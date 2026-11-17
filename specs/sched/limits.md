@@ -40,10 +40,24 @@ Examples, preset 20 new and 200 reviews:
 
 ## L3. The limits tree
 
-- The tree holds the studied deck and all its descendants (`sched/queue-building#B2`). When `applyAllParentLimits` is true, it also holds each ancestor of the studied deck, up to the top level; the top-level ancestor is then the tree's root. Otherwise the studied deck is the root and decks above it do not limit it (R607).
+- The tree holds the studied deck and all its descendants (`sched/queue-building#B2`). When `applyAllParentLimits` is true, it also holds the ancestors of the studied deck, going up from its parent and stopping before the first one that does not exist; the highest ancestor found is then the tree's root, and decks above a missing ancestor are not in the tree. Otherwise the studied deck is the root and decks above it do not limit it (R607).
 - Siblings of ancestors are never in the tree.
 - Each node starts with its deck's remaining limits (L2).
-- A deck whose parent deck is missing (a damaged tree) is not in the tree, and neither are its descendants (`sched/counts#C1`). Anki fails to build the queue when such a deck holds a card the build would gather; Meguri leaves those cards out (`sched/queue-building#B11`).
+- **Damaged tree.** The rest of this bullet list concerns a deck below the root whose parent deck is missing. The root itself never counts as such a deck: a studied deck whose own parent is missing is the root and its queue builds normally (with `applyAllParentLimits` true, no ancestor is then in the tree).
+  - **Meguri** leaves that deck and all its descendants out of the tree and leaves every card of them out of the queue, intraday learning cards included (`sched/counts#C1`, `sched/queue-building#B11`).
+  - **Anki** places the decks in name order. A deck whose parent is missing is attached to a deck already placed one level above it: starting from its nearest existing ancestor, Anki follows the most recently placed child of each deck down to that level. The deck then has that deck and its ancestors as limiting ancestors (L4), and its descendants follow it. When a deck on that path has no child placed yet, the deck and its descendants are left out of the tree. Studying P with P::A and P::M::X (P::M missing), X hangs under P::A; studying P with P::M::X only, X is left out.
+  - In Anki, a deck left out of the tree makes the build fail with an invalid-input error (the deck has no place in the limits tree) in these cases: (a) one of its review or interday learning cards is offered (`sched/queue-building#B4`) while the root's review limit is above 0; (b) with new gather priority Deck or Deck then random notes (Deck is the default), the deck-by-deck new pass reaches that deck while the root's new limit is above 0, whether or not the deck holds a card; (c) with any other new gather priority, one of its new cards is offered while the root's new limit is above 0. Its intraday learning cards (L5) never fail and are gathered.
+  - So Meguri differs from Anki in three cases: where Anki fails, where Anki gathers an attached deck's cards under another deck's limits, and where Anki builds and gathers the intraday learning cards of a deck it left out of the tree.
+  - Changed 2026-11-17: an earlier text said Anki always leaves such a deck out, and could be read as leaving out a studied deck whose parent is missing, or as taking ancestors above a missing one. Implemented code must be checked against this bullet list: U41's limits tree and gathering in the core scheduler.
+
+Damaged-tree examples (no golden yet; Meguri's required tests use these):
+
+| Setup | Anki | Meguri |
+|---|---|---|
+| studying A::B::C, A::B missing, A exists with new limit 0, `applyAllParentLimits` true; 2 new cards in C | 2 new cards (A is not in the tree) | the same |
+| studying P, P::M missing, P::M::X holds no card; default gather priority; root limits above 0 | the build fails | builds, without X |
+| studying P with P::A (This-deck new 0) and P::M::X (P::M missing), 1 new card in X | no new card from X (P::A's limit applies) | no card from X (X is left out) |
+| studying P with P::M::X only (P::M missing), P's This-deck limits new 0 and review 0, 1 intraday learning card in X | the build succeeds and the card is gathered (L5) | the card is left out |
 
 ## L4. Taking a card
 
@@ -94,4 +108,4 @@ The queue result keeps, for each deck of the tree, its remaining new and review 
 | `sched/queue/gather/missing-preset` | L2 (missing preset: 9999, not capped) |
 | `sched/queue/order/new-gather-*` | L4 with a This-deck limit on a subtree, in every gather order |
 
-Meguri's required tests (`core/crates/meguri-sched/tests/queue.rs`) must add L2's 32-bit cases (a stored limit above 2,147,483,647) and the damaged tree of L3, with expected values from these tables.
+Meguri's required tests (`core/crates/meguri-sched/tests/queue.rs`) must add L2's 32-bit cases (a stored limit above 2,147,483,647) and the damaged tree of L3 (every row of its damaged-tree examples, Meguri column), with expected values from these tables.

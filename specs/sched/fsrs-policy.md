@@ -77,7 +77,7 @@ The card's home preset gives the inputs:
 | Home preset | Inputs |
 |---|---|
 | exists and is supported | its parameter list and decay (`sched/presets#V6`), the desired retention in force (`sched/presets#V7`: the home deck's own value, else the preset's), its historical retention and its ignore date |
-| missing (the deck's preset id names no preset) | the built-in defaults (`sched/presets#V1`): empty parameter list, desired retention 0.9, historical retention 0.9, no ignore date |
+| missing (the deck's preset id names no preset) | the built-in defaults (`sched/presets#V1`): empty parameter list (decay 0.154), preset desired retention 0.9, historical retention 0.9, no ignore date. The desired retention in force is still `sched/presets#V7`'s: the home deck's own value when it has one, else 0.9 (2026-11-17: an earlier text could be read as always 0.9; implemented code must be checked: U50's `enableFsrs` inputs for a deck with a missing preset) |
 | unsupported (U1, U2) | none: the card is skipped and keeps its bytes |
 
 ## E3. What it writes on a computed card
@@ -120,7 +120,7 @@ Examples from `sched/compat/enable-fsrs` (FSRS turned on at 2030-03-01 10:01 UTC
 In Anki the user turns FSRS on in the deck options screen and saves. The oracle's `enable_fsrs` is that save, made so that it does nothing else (`conformance/fsrs-policy-ops` F2). That save does more than `enableFsrs`, and Meguri leaves these out:
 
 - Anki writes the screen's four global options every time (the custom scheduling script, "New cards ignore review limit", "Limits start from top" and the health check), adding the keys that are missing. Meguri writes only `fsrs` (R763).
-- Anki saves the presets the screen sends: the screen fills an empty FSRS-6 list from the older lists when it loads, and the save clears the older lists of a preset sent with an empty FSRS-6 list. Meguri writes no preset.
+- Anki saves the presets the screen sends: the screen fills an empty FSRS-6 list from the older lists when it loads, and the save clears the older lists of a preset sent with an empty FSRS-6 list. The save also replaces a sent preset's ignore date text that sorts after today's date as a string with today's date. For a text that `sched/fsrs-items#I1.3` refuses (such as `garbage`), Anki then computes with today's date where Meguri, which keeps the stored text, fails the whole switch (`sched/memory-state#M4.3`). For a valid future date (such as `2099-01-01`), Anki computes with today's date as the cutoff and Meguri with the stored date (added 2026-11-17). Meguri writes no preset.
 - Anki gives a deck whose preset is missing the preset of the deck the screen was opened for, and computes its cards with that preset. Meguri leaves the deck as it is and computes with the built-in defaults (E2).
 - Anki fails the whole save when the parameter list of a preset it sends or computes with cannot be built. Meguri skips those presets (U4).
 - Anki writes every computed card, changed or not. Meguri writes only changed cards (R687, `sched/memory-state#M4.2`). No golden of this unit has a computed card whose values stay the same, so it needs no deviation entry; a scenario that has one joins the deviations `memory-recompute-unchanged-mod` and `memory-recompute-unchanged-usn`.
@@ -268,7 +268,7 @@ Goldens are recorded by the oracle maintainer with the driver ops of `conformanc
 `core/crates/meguri-engine/tests/fsrs_policy.rs` asserts what no oracle can show:
 
 - S1, S2: the status for each `fsrs` value of S1; `needsReEnable` after a `SyncIncoming` op (`engine/op-model`) changes `fsrs` from on to off, also after close and open; `needsEnable` with no mark; the mark kept across a collection replacement.
-- E1 to E4: a collection with a 34-value preset: `enableFsrs` skips its cards (bytes unchanged) and computes the others; a deck whose preset is missing is computed with the built-in defaults and keeps its preset id; a cancelled `enableFsrs` writes nothing and leaves `fsrs` off; undo history cleared after it.
+- E1 to E4: a collection with a 34-value preset and a preset of 17 finite values whose 6th value is -0.5 (U1): `enableFsrs` skips the cards of both (bytes unchanged) and computes the others, and `startSession` on the second preset's deck refuses with `PresetUnsupported` (U4); a deck whose preset is missing is computed with the built-in defaults and keeps its preset id; a deck with `config_id` 999 and its own desired retention 80 holding a review card with history gets `dr` 0.8 and `decay` 0.154, with `s` and `d` from the built-in defaults' parameters and historical retention (E2; the desired retention plays no part in the memory state); a cancelled `enableFsrs` writes nothing and leaves `fsrs` off; undo history cleared after it.
 - U1 to U4: a preset of each row of the U1 and U2 tables is reported unsupported or not, through U45's check; the deck-tree query that U43's `startSession` uses returns the unsupported home presets' ids, ascending, and none for a tree without such a card; the preset row and its cards keep their bytes through open, a save of another preset and a `SyncIncoming` op.
 - V2: a `schedVer` 2 collection without `sched2021` opens with it on, `creationOffset` untouched (also when missing); direct test `v3_switch_at_open`. Raw reopen remains unchanged until an engine operation promotes it (V3).
 - K3: the preservation test.

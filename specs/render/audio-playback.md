@@ -21,7 +21,7 @@ Use the card's **home deck**: original deck id when the card is in a filtered de
 
 `interruptAudioWhenAnswering` is read with the strict boolean read of `sched/config-keys#G1` (`review/review-preferences` P2) and written, in Meguri's interface, only by Settings › Review (`review/review-preferences` P4).
 
-The controller accepts already resolved typed policy values; caller/database parsing belongs to existing config APIs. Autoplay controls automatic native AV selection, not manual replay and not a card's HTML `autoplay` or `play()` (A8). A setting change affects later commands; it does not restart a current clip merely because the setting changed.
+The controller accepts already resolved typed policy values; caller/database parsing belongs to existing config APIs. Autoplay controls automatic native AV selection and, on the review pages, whether card HTML audio/video may start without a user gesture (A8). It never blocks manual replay. A setting change affects later commands; it does not restart a current clip merely because the setting changed.
 
 Every queued entry retains its card, side and original AV index. Native player completion/load callbacks carry a playback generation so a stopped item's delayed callback cannot advance or terminate a newer queue. A deliberately surviving old clip under interrupt-off keeps its own identity until it ends; it is not relabeled as the new card's clip. Closing the owner stops playback and releases callbacks/resources.
 
@@ -96,7 +96,16 @@ Mac uses its native playback path without an iOS AVAudioSession. Owner suspend/c
 
 ## A8. HTML media and native queue separation
 
-Configure WebKit before loading either page with no gesture requirement for audio/video and inline video playback on iPhone (R560). Native preset autoplay does not disable HTML `autoplay`; card scripts retain their normal WebKit `play()` semantics. Scheme MIME/Range support is M3/M4, not a guarantee that the VM has a real audio route.
+Configure WebKit, before loading either page, for inline video playback on iPhone (R560). On the review page pair, the card's autoplay policy (A1, home-deck preset) also decides whether card HTML `<audio>` and `<video>` need a user gesture, as in Anki's reviewer:
+
+- **Autoplay on**: no gesture is needed. An `autoplay` attribute and a script's `play()` start media when the side is presented (C66 C8.2).
+- **Autoplay off**: media needs a user gesture in the page. An `autoplay` attribute and a script's `play()` outside a gesture do not start it, and C66 C8.2's resume at presentation does not start it either. A control the user taps, or a script run by the user's tap or key press in the page, plays it.
+
+This is how R560 is read: its 'without a user gesture (honouring `autoplay`)' means no gesture is needed when the card's home-deck preset autoplays, and a gesture is needed when it does not, as in Anki.
+
+The policy is read when the card's question is shown and applies to that card's answer too, so a reveal never changes it. Each card sets it again, so a gated card does not gate the next card, and the reverse. Manual and automatic native playback (A2, A3) are unaffected. WebKit's configuration-level gesture setting is fixed when a web view is created, and the page pair is reused across cards whose presets differ, so the rule cannot rest on that setting alone. A pre-rendered page takes the policy of the card it prepares. Implemented code must be checked against this rule: U67's WebKit configuration and page pair, which set no gesture requirement for every card, and U176's pre-rendering. The template and note previews (`render/preview`) follow V12 instead: card media there always needs a gesture. The Browse preview (`browser/preview` P7) applies this rule to the card it shows, with that card's home-deck autoplay, as Anki's browse previewer does.
+
+Scheme MIME/Range support is M3/M4, not a guarantee that the VM has a real audio route.
 
 C66 C8.2 holds HTML audio/video in an unpresented page and resumes remembered elements only when that page is presented. Swapping a page out pauses its HTML audio/video; backgrounding pauses both pages. C66 C6.3 unloads video before DOM replacement, including direct source/stream cleanup. These rules do not stop a surviving **native** clip allowed by A2. Web Audio and speech-synthesis limitations remain C66's explicit scope; this spec does not claim it can pause arbitrary browser APIs.
 
@@ -121,6 +130,7 @@ Use small generated clips and a controllable player clock to test policy indepen
 | background race | item still loading; background; load completes | no playback, no queue revival, no Now Playing metadata |
 | stale completion | Replay replaces old generation; old completion fires twice | newer queue untouched by both callbacks |
 | pre-render | idle payload includes Q1; prepare completes, later present | no sound/ducking while idle; Q1 starts once at present |
+| HTML media gate | card1 autoplay off, question `<audio src="x.mp3" autoplay controls>`, answer `{{FrontSide}}`; show, reveal, tap the element's play control; then card2 with autoplay on and the same question | card1: x silent on question and answer until the tap, then plays; card2: x starts when its question is presented. Native queue unchanged throughout |
 | AE18 native admission | idle Mac front requests reveal; another card visible; then matching present | old card unchanged; reveal only the newly presented matching card. iOS has no pycmd and stays on question |
 
 Also assert: home-deck rather than filtered-deck settings, autoplay-off manual Replay, repeated shown receipt, invalid command with active audio unchanged, filenames with raw percent text, empty AV lists, cancel during preload, seek while paused/loading, two card surfaces with independent identities and balanced shared session ducking. Injected spies must see no synthesized speech, native arbitrary path, remote file fetch, microphone request or Now Playing registration.

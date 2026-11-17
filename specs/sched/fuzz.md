@@ -18,7 +18,7 @@ Z1 to Z6 were written for the floating-point probe (U14, `conformance/float-dete
 
 ## Z2. Fuzz factor
 
-- The factor `f` is the first value that the `rand` crate, version 0.9.4 exactly, returns for `Rng::random_range(0.0f32..1.0f32)` on a generator made by `StdRng::seed_from_u64(seed)` (R660). It lies in [0, 1).
+- The factor `f` is the first value that the `rand` crate, version 0.9.4 exactly, returns for `Rng::random_range(0.0f32..1.0f32)` on a generator made by `StdRng::seed_from_u64(seed)` (R660). It lies in [0, 1) and is always a whole multiple of 2^−23: `f = k × 2^−23` for an integer `k` from 0 to 2^23 − 1, so the largest factor is 1 − 2^−23. The draw rejects nothing, so every such `k`, including the largest, can occur (Z4 step 6).
 - Meguri depends on `rand =0.9.4` for this under a renamed workspace dependency, separate from whatever version fsrs pulls in. A change of that pin changes fuzz results; the 10,000-pair fuzz table (Z6, `conformance/float-determinism#F4`) must fail before any other test when it does (R1892, AE82).
 - The draw uses only integer operations and exact float scaling, so it gives the same `f` on every platform.
 
@@ -48,9 +48,11 @@ Given an unrounded interval `x` (`f32` days), a minimum `m` and a maximum `M` (u
 3. `lower = round(x' − Δ(x'))` and `upper = round(x' + Δ(x'))`, each subtraction or sum done in `f32`, rounding halves away from zero, then converted to an unsigned integer.
 4. `lower` and `upper` are each clamped to `[m', M]`.
 5. When `lower = upper` and `upper > 2` and `upper < M`, `upper` becomes `lower + 1`. (With the inputs this file gives, this step never changes a result: below `x' = 2.5` the bounds are at most 2, and from 2.5 on `upper` is at least `m' + 1` unless `M` caps it. Unit tests exercise it on bounds directly.)
-6. The result is `floor(L + f × N)` converted to an unsigned integer, where `L` is `lower` as `f32`, `N` is `1 + upper − lower` (an integer) as `f32`, `f` is the factor of Z2, and the product and the sum are each rounded to `f32`. Since `f < 1`, the result lies in `[lower, upper]`.
+6. The result is `floor(L + f × N)` converted to an unsigned integer, where `L` is `lower` as `f32`, `N` is `1 + upper − lower` (an integer) as `f32`, `f` is the factor of Z2, and the product and the sum are each rounded to `f32` (round to nearest, ties to even). The result is used as it is: no clamp follows, and an implementation must not add a clamp or an assertion on it.
 
-So intervals below 2.5 days are only rounded and clamped (R661), and `x` itself is never rounded on the way: only `x' − Δ` and `x' + Δ` are.
+   The result is normally in `[lower, upper]`. For `f = 1 − k × 2^−23` with `k` from 1 up to a limit that depends on the bounds, the rounding of `f × N`, or of `L + f × N`, can carry it to `upper + 1`, and `upper + 1` can exceed `M`. The limit is largest when `lower = upper = M`, which is the case whenever the minimum is at least `M`: for example Good or Easy after a Hard that is already at the maximum (their minimum is at least one more than the button before), or a review card whose interval is already the maximum, unless FSRS shrank it beyond the fuzz range (Z5 then gives the minimum `p` or `p + 1`). With `M` = 36,500 those bounds give `upper + 1` for `k` up to 16,384, about one seed in 512; the bounds 36499, 36500 do so for `k` up to 8,192; bounds that come from `m = 1` (the `fuzz_table` case, Z6) with `M` = 36,500 do so for `k` at most 9. Example: with `f = 1 − 2^−23`, `lower = upper = 2` gives `2 + (1 − 2^−23) = 3 − 2^−23`, an exact tie between two `f32` neighbours that rounds to 3. The `fp-probe/corpus/next-states` goldens contain such results: for example id 39148 in `next-states-039` (current interval 36,500, maximum 36,500) has Hard, Good and Easy all 36501.
+
+So intervals below 2.5 days get no fuzz range (R661): their bounds are only rounded and clamped, and the pick returns `lower`, except that the rare factors of step 6 turn an interval whose bounds are both 2 (`x'` from 1.5 to below 2.5) into 3. `x` itself is never rounded on the way: only `x' − Δ` and `x' + Δ` are.
 
 No oracle observation can fix the factor (it always comes from a seed), so these examples, worked from the steps above for chosen factors, are for unit tests only:
 
@@ -67,6 +69,20 @@ No oracle observation can fix the factor (it always comes from a seed), so these
 | 2 | 3 | 36500 | 3, 4 (x' = 3) | 3 | 4 | 4 |
 | 2 | 3 | 3 | 3, 3 | 3 | 3 | 3 |
 | 100 | 1 | 99 | 92, 99 (x' = 99) | 92 | 96 | 99 |
+
+Unit tests on the bounds directly (step 6 only, after steps 1 to 5), for factors next to 1, where `u` is 2^−23:
+
+| lower, upper | M | f = 1 − u | f = 1 − 2u | f = 1 − 8u |
+|---|---|---|---|---|
+| 1, 1 | 1 or more | 1 | 1 | 1 |
+| 2, 2 | 2 or more | 3 | 2 | 2 |
+| 3, 3 | 3 | 4 | 3 | 3 |
+| 4, 4 | 4 | 5 | 5 | 4 |
+| 141, 150 (row x = 200 above) | 150 | 151 | 151 | 150 |
+| 34673, 36500 | 36500 | 36501 | 36501 | 36501 |
+| 36500, 36500 (minimum at least `M`) | 36500 | 36501 | 36501 | 36501 |
+
+Implemented code must be checked against this: the U45 review-fuzz pick and anything that relies on the fuzzed interval being at most `upper` or at most `M`. (It is always at least `lower`, because `f ≥ 0` and `L` is exact.)
 
 ## Z5. No-regression minimum
 
@@ -86,7 +102,7 @@ Examples with `M = 36500` and `p = 9`: `x = 9.6` gives 10 (it grew); `x = 8.2` g
 The `fuzz_table` observation (`specs/conformance/observations.md` O4) reports, for a card id `c`, a review count `n` (the reviews before the answer) and a whole interval `i`, the change fuzz makes to `i`:
 
 - `delta = Z4(x = i, m = 1, M = the maximum interval of the card's home preset) − i`, as a signed integer, with the factor of Z2 for the seed `c + n` (Z1).
-- So a delta is 0 for `i ≤ 2` when the maximum is at least `i`, and the table is the same on every platform (Z2, Z3 and Z4 use no math library function).
+- So a delta is 0 for `i = 1`, and for `i = 2` when the maximum is at least 2, except on the rare factors of Z4 step 6, which give +1 at `i = 2`. The table is the same on every platform (Z2, Z3 and Z4 use no math library function).
 
 Examples (oracle, `conformance/goldens/smoke/fuzz-table-small.json`, maximum interval 36,500):
 
@@ -159,4 +175,4 @@ The engine takes an optional fuzzed-day chooser. At each point above it first of
 | `sched/steps/learning-fuzz`, `sched/steps/rollover-answer`, `sched/answer/*` | Z7 |
 | `sched/fsrs/*`, `sched/steps/*` | Z4, Z5 and Z8 inside the transitions |
 
-All goldens are recorded. Z4's table, the widening of step 5 and Z1's negative ids are unit tests. The stored-card `fuzz_table` observation accepts integer intervals and review counts at most 4,294,967,294. The existing 10,000-pair corpus covers twenty integer intervals, including every integral interval in U45's test list. Test the fractional 2.5-day threshold and its adjacent `f32` values directly through Z3/Z4; never truncate 2.5 into a table request. Likewise, arbitrary `u64` seed-addition wrap is a direct Z1 test; it is not a stored-card review count. Z7 adds unit tests at the largest representable delays, including both sides of the exclusive-upper-bound limit.
+All goldens are recorded. Z4's two tables (chosen factors, and bounds with factors next to 1), the widening of step 5 and Z1's negative ids are unit tests. The stored-card `fuzz_table` observation accepts integer intervals and review counts at most 4,294,967,294. The existing 10,000-pair corpus covers twenty integer intervals, including every integral interval in U45's test list. Test the fractional 2.5-day threshold and its adjacent `f32` values directly through Z3/Z4; never truncate 2.5 into a table request. Likewise, arbitrary `u64` seed-addition wrap is a direct Z1 test; it is not a stored-card review count. Z7 adds unit tests at the largest representable delays, including both sides of the exclusive-upper-bound limit.

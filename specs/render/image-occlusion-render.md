@@ -49,15 +49,17 @@ ATTRIBUTES come from the raw reading of the cloze's shape text (`render/image-oc
 
 Recorded from the oracle (`render/image-occlusion/render/divs`); each line is one shape text and its ATTRIBUTES.
 
+An empty value followed by `:` ends the raw reading (`render/image-occlusion-format#F4` step 4), so it drops that property and every later one. A value read is therefore empty only in the last property of a shape text, so the conditions of I2 step 3 that the value is not empty decide something only there. The "exactly `0`" condition, and the `points` condition that the rewrite is not empty, apply to any property. An earlier version of this table gave `data-top="0" data-height=".5" data-angle="0"` for the `rect:left=:top=0:…` row. Implemented code and unit tests based on that row must be checked against the corrected row; the oracle and the rule in F4 never changed.
+
 | Shape text | ATTRIBUTES |
 |---|---|
 | `rect:left=.1:top=.2:width=.3:height=.4:oi=1` | `data-shape="rect" data-left=".1" data-top=".2" data-width=".3" data-height=".4" data-occludeInactive="1" ` |
 | `ellipse:left=.5:top=.5:rx=.1:ry=.2:oi=1` | `data-shape="ellipse" data-left=".5" data-top=".5" data-rx=".1" data-ry=".2" data-occludeInactive="1" ` |
 | `polygon:left=.6:top=.1:points=.6,.1 .9,.1 .75,.3:oi=1` | `data-shape="polygon" data-left=".6" data-top=".1" data-points=".6,.1 .9,.1 .75,.3" data-occludeInactive="1" ` |
 | `text:left=.1:top=.8:text=Label:scale=1.:fs=.05:oi=1` | `data-shape="text" data-left=".1" data-top=".8" data-text="Label" data-scale="1." data-font-size=".05" data-occludeInactive="1" ` |
-| `rect:left=:top=0:width=0:height=.5:angle=0:fill=:oi=` | `data-shape="rect" data-top="0" data-height=".5" data-angle="0" ` |
+| `rect:left=:top=0:width=0:height=.5:angle=0:fill=:oi=` | `data-shape="rect" ` (the empty `left` is followed by `:`, so the reading keeps no property) |
 | `ellipse:left=.1:top=.1:width=.2:height=0.0:rx=.1:ry=0:angle=2500` | `data-shape="ellipse" data-left=".1" data-top=".1" data-width=".2" data-height="0.0" data-rx=".1" data-angle="2500" ` |
-| `text:left=.1:top=.1:text=:scale=0:fs=` | `data-shape="text" data-left=".1" data-top=".1" ` |
+| `text:left=.1:top=.1:text=:scale=0:fs=` | `data-shape="text" data-left=".1" data-top=".1" ` (reading stops at the empty `text`, so `scale` and `fs` are never read) |
 | `rect:left=.1:left=.2:zz=9:top=.3:points=1,2:text=t` | `data-shape="rect" data-left=".1" data-left=".2" data-top=".3" data-points="1,2" data-text="t" ` |
 | `star:left=.1:top=.2` | `data-left=".1" data-top=".2" ` |
 | `rect`, or nothing after the prefix | (empty) |

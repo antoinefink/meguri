@@ -20,7 +20,7 @@ The **chain** is the list of filter names in application order: nearest the key 
    - a built-in name (F2) replaces the text with its output;
    - any other name **ends the chain**: the output is the text as it is at that point, and no later filter applies, built in or not.
 
-So `{{edit:furigana:F}}` applies furigana and gives the ruby markup, while `{{furigana:edit:F}}` gives the field's raw text. Anki hands the rest of such a chain to add-ons; with none installed (the oracle, and Meguri, which has no add-ons) nothing happens to it.
+So `{{edit:furigana:F}}` applies furigana and gives the ruby markup, while `{{furigana:edit:F}}` gives the field's raw text. Anki hands the rest of such a chain to add-ons; with none installed (the oracle, and Meguri, which has no add-ons) nothing happens to it. One exception exists outside the core: desktop Anki's GUI layer, which the oracle does not run, itself handles `tts-voices` and replaces the text with a list of the installed text-to-speech voices. Meguri treats `tts-voices` as unknown, like the oracle (F9).
 
 ## F2. Built-in names
 
@@ -116,6 +116,7 @@ Built in (they never end a chain). What they output depends on the card ordinal 
 - R968 says later filters still apply after an unknown one. In Anki 26.09.3 no filter applied after an unknown one has any effect (F1). Meguri follows the oracle (R1907). The common add-on form, with the unknown filter outermost (`{{editable:furigana:F}}`, `{{edit:F}}`, `{{clickable:F}}`), is unaffected.
 - R964 asks for a `ci` modifier and modifiers combined in any order. Anki 26.09.3 has no `ci`: every chain other than exactly `type:nc` and `type:cloze` gives the plain `[[type:KEY]]` marker (F7). Meguri's engine emits Anki's marker. The parse result keeps every replacement's filter names (`template-syntax.md` T12), so U64 can read the modifiers R964 lists from the template; any typing behavior Meguri adds on top is U64's, with its deviation entry (`render/type-answer#A9`).
 - R965 says empty text gives nothing: text that is only white space comes back unchanged (F5).
+- Desktop Anki lists its text-to-speech voices for `{{tts-voices:}}` (F1). The Product Contract puts TTS out of scope and keeps the text visible (R564), so Meguri ends the chain there as for any unknown name: `{{tts-voices:F}}` gives the text of `F`, and `{{tts-voices:}}` gives nothing (`template-syntax.md` T7 rule 2). This needs no deviation entry, and the oracle cannot observe it.
 
 ## F10. Scenarios
 

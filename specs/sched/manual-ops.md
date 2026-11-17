@@ -11,7 +11,7 @@ Terms as in `sched/answering`: `now_ms`, `now_s`, `today`, `next_day_at`. Card t
 
 ## M1. Shared rules
 
-- **Targets.** Each operation takes a list of distinct card ids. Bury and suspend also take a list of note ids instead (Bury Note, Suspend Note): the targets are then all cards of those notes. Ids that name no card, and notes without cards, are skipped without error, except in Grade Now (M7). An operation whose targets change nothing writes nothing and records no step (`engine/undo` A2).
+- **Targets.** Each operation takes a list of distinct card ids. Bury and suspend also take a list of note ids instead (Bury Note, Suspend Note): the targets are then all cards of those notes. Ids that name no card, and notes without cards, are skipped without error, except in Grade Now (M7). An operation whose targets change nothing writes nothing and records no step (`engine/undo` A2), except for the config keys that Reset (M6.2, M6.4) and Set Due Date (`sched/set-due-date` S6, S7) write after their cards: those writes happen even when no listed id names a card, and when one of them changes a key the operation records its step.
 - **Order.** Reset and Grade Now handle the cards in the order the caller lists them, which decides positions (M6) and review-log ids (M7). The other operations handle them in ascending card id order; only review-log ids could show the order, and they write none.
 - **A card written** gets `mod` = `now_s` and `usn` -1, and its `data` text is encoded again (`model/card-data-json` C4), so a card whose data held unknown or misplaced keys is normalized by any of these operations. A card an operation leaves alone keeps its row byte for byte, `mod` and `usn` included.
 - **`col.mod`** becomes `now_ms` when the operation wrote anything (`storage/ids-usn-mtime` S5).
@@ -143,6 +143,7 @@ A new card that is reset gets a marker too. The memory-state history drops every
 - One undoable operation named "Reset Card" (V4 `reset_card`; R716's "Reset" is Anki's "Reset Card"). `col.mod` = `now_ms`.
 - The note is not touched: the `leech` tag stays (R716).
 - Undo restores the cards, `nextPos` and the choice keys exactly, deletes the marker rows and restores `col.mod`.
+- When no listed id names a card (an empty list included), no card or marker row is written, but `nextPos` and, with a context, the two choice keys are still written as M6.2 and M6.4 say (only when different). So a missing or unreadable `nextPos` is written as 0, and a missing choice key is written with the chosen value. When any of them is written, the operation records a "Reset Card" step with `col.mod` = `now_ms`; otherwise nothing is written and no step is recorded. Example: browser context, restore off, reset counts off, `nextPos`, `restorePositionBrowser` and `resetCountsBrowser` missing, one id that names no card: `nextPos` becomes 0 and both keys `false`, all with `usn` -1, in one undoable step. (2026-11-17: added; implemented code must be checked, M9.)
 
 ## M7. Grade Now (R718)
 
@@ -207,6 +208,7 @@ Every operation of this file is one engine op of source `UserUndoable` (`engine/
 | set due date | `sched/set-due-date` S9 | Set Due Date | S9 |
 
 - Each op also takes an optional review-session id. With one, the step records the session (`engine/undo` M1) and the result carries the session's head diff (`sched/review-session` C13), so the review screen shows the next card without a rebuild (R1812). Without one, an open session reacts to the change set like to any other change.
+- Ids that name no card are skipped as M1 says; reset and set due date still make their config writes (M6.5, `sched/set-due-date` S7). (2026-11-17: implemented code that returns early, or records no step, when no listed id names a card must be checked against this.)
 - A list holding the same id twice is refused with `InvalidArgument` before anything is written. (Anki fails such a list with a database error for bury, suspend, unsuspend and Set Due Date, and handles the card twice for Reset and Grade Now, writing two review-log rows; no Meguri caller sends one.)
 - Results: the change set (`engine/change-stream`); bury and suspend also the number of cards they wrote; the head diff with a session id.
 - **Buried kinds.** For a deck, Meguri reports whether the cards of M5 include a card with `queue` -2 and whether they include one with `queue` -3 (a read, not an op), for the deck page's choice (R635).

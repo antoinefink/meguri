@@ -10,7 +10,7 @@ How the current state and the four answer states of a card are computed. Meguri 
 ## T1. The FSRS model
 
 - Meguri evaluates FSRS only with the crate `fsrs` at exactly 6.6.2 (R646): `FSRS::new(&params)` with the parameter list of T2.1, unchanged, then `next_states(memory_state, desired_retention, days_elapsed)`, where `memory_state` is `Some(MemoryState { stability, difficulty })` for a card that has one and `None` for a new card (the crate then gives the initial states).
-- The crate fills the shorter parameter forms (0, 17 or 19 values) and clips every parameter to its range itself. Meguri never fills, converts or clips parameters, and never re-implements a formula of the crate. A list of any other length, or one holding NaN or an infinity, is refused by the crate; Meguri reports it as `UnsupportedParams` (T13).
+- The crate fills the shorter parameter forms (0, 17 or 19 values) and clips every parameter to its range itself. Meguri never fills, converts or clips parameters, and never re-implements a formula of the crate. The crate's model constructor refuses a list of any other length, and a list in which some value is not finite once the crate has filled it to 21 values: a stored NaN or infinity, or a finite 17-value list whose fill gives one (T13). Meguri reports every refusal of the constructor as `UnsupportedParams` (T13). Meguri never fills a list to decide: the constructor's result is the check.
 - `next_states` returns, for each of again, hard, good and easy, a memory state (stability `S_r`, difficulty `D_r`) and an unrounded interval `u_r` in days (`f32`). All of it is 32-bit float arithmetic with the platform's math library, as in Anki on the same platform (KTD24, `conformance/float-determinism`).
 - An error of the crate for any other reason (a memory state it cannot use) is a typed error; nothing is guessed.
 
@@ -186,7 +186,7 @@ Meguri keeps the SM-2 ease moving although FSRS never uses it.
 The engine refuses to compute states, with `UnsupportedParams`, for a card whose home preset has any of:
 
 1. a parameter list (T2.1) whose length is not 0, 17, 19 or 21, for example 34 (the parameter count of later FSRS versions);
-2. a parameter list holding NaN, +∞ or −∞;
+2. a parameter list of an allowed length that the crate's model constructor at 6.6.2 still refuses: once the crate has filled the list to 21 values (a 21-value list is used as stored), some value is not finite. This covers a stored NaN, +∞ or −∞, and also 17 finite values whose fill gives a non-finite value, for example any 6th value below −1/3, such as −0.5 (the fill takes the logarithm of 3 × −0.5 + 1, a negative number, which is NaN), or values so large that the fill overflows. The constructor's result decides, not a rule of Meguri's own (T1). (2026-11-17: an earlier text named only stored NaN and infinities; implemented code must be checked: U45's check must report every refusal of the constructor as `UnsupportedParams`, not as one of the crate's other errors, and U46, U47 and U50 must skip such presets.)
 3. a later FSRS parameter list than `fsrs_params_6`, which a later Anki release may write:
    - in the deck config blob, a top-level unknown field with decoded number 7 or 8 (numbers Anki reserves for later parameter lists, `model/protobuf-records#P6.6`) other than a length-delimited field of length 0. Inspect every occurrence: an empty occurrence does not cancel a non-empty one. Any other valid wire representation of either number signals unsupported parameters, even a zero-valued varint or an empty group. Do not inspect nested payloads or require a guessed future packed-float format;
    - in `other` (`model/protobuf-records#P7`), a top-level member whose decoded key matches the case-sensitive ASCII pattern `^fsrsParams[0-9]+$`, whose decimal suffix denotes a number of at least 7, and whose value is a JSON array with at least one element. Leading zeros are allowed; an arbitrarily large suffix still denotes a later version. An empty array, a non-array value, a nested member, a sign, non-ASCII digits or extra suffix text is not a marker. Any qualifying stored member suffices, even when another occurrence of that key is empty.
@@ -194,7 +194,7 @@ The engine refuses to compute states, with `UnsupportedParams`, for a card whose
 The model owns this inspection. Only its schema-11 boundary interprets `other`, using `model/schema11-json#S3`'s JSON validity rules; invalid JSON or a non-object supplies no JSON marker. The protobuf decoder supplies the top-level unknown-field metadata. It validates the blob before this policy applies. Both inspections leave all captured bytes unchanged. Scheduling code consumes the resulting support marker and never parses opaque `other` or unknown-field bytes itself.
 
 - Nothing is written and no other card is affected; the study screen shows R704's message, and memory-state computation and optimization skip such presets (U46, U47, U50 use the same check).
-- Anki 26.09.3 has no later list: it ignores such a key or field and schedules with `fsrsParams6`. The oracle at the pin cannot produce such a preset, so this is a forward-compatibility rule, asserted by Meguri's unit tests (a 34-value list; a valid `fsrsParams6` plus a non-empty `fsrsParams7` member; a valid list plus an unknown field 7 holding a packed float), not a conformance scenario.
+- Anki 26.09.3 has no later list: it ignores such a key or field and schedules with `fsrsParams6`. The oracle at the pin cannot produce such a preset, so this is a forward-compatibility rule, asserted by Meguri's unit tests (a 34-value list; 17 finite values whose 6th value is −0.5; a valid `fsrsParams6` plus a non-empty `fsrsParams7` member; a valid list plus an unknown field 7 holding a packed float), not a conformance scenario.
 
 ## T14. The engine (U45)
 
@@ -214,7 +214,7 @@ Again on a review card carries the leech flag (T12).
 
 Review-log day intervals retain their low 32 bits as a signed integer. This applies to both `ivl` and `lastIvl`: a current review interval 2,147,483,648 produces `lastIvl` −2,147,483,648, and 4,294,967,295 produces −1. It is not a positive clamp or an input refusal. Normal computed review intervals are within the preset bounds; the distinction matters for imported current intervals. Seconds retain the negative, saturating rule above.
 
-**Errors:** `UnsupportedParams` (T1, T13), `InFilteredDeck` (T7), and the crate's other errors (T1). None of them changes anything.
+**Errors:** `UnsupportedParams` (T1, T13; every refusal of the crate's model constructor is this error), `InFilteredDeck` (T7), and the crate's other errors (T1). None of them changes anything.
 
 **FSRS instances:** the engine may keep `FSRS` instances made from a parameter list for reuse, keyed by the exact `f32` values of the list; a reused instance gives the same results as a new one. U46, U47 and U50 use the same instances and the same T13 check.
 

@@ -74,7 +74,7 @@ The unique indexes on `name` take the column's `unicase` collation, so two deck,
 ## S5. Statistics tables
 
 - Files Anki writes also hold SQLite's statistics tables `sqlite_stat1` and `sqlite_stat4`, made by `ANALYZE`. Anki runs `ANALYZE` in the step to schema 15 (`storage/schema-upgrade#U5`), which also runs whenever Anki creates a collection, and in its optimize (`VACUUM`, `REINDEX`, `ANALYZE`), which Check Database and the preparation of a full upload run. Their rows are SQLite's own and are never compared.
-- Meguri runs `ANALYZE` at the same points: in the schema-15 upgrade step, when it creates a collection (U28), and in optimize (U128, U132, and the full-upload preparation of U109, which exists only for the manual Anki transfer, frozen with the Anki server work, KTD26). Nowhere else. The bundled SQLite is built with STAT4, so `ANALYZE` creates both tables, as Anki's does.
+- Meguri runs `ANALYZE` at the same points: in the schema-15 upgrade step, when it creates a collection (U28; at the point inside the bootstrap transaction that `storage/new-collection` B2 gives, before the default preset, deck and note types are written), and in optimize (U128, U132, and the full-upload preparation of U109, which exists only for the manual Anki transfer, frozen with the Anki server work, KTD26). Nowhere else. The bundled SQLite is built with STAT4, so `ANALYZE` creates both tables, as Anki's does.
 - Normalized text: `CREATE TABLE sqlite_stat1(tbl,idx,stat)` and `CREATE TABLE sqlite_stat4(tbl,idx,neq,nlt,ndlt,sample)` (SQLite writes it).
 
 ## S6. Expected objects and the schema guard (R2016)

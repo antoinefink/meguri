@@ -86,10 +86,10 @@ The scheduler's meaning of each key of `cards.data` (format: `model/card-data-js
 | Key | Meaning | Set by | Removed by |
 |---|---|---|---|
 | `pos` | the card's new-card position, saved when it left the new state | K6 | Forget (K6) |
-| `s`, `d` | FSRS memory state: stability in days, difficulty from 1 to 10 | every answer (the memory state of the new state, U45); memory-state computation (U46) | Forget; Change Deck (U46 then computes it again in an FSRS deck) |
+| `s`, `d` | FSRS memory state: stability in days, difficulty from 1 to 10 | every answer (the memory state of the new state, U45); memory-state computation (U46) | Forget; Change Deck (U46 then computes it again in an FSRS deck); U46's recompute (`sched/memory-state#M4.1`) of a processed card whose review-log rows give no memory item, which still writes `dr` and `decay` (goldens `sched/memory/recompute` c4, `sched/compat/enable-fsrs` hotel) |
 | `dr` | the desired retention the card was last scheduled with | every answer that schedules the card (not a preview answer, K5.1): the effective desired retention of `sched/presets#V7`; U46 | Change Deck |
 | `decay` | the FSRS decay the card was last scheduled with | every answer, preview answers included: the decay of the home preset's parameters (`sched/presets#V6`); U46 | Change Deck |
-| `lrt` | the time of the last answer, in whole epoch seconds | every answer except a preview answer: the answer's instant | never |
+| `lrt` | the time of the last answer, in whole epoch seconds | every answer except a preview answer: the answer's instant; Check Database's repair (`sched/memory-state#M6`, U128): the second of the latest graded row | Check Database's repair only (`sched/memory-state#M6`), for a card that is not new and has review-log rows: when none of its rows is graded, or when a Reset marker without a button follows its latest graded row (golden `sched/memory/lrt-repair`) |
 | `cd` | data of another client's custom scheduler: a string holding JSON | never by Meguri (R591) | never by Meguri |
 | other keys | another client's data | never | never (Meguri keeps them, `model/card-data-json` C3 rule 7; Anki drops them) |
 
@@ -97,6 +97,7 @@ The scheduler's meaning of each key of `cards.data` (format: `model/card-data-js
 - `decay` is the parameter value as stored, before the FSRS crate clamps it to its own range: a preset whose 21st parameter is 0.05 writes `"decay":0.05` although the model computes with 0.1 (`sched/presets#V6`).
 - Forget (U48) removes `s`, `d` and `pos` and keeps `dr`, `decay` and `lrt`.
 - Change Deck removes `s`, `d`, `dr` and `decay` (and returns a card from a filtered deck, K3); with FSRS on, U46 then computes the memory state of the moved cards that have none.
+- 2026-11-17: an earlier table said nothing removes `lrt` and listed only Forget and Change Deck as removing `s` and `d`, against `sched/memory-state` M4.1 and M6. Those sections decide; implemented code must be checked: any data-model test or invariant that `lrt` is never removed, or that a recompute keeps `s` and `d`.
 - Meguri always schedules with FSRS (R702). Another client answering with FSRS off removes `s`, `d` and `dr` and keeps `decay`; Meguri reads such a card as one without a memory state (U46 computes one).
 
 ### K5.1 Preview answers

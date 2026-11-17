@@ -32,10 +32,12 @@ The text format of the `cards.data` column: how Meguri reads it into card values
    - `pos`: an integer from 0 to 4294967295 (`3.0`, `-1` and `4294967296` do not fit);
    - `lrt`: an integer in the `i64` range (`1.5` and `9223372036854775808` do not fit);
    - `s`, `d`, `dr`, `decay`: any number, read as `f32` (`model/json-numbers` N2), so `5` reads as 5.0 and `1e40` as +∞; a string such as `"1.5"` does not fit;
-   - `cd`: any string. Its content is not checked.
+   - `cd`: any string. Its content is not checked. `cd` is the one exception to "absent otherwise": when an object holds `cd` with any other JSON type (number, boolean, array, object or `null`), the whole text reads as no keys, as in rule 1, so the other known keys are lost too (`{"pos":5,"s":1.5,"d":2,"cd":5}` and `{"pos":1,"cd":null}` read as no keys). A missing `cd` is simply absent.
+
+   Changed 2026-11-17: an earlier text treated a `cd` that is not a string like any other misfit, absent on its own, so the other keys were kept. Implemented code must be checked against rules 3 and 6: U21's card-data reader and every path that rewrites `cards.data` from it.
 4. `s` and `d` are one memory state: when either is absent, both are absent (`{"s":1.5}` reads as neither).
 5. `cd` that is the empty string or exactly `{}` counts as absent.
-6. An array is read by position: element 1 is `pos`, then `s`, `d`, `dr`, `decay`, `lrt`, `cd`, each by rule 3, with `null` meaning absent. An array with more than 7 elements reads as no keys at all. An array has no unknown keys. (`[1,2,3]` reads as `pos` 1, `s` 2.0, `d` 3.0.)
+6. An array is read by position: element 1 is `pos`, then `s`, `d`, `dr`, `decay`, `lrt`, `cd`, each by rule 3, with `null` meaning absent for elements 1 to 6. Element 7 is `cd` and follows its rule in rule 3: a `null` or any other value that is not a string there makes the whole array read as no keys (`[1,2,3,4,5,6,null]`). An array with fewer than 7 elements has no `cd`. An array with more than 7 elements reads as no keys at all. An array has no unknown keys. (`[1,2,3]` reads as `pos` 1, `s` 2.0, `d` 3.0.)
 7. Unknown keys (Meguri, R1461): every member of an object whose key is not one of the seven is kept, in order, with its value as exact text (`model/json-numbers` N7), even a value holding a number beyond the 64-bit float range, which Anki skips without reading (`{"pos":5,"zz":1e400}` keeps `zz` as `1e400`). When an unknown key repeats, only its last occurrence is kept, at that occurrence's place. Anki drops unknown keys; this is the deviation `card-data-unknown-keys` in `conformance/deviations.yaml` (`card-data-unknown-keys-range` for the scenario `out-of-range`).
 
 ## C4. Writing
@@ -78,6 +80,7 @@ Anki's output after rewriting a card whose `data` held the input (oracle). Megur
 | `{"lrt":9223372036854775807}` | unchanged |
 | `{"lrt":9223372036854775808}` | `{}` |
 | `{"cd":5}`, `{"cd":""}`, `{"cd":"{}"}` | `{}` |
+| `{"pos":5,"s":1.5,"d":2,"cd":5}`, `{"pos":1,"cd":null}`, `{"lrt":7,"cd":{"a":1}}`, `[1,2,3,4,5,6,null]` | `{}` (Anki 26.09.3, no golden yet: a `cd` that is not a string drops every key, C3 rules 3 and 6) |
 | `{"cd":"[1]"}`, `{"cd":"{\"a\": 1}"}` | unchanged |
 | `{"s":1,"s":2,"d":3}`, `{"cd":"a","cd":"b"}` | `{}` |
 | `{"zz":1,"zz":2,"s":1,"d":2}` | `{"s":1.0,"d":2.0}` (Meguri: `{"s":1.0,"d":2.0,"zz":2}`) |

@@ -124,7 +124,7 @@ Each target card gets one row, inserted right after its card row is computed:
 ## S7. The operation
 
 - One undoable operation named "Set Due Date" (`specs/conformance/undo-ops.md` V4 `set_due_date`; R712, R719), in one transaction: S2's check first, then for each target card in ascending card id order (whatever order the caller listed them in) its row (S4) and its review-log row (S5), then the remembered text (S6). `col.mod` becomes `now_ms`.
-- A list whose ids name no card changes nothing and records no step (`engine/undo` A2).
+- When no listed id names a card (an empty list included), no card or review-log row is written, but S6 still applies: with a context whose key does not already hold the typed text, the key is written and the operation records a "Set Due Date" step with `col.mod` = `now_ms`, whose undo restores the key. Without a context, or when the key already holds the text, nothing is written and no step is recorded (`engine/undo` A2). (2026-11-17: before this date the spec said such a list records no step even with a context; implemented code must be checked, S9.)
 - Undo restores every card row and the config row exactly as they were (`mod` and `usn` included), deletes the review-log rows and restores `col.mod` (`sched/revlog` E4, `engine/undo` A7). Redo inserts the rows again under their ids.
 - A card in a filtered deck is taken out of it (R710); the filtered deck itself is not changed.
 - No note, tag or deck row is written.
@@ -146,6 +146,7 @@ FSRS on, `today` 0, `next_day_at` B, text `3`, one operation on five cards:
 - **Parser.** Parse the supplied days text without accessing collection state. Return the bounds and whether interval reset was requested, or one of the S2 error categories. The app uses this result to explain invalid input.
 - **Op.** Source `UserUndoable` (`engine/op-model` O1), step name "Set Due Date", kind `Other`. Inputs: distinct card ids, the days text (parsed again inside the op), the context (none, reviewer, browser) and an optional review-session id. A list holding an id twice is refused with `InvalidArgument` before anything is written (Anki fails such a list with a database error; no Meguri caller sends one).
 - **Errors.** `InvalidDays(kind)` (S2), `NotFound` and `HomeDeckFiltered` (S4.1), `InvalidArgument`. Each leaves the collection unchanged.
+- **No card named.** Ids that name no card are skipped; when none names a card the op still writes the context's key as S7 says. (2026-11-17: implemented code that returns early, or records no step, in that case must be checked against S7.)
 - **Result.** The change set (`engine/change-stream`) and, with a session id, the session's head diff (`sched/review-session` C13; R1812). The step records the session (`engine/undo` M1).
 
 ## S10. Scenarios

@@ -121,8 +121,9 @@ Learning, relearning and suspended results add nothing. The answer does this whe
 
 - Undoing an answer that a review session made while it held a cache removes, from every day of every preset's list, one entry of that card (the first found), when the cache is still the one present at the answer. A day keeps the note id among its sibling notes while another entry of that note remains on it. So the undo also removes the entry the build gave the card, and an answer that added nothing still removes the build's entry.
 - Undoing a Grade Now answer touches no cache (Anki records no queue change for it; Meguri's Grade Now cache is gone by then).
-- When the queue was rebuilt between the answer and its undo, the new cache is left as it is.
-- Redoing the answer adds nothing back. These are entry-removal rules, not restoration of a whole prior cache snapshot. Tests must retain the cache-build identity and check multiple entries, a rebuilt cache and answers that appended no entry.
+- When the queue was rebuilt between the answer and its undo (or its redo), the undo or redo drops that queue and its cache and removes no entry. Until the next build no cache is held, so next states use plain fuzz (W10). The next build makes a new cache from the collection after the undo or redo has committed (W2). A review session builds again at once (`sched/review-session` P9 "Build changed", C15), so its cache is then a fresh W2 build of that collection.
+- Redoing the answer adds nothing back. These are entry-removal rules, not restoration of a whole prior cache snapshot. Tests must retain the cache-build identity and check multiple entries, answers that appended no entry, and an undo after a rebuild: the cache held afterwards must equal a fresh W2 build of the collection after the undo, not the rebuilt cache with the entry left in or taken out.
+- Changed 2026-11-17: an earlier text kept the rebuilt cache unchanged on such an undo. Implemented code must be checked against the rule above: the U43 session's answer restorer and cache handling, and the conformance executor's held queue (`specs/conformance/answer-ops.md` H2, H3).
 - Meguri does this through the answer's restorer (`engine/undo#M10`, `sched/answering#A13`).
 
 ## W10. Lifetime

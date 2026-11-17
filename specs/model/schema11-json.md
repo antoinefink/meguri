@@ -91,7 +91,9 @@ Older objects carry keys such as `tags` and `vers`; they are ordinary `other` me
 
 Output: an array with one entry per card requirement, each a three-element array `[card_ord, kind, field_ords]`: `card_ord` low 16 bits; `kind` the string `"any"` for 1, `"all"` for 2 and `"none"` for any other value; `field_ords` an array of the field ordinals, each low 16 bits. Example: `[[0,"any",[0]]]`.
 
-Input: an array of such three-element arrays, `card_ord` and each field ordinal a strict `u16`, `kind` exactly `"any"`, `"all"` or `"none"`. Anything else makes the whole `req` key invalid, so `reqs` is empty.
+Input: an array whose entries each take one of two forms: a three-element array `[card_ord, kind, field_ords]` as above, or an object with the members `card_ord`, `kind` and `field_ords` (these exact snake-case names, in any order; other members are ignored and kept nowhere; a repeated member counts by its last occurrence). In both forms `card_ord` and each field ordinal are a strict `u16` and `kind` is exactly `"any"`, `"all"` or `"none"`. Anything else, an object entry missing one of the three members included, makes the whole `req` key invalid, so `reqs` is empty. `{"card_ord":0,"kind":"all","field_ords":[0]}` reads as `[0,"all",[0]]` does. Output always writes the array form.
+
+Changed 2026-11-17: an earlier text accepted only the array form here and for `terms` (S9). Implemented code must be checked against this paragraph and the `terms` rule of S9: U21's schema-11 note type and filtered deck input.
 
 Anki recomputes `reqs` whenever it saves a note type through its editing paths; the conversion itself only carries them.
 
@@ -185,13 +187,15 @@ The normal deck has no `other`; its unknown fields are protobuf-level (`model/pr
 | Key | Output | Input reader | Missing | Input result |
 |---|---|---|---|---|
 | `resched` | `reschedule` | bool-any | refuse | `reschedule` |
-| `terms` | array of `[search, limit as i32, order]` per search term | strict array of three-element arrays `[strict string, int-or-string i32, strict i32]` | refuse | search terms; a negative limit gives 0 |
+| `terms` | array of `[search, limit as i32, order]` per search term | strict array; each element a three-element array `[strict string, int-or-string i32, strict i32]` or an object (below) | refuse | search terms; a negative limit gives 0 |
 | `separate` | always `true` | strict bool | false | not stored |
 | `delays` | `delays` as an array of `f32`, or `null` when empty | lenient array of `f32` or `null` | `null` | `delays` (empty for `null` or invalid) |
 | `previewDelay` | `preview_delay` | strict `u32` | 0 | `preview_delay` |
 | `previewAgainSecs` | `preview_again_secs` | strict `u32` | 0 | `preview_again_secs` |
 | `previewHardSecs` | `preview_hard_secs` | strict `u32` | 0 | `preview_hard_secs` |
 | `previewGoodSecs` | `preview_good_secs` | strict `u32` | 0 | `preview_good_secs` |
+
+A `terms` element may also be an object with the members `search` (strict string), `limit` (int-or-string i32) and `order` (strict i32), in any order. All three are required; other members are ignored and kept nowhere; a repeated member counts by its last occurrence. A missing member or a value of the wrong type refuses the deck object, as in the array form. `{"search":"deck:x","limit":5,"order":1}` reads as `["deck:x",5,1]` does. Output always writes the array form.
 
 Example (oracle) of a filtered deck with one search `""`, limit 100, order 0, reschedule on, Again 60 s, Hard 600 s: `…,"dyn":1,"resched":true,"terms":[["",100,0]],"separate":true,"delays":null,"previewDelay":0,"previewAgainSecs":60,"previewHardSecs":600,"previewGoodSecs":0}`.
 

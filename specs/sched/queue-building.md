@@ -140,7 +140,7 @@ A **flag-only** entry is an updated card with both images present and no changed
 | Situation | Anki | Meguri |
 |---|---|---|
 | a filtered deck below the studied deck (B2.2) | gathers its cards | leaves them out (deviation `queue-nested-filtered-deck`) |
-| a studied deck whose parent deck is missing (`sched/limits#L3`) | the build fails when that deck holds a card to gather | the deck and its cards are left out |
+| a deck below the studied deck whose parent deck is missing (`sched/limits#L3`) | attaches it under a deck one level up on the path from its nearest existing ancestor (`sched/limits#L3`) and gathers its cards under that deck's limits; when that path has no such deck, leaves it out of the limits tree, and the build fails once that deck is checked against a limit (its intraday learning cards are still gathered) | the deck, its descendants and all their cards are left out |
 
 ## B12. Scenarios
 

@@ -52,6 +52,8 @@ The names live in the synced collection config key `flagLabels` (`storage/config
 
 **Reading.** The shown name of flag N is the member `"N"` when it is a non-empty string, else the default name (F1). A missing key, or a value that is not an object, reads as `{}` (config-table C3). Members other than `"1"`–`"7"`, and non-string members, are kept by every write and never shown.
 
+An empty member is a deliberate difference. Anki shows any existing member as stored, the empty string included, so `{"1":""}` gives flag 1 an empty name there. Meguri shows the default name instead, so that every menu item, sidebar row and accessibility label keeps a name. Anki's own rename never stores `""` (an empty rename restores the default, below), so only another client's value gives this case. Example: `{"1":"","2":"Hard"}` shows `Red` (Anki: an empty name) and `Hard`; renaming flag 1 to `Red` then writes nothing (step 3), where Anki writes `{"1":"Red","2":"Hard"}`.
+
 **Renaming flag N to a text** (Browse's sidebar, inline):
 
 1. Remove every `"` from the text (Anki's sidebar does this for every rename).
@@ -86,4 +88,4 @@ Review shows a star while the current note is marked (M1; U175). Browse and save
 | `tags/flags/set` | F2 (bits kept, `mod` kept, `usn`, count, refusal) | awaits the `set_flag` driver op |
 | `tags/marked/mark` | M2 Mark and Unmark through the tag operations | awaits the `add_note_tags` and `remove_note_tags` driver ops |
 
-F3's toggles, F4's names and M2's toggles are decided by the UI layer in Anki, which the oracle does not run (it runs the collection library only). Meguri's tests cover them (U30 `tests/flags.rs`, `tests/tags.rs`; U217 for the sidebar): toggling a flag on and off, the Browse rule with a current card, `flagLabels` set to "Hard" for flag 1 then restored (the member removed, other members untouched), an equal name writing nothing, a `"` removed, a non-object value replaced, and unmarking a note tagged `Marked`.
+F3's toggles, F4's names and M2's toggles are decided by the UI layer in Anki, which the oracle does not run (it runs the collection library only). Meguri's tests cover them (U30 `tests/flags.rs`, `tests/tags.rs`; U217 for the sidebar): toggling a flag on and off, the Browse rule with a current card, `flagLabels` set to "Hard" for flag 1 then restored (the member removed, other members untouched), an equal name writing nothing, a `"` removed, a non-object value replaced, and unmarking a note tagged `Marked`. The empty-member case of F4 (`{"1":"","2":"Hard"}`, then a rename of flag 1 to `Red`) is still to be added to `tests/flags.rs`.
