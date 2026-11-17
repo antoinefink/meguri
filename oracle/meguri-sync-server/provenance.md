@@ -102,3 +102,28 @@ validation checks its actual retained runtime identities; it does not claim to
 verify secret initialization console output. No such output is retained here.
 The repair adds four guard test methods to the original twelve. No test or
 runtime ran. A new complete-content review and parent-owned MG checks remain due.
+
+
+### U11 finite retained companion and observer
+
+The same existing oracle-maintainer author session
+`s-20261116T225916Z-981c8d1b` implements only the finite quarantined commands from
+frozen original interface `8e69a6337554ac477530ef09544422729c8a1d2b70b399a8e9a563f2e71cfdbb`
+and independently checked public metadata
+`ca55bdc950d506be75182f9ad2c036b7a534ed912f3ea49ea60ad5a373562db1`.
+Those metadata provide the twelve-table raw cell/column/key/stamp contract and
+closed worker actions/invocation shape. No first-party implementation or upstream
+Anki source was read. Existing quarantined SDK helpers and original synthetic
+recipes supply the operations. No dependencies, services or production behavior
+are added. Wire observations contain only closed method/path tokens and measured
+counts/status/disposition; body/header/query data and their hashes are excluded.
+
+The source export is based on the explicit prepared seven-file byte/boundary
+repair overlay over original `ae8caefa0165b7811f8ff911f269322a3faecdef`, not an
+invented Git commit. Its patch includes only the companion delta. A two-line
+helper option preserves media during the ordinary reverse preparation; all old
+callers retain their default behavior. Actual source manifests preserve every
+original and prepared hash. The separate typed SyncError fixture correction is
+not included. No tests, imports, SDK actions, builds, servers or network were run
+by this author. Independent complete-content/source review, parent MG checks,
+actual HTTP execution and final semantic evidence review remain required.

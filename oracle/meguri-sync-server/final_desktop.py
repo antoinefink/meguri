@@ -114,7 +114,7 @@ def expected_values(recipe,checkpoint):
     return initial
 
 
-def change(col,ids,recipe,direction):
+def change(col,ids,recipe,direction,with_media=True):
     delta=recipe['rich_'+direction+'_changes'];time.sleep(1.05)
     model=col.models.get(ids['model']);model['tmpls'][0].update(qfmt=delta['question'],afmt=delta['answer']);model['css']=delta['css'];col.models.save(model)
     deck=col.decks.get(ids['deck']);deck.update(desc=delta['deck_description'],collapsed=delta['deck_collapsed']);col.decks.save(deck)
@@ -128,7 +128,7 @@ def change(col,ids,recipe,direction):
     button=recipe['review_actions'][direction]['button'];rating=CardAnswer.GOOD if button == 3 else CardAnswer.HARD
     col.sched.answer_card(CardAnswer(card_id=cid,current_state=states.current,new_state=states.good if button == 3 else states.hard,
         rating=rating,answered_at_millis=int(time.time()*1000),milliseconds_taken=0))
-    set_media(col,recipe['media_utf8_exact'][direction])
+    if with_media:set_media(col,recipe['media_utf8_exact'][direction])
 
 
 class Run:

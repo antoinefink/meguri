@@ -46,6 +46,13 @@ class PrivateResult(unittest.TextTestResult):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'retained-companion':
+        child=subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('retained_companion.py')),*sys.argv[2:]],
+                             stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        return child.returncode
+    if len(sys.argv) > 1 and sys.argv[1] == 'retained-observer':
+        from retained_observer import main as observe
+        return observe(sys.argv[2:])
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["selftest", "identity", "recovery-discover", "recovery", "recovery-dirty", "smoke", "edges", "normal", "normal-sdk", "normal-matrix", "media", "candidate", "final-assemble", "catalog", "validate", "seal"])
     parser.add_argument('--stage',choices=['normal','execute','record'],default='normal')
