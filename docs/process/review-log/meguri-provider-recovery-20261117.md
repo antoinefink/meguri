@@ -290,3 +290,19 @@ log sentence was rephrased; failed `040057-42397` remains retained.
 Static `20261117T040055Z-41527` passes three checks; similarity
 `20261117T040055Z-41454` passes four files, with its filtered report read.
 Scanner regression `20261117T040055Z-41411` passes its one case, zero skips.
+
+## AppModel repair execution
+
+`swift-test/20261117T040227Z-43502` on clean `a16bff14` passes eight
+of the same ten methods, with two failures and zero skips. Publication,
+explicit reopen recovery, held original handoff, successor failure/retry and
+local-only media routing reach their preserved checks. Both failed methods
+now reach the same final preview assertion after successful provider switches:
+`SyncCoordinatorShutdownTests.swift` lines 91 and 198. Preview is absent.
+No unchanged-source rerun or expected-nil adjustment follows from this result.
+
+The earlier unqualified startEngine error is absent in this run. Source review
+found no proven cancellation cause for that original error; its failure remains
+retained. Shutdown intent alone cannot classify an unavailable error as owned
+cancellation. Every strict backend error check remains enabled.
+The actual terminal JSON released the Apple window. Integration stays failed.
