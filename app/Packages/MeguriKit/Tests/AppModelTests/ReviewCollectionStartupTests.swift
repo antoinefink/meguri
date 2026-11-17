@@ -888,8 +888,10 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
                 for _ in 0..<2 {
                     app.sync.signInMeguri(endpoint: configured.connection.endpoint, username: "?", password: "synthetic-unused-password")
                     await app.sync.waitForMeguriAction()
-                    #expect(try await app.sync.meguriConnection() === original)
-                    #expect(try await core.configuredMeguri()?.connection == configured.connection)
+                    let currentConnection = try await app.sync.meguriConnection()
+                    #expect(currentConnection === original)
+                    let currentConfiguredConnection = try await core.configuredMeguri()?.connection
+                    #expect(currentConfiguredConnection == configured.connection)
                     // Requires the normal native credential-read capability;
                     // a storage refusal is not an authentication pass.
                     guard let failure = app.sync.meguriLastError as? MeguriProviderAuthenticationFailure,
