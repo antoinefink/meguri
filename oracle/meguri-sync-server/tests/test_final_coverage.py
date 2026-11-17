@@ -90,32 +90,58 @@ class FinalCoverage(unittest.TestCase):
     def test_migration_upload_resets_before_first_media_and_keeps_frozen_content(self):
         from unittest.mock import patch
         from final_desktop import migration
-        # Both services are actual owned pinned SDK references. This characterizes
-        # the fixture and HTTP ordering, never candidate31 interoperability credit.
-        case=candidate_selection('final-migration')['cases'][0]
-        recorder=api.recorder
-        with tempfile.TemporaryDirectory() as directory:
-            root=pathlib.Path(directory)
-            with api.reference_server(root/'candidate') as (port,username,password):
-                def reference_upstream(upstream):return recorder(port if upstream == 8080 else upstream)
-                target={'username':username,'password':password,'server':api.runtime()['server']}
-                with patch.object(api,'recorder',side_effect=reference_upstream):
-                    details=migration(api,root/'migration',target,case)
-        expected={row['name']:row['value'] for row in case['expected']}
-        self.assertEqual(details['values'],expected)
-        self.assertEqual(final_values({'final_details':details},case),expected)
-        switch=[row for row in details['receipts'] if row['actor'] == 'client_a' and row['action_index'] == 1]
-        self.assertEqual([row['operation'] for row in switch],['decision','full','media'])
-        self.assertTrue(any(row['route'] == '/sync/upload' and row['status'] == 200 and row['upload_result'] == 'OK' for row in switch[1]['traffic']))
-        self.assertFalse(any(row['route'].startswith('/msync/') for receipt in switch[:2] for row in receipt['traffic']))
-        rows=switch[2]['traffic']
-        self.assertEqual(next(row['media_begin']['usn'] for row in rows if row['route'] == '/msync/begin'),0)
-        self.assertEqual(next(row['media_request']['lastUsn'] for row in rows if row['route'] == '/msync/mediaChanges'),0)
-        self.assertEqual(sum(row['media_result'][0] for row in rows if row['route'] == '/msync/uploadChanges'),len(recipes()['media_utf8_exact']['initial']))
-        inputs={row['sha256']:row['value'] for row in details['inputs']};before=inputs[switch[2]['input_sha256']]
-        authority=details['frozen_authorities'][1]
-        self.assertEqual(before['projection'],authority['projection'])
-        self.assertEqual(before['media'],authority['media'])
+        from validation import encoded
+        api.PHASE='setup'
+        try:
+            # Both services are actual owned pinned SDK references. This characterizes
+            # the fixture and HTTP ordering, never candidate31 interoperability credit.
+            case=candidate_selection('final-migration')['cases'][0]
+            recorder=api.recorder
+            with tempfile.TemporaryDirectory() as directory:
+                root=pathlib.Path(directory)
+                with api.reference_server(root/'candidate') as (port,username,password):
+                    def reference_upstream(upstream):return recorder(port if upstream == 8080 else upstream)
+                    target={'username':username,'password':password,'server':api.runtime()['server']}
+                    with patch.object(api,'recorder',side_effect=reference_upstream):
+                        details=migration(api,root/'migration',target,case)
+            api.PHASE='migration-test-values-check'
+            expected={row['name']:row['value'] for row in case['expected']}
+            self.assertEqual(details['values'],expected)
+            self.assertEqual(final_values({'final_details':details},case),expected)
+            api.PHASE='migration-test-trace-check'
+            switch=[row for row in details['receipts'] if row['actor'] == 'client_a' and row['action_index'] == 1]
+            self.assertEqual([row['operation'] for row in switch],['decision','full','media'])
+            self.assertTrue(any(row['route'] == '/sync/upload' and row['status'] == 200 and row['upload_result'] == 'OK' for row in switch[1]['traffic']))
+            self.assertFalse(any(row['route'].startswith('/msync/') for receipt in switch[:2] for row in receipt['traffic']))
+            rows=switch[2]['traffic']
+            self.assertEqual(next(row['media_begin']['usn'] for row in rows if row['route'] == '/msync/begin'),0)
+            self.assertEqual(next(row['media_request']['lastUsn'] for row in rows if row['route'] == '/msync/mediaChanges'),0)
+            self.assertEqual(sum(row['media_result'][0] for row in rows if row['route'] == '/msync/uploadChanges'),len(recipes()['media_utf8_exact']['initial']))
+            api.PHASE='migration-test-input-check'
+            inputs={row['sha256']:row['value'] for row in details['inputs']};before=inputs[switch[2]['input_sha256']]
+            authority=details['frozen_authorities'][1]
+            self.assertEqual(before['projection'],authority['projection'])
+            self.assertEqual(before['media'],authority['media'])
+        except BaseException as error:
+            phases={'setup','migration-setup','migration-client-setup','migration-source-content-prepare',
+                'migration-source-service','migration-source-login','migration-source-witness-login',
+                'migration-source-witness-download','migration-source-authority-freeze','migration-target-login',
+                'migration-authority-check','migration-upload-content-check','migration-explicit-source-media-reset',
+                'migration-reset-content-check','migration-target-media','migration-media-cursor-check',
+                'migration-media-publication-check','migration-published-content-check','migration-receiver-b',
+                'migration-receiver-b-check','migration-receiver-fresh','migration-receiver-fresh-check',
+                'migration-source-cleanup-check','migration-result','migration-test-values-check',
+                'migration-test-trace-check','migration-test-input-check','runtime-location',
+                'runtime-version-build','runtime-installation-receipt','final-decision','final-full-upload',
+                'final-full-download','final-normal','final-media','media-sync-submit','media-sync-status'}
+            errors={'ValueError','AssertionError','SyncError','NetworkError','TimeoutError','TypeError','KeyError','OSError'}
+            phase=getattr(api,'PHASE','setup');kind=type(error).__name__
+            diagnostic={'test':'migration-upload-reset-reference',
+                'case':'P-F03:desktop.candidate.migration-explicit-authority',
+                'phase':phase if type(phase) is str and phase in phases else 'setup',
+                'error_class':kind if kind in errors else 'other','case_credit':False}
+            pathlib.Path('/out/migration-reference-diagnostic.json').write_bytes(encoded(diagnostic))
+            raise
 
     def test_final31_preserves_each_historical_case_and_order(self):
         final=candidate_selection('final')['cases']

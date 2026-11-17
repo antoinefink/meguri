@@ -301,21 +301,29 @@ def replacement(api,root,target,case,upload):
 
 
 def migration(api,root,target,case):
+    api.PHASE='migration-setup'
     recipe=recipes();source={}
     with environment(api,root,target,case) as (run,record,client):
+        api.PHASE='migration-client-setup'
         a,ids,aa=client('a');b,_,ab=client('b');c,_,ac=client('fresh')
+        api.PHASE='migration-source-content-prepare'
         set_media(a,recipe['media_utf8_exact']['initial']);initial=run.freeze(a,'client_a',0,'source-initial')
         require(same_value(authored_values(a,ids),expected_values(recipe,'initial')),'migration author differs from original recipe')
+        api.PHASE='migration-source-service'
         with api.reference_server(root/'source-service',(target['username'],target['password']),fixed_port=8081,evidence=source) as (port,user,password):
             require(port == 8081,'migration source port changed')
             with api.recorder(8081) as source_record:
                 source_record.capture_normal=True;source_record.capture_media=True;source_record.sdk_completions=[]
+                api.PHASE='migration-source-login'
                 auth=a.sync_login(username=user,password=password,endpoint=f'http://127.0.0.1:{source_record.server_port}/')
                 run.call(a,auth,'client_a',0,'full',source_record,True);run.call(a,auth,'client_a',0,'media',source_record)
                 run.call(a,auth,'client_a',0,'normal',source_record)
                 witness_dir=root/'source-witness';witness_dir.mkdir();witness=api.Collection(str(witness_dir/'collection.anki2'));run.clients.append(witness)
+                api.PHASE='migration-source-witness-login'
                 witness_auth=witness.sync_login(username=user,password=password,endpoint=f'http://127.0.0.1:{source_record.server_port}/')
+                api.PHASE='migration-source-witness-download'
                 api.full(witness,witness_auth,False);api.media_sync(witness,witness_auth)
+                api.PHASE='migration-source-authority-freeze'
                 require(not source_record.errors,'migration source recording incomplete')
                 source_equal=same_value(projection(witness),initial['projection']) and media_map(witness) == expected_media(recipe['media_utf8_exact']['initial'])
                 authority=run.freeze(a,'client_a',0,'pre-switch-source-authority')
@@ -323,28 +331,42 @@ def migration(api,root,target,case):
                 source['preparation_witness']={'actor':'fresh_client','scope':'source-only preparation witness; never candidate credit','traffic':copy.deepcopy(source_record.observations)}
                 source['runtime']=api.runtime();source['endpoint']='http://127.0.0.1:8081/'
                 source['authoritative_projection_sha256']=sha(encoded(authority['projection']));source['media']=media_map(witness)
+            api.PHASE='migration-target-login'
             aa=a.sync_login(username=target['username'],password=target['password'],endpoint=f'http://127.0.0.1:{record.server_port}/')
             decision=run.call(a,aa,'client_a',1,'decision',record)
+            api.PHASE='migration-authority-check'
             require(decision in {SyncOutput.FULL_UPLOAD,SyncOutput.FULL_SYNC},'migration candidate did not require upload authority')
             run.call(a,aa,'client_a',1,'full',record,True)
+            api.PHASE='migration-upload-content-check'
             require(same_value(projection(a),authority['projection']) and media_map(a) == authority['media'],'migration collection upload changed frozen source content')
             api.PHASE='migration-explicit-source-media-reset'
             a.media.force_resync()
+            api.PHASE='migration-reset-content-check'
             require(same_value(projection(a),authority['projection']) and media_map(a) == authority['media'],'migration media reset changed frozen source content')
+            api.PHASE='migration-target-media'
             media_start=len(record.observations);run.call(a,aa,'client_a',1,'media',record)
             media_rows=record.observations[media_start:]
+            api.PHASE='migration-media-cursor-check'
             cursor=next((row['media_request']['lastUsn'] for row in media_rows if row['route'] == '/msync/mediaChanges'),None)
             require(cursor == 0,'migration first candidate media listing did not start at zero')
+            api.PHASE='migration-media-publication-check'
             uploads=[row['media_result'] for row in media_rows if row['route'] == '/msync/uploadChanges' and row['status'] == 200]
             require(uploads and all(isinstance(row,list) and len(row) == 2 and type(row[0]) is int and row[0] >= 0 for row in uploads)
                     and sum(row[0] for row in uploads) == len(authority['media'])
                     and any(row['route'] == '/msync/mediaSanity' and row.get('media_result') == 'OK' and row['status'] == 200 for row in media_rows),'migration frozen source media publication incomplete')
+            api.PHASE='migration-published-content-check'
             require(same_value(projection(a),authority['projection']) and media_map(a) == authority['media'],'migration media publication changed frozen source content')
+            api.PHASE='migration-receiver-b'
             run.call(b,ab,'client_b',2,'full',record,False);run.call(b,ab,'client_b',2,'media',record)
+            api.PHASE='migration-receiver-b-check'
             b_equal=run.compare(b,ids,authority,'initial','client_b',2)
+            api.PHASE='migration-receiver-fresh'
             run.call(c,ac,'fresh_client',3,'full',record,False);run.call(c,ac,'fresh_client',3,'media',record)
+            api.PHASE='migration-receiver-fresh-check'
             c_equal=run.compare(c,ids,authority,'initial','fresh_client',3)
+        api.PHASE='migration-source-cleanup-check'
         require(source.get('cleanup_complete') is True,'owned migration source cleanup failed')
+        api.PHASE='migration-result'
         return run.result({'source_sync_completed':source_equal,'distinct_owned_source':source.get('owned_pid',0) > 0 and source.get('endpoint') == 'http://127.0.0.1:8081/' and source.get('cleanup_complete') is True,
             'authority':'upload','history_scheduling_equal':b_equal and c_equal,
             'media_equal':media_map(b) == media_map(c) == expected_media(recipe['media_utf8_exact']['initial']),
