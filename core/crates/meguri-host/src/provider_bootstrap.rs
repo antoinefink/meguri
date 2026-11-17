@@ -166,6 +166,8 @@ impl CoreHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use meguri_model::rng::SeededRandom;
+    use meguri_sync::Job;
     fn connection() -> MeguriConnection {
         MeguriConnection { reference: "synthetic".into(), revision: 1, endpoint: "https://bootstrap.synthetic.example/".into() }
     }
@@ -178,7 +180,8 @@ mod tests {
         assert_eq!(access.username(), "synthetic-user");
         let (actual, options, transport) = access.into_round_inputs();
         assert_eq!(actual.as_str(), key.as_str());
-        assert_eq!(options.base.as_str(), connection.endpoint);
+        let job = Job::new(&options, Some(actual), &SeededRandom::new(1)).unwrap();
+        assert_eq!(job.base().as_str(), connection.endpoint);
         assert!(transport.is_none());
     }
     #[test]
