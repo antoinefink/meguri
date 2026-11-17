@@ -830,7 +830,7 @@ PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d1273
 PUBLIC_ARTIFACTS = {
     # Complete-content public reviews: routine Core fix1 and Host fix2, 2026-11-17.
     "core/crates/meguri-host/tests/provider_normal.rs":
-        "bb107c3ba79f391c45d4007d93831b1e2b00b5c22f846c978cc2bf90e0e13a8f",
+        "6e4da27f10740c311b499a99e3859d799e26b4b361b03fdd2f008535793072a3",
     "core/crates/meguri-storage/tests/media_bound_reset.rs":
         "afc4b2b78e4a6482f363326fc71e687e51d0c6ee7d72f8dbdf554a1484839004",
     "core/crates/meguri-sync/src/media.rs":
@@ -918,7 +918,7 @@ PUBLIC_ARTIFACTS = {
     "core/crates/meguri-host/tests/own_handoff_attribution.rs":
         "61735c7012d7cc0d883d0caa5d211ebb426ff5181e1e6be4db060932079aa709",
     "core/crates/meguri-sync/src/cloud/runtime.rs":
-        "56399c071f59b6e58e8ea0f282ca47c36ac84a8c7593d35873072861db5e5210",
+        "a4217d453e672d9e072cf80e19296449d78fad30d13562fee13f4759ff6e4de5",
     "core/crates/meguri-sync/src/cloud/workflow_runtime.rs":
         "6bb6bb78447586c080d7b19adc9aae19447489c2d9d5f36bca3bd471863cb76f",
 
@@ -959,7 +959,7 @@ PUBLIC_ARTIFACTS = {
         "31af001e272ebcc61ca299e3d932f6f29bc5da69551389305956ef92cd9f0e40",
     # Complete public-source review; future bytes remain checked.
     "core/crates/meguri-sync/src/provider.rs":
-        "832a33d7bc765566905e9a628fff30e5b4fae9e85d7a7d4f19139e12315ae779",
+        "793880794f47d8c5a5c2da40314556eb63b2a21d3a5a00e4d41948cf0948354f",
     "core/crates/meguri-host/tests/cloud_publication_phase.rs":
         "9c5b08115ee7c9969554a0f6d68628cca262a7def0aee665866f0ebab78de622",
     "docs/process/review-log/cancellation-provider-restoration-20261117.md":
