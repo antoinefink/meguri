@@ -336,7 +336,8 @@ extension EventTests {
             let calls = Mutex<[BridgeCall]>([])
             try await MaintenanceCallObservation.$capture.withValue({ call in calls.withLock { $0.append(call) } }) {
                 await #expect(throws: MeguriBootstrapAdmissionFailure.retired) { _ = try await original.pendingPreparation() }
-                #expect(try await current.pendingPreparation() == nil)
+                let pendingPreparation = try await current.pendingPreparation()
+                #expect(pendingPreparation == nil)
                 #expect(calls.withLock { $0.filter { $0 == .providerBootstrapPendingPreparation }.count } == 1)
                 #expect(calls.withLock { Set($0).isDisjoint(with: bootstrapStarts) })
                 #expect(!calls.withLock { $0.contains(.providerStartLogin) || $0.contains(.jobProgressSetListener) })

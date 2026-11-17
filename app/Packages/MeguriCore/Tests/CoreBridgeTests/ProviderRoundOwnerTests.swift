@@ -119,7 +119,8 @@ extension EventTests {
                 }
                 let facade = try await owner.roundService()
                 #expect(try await owner.roundService() === facade)
-                #expect(facade.connection == configured.connection)
+                let connection = await facade.connection
+                #expect(connection == configured.connection)
                 #expect(await owner.phase == .setupRequired)
                 #expect(calls.withLock { Set($0).isDisjoint(with: roundNetworkStarts) })
                 expectRoundRefusal(try await facade.fullRound(), selected: selected)
