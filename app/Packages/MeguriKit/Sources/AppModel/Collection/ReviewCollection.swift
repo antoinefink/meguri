@@ -116,6 +116,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?, allowGoToDeckRecovery: Bool = false) -> Bool {
         guard host == .main, foreground, !resuming, !closed, !closing, !sync.providerHandoffInProgress,
+              !sync.meguriCollectionWorkHeld,
               !opening, (!starting || (route == .goToDeck && goToDeckBusy)), !enabling, state == .ready,
               case .ready(let current) = lifecycle, current == generation,
               review == nil, navigation.review == nil,
@@ -378,7 +379,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         lifecycle = .noCollection; state = restored
     }
     var exportAllowed: Bool {
-        guard !opening, !enabling, !deckNamesReserved, !sync.providerHandoffInProgress, state == .ready, case .ready = lifecycle else { return false }
+        guard !opening, !enabling, !deckNamesReserved, !sync.providerHandoffInProgress,
+              !sync.meguriCollectionWorkHeld, state == .ready, case .ready = lifecycle else { return false }
         return true
     }
     @ObservationIgnored var loadDeckTree: @MainActor () async throws -> CountedDeckTree
@@ -399,6 +401,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var openTask: Task<Void, Never>?
     private var cloudPreparationTask: Task<Void, any Error>?
     private var cloudActivationCompletion: Task<Void, Never>?
+    private var meguriActivationAttachment: (sync: SyncCoordinator, generation: UInt64, noFile: Bool)?
     private var opening = false
     private var preparedGeneration: UInt64?
     private var starting = false
@@ -440,6 +443,43 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     private func configureSyncOwnership() {
         sync.configureProviderDirectory(providerDirectory)
+        sync.beginMeguriActivation = { [weak self] in
+            guard let self else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+            try self.beginManualActivation()
+            self.meguriActivationAttachment = (self.sync, self.generation,
+                self.state == .noFile && self.lifecycle == .noCollection)
+        }
+        sync.finishMeguriActivation = { [weak self] candidateActive in
+            guard let self else { return nil }
+            let original = self.meguriActivationAttachment
+            defer { self.meguriActivationAttachment = nil }
+            await self.sync.waitForReplacement()
+            await self.mediaCloseTask?.value
+            // Lifecycle is actual evidence even when cancellation or a thrown
+            // terminal read could not report whether activation happened.
+            let resulting: CollectionLifecycle
+            do { resulting = try await self.collection.lifecycle() }
+            catch { _ = await self.finishEntryActivation(candidateActive: candidateActive); return nil }
+            let changed: Bool
+            if case .ready(let next) = resulting { changed = next != self.preparedGeneration }
+            else { changed = false }
+            let adopted = await self.finishEntryActivation(candidateActive: candidateActive || changed)
+            guard !self.closing, !self.closed else { return nil }
+            if adopted { return self.sync }
+            // A failed first download can retain the original valid Host with
+            // no collection. This is local refresh authority, not activation or
+            // permission to reprepare. A new/failed/retired attachment refuses.
+            guard !candidateActive, !changed, let original, original.noFile,
+                  self.sync === original.sync, self.generation == original.generation,
+                  self.state == .noFile, self.lifecycle == .noCollection else { return nil }
+            do {
+                guard try await original.sync.validateRetainedMeguriAttachment(generation: original.generation),
+                      self.sync === original.sync, self.generation == original.generation,
+                      !self.closing, !self.closed, self.state == .noFile,
+                      self.lifecycle == .noCollection else { return nil }
+                return original.sync
+            } catch { return nil }
+        }
         sync.providerChangeAllowed = { [weak self] in
             guard let self else { return false }
             return !closed && !closing && !opening && !starting && !enabling && !resuming
@@ -586,6 +626,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         if generation != value { endGoToDeckGeneration(); invalidateDeckActions(); exportOwner?.generationChanged() }
         generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
         try sync.releaseEntryActivation()
+        sync.setMeguriLocalCollection(true)
         await sync.completeOpenedHost(generation: value)
         if loadRecord {
             do { previousRecord = try await records.load() }
@@ -612,6 +653,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         try await subscribe()
         return try await Self.prepareOpenLocation(configuration.collectionLocation, providerDirectory: providerDirectory)
     }
+    /// Local native service selection shares ordinary Host admission.
+    public func prepareSyncServiceSelection() async throws { try await prepareCloudConnectionHost() }
     func prepareCloudConnectionHost() async throws {
         if let cloudPreparationTask { try await cloudPreparationTask.value; return }
         guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
@@ -637,6 +680,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
             lifecycle = try await collection.lifecycle()
             if case .noCollection = lifecycle { state = .noFile; generation = retainedGeneration }
+            sync.setMeguriLocalCollection(false)
             await sync.completeOpenedHost(generation: retainedGeneration)
             await sync.prepareConnectionAuthority()
             guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
@@ -644,7 +688,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         cloudPreparationTask = task
         try await task.value
     }
-    var entryAllowed: Bool { (state == .ready || manualOwner?.preview == nil) && manualAllowed && state != .unavailable }
+    var entryAllowed: Bool { !sync.meguriCollectionWorkHeld && (state == .ready || manualOwner?.preview == nil) && manualAllowed && state != .unavailable }
     var manualAllowed: Bool { !sync.providerHandoffInProgress && cloudPreparationTask == nil && !deckNamesReserved && entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
     func beginManualActivation() throws {
         guard review == nil, !starting else { throw BridgeError.sessionActive }
@@ -1039,7 +1083,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             if let deck = pendingDeck { pendingDeck = nil; Task { await startStudy(deckID: deck) } }
         } catch { self.error = String(describing: error) }
     }
-    public var canStudy: Bool { !deckNamesReserved && !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting && review == nil && policy == .ok }
+    public var canStudy: Bool { !sync.meguriCollectionWorkHeld && !deckNamesReserved && !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting && review == nil && policy == .ok }
     public func startStudy(deckID: Int64) async {
         _ = await startStudy(deckID: deckID, goToDeckAdmission: nil)
     }

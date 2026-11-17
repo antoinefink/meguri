@@ -19,7 +19,22 @@ public struct AccountSyncView: View {
     private var controls: CloudPolicyControls { sync.status?.controls ?? .unknown }
     private var decisionRequired: Bool { controls.decisionRequired == true }
     public var body: some View {
+        if sync.providerState?.selection == .meguri {
+            NavigationStack {
+                form.navigationDestination(isPresented: Binding(
+                    get: { collection.syncPresentation.meguriAffectedFilesPresented },
+                    set: { collection.syncPresentation.meguriAffectedFilesPresented = $0 })) {
+                        MeguriAffectedFilesPage(collection: collection)
+                    }
+            }
+        } else { form }
+    }
+    private var form: some View {
         Form {
+            SyncServiceSection(collection: collection, host: host)
+            if sync.providerState?.selection == .meguri {
+                MeguriSyncSections(collection: collection)
+            } else if sync.providerState?.selection == .iCloud {
             Section {
                 SyncStatusRows(collection: collection)
                 if let failure = sync.connectionFailure {
@@ -158,6 +173,7 @@ public struct AccountSyncView: View {
                         // Keep the disclosure's identifier out of its content subtree.
                         .accessibilityIdentifier("settings.accountSync.details")
                 }
+            }
             }
         }
         .formStyle(.grouped)

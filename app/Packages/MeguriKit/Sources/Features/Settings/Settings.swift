@@ -223,7 +223,7 @@ public struct MacSettingsView: View {
         let query = collection.syncPresentation.settingsSearch
         guard !query.isEmpty else { return true }
         let terms: String = switch page {
-        case .accountSync: SyncText.value("sync.settings.section") + " iCloud"
+        case .accountSync: SyncText.value("sync.settings.section") + " iCloud " + SyncText.value("sync.service.meguri")
         case .collection: String(localized: "Collection", bundle: .module) + " Import Export"
         case .ankiServer: String(localized: "Anki Server", bundle: .module) + " Connection"
         }

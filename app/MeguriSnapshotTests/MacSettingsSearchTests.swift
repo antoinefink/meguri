@@ -1,11 +1,131 @@
 #if os(macOS)
 import AppKit
-import AppModel
+@testable import AppModel
+import CoreBridge
+import Darwin
 import Settings
 import SwiftUI
 import Testing
 
 @MainActor @Suite(.serialized) struct MacSettingsSearchTests {
+    @Test(.timeLimit(.minutes(1))) func normalAccountSyncShowsRealMeguriSetupControls() async throws {
+        try await SnapshotAppLifecycle.shared.withExclusiveAccess {
+            let files = FileManager.default
+            let temporary = try #require(realpath(files.temporaryDirectory.path, nil))
+            defer { free(temporary) }
+            let root = URL(filePath: String(cString: temporary)).appending(path: "synthetic-native-account-sync-\(UUID().uuidString)")
+            let directory = root.appending(path: "collection")
+            let backups = root.appending(path: "backups")
+            let installation = root.appending(path: "installation")
+            try files.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? files.removeItem(at: root) }
+            var configuration = LaunchConfiguration()
+            configuration.collectionLocation = AppModel.CollectionLocation(directory: directory, backupsDirectory: backups)
+            let sync = SyncCoordinator(directory: directory, defaults: nil)
+            let collection = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+                providerDirectory: installation)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
+                styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            let controller = NSHostingController(rootView: AccountSyncView(collection: collection, host: .settings))
+            defer {
+                window.contentViewController = nil; window.close()
+                withExtendedLifetime(controller) {}
+            }
+            do {
+                await collection.start()
+                try #require(collection.state == .noFile)
+                // Import the public synthetic package through the ordinary
+                // Files owner, with every persistence root under this fixture.
+                var checkout = URL(filePath: #filePath)
+                for _ in 0..<3 { checkout.deleteLastPathComponent() }
+                let source = checkout.appending(path: "app/Fixtures/CollectionEntry/review.colpkg")
+                collection.entry.present(); collection.entry.inspect(source)
+                await collection.entry.waitForCompletion()
+                try #require(collection.entry.preview != nil)
+                collection.entry.confirm(); await collection.entry.waitForCompletion()
+                try #require(collection.state == .ready)
+                try #require(collection.sync.providerState?.selection == .localOnly)
+                window.contentViewController = controller
+                window.orderFront(nil); window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded()
+                let picker = try #require(nativeServicePickers(in: controller.view).first)
+                #expect(Set(picker.itemTitles) == [SyncText.value("sync.service.iCloud"), SyncText.value("sync.service.meguri")])
+                picker.selectItem(withTitle: SyncText.value("sync.service.meguri"))
+                try #require(picker.sendAction(picker.action, to: picker.target))
+                try await waitForNativeAccountState {
+                    collection.sync.providerState?.selection == .meguri && !collection.sync.meguriBusy
+                }
+                window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded()
+                for id in ["address", "username", "password", "signIn"] {
+                    _ = try #require(nativeAccountElement("settings.accountSync.meguri.\(id)", in: controller.view))
+                }
+                let password = try #require(nativeAccountElement("settings.accountSync.meguri.password", in: controller.view))
+                #expect(accessibilityString(in: password, selector: #selector(NSAccessibilityProtocol.accessibilitySubrole))
+                    == NSAccessibility.Subrole.secureTextField.rawValue)
+                for id in ["settings.accountSync.iCloudHeading", "settings.accountSync.connect", "settings.accountSync.automatic", "settings.accountSync.media"] {
+                    #expect(try nativeAccountElement(id, in: controller.view) == nil)
+                }
+                #expect(collection.sync.meguriPhase == .unconfigured)
+                #expect(collection.sync.meguriPreview == nil && collection.sync.meguriRoundReport == nil)
+                let currentPicker = try #require(nativeServicePickers(in: controller.view).first)
+                currentPicker.selectItem(withTitle: SyncText.value("sync.service.iCloud"))
+                try #require(currentPicker.sendAction(currentPicker.action, to: currentPicker.target))
+                try await waitForNativeAccountState { window.attachedSheet != nil }
+                let sheet = try #require(window.attachedSheet)
+                let sheetContent = try #require(sheet.contentView)
+                _ = try #require(nativeAccountElement("sync.serviceSwitch.confirm", in: sheetContent))
+                let revision = collection.sync.providerState?.revision
+                let enter = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                    timestamp: 0, windowNumber: sheet.windowNumber, context: nil,
+                    characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+                sheet.sendEvent(enter)
+                await Task.yield()
+                #expect(window.attachedSheet === sheet)
+                #expect(!collection.syncPresentation.serviceChanging)
+                #expect(collection.sync.providerState?.selection == .meguri)
+                #expect(collection.sync.providerState?.revision == revision)
+                let cancel = try #require(nativeAccountElement("sync.serviceSwitch.cancel", in: sheetContent))
+                let press = NSSelectorFromString("accessibilityPerformPress")
+                try #require(cancel.responds(to: press))
+                _ = cancel.perform(press)
+                try await waitForNativeAccountState { window.attachedSheet == nil }
+                #expect(collection.sync.providerState?.selection == .meguri)
+                #expect(collection.sync.meguriLastCommand == nil && collection.sync.meguriRoundReport == nil)
+                try #require(await collection.close())
+            } catch { _ = await collection.close(); throw error }
+        }
+    }
+    private func waitForNativeAccountState(_ ready: () throws -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(20)
+        while ContinuousClock.now < deadline {
+            if try ready() { return }
+            await Task.yield()
+        }
+        throw NativeAccountStateFailure.notSettled
+    }
+    private enum NativeAccountStateFailure: Error { case notSettled }
+    private func nativeServicePickers(in view: NSView) -> [NSPopUpButton] {
+        var matches: [NSPopUpButton] = []
+        if let picker = view as? NSPopUpButton,
+           picker.itemTitles.contains(SyncText.value("sync.service.meguri")) { matches.append(picker) }
+        return matches + view.subviews.flatMap { nativeServicePickers(in: $0) }
+    }
+    private func nativeAccountElement(_ identifier: String, in root: NSObject) throws -> NSObject? {
+        var visited: Set<ObjectIdentifier> = []
+        func find(_ object: NSObject) throws -> NSObject? {
+            guard visited.insert(ObjectIdentifier(object)).inserted else { return nil }
+            if accessibilityString(in: object, selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier)) == identifier { return object }
+            let children = try accessibilityChildArray(in: object, selector: #selector(NSAccessibilityProtocol.accessibilityChildren))
+            defer { withExtendedLifetime(children) {} }
+            for index in 0..<children.count {
+                let child = try #require(children.object(at: index) as? NSObject)
+                if let found = try find(child) { return found }
+            }
+            return nil
+        }
+        return try find(root)
+    }
+
     @Test func nativeSidebarSearchIdentifiersSurviveRemountWithText() throws {
         let collection = ReviewCollection(configuration: LaunchConfiguration(), navigation: AppNavigation())
         collection.syncPresentation.settingsSearch = "iCloud"
@@ -156,6 +276,8 @@ import Testing
         switch selector {
         case #selector(NSAccessibilityProtocol.accessibilityRole):
             attribute = .role
+        case #selector(NSAccessibilityProtocol.accessibilitySubrole):
+            attribute = .subrole
         case #selector(NSAccessibilityProtocol.accessibilityLabel):
             attribute = .description
         case #selector(NSAccessibilityProtocol.accessibilityIdentifier):

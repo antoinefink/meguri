@@ -7,7 +7,13 @@ import SwiftUI
 struct SyncStatusContent: View {
     let collection: ReviewCollection
     var body: some View {
-        Section { SyncStatusRows(collection: collection) }
+        Section {
+            SyncStatusRows(collection: collection)
+            if collection.sync.providerState?.selection == .meguri,
+               MeguriMediaFactRows.isVisible(collection.sync) {
+                MeguriMediaFactRows(collection: collection)
+            }
+        }
     }
 }
 
@@ -19,6 +25,18 @@ struct SyncStatusRows: View {
     private var presentation: SyncStatusPresentation { .init(state: sync.status?.state, setup: sync.setupState) }
     var body: some View {
         Group {
+            if sync.providerState?.selection == .meguri {
+                VStack(alignment: .leading) {
+                    Text(SyncText.value("sync.service.meguri"))
+                    Text(SyncText.value(sync.meguriStatus.titleKey))
+                    if let key = sync.meguriStatus.detailKey { Text(SyncText.value(key)) }
+                    if sync.meguriStage == .media, let progress = sync.meguriMediaProgress {
+                        Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: progress.awaiting)))
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("settings.accountSync.meguri.status")
+            } else {
             VStack(alignment: .leading) {
                 Label(SyncText.value(presentation.titleKey), systemImage: presentation.symbol)
                 if let key = presentation.detailKey { Text(SyncText.value(key)) }
@@ -58,6 +76,7 @@ struct SyncStatusRows: View {
             if let recovery = sync.recovery {
                 CloudRecoveryContent(collection: collection, recovery: recovery)
             }
+            }
         }
     }
 }
@@ -67,9 +86,18 @@ struct SyncNowButton: View {
     var identifier = "sync.status.syncNow"
     var showsUnavailableReason = true
     var reasonIdentifierSuffix = ""
+    var accountAction: ((String) -> Void)? = nil
+    private var titleKey: String {
+        if collection.sync.providerState?.selection == .meguri, case .account(let key) = collection.sync.meguriStatus.route { return key }
+        return "sync.now.command"
+    }
     private var reason: String? { SyncStatusCopy.unavailable(collection) }
     var body: some View {
-        Button(SyncText.value("sync.now.command")) { collection.requestSyncNow() }
+        Button(SyncText.value(titleKey)) {
+            if collection.sync.providerState?.selection == .meguri, case .account(let key) = collection.sync.meguriStatus.route,
+               let accountAction { accountAction(key) }
+            else { collection.requestSyncNow() }
+        }
             .disabled(collection.syncNowAvailability() != .available || collection.navigation.sheet != nil)
             .help(reason ?? SyncText.value("sync.now.command"))
             .accessibilityIdentifier(identifier)
@@ -95,6 +123,10 @@ enum SyncStatusCopy {
         }
     }
     static func unavailable(_ collection: ReviewCollection) -> String? {
+        if collection.sync.providerState?.selection == .meguri {
+            if case .disabled(let key) = collection.sync.meguriStatus.route { return key.map(SyncText.value) }
+            return nil
+        }
         guard case .unavailable(let reason) = collection.syncNowAvailability() else { return nil }
         let key: String
         switch reason {

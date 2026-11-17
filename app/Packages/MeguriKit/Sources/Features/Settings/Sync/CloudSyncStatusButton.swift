@@ -14,7 +14,10 @@ public struct CloudSyncStatusButton: View {
     @Environment(\.openSettings) private var openSettings
     #endif
     public init(collection: ReviewCollection) { self.collection = collection }
+    private var meguri: Bool { collection.sync.providerState?.selection == .meguri }
     private var copy: SyncStatusPresentation { .init(state: collection.sync.status?.state, setup: collection.sync.setupState) }
+    private var titleKey: String { meguri ? collection.sync.meguriStatus.titleKey : copy.titleKey }
+    private var detailKey: String? { meguri ? collection.sync.meguriStatus.detailKey : copy.detailKey }
     private var presented: Binding<Bool> {
         Binding(get: { collection.navigation.sheet == nil && collection.syncPresentation.statusPresented },
             set: { collection.syncPresentation.statusPresented = $0 })
@@ -37,13 +40,13 @@ public struct CloudSyncStatusButton: View {
                     .accessibilityIdentifier("sync.status.mediaIndicator")
             }
             Button { presented.wrappedValue.toggle() } label: {
-                Image(systemName: copy.symbol)
+                Image(systemName: meguri ? collection.sync.meguriStatus.symbol : copy.symbol)
                     .symbolEffect(.rotate, options: .repeating,
-                        isActive: !reduceMotion && collection.sync.status?.state == .syncingCollection)
+                        isActive: !reduceMotion && (meguri ? collection.sync.meguriStatus.isBusy : collection.sync.status?.state == .syncingCollection))
             }
-            .accessibilityLabel(SyncText.value("sync.button.label"))
-            .accessibilityValue(SyncText.value(copy.titleKey).replacingOccurrences(of: "…", with: ""))
-            .help([SyncText.value(copy.titleKey), copy.detailKey.map(SyncText.value)].compactMap { $0 }.joined(separator: "\n"))
+            .accessibilityLabel(SyncText.value(meguri ? "sync.meguri.button.label" : "sync.button.label"))
+            .accessibilityValue(SyncText.value(titleKey).replacingOccurrences(of: "…", with: ""))
+            .help([SyncText.value(titleKey), detailKey.map(SyncText.value)].compactMap { $0 }.joined(separator: "\n"))
             .accessibilityIdentifier("sync.status.button")
             .disabled(collection.syncPresentation.statusHandoffPending)
             .popover(isPresented: presented(compact: false)) {
@@ -51,6 +54,11 @@ public struct CloudSyncStatusButton: View {
                     .presentationCompactAdaptation(.sheet)
                     .presentationDetents([.medium, .large])
             }
+            #if os(macOS)
+            .onChange(of: collection.syncPresentation.settingsRequest) { _, request in
+                if meguri, request != nil { openSettings() }
+            }
+            #endif
             #if os(iOS)
             // Keep status and connection separate; native dismissal, rather
             // than a delay or view disappearance, orders the compact handoff.
@@ -78,6 +86,7 @@ public struct CloudSyncStatusButton: View {
         VStack {
             Form {
                 SyncStatusContent(collection: collection)
+                if !meguri {
                 if collection.sync.status?.controls.enable == .connect {
                     Section { CloudPreviewEntryButton(collection: collection, entry: .connect, entryAction: openStatusEntry) }
                 }
@@ -96,11 +105,15 @@ public struct CloudSyncStatusButton: View {
                     }
                 }
                 CloudAttentionSection(collection: collection, entryAction: openStatusEntry)
+                }
             }
             .formStyle(.grouped)
             Divider()
             VStack {
-                SyncNowButton(collection: collection)
+                SyncNowButton(collection: collection, accountAction: { key in
+                    if key == "sync.meguri.media.showAffected" { collection.syncPresentation.meguriAffectedFilesPresented = true }
+                    showSettings()
+                })
                 Button(SyncText.value("sync.settings.section"), action: showSettings)
                     .accessibilityIdentifier("sync.status.accountSync")
             }
@@ -110,6 +123,7 @@ public struct CloudSyncStatusButton: View {
         .accessibilityIdentifier("sync.status.popover")
     }
     private var mediaLine: String? {
+        if meguri { return nil }
         guard let media = collection.sync.status?.media,
               (media.uploadsRunning ?? 0) > 0 || (media.downloadsRunning ?? 0) > 0,
               let count = SyncStatusCopy.sum(media.uploadFiles, media.downloadFiles) else { return nil }

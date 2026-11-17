@@ -5,6 +5,149 @@ import SwiftUI
 import Testing
 
 @MainActor @Suite struct CloudSyncPresentationTests {
+    @Test func meguriReplacementRowsRenderActualNumericValuesWithPlainLabels() {
+        // These are display inputs, not an issued preview, receipt or confirmation.
+        let rows = MeguriSyncStatusPresentation.replacementCountRows(cards: 237, notes: 184, reviews: 96)
+        #expect(rows.map(\.label) == ["Cards", "Notes", "Reviews"])
+        #expect(rows.map(\.value) == ["237", "184", "96"])
+        let empty = MeguriSyncStatusPresentation.replacementCountRows(cards: 0, notes: 0, reviews: 0)
+        #expect(empty.map(\.value) == ["0", "0", "0"])
+        #expect(SyncText.value("sync.counts.cards") == "Cards")
+        #expect(SyncText.value("sync.counts.notes") == "Notes")
+        #expect(SyncText.value("sync.counts.reviews") == "Reviews")
+    }
+    @Test func meguriToolbarSymbolsFollowTheReportedPresentationAndBusyStages() {
+        let attention = "exclamationmark.arrow.triangle.2.circlepath"
+        let account = "person.crop.circle.badge.exclamationmark"
+        let busy = "arrow.triangle.2.circlepath"
+        let stages: [(MeguriSetupStage, String, Bool)] = [
+            (.required, account, false), (.preview, account, false),
+            (.preparing, busy, true), (.collection, busy, true), (.media, busy, true),
+            (.mediaBlocked, attention, false), (.acceptanceUnknown, attention, false),
+            (.acceptedLocalIncomplete, attention, false), (.failed, attention, false)
+        ]
+        for (stage, symbol, isBusy) in stages {
+            let presentation = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+                stage: stage, localCollection: true, paused: false, routine: nil)
+            #expect(presentation.symbol == symbol)
+            #expect(presentation.isBusy == isBusy)
+        }
+        let rounds: [(MeguriRoutineState, String, Bool)] = [
+            (.unreported, attention, false), (.exchanging, busy, true),
+            (.idle, "checkmark.circle", false), (.pending, "arrow.up.circle", false),
+            (.mediaBlocked, attention, false), (.authentication, account, false),
+            (.acceptanceUnknown, attention, false), (.fullSyncRequired, account, false),
+            (.network, attention, false), (.server, attention, false),
+            (.cancelled, attention, false), (.failed, attention, false)
+        ]
+        for (round, symbol, isBusy) in rounds {
+            let presentation = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+                stage: nil, localCollection: true, paused: false, routine: round)
+            #expect(presentation.symbol == symbol)
+            #expect(presentation.isBusy == isBusy)
+        }
+        let connections: [(MeguriProviderConnectionPhase, String, Bool)] = [
+            (.unconfigured, account, false), (.signedOut, account, false),
+            (.cancelled, account, false), (.authenticating, busy, true),
+            (.setupRequired, account, false), (.blocked, attention, false)
+        ]
+        for (connection, symbol, isBusy) in connections {
+            let presentation = MeguriSyncStatusPresentation(stopped: false, connection: connection,
+                stage: nil, localCollection: true, paused: false, routine: nil)
+            #expect(presentation.symbol == symbol)
+            #expect(presentation.isBusy == isBusy)
+        }
+        let paused = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+            stage: nil, localCollection: true, paused: true, routine: .pending)
+        #expect(paused.symbol == "pause.circle" && !paused.isBusy)
+        let stopped = MeguriSyncStatusPresentation(stopped: true, connection: .authenticating,
+            stage: .preparing, localCollection: true, paused: false, routine: .exchanging)
+        #expect(stopped.symbol == attention && !stopped.isBusy)
+        let blocked = MeguriSyncStatusPresentation(stopped: false, connection: .blocked,
+            stage: .media, localCollection: true, paused: false, routine: .exchanging)
+        #expect(blocked.symbol == attention && !blocked.isBusy)
+    }
+    @Test func meguriSyncNowUsesRecoveryPauseAndSetupBeforeAnyRound() {
+        let stopped = MeguriSyncStatusPresentation(stopped: true, connection: .setupRequired,
+            stage: .required, localCollection: true, paused: true, routine: .idle)
+        #expect(stopped.titleKey == "sync.meguri.status.stopped.title")
+        #expect(stopped.detailKey == nil)
+        #expect(stopped.route == .disabled("sync.meguri.now.unavailable.stopped"))
+        let blocked = MeguriSyncStatusPresentation(stopped: false, connection: .blocked,
+            stage: nil, localCollection: true, paused: true, routine: .acceptanceUnknown)
+        #expect(blocked.route == .disabled("sync.meguri.now.unavailable.stopped"))
+        let paused = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+            stage: .acceptanceUnknown, localCollection: true, paused: true, routine: nil)
+        #expect(paused.route == .disabled("sync.meguri.now.unavailable.paused"))
+        // A setup's unknown acceptance opens the explicit retained recovery.
+        // A routine's unknown acceptance cannot start a writer.
+        let setup = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+            stage: .acceptanceUnknown, localCollection: true, paused: false, routine: nil)
+        #expect(setup.titleKey == "sync.meguri.status.acceptanceUnknown.title")
+        #expect(setup.route == .account("sync.meguri.setup.continue"))
+        let round = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+            stage: nil, localCollection: true, paused: false, routine: .acceptanceUnknown)
+        #expect(round.route == .disabled("sync.meguri.now.unavailable.acceptanceUnknown"))
+        #expect(round.detailKey == "sync.meguri.round.acceptanceUnknown")
+    }
+    @Test func meguriRoutineOutcomesDoNotTurnFailuresIntoIdleOrSuccess() {
+        let cases: [(MeguriRoutineState, String, String?, MeguriSyncNowRoute)] = [
+            (.idle, "on", nil, .round),
+            (.pending, "pending", "sync.meguri.status.pending.detail", .round),
+            (.fullSyncRequired, "chooseCollection", "sync.meguri.round.fullSyncRequired", .account("sync.meguri.now.chooseCollection")),
+            (.mediaBlocked, "mediaBlocked", "sync.meguri.media.blocked", .account("sync.meguri.media.showAffected")),
+            (.authentication, "signInRequired", "sync.meguri.status.signInRequired.detail", .disabled("sync.meguri.now.unavailable.signIn")),
+            (.exchanging, "syncingCollection", nil, .disabled(nil)),
+            (.network, "failed", "sync.meguri.round.network", .round),
+            (.server, "failed", "sync.meguri.round.server", .round),
+            (.cancelled, "failed", "sync.meguri.round.cancelled", .round),
+            (.failed, "stopped", nil, .disabled(nil)),
+            (.unreported, "stopped", nil, .round),
+        ]
+        for (state, title, detail, route) in cases {
+            let presentation = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+                stage: nil, localCollection: true, paused: false, routine: state)
+            #expect(presentation.titleKey == "sync.meguri.status.\(title).title")
+            #expect(presentation.detailKey == detail)
+            #expect(presentation.route == route)
+        }
+    }
+    @Test func meguriSetupPresentationCannotGrantOpaqueRecoveryOrReadyAuthority() {
+        let local = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+            stage: .required, localCollection: true, paused: false, routine: nil)
+        let download = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+            stage: .required, localCollection: false, paused: false, routine: nil)
+        #expect(local.detailKey == "sync.meguri.setup.choose")
+        #expect(download.detailKey == "sync.meguri.setup.download.detail")
+        let accepted = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+            stage: .acceptedLocalIncomplete, localCollection: true, paused: false, routine: nil)
+        #expect(accepted.titleKey == "sync.meguri.status.acceptedLocalIncomplete.title")
+        #expect(accepted.route == .account("sync.meguri.setup.continue"))
+        let sync = SyncCoordinator(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            configuration: nil, defaults: nil)
+        #expect(!sync.meguriCanFinish && !sync.meguriCanChoose && !sync.meguriCanRetryMedia)
+        sync.confirmMeguriPreview(); sync.finishMeguriSetup(); sync.retryMeguriMedia(); sync.syncNow()
+        #expect(!sync.meguriBusy && sync.meguriLastCommand == nil && sync.meguriRoundReport == nil)
+        #expect(sync.meguriRoutine == nil && sync.meguriPreview == nil)
+    }
+    @Test func meguriT18CopyKeepsCollectionMediaAndUnknownEffectsDistinct() {
+        #expect(SyncText.value("sync.service.none.footer") == "Choose a service to sync this collection.")
+        #expect(SyncText.value("sync.meguri.signIn.footer") == "Signing in doesn’t send or change your collection.")
+        #expect(SyncText.value("sync.meguri.signOut.failed") == "Sign-out didn’t finish.")
+        #expect(SyncText.value("sync.meguri.setup.collectionDone") == "The collection transferred. Syncing starts when the media finishes.")
+        #expect(SyncText.value("sync.meguri.setup.finish") == "Finish Setup")
+        #expect(SyncText.value("sync.meguri.setup.useDevice") == "Use This Device’s Collection…")
+        #expect(SyncText.value("sync.meguri.setup.useServer") == "Use Server Collection…")
+        #expect(SyncText.format("sync.meguri.media.filesLeft", Int64(1)) == "1 media file left")
+        #expect(SyncText.format("sync.meguri.media.filesLeft", Int64(2)) == "2 media files left")
+        #expect(SyncText.format("sync.meguri.media.notTransferred", Int64(1)) == "1 media file hasn’t transferred.")
+        #expect(SyncText.format("sync.meguri.media.remotePending", Int64(2)) == "2 files on the server haven’t reached this device.")
+        #expect(SyncText.format("sync.switch.heldBack", Int64(1), "iCloud Sync") == "1 review answer on this device hasn’t been sent to iCloud Sync yet.")
+        #expect(SyncText.format("sync.switch.pending", Int64(2), "Meguri Sync") == "2 changes on this device haven’t been sent to Meguri Sync.")
+        #expect(SyncText.format("sync.switch.media", Int64(1), "Meguri Sync") == "1 media file hasn’t synced with Meguri Sync.")
+        #expect(MeguriSyncStatusPresentation.failureKey(.storage) == "sync.meguri.setup.error.storage")
+        #expect(MeguriSyncStatusPresentation.failureKey(.operationMismatch) == nil)
+    }
     @Test func unknownEvidenceAndSetupCannotClaimUpToDate() {
         let unknown = SyncStatusPresentation(state: .awaitingEvidence, setup: .attached)
         #expect(unknown.detailKey == "sync.counts.unknown")

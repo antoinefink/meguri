@@ -59,6 +59,11 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     public func cancelStatusHandoff() { pendingStatusEntry = nil }
     public var settingsRequest: UUID?
     public var settingsSearch = ""
+    public var meguriAffectedFilesPresented = false
+    public var serviceChanging = false
+    public var serviceChangeFailed = false
+    public var meguriSigningOut = false
+    public var meguriSignOutFailed = false
     public var showStatusForCommands = true
     public var connectionPath: [CloudSyncEntry] = []
     public init() {}
@@ -225,10 +230,25 @@ extension ReviewCollection {
     /// Every control uses Rust's projection, or the actual installation fact
     /// while that projection is absent. No binding or account is inferred.
     public func syncNowAvailability() -> CloudPolicySyncNowAvailability {
-        SyncStatusPresentation.availability(sync.status?.syncNow, setup: sync.setupState)
+        if sync.providerState?.selection == .meguri {
+            switch sync.meguriStatus.route {
+            case .round, .account: return .available
+            case .disabled: return .unavailable(sync.settings.paused ? .paused : .recoveryRequired)
+            }
+        }
+        return SyncStatusPresentation.availability(sync.status?.syncNow, setup: sync.setupState)
     }
     @discardableResult public func requestSyncNow(source: CloudPolicySource = .command, showStatus: Bool = false) -> Bool {
         guard navigation.sheet == nil, syncNowAvailability() == .available else { return false }
+        if sync.providerState?.selection == .meguri, case .account(let key) = sync.meguriStatus.route {
+            if key == "sync.meguri.media.showAffected" { syncPresentation.meguriAffectedFilesPresented = true }
+            #if os(macOS)
+            syncPresentation.settingsRequest = UUID()
+            #else
+            _ = navigation.openAccountSync()
+            #endif
+            return true
+        }
         sync.syncNow(source: source)
         if showStatus { syncPresentation.statusPresented = true }
         return true
@@ -296,5 +316,146 @@ extension AppNavigation {
             setPath([.settingsPage(.accountSync)], for: .settings)
         }
         return true
+    }
+}
+
+// Display values carry no command or binding authority.
+public enum MeguriSetupStage: Sendable, Equatable {
+    case required, preparing, preview, collection, media, mediaBlocked
+    case acceptanceUnknown, acceptedLocalIncomplete, failed
+}
+public enum MeguriRoutineState: Sendable, Equatable {
+    case unreported, exchanging, idle, pending, mediaBlocked, authentication
+    case acceptanceUnknown, fullSyncRequired, network, server, cancelled, failed
+}
+public enum MeguriSyncNowRoute: Equatable, Sendable {
+    case disabled(String?), account(String), round
+}
+public struct MeguriSyncStatusPresentation {
+    public let titleKey: String
+    public let detailKey: String?
+    public let route: MeguriSyncNowRoute
+    public var isBusy: Bool {
+        switch titleKey {
+        case "sync.meguri.status.signingIn.title", "sync.meguri.status.preparing.title",
+             "sync.meguri.status.transferringCollection.title", "sync.meguri.status.transferringMedia.title",
+             "sync.meguri.status.syncingCollection.title", "sync.meguri.status.syncingMedia.title": true
+        default: false
+        }
+    }
+    public var symbol: String {
+        if isBusy { return "arrow.triangle.2.circlepath" }
+        return switch titleKey {
+        case "sync.meguri.status.notSetUp.title", "sync.meguri.status.signedOut.title",
+             "sync.meguri.status.signedIn.title", "sync.meguri.status.setup.title",
+             "sync.meguri.status.chooseCollection.title", "sync.meguri.status.signInRequired.title":
+            "person.crop.circle.badge.exclamationmark"
+        case "sync.meguri.status.paused.title": "pause.circle"
+        case "sync.meguri.status.pending.title": "arrow.up.circle"
+        case "sync.meguri.status.on.title": "checkmark.circle"
+        default: "exclamationmark.arrow.triangle.2.circlepath"
+        }
+    }
+    /// Read-only values for the replacement sheet; no preview or command authority.
+    public static func replacementCountRows(cards: UInt64, notes: UInt64, reviews: UInt64) -> [(label: String, value: String)] {
+        [(SyncText.value("sync.counts.cards"), cards.formatted(.number)),
+         (SyncText.value("sync.counts.notes"), notes.formatted(.number)),
+         (SyncText.value("sync.counts.reviews"), reviews.formatted(.number))]
+    }
+    public init(stopped: Bool, connection: MeguriProviderConnectionPhase, stage: MeguriSetupStage?,
+                localCollection: Bool, paused: Bool, routine: MeguriRoutineState?, failureKey: String? = nil) {
+        if stopped || connection == .blocked {
+            route = .disabled("sync.meguri.now.unavailable.stopped")
+        } else if paused {
+            route = .disabled("sync.meguri.now.unavailable.paused")
+        } else if let routine {
+            route = switch routine {
+            case .acceptanceUnknown: .disabled("sync.meguri.now.unavailable.acceptanceUnknown")
+            case .fullSyncRequired: .account("sync.meguri.now.chooseCollection")
+            case .mediaBlocked: .account("sync.meguri.media.showAffected")
+            case .authentication: .disabled("sync.meguri.now.unavailable.signIn")
+            case .exchanging, .failed: .disabled(nil)
+            case .unreported, .idle, .pending, .network, .server, .cancelled: .round
+            }
+        } else { route = .account("sync.meguri.setup.continue") }
+        let pair: (String, String?)
+        if stopped { pair = ("stopped", nil) }
+        else if connection == .blocked { pair = ("connectionBlocked", "sync.meguri.status.connectionBlocked.detail") }
+        else if connection == .unconfigured { pair = ("notSetUp", "sync.meguri.status.notSetUp.detail") }
+        else if connection == .signedOut { pair = ("signedOut", "sync.meguri.status.signedOut.detail") }
+        else if connection == .cancelled { pair = ("signedOut", "sync.meguri.status.cancelled.detail") }
+        else if connection == .authenticating { pair = ("signingIn", nil) }
+        else if let stage {
+            pair = switch stage {
+            case .required: ("setup", localCollection ? "sync.meguri.setup.choose" : "sync.meguri.setup.download.detail")
+            case .preparing: ("preparing", "sync.meguri.setup.preparing")
+            case .preview: ("setup", "sync.meguri.setup.review")
+            case .collection: ("transferringCollection", nil)
+            case .media: ("transferringMedia", "sync.meguri.setup.collectionDone")
+            case .mediaBlocked: ("mediaBlocked", "sync.meguri.media.blocked")
+            case .acceptanceUnknown: ("acceptanceUnknown", "sync.meguri.setup.acceptanceUnknown")
+            case .acceptedLocalIncomplete: ("acceptedLocalIncomplete", "sync.meguri.setup.acceptedLocalIncomplete")
+            case .failed: ("setupFailed", failureKey)
+            }
+        } else if paused { pair = ("paused", "sync.meguri.status.paused.detail") }
+        else if let routine {
+            pair = switch routine {
+            case .unreported, .failed: ("stopped", nil)
+            case .exchanging: ("syncingCollection", nil)
+            case .idle: ("on", nil)
+            case .pending: ("pending", "sync.meguri.status.pending.detail")
+            case .mediaBlocked: ("mediaBlocked", "sync.meguri.media.blocked")
+            case .authentication: ("signInRequired", "sync.meguri.status.signInRequired.detail")
+            case .acceptanceUnknown: ("acceptanceUnknown", "sync.meguri.round.acceptanceUnknown")
+            case .fullSyncRequired: ("chooseCollection", "sync.meguri.round.fullSyncRequired")
+            case .network: ("failed", "sync.meguri.round.network")
+            case .server: ("failed", "sync.meguri.round.server")
+            case .cancelled: ("failed", "sync.meguri.round.cancelled")
+            }
+        } else { pair = ("signedIn", "sync.meguri.status.setupUnavailable") }
+        titleKey = "sync.meguri.status.\(pair.0).title"; detailKey = pair.1
+    }
+    public static func canDiscard(_ receipt: MeguriBootstrapReceipt) -> Bool {
+        receipt.acceptance == .notSent && receipt.phase != .needsDecision
+            && receipt.boundary != .activationInterrupted
+    }
+    public static func canRecover(_ receipt: MeguriBootstrapReceipt) -> Bool {
+        receipt.direction == .export && receipt.acceptance == .exactOk
+            && (receipt.phase == .remoteAccepted || receipt.phase == .activating
+                || receipt.boundary == .activationInterrupted)
+    }
+    public static func failureKey(_ failure: MeguriBootstrapFailure) -> String? {
+        switch failure {
+        case .accountChanged, .connectionChanged, .username: "sync.meguri.setup.error.identityChanged"
+        case .publicationChanged: "sync.meguri.setup.error.remoteChanged"
+        case .documentChanged: "sync.meguri.setup.error.localChanged"
+        case .storage, .diskFull: "sync.meguri.setup.error.storage"
+        case .cancelled: "sync.meguri.setup.error.cancelled"
+        case .transfer(let value): transferFailureKey(value)
+        default: nil
+        }
+    }
+    public static func transferFailureKey(_ value: ManualTransferFailure) -> String? {
+        if value.boundary == .activationInterrupted { return "sync.meguri.setup.error.activationInterrupted" }
+        switch value.issue {
+        case .safetyBackup: return "sync.meguri.setup.error.backupFailed"
+        case .invalidDownload: return "sync.meguri.setup.error.invalidDownload"
+        case .storage, .diskFull: return "sync.meguri.setup.error.storage"
+        case .cancelled, .interrupted: return "sync.meguri.setup.error.cancelled"
+        case .server:
+            switch value.serverKind {
+            case "auth_failed": return "sync.meguri.setup.error.authentication"
+            case "offline", "network": return "sync.meguri.setup.error.remoteUnavailable"
+            case "server_error", "unexpected_status", "server_message": return "sync.meguri.setup.error.server"
+            default: return nil
+            }
+        default:
+            return switch value.boundary {
+            case .localChanged: "sync.meguri.setup.error.localChanged"
+            case .remoteChanged: "sync.meguri.setup.error.remoteChanged"
+            case .identityChanged: "sync.meguri.setup.error.identityChanged"
+            default: nil
+            }
+        }
     }
 }

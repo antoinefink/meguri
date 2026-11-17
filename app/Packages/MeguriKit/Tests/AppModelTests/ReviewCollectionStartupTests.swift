@@ -1,4 +1,9 @@
-import CoreBridge
+@testable import CoreBridge
+import Instrumentation
+import Synchronization
+#if os(macOS)
+import Darwin
+#endif
 import Foundation
 import Testing
 @testable import AppModel
@@ -721,3 +726,317 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
         }
     }
 }
+
+#if os(macOS)
+@MainActor extension ReviewCollectionStartupTests {
+    @Test(.timeLimit(.minutes(1))) func meguriLocalConnectionCommandsNeverStartCollectionOrMediaWork() async throws {
+        try await withNativeMeguriSetupOwner { app in
+            let core = try await CoreProviderService.attached()
+            let store = NativeMeguriSetupCredentials()
+            let owner = MeguriProviderConnectionOwner(service: core, store: store)
+            let calls = Mutex<[BridgeCall]>([])
+            do {
+                try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                    try await owner.load()
+                    #expect(await owner.phase == .unconfigured)
+                    try await owner.configure(endpoint: "https://native-setup.synthetic.example/prefix/")
+                    try await owner.load()
+                    #expect(await owner.phase == .signedOut)
+                    let facade = try await owner.bootstrapService()
+                    guard case .notSelected = try await facade.readiness() else {
+                        Issue.record("Local-only readiness must not grant setup or routine admission"); return
+                    }
+                    #expect(calls.withLock { !($0.contains(.providerStartLogin)) })
+                    // Core validates this deliberately invalid username before
+                    // constructing a transport. No real account is contacted.
+                    do {
+                        try await owner.signIn(username: "?", password: "synthetic-unused-password")
+                        Issue.record("Invalid username unexpectedly authenticated")
+                    } catch let error as MeguriProviderAuthenticationFailure {
+                        guard case .username = error else { throw error }
+                    }
+                    #expect(await store.savedCount == 0)
+                    #expect(calls.withLock { $0.filter { $0 == .providerStartLogin }.count } == 1)
+                    #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
+                    #expect(app.sync.providerState?.selection == .localOnly)
+                }
+                await owner.cancelAndDrain()
+            } catch { await owner.cancelAndDrain(); throw error }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func meguriNativeSelectionAndSetupRoutingCannotAdmitARoutineRound() async throws {
+        try await withNativeMeguriSetupOwner { app in
+            let original = app.sync
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                try #require(await original.changeProvider(to: .meguri))
+                try #require(app.sync !== original)
+                await app.sync.waitForMeguriAction()
+                #expect(app.sync.providerState?.selection == .meguri)
+                #expect(app.sync.providerState?.phase == .setupRequired)
+                #expect(app.sync.meguriPhase == .unconfigured)
+                #expect(app.sync.meguriRoutine == nil && app.sync.meguriRoundReport == nil)
+                #expect(!app.sync.settings.enabled && !app.sync.settings.automatic)
+                #expect(app.sync.meguriStatus.route == .account("sync.meguri.setup.continue"))
+                #expect(app.owner.requestSyncNow())
+                #if os(macOS)
+                #expect(app.owner.syncPresentation.settingsRequest != nil)
+                #endif
+                app.sync.syncNow() // Direct calls have the same Ready guard.
+                await app.sync.waitForInputs()
+                #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
+                #expect(calls.withLock { !($0.contains(.providerStartLogin)) })
+                #expect(app.sync.meguriPreview == nil && app.sync.meguriLastCommand == nil)
+            }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func meguriColdLookupUsesCurrentFacadeAndUnboundCoreRefusesRoutineWork() async throws {
+        try await withNativeMeguriSetupOwner { app in
+            try #require(await app.sync.changeProvider(to: .meguri))
+            await app.sync.waitForMeguriAction()
+            let core = try await CoreProviderService.attached()
+            let store = NativeMeguriSetupCredentials()
+            let original = MeguriProviderConnectionOwner(service: core, store: store)
+            try await original.configure(endpoint: "https://native-setup.synthetic.example/")
+            let configured = try #require(try await core.configuredMeguri())
+            await store.save(.init(connection: configured.connection, username: "synthetic-user", hostKey: "synthetic-key"))
+            try await original.load()
+            let facade = try await original.bootstrapService()
+            let round = try await original.roundService()
+            do {
+                guard case .unbound(operation: nil) = try await facade.readiness() else {
+                    Issue.record("Configured credentials must not manufacture a ready binding"); await original.cancelAndDrain(); return
+                }
+                #expect(try await facade.pendingPreparation() == nil)
+                let report = try await round.fullRound()
+                guard case .refused(.notReady) = report.collection.outcome else {
+                    Issue.record("Unbound collection must refuse the actual native round"); await original.cancelAndDrain(); return
+                }
+                #expect(report.media == nil && !report.complete)
+                await original.cancelAndDrain()
+                await #expect(throws: MeguriBootstrapAdmissionFailure.retired) { _ = try await facade.readiness() }
+                let current = MeguriProviderConnectionOwner(service: try await CoreProviderService.attached(), store: store)
+                do {
+                    try await current.load()
+                    let fresh = try await current.bootstrapService()
+                    #expect(fresh !== facade)
+                    #expect(try await fresh.pendingPreparation() == nil)
+                    // Retirement does not replace the original terminal result.
+                    guard case .refused(.notReady) = report.collection.outcome else {
+                        Issue.record("Original refusal was lost"); await current.cancelAndDrain(); return
+                    }
+                    await current.cancelAndDrain()
+                } catch { await current.cancelAndDrain(); throw error }
+            } catch { await original.cancelAndDrain(); throw error }
+        }
+    }
+
+    private func withNativeMeguriSetupOwner(_ body: (ServiceAppHarness) async throws -> Void) async throws {
+        let files = FileManager.default
+        let temporary = try #require(realpath(files.temporaryDirectory.path, nil))
+        defer { free(temporary) }
+        let root = URL(filePath: String(cString: temporary)).appending(path: "synthetic-native-meguri-\(UUID().uuidString)")
+        let collection = root.appending(path: "collection")
+        let installation = collection.appending(path: "synthetic-installation")
+        let backups = root.appending(path: "Backups", directoryHint: .isDirectory)
+        let service = root.appending(path: "service")
+        for directory in [collection, installation, service] { try files.createDirectory(at: directory, withIntermediateDirectories: true) }
+        defer { try? files.removeItem(at: root) }
+        let schema = try #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2"))
+        try files.copyItem(at: schema, to: collection.appending(path: "collection.anki2"))
+        let process = try await CloudServiceProcess.open(stateDirectory: service, transport: .binaryAssetsV1)
+        var active: ServiceAppHarness?
+        do {
+            let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
+            let app = try ServiceAppHarness(root: collection, wire: wire, cachedIdentityAvailable: false, clock: .system)
+            active = app
+            defer { app.defaults.removePersistentDomain(forName: app.suite) }
+            #expect(app.owner.configuration.collectionLocation.backupsDirectory == backups)
+            await app.owner.start()
+            try #require(app.owner.state == .ready)
+            await app.sync.waitForInputs()
+            try await body(app)
+            try #require(await app.owner.close())
+            let exit = await process.close()
+            try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
+            try #require(exit.diagnostics.isEmpty)
+        } catch {
+            _ = await active?.owner.close()
+            _ = await process.cancel()
+            throw error
+        }
+    }
+}
+
+@MainActor extension ReviewCollectionStartupTests {
+    @Test(.timeLimit(.minutes(1))) func meguriUnchangedAddressAuthenticationRetryKeepsExactConnection() async throws {
+        try await withNativeMeguriSetupOwner { app in
+            try #require(await app.sync.changeProvider(to: .meguri))
+            await app.sync.waitForMeguriAction()
+            let core = try await CoreProviderService.attached()
+            let configured = try await core.configureMeguri(endpoint: "https://native-auth.synthetic.example/prefix/")
+            app.sync.loadMeguriConnection()
+            await app.sync.waitForMeguriAction()
+            let original = try await app.sync.meguriConnection()
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                // Reloading the configured spelling is programmatic, not an edit.
+                app.sync.loadMeguriConnection()
+                await app.sync.waitForMeguriAction()
+                for _ in 0..<2 {
+                    app.sync.signInMeguri(endpoint: configured.connection.endpoint, username: "?", password: "synthetic-unused-password")
+                    await app.sync.waitForMeguriAction()
+                    #expect(try await app.sync.meguriConnection() === original)
+                    #expect(try await core.configuredMeguri()?.connection == configured.connection)
+                    // Requires the normal native credential-read capability;
+                    // a storage refusal is not an authentication pass.
+                    guard let failure = app.sync.meguriLastError as? MeguriProviderAuthenticationFailure,
+                          case .username = failure else {
+                        Issue.record("Expected the actual no-network username refusal"); return
+                    }
+                    #expect(app.sync.meguriSignInErrorKey == "sync.meguri.error.credentials")
+                }
+                #expect(calls.withLock { !$0.contains(.providerConfigureMeguri) })
+                #expect(calls.withLock { $0.filter { $0 == .providerStartLogin }.count } == 2)
+                #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
+            }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func meguriExplicitAddressEditSurvivesLocalReloadAndStillConfigures() async throws {
+        try await withNativeMeguriSetupOwner { app in
+            try #require(await app.sync.changeProvider(to: .meguri))
+            await app.sync.waitForMeguriAction()
+            let core = try await CoreProviderService.attached()
+            let configured = try await core.configureMeguri(endpoint: "https://native-edit.synthetic.example/")
+            app.sync.loadMeguriConnection()
+            await app.sync.waitForMeguriAction()
+            let original = try await app.sync.meguriConnection()
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                // Even editing back to the same text is a deliberate edit.
+                app.sync.meguriAddressEdited()
+                app.sync.loadMeguriConnection()
+                await app.sync.waitForMeguriAction()
+                app.sync.signInMeguri(endpoint: configured.connection.endpoint, username: "?", password: "synthetic-unused-password")
+                await app.sync.waitForMeguriAction()
+                #expect(try await app.sync.meguriConnection() === original)
+                let current = try #require(try await core.configuredMeguri())
+                #expect(current.connection != configured.connection)
+                #expect(current.connection.endpoint == configured.connection.endpoint)
+                #expect(calls.withLock { $0.filter { $0 == .providerConfigureMeguri }.count } == 1)
+                #expect(calls.withLock { $0.filter { $0 == .providerStartLogin }.count } == 1)
+                #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
+            }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func meguriNoFileNonactivationRetainsValidatedAttachmentAndOriginalRefusal() async throws {
+        try await withNativeMeguriNoFileOwner { app in
+            let sync = app.sync
+            let core = try await CoreProviderService.attached()
+            let store = NativeMeguriSetupCredentials()
+            let owner = MeguriProviderConnectionOwner(service: core, store: store)
+            do {
+                try await owner.configure(endpoint: "https://native-no-file.synthetic.example/")
+                let configured = try #require(try await core.configuredMeguri())
+                await store.save(.init(connection: configured.connection, username: "?", hostKey: "synthetic-unused-key"))
+                try await owner.load()
+                let facade = try await owner.bootstrapService()
+                let calls = Mutex<[BridgeCall]>([])
+                try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                    // Actual local refusal, not a fabricated preview or receipt.
+                    // A positive confirm/network failure needs the own-server fixture.
+                    let result = try await facade.prepare(.useServerCollection)
+                    sync.retainMeguriCollectionResult(result)
+                    let begin = try #require(sync.beginMeguriActivation)
+                    let finish = try #require(sync.finishMeguriActivation)
+                    try begin()
+                    let current = await finish(false)
+                    await owner.cancelAndDrain()
+                    #expect(current === sync && app.sync === sync)
+                    #expect(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
+                    #expect(!FileManager.default.fileExists(atPath: app.owner.configuration.collectionLocation.collectionFile.path))
+                    #expect(sync.meguriStage == .failed)
+                    #expect(sync.meguriFailureKey == "sync.meguri.setup.error.identityChanged")
+                    guard case .refused(.username, _) = result.outcome,
+                          let retained = sync.meguriCollectionCommand,
+                          case .refused(.username, _) = retained.outcome else {
+                        Issue.record("Original actual username refusal was lost"); return
+                    }
+                    #expect(sync.meguriCollectionError == nil && sync.meguriPreview == nil)
+                    #expect(!sync.meguriCanFinish && !sync.meguriCanRetryMedia)
+                    #expect(calls.withLock { $0.filter { $0 == .providerBootstrapPrepare }.count } == 1)
+                    #expect(calls.withLock { $0.contains(.providerRefresh) })
+                    #expect(calls.withLock { Set($0).intersection(nativeMeguriTransferCalls) } == [.providerBootstrapPrepare])
+                }
+            } catch { await owner.cancelAndDrain(); throw error }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func meguriNoFileNonactivationCannotReturnADrainedAttachment() async throws {
+        try await withNativeMeguriNoFileOwner { app in
+            let original = app.sync
+            let begin = try #require(original.beginMeguriActivation)
+            let finish = try #require(original.finishMeguriActivation)
+            try begin()
+            let drained = await original.cancelAndDrain()
+            let current = await finish(false)
+            #expect(drained)
+            #expect(current == nil)
+            #expect(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
+            #expect(!FileManager.default.fileExists(atPath: app.owner.configuration.collectionLocation.collectionFile.path))
+        }
+    }
+
+    private func withNativeMeguriNoFileOwner(_ body: (ServiceAppHarness) async throws -> Void) async throws {
+        let files = FileManager.default
+        let temporary = try #require(realpath(files.temporaryDirectory.path, nil))
+        defer { free(temporary) }
+        let root = URL(filePath: String(cString: temporary)).appending(path: "synthetic-native-meguri-no-file-\(UUID().uuidString)")
+        let collection = root.appending(path: "collection")
+        let installation = collection.appending(path: "synthetic-installation")
+        let service = root.appending(path: "service")
+        for directory in [collection, installation, service] { try files.createDirectory(at: directory, withIntermediateDirectories: true) }
+        defer { try? files.removeItem(at: root) }
+        let process = try await CloudServiceProcess.open(stateDirectory: service, transport: .binaryAssetsV1)
+        var active: ServiceAppHarness?
+        do {
+            let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
+            let app = try ServiceAppHarness(root: collection, wire: wire, cachedIdentityAvailable: false, clock: .system)
+            active = app
+            defer { app.defaults.removePersistentDomain(forName: app.suite) }
+            await app.owner.start()
+            try #require(app.owner.state == .noFile)
+            try await app.owner.prepareSyncServiceSelection()
+            try #require(await app.sync.changeProvider(to: .meguri))
+            await app.sync.waitForMeguriAction()
+            try await body(app)
+            let closed = await app.owner.close()
+            let exit = await process.close()
+            try #require(closed)
+            try #require(exit.status == 0 && exit.joined && !exit.unexpectedOutput && !exit.ioFailed)
+            try #require(exit.diagnostics.isEmpty)
+        } catch {
+            _ = await active?.owner.close()
+            _ = await process.cancel()
+            throw error
+        }
+    }
+}
+
+private let nativeMeguriTransferCalls: Set<BridgeCall> = [
+    .providerBootstrapPrepare, .providerBootstrapConfirm, .providerBootstrapRecovery,
+    .providerBootstrapMediaPrepare, .providerBootstrapMedia, .providerBootstrapComplete,
+    .providerStartCollectionRound, .providerStartMediaRound,
+]
+private actor NativeMeguriSetupCredentials: MeguriProviderCredentialStore {
+    private var value: MeguriProviderCredentials?
+    private(set) var savedCount = 0
+    func load(connection: MeguriProviderConnection) -> MeguriProviderCredentials? { value }
+    func save(_ credentials: MeguriProviderCredentials) { value = credentials; savedCount += 1 }
+    func delete(connection: MeguriProviderConnection) { value = nil }
+}
+#endif

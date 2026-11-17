@@ -471,6 +471,606 @@ public final class SyncCoordinator {
     private var providerAttachmentPending = false
     private var retryingProviderAttachment = false
     private var meguriConnectionOwner: MeguriProviderConnectionOwner?
+    public private(set) var meguriPhase: MeguriProviderConnectionPhase = .unconfigured
+    public private(set) var meguriEndpoint = ""
+    public private(set) var meguriStage: MeguriSetupStage?
+    public private(set) var meguriPreview: MeguriBootstrapPreview?
+    public private(set) var meguriReceipt: MeguriBootstrapReceipt?
+    public private(set) var meguriAccounting: MeguriBootstrapMediaAccounting?
+    public private(set) var meguriProgress: CoreProgress?
+    public private(set) var meguriMediaProgress: MeguriBootstrapMediaProgress?
+    public private(set) var meguriFailureKey: String?
+    public private(set) var meguriSignInErrorKey: String?
+    public private(set) var meguriRoutine: MeguriRoutineState?
+    public private(set) var meguriRoundReport: MeguriRoundReport?
+    public private(set) var meguriLastCommand: MeguriBootstrapCommandResult?
+    public private(set) var meguriCollectionCommand: MeguriBootstrapCommandResult?
+    public private(set) var meguriRecoveryPreparation: MeguriBootstrapCommandResult?
+    public private(set) var meguriCollectionError: (any Error)?
+    public private(set) var meguriLastError: (any Error)?
+    public private(set) var meguriProgressFailure: BridgeError?
+    public private(set) var meguriBusy = false
+    public private(set) var meguriCancelling = false
+    var meguriCollectionWorkHeld: Bool {
+        meguriPreview != nil || meguriStage == .preparing || meguriStage == .collection
+    }
+    public var serviceChangeAvailable: Bool {
+        providerChangeAllowed() && !providerActionInProgress && !meguriBusy && !suspended && !replacing
+    }
+    public var meguriCanChoose: Bool {
+        meguriChoiceAllowed && (meguriStage == .required || meguriStage == .failed) && !meguriBusy && !settings.paused
+    }
+    public var meguriCanFinish: Bool {
+        !meguriBusy && !settings.paused && meguriOperation.map { MeguriSyncStatusPresentation.canRecover($0.receipt) } == true
+    }
+    public var meguriCanRetryMedia: Bool {
+        !meguriBusy && !settings.paused && meguriStage == .mediaBlocked && meguriOperation != nil
+    }
+    public var meguriStatus: MeguriSyncStatusPresentation {
+        .init(stopped: providerNeedsAttention, connection: meguriAuthenticating ? .authenticating : meguriPhase,
+            stage: meguriStage, localCollection: meguriHasLocalCollection, paused: settings.paused,
+            routine: meguriRoutine, failureKey: meguriFailureKey)
+    }
+    var beginMeguriActivation: (@MainActor () throws -> Void)?
+    var finishMeguriActivation: (@MainActor (Bool) async -> SyncCoordinator?)?
+    private var meguriHasLocalCollection = false
+    private var meguriChoiceAllowed = false
+    private var meguriAddressDirty = false
+    private var meguriAddressEditRevision: UInt64 = 0
+    private var meguriLoadedConnection: (owner: MeguriProviderConnectionOwner, connection: MeguriProviderConnection)?
+    private var meguriAuthenticating = false
+    private var meguriBootstrap: MeguriProviderBootstrapService?
+    private var meguriOperation: MeguriBootstrapOperation?
+    private var meguriActiveFacade: MeguriProviderBootstrapService?
+    private var meguriAction: (id: UUID, task: Task<Void, Never>)?
+    private var meguriRound: CoreMeguriRoundService?
+    private var meguriReady = false
+    private var meguriWakePending = false
+    private var meguriWakeManual = false
+    private var meguriReadyWakePending = false
+    private var meguriWake: (id: UUID, task: Task<Void, Never>)?
+    private var meguriAddressDrain: Task<Void, Never>?
+    private var meguriPauseDrain: Task<Void, Never>?
+    private var meguriCancellation: Task<Void, Never>?
+    public private(set) var meguriCollectionFinalization: MeguriRoundPhaseOutcome?
+    public private(set) var meguriMediaFinalization: MeguriRoundPhaseOutcome?
+
+
+    func setMeguriLocalCollection(_ exists: Bool) { meguriHasLocalCollection = exists }
+    private func meguriCurrent(_ owner: MeguriProviderConnectionOwner, _ expected: UInt64, _ revision: UInt64) -> Bool {
+        meguriConnectionOwner === owner && generation == expected && hostRevision == revision
+            && !closing && !replacing && !suspended && !providerHandoffInProgress
+    }
+    private func issueMeguri(_ body: @escaping @MainActor (UUID) async -> Void) {
+        guard !meguriBusy, !meguriCancelling, !closing, !replacing, !suspended, !providerActionInProgress,
+              providerState?.selection == .meguri, !providerNeedsAttention else { return }
+        let id = UUID()
+        meguriBusy = true
+        let task = Task {
+            if !closing, !replacing, !suspended, !providerHandoffInProgress { await body(id) }
+            if meguriAction?.id == id {
+                meguriAction = nil; meguriActiveFacade = nil; meguriBusy = false; meguriProgress = nil
+                if meguriReadyWakePending {
+                    meguriReadyWakePending = false
+                    requestMeguriWake(automatic: true)
+                }
+            }
+        }
+        meguriAction = (id, task)
+    }
+    func waitForMeguriAction() async { await meguriAction?.task.value }
+    public func meguriAddressEdited() {
+        meguriAddressEditRevision &+= 1
+        meguriAddressDirty = true; meguriReady = false; meguriRoutine = nil; meguriSignInErrorKey = nil
+        meguriWakePending = false
+        let original = meguriConnectionOwner, previous = meguriAddressDrain
+        let wake = meguriWake
+        wake?.task.cancel()
+        meguriAddressDrain = Task {
+            await previous?.value
+            await original?.cancelAndDrain()
+            await wake?.task.value
+        }
+    }
+    public func loadMeguriConnection() {
+        issueMeguri { _ in
+            do { try await self.readMeguriConnection() }
+            catch { self.meguriLastError = error }
+        }
+    }
+    // Offline attachment/readiness only. This never wakes a round.
+    private func readMeguriConnection() async throws {
+        // A local reload must not turn a deliberate draft edit into an
+        // unchanged-address authentication attempt.
+        guard !meguriAddressDirty else { return }
+        let editRevision = meguriAddressEditRevision
+        let expected = generation, revision = hostRevision
+        let owner = try await meguriConnection()
+        meguriReady = false; meguriRound = nil; meguriBootstrap = nil; meguriChoiceAllowed = false
+        do {
+            try await owner.load()
+            guard meguriCurrent(owner, expected, revision), editRevision == meguriAddressEditRevision else { return }
+            meguriPhase = await owner.phase
+            let configured = try await provider?.configuredMeguri()
+            guard meguriCurrent(owner, expected, revision), editRevision == meguriAddressEditRevision else { return }
+            guard let configured else {
+                meguriLoadedConnection = nil; meguriEndpoint = ""
+                return
+            }
+            let facade = try await owner.bootstrapService()
+            guard meguriCurrent(owner, expected, revision), editRevision == meguriAddressEditRevision else { return }
+            guard facade.connection == configured.connection else { throw MeguriProviderAuthenticationFailure.connectionChanged }
+            meguriLoadedConnection = (owner, facade.connection)
+            meguriEndpoint = facade.connection.endpoint
+            guard meguriPhase == .setupRequired else { return }
+            meguriBootstrap = facade
+            try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+        } catch {
+            let phase = await owner.phase
+            if meguriCurrent(owner, expected, revision) { meguriPhase = phase; meguriLastError = error }
+            throw error
+        }
+    }
+    private func readMeguriReadiness(_ facade: MeguriProviderBootstrapService, owner: MeguriProviderConnectionOwner,
+                                     expected: UInt64, revision: UInt64) async throws {
+        meguriChoiceAllowed = false
+        let readiness = try await facade.readiness()
+        guard meguriCurrent(owner, expected, revision), meguriBootstrap === facade else { return }
+        switch readiness {
+        case .ready:
+            let round = try await owner.roundService()
+            guard meguriCurrent(owner, expected, revision), meguriBootstrap === facade else { return }
+            meguriReady = true; meguriRound = round; meguriStage = nil
+            if meguriRoutine == nil { meguriRoutine = .unreported }
+        case .unbound(let retained):
+            meguriReady = false; meguriRound = nil; meguriRoutine = nil
+            // Intent is historical display evidence. Only the checked lookup
+            // names an active preparation, which may be newer than that intent.
+            let pending = try await facade.pendingPreparation()
+            guard meguriCurrent(owner, expected, revision), meguriBootstrap === facade else { return }
+            meguriOperation = pending
+            if let pending { showMeguriOperation(pending) }
+            else if let retained, Self.meguriRetainsEffects(retained.receipt) {
+                // Collection/media completion and unresolved acceptance or
+                // activation still belong to the real retained intent handle.
+                showMeguriOperation(retained)
+            } else {
+                if let retained { meguriReceipt = retained.receipt }
+                meguriStage = retained == nil ? .required : .failed
+                meguriChoiceAllowed = true
+            }
+        case .notSelected, .stale:
+            meguriReady = false; meguriStage = .failed; meguriFailureKey = nil
+        }
+    }
+    private static func meguriRetainsEffects(_ receipt: MeguriBootstrapReceipt) -> Bool {
+        receipt.phase == .collectionComplete || receipt.phase == .mediaIncomplete || receipt.phase == .complete
+            || !MeguriSyncStatusPresentation.canDiscard(receipt)
+    }
+    public func signInMeguri(endpoint: String, username: String, password: String) {
+        guard !settings.paused else { return }
+        issueMeguri { _ in
+            self.meguriSignInErrorKey = nil
+            let editRevision = self.meguriAddressEditRevision
+            let expected = self.generation, revision = self.hostRevision
+            do {
+                await self.meguriAddressDrain?.value
+                let owner = try await self.meguriConnection()
+                guard self.meguriCurrent(owner, expected, revision) else { return }
+                if !self.meguriAddressDirty, self.meguriLoadedConnection?.owner !== owner {
+                    try await self.readMeguriConnection()
+                }
+                guard self.meguriCurrent(owner, expected, revision), editRevision == self.meguriAddressEditRevision else { return }
+                let unchanged = !self.meguriAddressDirty && self.meguriLoadedConnection?.owner === owner
+                    && self.meguriLoadedConnection?.connection.endpoint == endpoint
+                do {
+                    if !unchanged {
+                        // Configure is the sole endpoint parser. An explicit
+                        // edit still drains/configures even if its text returns
+                        // to the old spelling; programmatic loads do not edit.
+                        try await owner.configure(endpoint: endpoint)
+                        guard self.meguriCurrent(owner, expected, revision), editRevision == self.meguriAddressEditRevision else { return }
+                        self.meguriPhase = await owner.phase
+                        let configured = try await owner.bootstrapService()
+                        guard self.meguriCurrent(owner, expected, revision), editRevision == self.meguriAddressEditRevision else { return }
+                        self.meguriLoadedConnection = (owner, configured.connection)
+                        self.meguriEndpoint = configured.connection.endpoint
+                    }
+                } catch {
+                    if let bridge = error as? BridgeError, case .invalidArgument = bridge {
+                        self.meguriSignInErrorKey = "sync.meguri.error.address"
+                    }
+                    throw error
+                }
+                guard self.meguriCurrent(owner, expected, revision), editRevision == self.meguriAddressEditRevision else { return }
+                self.meguriAddressDirty = false; self.meguriReady = false
+                self.meguriBootstrap = nil; self.meguriRound = nil; self.meguriRoutine = nil
+                self.meguriAuthenticating = true
+                defer { self.meguriAuthenticating = false }
+                do { try await owner.signIn(username: username, password: password) }
+                catch {
+                    let phase = await owner.phase
+                    if self.meguriCurrent(owner, expected, revision) { self.meguriPhase = phase }
+                    throw error
+                }
+                guard self.meguriCurrent(owner, expected, revision) else { return }
+                self.meguriPhase = await owner.phase
+                let facade = try await owner.bootstrapService()
+                guard self.meguriCurrent(owner, expected, revision) else { return }
+                self.meguriBootstrap = facade
+                try await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+            } catch {
+                self.meguriLastError = error
+                if self.generation == expected, self.hostRevision == revision, editRevision == self.meguriAddressEditRevision {
+                    if self.meguriSignInErrorKey == nil { self.meguriSignInErrorKey = Self.meguriAuthenticationKey(error) }
+                    if let owner = self.meguriConnectionOwner { self.meguriPhase = await owner.phase }
+                }
+            }
+        }
+    }
+    // NoCollection alone does not prove that this coordinator's Host survived.
+    // Refresh the exact retained provider, whose real facade rejects a retired
+    // Host, before allowing the entry owner to refresh local setup authority.
+    func validateRetainedMeguriAttachment(generation expected: UInt64) async throws -> Bool {
+        guard generation == expected, !closing, !replacing, !suspended, !drained,
+              retainedHostAdmitted, !backendRetired, setupState == .attached,
+              let backend, let provider else { return false }
+        let revision = hostRevision
+        do {
+            let state = try await provider.refresh()
+            guard generation == expected, revision == hostRevision, self.backend === backend,
+                  self.provider === provider, !closing, !replacing, !suspended, !drained,
+                  !backendRetired, setupState == .attached else { return false }
+            return state.selection == .meguri && state.phase != .blocked && state.phase != .handoffRecovery
+        } catch { meguriLastError = error; throw error }
+    }
+    private static func meguriAuthenticationKey(_ error: any Error) -> String {
+        if let failure = error as? MeguriProviderAuthenticationFailure {
+            return switch failure {
+            case .username, .credentials: "sync.meguri.error.credentials"
+            case .redirectRefused: "sync.meguri.error.redirect"
+            case .network: "sync.meguri.error.network"
+            case .connectionChanged: "sync.meguri.error.other"
+            }
+        }
+        return "sync.meguri.error.other"
+    }
+    private func progressForMeguri(_ id: UUID) -> @Sendable (CoreProgress) -> Void {
+        { [weak self] value in
+            Task { @MainActor in if self?.meguriAction?.id == id { self?.meguriProgress = value } }
+        }
+    }
+    private func retainMeguri(_ result: MeguriBootstrapCommandResult) {
+        meguriLastCommand = result
+        meguriProgressFailure = result.progressFailure
+        meguriMediaProgress = result.mediaProgress
+        if let retry = result.retryOperation { meguriOperation = retry; meguriReceipt = retry.receipt }
+    }
+    func retainMeguriCollectionResult(_ result: MeguriBootstrapCommandResult) {
+        meguriCollectionCommand = result
+        retainMeguri(result)
+        applyMeguriOutcome(result.outcome)
+    }
+    func refreshMeguriAfterCollection() async throws {
+        try await readMeguriConnection()
+        guard meguriChoiceAllowed else { return }
+        if meguriCollectionError != nil { meguriStage = .failed }
+        else if let result = meguriCollectionCommand, case .refused = result.outcome { meguriStage = .failed }
+    }
+    private func showMeguriOperation(_ operation: MeguriBootstrapOperation) {
+        meguriOperation = operation; meguriReceipt = operation.receipt
+        let receipt = operation.receipt
+        meguriChoiceAllowed = false
+        if receipt.acceptance == .possiblyAccepted || receipt.boundary == .remoteCompletionUnknown {
+            meguriStage = .acceptanceUnknown
+        } else if MeguriSyncStatusPresentation.canRecover(receipt) {
+            meguriStage = .acceptedLocalIncomplete
+        } else if receipt.phase == .collectionComplete || receipt.phase == .mediaIncomplete || receipt.phase == .complete {
+            meguriStage = .mediaBlocked
+        } else if MeguriSyncStatusPresentation.canDiscard(receipt) {
+            meguriStage = .required; meguriChoiceAllowed = true
+        } else { meguriStage = .failed }
+    }
+    private func applyMeguriOutcome(_ outcome: MeguriBootstrapOutcome) {
+        switch outcome {
+        case .preview(let preview): meguriPreview = preview; meguriReceipt = preview.receipt; meguriStage = .preview
+        case .operation(let operation): showMeguriOperation(operation)
+        case .mediaConsent(let consent): meguriReceipt = consent.receipt; meguriStage = .media
+        case .ready(let accounting): meguriAccounting = accounting
+        case .refused(let failure, let accounting):
+            meguriAccounting = accounting; meguriFailureKey = MeguriSyncStatusPresentation.failureKey(failure)
+            meguriStage = accounting == nil ? .failed : .mediaBlocked
+            if let operation = meguriOperation {
+                let receipt = operation.receipt
+                if receipt.acceptance == .possiblyAccepted || receipt.boundary == .remoteCompletionUnknown { meguriStage = .acceptanceUnknown }
+                else if MeguriSyncStatusPresentation.canRecover(receipt) { meguriStage = .acceptedLocalIncomplete }
+            }
+        }
+    }
+    public func prepareMeguri(_ direction: MeguriBootstrapDirection) {
+        guard meguriCanChoose, providerChangeAllowed(), let facade = meguriBootstrap, let owner = meguriConnectionOwner else { return }
+        issueMeguri { id in
+            let expected = self.generation, revision = self.hostRevision
+            self.meguriActiveFacade = facade; self.meguriFailureKey = nil; self.meguriChoiceAllowed = false
+            do {
+                // Cold NotSent must be explicitly discarded on the same facade.
+                // Unknown/NeedsDecision never enter this path.
+                if let pending = self.meguriOperation {
+                    guard MeguriSyncStatusPresentation.canDiscard(pending.receipt) else { return }
+                    let discarded = try await facade.discard(pending)
+                    self.retainMeguri(discarded)
+                    guard self.meguriCurrent(owner, expected, revision) else { return }
+                    if case .refused = discarded.outcome { self.applyMeguriOutcome(discarded.outcome); return }
+                    self.meguriOperation = nil
+                }
+                self.meguriStage = .preparing
+                let result = try await facade.prepare(direction, progress: self.progressForMeguri(id))
+                self.retainMeguri(result)
+                guard self.meguriCurrent(owner, expected, revision) else { return }
+                self.applyMeguriOutcome(result.outcome)
+                if let retry = result.retryOperation { self.showMeguriOperation(retry) }
+                if case .refused = result.outcome {
+                    // Obtain actual local authority after a drained failed
+                    // preparation; never retry to discover remote acceptance.
+                    try await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+                    if self.meguriChoiceAllowed { self.meguriStage = .failed }
+                }
+            } catch { self.meguriLastError = error; self.meguriStage = .failed }
+        }
+    }
+    public func cancelMeguriPreparation() {
+        guard meguriCancellation == nil, let original = meguriAction, let facade = meguriActiveFacade else { return }
+        meguriCancelling = true
+        meguriCancellation = Task {
+            await facade.stop(.user)
+            await original.task.value
+            meguriCancelling = false; meguriCancellation = nil
+        }
+    }
+    public func discardMeguriPreview() {
+        guard let preview = meguriPreview, let facade = meguriBootstrap else { return }
+        issueMeguri { _ in
+            self.meguriActiveFacade = facade
+            do {
+                let result = try await facade.discard(preview)
+                self.retainMeguri(result)
+                self.applyMeguriOutcome(result.outcome)
+                if case .refused = result.outcome { return }
+                // Only the actual local discard lets the sheet go away.
+                if self.meguriPreview === preview {
+                    self.meguriPreview = nil; self.meguriOperation = nil; self.meguriStage = .required; self.meguriChoiceAllowed = true
+                }
+            } catch { self.meguriLastError = error; self.meguriStage = .failed }
+        }
+    }
+    public func confirmMeguriPreview() {
+        guard let preview = meguriPreview, let facade = meguriBootstrap, !settings.paused,
+              let beginMeguriActivation, let finishMeguriActivation else { return }
+        issueMeguri { id in
+            do { try beginMeguriActivation() }
+            catch { self.meguriLastError = error; return }
+            let before = self.generation
+            self.meguriActiveFacade = facade; self.meguriStage = .collection
+            // Consume the presentation once. The original facade/preview live
+            // in this task through its terminal read, including activated errors.
+            self.meguriPreview = nil; self.meguriChoiceAllowed = false
+            self.meguriCollectionError = nil
+            var candidateActive = false
+            do {
+                let result = try await facade.confirm(preview, progress: self.progressForMeguri(id))
+                self.retainMeguriCollectionResult(result)
+                if case .refused(.transfer(let failure), _) = result.outcome { candidateActive = failure.candidateActive }
+            } catch {
+                self.meguriLastError = error; self.meguriCollectionError = error
+                candidateActive = (error as? ManualTransferFailure)?.candidateActive == true
+                self.meguriStage = .failed
+            }
+            candidateActive = candidateActive || before != self.generation
+            // Never drain this connection before its own confirmation. The
+            // existing replacement path joins only the native facade, not us.
+            guard let current = await finishMeguriActivation(candidateActive) else { return }
+            if current !== self {
+                current.meguriLastCommand = self.meguriLastCommand; current.meguriLastError = self.meguriLastError
+                current.meguriReceipt = self.meguriReceipt; current.meguriProgressFailure = self.meguriProgressFailure
+                current.meguriCollectionCommand = self.meguriCollectionCommand; current.meguriCollectionError = self.meguriCollectionError
+                current.meguriFailureKey = self.meguriFailureKey
+            }
+            do {
+                // Reload after Host adoption or validation of the retained
+                // NoCollection attachment. Old opaque handles are never rebound.
+                try await current.refreshMeguriAfterCollection()
+                if let operation = current.meguriOperation,
+                   operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete {
+                    try await current.continueMeguriMedia(operation, id: id)
+                }
+            } catch { current.meguriLastError = error; current.meguriStage = .failed }
+        }
+    }
+    public func finishMeguriSetup() {
+        guard meguriCanFinish, let operation = meguriOperation, let facade = meguriBootstrap,
+              let beginMeguriActivation, let finishMeguriActivation else { return }
+        issueMeguri { id in
+            do { try beginMeguriActivation() } catch { self.meguriLastError = error; return }
+            let before = self.generation
+            self.meguriActiveFacade = facade; self.meguriStage = .collection
+            self.meguriCollectionError = nil
+            var candidateActive = false
+            do {
+                let preparation = try await facade.prepareRecovery(operation, progress: self.progressForMeguri(id))
+                self.meguriRecoveryPreparation = preparation
+                self.retainMeguri(preparation)
+                let result: MeguriBootstrapCommandResult
+                if case .preview(let recoveryPreview) = preparation.outcome {
+                    // Finish Setup continues the original, already confirmed
+                    // ExactOk operation. Core's recovery preview is not a new
+                    // upload choice and is confirmed only on this same facade.
+                    result = try await facade.confirm(recoveryPreview, progress: self.progressForMeguri(id))
+                } else { result = preparation }
+                self.retainMeguriCollectionResult(result)
+                if case .refused(.transfer(let failure), _) = result.outcome { candidateActive = failure.candidateActive }
+            } catch {
+                self.meguriLastError = error; self.meguriCollectionError = error
+                candidateActive = (error as? ManualTransferFailure)?.candidateActive == true
+                self.meguriStage = .failed
+            }
+            candidateActive = candidateActive || before != self.generation
+            guard let current = await finishMeguriActivation(candidateActive) else { return }
+            if current !== self {
+                current.meguriLastCommand = self.meguriLastCommand; current.meguriLastError = self.meguriLastError
+                current.meguriReceipt = self.meguriReceipt; current.meguriProgressFailure = self.meguriProgressFailure
+                current.meguriCollectionCommand = self.meguriCollectionCommand; current.meguriCollectionError = self.meguriCollectionError
+                current.meguriFailureKey = self.meguriFailureKey
+            }
+            do {
+                try await current.refreshMeguriAfterCollection()
+                if let operation = current.meguriOperation,
+                   operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete {
+                    try await current.continueMeguriMedia(operation, id: id)
+                }
+            } catch { current.meguriLastError = error; current.meguriStage = .failed }
+        }
+    }
+    public func retryMeguriMedia() {
+        guard meguriCanRetryMedia else { return }
+        issueMeguri { id in
+            do {
+                try await self.readMeguriConnection()
+                guard let current = self.meguriOperation else { return }
+                try await self.continueMeguriMedia(current, id: id)
+            } catch { self.meguriLastError = error; self.meguriStage = .mediaBlocked }
+        }
+    }
+    private func continueMeguriMedia(_ operation: MeguriBootstrapOperation, id: UUID) async throws {
+        guard let facade = meguriBootstrap, let owner = meguriConnectionOwner, !settings.paused else { return }
+        let expected = generation, revision = hostRevision
+        guard meguriCurrent(owner, expected, revision),
+              operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete else { return }
+        meguriActiveFacade = facade; meguriStage = .media
+        let prepared = try await facade.prepareMedia(operation, progress: progressForMeguri(id))
+        retainMeguri(prepared)
+        guard meguriCurrent(owner, expected, revision) else { return }
+        applyMeguriOutcome(prepared.outcome)
+        guard case .mediaConsent(let consent) = prepared.outcome else { return }
+        let result = try await facade.transferMedia(consent, progress: progressForMeguri(id), mediaProgress: { [weak self] value in
+            Task { @MainActor in if self?.meguriAction?.id == id { self?.meguriMediaProgress = value } }
+        })
+        retainMeguri(result)
+        guard meguriCurrent(owner, expected, revision) else { return }
+        applyMeguriOutcome(result.outcome)
+        guard case .operation(let completed) = result.outcome else { return }
+        let outcome = try await facade.complete(completed)
+        applyMeguriOutcome(outcome)
+        guard case .ready = outcome, meguriCurrent(owner, expected, revision) else { return }
+        // Whole-operation Ready is Core's durable automatic-sync consent.
+        let state = try await provider?.refresh()
+        guard meguriCurrent(owner, expected, revision), let state, let committed = state.settings else { return }
+        providerState = state; settings = committed
+        try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+        guard meguriCurrent(owner, expected, revision), meguriReady else { return }
+        meguriOperation = nil
+        meguriReadyWakePending = true
+    }
+    private var meguriCanRun: Bool {
+        meguriReady && meguriRound != nil && providerState?.selection == .meguri && settings.enabled
+            && !settings.paused && desiredProviderSettings?.paused != true && !meguriAddressDirty && !meguriBusy
+            && !closing && !suspended && !replacing && !providerActionInProgress && !providerHandoffInProgress
+            && !providerNeedsAttention && !entryActivationHeld
+    }
+    public func retryMeguriRoundMedia() {
+        guard meguriRoutine == .mediaBlocked, meguriWake == nil, !meguriBusy else { return }
+        requestMeguriWake(automatic: false, retryMedia: true)
+    }
+    private func requestMeguriWake(automatic: Bool, retryMedia: Bool = false) {
+        guard meguriCanRun, !automatic || settings.automatic else { return }
+        switch meguriRoutine {
+        case .mediaBlocked: if !retryMedia { return }
+        case .acceptanceUnknown, .fullSyncRequired, .authentication, .failed: return
+        default: break
+        }
+        meguriWakePending = true
+        if !automatic { meguriWakeManual = true }
+        guard meguriWake == nil, let round = meguriRound, let owner = meguriConnectionOwner else { return }
+        let id = UUID(), expected = generation, revision = hostRevision
+        // Reserve the product task before the first actor/credential suspension.
+        let task = Task {
+            defer { if meguriWake?.id == id { meguriWake = nil } }
+            while meguriWakePending, meguriCanRun, meguriRound === round,
+                  meguriCurrent(owner, expected, revision), !Task.isCancelled {
+                let manual = meguriWakeManual
+                meguriWakePending = false; meguriWakeManual = false
+                guard manual || settings.automatic else { return }
+                meguriRoutine = .exchanging
+                do {
+                    let report = try await round.fullRound()
+                    // Retain actual terminal effects before checking retirement.
+                    meguriRoundReport = report
+                    meguriCollectionFinalization = nil; meguriMediaFinalization = nil
+                    guard meguriWake?.id == id, meguriCurrent(owner, expected, revision), meguriRound === round else { return }
+                    meguriAccounting = nil
+                    reduceMeguriRound(report)
+                    if meguriRoutine == .fullSyncRequired, let facade = meguriBootstrap {
+                        try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+                    }
+                    if meguriRoutine != .idle && meguriRoutine != .pending { meguriWakePending = false }
+                } catch {
+                    meguriLastError = error
+                    guard meguriWake?.id == id, meguriCurrent(owner, expected, revision) else { return }
+                    meguriRoutine = error is CancellationError ? .cancelled : .failed
+                    meguriWakePending = false
+                }
+            }
+        }
+        meguriWake = (id, task)
+    }
+    private func reduceMeguriRound(_ report: MeguriRoundReport) {
+        guard case .collection(let collection) = meguriCollectionFinalization ?? report.collection.outcome else { meguriRoutine = .failed; return }
+        if collection.acceptanceUnknown { meguriRoutine = .acceptanceUnknown; return }
+        if case .fullSyncRequired = collection.state { meguriRoutine = .fullSyncRequired; return }
+        guard collection.recovery == nil, report.collection.trackingFailure == nil else { meguriRoutine = .failed; return }
+        if let failure = collection.failure { meguriRoutine = Self.meguriRoundFailure(failure); return }
+        guard collection.succeeded else { meguriRoutine = .failed; return }
+        guard let mediaResult = report.media, case .media(let media) = meguriMediaFinalization ?? mediaResult.outcome else { meguriRoutine = .failed; return }
+        guard media.recovery == nil, media.refusal == nil, media.accountingFailure == nil,
+              mediaResult.trackingFailure == nil else { meguriRoutine = .failed; return }
+        if let failure = media.failure { meguriRoutine = Self.meguriRoundFailure(failure); return }
+        guard media.complete else { meguriRoutine = .mediaBlocked; return }
+        meguriRoutine = collection.skipped > 0 ? .pending : .idle
+    }
+    private static func meguriRoundFailure(_ failure: MeguriRoundFailure) -> MeguriRoutineState {
+        switch failure.kind {
+        case "auth_failed": .authentication
+        case "network", "offline": .network
+        case "server_error", "unexpected_status", "server_message": .server
+        case "cancelled", "interrupted": .cancelled
+        default: .failed
+        }
+    }
+    public func retryMeguriFinalization() {
+        guard meguriWake == nil, !meguriBusy, !closing, !replacing, let report = meguriRoundReport else { return }
+        issueMeguri { _ in
+            // Retry only the sealed local result; never resend a round to learn
+            // whether its remote work completed.
+            do {
+                let expected = self.generation, revision = self.hostRevision
+                if let finalization = report.collection.finalization { self.meguriCollectionFinalization = try await finalization.retry() }
+                if let finalization = report.media?.finalization { self.meguriMediaFinalization = try await finalization.retry() }
+                guard expected == self.generation, revision == self.hostRevision, !self.closing, !self.replacing else { return }
+                self.reduceMeguriRound(report)
+            } catch { self.meguriLastError = error }
+        }
+    }
+    private func drainMeguriProduct() async {
+        meguriWakePending = false; meguriWakeManual = false; meguriReadyWakePending = false
+        let wake = meguriWake, action = meguriAction, facade = meguriActiveFacade, round = meguriRound
+        wake?.task.cancel()
+        await facade?.stop(.system)
+        if meguriAuthenticating { await meguriConnectionOwner?.cancelAndDrain() }
+        await round?.cancelAndDrain()
+        await wake?.task.value
+        await action?.task.value
+        await meguriCancellation?.value
+        await meguriAddressDrain?.value
+    }
     func configureProviderDirectory(_ directory: URL) {
         // Custom backend fixtures retain their injected owner. Ordinary native
         // composition and ServiceAppHarness opt in at construction; CoreHost's
@@ -532,6 +1132,7 @@ public final class SyncCoordinator {
         }
         self.settings = settings
         if providerNeedsAttention { operationFailed = true }
+        if state.selection == .meguri, !meguriBusy { loadMeguriConnection() }
     }
 
     public convenience init(directory: URL, clock: AppClock = .system,
@@ -761,6 +1362,17 @@ public final class SyncCoordinator {
     func receive(_ event: CloudPolicyEvent) { if !closing { enqueue(.policy(event)) } }
     func coreEvent(_ event: CoreEvent) {
         guard !closing else { return }
+        if event.generation == generation, providerState?.selection == .meguri {
+            switch event.kind {
+            case .changes(let changes):
+                if changes.source != .syncIncoming && changes.source != .cloudIncoming && changes.source != .cloudRekey {
+                    requestMeguriWake(automatic: true)
+                }
+            case .sessionEnded: requestMeguriWake(automatic: true)
+            case .available: if meguriWake == nil { requestMeguriWake(automatic: true) }
+            default: break
+            }
+        }
         switch event.kind {
         case .sessionStarted, .sessionEnded, .changes, .available, .mediaArrived:
             // The Driver reads the actual session registry; focus is never a
@@ -793,6 +1405,14 @@ public final class SyncCoordinator {
                     providerState = state
                     desiredProviderSettings = nil
                     applyDeviceSettings(paused: committed.paused, automatic: committed.automatic, media: committed.media, enabled: committed.enabled)
+                    if committed.paused, state.selection == .meguri, meguriPauseDrain == nil {
+                        // This join cannot live in providerSettingsTask: a
+                        // confirmation's replacement joins that settings task.
+                        meguriPauseDrain = Task {
+                            await self.drainMeguriProduct()
+                            self.meguriPauseDrain = nil
+                        }
+                    }
                 } catch {
                     guard attachment == hostRevision,
                           self.provider === provider, !closing, !replacing else { return }
@@ -818,6 +1438,7 @@ public final class SyncCoordinator {
             // that returned while paused grants no authority to this attempt.
             enqueue(.account(false))
         }
+        if providerState?.selection == .meguri, wasPaused, !paused { requestMeguriWake(automatic: true) }
         guard initialAdoptionEnabledBefore != nil, wasPaused != paused else { return }
         if paused { drainInitialOwnWork() }
         else {
@@ -855,6 +1476,11 @@ public final class SyncCoordinator {
         saveSettings(settings)
     }
     public func syncNow(source: CloudPolicySource = .command) {
+        if providerState?.selection == .meguri {
+            guard meguriStatus.route == .round else { return }
+            requestMeguriWake(automatic: false)
+            return
+        }
         guard providerAllowsAccountRead else { return }
         reportAvailableSpace(); receive(.syncNowRequested(source))
     }
@@ -1000,6 +1626,7 @@ public final class SyncCoordinator {
             guard providerChangeAllowed() else { connectionFailure = .busy; return false }
             // Both Core admissions closed durably before cancellation. Keep
             // original native owners until their actual results and ACKs join.
+            await drainMeguriProduct()
             await meguriConnectionOwner?.cancelAndDrain()
             await drainManualProviderOwner?()
             guard current(revision), providerChangeAllowed() else { return false }
@@ -1028,6 +1655,8 @@ public final class SyncCoordinator {
             guard (self.provider === provider || self.provider == nil && drained && closing),
                   expected == generation, !replacing else { return false }
             operationFailed = true
+            do { providerState = try await provider.state() }
+            catch { meguriLastError = error }
             recordConnectionFailure(error)
             return false
         }
@@ -1059,6 +1688,7 @@ public final class SyncCoordinator {
                 && attachment == hostRevision && !replacing && !entryActivationHeld
         }
         do {
+            await drainMeguriProduct()
             await meguriConnectionOwner?.cancelAndDrain()
             await drainManualProviderOwner?()
             guard current(revision), providerChangeAllowed() else { return false }
@@ -1637,6 +2267,7 @@ public final class SyncCoordinator {
         mediaEnabledRevision = nil
         awaitingResumeProof = needsProof
         suspended = false
+        if providerState?.selection == .meguri { requestMeguriWake(automatic: true) }
         if pendingPreviewCancellation { pendingPreviewCancellation = false; await cancelConnectionPreview() }
         guard !closing, !replacing, expected == generation, revision == hostRevision else { return }
         // Starting the app-owned read is ordered, but waiting for Apple is not
@@ -1661,6 +2292,10 @@ public final class SyncCoordinator {
         await replacementTask?.value
         guard !replacing else { return false }
         if initialAdoptionEnabledBefore != nil { initialOwnAdmission.setOpen(false) }
+        if providerState?.selection == .meguri {
+            suspended = true
+            await drainMeguriProduct()
+        }
         if let deadlineMilliseconds { receive(.background(deadlineMilliseconds: deadlineMilliseconds)) }
         else { receive(.backgroundExpiring) }
         await waitForInputs()
@@ -2560,7 +3195,12 @@ public final class SyncCoordinator {
         else { ownTask?.cancel() }
         do {
             await providerSettingsTask?.value
+            meguriWakePending = false
+            let originalWake = meguriWake
+            originalWake?.task.cancel()
             await meguriConnectionOwner?.cancelAndDrain()
+            await originalWake?.task.value
+            meguriReady = false; meguriBootstrap = nil; meguriRound = nil; meguriOperation = nil
             try await backend?.quiesce()
             await accountTask?.value
             await ownTask?.value
@@ -2777,6 +3417,7 @@ public final class SyncCoordinator {
         initialOwnAdmission.setOpen(false)
         let task = Task { () -> Bool in
             await providerSettingsTask?.value
+            await drainMeguriProduct()
             await meguriConnectionOwner?.cancelAndDrain()
             await attachmentTask?.value
             await replacementTask?.value
