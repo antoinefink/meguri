@@ -201,3 +201,16 @@ The participant patch passes normal privacy `030357-10827`, static policy
 `030357-10662` and similarity `030358-11267`. All filtered reports were read.
 Selected Mac bridge verification stays green at 19 methods. AppModel flows,
 broader fixture suites, signed storage and the required full gate remain pending.
+
+## First AppModel compile
+
+`swift-test/20261117T031305Z-14770` fails before AppModel execution on
+clean `6f27d57f`. Two read-only weak locals are declared mutable; this
+toolchain diagnoses them as errors. No AppModel test ran. The CPU window
+was released from the exact result.
+
+Filtered author `032119-17542` changes only those two declarations to
+`weak let`, matching existing compiled tests. Independent non-author
+`provider_test_delta_review` clears P0–P2. Weak ownership, automatic zeroing,
+mutable original-owner release and every lifetime/join assertion remain.
+The exact reviewed bytes are applied. AppModel execution is still pending.

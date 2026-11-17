@@ -42,7 +42,7 @@ extension ReviewCollectionStartupTests {
     @Test func providerHandoffJoinsTheOriginalCoreCommandBeforeCommittingMeguriSetup() async throws {
         try await withShutdownHarness { harness in
             var originalCoordinator: SyncCoordinator? = harness.sync
-            weak var originalLifetime = originalCoordinator
+            weak let originalLifetime = originalCoordinator
             let backend = try harness.backend
             await harness.sync.drainOperations()
             let gate = SyncOwnerGate()
@@ -83,7 +83,7 @@ extension ReviewCollectionStartupTests {
                 #expect(originalCoordinator?.preview == nil)
                 originalCoordinator = nil
                 #expect(originalLifetime == nil, "The attached successor must release its drained predecessor")
-                weak var secondLifetime = harness.sync
+                weak let secondLifetime = harness.sync
                 try #require(await harness.sync.changeProvider(to: .localOnly))
                 #expect(secondLifetime == nil, "Repeated handoffs must not retain a coordinator chain")
                 try await harness.owner.prepareCloudConnectionPreview()
