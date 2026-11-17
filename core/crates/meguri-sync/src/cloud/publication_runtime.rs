@@ -1016,6 +1016,11 @@ impl Runtime {
             }
             _ => return Err(PublicationError::NotOffered.into()),
         }
+        // Consent precedes these guarded local transitions. Only their actual
+        // active binding and matching settled decision can qualify the required
+        // publication SDK work; discovery cannot reach this path. This grants
+        // no completed scan, ACK or ready baseline.
+        self.qualify_provider_binding()?;
         Ok(())
     }
     /// The executor invokes this at EACH synchronous transport enqueue, after

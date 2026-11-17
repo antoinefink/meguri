@@ -828,6 +828,11 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "docs/process/review-log/meguri-provider-admission-20261117.md":
+        "31af001e272ebcc61ca299e3d932f6f29bc5da69551389305956ef92cd9f0e40",
+    # Complete public-source review; future bytes remain checked.
+    "core/crates/meguri-sync/src/provider.rs":
+        "ed5107904d639db9b9ff050ea8692e82d1bb500971978ed9a0096240ae0aedf5",
     'specs/sync/one-way.md':
         '8de7695fada9f38fa5d6c54c26538d025cd7e3b45b1867a1b8650417533b0812',
     'specs/sync/meguri-provider.md':

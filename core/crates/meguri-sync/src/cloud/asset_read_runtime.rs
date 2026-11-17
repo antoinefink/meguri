@@ -128,6 +128,7 @@ impl Runtime {
     ) -> Result<AssetReadPass, RuntimeError> {
         let guard = {
             let s = self.state();
+            Self::provider_admission_locked(&s)?;
             work.check()?;
             Self::sdk_locked(&s, sdk)?;
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;

@@ -6,6 +6,21 @@ import Testing
 // Owns the process's real collection; run this suite with a focused selector.
 @MainActor
 @Suite(.serialized) struct ReviewCollectionStartupTests {
+    @Test func providerHandoffRefusesAnActiveRealReviewWithoutWaitingForNetwork() async throws {
+        try await withStartupActivityOwner { fixture, deckID in
+            fixture.owner.reviewSessionClient = CoreReviewSessionClient()
+            await fixture.owner.startStudy(deckID: deckID)
+            let review = try #require(fixture.owner.review)
+            let session = try #require(review.sessionID)
+            #expect(!(await fixture.owner.sync.changeProvider(to: .meguri)))
+            #expect(review.sessionID == session && fixture.owner.reviewIsActive)
+            #expect(try await CoreCollectionService().resume().activeSession == session)
+            review.reveal(); await review.settled()
+            #expect(review.phase == .answer)
+            await fixture.owner.finishReview()
+            #expect(try await CoreCollectionService().resume().activeSession == nil)
+        }
+    }
     @Test func reviewStartupActivityCoalescedRecoveryEnablesReveal() async throws {
         try await withStartupActivityOwner { fixture, deckID in
             let study = Task { await fixture.owner.startStudy(deckID: deckID) }
@@ -203,7 +218,8 @@ import Testing
             configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
             configuration.timeZone = TimeZone(secondsFromGMT: 0)
             let sync = SyncCoordinator(directory: directory, configuration: nil, defaults: nil)
-            owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+            owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+                providerDirectory: directory.appending(path: "synthetic-installation", directoryHint: .isDirectory))
             owner.makeReviewSurface = { [surface] _ in surface }
             owner.reviewSessionClient = client
             client.onStartResult = { [gate] in await gate.hold() }
@@ -238,8 +254,10 @@ import Testing
         let cloudA = SyncOwnerFake(), cloudB = SyncOwnerFake()
         let syncA = SyncCoordinator(bootstrap: {}, makeBackend: { _ in cloudA }, defaults: nil)
         let syncB = SyncCoordinator(bootstrap: {}, makeBackend: { _ in cloudB }, defaults: nil)
-        let ownerA = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: syncA)
-        let ownerB = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: syncB)
+        let ownerA = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: syncA,
+            providerDirectory: configuration.collectionLocation.directory.appending(path: "synthetic-installation"))
+        let ownerB = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: syncB,
+            providerDirectory: configuration.collectionLocation.directory.appending(path: "synthetic-installation"))
         ownerA.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
         ownerB.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
         let service = CoreCollectionService()
@@ -405,7 +423,8 @@ import Testing
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory)
         configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600))
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: configuration.collectionLocation.directory.appending(path: "synthetic-installation"))
         let service = CoreCollectionService()
         try #require(try await service.lifecycle() == .noCollection)
         do {
@@ -437,7 +456,8 @@ import Testing
         configuration.recordDiagnostic = { observations.append($0) }
         let service = CoreCollectionService()
         try #require(try await service.lifecycle() == .noCollection)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: configuration.collectionLocation.directory.appending(path: "synthetic-installation"))
         // Exercise the actual nonthrowing lifecycle exit, with no fake ready flag.
         try await owner.completeStartupHost()
         #expect(owner.state == .unavailable && owner.lifecycle == .noCollection)
@@ -463,7 +483,8 @@ import Testing
         var observations: [FieldDiagnosticObservation] = []
         configuration.recordDiagnostic = { observations.append($0) }
         configuration.collectionLocation = AppModel.CollectionLocation(directory: directory)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation())
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: configuration.collectionLocation.directory.appending(path: "synthetic-installation"))
         let service = CoreCollectionService()
         try #require(try await service.lifecycle() == .noCollection)
         func release() async throws {

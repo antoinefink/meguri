@@ -54,6 +54,10 @@ import Testing
 
     @Test func bridgeCallsAreSignpostedUnderTheirExportNamesOnly() {
         let mediaExports = [
+            "migrate_provider", "provider_owner", "ProviderOwner.snapshot", "ProviderOwner.refresh", "ProviderOwner.save_settings",
+            "ProviderOwner.begin_icloud_discovery", "ProviderOwner.accept_icloud_connection", "ProviderOwner.begin_handoff",
+            "ProviderOwner.finish_handoff", "ProviderOwner.configure_meguri", "ProviderOwner.configured_meguri", "ProviderConnection.information",
+            "ProviderConnection.start_login", "ProviderLoginResult.result",
             "ManualTransferSession.start_media_preview",
             "ManualTransferSession.start_media",
             "ManualTransferSession.start_cancel_prepared_media",

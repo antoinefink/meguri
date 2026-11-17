@@ -74,11 +74,12 @@ public final class ReviewCollection: ChangeFanoutSink {
     public let configuration: LaunchConfiguration
     public let navigation: AppNavigation
     /// Shared by the main scene, Settings, imports and every shell layout.
-    public let sync: SyncCoordinator
+    public private(set) var sync: SyncCoordinator
     private var backgroundLease: UInt64 = 0
     private var backgroundDeadlineMilliseconds: Int64?
     private var backgroundLeaseExpired = false
     private let collection: CoreCollectionService
+    private let providerDirectory: URL
     private let entryService: any CollectionEntryService
     private var entryOwner: CollectionEntryCoordinator?
     public var entry: CollectionEntryCoordinator {
@@ -114,7 +115,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         return deckNamesOwner?.busy == true
     }
     func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?, allowGoToDeckRecovery: Bool = false) -> Bool {
-        guard host == .main, foreground, !resuming, !closed, !closing,
+        guard host == .main, foreground, !resuming, !closed, !closing, !sync.providerHandoffInProgress,
               !opening, (!starting || (route == .goToDeck && goToDeckBusy)), !enabling, state == .ready,
               case .ready(let current) = lifecycle, current == generation,
               review == nil, navigation.review == nil,
@@ -352,7 +353,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         if let manualOwner { return manualOwner }
         let location = CoreBridge.CollectionLocation(collectionDirectory: configuration.collectionLocation.directory,
             backupsDirectory: configuration.collectionLocation.backupsDirectory,
-            appGroupSnapshot: configuration.collectionLocation.directory.appending(path: "meguri-widget-unavailable.json"))
+            appGroupSnapshot: configuration.collectionLocation.directory.appending(path: "meguri-widget-unavailable.json"),
+            manualTransferDirectory: providerDirectory)
         let value = ManualTransferCoordinator(owner: self, service: CoreManualTransferService(location: location,
             clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone)))
         manualOwner = value
@@ -376,7 +378,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         lifecycle = .noCollection; state = restored
     }
     var exportAllowed: Bool {
-        guard !opening, !enabling, !deckNamesReserved, state == .ready, case .ready = lifecycle else { return false }
+        guard !opening, !enabling, !deckNamesReserved, !sync.providerHandoffInProgress, state == .ready, case .ready = lifecycle else { return false }
         return true
     }
     @ObservationIgnored var loadDeckTree: @MainActor () async throws -> CountedDeckTree
@@ -408,7 +410,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var day: ReviewDayMonitor?
     private var recoveryDrops: [Int64] = []
 
-    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil) {
+    public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil) {
         loadMediaIndex = { @MainActor in try await CoreMediaService().trackedNames() }
         loadDeckTree = { @MainActor in try await CoreDeckService().treeWithCounts() }
         saveSelectedDeck = { @MainActor id in try await CoreDeckService().selectDeck(id: id).generation }
@@ -417,6 +419,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         self.exportService = exportService ?? CoreCollectionExportService()
         self.configuration = configuration; self.navigation = navigation
+        self.providerDirectory = providerDirectory ?? CoreBridge.CollectionLocation(
+            collectionDirectory: configuration.collectionLocation.directory,
+            backupsDirectory: configuration.collectionLocation.backupsDirectory,
+            appGroupSnapshot: configuration.collectionLocation.directory.appending(path: "meguri-widget-unavailable.json")).manualTransferDirectory
         self.sync = sync ?? SyncCoordinator(directory: configuration.collectionLocation.directory, clock: configuration.clock,
             recordDiagnostic: configuration.recordDiagnostic)
         self.entryService = entryService ?? CoreCollectionEntryService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone),
@@ -426,8 +432,71 @@ public final class ReviewCollection: ChangeFanoutSink {
             })
         collection = CoreCollectionService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
         records = ReviewRecordStore(file: configuration.collectionLocation.directory.appending(path: "meguri-review-session.json"))
+        configureSyncOwnership()
         navigation.deckSelectionAction = { [weak self] deck in
             self?.openDeckPage(deckID: deck.rawValue)
+        }
+    }
+
+    private func configureSyncOwnership() {
+        sync.configureProviderDirectory(providerDirectory)
+        sync.providerChangeAllowed = { [weak self] in
+            guard let self else { return false }
+            return !closed && !closing && !opening && !starting && !enabling && !resuming
+                && review == nil && navigation.review == nil && !deckNamesReserved
+                && entryOwner?.busy != true && entryOwner?.preview == nil && entryOwner?.pickerPresented != true
+                && exportOwner?.busy != true && exportOwner?.artifact == nil && exportOwner?.providerLease == nil
+                && manualOwner?.busy != true && manualOwner?.preview == nil && manualOwner?.mediaPreview == nil
+        }
+        sync.drainManualProviderOwner = { [weak self] in await self?.manualOwner?.cancelAndDrain() }
+        sync.attachProviderSuccessor = { [weak self] original in
+            guard let self, self.sync === original, !self.closing, !self.closed else {
+                throw BridgeError.unavailable(reason: "collectionUnavailable")
+            }
+            let current = try original.makeProviderSuccessor()
+            self.sync = current
+            self.configureSyncOwnership()
+            try await self.attachCurrentProvider(current)
+        }
+        sync.retryProviderAttachment = { [weak self] current in
+            guard let self, self.sync === current, !self.closing, !self.closed else {
+                throw BridgeError.unavailable(reason: "collectionUnavailable")
+            }
+            let expected = self.generation
+            // A failed refresh may still own a fresh native backend. Join that
+            // successor before retrying its factory; the original stays closed.
+            guard await current.cancelAndDrain() else {
+                throw BridgeError.unavailable(reason: "Provider attachment drain failed")
+            }
+            guard self.sync === current, expected == self.generation, !self.closing, !self.closed else {
+                throw BridgeError.unavailable(reason: "collectionUnavailable")
+            }
+            try await self.attachCurrentProvider(current)
+        }
+    }
+
+    private func attachCurrentProvider(_ current: SyncCoordinator) async throws {
+        let expected = generation
+        do {
+            guard sync === current, !closing, !closed else {
+                throw BridgeError.unavailable(reason: "collectionUnavailable")
+            }
+            await current.preparePlatform()
+            guard sync === current, generation == expected, !closing, !closed else {
+                throw BridgeError.unavailable(reason: "collectionUnavailable")
+            }
+            // Use the retained Host's ordinary setup path. Attachment failures
+            // belong to this current coordinator and its explicit Retry action.
+            try await prepareCloudConnectionHost()
+            guard sync === current, generation == expected, !closing, !closed else {
+                throw BridgeError.unavailable(reason: "collectionUnavailable")
+            }
+            try current.requireProviderAttachment()
+        } catch {
+            if sync === current, generation == expected, !closing, !closed {
+                current.providerAttachmentFailed(error)
+            }
+            throw error
         }
     }
 
@@ -458,7 +527,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             #if DEBUG
             openPhase = .pathPreparation
             #endif
-            let location = try await Self.prepareOpenLocation(configuration.collectionLocation)
+            let location = try await Self.prepareOpenLocation(configuration.collectionLocation, providerDirectory: providerDirectory)
             guard await Self.exists(configuration.collectionLocation.collectionFile) else {
                 state = .noFile
                 configuration.recordDiagnostic(.init(component: .startup, operation: .open, stage: .admission, outcome: .refused, failure: .unavailable))
@@ -537,7 +606,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         await sync.preparePlatform()
         try await configuration.nativeReviewInput?.prepare()
         try await subscribe()
-        return try await Self.prepareOpenLocation(configuration.collectionLocation)
+        return try await Self.prepareOpenLocation(configuration.collectionLocation, providerDirectory: providerDirectory)
     }
     func prepareCloudConnectionHost() async throws {
         if let cloudPreparationTask { try await cloudPreparationTask.value; return }
@@ -572,7 +641,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         try await task.value
     }
     var entryAllowed: Bool { (state == .ready || manualOwner?.preview == nil) && manualAllowed && state != .unavailable }
-    var manualAllowed: Bool { cloudPreparationTask == nil && !deckNamesReserved && entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
+    var manualAllowed: Bool { !sync.providerHandoffInProgress && cloudPreparationTask == nil && !deckNamesReserved && entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
     func beginManualActivation() throws {
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         guard manualAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
@@ -1343,13 +1412,13 @@ public final class ReviewCollection: ChangeFanoutSink {
         snapshot.generation == generation && snapshot.root.isFileURL &&
             Data(snapshot.root.standardizedFileURL.path.utf8) == Data(root.standardizedFileURL.path.utf8)
     }
-    @concurrent private nonisolated static func prepareOpenLocation(_ location: CollectionLocation) async throws -> CoreBridge.CollectionLocation {
+    @concurrent private nonisolated static func prepareOpenLocation(_ location: CollectionLocation, providerDirectory: URL) async throws -> CoreBridge.CollectionLocation {
         // Only the app-private destination root is prepared here. Rust preflights
         // the combined import budget before source copy/inspection/backup writes;
         // the real backup writer owns creation of its supplied backup parents.
         try FileManager.default.createDirectory(at: location.directory, withIntermediateDirectories: true)
         return CoreBridge.CollectionLocation(collectionDirectory: location.directory, backupsDirectory: location.backupsDirectory,
-            appGroupSnapshot: location.directory.appending(path: "meguri-widget-unavailable.json"))
+            appGroupSnapshot: location.directory.appending(path: "meguri-widget-unavailable.json"), manualTransferDirectory: providerDirectory)
     }
     @concurrent private nonisolated static func exists(_ url: URL) async -> Bool { FileManager.default.fileExists(atPath: url.path) }
 }

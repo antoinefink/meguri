@@ -141,6 +141,11 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
     let workflow: CoreCloudWorkflowService
     var connection: CoreCloudConnectionService? { production.connection }
     var own: CloudOwnExecutor? { production.own }
+    // A negative may supply an actual retired Core facade. No state or proof
+    // is substituted; attachment must observe its real refresh refusal.
+    var attachmentProvider: CoreProviderService?
+    var providerService: CoreProviderService? { attachmentProvider ?? production.providerService }
+    private(set) var accountReadCount = 0
     func setProofAdmission(_ admission: @escaping @Sendable (CloudOriginalCommandProofYield) async throws -> Void,
                            acknowledgeOutputs: @escaping @Sendable ([CloudPolicyOutput]) async -> Void) async {
         await production.setProofAdmission(admission, acknowledgeOutputs: acknowledgeOutputs)
@@ -514,7 +519,11 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
         }
     }
     func beginAccountRead(transition: Bool) async throws -> UInt64 {
-        do { return try await production.beginAccountRead(transition: transition) }
+        do {
+            let read = try await production.beginAccountRead(transition: transition)
+            accountReadCount += 1
+            return read
+        }
         catch {
             capture(error, stage: .beginAccountReadThrow)
             throw error
@@ -600,6 +609,7 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
     let factory: ServiceSDKFactory
     let causalTrace = ServiceAppCausalTrace()
     private let clock: AppClock
+    private let cachedIdentityAvailable: Bool
     private(set) var backends: [ServiceAppBackend] = []
     var observeOwn: (@Sendable (CloudOwnObservation) -> Void)?
     var ownTransport: (any CloudOwnTransport)?
@@ -610,7 +620,8 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
     }
     // Test-owned admission before a new native backend can resume work.
     var beforeBackend: (@MainActor () async throws -> Void)?
-    lazy var sync = makeSync()
+    var afterBackend: (@MainActor (ServiceAppBackend) -> Void)?
+    var sync: SyncCoordinator { owner.sync }
 
     #if DEBUG
     func startCausalTrace() { causalTrace.start(); restoreCausalTraceObserver() }
@@ -624,9 +635,10 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
     }
     #endif
     private func makeSync() -> SyncCoordinator {
-        SyncCoordinator(bootstrap: {
+        SyncCoordinator(bootstrap: { [cachedIdentityAvailable] in
             try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-initial-app", environment: .development,
-                status: .available, identity: Data("synthetic-initial-account".utf8))
+                status: cachedIdentityAvailable ? .available : .couldNotDetermine,
+                identity: cachedIdentityAvailable ? Data("synthetic-initial-account".utf8) : nil)
         }, makeBackend: { [self] persisted in
             let allBackendsClosed: Bool = backends.allSatisfy { $0.closed }
             let closeDiagnostics = backends.enumerated().prefix(16).map { index, backend in
@@ -643,22 +655,27 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
             backend.causalTrace = causalTrace
             backend.onCommands = onCommands
             backends.append(backend)
+            afterBackend?(backend)
             return backend
-        }, defaults: defaults, clock: .system, directory: nil, observeSignals: false)
+        }, defaults: defaults, clock: .system, directory: nil, observeSignals: false,
+           providerDirectory: root.appending(path: "synthetic-installation", directoryHint: .isDirectory))
     }
     lazy var owner: ReviewCollection = {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
         configuration.clock = clock
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
-        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: makeSync(),
+            providerDirectory: root.appending(path: "synthetic-installation", directoryHint: .isDirectory))
         owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
         return owner
     }()
     init(root: URL, wire: ServiceWorkflowWire, defaults: UserDefaults? = nil,
+         cachedIdentityAvailable: Bool = true,
          clock: AppClock = .fixed(Date(timeIntervalSince1970: 1_735_689_600))) throws {
         self.root = root; self.wire = wire
         self.clock = clock
+        self.cachedIdentityAvailable = cachedIdentityAvailable
         factory = ServiceSDKFactory(wire: wire, causalTrace: causalTrace)
         if let defaults { self.defaults = defaults }
         else { self.defaults = try #require(UserDefaults(suiteName: suite)) }

@@ -79,6 +79,14 @@ impl Runtime {
         Self::instance_locked(&self.state())
     }
     pub(super) fn caller_locked(s: &State, instance: &str) -> Result<(), RuntimeError> {
+        if let Some(provider) = &s.provider {
+            let binding = &s.bound.as_ref().ok_or(RuntimeError::IdentityUnverified)?.binding;
+            if !provider.permits_icloud_binding(binding)
+                && !(s.adapter.sdk.as_ref().is_some_and(|sdk| sdk.id == instance)
+                    && provider.permits_icloud_completion(binding)) {
+                return Err(RuntimeError::IdentityUnverified);
+            }
+        }
         let host_instance = Self::instance_locked(s)?;
         let sdk_valid = s
             .adapter
@@ -164,6 +172,7 @@ impl Runtime {
         Self::gate_locked(&s)
     }
     pub(super) fn gate_locked(s: &State) -> Result<(), RuntimeError> {
+        Self::provider_admission_locked(s)?;
         Self::general_gate_locked(s)?;
         if !s.root_confirmed && !Self::publication_allows_send_locked(s) {
             #[cfg(feature = "test-hooks")]
@@ -669,6 +678,7 @@ impl Runtime {
         media: &meguri_engine::media::MediaService,
         timeout: Duration,
     ) -> Result<(), RuntimeError> {
+        Self::provider_admission_locked(&self.state())?;
         match self.prepare_binding_inner(collection, media, timeout)
             .map_err(|e| self.remember_layout_refusal(collection, e))
         {

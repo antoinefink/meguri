@@ -6,6 +6,201 @@ import Testing
 
 #if os(macOS)
 extension ReviewCollectionStartupTests {
+    @Test func legacyUpgradeKeepsTheRealRetainedICloudBindingPendingRowsAndSettings() async throws {
+        try await withShutdownHarness { harness in
+            _ = try await CoreDeckService().addDeck(name: "Synthetic pending upgrade deck")
+            try await CoreCollectionService().flushForBackground()
+            await harness.sync.waitForInputs()
+            await harness.sync.drainOperations()
+            let original = try harness.backend
+            try #require(await harness.sync.cancelAndDrain())
+            let before = try await original.workflow.durableSnapshot()
+            let providerFile = harness.root.appending(path: "synthetic-installation/provider.json")
+            let oldDocument = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: providerFile)) as? [String: Any])
+            try #require(await harness.owner.close())
+            try FileManager.default.removeItem(at: providerFile)
+            harness.defaults.set(["enabled": true, "paused": true, "automatic": false, "media": false], forKey: "meguri.cloud.deviceSettings")
+            let reopened = try ServiceAppHarness(root: harness.root, wire: harness.wire, defaults: harness.defaults)
+            do {
+                await reopened.owner.start()
+                try #require(reopened.owner.state == .ready)
+                let settings = reopened.sync.settings
+                #expect(settings.enabled && settings.paused && !settings.automatic && !settings.media)
+                #expect(reopened.sync.providerState?.selection == .iCloud)
+                let after = try await reopened.backend.workflow.durableSnapshot()
+                #expect(before.binding == after.binding)
+                #expect(before.entities == after.entities)
+                #expect(before.inboxNames == after.inboxNames)
+                let newDocument = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: providerFile)) as? [String: Any])
+                let oldBinding = try #require(oldDocument["binding"] as? NSDictionary)
+                let newBinding = try #require(newDocument["binding"] as? NSDictionary)
+                #expect(oldBinding.isEqual(newBinding))
+                try #require(await reopened.owner.close())
+            } catch { _ = await reopened.owner.close(); throw error }
+        }
+    }
+    @Test func providerHandoffJoinsTheOriginalCoreCommandBeforeCommittingMeguriSetup() async throws {
+        try await withShutdownHarness { harness in
+            var originalCoordinator: SyncCoordinator? = harness.sync
+            weak var originalLifetime = originalCoordinator
+            let backend = try harness.backend
+            await harness.sync.drainOperations()
+            let gate = SyncOwnerGate()
+            let held = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var originalReturned = false, handoffReturned = false, once = false
+            backend.beforeExecution = { command in
+                guard case .resumeMedia = command.action, !once else { return }
+                once = true; held.continuation.yield(true)
+                await gate.hold()
+                #expect(Task.isCancelled)
+                originalReturned = true
+            }
+            defer { backend.beforeExecution = nil; gate.release(); held.continuation.finish() }
+            harness.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            try #require(try await serviceAppSignal(held.stream, stage: "provider original command"))
+            let changing = Task {
+                let success = await harness.sync.changeProvider(to: .meguri)
+                handoffReturned = true
+                return success
+            }
+            do {
+                try await backend.waitForQuiesce()
+                #expect(!originalReturned && !handoffReturned && !backend.closed)
+                #expect(originalLifetime != nil, "Keep the original owner through its actual callback join")
+                #expect(harness.sync.providerState?.selection == .iCloud)
+                #expect(harness.sync.providerState?.phase == .handoffRecovery)
+                gate.release()
+                #expect(await changing.value)
+                #expect(originalReturned && backend.closed && backend.closeReturned == 1)
+                #expect(harness.sync.providerState?.selection == .meguri)
+                #expect(harness.sync.providerState?.phase == .setupRequired)
+                #expect(!harness.sync.settings.automatic)
+                #expect(harness.sync !== originalCoordinator)
+                #expect(harness.sync.setupState == .attached)
+                #expect(try harness.backend !== backend)
+                originalCoordinator?.beginConnectionPreview()
+                await originalCoordinator?.waitForConnectionPreview()
+                #expect(originalCoordinator?.preview == nil)
+                originalCoordinator = nil
+                #expect(originalLifetime == nil, "The attached successor must release its drained predecessor")
+                weak var secondLifetime = harness.sync
+                try #require(await harness.sync.changeProvider(to: .localOnly))
+                #expect(secondLifetime == nil, "Repeated handoffs must not retain a coordinator chain")
+                try await harness.owner.prepareCloudConnectionPreview()
+                await harness.sync.waitForConnectionPreview()
+                try #require(harness.sync.preview != nil && harness.sync.connectionFailure == nil)
+                await harness.sync.keepLocalOnly()
+                #expect(harness.sync.providerState?.selection == .localOnly)
+                #expect(harness.owner.state == .ready && harness.sync.setupState == .attached)
+            } catch { gate.release(); _ = await changing.value; throw error }
+        }
+    }
+    @Test(arguments: ["factory", "providerRefresh"])
+    func failedSuccessorAttachmentRetriesOnceOnTheCurrentHost(failure: String) async throws {
+        try await withShutdownHarness { app in
+            let original = app.sync
+            let originalBackend = try app.backend
+            // Initial adoption really replaced the Host. This facade belongs
+            // to that retired generation; it cannot refresh for this successor.
+            let retiredProvider = try #require(app.backends.first?.providerService)
+            do { _ = try await retiredProvider.refresh(); Issue.record("Expected a retired provider") }
+            catch { /* The negative uses actual Core ownership, never a state DTO. */ }
+            var attempts = 0
+            app.beforeBackend = {
+                attempts += 1
+                if failure == "factory", attempts == 1 {
+                    throw BridgeError.cloudConnection(.accountUnavailable)
+                }
+            }
+            app.afterBackend = { backend in
+                if failure == "providerRefresh", attempts == 1 {
+                    backend.attachmentProvider = retiredProvider
+                }
+            }
+            defer { app.beforeBackend = nil; app.afterBackend = nil }
+            #expect(!(await original.changeProvider(to: .meguri)))
+            let current = app.sync
+            try #require(current !== original && current.setupState == .failed)
+            #expect(originalBackend.closed && originalBackend.closeReturned == 1)
+            #expect(attempts == 1 && current.operationFailed)
+            #expect(current.providerState?.selection == .meguri)
+            #expect(current.providerState?.phase == .setupRequired)
+            if failure == "factory" { #expect(current.connectionFailure == .accountUnavailable) }
+            if failure == "providerRefresh" {
+                let failedBackend = try app.backend
+                #expect(failedBackend.providerService === retiredProvider)
+                #expect(!failedBackend.closed)
+            }
+            // Failure does not close the collection or require a study restart.
+            if app.owner.policy != .ok { await app.owner.enableFsrs() }
+            let deck = try await CoreDeckService().addDeck(name: "Synthetic successor failure study")
+            let type = try await CoreNotetypeService().addNotetype(.init(name: "Synthetic successor QA", cloze: false,
+                fields: ["Q", "A"], templates: [.init(name: "Face", front: "{{Q}}", back: "{{A}}", browserFront: "", browserBack: "")], css: nil))
+            _ = try await CoreNoteService().addNote(.init(notetypeId: type.id, fields: ["Question", "Answer"],
+                tags: [], deckId: deck.id, guid: nil, updateAddDefaults: false))
+            await app.owner.startStudy(deckID: deck.id)
+            let review = try #require(app.owner.review)
+            try #require(review.phase == .question)
+            review.reveal(); await review.settled()
+            review.rate(.easy); await review.settled()
+            #expect(review.record.answers.count == 1)
+            await app.owner.finishReview()
+            #expect(attempts == 1, "Local work must not automatically retry attachment")
+            await current.retryProviderAuthority()
+            try #require(app.sync === current && current.setupState == .attached)
+            #expect(attempts == 2 && current.connectionFailure == nil)
+            let backend = try app.backend
+            let provider = try #require(backend.providerService)
+            #expect(provider !== retiredProvider && backend !== originalBackend)
+            #expect(try await provider.state().selection == .meguri)
+            let credentials = try await current.meguriConnection()
+            try await credentials.configure(endpoint: "https://sync.invalid")
+            let configured = try #require(try await provider.configuredMeguri())
+            #expect(URL(string: configured.connection.endpoint)?.host == "sync.invalid")
+            #expect(await credentials.phase == .signedOut)
+            #expect(current.providerState?.phase == .setupRequired)
+            await current.retryProviderAuthority()
+            #expect(attempts == 2, "An attached owner refreshes instead of repeating its factory")
+            try #require(await current.changeProvider(to: .localOnly))
+            #expect(app.owner.state == .ready && app.sync.setupState == .attached)
+            original.beginConnectionPreview()
+            await original.waitForConnectionPreview()
+            #expect(original.preview == nil && originalBackend.closeReturned == 1)
+        }
+    }
+    @Test func actualCollectionReplacementRetiresProviderAndCredentialOwnersBeforeCurrentSettingsAndReturn() async throws {
+        var oldProvider: CoreProviderService?
+        var oldCredentials: MeguriProviderConnectionOwner?
+        try await withShutdownHarness(beforeAdopt: { app in
+            app.sync.observeInitialAdoptionPreview = { _ in
+                oldProvider = try? await CoreProviderService.attached()
+                oldCredentials = try? await app.sync.meguriConnection()
+            }
+        }) { app in
+            let original = try #require(app.backends.first)
+            try #require(app.backends.count >= 2 && original.closed && original.closeReturned == 1)
+            let provider = try #require(oldProvider)
+            let credentials = try #require(oldCredentials)
+            do { _ = try await provider.state(); Issue.record("Replaced provider facade remained usable") }
+            catch { /* The original Core-issued generation must remain rejected. */ }
+            do { try await credentials.deleteCredentialsAfterDrain(); Issue.record("Replaced credential owner remained usable") }
+            catch { /* Retired credentials cannot act for the successor. */ }
+            app.sync.setDeviceSettings(paused: true, automatic: false, media: false)
+            await app.sync.waitForInputs()
+            #expect(app.sync.settings.paused && !app.sync.settings.automatic && !app.sync.settings.media)
+            #expect(app.sync.providerState?.settings == app.sync.settings)
+            #expect(!app.sync.operationFailed)
+            app.sync.setDeviceSettings(paused: false, automatic: false, media: false)
+            await app.sync.waitForInputs()
+            try #require(await app.sync.changeProvider(to: .localOnly))
+            try await app.owner.prepareCloudConnectionPreview()
+            await app.sync.waitForConnectionPreview()
+            try #require(app.sync.preview != nil && app.sync.connectionFailure == nil)
+            #expect(app.sync.providerState?.selection == .localOnly)
+            await app.sync.keepLocalOnly()
+            #expect(app.owner.state == .ready && !app.sync.operationFailed)
+        }
+    }
     @Test func realOwnerQuitCancelsAndJoinsMediaBeforeClosingItsCollection() async throws {
         try await withShutdownHarness { harness in
             let backend = try harness.backend
@@ -1175,6 +1370,7 @@ extension ReviewCollectionStartupTests {
 
 @MainActor private func withShutdownHarness(
     mediaEnabled: Bool = true,
+    beforeAdopt: (@MainActor (ServiceAppHarness) async throws -> Void)? = nil,
     _ body: (ServiceAppHarness) async throws -> Void
 ) async throws {
     let fixture = try InitialCloudFixture.load()
@@ -1195,6 +1391,7 @@ extension ReviewCollectionStartupTests {
         }
         defer { harness.defaults.removePersistentDomain(forName: harness.suite) }
         try await wire.seed(fixture)
+        try await beforeAdopt?(harness)
         try await harness.adopt()
         try await body(harness)
         try #require(await harness.owner.close())

@@ -31,6 +31,7 @@ public struct CloudBuildConfiguration: Sendable {
 protocol SyncCoordinatorBackend: AnyObject, Sendable {
     var connection: CoreCloudConnectionService? { get }
     var own: CloudOwnExecutor? { get }
+    var providerService: CoreProviderService? { get }
     func stopSyncing() async throws
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult
@@ -54,6 +55,7 @@ protocol SyncCoordinatorBackend: AnyObject, Sendable {
     func close() async throws
 }
 extension SyncCoordinatorBackend {
+    var providerService: CoreProviderService? { nil }
     func stopSyncing() async throws { throw BridgeError.cloudConnection(.notOffered) }
     func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void) async -> SyncCommandResult {
         await execute(command)
@@ -269,6 +271,8 @@ public final class SyncCoordinator {
                              acknowledged: CheckedContinuation<Bool, Never>)
         case accountOutputsReturned(UInt64, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
                                     result: SyncCommandResult, acknowledged: CheckedContinuation<Bool, Never>)
+        case discoveryPrepared(preparation: ResumePreparation, backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
+                               acknowledged: CheckedContinuation<Bool, any Error>)
         case resumeBinding(CloudConnectionPreview, preparation: ResumePreparation, service: CoreCloudConnectionService, generation: UInt64, revision: UInt64,
                            acknowledged: CheckedContinuation<ResumeAdmission, any Error>)
         case nativeInput(@Sendable () async throws -> CloudPolicyOutput, generation: UInt64, revision: UInt64,
@@ -287,8 +291,9 @@ public final class SyncCoordinator {
         case reconcile(any SyncCoordinatorBackend, acknowledged: CheckedContinuation<Void, Never>?)
         case barrier(CheckedContinuation<Void, Never>)
     }
-    // Created with the consumed Resume preview before its task does any work.
-    // The input lane revokes it before the actual Core Resume call begins.
+    // A tracked own task has not entered native work yet: explicit discovery
+    // joins its first account read, or Resume joins previous policy work.
+    // The input lane revokes preparation before either enters Core/native work.
     private final class ResumePreparation { let id = UUID() }
     private enum ResumeAdmission { case pending, cancelled, resumed(CloudOriginalCommandProofYield) }
     private enum ProofOwner: Equatable {
@@ -392,6 +397,9 @@ public final class SyncCoordinator {
     private var heldAccountCompletion: Input?
     private var readyPreviewOwner: (service: CoreCloudConnectionService, generation: UInt64, revision: UInt64, id: UUID)?
     private var readingPreview = false
+    // Actual tracked account-read output for the current pre-work discovery.
+    // Native proof capabilities remain exclusively Core-issued.
+    private var discoveryAccountRead: (read: UInt64?, result: SyncCommandResult?)?
     // A retained acceptance, not preview/view ownership. Nil is distinct from
     // an earlier Enabled=false and survives queued work until Rust ends it.
     private var initialAdoptionEnabledBefore: Bool?
@@ -420,16 +428,78 @@ public final class SyncCoordinator {
     private var drained = false
     private var closeTask: Task<Bool, Never>?
     private var attachmentTask: Task<Void, Never>?
+    private var attachmentFailure: (any Error)?
     private var hostRevision: UInt64 = 0
     private(set) var failureRevision: UInt64 = 0
     private var commandSequence: UInt64 = 0
     private var timerSequence: UInt64 = 0
     private var statusSequence: UInt64 = 0
     private static let settingsKey = "meguri.cloud.deviceSettings"
+    private var providerDirectory: URL?
+    private var provider: CoreProviderService?
+    public private(set) var providerState: SyncProviderState?
+    public var providerNeedsAttention: Bool { SyncStatusPresentation.providerNeedsAttention(providerState) }
+    public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
+    private var providerDiscovery: ProviderDiscoveryOwnership?
+    private var providerHandoff: ProviderHandoffOwnership?
+    private var providerHandoffDestination: SyncProviderSelection?
+    private var providerSettingsTask: Task<Void, Never>?
+    private var providerSettingsRevision: UInt64 = 0
+    var providerChangeAllowed: @MainActor () -> Bool = { true }
+    var drainManualProviderOwner: (@MainActor () async -> Void)?
+    var attachProviderSuccessor: (@MainActor (SyncCoordinator) async throws -> Void)?
+    var retryProviderAttachment: (@MainActor (SyncCoordinator) async throws -> Void)?
+    private var providerAttachmentPending = false
+    private var retryingProviderAttachment = false
+    private var meguriConnectionOwner: MeguriProviderConnectionOwner?
+    func configureProviderDirectory(_ directory: URL) {
+        // Custom backend fixtures retain their injected owner. Ordinary native
+        // composition and ServiceAppHarness opt in at construction; CoreHost's
+        // durable gate remains mandatory in either case.
+        if providerDirectory != nil { providerDirectory = directory }
+    }
+    private var providerAllowsAccountRead: Bool {
+        providerDirectory == nil || providerDiscovery != nil || providerState?.permitsICloudStartup == true
+    }
+
+    func makeProviderSuccessor() throws -> SyncCoordinator {
+        guard drained, closing, closeTask == nil, backend == nil, providerHandoff == nil else {
+            throw BridgeError.busy(runningOperation: "provider drain")
+        }
+        let successor = SyncCoordinator(bootstrap: bootstrap, makeBackend: makeBackend,
+            defaults: defaults, clock: clock, directory: directory, observeSignals: observeSignals,
+            providerDirectory: providerDirectory, recordDiagnostic: recordDiagnostic)
+        // The original already joined its native owners above. The successor
+        // needs an attachment retry, not a strong chain of drained owners.
+        successor.providerAttachmentPending = true
+        successor.operationFailed = operationFailed
+        successor.failureRevision = failureRevision
+        return successor
+    }
+
+    private func attachProvider(to backend: any SyncCoordinatorBackend) async throws {
+        guard providerDirectory != nil else { return }
+        let expected = generation, revision = hostRevision
+        let current: CoreProviderService
+        if let issued = backend.providerService { current = issued }
+        else { current = try await CoreProviderService.attached() }
+        let state = try await current.refresh()
+        guard !closing, !backendRetired, self.backend === backend,
+              expected == generation, revision == hostRevision else { return }
+        provider = current
+        providerState = state
+        guard let settings = state.settings else {
+            throw BridgeError.unavailable(reason: "Provider settings require recovery")
+        }
+        self.settings = settings
+        if providerNeedsAttention { operationFailed = true }
+    }
 
     public convenience init(directory: URL, clock: AppClock = .system,
                             configuration: CloudBuildConfiguration? = .fromBundle, defaults: UserDefaults? = .standard,
                             recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
+        let providerDirectory = CoreBridge.CollectionLocation(collectionDirectory: directory,
+            backupsDirectory: directory, appGroupSnapshot: directory).manualTransferDirectory
         self.init(bootstrap: {
             guard let configuration, configuration.schemaConfigured,
                   !configuration.container.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -447,20 +517,22 @@ public final class SyncCoordinator {
             #else
             throw SyncOwnerFailure.configurationUnavailable
             #endif
-        }, defaults: defaults, clock: clock, directory: directory, observeSignals: true, recordDiagnostic: recordDiagnostic)
+        }, defaults: defaults, clock: clock, directory: directory, observeSignals: true,
+           providerDirectory: providerDirectory, recordDiagnostic: recordDiagnostic)
     }
 
     init(bootstrap: @escaping @MainActor () async throws -> Void,
          makeBackend: @escaping @MainActor (@escaping @Sendable () async -> Void) async throws -> any SyncCoordinatorBackend,
          defaults: UserDefaults?, clock: AppClock = .system, directory: URL? = nil, observeSignals: Bool = false,
+         providerDirectory: URL? = nil,
          recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
         self.recordDiagnostic = recordDiagnostic
         self.bootstrap = bootstrap; self.makeBackend = makeBackend; self.defaults = defaults
         self.clock = clock; self.directory = directory
+        self.providerDirectory = providerDirectory
         self.observeSignals = observeSignals
-        let saved = defaults?.dictionary(forKey: Self.settingsKey)
-        settings = .init(enabled: saved?["enabled"] as? Bool ?? false, paused: saved?["paused"] as? Bool ?? false,
-            automatic: saved?["automatic"] as? Bool ?? true, media: saved?["media"] as? Bool ?? true)
+        settings = (try? CoreProviderService.legacySettings(defaults?.object(forKey: Self.settingsKey)))
+            ?? .init(enabled: false, paused: false, automatic: false, media: true)
     }
 
     /// Both open and prepareEntry call this before either can create a Host.
@@ -472,6 +544,13 @@ public final class SyncCoordinator {
         guard !platformPrepared else { return }
         let task = Task {
             defer { platformTask = nil }
+            if let providerDirectory {
+                do {
+                    providerState = try await CoreProviderService.migrate(directory: providerDirectory,
+                        legacyJSON: CoreProviderService.legacyMigrationJSON(defaults?.object(forKey: Self.settingsKey)))
+                    if let migrated = providerState?.settings { settings = migrated }
+                } catch { providerState = .blocked; operationFailed = true }
+            }
             do { try await bootstrap(); platformPrepared = true; setupState = .prepared }
             catch SyncOwnerFailure.configurationUnavailable { setupState = .configurationUnavailable }
             catch {
@@ -522,8 +601,13 @@ public final class SyncCoordinator {
                     backend = nil
                     return
                 }
+                try await attachProvider(to: value)
+                guard !closing, !Task.isCancelled, !replacing,
+                      revision == hostRevision, generation == self.generation else { return }
                 drained = false
                 setupState = .attached
+                providerAttachmentPending = false
+                attachmentFailure = nil; connectionFailure = nil
                 let retained = await readRetainedRecovery(value)
                 guard !closing, !suspended, !replacing, !Task.isCancelled,
                       backend === value, !backendRetired, !drained,
@@ -538,11 +622,28 @@ public final class SyncCoordinator {
                 #if DEBUG
                 DebugCloudDiagnostics.record(.backendAttachment, error: error)
                 #endif
-                operationFailed = true; setupState = .failed
+                guard revision == hostRevision, generation == self.generation else { return }
+                attachmentFailure = error
+                recordConnectionFailure(error)
+                setupState = .failed
             }
         }
         attachmentTask = task
         await task.value
+    }
+
+    func requireProviderAttachment() throws {
+        guard setupState == .attached else {
+            throw attachmentFailure ?? BridgeError.unavailable(reason: "Provider attachment unavailable")
+        }
+    }
+    func providerAttachmentFailed(_ error: any Error) {
+        guard providerAttachmentPending else { return }
+        // Host preparation may report only that no connection was attached.
+        // Preserve the factory/refresh failure from the actual attachment.
+        if attachmentFailure == nil { attachmentFailure = error }
+        recordConnectionFailure(attachmentFailure ?? error)
+        setupState = .failed
     }
 
     private func readRetainedRecovery(_ original: any SyncCoordinatorBackend) async -> Result<CloudRecoveryStatus?, any Error> {
@@ -608,6 +709,30 @@ public final class SyncCoordinator {
     }
 
     public func setDeviceSettings(paused: Bool, automatic: Bool, media: Bool) {
+        guard !closing, !replacing else { return }
+        if let provider {
+            providerSettingsRevision &+= 1
+            let revision = providerSettingsRevision
+            let attachment = hostRevision
+            let previous = providerSettingsTask
+            let next = CloudPolicyDeviceSettings(enabled: settings.enabled, paused: paused, automatic: automatic, media: media)
+            providerSettingsTask = Task {
+                await previous?.value
+                do {
+                    let state = try await provider.saveSettings(next)
+                    guard revision == providerSettingsRevision, attachment == hostRevision, !replacing else { return }
+                    providerState = state
+                    applyDeviceSettings(paused: paused, automatic: automatic, media: media)
+                } catch {
+                    guard revision == providerSettingsRevision, attachment == hostRevision, !replacing else { return }
+                    providerState = .blocked; operationFailed = true
+                }
+            }
+            return
+        }
+        applyDeviceSettings(paused: paused, automatic: automatic, media: media)
+    }
+    private func applyDeviceSettings(paused: Bool, automatic: Bool, media: Bool) {
         let wasPaused = settings.paused
         if paused { initialOwnAdmission.setOpen(false) }
         saveSettings(.init(enabled: settings.enabled, paused: paused, automatic: automatic, media: media))
@@ -651,7 +776,12 @@ public final class SyncCoordinator {
             "automatic": settings.automatic, "media": settings.media], forKey: Self.settingsKey)
         receive(.settings(settings))
     }
+    private func persistSettings(_ settings: CloudPolicyDeviceSettings) async throws {
+        if let provider { providerState = try await provider.saveSettings(settings) }
+        saveSettings(settings)
+    }
     public func syncNow(source: CloudPolicySource = .command) {
+        guard providerAllowsAccountRead else { return }
         reportAvailableSpace(); receive(.syncNowRequested(source))
     }
     public func cancelSyncNow(exchange: UInt64) { receive(.syncNowCancelled(exchange: exchange)) }
@@ -666,9 +796,28 @@ public final class SyncCoordinator {
         let expected = generation, revision = hostRevision
         connectionFailure = nil
         readingPreview = true
-        startOwnTask(backend: backend, generation: expected, revision: revision) { [self] in
+        let preparation = ResumePreparation()
+        startOwnTask(backend: backend, generation: expected, revision: revision, resumePreparation: preparation) { [self] in
             defer { readingPreview = false; finishOwnWork() }
             do {
+                if let provider { providerDiscovery = try await provider.beginICloudDiscovery() }
+                guard !Task.isCancelled, !closing, !suspended, !replacing,
+                      expected == generation, revision == hostRevision, self.backend === backend else { throw CancellationError() }
+                // No native own work has started. Issue the real producer on
+                // the tracked account lane and join its completion/outputs.
+                discoveryAccountRead = (nil, nil)
+                enqueue(.account(false))
+                var prepared = false
+                while !prepared {
+                    await prepareConnectionAuthority()
+                    for original in Array(operationTasks.values) { await original.value }
+                    prepared = try await withCheckedThrowingContinuation {
+                        enqueue(.discoveryPrepared(preparation: preparation, backend: backend,
+                            generation: expected, revision: revision, acknowledged: $0))
+                    }
+                }
+                guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
+                      expected == generation, revision == hostRevision, self.backend === backend else { throw CancellationError() }
                 let work = try await own.preview()
                 guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
                       expected == generation, revision == hostRevision else {
@@ -689,19 +838,26 @@ public final class SyncCoordinator {
                     readingPreview = false
                     initialAdoptionCancelled = false
                     initialActivationReturned = false
-                    initialAdoptionEnabledBefore = settings.enabled
+                    let enabledBefore = settings.enabled
+                    try await saveEnabled(true)
+                    guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
+                          expected == generation, revision == hostRevision else {
+                        try await saveEnabled(enabledBefore)
+                        try await connection.cancelPreview(handle)
+                        return
+                    }
+                    initialAdoptionEnabledBefore = enabledBefore
                     initialOwnAdmission.setOpen(true)
-                    // No await between the persistent setting and actual adopt.
-                    saveEnabled(true)
                     observeInitialAdoptionAcceptance?()
                     do {
                         _ = try await connection.confirmAdoption(handle)
+                        if let provider { providerState = try await provider.acceptICloudConnection() }
                         if expected == generation, revision == hostRevision, !closing { connectionFailure = nil }
                     }
                     catch {
                         // The call did not accept an operation. Restore even
                         // when authority/account changed during the call.
-                        restoreInitialAdoptionEnabled()
+                        await restoreInitialAdoptionEnabled()
                         throw error
                     }
                     recovery = try await connection.recoveryStatus()
@@ -741,7 +897,85 @@ public final class SyncCoordinator {
     }
     public func stopUsingICloud() async { await chooseLocalOnly(stopOnly: true) }
     public func keepLocalOnly() async { await chooseLocalOnly(stopOnly: false) }
+    /// MP-E can present these typed commands later. No service picker or
+    /// transfer producer is introduced here.
+    @discardableResult public func changeProvider(to destination: SyncProviderSelection, removeMeguriCredentials: Bool = false) async -> Bool {
+        guard providerChangeAllowed(), let provider, !suspended, !replacing else {
+            connectionFailure = .busy; return false
+        }
+        do {
+            if providerHandoff == nil {
+                providerHandoff = try await provider.beginHandoff(to: destination, removeCredentials: removeMeguriCredentials)
+                providerHandoffDestination = destination
+            } else if providerHandoffDestination != destination { connectionFailure = .busy; return false }
+            providerState = try await provider.state()
+            if removeMeguriCredentials, providerState?.removalPending != true { connectionFailure = .busy; return false }
+            // Both Core admissions closed durably before cancellation. Keep
+            // original native owners until their actual results and ACKs join.
+            await meguriConnectionOwner?.cancelAndDrain()
+            await drainManualProviderOwner?()
+            guard await cancelAndDrain(), let providerHandoff else { return false }
+            if providerState?.removalPending == true {
+                let credentials = try await meguriConnection()
+                try await credentials.deleteCredentialsAfterDrain()
+            }
+            providerState = try await provider.finishHandoff(providerHandoff)
+            self.providerHandoff = nil; providerHandoffDestination = nil; providerDiscovery = nil
+            if let committed = providerState?.settings { settings = committed }
+            self.provider = nil; meguriConnectionOwner = nil
+            // The original coordinator stays closed with its completed drain.
+            // ReviewCollection composes and attaches a distinct current owner.
+            guard let attachProviderSuccessor else {
+                throw BridgeError.unavailable(reason: "Provider successor composition unavailable")
+            }
+            try await attachProviderSuccessor(self)
+            return true
+        } catch {
+            operationFailed = true
+            recordConnectionFailure(error)
+            return false
+        }
+    }
+    public func meguriConnection() async throws -> MeguriProviderConnectionOwner {
+        guard !replacing else { throw BridgeError.busy(runningOperation: "collection replacement") }
+        if let meguriConnectionOwner { return meguriConnectionOwner }
+        guard let provider else { throw BridgeError.unavailable(reason: "Open the local collection first") }
+        let owner = MeguriProviderConnectionOwner(service: provider)
+        meguriConnectionOwner = owner
+        return owner
+    }
+    public func removeMeguriConnection() async -> Bool { await changeProvider(to: .localOnly, removeMeguriCredentials: true) }
+    /// Retry retains the original process's actual handoff ownership. A restart
+    /// only refreshes typed recovery; no persisted drain claim is reconstructed.
+    public func retryProviderAuthority() async {
+        if providerAttachmentPending {
+            guard setupState == .failed, !retryingProviderAttachment, !suspended, !replacing,
+                  providerChangeAllowed(), let retryProviderAttachment else { return }
+            retryingProviderAttachment = true
+            defer { retryingProviderAttachment = false }
+            let expected = generation
+            do { try await retryProviderAttachment(self) }
+            catch { if generation == expected { providerAttachmentFailed(error) } }
+            return
+        }
+        if let destination = providerHandoffDestination {
+            _ = await changeProvider(to: destination)
+        } else if let provider {
+            do {
+                providerState = try await provider.refresh()
+                if providerNeedsAttention { operationFailed = true }
+                else if providerAllowsAccountRead { enqueue(.account(false)) }
+            } catch { providerState = .blocked; operationFailed = true }
+        }
+    }
     private func chooseLocalOnly(stopOnly: Bool) async {
+        if provider != nil {
+            guard providerChangeAllowed() else { connectionFailure = .busy; return }
+            if stopOnly || (preview == nil && recovery == nil) {
+                await changeProvider(to: .localOnly)
+                return
+            }
+        }
         guard !closing, !suspended, !replacing, setupState == .attached,
               initialAdoptionEnabledBefore == nil,
               let backend, let connection = backend.connection else { return }
@@ -776,7 +1010,7 @@ public final class SyncCoordinator {
                 else { try await connection.keepLocalOnly(generation: expected, preview: checkedPreview) }
                 guard !closing, expected == generation, revision == hostRevision else { return }
                 preview = nil; readyPreviewOwner = nil
-                saveEnabled(false)
+                try await saveEnabled(false)
                 receive(.refresh(.cloud))
             } catch {
                 if expected == generation, revision == hostRevision, !closing {
@@ -786,6 +1020,7 @@ public final class SyncCoordinator {
             }
         }
         await ownTask?.value
+        if provider != nil, connectionFailure == nil { await changeProvider(to: .localOnly) }
     }
     public func confirmPublication() async { await confirmConnection(.publication) }
     public func confirmPublication(onConfirmation: @escaping @MainActor (CloudPublicationConfirmation.Result) -> Void,
@@ -864,10 +1099,11 @@ public final class SyncCoordinator {
                       self.backend === backend, backend.connection === connection else { return }
                 if intent != .resume && (closing || suspended || replacing) { return }
                 connectionFailure = nil
+                if let provider { providerState = try await provider.acceptICloudConnection() }
                 // Durable confirmation succeeded. Enable only now; subsequent
                 // status comes from policy. Adoption/publication keep their
                 // recoverable operation if later work fails.
-                saveSettings(.init(enabled: true, paused: settings.paused,
+                try await persistSettings(.init(enabled: true, paused: settings.paused,
                     automatic: settings.automatic, media: settings.media))
                 guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused else { return }
                 if intent == .resume {
@@ -991,6 +1227,7 @@ public final class SyncCoordinator {
                 proofWaits.removeValue(forKey: wait.proof.id); wait.proof.finish(CancellationError())
             }
         }
+        discoveryAccountRead = nil
         ownResumePreparation = nil; ownOwner = nil; ownTask = nil
         retryAccountCompletion()
         if ownWorkRequested, !cancellingConnectionOperation, !closing, !replacing, !suspended, !settings.paused, !awaitingInitialOwnProof, initialOwnDrain == nil { ownWorkRequested = false; resumeConnection() }
@@ -1046,16 +1283,17 @@ public final class SyncCoordinator {
             operationFailed = true
         }
     }
-    private func saveEnabled(_ enabled: Bool) {
-        saveSettings(.init(enabled: enabled, paused: settings.paused,
+    private func saveEnabled(_ enabled: Bool) async throws {
+        try await persistSettings(.init(enabled: enabled, paused: settings.paused,
             automatic: settings.automatic, media: settings.media))
     }
-    private func restoreInitialAdoptionEnabled() {
+    private func restoreInitialAdoptionEnabled() async {
         guard let earlier = initialAdoptionEnabledBefore else { return }
         initialAdoptionEnabledBefore = nil
         initialOwnResumeRead = nil
         awaitingInitialOwnProof = false
-        saveEnabled(earlier)
+        do { try await saveEnabled(earlier) }
+        catch { providerState = .blocked; operationFailed = true }
     }
     private func reconcileInitialAdoption(_ original: any SyncCoordinatorBackend) async {
         guard initialAdoptionEnabledBefore != nil else { return }
@@ -1078,7 +1316,7 @@ public final class SyncCoordinator {
             let usable = try await policy.status().controls.bindingUsable
             guard expected == generation, revision == hostRevision else { return }
             if usable == true { initialAdoptionEnabledBefore = nil; initialActivationReturned = false }
-            else if usable == false { restoreInitialAdoptionEnabled() }
+            else if usable == false { await restoreInitialAdoptionEnabled() }
         } catch { /* Unknown authority preserves the accepted operation's setting. */ }
     }
     private func willActivateInitialAdoption(generation expected: UInt64, revision: UInt64) throws {
@@ -1538,6 +1776,11 @@ public final class SyncCoordinator {
             #if DEBUG
             observeCausalBoundary?(.accountAccepted(read: read, verified: result.accountVerified, succeeded: result.error == nil), nil)
             #endif
+            if discoveryAccountRead?.read == read, ownResumePreparation != nil,
+               expected == generation, revision == hostRevision, backend === original,
+               !closing, !suspended, !replacing {
+                discoveryAccountRead?.result = result
+            }
             if result.error == nil {
                 await reduce(.ownAccountProof(read, generation: expected, revision: revision, verified: result.accountVerified))
             }
@@ -1554,6 +1797,28 @@ public final class SyncCoordinator {
             #if DEBUG
             observeCausalBoundary?(.proofAcknowledgementSending, nil)
             #endif
+            acknowledged.resume(returning: true)
+        case .discoveryPrepared(let preparation, let original, let expected, let revision, let acknowledged):
+            guard !closing, !suspended, !replacing, !settings.paused, ownTask?.isCancelled == false,
+                  expected == generation, revision == hostRevision, backend === original,
+                  ownResumePreparation?.owner == ownOwner, ownResumePreparation?.token === preparation else {
+                acknowledged.resume(throwing: CancellationError()); return
+            }
+            let queuedResult = inputQueue.contains { if case .result = $0 { return true }; return false }
+            guard operationTasks.isEmpty, accountTask == nil, pendingAccountRead == nil, !queuedResult else {
+                acknowledged.resume(returning: false); return
+            }
+            guard let result = discoveryAccountRead?.result else {
+                acknowledged.resume(throwing: BridgeError.unavailable(reason: "Cloud account proof unavailable")); return
+            }
+            if let error = result.error { acknowledged.resume(throwing: error); return }
+            guard result.accountVerified else {
+                acknowledged.resume(throwing: BridgeError.unavailable(reason: "Cloud account proof unavailable")); return
+            }
+            // Revoke the pre-work account admission on its ordered lane.
+            // Preview uses Core's real resulting account/collection guards.
+            discoveryAccountRead = nil
+            ownResumePreparation = nil
             acknowledged.resume(returning: true)
         case .resumeBinding(let handle, let preparation, let service, let expected, let revision, let acknowledged):
             guard !closing, !suspended, !replacing, !settings.paused, ownTask?.isCancelled == false,
@@ -1633,6 +1898,7 @@ public final class SyncCoordinator {
             retainedRecoveryStart = nil
             hasDeferredNativeWork = false
             hostRevision &+= 1
+            providerSettingsRevision &+= 1
             // Local collection generations still advance without an iCloud
             // installation. Only successful platform preparation admits an owner.
             guard platformPrepared, retainedHostAdmitted else { return }
@@ -1702,6 +1968,7 @@ public final class SyncCoordinator {
                 operationFailed = true
             }
         case .account(let transition):
+            guard providerAllowsAccountRead else { return }
             guard !closing, !replacing, !suspended, let backend else { return }
             if transition, initialAdoptionActive, !activatingInitialAdoption {
                 awaitingInitialOwnProof = true
@@ -1712,6 +1979,9 @@ public final class SyncCoordinator {
                 // before awaiting any network resolution. A later signal makes
                 // an earlier in-flight reply stale immediately.
                 pendingAccountRead = try await backend.beginAccountRead(transition: transition)
+                if discoveryAccountRead != nil, ownResumePreparation != nil {
+                    discoveryAccountRead = (pendingAccountRead, nil)
+                }
                 // These are real Core-issued generations on the existing lane.
                 // A later app observation supersedes a proof waiter too.
                 for key in Array(proofWaits.keys) where proofWaits[key]?.proof.isPending == true {
@@ -1723,6 +1993,9 @@ public final class SyncCoordinator {
                 #if DEBUG
                 DebugCloudDiagnostics.record(.beginAccountRead, error: error)
                 #endif
+                if discoveryAccountRead != nil, ownResumePreparation != nil {
+                    discoveryAccountRead = (nil, .init(outputs: [], error: error, deferred: false))
+                }
                 operationFailed = true
                 for wait in proofWaits.values { wait.proof.finish(error) }
                 proofWaits.removeAll()
@@ -2010,6 +2283,8 @@ public final class SyncCoordinator {
         if activatingInitialAdoption { await ownTask?.value }
         else { ownTask?.cancel() }
         do {
+            await providerSettingsTask?.value
+            await meguriConnectionOwner?.cancelAndDrain()
             try await backend?.quiesce()
             await accountTask?.value
             await ownTask?.value
@@ -2017,6 +2292,9 @@ public final class SyncCoordinator {
             try await backend?.close()
             backendRetired = true
             backend = nil
+            provider = nil; providerDiscovery = nil; meguriConnectionOwner = nil
+            providerHandoff = nil; providerHandoffDestination = nil
+            readyPreviewOwner = nil
             while !closing {
                 // generation/revision retain the newest event's successor intent
                 // while this task is joining or awaiting the original factory.
@@ -2048,6 +2326,12 @@ public final class SyncCoordinator {
                     continue
                 }
                 setupState = .attached
+                try await attachProvider(to: successor)
+                guard !closing, expected == generation, revision == hostRevision else {
+                    try await successor.close()
+                    backend = nil
+                    continue
+                }
                 replacing = false
                 attachRetainedRecovery(retained, backend: successor, generation: expected, revision: revision)
                 enqueue(.policy(.settings(settings)))
@@ -2124,6 +2408,7 @@ public final class SyncCoordinator {
         await waitForInputs()
     }
     func waitForInputs() async {
+        await providerSettingsTask?.value
         await withCheckedContinuation { enqueue(.barrier($0)) }
     }
     // Internal so real-command fixtures can join execution and result ACKs.
@@ -2200,6 +2485,8 @@ public final class SyncCoordinator {
         retainedRecoveryStart = nil
         initialOwnAdmission.setOpen(false)
         let task = Task { () -> Bool in
+            await providerSettingsTask?.value
+            await meguriConnectionOwner?.cancelAndDrain()
             await attachmentTask?.value
             await replacementTask?.value
             await initialOwnDrain?.value
@@ -2238,6 +2525,7 @@ public final class SyncCoordinator {
                 try await backend?.close()
                 backendRetired = true
                 backend = nil; suspended = false; awaitingResumeProof = false; networkMonitor = nil; status = nil; preview = nil; recovery = nil
+                providerDiscovery = nil
                 desiredVisibleMedia = nil; deliveredVisibleMedia = nil
                 hasDeferredNativeWork = false
                 hostRevision &+= 1; drained = true; retainedHostAdmitted = false

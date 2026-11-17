@@ -320,7 +320,7 @@ impl Runtime {
         };
         check_requested_action(&retained.work, retained.requested)?;
         let work = retained.work;
-        self.validate_cloud_media_work(collection, &work)?;
+        self.validate_cloud_media_completion(sdk, collection, request_id, &work)?;
         if let Request::Delete { name } = &work.request {
             if !saved.is_empty()
                 || !blob_conflicts.is_empty()
@@ -404,7 +404,7 @@ impl Runtime {
         }
         if let Some(record) = saved.first().or_else(|| blob_conflicts.first()) {
             meguri_model::faultpoint!("cloud.media.after_blob_save").map_err(Error::from)?;
-            self.cloud_media_reply(
+            self.complete_cloud_media_reply(
                 collection,
                 &self.media_service(collection)?,
                 &work,
@@ -412,6 +412,7 @@ impl Runtime {
                     name: record.name.clone(),
                     envelope: record.envelope.clone(),
                 },
+                || self.validate_cloud_media_completion(sdk, collection, request_id, &work),
             )?;
             // Commit removal of the ledger reference before releasing this
             // original SDK file. Stale replies retain ownership for recovery.

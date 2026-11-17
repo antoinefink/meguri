@@ -136,6 +136,12 @@ impl Runtime {
         }
     }
     fn media_authority(&self, collection: &Collection, verified: bool) -> Result<Authority, RuntimeError> {
+        Self::provider_admission_locked(&self.state())?;
+        self.media_authority_for_completion(collection, verified)
+    }
+    // Existing admitted work still rechecks its exact incarnation/file/account.
+    // Closing NEW provider admission does not rewrite an original SDK outcome.
+    fn media_authority_for_completion(&self, collection: &Collection, verified: bool) -> Result<Authority, RuntimeError> {
         let evidence = collection.open_evidence()?;
         let file = self.inputs.files.identity(collection.path())?;
         let s = self.state();
@@ -229,7 +235,7 @@ impl Runtime {
     }
     fn validate_media_recovery_file(&self, collection: &Collection, a: &MediaRecoveryAuthority) -> Result<(), RuntimeError> {
         let current = if a.1.is_some() { self.transition_media_authority(collection)? }
-            else { MediaRecoveryAuthority(self.media_authority(collection, true)?, None) };
+            else { MediaRecoveryAuthority(self.media_authority_for_completion(collection, true)?, None) };
         if current.0 != a.0 || current.1 != a.1 { return Err(RuntimeError::StaleIncarnation); }
         Ok(())
     }
@@ -390,7 +396,7 @@ impl Runtime {
         a: &Authority,
         work: impl FnOnce() -> Result<T, RuntimeError>,
     ) -> Result<T, RuntimeError> {
-        let mut current = self.media_authority(collection, true)?;
+        let mut current = self.media_authority_for_completion(collection, true)?;
         if Self::retained_upload_authority(&self.state(), a) {
             current.media_epoch = a.media_epoch;
         }
@@ -1185,6 +1191,20 @@ impl Runtime {
         work: &Work,
         reply: Reply,
     ) -> Result<(), RuntimeError> {
+        self.complete_cloud_media_reply(collection, media, work, reply, || {
+            self.validate_cloud_media_work(collection, work)
+        })
+    }
+    // Only public admitted replies or the exact retained SDK terminal callback
+    // may enter here. A transport Saved result alone grants no admission.
+    fn complete_cloud_media_reply(
+        &self,
+        collection: &Collection,
+        media: &MediaService,
+        work: &Work,
+        reply: Reply,
+        validate: impl FnOnce() -> Result<(), RuntimeError>,
+    ) -> Result<(), RuntimeError> {
         #[cfg(feature = "test-hooks")]
         let request_label = match &work.request {
             Request::Delete { .. } => "Delete",
@@ -1213,7 +1233,7 @@ impl Runtime {
                 self.incoming_hooks
                     .hit(crate::cloud::testing::IncomingStage::MediaReplyBeforeApply);
             }
-            self.validate_cloud_media_work(collection, work)?;
+            validate()?;
             #[cfg(feature = "test-hooks")]
             {
                 stage = "account_validation";
@@ -1225,7 +1245,7 @@ impl Runtime {
             {
                 stage = "authority_snapshot";
             }
-            let mut current_authority = self.media_authority(collection, true)?;
+            let mut current_authority = self.media_authority_for_completion(collection, true)?;
             if matches!(work.request, Request::Upload { .. }) {
                 current_authority.media_epoch = a.media_epoch;
             }
@@ -2745,7 +2765,34 @@ impl Runtime {
         Ok(blocked && !allowed)
     }
     pub fn validate_cloud_media_work(&self, collection: &Collection, work: &Work) -> Result<(), RuntimeError> {
-        let mut current = self.media_authority(collection, true)?;
+        let current = self.media_authority(collection, true)?;
+        self.validate_cloud_media_work_authority(work, current)
+    }
+    // Completion is private to the SDK bridge, which must still own this exact
+    // batch and be inside its original sent handler. It cannot admit a new send
+    // or turn a download result into permission to install media after handoff.
+    fn validate_cloud_media_completion(
+        &self,
+        sdk: &str,
+        collection: &Collection,
+        request_id: u64,
+        work: &Work,
+    ) -> Result<(), RuntimeError> {
+        {
+            let s = self.state();
+            Self::sdk_locked(&s, sdk)?;
+            if !matches!(work.request, Request::Upload { .. } | Request::Delete { .. })
+                || s.actions.handler != Some(request_id)
+                || !s.actions.media_batches.get(&(sdk.to_owned(), request_id))
+                    .is_some_and(|original| &original.work == work)
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+        }
+        let current = self.media_authority_for_completion(collection, true)?;
+        self.validate_cloud_media_work_authority(work, current)
+    }
+    fn validate_cloud_media_work_authority(&self, work: &Work, mut current: Authority) -> Result<(), RuntimeError> {
         if matches!(work.request, Request::Upload { .. } | Request::Delete { .. }) {
             current.media_epoch = work.authority.media_epoch;
         }

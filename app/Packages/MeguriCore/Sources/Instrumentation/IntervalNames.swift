@@ -150,6 +150,20 @@ public struct IntervalName: Sendable, Hashable, CustomStringConvertible {
 /// A call into the core: CoreBridge's lanes signpost each one under its
 /// name in the CoreBridge category (R1861, KTD9). The name is the export's.
 public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
+    public static let migrateProvider = BridgeCall("migrate_provider")
+    public static let providerOwner = BridgeCall("provider_owner")
+    public static let providerSnapshot = BridgeCall("ProviderOwner.snapshot")
+    public static let providerRefresh = BridgeCall("ProviderOwner.refresh")
+    public static let providerSaveSettings = BridgeCall("ProviderOwner.save_settings")
+    public static let providerBeginDiscovery = BridgeCall("ProviderOwner.begin_icloud_discovery")
+    public static let providerAcceptICloud = BridgeCall("ProviderOwner.accept_icloud_connection")
+    public static let providerBeginHandoff = BridgeCall("ProviderOwner.begin_handoff")
+    public static let providerFinishHandoff = BridgeCall("ProviderOwner.finish_handoff")
+    public static let providerConfigureMeguri = BridgeCall("ProviderOwner.configure_meguri")
+    public static let providerConfiguredMeguri = BridgeCall("ProviderOwner.configured_meguri")
+    public static let providerConnectionInformation = BridgeCall("ProviderConnection.information")
+    public static let providerStartLogin = BridgeCall("ProviderConnection.start_login")
+    public static let providerLoginResult = BridgeCall("ProviderLoginResult.result")
     public let interval: IntervalName
 
     init(_ name: StaticString) {
@@ -569,6 +583,9 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     /// Every bridge call, in registry order.
     public static let all: [BridgeCall] = [
+        migrateProvider, providerOwner, providerSnapshot, providerRefresh, providerSaveSettings,
+        providerBeginDiscovery, providerAcceptICloud, providerBeginHandoff, providerFinishHandoff,
+        providerConfigureMeguri, providerConfiguredMeguri, providerConnectionInformation, providerStartLogin, providerLoginResult,
         testCloudZoneDeletionFixture, testCloudZoneDeletionRows,
         cloudPolicyExecutionBeginCleanupPass, cloudCleanupPassSubmitInventory, cloudCleanupPassCompleteInventory, cloudCleanupPassFinish,
         cloudPolicyExecutionBeginZoneDeletionPass, cloudZoneDeletionPassActiveTarget, cloudZoneDeletionPassSubmitRead, cloudZoneDeletionPassCompleteRead, cloudZoneDeletionPassSubmitDeletion, cloudZoneDeletionPassCompleteDeletion, cloudZoneDeletionPassFinish,

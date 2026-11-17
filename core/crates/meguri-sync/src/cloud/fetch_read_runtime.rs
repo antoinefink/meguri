@@ -32,6 +32,7 @@ impl Runtime {
         self.sync_now_epoch_read_owned(&request, collection)
     }
     pub fn admit_sync_now(&self, sdk: &str, collection: &Collection) -> Result<SyncNowRequest, RuntimeError> {
+        Self::provider_admission_locked(&self.state())?;
         if self.active_review().is_some() {
             return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
         }

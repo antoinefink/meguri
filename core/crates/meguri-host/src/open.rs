@@ -248,6 +248,7 @@ impl Drop for RestoreCloseState<'_> {
 mod cloud_adoption;
 
 pub struct CoreHost {
+    pub(crate) provider: Arc<meguri_sync::provider::Authority>,
     pub(crate) cloud_policy: Option<meguri_sync::cloud::policy::Driver>,
     cloud: Option<Arc<meguri_sync::cloud::runtime::Runtime>>,
     pub(crate) manual_transfers: meguri_sync::oneway::ManualTransfers,
@@ -297,6 +298,9 @@ impl CoreHost {
     pub(crate) fn media_space_provider(&self) -> &dyn meguri_storage::space::SpaceProvider {
         self.backup_inputs.space.as_ref()
     }
+    pub(crate) fn provider_random(&self) -> &dyn meguri_model::rng::RandomSource {
+        self.backup_inputs.random.as_ref()
+    }
 
     pub fn open(config: HostConfig) -> Result<Self, EngineError> {
         ProcessCore::new(config.engine.clone())?.open(config)
@@ -314,15 +318,29 @@ impl CoreHost {
             return Err(error);
         }
         host.set_close_state(CloseState::Active);
+        host.refresh_provider_admission();
         Ok(host)
     }
 
     fn compose_on(
         process: &ProcessCore,
-        config: HostConfig,
+        mut config: HostConfig,
     ) -> Result<(Self, CollectionPaths, OpenConfig), EngineError> {
         wiring::validate()?;
         let paths = CollectionPaths::new(&config.collection_directory, &config.backups_directory)?;
+        // A failed migration/load is retained as blocked network admission. It
+        // must not prevent local collection open or repair.
+        let _ = meguri_sync::provider::Authority::migrate(&config.manual_transfer_directory, None);
+        let provider = meguri_sync::provider::Authority::load(&config.manual_transfer_directory);
+        if !meguri_sync::policy::TransferPolicy::new(&config.manual_transfer_directory)
+            .active().is_ok_and(|active| active.is_none()) {
+            provider.close_admission();
+        }
+        if let Some(inputs) = config.cloud.as_mut() {
+            inputs.identity = Arc::new(crate::provider::AdmittedIdentity {
+                original: inputs.identity.clone(), authority: provider.clone(),
+            });
+        }
         let engine = process.engine.clone();
         let cloud = config.cloud.clone().map(|inputs| {
             Arc::new(meguri_sync::cloud::runtime::Runtime::new(
@@ -335,6 +353,7 @@ impl CoreHost {
         let queues = process.queues.clone();
         let review = process.review.clone();
         if let Some(cloud) = &cloud {
+            cloud.attach_provider_authority(provider.clone());
             cloud.attach_sources(config.random.clone(), Arc::downgrade(&review));
             cloud.attach_adapter_clock(config.clock.clone());
             if let Some(keys) = &config.cloud_key_bytes {
@@ -434,6 +453,7 @@ impl CoreHost {
             .as_ref()
             .map(|runtime| meguri_sync::cloud::policy::Driver::new(runtime.clone(), config.clock.clone()));
         let host = Self {
+            provider,
             cloud_policy,
             cloud,
             manual_transfers,
@@ -493,6 +513,7 @@ impl CoreHost {
             .cloud
             .as_ref()
             .ok_or(meguri_sync::cloud::runtime::RuntimeError::IdentityUnverified)?;
+        runtime.require_provider_collection_admission()?;
         runtime.drain_incoming(&self.collection()?, timeout)
     }
     /// Reach one bounded native apply, moving past parked work without receiving again.

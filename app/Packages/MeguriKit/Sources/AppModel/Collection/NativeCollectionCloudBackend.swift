@@ -28,6 +28,8 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
     let own: CloudOwnExecutor?
     private let workflow: CoreCloudWorkflowService
     private let policy: CoreCloudPolicyService
+    private let provider: CoreProviderService
+    var providerService: CoreProviderService? { provider }
     private let accounts: CloudAppAccountReader
     private let adapter: CloudKitSyncAdapter
     private let executor: NativeCloudPolicyExecutor
@@ -46,11 +48,11 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
     }
     private(set) var shutdownTrace = ShutdownTrace()
 
-    private init(workflow: CoreCloudWorkflowService, policy: CoreCloudPolicyService,
+    private init(workflow: CoreCloudWorkflowService, policy: CoreCloudPolicyService, provider: CoreProviderService,
                  connection: CoreCloudConnectionService, own: CloudOwnExecutor,
                  factory: any CloudKitEngineFactory, adapter: CloudKitSyncAdapter,
                  executor: NativeCloudPolicyExecutor) {
-        self.workflow = workflow; self.policy = policy; self.connection = connection; self.own = own
+        self.workflow = workflow; self.policy = policy; self.provider = provider; self.connection = connection; self.own = own
         self.accounts = CloudAppAccountReader(workflow: workflow, policy: policy, factory: factory, adapter: adapter)
         self.adapter = adapter; self.executor = executor
     }
@@ -80,6 +82,8 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
                      observeOwn: (@Sendable (CloudOwnObservation) -> Void)? = nil,
                      observeExchangeCapture: (@Sendable (CloudPolicyCommand, UInt64) async -> Void)? = nil) async throws -> NativeCollectionCloudBackend {
         let policy = try await workflow.policy()
+        let provider = try await CoreProviderService.attached()
+        try await policy.validateOriginalOwner()
         let connection = try await workflow.connection()
         let media = try await workflow.media()
         let adapter = CloudKitSyncAdapter(core: workflow, engineFactory: factory,
@@ -92,7 +96,7 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
             observeExchangeCapture: observeExchangeCapture)
         let own = CloudOwnExecutor(core: connection, transport: ownTransport, observe: observeOwn,
             freshAccountRead: { try await adapter.refreshControlIdentity() })
-        return NativeCollectionCloudBackend(workflow: workflow, policy: policy, connection: connection,
+        return NativeCollectionCloudBackend(workflow: workflow, policy: policy, provider: provider, connection: connection,
             own: own, factory: factory, adapter: adapter, executor: executor)
     }
 
@@ -188,13 +192,15 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
                 diagnosticBoundary = .accountProjectionStatus
                 #endif
                 let status: CloudPolicyStatus = try await policy.status()
-                if status.controls.bindingUsable == true {
+                let providerState = try await provider.refresh()
+                if status.controls.bindingUsable == true && providerState.phase == .iCloud {
                     // Reconcile the current verified Host before policy can issue
                     // StartEngine. Core settles queued inbox work before its scan.
                     #if DEBUG
                     diagnosticBoundary = .accountProjectionPrepare
                     #endif
                     try await workflow.prepareRuntimeBeforePolicy()
+                    _ = try await provider.refresh()
                     #if DEBUG
                     diagnosticBoundary = .accountProjectionRefresh
                     #endif

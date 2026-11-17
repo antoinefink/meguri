@@ -241,6 +241,7 @@ impl CoreHost {
         + 'static,
         terminal: impl FnOnce(&T) -> Result<(), EngineError> + Send + 'static,
     ) -> Result<ManualTransferTask<T>, EngineError> {
+        if kind.is_some() { self.provider_authority().close_admission(); }
         let service = self.manual_transfers.clone();
         let result = Arc::new(Mutex::new(None));
         let output = result.clone();

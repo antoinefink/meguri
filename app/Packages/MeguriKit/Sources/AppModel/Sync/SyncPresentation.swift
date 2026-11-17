@@ -65,6 +65,9 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
 }
 
 public struct SyncStatusPresentation {
+    public static func providerNeedsAttention(_ state: SyncProviderState?) -> Bool {
+        state?.phase == .blocked || state?.phase == .handoffRecovery
+    }
     public static func showsRecoveryResume(_ recovery: CloudRecoveryStatus) -> Bool {
         if recovery.adoptionRecoveredCancelOnly || recovery.adoptionAfterReview { return false }
         switch recovery.step {

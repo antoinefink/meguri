@@ -41,6 +41,7 @@ pub mod notetypes;
 #[cfg(feature = "test-hooks")]
 pub mod physical_review_rows;
 pub mod progress;
+pub mod provider;
 pub mod render;
 pub mod review_session;
 mod runtime;

@@ -5,6 +5,8 @@ mod cloud_media;
 mod cloud_policy;
 mod collection_export;
 mod manual_transfers;
+mod provider;
+pub use provider::ProviderHandoff;
 pub use manual_transfers::ManualTransferTask;
 mod config;
 pub use collection_export::{

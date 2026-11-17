@@ -67,6 +67,7 @@ impl Runtime {
         automatic: bool,
         work: &mut PolicyWork,
     ) -> Result<(String, Option<Vec<u8>>, String), RuntimeError> {
+        Self::provider_admission_locked(s)?;
         if s.adapter.sdk.is_some() {
             return Err(Error::InvalidData.into());
         }
@@ -185,6 +186,7 @@ impl Runtime {
     /// independent of P6 so an Unknown or unequal owner can still fetch.
     pub fn validate_prepared_batch(&self, sdk: &str, zone: &str, batch: u64) -> Result<(), RuntimeError> {
         let s = self.state();
+        Self::provider_admission_locked(&s)?;
         Self::sdk_locked(&s, sdk)?;
         Self::gate_locked(&s)?;
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
@@ -928,6 +930,7 @@ impl Runtime {
         work: &mut PolicyWork,
     ) -> Result<u64, RuntimeError> {
         let mut s = self.state();
+        Self::provider_admission_locked(&s)?;
         work.check()?;
         Self::sdk_locked(&s, sdk)?;
         if s.adapter.fetch.is_some() {
@@ -1887,6 +1890,9 @@ impl Runtime {
         let _ = self.adapter_now();
         let no_collection = self.state().store.is_none();
         self.with_identity_read_state(no_collection, |s| {
+            if s.provider.as_ref().is_some_and(|provider| !provider.permits_icloud_account_read()) {
+                return Err(RuntimeError::IdentityUnverified);
+            }
             if let Some(sdk) = origin_sdk {
                 Self::sdk_locked(s, sdk)?;
             }

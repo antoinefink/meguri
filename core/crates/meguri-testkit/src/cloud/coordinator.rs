@@ -30,6 +30,10 @@ pub fn store_older_active(
         }
     }
     let mut config = options(&files.directory, 1_735_689_600_000, files.seed);
+    config.manual_transfer_directory = files.directory.join("synthetic-provider-installation");
+    meguri_host::CoreHost::migrate_provider_configuration(&config.manual_transfer_directory, meguri_sync::provider::LegacyInput::Settings(
+        meguri_sync::provider::LegacySettings { enabled: true, paused: false, automatic: false, media: true }
+    ))?;
     config.cloud = Some(CloudInputs {
         scope: files.binding.scope.clone(),
         identity: Arc::new(Account(files.scope.account.clone())),
@@ -44,6 +48,7 @@ pub fn store_older_active(
     runtime
         .reconcile_binding(&collection, &media, std::time::Duration::from_secs(30))
         .map_err(|_| failure())?;
+    host.refresh_provider_admission();
     let (sdk, _, _) = runtime.register_sdk(false).map_err(|_| failure())?;
     let response = service.request(
         &files.scope,

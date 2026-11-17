@@ -516,6 +516,7 @@ impl Bound {
 }
 #[derive(Default)]
 struct State {
+    provider: Option<Arc<crate::provider::Authority>>,
     native_authority: Arc<Mutex<NativeAuthority>>,
     incarnation: u64,
     invalidation: u64,
@@ -564,6 +565,7 @@ struct State {
 // tracking state and is never acquired while reading a provider or store.
 #[derive(Clone, Default)]
 pub(crate) struct NativeAuthority {
+    provider: Option<(Arc<crate::provider::Authority>, Binding)>,
     pub(crate) guard: super::adapter::Guard,
     pub(crate) instance: Option<String>,
     sdk: Option<super::adapter::SDKAuthority>,
@@ -577,6 +579,7 @@ pub(crate) struct NativeAuthority {
 impl NativeAuthority {
     fn from_state(s: &State) -> Self {
         Self {
+            provider: s.provider.as_ref().and_then(|p| s.bound.as_ref().map(|b| (p.clone(), b.binding.clone()))),
             guard: Runtime::adapter_guard_locked(s),
             instance: Runtime::instance_locked(s).ok(),
             sdk: s.adapter.sdk.clone(),
@@ -592,6 +595,9 @@ impl NativeAuthority {
         }
     }
     fn caller(&self, instance: &str) -> Result<(), RuntimeError> {
+        if self.provider.as_ref().is_some_and(|(p, b)| !p.permits_icloud_binding(b)) {
+            return Err(RuntimeError::IdentityUnverified);
+        }
         let host = self.instance.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if !self.sdk_matches(instance) && host != instance {
             return Err(RuntimeError::StaleIncarnation);
@@ -765,6 +771,74 @@ struct ScanPause {
 }
 
 impl Runtime {
+    /// Host-only composition. Standalone protocol Runtime callers retain their
+    /// existing low-level contract; every production Host installs authority.
+    pub fn attach_provider_authority(&self, provider: Arc<crate::provider::Authority>) {
+        self.state().provider = Some(provider);
+    }
+    pub fn qualify_provider_binding(&self) -> Result<(), RuntimeError> {
+        let (provider, binding) = {
+            let state = self.state();
+            (state.provider.clone(), state.bound.as_ref().map(|b| b.binding.clone()))
+        };
+        let Some(provider) = provider else { return Ok(()); };
+        let publication = meguri_engine::device_state::DeviceState::for_collection(
+            &self.directory.join("collection.anki2")).settled_publication()?;
+        if let (Some(binding), Some(publication)) = (binding, publication)
+            && binding.facts.state == BindingState::Active
+            && publication.decision == meguri_engine::device_state::PublicationDecision::Clear
+            && publication.identity == binding.facts.publication {
+            provider.qualify_legacy(&binding, &publication)?;
+            provider.validate_current_binding(&binding, &publication);
+        }
+        Ok(())
+    }
+    fn provider_admission_locked(state: &State) -> Result<(), RuntimeError> {
+        if let Some(provider) = &state.provider {
+            let binding = &state.bound.as_ref().ok_or(RuntimeError::IdentityUnverified)?.binding;
+            if !provider.permits_icloud_binding(binding) { return Err(RuntimeError::IdentityUnverified); }
+        }
+        Ok(())
+    }
+    pub fn provider_accept_icloud_connection(&self) -> Result<(), RuntimeError> {
+        let provider = {
+            let state = self.state();
+            let accepted = with_tracking_access(|| -> Result<bool, RuntimeError> {
+                let Some(store) = state.store.as_ref() else { return Ok(false); };
+                Ok(store.publication_op()?.is_some() || store.adoption_op()?.is_some()
+                    || state.bound.as_ref().is_some_and(|b| b.verified && b.usable && b.binding.facts.state == BindingState::Active))
+            })?;
+            if !accepted { return Err(RuntimeError::IdentityUnverified); }
+            state.provider.clone()
+        };
+        if let Some(provider) = provider { provider.accept_icloud_setup()?; }
+        self.qualify_provider_binding()
+    }
+    pub fn provider_transition_available(&self) -> Result<(), RuntimeError> {
+        let state = self.state();
+        with_tracking_access(|| -> Result<(), RuntimeError> {
+            if let Some(store) = state.store.as_ref()
+                && (store.publication_op()?.is_some() || store.adoption_op()?.is_some()) {
+                return Err(super::publication::PublicationError::Busy.into());
+            }
+            Ok(())
+        })
+    }
+    /// Additional Core exclusions, after the app joined its original owners.
+    /// These observations alone are never a native drain certificate.
+    pub fn provider_after_native_join(&self) -> Result<(), RuntimeError> {
+        self.provider_transition_available()?;
+        let mut state = self.state();
+        if state.adapter.sdk.is_some() || state.adapter.identity_read.is_some() || state.incoming.running {
+            return Err(super::publication::PublicationError::Busy.into());
+        }
+        Self::invalidate_authority_locked(&mut state);
+        state.publication.preview = None; state.publication.resume = None;
+        Ok(())
+    }
+    pub fn require_provider_collection_admission(&self) -> Result<(), RuntimeError> {
+        Self::provider_admission_locked(&self.state())
+    }
     /// Construction performs no account/provider call. Tracking opens under
     /// its serialization gate in the pre-admission OpenStep.
     pub fn new(directory: PathBuf, inputs: CloudInputs) -> Self {
