@@ -1,5 +1,7 @@
 import Foundation
 import Testing
+import Instrumentation
+import Synchronization
 @testable import CoreBridge
 
 @Suite struct MeguriProviderCredentialTests {
@@ -424,6 +426,96 @@ extension EventTests {
                 #expect(await store.value == nil)
                 #expect(await reply.authentications.isEmpty)
             } catch { await releaseProviderTasks([read], [loading]); throw error }
+        }
+    }
+}
+
+
+extension EventTests {
+    @Test @MainActor func ProviderBootstrapAuthenticationAndFactoryNeverTransfer() async throws {
+        try await withProviderOwnerCollection { core in
+            let reply = ProviderAuthenticationReply(core)
+            let store = FailingProviderStore("")
+            let owner = MeguriProviderConnectionOwner(service: reply, store: store)
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ call in calls.withLock { $0.append(call) } }) {
+                try await owner.configure(endpoint: "https://bootstrap.synthetic.example/")
+                let signedOut = try await owner.bootstrapService()
+                try await owner.load()
+                await #expect(throws: MeguriBootstrapAdmissionFailure.retired) { _ = try await signedOut.readiness() }
+                let beforeLogin = try await owner.bootstrapService()
+                try await owner.signIn(username: "synthetic.user", password: "synthetic-password")
+                await #expect(throws: MeguriBootstrapAdmissionFailure.retired) { _ = try await beforeLogin.prepare(.useDeviceCollection) }
+                let afterLogin = try await owner.bootstrapService()
+                #expect(afterLogin !== beforeLogin)
+                #expect(await owner.phase == .setupRequired)
+                #expect(await reply.authentications == 1)
+                guard case .notSelected = try await afterLogin.readiness() else { Issue.record("Authentication granted bootstrap readiness"); return }
+                let forbidden: Set<BridgeCall> = [.providerBootstrapPrepare, .providerBootstrapConfirm,
+                    .providerBootstrapMediaPrepare, .providerBootstrapMedia, .providerBootstrapComplete]
+                #expect(calls.withLock { Set($0).isDisjoint(with: forbidden) })
+                await owner.cancelAndDrain()
+            }
+        }
+    }
+
+    @Test @MainActor func ProviderBootstrapCredentialReadFailureStaysActionable() async throws {
+        try await withProviderOwnerCollection { core in
+            let reply = ProviderAuthenticationReply(core)
+            let store = FailingProviderStore("")
+            let owner = MeguriProviderConnectionOwner(service: reply, store: store)
+            try await owner.configure(endpoint: "https://bootstrap.synthetic.example/")
+            try await owner.signIn(username: "synthetic.user", password: "synthetic-password")
+            let facade = try await owner.bootstrapService()
+            await store.setFailure("load")
+            let calls = Mutex<[BridgeCall]>([])
+            await MaintenanceCallObservation.$capture.withValue({ call in calls.withLock { $0.append(call) } }) {
+                await #expect(throws: FailingProviderStore.Failure.self) { _ = try await facade.prepare(.useServerCollection) }
+            }
+            #expect(!calls.withLock { $0.contains(.providerBootstrapPrepare) })
+            #expect(await store.value != nil)
+            await owner.cancelAndDrain()
+        }
+    }
+
+    @Test @MainActor func ProviderBootstrapSignInDrainsHeldReadBeforeAuthenticating() async throws {
+        try await withProviderOwnerCollection { core in
+            let read = CloudCallbackGate()
+            let reply = ProviderAuthenticationReply(core)
+            let store = HeldProviderReadStore()
+            let owner = MeguriProviderConnectionOwner(service: reply, store: store)
+            try await owner.configure(endpoint: "https://bootstrap.synthetic.example/")
+            try await owner.signIn(username: "synthetic.user", password: "synthetic-password")
+            let original = try #require(await store.value)
+            let facade = try await owner.bootstrapService()
+            await store.holdRead(at: read, fails: false)
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ call in calls.withLock { $0.append(call) } }) {
+                let preparing = Task { _ = try await facade.prepare(.useServerCollection) }
+                var signingIn: Task<Void, any Error>?
+                do {
+                    try await awaitProviderGate(read)
+                    let base = await owner.revision
+                    let login = Task { try await owner.signIn(username: "synthetic.user", password: "synthetic-password") }
+                    signingIn = login
+                    try await awaitProviderCondition { await owner.revision == base + 1 }
+                    #expect(await reply.authentications == 1)
+                    #expect(await store.value == original)
+                    await read.open()
+                    await #expect(throws: MeguriBootstrapAdmissionFailure.retired) { try await preparing.value }
+                    try await login.value
+                    #expect(await reply.authentications == 2)
+                    #expect(!calls.withLock { $0.contains(.providerBootstrapPrepare) })
+                    await #expect(throws: MeguriBootstrapAdmissionFailure.retired) { _ = try await facade.prepare(.useDeviceCollection) }
+                    let current = try await owner.bootstrapService()
+                    #expect(current !== facade)
+                    await owner.cancelAndDrain()
+                } catch {
+                    await releaseProviderTasks([read], [preparing] + (signingIn.map { [$0] } ?? []))
+                    await owner.cancelAndDrain()
+                    throw error
+                }
+            }
         }
     }
 }

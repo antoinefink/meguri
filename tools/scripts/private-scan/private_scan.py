@@ -828,6 +828,9 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete bounded-content PUBLIC review: Codex r10_native_failure_diagnosis, 2026-11-17.
+    'app/Packages/MeguriCore/Sources/CoreBridge/Sync/ProviderBootstrapService.swift':
+        '71a794a1953a98f606d202049c57ed31eaa26c18a793fb2cdcf564c6aed82d05',
     # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
     'specs/sync/status-strings.md':
         '17c562307d81225ae1c55b0acc9c817d51258d2f25bb93839f61e0e645c72034',

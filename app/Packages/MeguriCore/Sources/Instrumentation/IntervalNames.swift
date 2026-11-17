@@ -166,6 +166,19 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let providerConnectionInformation = BridgeCall("ProviderConnection.information")
     public static let providerStartLogin = BridgeCall("ProviderConnection.start_login")
     public static let providerLoginResult = BridgeCall("ProviderLoginResult.result")
+    public static let providerBootstrapPrepare = BridgeCall("ProviderConnection.start_bootstrap_prepare")
+    public static let providerBootstrapConfirm = BridgeCall("ProviderConnection.start_bootstrap_confirm")
+    public static let providerBootstrapMediaPrepare = BridgeCall("ProviderConnection.start_bootstrap_media_prepare")
+    public static let providerBootstrapMedia = BridgeCall("ProviderConnection.start_bootstrap_media")
+    public static let providerBootstrapComplete = BridgeCall("ProviderConnection.complete_bootstrap")
+    public static let providerBootstrapReadiness = BridgeCall("ProviderConnection.bootstrap_readiness")
+    public static let providerBootstrapPreviewRecord = BridgeCall("ProviderBootstrapPreview.record")
+    public static let providerBootstrapMediaConsentRecord = BridgeCall("ProviderBootstrapMediaConsent.record")
+    public static let providerBootstrapOperationRecord = BridgeCall("ProviderBootstrapOperation.record")
+    public static let providerBootstrapOutcome = BridgeCall("ProviderBootstrapResult.outcome")
+    public static let providerBootstrapMediaSnapshot = BridgeCall("ProviderBootstrapResult.media_snapshot")
+    public static let providerBootstrapRequestStop = BridgeCall("ProviderBootstrapResult.request_stop")
+    public static let providerBootstrapRetainedOperation = BridgeCall("ProviderBootstrapResult.retained_operation")
     public let interval: IntervalName
 
     init(_ name: StaticString) {
@@ -591,6 +604,11 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         providerBeginDiscovery, providerAcceptICloud, providerBeginHandoff, providerFinishHandoff,
         providerRecoverHandoffToLocalOnly, providerRetryFailedPublication,
         providerConfigureMeguri, providerConfiguredMeguri, providerConnectionInformation, providerStartLogin, providerLoginResult,
+        providerBootstrapPrepare, providerBootstrapConfirm, providerBootstrapMediaPrepare,
+        providerBootstrapMedia, providerBootstrapComplete, providerBootstrapReadiness,
+        providerBootstrapPreviewRecord, providerBootstrapMediaConsentRecord, providerBootstrapOperationRecord,
+        providerBootstrapOutcome, providerBootstrapMediaSnapshot, providerBootstrapRequestStop,
+        providerBootstrapRetainedOperation,
         testCloudZoneDeletionFixture, testCloudZoneDeletionRows,
         cloudPolicyExecutionBeginCleanupPass, cloudCleanupPassSubmitInventory, cloudCleanupPassCompleteInventory, cloudCleanupPassFinish,
         cloudPolicyExecutionBeginZoneDeletionPass, cloudZoneDeletionPassActiveTarget, cloudZoneDeletionPassSubmitRead, cloudZoneDeletionPassCompleteRead, cloudZoneDeletionPassSubmitDeletion, cloudZoneDeletionPassCompleteDeletion, cloudZoneDeletionPassFinish,

@@ -170,8 +170,8 @@ public actor CoreProviderService: MeguriProviderConnectionService {
 
 public enum MeguriProviderConnectionPhase: Sendable, Equatable { case unconfigured, signedOut, authenticating, setupRequired, cancelled, blocked }
 public enum MeguriProviderAuthenticationFailure: Error, Sendable { case connectionChanged, username, credentials, redirectRefused, network }
-/// Authentication and secure storage only. Retains the real Core connection
-/// handle across every suspension; endpoint edits join the original attempt.
+/// Owns authentication, secure storage and the optional explicit bootstrap
+/// facade. Endpoint edits join every original owner before replacing authority.
 public actor MeguriProviderConnectionOwner {
     private let service: any MeguriProviderConnectionService
     private let store: any MeguriProviderCredentialStore
@@ -181,6 +181,8 @@ public actor MeguriProviderConnectionOwner {
     // Read-only within the module so bounded owner tests can acknowledge entry
     // before releasing work held across the first suspension.
     private(set) var revision: UInt64 = 0
+    private var bootstrap: (revision: UInt64, facade: MeguriProviderBootstrapService)?
+    private var bootstrapAvailable = false
     private var removing = false
     private var configurationBlocked = false
     public private(set) var phase: MeguriProviderConnectionPhase = .unconfigured
@@ -192,6 +194,43 @@ public actor MeguriProviderConnectionOwner {
     }
     private func requireCurrent(_ expected: UInt64, _ owner: MeguriProviderConnectionOwnership?) throws {
         guard isCurrent(expected, owner), !Task.isCancelled else { throw CancellationError() }
+    }
+    /// Requires an explicit load/configure/sign-in flow. This factory neither
+    /// authenticates nor starts a collection/media command.
+    public func bootstrapService() throws -> MeguriProviderBootstrapService {
+        guard bootstrapAvailable, !configurationBlocked, !removing, attempt == nil, configuration == nil,
+              phase == .signedOut || phase == .setupRequired, let ownership else {
+            throw MeguriBootstrapAdmissionFailure.connectionUnavailable
+        }
+        if let bootstrap {
+            guard bootstrap.revision == revision else { throw MeguriBootstrapAdmissionFailure.connectionUnavailable }
+            return bootstrap.facade
+        }
+        let expected = revision
+        let facade = MeguriProviderBootstrapService(raw: ownership.raw, connection: ownership.connection) { [weak self] in
+            guard let self else { throw MeguriBootstrapAdmissionFailure.retired }
+            return try await self.bootstrapCredentials(expected, ownership)
+        }
+        bootstrap = (expected, facade)
+        return facade
+    }
+    private func bootstrapCredentials(_ expected: UInt64, _ exact: MeguriProviderConnectionOwnership) async throws -> MeguriProviderCredentials {
+        func validate() throws {
+            guard isCurrent(expected, exact), bootstrapAvailable, !configurationBlocked, !removing,
+                  attempt == nil, configuration == nil, phase == .signedOut || phase == .setupRequired else {
+                throw MeguriBootstrapAdmissionFailure.retired
+            }
+        }
+        try validate()
+        let value = try await store.load(connection: exact.connection)
+        try validate()
+        guard let value else { throw MeguriBootstrapAdmissionFailure.credentialsMissing }
+        guard value.connection == exact.connection else { throw MeguriProviderCredentialFailure.wrongConnection }
+        return value
+    }
+    private func drainBootstrap(_ original: (revision: UInt64, facade: MeguriProviderBootstrapService)?) async {
+        await original?.facade.retireAndDrain()
+        if let original, bootstrap?.facade === original.facade { bootstrap = nil }
     }
     // Draining does not claim an intent. Concurrent callers can join the same
     // original task, but only its own slot can be cleared after the join.
@@ -211,20 +250,26 @@ public actor MeguriProviderConnectionOwner {
     }
     public func cancelAndDrain() async {
         revision &+= 1
+        bootstrapAvailable = false
+        let originalBootstrap = bootstrap
         let expected = revision, current = ownership
         let originalConfiguration = configuration
+        await drainBootstrap(originalBootstrap)
         await drainAttempt(expected, current)
         await drainConfiguration(originalConfiguration)
     }
     public func configure(endpoint: String) async throws {
         guard !removing else { throw MeguriProviderAuthenticationFailure.connectionChanged }
         revision &+= 1
+        bootstrapAvailable = false
+        let originalBootstrap = bootstrap
         let expected = revision
         var current = ownership
         let originalConfiguration = configuration
         configurationBlocked = true
         phase = .blocked
         do {
+            await drainBootstrap(originalBootstrap)
             await drainAttempt(expected, current)
             await drainConfiguration(originalConfiguration)
             try requireCurrent(expected, current)
@@ -247,14 +292,18 @@ public actor MeguriProviderConnectionOwner {
             ownership = configured
             configurationBlocked = false
             phase = .signedOut
+            bootstrapAvailable = true
         } catch { if isCurrent(expected, current) { phase = .blocked }; throw error }
     }
     public func load() async throws {
         guard !configurationBlocked, !removing else { throw MeguriProviderAuthenticationFailure.connectionChanged }
         revision &+= 1
+        bootstrapAvailable = false
+        let originalBootstrap = bootstrap
         let expected = revision
         var current = ownership
         do {
+            await drainBootstrap(originalBootstrap)
             await drainAttempt(expected, current)
             try requireCurrent(expected, current)
             if current == nil {
@@ -265,13 +314,19 @@ public actor MeguriProviderConnectionOwner {
             guard let current else { return }
             let credentials = try await store.load(connection: current.connection)
             try requireCurrent(expected, current)
+            if let credentials, credentials.connection != current.connection { throw MeguriProviderCredentialFailure.wrongConnection }
             phase = credentials == nil ? .signedOut : .setupRequired
+            bootstrapAvailable = true
         } catch { if isCurrent(expected, current) { phase = .blocked }; throw error }
     }
     public func signIn(username: String, password: String) async throws {
         guard !configurationBlocked, !removing, let ownership, attempt == nil else { throw BridgeError.unavailable(reason: "Configure a Meguri connection first") }
         revision &+= 1
+        bootstrapAvailable = false
+        let originalBootstrap = bootstrap
         let expected = revision
+        await drainBootstrap(originalBootstrap)
+        try requireCurrent(expected, ownership)
         do { _ = try await store.load(connection: ownership.connection) }
         catch { if isCurrent(expected, ownership) { phase = .blocked }; throw error }
         try requireCurrent(expected, ownership)
@@ -286,7 +341,7 @@ public actor MeguriProviderConnectionOwner {
         do {
             try await task.value
             try requireCurrent(expected, ownership)
-            attempt = nil; phase = .setupRequired
+            attempt = nil; phase = .setupRequired; bootstrapAvailable = true
         } catch {
             if isCurrent(expected, ownership) { attempt = nil; phase = .blocked }
             throw error
@@ -297,12 +352,15 @@ public actor MeguriProviderConnectionOwner {
     public func deleteCredentialsAfterDrain() async throws {
         guard !removing else { throw MeguriProviderAuthenticationFailure.connectionChanged }
         revision &+= 1
+        bootstrapAvailable = false
+        let originalBootstrap = bootstrap
         let expected = revision
         var current = ownership
         let originalConfiguration = configuration
         removing = true
         defer { removing = false }
         do {
+            await drainBootstrap(originalBootstrap)
             await drainAttempt(expected, current)
             await drainConfiguration(originalConfiguration)
             try requireCurrent(expected, current)
