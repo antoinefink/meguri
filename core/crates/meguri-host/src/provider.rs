@@ -135,6 +135,9 @@ impl CoreHost {
         self.begin_provider_handoff_with_removal(destination, false)
     }
     pub fn begin_provider_handoff_with_removal(&self, destination: Selection, remove_credentials: bool) -> Result<ProviderHandoff, EngineError> {
+        if matches!(self.engine().state(), meguri_engine::LifecycleState::NoCollection) {
+            return self.begin_no_collection_provider_handoff(destination, remove_credentials);
+        }
         self.cloud_connection_generation()?;
         if self.review().active_session().is_some()
             || !self.manual_transfer_history().active().is_ok_and(|active| active.is_none()) {
@@ -153,6 +156,9 @@ impl CoreHost {
     /// returned from the original backend's actual native joins. The Core checks
     /// here add exclusions; none substitutes for that join.
     pub fn finish_provider_handoff(&self, handoff: &ProviderHandoff) -> Result<(), EngineError> {
+        if matches!(self.engine().state(), meguri_engine::LifecycleState::NoCollection) {
+            return self.finish_no_collection_provider_handoff(handoff);
+        }
         if self.cloud_connection_generation()? != handoff.generation {
             return Err(EngineError::Busy { running_op: "provider original host changed".into() });
         }
@@ -171,6 +177,64 @@ impl CoreHost {
         }
         self.provider.commit_handoff(&handoff.intent)?;
         Ok(())
+    }
+    /// Retain only an original healthy absent owner. The lane checks Host
+    /// liveness, generation, recovery ownership and file absence without any
+    /// blocking close-state query. Its optional settled publication is authority.
+    fn reserve_no_collection_provider_handoff(&self, generation: meguri_engine::Generation)
+        -> Result<(meguri_engine::SlotGuard, Option<Publication>), EngineError> {
+        let slot = self.engine().acquire_slot(meguri_engine::LongOp::OneWaySync)?;
+        if !matches!(self.engine().state(), meguri_engine::LifecycleState::NoCollection)
+            || self.review().active_session().is_some()
+            || !self.manual_transfer_history().active().is_ok_and(|active| active.is_none()) {
+            return Err(EngineError::Busy { running_op: "provider recovery or review".into() });
+        }
+        let publication = self.publish_provider_metadata_for_slot(&slot, generation, Ok)?;
+        Ok((slot, publication))
+    }
+    fn begin_no_collection_provider_handoff(&self, destination: Selection, remove_credentials: bool) -> Result<ProviderHandoff, EngineError> {
+        let generation = self.engine().generation();
+        let (slot, original_publication) = self.reserve_no_collection_provider_handoff(generation)?;
+        if let Some(runtime) = self.cloud_runtime() {
+            runtime.provider_transition_available().map_err(|_| EngineError::Busy { running_op: "iCloud recovery".into() })?;
+            let status = runtime.status().map_err(|_| EngineError::Busy { running_op: "iCloud recovery".into() })?;
+            if status.stored_usable {
+                return Err(EngineError::Busy { running_op: "iCloud original owner".into() });
+            }
+        }
+        let provider = &self.provider;
+        self.publish_provider_metadata_for_slot(&slot, generation, |publication| {
+            if publication != original_publication {
+                return Err(EngineError::Busy { running_op: "provider authority changed".into() });
+            }
+            let intent = provider.begin_handoff_with_removal(destination, publication.clone(), generation.0, remove_credentials)?;
+            Ok(ProviderHandoff { intent, generation, publication })
+        })
+    }
+    fn finish_no_collection_provider_handoff(&self, handoff: &ProviderHandoff) -> Result<(), EngineError> {
+        let generation = handoff.generation;
+        let (slot, publication) = self.reserve_no_collection_provider_handoff(generation)?;
+        self.provider.validate_handoff(&handoff.intent)?;
+        if publication != handoff.publication {
+            return Err(EngineError::Busy { running_op: "provider authority changed".into() });
+        }
+        if let Some(runtime) = self.cloud_runtime() {
+            // An absent owner cannot stop a retained collection through a
+            // fabricated handle. Fail closed on unavailable Runtime facts too.
+            let status = runtime.status().map_err(|_| EngineError::Busy { running_op: "iCloud original owner".into() })?;
+            if status.stored_usable {
+                return Err(EngineError::Busy { running_op: "iCloud original owner".into() });
+            }
+            runtime.provider_after_native_join().map_err(|_| EngineError::Busy { running_op: "iCloud original owner".into() })?;
+        }
+        let provider = &self.provider;
+        self.publish_provider_metadata_for_slot(&slot, generation, |publication| {
+            if publication != handoff.publication {
+                return Err(EngineError::Busy { running_op: "provider authority changed".into() });
+            }
+            provider.commit_handoff(&handoff.intent)?;
+            Ok(())
+        })
     }
     pub fn configure_meguri_connection(&self, endpoint: &str) -> Result<meguri_sync::provider::MeguriConnection, EngineError> {
         self.configure_meguri_connection_for_generation(self.cloud_connection_generation()?, endpoint)

@@ -828,6 +828,12 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete final-content PUBLIC review: Codex adoption_empty_decks, 2026-11-17.
+    'core/crates/meguri-storage/src/media/inventory.rs':
+        'a15fbd849371207df8a52ba993b64e26d339fcb9af56bbe3cb01652f38b7cae9',
+    # Complete final-content PUBLIC review: Codex adoption_empty_decks, 2026-11-17.
+    'core/crates/meguri-ffi/src/provider_bootstrap.rs':
+        'ab1329fae5662e53827837ff3ac426e58ba948f44cdcdbbc2cd7cce9d339f459',
     # Complete PUBLIC review: Codex provider_test_delta_review, 2026-11-17.
     "docs/process/review-log/native-own-handoff-attribution-20261117.md":
         "05a9ce3d8eeecf5e249a920c444ca767eb915060cd7360d4a85e744d5931951e",
@@ -883,7 +889,7 @@ PUBLIC_ARTIFACTS = {
         "31af001e272ebcc61ca299e3d932f6f29bc5da69551389305956ef92cd9f0e40",
     # Complete public-source review; future bytes remain checked.
     "core/crates/meguri-sync/src/provider.rs":
-        "99704468573dab0c7f172a7ba0290cc3ccfe616e0fe9a2d6e4a475022d8b2314",
+        "832a33d7bc765566905e9a628fff30e5b4fae9e85d7a7d4f19139e12315ae779",
     "core/crates/meguri-host/tests/cloud_publication_phase.rs":
         "9c5b08115ee7c9969554a0f6d68628cca262a7def0aee665866f0ebab78de622",
     "docs/process/review-log/cancellation-provider-restoration-20261117.md":

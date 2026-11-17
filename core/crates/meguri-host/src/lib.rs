@@ -6,6 +6,8 @@ mod cloud_policy;
 mod collection_export;
 mod manual_transfers;
 mod provider;
+mod provider_bootstrap;
+pub use provider_bootstrap::{MeguriAccess, MeguriBootstrapDirection, MeguriBootstrapError};
 pub use provider::ProviderHandoff;
 pub use manual_transfers::ManualTransferTask;
 mod config;

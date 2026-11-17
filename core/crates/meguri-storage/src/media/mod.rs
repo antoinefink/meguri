@@ -6,6 +6,7 @@ mod check_report;
 mod collection_import;
 mod feed;
 mod folder;
+mod inventory;
 mod journal_db;
 mod staging;
 mod status;
@@ -21,6 +22,7 @@ pub use feed::{
 pub use status::recorded_sizes;
 
 pub use check_report::MediaCheckReport;
+pub use inventory::{InventoryFile, MediaInventory, UnsupportedMedia};
 pub use journal_db::{MediaEntry, MediaSyncState, PendingChange, TrackedMediaName};
 use meguri_model::{clock::Clock, rng::RandomSource};
 use rusqlite::Connection;

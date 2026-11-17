@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use crate::{Endpoint, cloud::{Binding, BindingState}};
 
+mod bootstrap;
+pub use bootstrap::{EpochEvidence, EpochInputs, MediaEpochEvidence, MediaRefusal, MeguriBinding, MeguriBootstrapIntent, MeguriReadiness, MeguriReadyRefusal, ReadyEvidence, ReadyInputs};
+
 fn invalid() -> StorageError { StorageError::Io { detail: "provider configuration requires recovery".into() } }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +64,8 @@ pub struct ProviderDocument {
     pub meguri: Option<MeguriConnection>,
     pub icloud_settings: LegacySettings,
     pub meguri_settings: LegacySettings,
+    #[serde(default)] pub meguri_binding: Option<MeguriBinding>,
+    #[serde(default)] pub meguri_bootstrap: Option<MeguriBootstrapIntent>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MeguriConnection { pub reference: String, pub revision: u64, pub endpoint: String }
@@ -68,18 +73,22 @@ impl ProviderDocument {
     pub fn migration(settings: LegacySettings) -> Self {
         Self { version: 1, revision: 1, selection: if settings.enabled { Selection::ICloud } else { Selection::LocalOnly },
             settings, binding: None, handoff: None, legacy_binding_pending: settings.enabled, meguri: None,
-            icloud_settings: settings, meguri_settings: LegacySettings { enabled: false, paused: false, automatic: false, media: true } }
+            icloud_settings: settings, meguri_settings: LegacySettings { enabled: false, paused: false, automatic: false, media: true },
+            meguri_binding: None, meguri_bootstrap: None }
     }
     pub fn permits_icloud(&self) -> bool {
         self.selection == Selection::ICloud && self.settings.enabled && !self.settings.paused
             && self.binding.is_some() && self.handoff.is_none()
     }
     /// MP-B/MP-C own durable collection-and-media completion. No ready setter exists here.
-    pub fn permits_meguri_transfer(&self) -> bool { false }
+    pub fn permits_meguri_transfer(&self) -> bool { self.selection == Selection::Meguri && self.settings.enabled && !self.settings.paused && self.handoff.is_none() && self.meguri_binding.as_ref().is_some_and(|b| Some(b.connection()) == self.meguri.as_ref()) }
     fn validate(&self) -> Result<(), StorageError> {
         if self.version != 1 || self.revision == 0
-            || (self.selection == Selection::Meguri && self.settings.automatic)
-            || self.meguri_settings.automatic || !self.meguri_settings.media
+            || (self.selection == Selection::Meguri && self.settings.automatic && self.meguri_binding.is_none())
+            || (self.meguri_settings.automatic && self.meguri_binding.is_none()) || !self.meguri_settings.media
+            || self.meguri_binding.as_ref().is_some_and(|b| Some(b.connection()) != self.meguri.as_ref())
+            || self.meguri_bootstrap.as_ref().is_some_and(|i| Some(i.connection()) != self.meguri.as_ref())
+            || (self.meguri_binding.is_some() && self.meguri_bootstrap.is_some())
             || self.meguri.as_ref().is_some_and(|c| c.reference.is_empty() || c.reference.len() > 128 || c.endpoint.len() > 4096 || c.revision == 0)
             || self.binding.as_ref().is_some_and(|b| b.account.len() > 4096 || b.container.len() > 1024)
             || self.handoff.as_ref().is_some_and(|h| h.revision != self.revision || h.old != self.selection)
@@ -321,7 +330,7 @@ impl Authority {
     }
     fn save_settings_with_facts(&self, settings: LegacySettings, facts: Option<(u64, Option<Publication>)>) -> Result<ProviderDocument, StorageError> {
         self.update_publication(facts, true, |_, doc| {
-            if doc.handoff.is_some() || (doc.selection == Selection::Meguri && (settings.automatic || !settings.media)) { return Err(invalid()); }
+            if doc.handoff.is_some() || (doc.selection == Selection::Meguri && ((settings.automatic && doc.meguri_binding.is_none()) || !settings.media)) { return Err(invalid()); }
             // Enable never chooses a service or manufactures a binding.
             doc.settings = settings;
             if doc.selection == Selection::Meguri { doc.meguri_settings = settings; }
@@ -340,6 +349,9 @@ impl Authority {
         let doc = self.update_publication(facts, true, |_, doc| {
             if doc.handoff.is_some() { return Err(invalid()); }
             doc.revision = doc.revision.checked_add(1).ok_or_else(invalid)?;
+            doc.meguri_binding = None; doc.meguri_bootstrap = None;
+            doc.meguri_settings.automatic = false;
+            if doc.selection == Selection::Meguri { doc.settings.automatic = false; }
             doc.meguri = Some(MeguriConnection { reference, revision: doc.revision, endpoint });
             Ok(())
         })?;
@@ -389,6 +401,8 @@ impl Authority {
             if doc.handoff.as_ref() != Some(&handoff.intent) { return Err(invalid()); }
             doc.selection = handoff.intent.destination;
             doc.binding = None; doc.legacy_binding_pending = false;
+            doc.meguri_binding = None; doc.meguri_bootstrap = None;
+            doc.meguri_settings.automatic = false;
             doc.settings = if doc.selection == Selection::Meguri { doc.meguri_settings } else { doc.icloud_settings };
             doc.settings.enabled = doc.selection != Selection::LocalOnly;
             if doc.selection == Selection::Meguri { doc.settings.automatic = false; }
@@ -426,6 +440,10 @@ impl Authority {
             let records = raw.entry("handoffRecoveries").or_insert_with(|| Value::Array(Vec::new()))
                 .as_array_mut().ok_or_else(invalid)?;
             records.push(evidence);
+            let was_meguri = doc.selection == Selection::Meguri;
+            doc.meguri_binding = None; doc.meguri_bootstrap = None;
+            doc.meguri_settings.automatic = false;
+            if was_meguri { doc.settings.automatic = false; }
             doc.selection = Selection::LocalOnly;
             doc.settings.enabled = false;
             doc.binding = None;

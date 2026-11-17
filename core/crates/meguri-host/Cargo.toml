@@ -29,3 +29,7 @@ serde_json.workspace = true
 meguri-engine = { workspace = true, features = ["test-hooks"] }
 meguri-model = { workspace = true, features = ["test-hooks"] }
 tempfile.workspace = true
+
+[[test]]
+name = "provider_bootstrap"
+required-features = ["test-hooks"]

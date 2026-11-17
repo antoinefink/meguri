@@ -25,6 +25,7 @@ pub mod media;
 pub mod oneway;
 pub mod policy;
 pub mod provider;
+pub mod provider_media;
 pub mod status;
 pub mod transport;
 pub mod wire;

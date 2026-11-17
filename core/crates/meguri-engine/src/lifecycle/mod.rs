@@ -691,6 +691,42 @@ impl Engine {
         publish(path)
     }
 
+    /// Device-local provider metadata only, under the caller's own current
+    /// `OneWaySync` guard. No callbacks, collection operations, network work
+    /// or lifecycle re-entry may run inside `publish`.
+    pub fn with_provider_metadata_publication_for_slot<T>(
+        &self,
+        slot: &SlotGuard,
+        generation: Generation,
+        publish: impl FnOnce(Option<&Path>) -> Result<T, EngineError>,
+    ) -> Result<T, EngineError> {
+        if !slot.belongs_to(self) {
+            return Err(EngineError::unavailable("provider metadata slot belongs to another engine"));
+        }
+        if slot.op() != LongOp::OneWaySync {
+            return Err(EngineError::unavailable("provider metadata requires a one-way sync slot"));
+        }
+        let _control = self.job_control_lane()?;
+        let state = self.lock_state();
+        let current_generation = self.generation();
+        if current_generation != generation {
+            return Err(EngineError::StaleGeneration { planned: generation, current: current_generation });
+        }
+        slot.check_held(&state)?;
+        if state.suspended || state.recovery_ownership.is_some() {
+            return Err(EngineError::unavailable("provider metadata lifecycle ownership unavailable"));
+        }
+        let path = match (&state.state, &state.current) {
+            (LifecycleState::Ready { generation: ready }, Some(current)) if *ready == generation => {
+                current.core.exec.require_admission(None)?;
+                Some(current.core.exec.path.as_path())
+            }
+            (LifecycleState::NoCollection, None) => None,
+            _ => return Err(EngineError::unavailable("provider metadata requires a healthy owner")),
+        };
+        publish(path)
+    }
+
     pub fn close(&self) -> Result<(), EngineError> {
         self.close_inner(None::<fn(Option<Collection>) -> Result<(), EngineError>>)
     }
