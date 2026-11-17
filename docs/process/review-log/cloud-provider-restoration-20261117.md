@@ -41,5 +41,11 @@ found no P0–P2 issues; its export equals the reviewed author patch byte for by
 
 The unchanged original app reproduction passes on clean `db118bcd` in
 `swift-test/20261117T090150Z-11321`: one method, both Reopen and Resume cases,
-zero failures or skips. Earlier failure receipts remain. The final Rust proof
-checks, broader suites and required gate are still pending.
+zero failures or skips. Earlier failure receipts remain.
+
+`core-test/20261117T091221Z-42310`, clean `3e48ab80b`, passes all four named
+restoration and provider-choice regressions. Its broader 136-method run fails
+overall with 15 passes and 121 failures. Older protocol fixtures need explicit
+prior iCloud selection; account inputs alone grant no consent. Generic local
+information and no-consent cases must stay unchanged. That fixture repair,
+other broader suites and the required gate remain incomplete.
