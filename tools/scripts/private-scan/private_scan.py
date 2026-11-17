@@ -835,17 +835,17 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/retained_observer.py':
         '8900b3935f72fcd0e97dcd3274c1db258ee9c8b7e118dd940ba7d9267d71d410',
     'tools/tests/sync_retained.bats':
-        '8a3bc0477af3b98d851455bbb867bb710ace54ba9dc6cd899e1e6910c0f7e51f',
+        '6cf424e0509c011d00d82982e48c877e94a27b342290a2784852d7066d3b13a7',
     'tools/mg.d/sync-retained.sh':
-        '1eaa29368bf416e3dc709da6fe4ab98946132fdab2ea711a09e79187c43eef30',
+        '35e54ba829dde06fb8ad13587d01e7bbdec935ae4a2db793211af8560c25b1ff',
     'conformance/peers/retained-sync/support.py':
-        'f815b854d9e41d1dd6b6347ac45eaad4f34d729daaedb53da6c52e67d7f9f07d',
+        'dcab31ea4b79706947b3bf4762d8e2c30fe025e9bbee279d2ae2ea1ee2025279',
     'conformance/peers/retained-sync/src/main.rs':
-        'e95a419ac822c4b42e79796b3db708604d499c80e7089e8dc7ea7755767ebb52',
+        '96e6a15b80ceccb78f8eb4753c6d094f09a4f1b98635e0b8b61b0f1c572dff30',
     'conformance/peers/retained-sync/src/fixture.rs':
         'c081384f0291814d7befe8aa178a5af98162331ced069c231a79fb125c7a026b',
     'conformance/peers/retained-sync/README.md':
-        '625a27d5cdfefedd533ce970e774d5802e15ff16b9d24feb1b99fa81f06bbee9',
+        'd2093cf58d8fd8a5e323beebd39a527a9a8b7fb647853f0334c776d503e1eb94',
     'conformance/peers/retained-sync/AGENTS.md':
         'a1aba360d6591c26719cf41483087415844925d55fdc8646419848aa68f30a06',
     'server/web/scripts/fixture.mjs':
@@ -1132,6 +1132,7 @@ PUBLIC_ARTIFACTS = {
 # 071ee5ebf2138e3ad180e0aacf6940c2cab5e6d8333741d9925c7bee2b153f39.
 # Keys pin exact repository-path UTF-8 bytes; values pin complete file bytes.
 PUBLIC_VENDOR_ARTIFACTS = {
+    '7f3eddd9b055b1b5220d7e096440db86572a8f0074cc61166de2a6609b308e78': '3e2b6410255d6c7d07c209a11d02c793e6b0a1e1156ac8fc0509f2f375051e0d',
     '6a9d04ca41587836af459446bdc65bf4d7255154cbe98aabcce66a19b4c66043': '963aa51734ae21fcbee28b7037dc5c0931bbba92177b6060ef2e561d1ee9c83c',
     'be7929cd9f7a1698bea4f000aa3d1f236c8b440d58361b5dd177b9697badc26d': '445aa8aa694a60231e0aad0bc3c99b4c950f19eed4566abbcaf9a7ac9736491a',
     'ebe7db15d768840d3f5bcd115f2345a19c31c0d20f5435c23ebbdca9c07e4c21': 'd1d7f78ad34c3fad64889ce65d5e245c6e2dc9b3a9c07104414b8748099f0ebb',
