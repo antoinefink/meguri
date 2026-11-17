@@ -15,6 +15,79 @@ use crate::events::{self, CoreEventKind};
 use crate::jobs::{self, JobHandle, JobOutcome};
 use crate::{callback, changes, runtime};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CloudPreparationHandoffObservation {
+    Present,
+    Absent,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CloudPreparationRefusal {
+    MissingBinding,
+    ProviderAdmissionDenied { handoff: CloudPreparationHandoffObservation },
+    PublishingBoundUsabilityRefused,
+    ReconcileUsabilityRefused,
+}
+
+impl From<meguri_sync::cloud::testing::RuntimePreparationRefusal> for CloudPreparationRefusal {
+    fn from(value: meguri_sync::cloud::testing::RuntimePreparationRefusal) -> Self {
+        use meguri_sync::cloud::testing::{HandoffObservation as H, RuntimePreparationRefusal as R};
+        match value {
+            R::MissingBinding => Self::MissingBinding,
+            R::ProviderAdmissionDenied { handoff } => Self::ProviderAdmissionDenied {
+                handoff: match handoff {
+                    H::Present => CloudPreparationHandoffObservation::Present,
+                    H::Absent => CloudPreparationHandoffObservation::Absent,
+                    H::Unknown => CloudPreparationHandoffObservation::Unknown,
+                },
+            },
+            R::PublishingBoundUsabilityRefused => Self::PublishingBoundUsabilityRefused,
+            R::ReconcileUsabilityRefused => Self::ReconcileUsabilityRefused,
+        }
+    }
+}
+
+/// One invocation owns this witness, including when the original call fails.
+#[derive(uniffi::Object)]
+pub struct CloudPreparationWitness {
+    state: std::sync::Mutex<(bool, Option<CloudPreparationRefusal>)>,
+}
+
+#[uniffi::export]
+impl CloudPreparationWitness {
+    pub fn observation(&self) -> Result<Option<CloudPreparationRefusal>, CoreError> {
+        callback::enter("CloudPreparationWitness.observation");
+        Ok(self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).1)
+    }
+}
+
+#[uniffi::export]
+pub fn test_cloud_preparation_witness() -> Result<Arc<CloudPreparationWitness>, CoreError> {
+    callback::enter("test_cloud_preparation_witness");
+    Ok(Arc::new(CloudPreparationWitness { state: std::sync::Mutex::new((false, None)) }))
+}
+
+/// Calls the retained original workflow exactly once, with no foreign callback
+/// or global Host lookup. No observation changes the returned Result.
+#[uniffi::export]
+pub fn test_cloud_prepare_runtime_observed(
+    workflow: Arc<crate::sync::CloudWorkflow>,
+    witness: Arc<CloudPreparationWitness>,
+) -> Result<(), CoreError> {
+    callback::enter("test_cloud_prepare_runtime_observed");
+    {
+        let mut state = witness.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.0 {
+            return Err(CoreError::InvalidArgument { message: "preparation witness already used".into() });
+        }
+        state.0 = true;
+    }
+    let (result, observation) = meguri_sync::cloud::testing::observe_runtime_preparation(|| workflow.prepare_runtime());
+    witness.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).1 = observation.map(Into::into);
+    result
+}
+
 #[path = "test_hooks_cloud_asset_reads.rs"]
 mod cloud_asset_read_fixtures;
 

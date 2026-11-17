@@ -710,6 +710,8 @@ impl Runtime {
             let s = self.state();
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
             if !b.usable || !b.verified {
+                #[cfg(feature = "test-hooks")]
+                super::testing::record_preparation_refusal(super::testing::RuntimePreparationRefusal::PublishingBoundUsabilityRefused);
                 return Err(RuntimeError::IdentityUnverified);
             }
             if s.scan_running || s.invalidation_exhausted {
@@ -753,6 +755,8 @@ impl Runtime {
             let mut s = self.state();
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
             if !b.usable || !b.verified {
+                #[cfg(feature = "test-hooks")]
+                super::testing::record_preparation_refusal(super::testing::RuntimePreparationRefusal::ReconcileUsabilityRefused);
                 return Err(RuntimeError::IdentityUnverified);
             }
             if s.scan_running || s.invalidation_exhausted {

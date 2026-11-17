@@ -5,6 +5,11 @@ import Foundation
 import Instrumentation
 import Synchronization
 import Testing
+#if DEBUG
+import class MeguriCoreBindings.CloudWorkflow
+import func MeguriCoreBindings.testCloudPreparationWitness
+import func MeguriCoreBindings.testCloudPrepareRuntimeObserved
+#endif
 
 // One prefix preserves the first cause across backend replacement and cleanup.
 // Only fixed event labels, booleans and local ordinals may be appended.
@@ -173,6 +178,35 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
     var expectedCommandFailures: [ObjectIdentifier: @MainActor (SyncCommandResult) -> Void] = [:]
     #if DEBUG
     var originalDiscardFaults: [ObjectIdentifier: @Sendable () throws -> Void] = [:]
+    var observeRuntimePreparationRefusals = false
+
+    private nonisolated static func observeRuntimePreparation(
+        _ raw: MeguriCoreBindings.CloudWorkflow, _ sink: DebugCloudDiagnostics.RuntimePreparationSink
+    ) throws {
+        let witness = try MeguriCoreBindings.testCloudPreparationWitness()
+        do {
+            try MeguriCoreBindings.testCloudPrepareRuntimeObserved(workflow: raw, witness: witness)
+        } catch {
+            // Read only this invocation's owned witness; preserve the original
+            // error even if reading the diagnostic itself is unavailable.
+            if let observation = try? witness.observation() {
+                switch observation {
+                case .missingBinding: sink.record(.missingBinding)
+                case .providerAdmissionDenied(let handoff):
+                    let value: DebugCloudDiagnostics.RuntimePreparationHandoff
+                    switch handoff {
+                    case .present: value = .present
+                    case .absent: value = .absent
+                    case .unknown: value = .unknown
+                    }
+                    sink.record(.providerAdmissionDenied(handoff: value))
+                case .publishingBoundUsabilityRefused: sink.record(.publishingBoundUsabilityRefused)
+                case .reconcileUsabilityRefused: sink.record(.reconcileUsabilityRefused)
+                }
+            }
+            throw error
+        }
+    }
     #endif
     // Runs at the coordinator's existing shutdown boundary, after admission
     // closes and original command tasks receive owned cancellation.
@@ -429,9 +463,12 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
         let mediaRecorder = DebugCloudDiagnostics.Recorder()
         let observe = observeCoreCall
         let discardFault = originalDiscardFaults.removeValue(forKey: ObjectIdentifier(command.raw))
+        let preparationInterceptor: CloudRuntimePreparationBoundary.Interceptor? = observeRuntimePreparationRefusals
+            ? { @Sendable raw, sink in try Self.observeRuntimePreparation(raw, sink) } : nil
         let result = await MaintenanceCallObservation.$capture.withValue({ observe?(command, $0) }) {
             await CloudFetchProofCompletionFault.$afterOriginalDiscard.withValue(discardFault) {
             await DebugCloudDiagnostics.$sendFailureCapture.withValue(sendCapture) {
+                await CloudRuntimePreparationBoundary.$interceptor.withValue(preparationInterceptor) {
                 await DebugCloudDiagnostics.$fetchReadFailureCapture.withValue(fetchReadCapture) {
                     await DebugCloudDiagnostics.$mediaRecorder.withValue(mediaRecorder) {
                         await CloudMediaRegistrationBoundary.$afterOriginalLookup.withValue(afterMediaOriginalLookup) {
@@ -442,6 +479,7 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
                             }
                         }
                     }
+                }
                 }
             }
             }
@@ -613,6 +651,11 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
     private(set) var backends: [ServiceAppBackend] = []
     var observeOwn: (@Sendable (CloudOwnObservation) -> Void)?
     var ownTransport: (any CloudOwnTransport)?
+    #if DEBUG
+    var observeRuntimePreparationRefusals = false {
+        didSet { for backend in backends { backend.observeRuntimePreparationRefusals = observeRuntimePreparationRefusals } }
+    }
+    #endif
     // Install before preparation and carry observation across real backend
     // handoffs. This callback never drives policy or owns issued capabilities.
     var onCommands: (@MainActor ([CloudPolicyCommand]) -> Void)? {
@@ -654,6 +697,9 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
             let backend = try await ServiceAppBackend.make(wire: wire, factory: factory, persisted: persisted, observeOwn: observeOwn, ownTransport: ownTransport)
             backend.causalTrace = causalTrace
             backend.onCommands = onCommands
+            #if DEBUG
+            backend.observeRuntimePreparationRefusals = observeRuntimePreparationRefusals
+            #endif
             backends.append(backend)
             afterBackend?(backend)
             return backend

@@ -17,6 +17,41 @@ use std::{
 const NOW: i64 = 1_735_689_600_000;
 
 #[test]
+#[cfg(feature = "test-hooks")]
+fn observed_preparation_preserves_original_missing_binding_error_and_fresh_witness() {
+    use crate::test_hooks::{
+        CloudPreparationRefusal, test_cloud_preparation_witness, test_cloud_prepare_runtime_observed,
+    };
+    // The ordinary local Host has its real provider authority and no cloud
+    // binding. No adapter baseline or provider readiness is manufactured.
+    let fixture = Fixture::new(Keys::new([]));
+    let workflow = Arc::new(CloudWorkflow {
+        host: fixture.workflow.host.clone(),
+        core: fixture.workflow.core.clone(),
+        identity: fixture.workflow.identity.clone(),
+    });
+    assert!(Arc::ptr_eq(&workflow.host, &fixture.workflow.host));
+    assert!(Arc::ptr_eq(&workflow.core, &fixture.workflow.core));
+    let original = workflow.prepare_runtime().unwrap_err();
+    assert_eq!(original, CoreError::Unavailable { reason: "cloud runtime account is unverified".into() });
+    let witness = test_cloud_preparation_witness().unwrap();
+    assert_eq!(witness.observation().unwrap(), None);
+    assert_eq!(test_cloud_prepare_runtime_observed(workflow.clone(), witness.clone()), Err(original));
+    assert_eq!(witness.observation().unwrap(), Some(CloudPreparationRefusal::MissingBinding));
+    assert!(matches!(test_cloud_prepare_runtime_observed(workflow.clone(), witness.clone()),
+        Err(CoreError::InvalidArgument { .. })));
+    assert_eq!(witness.observation().unwrap(), Some(CloudPreparationRefusal::MissingBinding));
+
+    // The same retained workflow now refuses at Host generation validation,
+    // before any covered Runtime guard. A fresh invocation cannot inherit it.
+    workflow.host.close().unwrap();
+    let fresh = test_cloud_preparation_witness().unwrap();
+    let closed_original = workflow.prepare_runtime().unwrap_err();
+    assert_eq!(test_cloud_prepare_runtime_observed(workflow, fresh.clone()), Err(closed_original));
+    assert_eq!(fresh.observation().unwrap(), None);
+}
+
+#[test]
 fn sdk_callback_fence_mapping_preserves_real_error_provenance() {
     assert_eq!(sdk_callback_error(r::RuntimeError::StaleIncarnation), CoreError::CloudSdkCallbackRejected);
     // The broader connection authority failure is not a callback guard fence.

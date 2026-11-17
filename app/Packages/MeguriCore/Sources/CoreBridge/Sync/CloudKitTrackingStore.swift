@@ -2,6 +2,15 @@ import Foundation
 import Instrumentation
 internal import MeguriCoreBindings
 
+#if DEBUG
+/// Synchronous raw-call seam, scoped to an existing command task. CoreBridge
+/// knows only the normal workflow type and its own fixed diagnostic sink.
+enum CloudRuntimePreparationBoundary {
+    typealias Interceptor = @Sendable (MeguriCoreBindings.CloudWorkflow, DebugCloudDiagnostics.RuntimePreparationSink) throws -> Void
+    @TaskLocal static var interceptor: Interceptor?
+}
+#endif
+
 struct CloudRegistration: Sendable {
     let instanceID: String
     let serialization: Data?
@@ -134,7 +143,24 @@ public actor CoreCloudWorkflowService {
     }
      func prepareRuntime() async throws {
         let raw = try await owner()
+        #if DEBUG
+        let interceptor = CloudRuntimePreparationBoundary.interceptor
+        let capture = DebugCloudDiagnostics.sendFailureCapture
+        let sink = DebugCloudDiagnostics.RuntimePreparationSink()
+        do {
+            try await MaintenanceLane.shared.call(.cloudWorkflowPrepareRuntime) {
+                if let interceptor { try interceptor(raw, sink) }
+                else { try raw.prepareRuntime() }
+            }
+        } catch {
+            // Swift cancellation is sampled after the original await. Only
+            // the paired Rust witness describes the covered refusing guard.
+            capture?.recordRuntimePreparation(error: error, refusal: sink.value)
+            throw error
+        }
+        #else
         try await MaintenanceLane.shared.call(.cloudWorkflowPrepareRuntime) { try raw.prepareRuntime() }
+        #endif
     }
     func registerSDK(automatic: Bool) async throws -> CloudRegistration {
         let raw = try await owner()

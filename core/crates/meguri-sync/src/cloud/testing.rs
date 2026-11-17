@@ -3,6 +3,115 @@ use super::Error;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, PoisonError};
 
+/// Fixed refusal facts from one synchronous preparation call. Handoff is an
+/// observation at denial, not proof of which provider predicate denied it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimePreparationRefusal {
+    MissingBinding,
+    ProviderAdmissionDenied { handoff: HandoffObservation },
+    PublishingBoundUsabilityRefused,
+    ReconcileUsabilityRefused,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandoffObservation {
+    Present,
+    Absent,
+    Unknown,
+}
+
+thread_local! {
+    // Outer None means there is no collector. No process history or identity.
+    static PREPARATION_REFUSAL: std::cell::Cell<Option<Option<RuntimePreparationRefusal>>> = const { std::cell::Cell::new(None) };
+}
+
+/// Installs a fresh calling-thread collector; restores its predecessor even
+/// when the original operation unwinds. The closure stays entirely in Rust.
+pub fn observe_runtime_preparation<R>(call: impl FnOnce() -> R) -> (R, Option<RuntimePreparationRefusal>) {
+    struct Restore(Option<Option<RuntimePreparationRefusal>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PREPARATION_REFUSAL.with(|slot| slot.set(self.0));
+        }
+    }
+    let _restore = Restore(PREPARATION_REFUSAL.with(|slot| slot.replace(Some(None))));
+    let result = call();
+    let observation = PREPARATION_REFUSAL.with(|slot| slot.get().flatten());
+    (result, observation)
+}
+
+pub(super) fn record_preparation_refusal(refusal: RuntimePreparationRefusal) {
+    PREPARATION_REFUSAL.with(|slot| {
+        if slot.get() == Some(None) {
+            slot.set(Some(Some(refusal)));
+        }
+    });
+}
+
+pub(super) fn preparation_refusal_pending() -> bool {
+    PREPARATION_REFUSAL.with(|slot| slot.get() == Some(None))
+}
+
+#[cfg(test)]
+mod preparation_refusal_tests {
+    use super::{RuntimePreparationRefusal::*, *};
+
+    #[test]
+    fn no_active_scope_and_first_refusal_wins() {
+        record_preparation_refusal(MissingBinding);
+        assert_eq!(PREPARATION_REFUSAL.with(|slot| slot.get()), None);
+        let (_, observed) = observe_runtime_preparation(|| {
+            record_preparation_refusal(ReconcileUsabilityRefused);
+            record_preparation_refusal(MissingBinding);
+        });
+        assert_eq!(observed, Some(ReconcileUsabilityRefused));
+        assert_eq!(observe_runtime_preparation(|| ()).1, None);
+    }
+
+    #[test]
+    fn nested_scope_restores_its_predecessor() {
+        let (_, outer) = observe_runtime_preparation(|| {
+            record_preparation_refusal(MissingBinding);
+            let (_, inner) = observe_runtime_preparation(|| {
+                record_preparation_refusal(PublishingBoundUsabilityRefused);
+            });
+            assert_eq!(inner, Some(PublishingBoundUsabilityRefused));
+        });
+        assert_eq!(outer, Some(MissingBinding));
+        assert_eq!(PREPARATION_REFUSAL.with(|slot| slot.get()), None);
+    }
+
+    #[test]
+    fn scope_is_thread_local() {
+        let (_, outer) = observe_runtime_preparation(|| {
+            record_preparation_refusal(MissingBinding);
+            std::thread::spawn(|| {
+                assert_eq!(PREPARATION_REFUSAL.with(|slot| slot.get()), None);
+                let (_, inner) = observe_runtime_preparation(|| {
+                    record_preparation_refusal(ReconcileUsabilityRefused);
+                });
+                assert_eq!(inner, Some(ReconcileUsabilityRefused));
+            }).join().unwrap();
+        });
+        assert_eq!(outer, Some(MissingBinding));
+    }
+
+    #[test]
+    fn unwind_restores_scope_and_does_not_leak_a_refusal() {
+        let (_, outer) = observe_runtime_preparation(|| {
+            record_preparation_refusal(MissingBinding);
+            let caught = std::panic::catch_unwind(|| observe_runtime_preparation(|| {
+                record_preparation_refusal(ReconcileUsabilityRefused);
+                panic!("collector unwind");
+            }));
+            assert!(caught.is_err());
+        });
+        assert_eq!(outer, Some(MissingBinding));
+        assert_eq!(PREPARATION_REFUSAL.with(|slot| slot.get()), None);
+        assert_eq!(observe_runtime_preparation(|| ()).1, None);
+    }
+}
+
 /// Control state for child orchestration, without entity image bodies.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PublicationControl {

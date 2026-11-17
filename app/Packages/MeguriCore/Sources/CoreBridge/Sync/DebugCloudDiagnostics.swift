@@ -31,6 +31,39 @@ public enum DebugCloudDiagnostics {
     // Retain collection/media context when a deeper send catch wins the latch.
     @TaskLocal static var mediaSendPhase: SendFailureSite?
 
+    enum RuntimePreparationHandoff: String, Sendable, CaseIterable {
+        case present, absent, unknown
+    }
+
+    /// Only the covered Rust guard and its fixed observation, never an error
+    /// payload. Handoff presence does not establish the reason for denial.
+    enum RuntimePreparationRefusal: Sendable, Equatable {
+        case missingBinding
+        case providerAdmissionDenied(handoff: RuntimePreparationHandoff)
+        case publishingBoundUsabilityRefused
+        case reconcileUsabilityRefused
+
+        var formatted: String {
+            switch self {
+            case .missingBinding: "runtimePreparationCause=missingBinding"
+            case .providerAdmissionDenied(let handoff):
+                "runtimePreparationCause=providerAdmissionDenied providerHandoff=\(handoff.rawValue)"
+            case .publishingBoundUsabilityRefused: "runtimePreparationCause=publishingBoundUsabilityRefused"
+            case .reconcileUsabilityRefused: "runtimePreparationCause=reconcileUsabilityRefused"
+            }
+        }
+    }
+
+    /// Fresh for one raw call; never stored on a command or shared with another
+    /// invocation. Empty means unclassified, not evidence of no refusal.
+    final class RuntimePreparationSink: Sendable {
+        private let first = Mutex<RuntimePreparationRefusal?>(nil)
+        var value: RuntimePreparationRefusal? { first.withLock { $0 } }
+        func record(_ refusal: RuntimePreparationRefusal) {
+            first.withLock { if $0 == nil { $0 = refusal } }
+        }
+    }
+
     enum SendFailureSite: String, Sendable {
         case executeAdmission, executeCore, prepareExecution, requestExecution, policyRefresh
         case originalSDK, sendAdmission, pendingUpdateApplication, beginSend, admissionValidation
@@ -57,10 +90,12 @@ public enum DebugCloudDiagnostics {
             let category: String
             let mediaSendPhase: SendFailureSite?
             let taskCancelled: Bool
+            let preparationRefusal: RuntimePreparationRefusal?
             func formatted(startEngine: Bool) -> String {
                 let phase = mediaSendPhase.map { " mediaSendPhase=\($0.rawValue)" } ?? ""
                 let cancellation = startEngine ? " firstTaskCancelled=\(taskCancelled ? 1 : 0)" : ""
-                return "firstSite=\(site.rawValue) firstCategory=\(category)\(phase)\(cancellation)"
+                let preparation = preparationRefusal.map { " \($0.formatted)" } ?? ""
+                return "firstSite=\(site.rawValue) firstCategory=\(category)\(phase)\(cancellation)\(preparation)"
             }
         }
         private struct State: Sendable {
@@ -75,19 +110,23 @@ public enum DebugCloudDiagnostics {
         func recordStartEngine(_ site: SendFailureSite, error: any Error) {
             record(site, error: error, startEngineOnly: true)
         }
+        func recordRuntimePreparation(error: any Error, refusal: RuntimePreparationRefusal?) {
+            guard let refusal, DebugCloudDiagnostics.startEngineFailureTag(error) == "runtimeIdentityUnverified" else { return }
+            record(.startEngineRuntimePreparation, error: error, startEngineOnly: true, preparationRefusal: refusal)
+        }
         // Classify immediately; retain neither the error nor any associated payload.
         // Every existing deeper catch retains its own cancellation snapshot, even
         // when a later lifecycle catch observes shutdown after awaited cleanup.
         func record(_ site: SendFailureSite, error: any Error,
                     mediaSendPhase: SendFailureSite? = DebugCloudDiagnostics.mediaSendPhase,
-                    startEngineOnly: Bool = false) {
+                    startEngineOnly: Bool = false, preparationRefusal: RuntimePreparationRefusal? = nil) {
             let taskCancelled = Task.isCancelled
             first.withLock { state in
                 guard state.first == nil, !startEngineOnly || state.startEngine else { return }
                 let category = state.startEngine ? DebugCloudDiagnostics.startEngineFailureTag(error)
                     : DebugCloudDiagnostics.failureTag(error)
                 state.first = Value(site: site, category: category, mediaSendPhase: mediaSendPhase,
-                    taskCancelled: taskCancelled)
+                    taskCancelled: taskCancelled, preparationRefusal: preparationRefusal)
             }
         }
     }

@@ -175,6 +175,9 @@ extension ReviewCollectionStartupTests {
         var oldProvider: CoreProviderService?
         var oldCredentials: MeguriProviderConnectionOwner?
         try await withShutdownHarness(beforeAdopt: { app in
+            #if DEBUG
+            app.observeRuntimePreparationRefusals = true
+            #endif
             app.sync.observeInitialAdoptionPreview = { _ in
                 oldProvider = try? await CoreProviderService.attached()
                 oldCredentials = try? await app.sync.meguriConnection()

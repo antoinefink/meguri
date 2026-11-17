@@ -8,6 +8,86 @@ import Testing
 struct DebugCloudDiagnosticsTests {
     private typealias Value = DebugCloudDiagnostics.Value
 
+    @Test func runtimePreparationRefusalsHaveOnlyFixedFormatting() {
+        let cases: [(DebugCloudDiagnostics.RuntimePreparationRefusal, String)] = [
+            (.missingBinding, "runtimePreparationCause=missingBinding"),
+            (.providerAdmissionDenied(handoff: .present), "runtimePreparationCause=providerAdmissionDenied providerHandoff=present"),
+            (.providerAdmissionDenied(handoff: .absent), "runtimePreparationCause=providerAdmissionDenied providerHandoff=absent"),
+            (.providerAdmissionDenied(handoff: .unknown), "runtimePreparationCause=providerAdmissionDenied providerHandoff=unknown"),
+            (.publishingBoundUsabilityRefused, "runtimePreparationCause=publishingBoundUsabilityRefused"),
+            (.reconcileUsabilityRefused, "runtimePreparationCause=reconcileUsabilityRefused")
+        ]
+        for (refusal, expected) in cases {
+            let sink = DebugCloudDiagnostics.RuntimePreparationSink()
+            sink.record(refusal)
+            let capture = DebugCloudDiagnostics.SendFailureCapture()
+            capture.observeStartEngine()
+            capture.recordRuntimePreparation(error: BridgeError.unavailable(reason: "cloud runtime account is unverified"), refusal: sink.value)
+            #expect(capture.firstValue == "firstSite=startEngineRuntimePreparation firstCategory=runtimeIdentityUnverified firstTaskCancelled=0 \(expected)")
+        }
+    }
+
+    @Test func runtimePreparationPairingPreservesTheFirstErrorLatch() {
+        let capture = DebugCloudDiagnostics.SendFailureCapture()
+        capture.observeStartEngine()
+        capture.recordStartEngine(.startEngineIdentityRead, error: BridgeError.cancelled)
+        let original = capture.firstValue
+        capture.recordRuntimePreparation(error: BridgeError.unavailable(reason: "cloud runtime account is unverified"),
+            refusal: .providerAdmissionDenied(handoff: .present))
+        #expect(capture.firstValue == original)
+        #expect(original == "firstSite=startEngineIdentityRead firstCategory=bridge.cancelled firstTaskCancelled=0")
+
+        let paired = DebugCloudDiagnostics.SendFailureCapture()
+        paired.observeStartEngine()
+        paired.recordRuntimePreparation(error: BridgeError.unavailable(reason: "cloud runtime account is unverified"), refusal: .missingBinding)
+        let first = paired.firstValue
+        paired.recordStartEngine(.startEngineRuntimePreparation, error: CancellationError())
+        paired.recordRuntimePreparation(error: BridgeError.unavailable(reason: "cloud runtime account is unverified"), refusal: .reconcileUsabilityRefused)
+        #expect(paired.firstValue == first)
+    }
+
+    @Test func runtimePreparationRequiresAPairedExactErrorAndActiveStartEngineCapture() {
+        let sentinel = UUID().uuidString
+        let cases: [(any Error, DebugCloudDiagnostics.RuntimePreparationRefusal?, String)] = [
+            (BridgeError.unavailable(reason: "cloud runtime account is unverified"), nil, "runtimeIdentityUnverified"),
+            (BridgeError.unavailable(reason: sentinel), .missingBinding, "bridge.unavailable"),
+            (BridgeError.unavailable(reason: "prefix cloud runtime account is unverified"), .missingBinding, "bridge.unavailable"),
+            (BridgeError.unavailable(reason: "cloud runtime tracking failed"), .missingBinding, "runtimeTrackingFailed"),
+            (BridgeError.cancelled, .missingBinding, "bridge.cancelled"),
+            (HostileError(), .missingBinding, "other")
+        ]
+        for (error, refusal, category) in cases {
+            let capture = DebugCloudDiagnostics.SendFailureCapture()
+            capture.observeStartEngine()
+            capture.recordRuntimePreparation(error: error, refusal: refusal)
+            #expect(capture.firstValue == nil)
+            // The unchanged adapter fallback retains its exact output.
+            capture.recordStartEngine(.startEngineRuntimePreparation, error: error)
+            #expect(capture.firstValue == "firstSite=startEngineRuntimePreparation firstCategory=\(category) firstTaskCancelled=0")
+            #expect(capture.firstValue?.contains(sentinel) == false)
+        }
+        let inactive = DebugCloudDiagnostics.SendFailureCapture()
+        inactive.recordRuntimePreparation(error: BridgeError.unavailable(reason: "cloud runtime account is unverified"), refusal: .missingBinding)
+        #expect(inactive.firstValue == nil)
+    }
+
+    @Test func runtimePreparationSinksCannotCrossPairInvocations() {
+        let first = DebugCloudDiagnostics.RuntimePreparationSink()
+        let second = DebugCloudDiagnostics.RuntimePreparationSink()
+        first.record(.missingBinding)
+        #expect(second.value == nil)
+        second.record(.reconcileUsabilityRefused)
+        first.record(.publishingBoundUsabilityRefused)
+        let error = BridgeError.unavailable(reason: "cloud runtime account is unverified")
+        let one = DebugCloudDiagnostics.SendFailureCapture()
+        let two = DebugCloudDiagnostics.SendFailureCapture()
+        one.observeStartEngine(); two.observeStartEngine()
+        two.recordRuntimePreparation(error: error, refusal: second.value)
+        one.recordRuntimePreparation(error: error, refusal: first.value)
+        #expect(one.firstValue == "firstSite=startEngineRuntimePreparation firstCategory=runtimeIdentityUnverified firstTaskCancelled=0 runtimePreparationCause=missingBinding")
+        #expect(two.firstValue == "firstSite=startEngineRuntimePreparation firstCategory=runtimeIdentityUnverified firstTaskCancelled=0 runtimePreparationCause=reconcileUsabilityRefused")
+    }
+
     @Test func sendFailureCapturePreservesExactLegacyFormattingAndFirstTuple() {
         let capture = DebugCloudDiagnostics.SendFailureCapture()
         #expect(capture.firstValue == nil)

@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "core/crates/meguri-ffi/src/sync_tests.rs":
+        "461fb731a22379b6bbe009cd968526c3e706f6e08ae769ff014bc82c63a85135",
     # Complete public-file review: incoming_contract_review, 2026-11-17.
     "docs/process/review-log/cloud-protocol-consent-fixtures-20261117.md":
         "8f37e85fa552b7eece8721914aaf2c6c48c7608308b7c3c242088599b816398a",

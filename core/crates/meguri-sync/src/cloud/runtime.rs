@@ -827,8 +827,24 @@ impl Runtime {
     }
     fn provider_admission_locked(state: &State) -> Result<(), RuntimeError> {
         if let Some(provider) = &state.provider {
-            let binding = &state.bound.as_ref().ok_or(RuntimeError::IdentityUnverified)?.binding;
-            if !provider.permits_icloud_binding(binding) { return Err(RuntimeError::IdentityUnverified); }
+            let binding = &state.bound.as_ref().ok_or_else(|| {
+                #[cfg(feature = "test-hooks")]
+                super::testing::record_preparation_refusal(super::testing::RuntimePreparationRefusal::MissingBinding);
+                RuntimeError::IdentityUnverified
+            })?.binding;
+            if !provider.permits_icloud_binding(binding) {
+                #[cfg(feature = "test-hooks")]
+                if super::testing::preparation_refusal_pending() {
+                    use super::testing::{HandoffObservation, RuntimePreparationRefusal, record_preparation_refusal};
+                    let handoff = match provider.snapshot() {
+                        Ok(doc) if doc.handoff.is_some() => HandoffObservation::Present,
+                        Ok(_) => HandoffObservation::Absent,
+                        Err(_) => HandoffObservation::Unknown,
+                    };
+                    record_preparation_refusal(RuntimePreparationRefusal::ProviderAdmissionDenied { handoff });
+                }
+                return Err(RuntimeError::IdentityUnverified);
+            }
         }
         Ok(())
     }
