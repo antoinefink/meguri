@@ -1120,6 +1120,12 @@ extension ReviewCollectionStartupTests {
             }
         }
         do {
+            // This caller explicitly opts its synthetic installation into iCloud
+            // before the first Host opens; the shared harness defaults stay off.
+            _ = try await CoreProviderService.migrate(
+                directory: harness.scratchContainer.appending(path: "synthetic-installation", directoryHint: .isDirectory),
+                legacyJSON: CoreProviderService.legacyMigrationJSON(
+                    ["enabled": true, "paused": false, "automatic": false, "media": true]))
             switch window {
             case .reopen:
                 original = Task {

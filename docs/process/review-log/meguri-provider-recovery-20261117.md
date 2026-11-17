@@ -465,3 +465,13 @@ Author `055530-8522` separates LocalOnly setup from the connected baseline. The 
 The third file adds the new DEBUG case to an existing explicit ignored group. Independent review `055943-10586` finds no required P0–P1 issues. Root verifies complete author/reviewer source equality before application. Actual CoreBridge and AppModel execution are still pending; both earlier failures remain.
 
 Scoped static `060417-13839` and similarity `060415-13242` pass; the filtered three-file report has no flags or exemptions. Final privacy check passes after a shorter public review paragraph; failed scan `060415-13158` remains retained. No source or policy changed during that rewrite.
+
+## Original provider workflows pass
+
+CoreBridge `swift-test/20261117T060840Z-15685`, clean `3f40fdd5`: three passed, zero failed or skipped. The local-only setup reaches its expected refusal and both zero-SDK checks; both positive native methods pass.
+
+AppModel `swift-test/20261117T060940Z-17055` on the same clean commit executes twelve methods: ten pass, two fail, zero skip. All ten original provider/review methods pass. The additional first-proof method fails before its held-status target; the new held-status method completes its ACK checks but cannot confirm the preview after Pause. Both failures remain retained.
+
+Source audit finds missing prior-provider preparation in the older custom proof harness. Author `061853-23369` adds public migration only in that caller before Host open. Its shared defaults and both windows remain. V13.6 and V26.1 retain account checks after preview authority changes; the new status fixture must stay unpaused. It now enables media while disabled and automatic-off, which changes real media status without revoking that account authority. ACK, guard, final failure, close, successor and deadline assertions remain. Independent review `062514-27337` is clear. Root verifies complete author/reviewer byte equality. Actual verification of these two setup corrections is pending.
+
+Test-preparation checks pass: privacy `062936-33399`, static `062939-34248` and similarity `062937-33690`. The filtered two-file report has no flags or exemptions. These source checks establish no runtime pass.

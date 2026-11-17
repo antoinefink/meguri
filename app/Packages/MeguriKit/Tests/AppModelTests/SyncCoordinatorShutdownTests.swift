@@ -946,10 +946,13 @@ extension ReviewCollectionStartupTests {
                 Issue.record("Expected the real ready return preview")
                 return
             }
-            // Finish discovery's account proof and trailing refresh. Install
-            // the hold before changing the actual unpaused settings to Pause.
+            // Finish discovery's account proof and trailing refresh. Enabling
+            // media changes status while preserving the preview's account authority.
             await harness.sync.drainOperations()
-            try #require(!harness.sync.settings.paused)
+            try #require(!harness.sync.settings.enabled && !harness.sync.settings.paused
+                && !harness.sync.settings.automatic && !harness.sync.settings.media)
+            let status = try #require(harness.sync.status)
+            try #require(status.media.noSpace != true && status.mediaPaused)
             let originalCoordinator = harness.sync
             let backend = try harness.backend
             let originalGuard = try await backend.workflow.currentGuard()
@@ -961,8 +964,9 @@ extension ReviewCollectionStartupTests {
             var heldResult: SyncCommandResult?
             var acknowledgementJoined = false, localOnlyReturned = false
             backend.afterExecution = { command, result in
-                guard case .statusChanged = command.action, heldCommand == nil else { return }
+                guard case .statusChanged(let status) = command.action, heldCommand == nil else { return }
                 heldCommand = command; heldResult = result
+                #expect(!status.mediaPaused && status.media.noSpace != true)
                 #expect(!Task.isCancelled && result.error == nil && !result.deferred)
                 held.continuation.yield(true)
                 await resultGate.hold()
@@ -985,14 +989,16 @@ extension ReviewCollectionStartupTests {
             }
             var choosing: Task<Void, Never>?
             do {
-                originalCoordinator.setDeviceSettings(paused: true, automatic: false, media: false)
+                originalCoordinator.setDeviceSettings(paused: false, automatic: false, media: true)
                 // The status Core phase is held by this result: an input
                 // barrier here would wait for the same ACK we have not released.
                 try #require(try await serviceAppSignal(held.stream, stage: "local-only actual status result held"))
                 let result = try #require(heldResult)
                 try #require(heldCommand != nil)
                 #expect(result.error == nil && !result.deferred)
-                #expect(originalCoordinator.settings.paused && !acknowledgementJoined)
+                #expect(!originalCoordinator.settings.enabled && !originalCoordinator.settings.paused
+                    && !originalCoordinator.settings.automatic && originalCoordinator.settings.media
+                    && !acknowledgementJoined)
                 let action = Task {
                     await originalCoordinator.keepLocalOnly()
                     localOnlyReturned = true
@@ -1014,7 +1020,8 @@ extension ReviewCollectionStartupTests {
             #expect(!originalCoordinator.operationFailed && originalCoordinator.failureRevision == 0)
             #expect(backend.closed && backend.closeReturned == 1)
             #expect(harness.sync !== originalCoordinator && harness.sync.providerState?.selection == .localOnly)
-            #expect(harness.sync.settings.paused && !harness.sync.settings.enabled)
+            #expect(!harness.sync.settings.enabled && !harness.sync.settings.paused
+                && !harness.sync.settings.automatic && harness.sync.settings.media)
             #expect(harness.owner.state == .ready && harness.sync.setupState == .attached)
             #expect(!harness.sync.operationFailed && harness.sync.connectionFailure == nil)
             #expect(try await harness.backend.workflow.currentGuard() != originalGuard)
