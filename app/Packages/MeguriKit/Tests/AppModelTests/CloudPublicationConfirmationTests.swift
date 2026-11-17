@@ -304,12 +304,23 @@ extension ReviewCollectionStartupTests {
             harness.removeStorage()
         }
         do {
-            let operationID = try await harness.retainPublicationAndClose()
-            if block == .disabled { harness.setSavedEnabled(false) }
-            let proof = harness.accounts.holdNextRead()
+            let operationID = try await harness.retainPublicationAndClose(disabled: block == .disabled)
+            let accountReads = harness.accounts.reads
+            let proof = block == .disabled ? nil : harness.accounts.holdNextRead()
             harness.freshCoordinator()
             await harness.owner.start()
-            try await proof.waitForAdmission()
+            if let proof {
+                try await proof.waitForAdmission()
+            } else {
+                // Disabled provider authority forbids automatic account reads.
+                // Join the real startup inputs and their original command ACKs.
+                await harness.sync.prepareConnectionAuthority()
+                await harness.sync.drainOperations()
+                #expect(harness.sync.providerState?.settings?.enabled == false)
+                #expect(harness.sync.providerState?.permitsICloudStartup == false)
+                #expect(harness.accountReadCount == 0 && harness.accounts.reads == accountReads)
+                #expect(harness.accountCompletion == nil && harness.observations.operationIDs.isEmpty)
+            }
             #expect(harness.sync.recovery?.step == .bound)
             #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
             var successorProof: PublicationAccountProof?
@@ -325,7 +336,9 @@ extension ReviewCollectionStartupTests {
                 await harness.sync.waitForInputs()
             case .failed, .disabled: break
             }
-            if block == .failed { proof.fail() } else { proof.finish() }
+            if let proof {
+                if block == .failed { proof.fail() } else { proof.finish() }
+            }
             if block == .replaced { await harness.sync.waitForReplacement() }
             if let successorProof {
                 try await successorProof.waitForAdmission()
@@ -388,15 +401,27 @@ extension ReviewCollectionStartupTests {
         do {
             await harness.owner.start()
             await harness.sync.prepareConnectionAuthority()
+            await harness.sync.drainOperations()
+            #expect(harness.sync.providerState?.selection == .localOnly)
+            #expect(harness.sync.providerState?.settings?.enabled == false && !harness.sync.settings.enabled)
+            #expect(harness.sync.providerState?.permitsICloudStartup == false)
+            #expect(harness.accountReadCount == 0 && harness.accounts.reads == 0)
+            #expect(harness.accountCompletion == nil && harness.observations.operationIDs.isEmpty)
             #expect(harness.sync.recovery == nil)
+            #expect(!harness.sync.connectionOperationActive)
+            #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
             #expect(await harness.owner.close())
-            let proof = harness.accounts.holdNextRead()
+            let accountReads = harness.accounts.reads
             harness.freshCoordinator()
             await harness.owner.start()
-            try await proof.waitForAdmission()
-            #expect(harness.sync.recovery == nil)
-            proof.finish()
             await harness.sync.prepareConnectionAuthority()
+            await harness.sync.drainOperations()
+            #expect(harness.sync.recovery == nil)
+            #expect(harness.sync.providerState?.selection == .localOnly)
+            #expect(harness.sync.providerState?.settings?.enabled == false && !harness.sync.settings.enabled)
+            #expect(harness.sync.providerState?.permitsICloudStartup == false)
+            #expect(harness.accountReadCount == 0 && harness.accounts.reads == accountReads)
+            #expect(harness.accountCompletion == nil && harness.observations.operationIDs.isEmpty)
             #expect(harness.sync.recovery == nil && !harness.sync.connectionOperationActive)
             #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
             #expect(await harness.owner.close())
@@ -412,46 +437,39 @@ extension ReviewCollectionStartupTests {
     var transport = PublicationPresentationTransport()
     let accounts = PublicationAccountFactory()
     var observations = PublicationOwnObservations()
-    let realAccountProof: Bool
     let suite = "synthetic-publication-startup-\(UUID().uuidString)"
     let defaults: UserDefaults
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
     var afterExecution: (@MainActor (CloudPolicyCommand, SyncCommandResult) -> Void)?
-    private var backend: (any SyncCoordinatorBackend)?
+    private var backend: PublicationStartupBackend?
+    private var providerDirectory: URL { root.appending(path: "synthetic-installation") }
     lazy var sync = makeSync()
 
     private func makeSync() -> SyncCoordinator {
         SyncCoordinator(bootstrap: {
             try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-publication-presentation", environment: .development,
-                status: self.realAccountProof ? .couldNotDetermine : .available,
-                identity: self.realAccountProof ? nil : Data("synthetic-publication-account".utf8))
+                status: .couldNotDetermine, identity: nil)
         }, makeBackend: { [self] persisted in
-            if realAccountProof {
-                let observations = self.observations
-                let native = try await NativeCollectionCloudBackend.make(workflow: CoreCloudWorkflowService(), factory: accounts,
-                    ownTransport: transport, mediaTransport: PublicationUnusedMediaTransport(), persisted: persisted,
-                    observeOwn: { observations.record($0) })
-                let backend = PublicationStartupBackend(native: native)
-                backend.beforeExecution = beforeExecution
-                backend.afterExecution = afterExecution
-                self.backend = backend
-                return backend
-            }
-            let connection = try await CoreCloudWorkflowService().connection()
-            let backend = PublicationPresentationBackend(connection: connection, own: CloudOwnExecutor(core: connection, transport: transport))
+            let observations = self.observations
+            let native = try await NativeCollectionCloudBackend.make(workflow: CoreCloudWorkflowService(), factory: accounts,
+                ownTransport: transport, mediaTransport: PublicationUnusedMediaTransport(), persisted: persisted,
+                observeOwn: { observations.record($0) })
+            let backend = PublicationStartupBackend(native: native)
+            backend.beforeExecution = beforeExecution
+            backend.afterExecution = afterExecution
             self.backend = backend
             return backend
-        }, defaults: realAccountProof ? defaults : nil, clock: .system, directory: nil, observeSignals: false)
+        }, defaults: defaults, clock: .system, directory: nil, observeSignals: false,
+           providerDirectory: providerDirectory)
     }
     lazy var owner: ReviewCollection = makeOwner()
     private func makeOwner() -> ReviewCollection {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
         return ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
-            providerDirectory: root.appending(path: "synthetic-installation"))
+            providerDirectory: providerDirectory)
     }
-    init(realAccountProof: Bool = false) throws {
-        self.realAccountProof = realAccountProof
+    init(realAccountProof _: Bool = false) throws {
         defaults = try #require(UserDefaults(suiteName: suite))
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let source = try #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2"))
@@ -465,7 +483,7 @@ extension ReviewCollectionStartupTests {
         guard case .ready(_, let summary) = sync.preview else { throw CloudOwnTransportFailure.unexpectedReply }
         try #require(summary.decision == .confirmUpload)
     }
-    func retainPublicationAndClose() async throws -> Data {
+    func retainPublicationAndClose(disabled: Bool = false) async throws -> Data {
         try await prepare()
         let original = Task { await sync.confirmPublication() }
         do {
@@ -475,6 +493,19 @@ extension ReviewCollectionStartupTests {
             transport.zones.finish(.publication(.failed(retryAfterMilliseconds: nil)))
             await original.value
             try #require(try await connection().recoveryStatus()?.step == .bound)
+            if disabled {
+                // Persist through the original live provider, preserving the
+                // retained operation rather than changing legacy defaults.
+                let provider = try #require(backend?.providerService)
+                let settings = try #require(try await provider.refresh().settings)
+                let saved = try await provider.saveSettings(.init(enabled: false, paused: settings.paused,
+                    automatic: settings.automatic, media: settings.media))
+                try #require(saved.settings?.enabled == false && !saved.permitsICloudStartup)
+                let refreshed = try await provider.refresh()
+                try #require(refreshed.selection == .iCloud && refreshed.settings?.enabled == false)
+                try #require(try await connection().recoveryStatus()?.step == .bound)
+                try #require(observations.operationIDs == Set([operationID]))
+            }
             try #require(await owner.close())
             return operationID
         } catch { release(); await original.value; throw error }
@@ -484,12 +515,9 @@ extension ReviewCollectionStartupTests {
         observations = PublicationOwnObservations()
         sync = makeSync(); owner = makeOwner()
     }
-    func setSavedEnabled(_ enabled: Bool) {
-        defaults.set(["enabled": enabled, "paused": false, "automatic": false, "media": true],
-            forKey: "meguri.cloud.deviceSettings")
-    }
     func connection() throws -> CoreCloudConnectionService { try #require(backend?.connection) }
-    var accountCompletion: PublicationAccountCompletion? { (backend as? PublicationStartupBackend)?.accountCompletion }
+    var accountReadCount: Int? { backend?.accountReadCount }
+    var accountCompletion: PublicationAccountCompletion? { backend?.accountCompletion }
     func expectSuccessfulAccountCompletion(stage: String) {
         let completion = accountCompletion
         let recoveryStep = sync.recovery.map { String(describing: $0.step) } ?? "none"
@@ -504,18 +532,6 @@ extension ReviewCollectionStartupTests {
         defaults.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: root)
     }
-}
-
-@MainActor private final class PublicationPresentationBackend: SyncCoordinatorBackend {
-    let connection: CoreCloudConnectionService?
-    let own: CloudOwnExecutor?
-    init(connection: CoreCloudConnectionService, own: CloudOwnExecutor) { self.connection = connection; self.own = own }
-    func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput { .commands([]) }
-    func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult { .init(outputs: [], error: nil, deferred: false) }
-    func beginAccountRead(transition: Bool) async throws -> UInt64 { 1 }
-    func readAccount(_ read: UInt64) async -> SyncCommandResult { .init(outputs: [], error: nil, deferred: false) }
-    func quiesce() async throws { await own?.close() }
-    func close() async throws { await own?.close() }
 }
 
 private nonisolated final class PublicationPresentationTransport: CloudOwnTransport, Sendable {
@@ -584,8 +600,11 @@ private nonisolated struct PublicationAccountCompletion {
     var beforeExecution: (@MainActor (CloudPolicyCommand) async -> Void)?
     var afterExecution: (@MainActor (CloudPolicyCommand, SyncCommandResult) -> Void)?
     private(set) var accountCompletion: PublicationAccountCompletion?
+    private(set) var accountReadCount = 0
     var connection: CoreCloudConnectionService? { native.connection }
     var own: CloudOwnExecutor? { native.own }
+    var providerService: CoreProviderService? { native.providerService }
+    func stopSyncing() async throws { try await native.stopSyncing() }
     func setProofAdmission(_ admission: @escaping @Sendable (CloudOriginalCommandProofYield) async throws -> Void,
                            acknowledgeOutputs: @escaping @Sendable ([CloudPolicyOutput]) async -> Void) async {
         await native.setProofAdmission(admission, acknowledgeOutputs: acknowledgeOutputs)
@@ -593,12 +612,27 @@ private nonisolated struct PublicationAccountCompletion {
     init(native: NativeCollectionCloudBackend) { self.native = native }
     func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput { try await native.input(event) }
     func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult {
+        await execute(command, corePrepared: {})
+    }
+    func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void) async -> SyncCommandResult {
         await beforeExecution?(command)
-        let result = await native.execute(command)
+        let result = await native.execute(command, corePrepared: corePrepared)
         afterExecution?(command, result)
         return result
     }
-    func beginAccountRead(transition: Bool) async throws -> UInt64 { try await native.beginAccountRead(transition: transition) }
+    func execute(_ command: CloudPolicyCommand, corePrepared: @escaping @MainActor @Sendable () async -> Void,
+                 acknowledgeOutputs: @escaping @MainActor @Sendable ([CloudPolicyOutput]) async -> Void,
+                 performInput: @escaping @MainActor @Sendable (@escaping @Sendable () async throws -> CloudPolicyOutput) async throws -> CloudPolicyOutput) async -> SyncCommandResult {
+        await beforeExecution?(command)
+        let result = await native.execute(command, corePrepared: corePrepared,
+            acknowledgeOutputs: acknowledgeOutputs, performInput: performInput)
+        afterExecution?(command, result)
+        return result
+    }
+    func beginAccountRead(transition: Bool) async throws -> UInt64 {
+        accountReadCount += 1
+        return try await native.beginAccountRead(transition: transition)
+    }
     func readAccount(_ read: UInt64) async -> SyncCommandResult { await native.readAccount(read) }
     func prepareAccountRead(_ read: UInt64) async -> @MainActor (Bool) async -> SyncCommandResult {
         accountCompletion = nil
@@ -618,6 +652,7 @@ private nonisolated struct PublicationAccountCompletion {
 }
 
 @MainActor private final class PublicationAccountFactory: CloudKitEngineFactory {
+    private(set) var reads = 0
     private var proofs: [PublicationAccountProof] = []
     private var allProofs: [PublicationAccountProof] = []
     func holdNextRead() -> PublicationAccountProof {
@@ -626,6 +661,7 @@ private nonisolated struct PublicationAccountCompletion {
         return proof
     }
     func resolveAccount() async throws -> CloudResolvedAccount? {
+        reads += 1
         if !proofs.isEmpty { return try await proofs.removeFirst().resolve() }
         return CloudResolvedAccount(status: .available, identity: Data("synthetic-publication-account".utf8))
     }
