@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/golden.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md D11. Written only by tools/mg oracle record.",
+  "$comment": "SPDX-License-Identifier: MIT. Semantics: specs/conformance/dsl.md D11. Written only by tools/mg oracle record.",
   "title": "Meguri conformance golden",
   "type": "object",
   "required": ["scenario_id", "scenario_sha256", "oracle", "tz", "clock", "observations"],

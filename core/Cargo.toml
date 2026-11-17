@@ -10,7 +10,7 @@ askama_derive = { path = "vendor/askama_derive" }
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.99"
-license = "MPL-2.0"
+license = "MIT"
 publish = false
 
 [workspace.dependencies]

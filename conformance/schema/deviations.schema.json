@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/deviations.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md D13 and float-determinism.md F8.6. File: conformance/deviations.yaml.",
+  "$comment": "SPDX-License-Identifier: MIT. Semantics: specs/conformance/dsl.md D13 and float-determinism.md F8.6. File: conformance/deviations.yaml.",
   "title": "Known deviations from the oracle (R1889)",
   "type": "object",
   "required": ["deviations"],

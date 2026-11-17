@@ -1,5 +1,7 @@
 # Server dependency assessment
 
+Current policy (2026-11-17): independently authored Meguri material, including the model crate, now uses MIT under `LICENSING.md`. The assessment and receipts below describe the earlier source revisions and retain their original MPL-2.0 statements. This note does not rerun or replace dependency or packaging verification. Third-party terms remain unchanged.
+
 New first-party server code is MIT. The public model dependency remains
 MPL-2.0. No Anki implementation or reference runtime belongs to this graph.
 

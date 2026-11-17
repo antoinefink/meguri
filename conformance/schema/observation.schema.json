@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/observation.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/observations.md, and specs/conformance/sync-ops.md for the outputs of sync and converge.",
+  "$comment": "SPDX-License-Identifier: MIT. Semantics: specs/conformance/observations.md, and specs/conformance/sync-ops.md for the outputs of sync and converge.",
   "title": "Observations of one scenario run",
   "description": "One output per scenario step, in step order (O1). Draft kinds accept any value until their area defines it.",
   "type": "object",

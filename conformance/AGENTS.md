@@ -1,4 +1,4 @@
-# conformance/ (MPL-2.0, shared by spec writers and implementers)
+# conformance/ (MIT, shared by spec writers and implementers)
 
 - The format, observations, statuses and catalog are `specs/conformance/dsl.md` and `observations.md`; `schema/*.schema.json` mirror them. Change spec, schema, the testkit model (`core/crates/meguri-testkit/src/scenario/`) and, for a new op or kind, the oracle driver together. `schema/protocol.json` is the only interface to oracle workers.
 - `goldens/` is written only by `tools/mg oracle record <filter>` (or `tools/mg conformance --live`, which calls it): never edit a golden by hand or bless Meguri output into one. `tools/mg oracle compare <filter>` re-runs the live oracle against the committed goldens.

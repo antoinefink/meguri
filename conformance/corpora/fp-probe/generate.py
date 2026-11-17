@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: MIT
 """Writes the floating-point probe corpus (specs/conformance/float-determinism.md F2).
 
     python3 -B -I conformance/corpora/fp-probe/generate.py [--root <checkout>]

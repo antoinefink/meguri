@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: MIT
 """Writes the render area's template corpus as generated scenarios.
 
     python3 -B -I conformance/corpora/templates/generate.py [--out conformance/scenarios/render/corpus]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: MIT
 """Writes the media area's naming differential as a generated scenario.
 
     python3 -B -I conformance/corpora/media/generate.py [--out conformance/scenarios/media/corpus]

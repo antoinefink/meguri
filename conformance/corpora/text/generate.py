@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: MIT
 """Writes the text area's differential corpus as generated scenarios.
 
     python3 -B -I conformance/corpora/text/generate.py [--out conformance/scenarios/text/corpus]

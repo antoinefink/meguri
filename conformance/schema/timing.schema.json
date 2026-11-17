@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/timing.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/timed-operations.md (T7). Written by tools/mg oracle time (side anki) and meguri-cli timing run (side meguri); never a golden.",
+  "$comment": "SPDX-License-Identifier: MIT. Semantics: specs/conformance/timed-operations.md (T7). Written by tools/mg oracle time (side anki) and meguri-cli timing run (side meguri); never a golden.",
   "title": "Timed operations report",
   "type": "object",
   "required": ["report_version", "side", "platform", "protocol", "now", "tz", "collection", "operations"],

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: MIT
 """Validates the conformance tree against its JSON schemas (tools/mg goldens-check).
 
   python3 -B -I tools/conformance/check_schemas.py --cli <meguri-cli> --conformance conformance --report FILE

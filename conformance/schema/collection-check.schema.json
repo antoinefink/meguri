@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/collection-check.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/collection-check.md. Written only by tools/mg oracle check.",
+  "$comment": "SPDX-License-Identifier: MIT. Semantics: specs/conformance/collection-check.md. Written only by tools/mg oracle check.",
   "title": "Oracle check of a collection directory",
   "type": "object",
   "required": ["report_version", "oracle", "dir", "now", "tz", "timing", "counts", "decks", "render", "check_db", "changed_tables"],

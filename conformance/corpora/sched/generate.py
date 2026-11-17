@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: MIT
 """Writes the scheduler day-clock matrix as generated scenarios.
 
     python3 -B -I conformance/corpora/sched/generate.py [--out conformance/scenarios/sched/day/matrix]

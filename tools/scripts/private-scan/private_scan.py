@@ -913,6 +913,11 @@ PUBLIC_ARTIFACTS = {
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
         'be4e3d95b0853e39f2b7da1e33fcf4474da829a593b30835a87704cf284b316c',
+    # Independently reviewed first-party license scope, exact complete text.
+    'LICENSING.md':
+        '98c119e6dedf0192268fc328b9a8e0be58771760a4bc2156387db57ae97c7f2a',
+    'docs/process/review-log/mit-license-20261117.md':
+        'e73a0d15e92e20ee01b4f3fcf8c5cbc7faf7a767143e466ea12b77ecbc3b2c29',
     'conformance/fixtures/meguri-sync-server/observations/desktop-26.09.4-normal-matrix.json':
         '8a4e17346939516eda8b5b650203444693fb32e2173f4d6741242b4089da04eb',
     'specs/sync/server-desktop-current.md':
@@ -1006,7 +1011,7 @@ PUBLIC_ARTIFACTS = {
     # account-service code, tests and documentation. Includes production paths;
     # each entry admits only its exact path and complete reviewed bytes.
     'server/DEPENDENCIES.md':
-        '1fdefcfdee0a81e3c190550cedfc8667b1bd6ba0f21b1727664e0afa91e52148',
+        '33c9b563af531ec0b5cd6b02b0b43d3dec2c5db2aa025d7528a23a896ac79a23',
     'server/src/error.rs':
         '33e51ae13c05fb5124242b189fc02851103684fb3e03e104de63bd1d0a151261',
     'server/src/main.rs':

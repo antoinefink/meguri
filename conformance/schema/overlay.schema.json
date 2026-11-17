@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/overlay.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/float-determinism.md F7, F8. File: conformance/goldens-apple/<scenario id>.json, written only by tools/mg oracle record --platform apple. The schema checks the shape; goldens-check also checks freshness (F7.3), that each pointer resolves in the Linux golden to the linux value, pointer order, and the fp-libm-boundary class (F8).",
+  "$comment": "SPDX-License-Identifier: MIT. Semantics: specs/conformance/float-determinism.md F7, F8. File: conformance/goldens-apple/<scenario id>.json, written only by tools/mg oracle record --platform apple. The schema checks the shape; goldens-check also checks freshness (F7.3), that each pointer resolves in the Linux golden to the linux value, pointer order, and the fp-libm-boundary class (F8).",
   "title": "macOS native oracle overlay golden",
   "type": "object",
   "required": ["scenario_id", "scenario_sha256", "linux_observations_sha256", "oracle", "entries"],

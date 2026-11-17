@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/scenario.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md, and specs/conformance/sync-ops.md for actor scenarios. Authoritative for the scenario file format together with those specs. Not expressed here, checked when a scenario loads: an actor step names a declared actor, and each actor's first sync step has kind login (sync-ops.md S2.3, S4.2); no media_sync precedes its actor's first sync (media-sync-ops.md V3); review_session markers alternate per actor starting begin, with no reopen/full_upload/full_download while open (S13).",
+  "$comment": "SPDX-License-Identifier: MIT. Semantics: specs/conformance/dsl.md, and specs/conformance/sync-ops.md for actor scenarios. Authoritative for the scenario file format together with those specs. Not expressed here, checked when a scenario loads: an actor step names a declared actor, and each actor's first sync step has kind login (sync-ops.md S2.3, S4.2); no media_sync precedes its actor's first sync (media-sync-ops.md V3); review_session markers alternate per actor starting begin, with no reopen/full_upload/full_download while open (S13).",
   "title": "Meguri conformance scenario",
   "type": "object",
   "required": ["id", "clock"],

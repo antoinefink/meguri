@@ -17,7 +17,7 @@ yanked = "deny"
 
 [licenses]
 # Anything not listed is rejected: GPL, AGPL, LGPL-only and unknown or missing
-# licenses all fail. MPL-2.0 is allowed unmodified (Meguri's own license).
+# licenses all fail. MPL-2.0 remains allowed for covered dependencies.
 allow = [
   "Apache-2.0",
   "BSD-2-Clause",

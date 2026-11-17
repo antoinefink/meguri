@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/area.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md D9.1. File: conformance/scenarios/<area>/area.yaml, at most one per area. Live scenarios are the ones with handoff steps (D9.2).",
+  "$comment": "SPDX-License-Identifier: MIT. Semantics: specs/conformance/dsl.md D9.1. File: conformance/scenarios/<area>/area.yaml, at most one per area. Live scenarios are the ones with handoff steps (D9.2).",
   "title": "Conformance area metadata",
   "type": "object",
   "required": ["area"],
