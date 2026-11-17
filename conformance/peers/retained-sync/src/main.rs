@@ -64,9 +64,11 @@ fn allowed(input: &Input) -> bool {
         MediaBaseline => matches!(input.case.as_str(), "media-no-change" | "media-bidirectional"),
     }
 }
-fn options(uncertain: bool) -> JobOptions {
-    let options = JobOptions::new(Endpoint::parse(ENDPOINT).expect("fixed endpoint"), ServerKind::SelfHosted);
-    if uncertain { options.proxy(meguri_sync::Proxy::new(LOST_REPLY_PROXY)) } else { options }
+fn options(_uncertain: bool) -> JobOptions {
+    // The owned observer passes ordinary traffic through and arms reply loss
+    // solely from the closed (case, action) admission. Every HTTP Job is observed.
+    JobOptions::new(Endpoint::parse(ENDPOINT).expect("fixed endpoint"), ServerKind::SelfHosted)
+        .proxy(meguri_sync::Proxy::new(LOST_REPLY_PROXY))
 }
 fn finish<T>(events: Subscription, task: ManualTransferTask<T>) -> std::result::Result<T, TransferError> {
     while let Some(event) = events.recv() {
