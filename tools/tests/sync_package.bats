@@ -286,15 +286,15 @@ PY
     if [ "$mode" = valid ]; then [ "$status" -eq 0 ]; else [ "$status" -ne 0 ]; fi
     [[ "$output" != *private-export-sentinel* && "$output" != *setup_token* && "$output" != *0000000000000000000000000000000000000000000* ]]
     [ "$(tail -n 2 "$MG_RUN_DIR/export-sequence" | tr '\n' ' ')" = 'proxy-cleanup service-cleanup ' ]
-    ! rg 'forbidden-' "$MG_RUN_DIR/export-sequence"
-    rg -q 'mg_sync_package__volume_remove' "$MG_RUN_DIR/hooks"
-    rg -q 'mg_sync_package__stop' "$MG_RUN_DIR/hooks"
-    rg -q 'mg_sync_server__remove_container' "$MG_RUN_DIR/hooks"
+    ! grep -q 'forbidden-' "$MG_RUN_DIR/export-sequence"
+    grep -q 'mg_sync_package__volume_remove' "$MG_RUN_DIR/hooks"
+    grep -q 'mg_sync_package__stop' "$MG_RUN_DIR/hooks"
+    grep -q 'mg_sync_server__remove_container' "$MG_RUN_DIR/hooks"
     case "$mode" in
       valid|cleanup|stop)
         [ "$(head -n 5 "$MG_RUN_DIR/export-sequence" | tr '\n' ' ')" = 'inspect export-ready inspect export-descriptor inspect ' ]
-        rg -qx browser "$MG_RUN_DIR/export-sequence" ;;
-      *) ! rg -qx browser "$MG_RUN_DIR/export-sequence" ;;
+        grep -qx browser "$MG_RUN_DIR/export-sequence" ;;
+      *) ! grep -qx browser "$MG_RUN_DIR/export-sequence" ;;
     esac
   done
 }
