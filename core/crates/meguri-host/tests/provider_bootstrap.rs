@@ -772,3 +772,178 @@ fn meguri_cold_cancelled_failed_confirmation_intent_allows_next_preview_and_disc
     let _lane = LANE.lock().unwrap();
     discarded_failed_confirmation_allows_next_preview(true);
 }
+
+fn nonactive_failed_confirmation_allows_fresh_preview_discard_and_confirm(cold: bool) {
+    use meguri_sync::{oneway::TransferError, policy::{Acceptance, Boundary, MediaOutcome}};
+    use std::os::unix::fs::MetadataExt;
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let connection = select(&host);
+    let (_, data) = server(&root.path().join("server"));
+    // The final read-only Meta fails before Upload or local activation.
+    let script = Script::new(vec![(Method::Meta, Reply::Bytes(meta(NOW - 2000, 7))),
+        (Method::Download, Reply::Bytes(data.clone())), (Method::Meta, Reply::Bytes(meta(NOW - 1000, 8))),
+        (Method::Meta, Reply::Lost)]);
+    let preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &script), D::UseDeviceCollection).unwrap()).unwrap();
+    let first_id = preview.operation.id.clone();
+    let prepared_generation = preview.operation.actual_generation.expect("real preparation captures a generation");
+    assert_eq!(preview.operation.phase, Phase::Preview);
+    assert_eq!(preview.operation.scope, Scope::CollectionAndMedia);
+    let confirmation = bootstrap_complete(&host, || host.confirm_meguri_bootstrap(access(&connection, &script), preview).unwrap());
+    match &confirmation {
+        Err(TransferError::Server(error)) => assert_eq!(error.kind.id(), "network"),
+        other => panic!("expected the final Meta network failure, got {other:?}"),
+    }
+    script.assert_done();
+    assert_eq!(script.count(Method::Meta), 3);
+    assert_eq!(script.count(Method::Download), 1);
+    let first = host.manual_transfer_history().get(&first_id).unwrap();
+    assert_eq!(first.phase, Phase::Failed);
+    assert_eq!(first.boundary, Some(Boundary::Server));
+    assert_eq!(first.acceptance, Acceptance::NotSent);
+    assert_eq!(first.actual_generation, Some(prepared_generation));
+    assert!(host.manual_transfer_history().active().unwrap().is_none());
+    assert!(first.activation_identity.is_none());
+    assert!(first.resulting_publication.is_none());
+    assert!(first.receipt.is_none());
+    assert!(!first.collection_complete);
+    assert_eq!(first.media, MediaOutcome::default());
+    let first_intent = host.provider_authority().meguri_bootstrap_intent().unwrap();
+    assert_eq!(first_intent.operation(), &first_id);
+    assert!(first_intent.media_epoch().is_none());
+    let first_artifacts = retained_artifacts(&config, &first);
+    let provider_before = bytes(&config);
+    let collection_path = host.collection().unwrap().path().to_owned();
+    let collection_before = fs::read(&collection_path).unwrap();
+    let metadata = fs::metadata(&collection_path).unwrap();
+    let file_before = (metadata.dev(), metadata.ino(), metadata.len());
+    let state = DeviceState::for_collection(&collection_path);
+    let publication_before = state.settled_publication().unwrap();
+    let replacement_before = state.replacement_evidence().unwrap();
+    unbound(&host);
+    for method in [Method::Upload, Method::MediaBegin, Method::UploadChanges, Method::MediaChanges, Method::DownloadFiles, Method::MediaSanity] {
+        assert_eq!(script.count(method), 0);
+    }
+
+    let host = if cold { host.close().unwrap(); CoreHost::open(config.clone()).unwrap() } else { host };
+    settle(&host);
+    assert_eq!(host.manual_transfer_history().get(&first_id).unwrap(), first);
+    assert_eq!(host.provider_authority().meguri_bootstrap_intent(), Some(first_intent.clone()));
+    assert!(host.manual_transfer_history().active().unwrap().is_none());
+    assert!(host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().is_none());
+    // Ordinary admission refresh observes the actual cleared active row.
+    host.refresh_provider_admission();
+    assert!(host.manual_transfer_history().active().unwrap().is_none());
+    assert!(!host.provider_authority().network_blocked());
+    assert_eq!(bytes(&config), provider_before);
+    assert_eq!(fs::read(&collection_path).unwrap(), collection_before);
+    let metadata = fs::metadata(&collection_path).unwrap();
+    assert_eq!((metadata.dev(), metadata.ino(), metadata.len()), file_before);
+    assert_eq!(state.settled_publication().unwrap(), publication_before);
+    assert_eq!(state.replacement_evidence().unwrap(), replacement_before);
+    assert_artifacts(&first_artifacts);
+
+    let next_script = offline_preparation_script(data.clone());
+    let next = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &next_script), D::UseDeviceCollection).unwrap()).unwrap();
+    next_script.assert_done();
+    assert_ne!(next.operation.id, first_id);
+    assert_eq!(next.operation.phase, Phase::Preview);
+    assert_eq!(next.operation.scope, Scope::CollectionAndMedia);
+    assert_eq!(host.manual_transfer_history().active().unwrap().as_ref(), Some(&next.operation));
+    assert_eq!(host.provider_authority().meguri_bootstrap_intent(), Some(first_intent.clone()));
+    assert_eq!(bytes(&config), provider_before);
+    let next_artifacts = retained_artifacts(&config, &next.operation);
+    // Intended RED boundary: a fresh preview must be discoverable despite the
+    // historical, nonactive Failed intent, without writing new consent.
+    assert_eq!(host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().as_ref(), Some(&next.operation));
+    assert!(matches!(host.pending_meguri_bootstrap_preparation(&connection, "other-user"), Err(E::Ready(F::AccountChanged))));
+    for field in ["reference", "revision", "endpoint"] {
+        let mut wrong = connection.clone();
+        match field { "reference" => wrong.reference.push('x'), "revision" => wrong.revision += 1,
+            _ => wrong.endpoint = "https://foreign.synthetic.example/".into() }
+        assert!(matches!(host.pending_meguri_bootstrap_preparation(&wrong, USER), Err(E::ConnectionChanged)));
+        assert!(matches!(host.discard_meguri_bootstrap_preparation(&wrong, &next.operation), Err(E::ConnectionChanged)));
+    }
+    assert!(matches!(host.discard_meguri_bootstrap_preparation(&connection, &first), Err(E::Ready(F::OperationMismatch))));
+    assert_eq!(host.manual_transfer_history().get(&first_id).unwrap(), first);
+    assert_eq!(host.manual_transfer_history().get(&next.operation.id).unwrap(), next.operation);
+    assert_eq!(host.manual_transfer_history().active().unwrap().as_ref(), Some(&next.operation));
+    assert_eq!(host.provider_authority().meguri_bootstrap_intent(), Some(first_intent.clone()));
+    assert_eq!(bytes(&config), provider_before);
+
+    let cancelled_next = host.discard_meguri_bootstrap_preparation(&connection, &next.operation).unwrap();
+    assert_eq!(cancelled_next.phase, Phase::Cancelled);
+    assert_eq!(cancelled_next.boundary, Some(Boundary::Cancelled));
+    assert_eq!(cancelled_next.acceptance, Acceptance::NotSent);
+    assert!(cancelled_next.activation_identity.is_none());
+    assert!(cancelled_next.resulting_publication.is_none());
+    assert!(cancelled_next.receipt.is_none());
+    assert!(!cancelled_next.collection_complete);
+    assert_eq!(cancelled_next.media, MediaOutcome::default());
+    assert!(host.manual_transfer_history().active().unwrap().is_none());
+    assert!(host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().is_none());
+    assert_eq!(host.manual_transfer_history().get(&first_id).unwrap(), first);
+    assert_eq!(host.manual_transfer_history().get(&next.operation.id).unwrap(), cancelled_next);
+    assert_eq!(host.provider_authority().meguri_bootstrap_intent(), Some(first_intent.clone()));
+    assert_eq!(bytes(&config), provider_before);
+    assert_eq!(fs::read(&collection_path).unwrap(), collection_before);
+    let metadata = fs::metadata(&collection_path).unwrap();
+    assert_eq!((metadata.dev(), metadata.ino(), metadata.len()), file_before);
+    assert_eq!(state.settled_publication().unwrap(), publication_before);
+    assert_eq!(state.replacement_evidence().unwrap(), replacement_before);
+    assert_artifacts(&first_artifacts);
+    assert_artifacts(&next_artifacts);
+    for method in [Method::Upload, Method::MediaBegin, Method::UploadChanges, Method::MediaChanges, Method::DownloadFiles, Method::MediaSanity] {
+        assert_eq!(script.count(method), 0);
+        assert_eq!(next_script.count(method), 0);
+    }
+    unbound(&host);
+
+    let final_script = collection_script(data, true);
+    let final_preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(access(&connection, &final_script), D::UseDeviceCollection).unwrap()).unwrap();
+    let final_id = final_preview.operation.id.clone();
+    assert_ne!(final_id, first_id);
+    assert_ne!(final_id, next.operation.id);
+    assert_eq!(final_preview.operation.phase, Phase::Preview);
+    assert_eq!(final_preview.operation.scope, Scope::CollectionAndMedia);
+    assert_eq!(host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().as_ref(), Some(&final_preview.operation));
+    assert_eq!(host.provider_authority().meguri_bootstrap_intent(), Some(first_intent));
+    assert_eq!(bytes(&config), provider_before);
+    assert_eq!(final_script.count(Method::Upload), 0);
+    let done = bootstrap_complete(&host, || host.confirm_meguri_bootstrap(access(&connection, &final_script), final_preview).unwrap()).unwrap();
+    final_script.assert_done();
+    assert_eq!(done.id, final_id);
+    assert!(done.collection_complete);
+    assert_eq!(done.scope, Scope::CollectionAndMedia);
+    assert_eq!(done.acceptance, Acceptance::ExactOk);
+    assert!(done.receipt.is_none());
+    assert_eq!(done.media, MediaOutcome::default());
+    assert_eq!(host.manual_transfer_history().get(&final_id).unwrap(), done);
+    assert_eq!(host.manual_transfer_history().get(&first_id).unwrap(), first);
+    assert_eq!(host.manual_transfer_history().get(&next.operation.id).unwrap(), cancelled_next);
+    assert_eq!(host.manual_transfer_history().history().unwrap().len(), 3);
+    let final_intent = host.provider_authority().meguri_bootstrap_intent().unwrap();
+    assert_eq!(final_intent.operation(), &final_id);
+    assert!(final_intent.media_epoch().is_none());
+    let doc = host.provider_authority().snapshot().unwrap();
+    assert!(doc.meguri_binding.is_none());
+    assert!(!doc.meguri_settings.automatic);
+    unbound(&host);
+    assert_eq!(final_script.count(Method::Meta), 3);
+    assert_eq!(final_script.count(Method::Download), 1);
+    assert_eq!(final_script.count(Method::Upload), 1);
+    for method in [Method::MediaBegin, Method::UploadChanges, Method::MediaChanges, Method::DownloadFiles, Method::MediaSanity] {
+        assert_eq!(final_script.count(method), 0);
+    }
+    host.close().unwrap();
+}
+#[test]
+fn meguri_warm_nonactive_failed_confirmation_intent_allows_fresh_preview_discard_and_confirm() {
+    let _lane = LANE.lock().unwrap();
+    nonactive_failed_confirmation_allows_fresh_preview_discard_and_confirm(false);
+}
+#[test]
+fn meguri_cold_nonactive_failed_confirmation_intent_allows_fresh_preview_discard_and_confirm() {
+    let _lane = LANE.lock().unwrap();
+    nonactive_failed_confirmation_allows_fresh_preview_discard_and_confirm(true);
+}
