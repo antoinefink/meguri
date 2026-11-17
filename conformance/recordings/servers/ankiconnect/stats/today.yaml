@@ -1,0 +1,37 @@
+# specs/servers/ankiconnect-actions A14, A20.7 `today`: the studied-today
+# window starts after S, the start of the current day in ms (stats/day-buckets
+# B2: id > S). Rows at S - 1 s, S and S + 1 s, written by setDueDate (type 4:
+# no action Meguri serves writes other types, and durations are whole seconds).
+# The golden records the add-on, which counts the S + 1 s row; Meguri leaves
+# type 4 out and answers 0 (A18 ankiconnect-review-counts-exclusions). The
+# millisecond edges and the type 5 row are today-counted (declared).
+id: servers/ankiconnect/stats/today
+description: "getNumCardsReviewedToday with setDueDate rows around the day start"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T03:59:59"}
+setup:
+  config: {rollover: 4}
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, fields: {Term: one, Gloss: first}}
+    - {notetype: Pair, fields: {Term: two, Gloss: second}}
+    - {notetype: Pair, fields: {Term: three, Gloss: third}}
+steps:
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c1"], days: "1"}}}
+  - advance: 1s
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2"], days: "1"}}}
+  - advance: 1s
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c3"], days: "1"}}}
+  - observe: [{db_dump: {tables: [revlog]}}]
+  - http:
+      body: {json: {action: getNumCardsReviewedToday, version: 6}}

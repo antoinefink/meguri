@@ -1,0 +1,23 @@
+# servers/ankiconnect-envelope E19.2 `policy/key-pending`: key required but no key applied (E8, H10.3).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# The apply carries no key, so the key is set but unknown (H10.3).
+id: servers/ankiconnect/policy/key-pending
+description: key set but unknown refuses every action except requestPermission
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - apply_config: {ankiconnect: {api_key_required: true}}
+  - http:
+      body: {json: {action: deckNames, version: 6, key: k1}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "valid api key must be provided"}}
+  - http:
+      body: {json: {action: requestPermission, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: granted, requireApikey: true, version: 6}, error: null}}

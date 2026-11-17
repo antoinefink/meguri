@@ -1,0 +1,32 @@
+# servers/migaku-protocol P16 `ws-wrong-version`.
+# A handshake with another version gets the same 400 plus Sec-WebSocket-Version: 13
+# (P10.1, RFC 6455). The key is base64 of the ASCII bytes 0123456789abcdef.
+# No Origin, so Access-Control-Allow-Origin is * and no Vary (P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/ws-wrong-version
+description: "a handshake with version 8 gets 400 naming version 13"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: GET
+      target: /anki-connect
+      headers:
+        - [Upgrade, websocket]
+        - [Connection, Upgrade]
+        - [Sec-WebSocket-Version, "8"]
+        - [Sec-WebSocket-Key, "MDEyMzQ1Njc4OWFiY2RlZg=="]
+    expect:
+      status: 400
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+        sec-websocket-version: "13"
+        upgrade: null
+      body: {json: {success: false, error: "Expected a WebSocket upgrade."}}

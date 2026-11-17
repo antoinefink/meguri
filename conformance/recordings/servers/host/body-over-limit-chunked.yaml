@@ -1,0 +1,27 @@
+# servers/host-security H17 `body-over-limit-chunked` (declared, servers/transcripts T13):
+# a chunked body is counted while read; one byte over the limit is refused with the over-limit
+# reply (H8); the executor ignores its own write error (servers/transcripts T6.4).
+id: servers/host/body-over-limit-chunked
+description: "chunked body over each limit refused while read"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect, migaku]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: listening, addresses: ["127.0.0.1:44432", "[::1]:44432"]}, within_ms: 1000, server: migaku}
+  - http: {server: ankiconnect, headers: [[Transfer-Encoding, chunked]], body: {fill: {size: 268435457, byte: 32}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*", connection: close}
+      body: {json: {result: null, error: "Meguri: the request body is too large"}}
+      closed: true
+      no_effect: true
+  - http: {server: migaku, method: POST, target: /srs-import, headers: [[Transfer-Encoding, chunked]], body: {fill: {size: 134217729, byte: 32}}}
+    expect:
+      status: 400
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*", connection: close}
+      body: {json: {success: false, error: "Request body is too large."}}
+      closed: true
+      no_effect: true

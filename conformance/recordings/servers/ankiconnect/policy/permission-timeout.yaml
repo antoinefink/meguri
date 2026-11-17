@@ -1,0 +1,37 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-timeout`: a prompt with no outcome (E9 outcome table, H11.2).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# The 403 shows the allow-list unchanged; the last request consumes its scripted deny, so it raised a new prompt: the first one is gone and the origin is not deny-listed (T7.2).
+id: servers/ankiconnect/policy/permission-timeout
+description: no outcome within 120 s denies; the prompt is gone and no list changed
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - permission: {answer: none}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}
+      async: p1
+  - wait: 1s
+  - advance: 120s
+  - await: p1
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: denied}, error: null}}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}
+  - permission: {answer: deny}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: denied}, error: null}}

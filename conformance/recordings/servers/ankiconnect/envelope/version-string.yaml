@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 version-string: a string version is not an integer (E4).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/version-string
+description: "version \"6\": not an integer"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: version, version: "6"}}

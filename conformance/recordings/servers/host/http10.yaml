@@ -1,0 +1,18 @@
+# servers/host-security H17 `http10` (declared, servers/transcripts T13):
+# an HTTP/1.0 request without Connection: keep-alive is answered, then the connection closes;
+# the reply carries Connection: close (H7.1, H7.3).
+id: servers/host/http10
+description: "HTTP/1.0 ping, then close"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, http_version: "1.0"}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*", connection: close}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+      closed: true

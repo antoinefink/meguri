@@ -1,0 +1,24 @@
+# specs/servers/ankiconnect-actions A20.3 `add-no-card` (A7.3, A21 Q7): a note
+# whose template selects no card is still added, with its fallback card.
+id: servers/ankiconnect/notes/add-no-card
+description: addNote whose only template is blank still adds the note with one card
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Rev
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Gloss}}", back: "{{Term}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Rev, fields: {Term: "x"}}}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

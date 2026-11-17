@@ -1,0 +1,66 @@
+# specs/servers/ankiconnect-actions A20.3 `add-notes` (A7.6's table, A18
+# `ankiconnect-addnotes-rollback`). Notes: A (Term a), C (Term c), B the failing
+# one of each row. Step 4 dumps graves after the failed requests: rows the
+# add-on added and deleted within one request have no tokens (servers/transcripts
+# T10.6). Step 5 is A7.6's passing case (the new ids in list order).
+id: servers/ankiconnect/notes/add-notes
+description: addNotes is all or nothing; the error lists the failing notes' texts
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  # 0: empty list
+  - http:
+      body: {json: {action: addNotes, version: 6, params: {notes: []}}}
+  # 1: A ok, B with note type Nope, C ok
+  - http:
+      body:
+        json:
+          action: addNotes
+          version: 6
+          params:
+            notes:
+              - {deckName: D, modelName: Pair, fields: {Term: "a"}}
+              - {deckName: D, modelName: Nope, fields: {Term: "b"}}
+              - {deckName: D, modelName: Pair, fields: {Term: "c"}}
+  # 2: A, then A again
+  - http:
+      body:
+        json:
+          action: addNotes
+          version: 6
+          params:
+            notes:
+              - {deckName: D, modelName: Pair, fields: {Term: "a"}}
+              - {deckName: D, modelName: Pair, fields: {Term: "a"}}
+  # 3: A in a missing deck X, B with an empty first field
+  - http:
+      body:
+        json:
+          action: addNotes
+          version: 6
+          params:
+            notes:
+              - {deckName: X, modelName: Pair, fields: {Term: "a"}}
+              - {deckName: D, modelName: Pair, fields: {Term: "", Gloss: "b"}}
+  - observe: [{db_dump: {tables: [notes, cards, graves]}}, media_dir]
+  # 5: every note passes
+  - http:
+      body:
+        json:
+          action: addNotes
+          version: 6
+          params:
+            notes:
+              - {deckName: D, modelName: Pair, fields: {Term: "a"}}
+              - {deckName: D, modelName: Pair, fields: {Term: "c"}}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

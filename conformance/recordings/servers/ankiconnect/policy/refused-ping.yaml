@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.2 `policy/refused-ping`: empty body from a disallowed origin.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/refused-ping
+description: the ping from a disallowed origin, 403
+tags: [policy]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      headers: [[Origin, "https://evil.example"]]

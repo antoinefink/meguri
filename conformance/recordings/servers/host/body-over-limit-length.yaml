@@ -1,0 +1,26 @@
+# servers/host-security H17 `body-over-limit-length` (declared, servers/transcripts T13):
+# a Content-Length one byte over the limit is refused from the head, before any body byte
+# (declared_length sends none), with the server's over-limit reply and Connection close (H8,
+# E2, P8.3).
+id: servers/host/body-over-limit-length
+description: "Content-Length over each limit refused before the body"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect, migaku]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: listening, addresses: ["127.0.0.1:44432", "[::1]:44432"]}, within_ms: 1000, server: migaku}
+  - http: {server: ankiconnect, declared_length: 268435457}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*", connection: close}
+      body: {json: {result: null, error: "Meguri: the request body is too large"}}
+      closed: true
+  - http: {server: migaku, method: POST, target: /srs-import, declared_length: 134217729}
+    expect:
+      status: 400
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*", connection: close}
+      body: {json: {success: false, error: "Request body is too large."}}
+      closed: true

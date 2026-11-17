@@ -1,0 +1,29 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-others-served`: other requests while a prompt is open (E9, E18 permission prompt).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# The scenario clock does not move before the deckNames reply, so a deckNames held behind the prompt would never be answered.
+id: servers/ankiconnect/policy/permission-others-served
+description: a request from another origin is answered while a prompt waits
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - permission: {answer: none}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}
+      async: p1
+  - wait: 1s
+  - http:
+      headers: [[Origin, "chrome-extension://abc"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "chrome-extension://abc", access-control-allow-headers: "*"}
+      body: {json: {result: [Default], error: null}}
+  - advance: 120s
+  - await: p1
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: denied}, error: null}}

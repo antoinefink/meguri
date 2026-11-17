@@ -1,0 +1,31 @@
+# servers/ankiconnect-actions A20.2 `names` (A6). No Origin, version 6.
+# Pair, then Duo, then alpha are created in that order, so creation order
+# differs from name order. All values are synthetic.
+id: servers/ankiconnect/models/names
+description: modelNames and modelNamesAndIds in name order, not creation order
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+    - name: Duo
+      fields: [F, B]
+      templates:
+        - {name: Card 1, front: "{{F}}", back: "{{B}}"}
+      css: ".card{}"
+    - name: alpha
+      fields: [Term]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{Term}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body: {json: {action: modelNames, version: 6}}
+  - http:
+      body: {json: {action: modelNamesAndIds, version: 6}}

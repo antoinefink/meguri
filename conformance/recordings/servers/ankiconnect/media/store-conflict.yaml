@@ -1,0 +1,27 @@
+# specs/servers/ankiconnect-media X14 `media/store-conflict`: X4 rows 3, 4, 5
+# and 9, each on its own file (c3, c4, c5, c9 = A before) so that the rows do
+# not depend on one another. Row 5: the add-on trashes a copy of A
+# (`ankiconnect-media-delete-existing`); row 9: Meguri resolves the case variant
+# (`ankiconnect-media-case-variants`). A = 61 0a, B = 62 0a. All values are synthetic.
+id: servers/ankiconnect/media/store-conflict
+description: storeMediaFile onto present names, deleteExisting true and false, same content, case variant
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: c3.mp3, text: "a\n"}
+    - {name: c4.mp3, text: "a\n"}
+    - {name: c5.mp3, text: "a\n"}
+    - {name: c9.mp3, text: "a\n"}
+steps:
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: c3.mp3, data: "Ygo="}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: c4.mp3, data: "Ygo=", deleteExisting: false}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: c5.mp3, data: "YQo="}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: C9.mp3, data: "Ygo="}}}
+  - observe: [media_dir, media_trash]

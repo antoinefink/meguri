@@ -1,0 +1,55 @@
+# servers/ankiconnect-actions A20.5 `cards/intervals` (A12.4, A12.5). All values are synthetic.
+# The recorder runs no card-state or review-log setup section (conformance/dsl D6.6, D6.7
+# are drafts), and the actions that would write learning rows (answerCards, insertReviews)
+# are ones Meguri refuses (servers/ankiconnect-envelope E12), so review-log rows here come
+# from setDueDate (A13: one row of type 4 per card). With FSRS on, Set Due Date keeps a new
+# card's ivl at 0 (sched/set-due-date S4.2), so every row has ivl 0. The table's rows
+# ivl -600, 1, 4 and the learning row ivl -1800 dated now - 3600 s are not in this transcript.
+# FSRS is on, as Meguri always runs it (sched/set-due-date S1, R702).
+id: servers/ankiconnect/cards/intervals
+description: getIntervals and areDue for new, review and reset cards and an unknown id
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [A]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: A, fields: {Term: "a1", Gloss: "b1"}}
+    - {notetype: Pair, deck: A, fields: {Term: "a2", Gloss: "b2"}}
+    - {notetype: Pair, deck: A, fields: {Term: "a3", Gloss: "b3"}}
+steps:
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2"], days: "1"}}}
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2"], days: "4"}}}
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c3"], days: "0"}}}
+  - http:
+      body: {json: {action: getIntervals, version: 6, params: {cards: ["#c1", "#c2", "#c3"]}}}
+  - http:
+      body: {json: {action: getIntervals, version: 6, params: {cards: ["#c2"], complete: true}}}
+  - http:
+      body: {json: {action: areDue, version: 6, params: {cards: ["#c1", "#c2", "#c3"]}}}
+  - http:
+      body: {json: {action: getIntervals, version: 6, params: {cards: [7]}}}
+  - http:
+      body: {json: {action: getIntervals, version: 6, params: {cards: [7], complete: true}}}
+  - http:
+      body: {json: {action: areDue, version: 6, params: {cards: [7]}}}
+  - http:
+      body: {json: {action: forgetCards, version: 6, params: {cards: ["#c2"]}}}
+  - http:
+      body: {json: {action: getIntervals, version: 6, params: {cards: ["#c2"]}}}
+  - http:
+      body: {json: {action: getIntervals, version: 6, params: {cards: ["#c2"], complete: true}}}
+  - http:
+      body: {json: {action: areDue, version: 6, params: {cards: ["#c2"]}}}
+  - observe: [{db_dump: {tables: [cards, revlog]}}]

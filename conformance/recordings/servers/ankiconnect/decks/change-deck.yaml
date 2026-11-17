@@ -1,0 +1,30 @@
+# servers/ankiconnect-actions A20.1 change-deck (A5.5; A18
+# ankiconnect-changedeck-op). The row with a filtered deck F is not here: no
+# setup section or AnkiConnect action makes a filtered deck in a transcript.
+# advance before each move so that a stamped mod shows. Synthetic content only.
+id: servers/ankiconnect/decks/change-deck
+description: changeDeck into an existing deck and into a new nested deck
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [A, "New::Sub"]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: A, fields: {Term: alpha, Gloss: first}}
+    - {notetype: Pair, deck: "New::Sub", fields: {Term: beta, Gloss: second}}
+steps:
+  - advance: 1m
+  - http:
+      body: {json: {action: changeDeck, version: 6, params: {cards: ["#c1", "#c2"], deck: "New::Sub"}}}
+  - observe: [{db_dump: {tables: [cards, decks]}}]
+  - advance: 1m
+  - http:
+      body: {json: {action: changeDeck, version: 6, params: {cards: ["#c1"], deck: "Brand::New"}}}
+  - observe: [{db_dump: {tables: [cards, decks]}}]

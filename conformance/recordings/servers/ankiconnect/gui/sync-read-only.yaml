@@ -1,0 +1,32 @@
+# specs/servers/ankiconnect-gui G12 `sync-read-only` (G9, envelope E13).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3).
+# Refused before the action runs, so no SyncNow interaction is posted.
+id: servers/ankiconnect/gui/sync-read-only
+description: "sync in read-only mode"
+tags: [gui]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {read_only: true}
+setup:
+  config: {activeCols: [noteFld, template, cardDue, deck, noteCrt]}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}}
+    - {notetype: Pair, deck: Default, fields: {Front: gamma, Back: third}}
+steps:
+  - http:
+      body: {json: {action: sync, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "Meguri: the API is in read-only mode"}}
+      no_effect: true

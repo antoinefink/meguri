@@ -1,0 +1,23 @@
+# servers/host-security H17 `failed-open-listens` (declared, servers/transcripts T13):
+# after a failed first open the server listens with collection_available false, and a
+# collection action gets the unavailable error after its 30 s wait (H3, H9.2, E14). The
+# real-time wait lets the request reach its wait before the clock moves.
+id: servers/host/failed-open-listens
+description: "failed first open: listening, collection actions time out"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+host_env: {start: before_open}
+steps:
+  - lifecycle: open_fail
+  - status: {until: {state: listening, collection_available: false}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, body: {json: {action: deckNames, version: 6}}, async: d}
+  - wait: 1s
+  - advance: 30s
+  - await: d
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "collection is not available"}}

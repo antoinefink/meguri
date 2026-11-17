@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.2 `policy/key-before-lookup`: the key checked before the action lookup.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/key-before-lookup
+description: an unknown action without key gets the key error first
+tags: [policy, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {api_key: k1}
+steps:
+  - http:
+      body: {json: {action: nope, version: 6}}

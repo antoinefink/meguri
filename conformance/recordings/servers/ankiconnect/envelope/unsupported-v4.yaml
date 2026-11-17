@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 unsupported-v4: an unknown action without version: errors are always wrapped (E5.1).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/unsupported-v4
+description: "unknown action, no version: wrapped error"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: nope}}

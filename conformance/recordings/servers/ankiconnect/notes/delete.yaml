@@ -1,0 +1,23 @@
+# specs/servers/ankiconnect-actions A20.3 `delete` (A8.6): an id that names no
+# note is skipped. The deleted-notes log is a file outside the collection and
+# is not observed here; the graves are.
+id: servers/ankiconnect/notes/delete
+description: deleteNotes with one known and one unknown id
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: D, fields: {Term: "x", Gloss: "y"}}
+steps:
+  - http:
+      body: {json: {action: deleteNotes, version: 6, params: {notes: ["#n1", 5]}}}
+  - observe: [{db_dump: {tables: [notes, cards, graves]}}]

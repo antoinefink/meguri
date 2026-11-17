@@ -1,0 +1,32 @@
+# servers/host-security H17 `toggle-off` (declared, servers/transcripts T13):
+# turning the server off within 1 s: sockets closed, an idle connection closed, a request
+# waiting for the collection answered as timed out and closed (H10.4). The real-time wait lets
+# the async request reach its wait; the idle ping comes after it, so close_wait counts from
+# just before the apply.
+id: servers/host/toggle-off
+description: "server turned off: waits answered, idle connections closed"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - lifecycle: exclusive
+  - http: {server: ankiconnect, body: {json: {action: deckNames, version: 6}}, async: w}
+  - wait: 1s
+  - http: {server: ankiconnect, connection: k}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+      closed: false
+  - apply_config: {ankiconnect: {enabled: false}}
+  - close_wait: {name: k, within_ms: 1000}
+  - await: w
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "collection is not available"}}
+      closed: true
+  - status: {until: {state: off, addresses: []}, within_ms: 1000, server: ankiconnect}

@@ -3,7 +3,7 @@
 Spec: servers/ankiconnect-envelope
 Requirements: R1734, R1735, R1736, R1737, R1738, R1739, R1740, R1741, R1742, R1743, R1744, R1745, R1746, R1747, R1748, R1749, R1750, R1751, R1752, R1753, R1775, R1779, R1780, R1781, R1790 (one action, one op), R1797; AE75, AE76, AE77; supports R1659, R1679, R1795
 Anki: 26.09.3
-Scenarios: none yet in `conformance/`. The transcript format is `servers/transcripts`; until its runner exists (U136), E19 lists every planned scenario as a request and reply table, to become `conformance/recordings/servers/ankiconnect/{envelope,policy,multi}/` (`servers/transcripts` T2; ids `servers/ankiconnect/<dir>/<name>`).
+Scenarios: conformance/recordings/servers/ankiconnect/{envelope,policy,multi}/ (`servers/transcripts` T2; ids `servers/ankiconnect/<dir>/<name>`): 74 oracle transcripts with their goldens (envelope 30, policy 28, multi 16) and 37 declared scenarios (`servers/transcripts` T13; envelope 6, policy 24, multi 7). E19 lists every row as a request and reply table and says which rows are not transcripts.
 
 What the AnkiConnect-compatible server on the AnkiConnect port (default 8765) does with one HTTP request before and after an action runs: the request and reply envelope, API versions, the ping, origin gating and CORS, the API key, `requestPermission`, `apiReflect`, `multi`, read-only mode, the collection wait, the action registry, the activity log and the connection snippet for agents.
 
@@ -511,9 +511,11 @@ Each needs an entry in `conformance/deviations.yaml` once the transcripts exist 
 
 ## E19. Scenarios
 
-Planned transcript scenarios. "Rec." means the reply must equal the reference recording, after `servers/transcripts` normalization (T10) and comparison (T11), with the E18 entries named in the row as `deviations.yaml` transforms (T12): "ACAO per E18" is a `replace` of the `access-control-allow-origin` header, "headers per E18" an `absent` on both CORS headers, "text per E18" an `any_string` on `/body/json/error`. "Meguri" means the expectation is Meguri's own (a deviation, a check of Meguri's own state such as the config document, or an app interaction the recorder cannot drive: no answer, timeouts, joined prompts, closed waiters, resolve calls): a declared scenario (`servers/transcripts` T13, with T7.2 and T7.3 steps) or a test in `core/crates/meguri-servers/tests/` (U141). Unless a row says otherwise: default settings (allow-list `["http://localhost"]`, empty deny-list, no key, read-only off), method `POST`, no `Origin`, a fresh collection whose only deck is `Default`, and replies HTTP 200 with the E5.1 headers. `ACAO` is `Access-Control-Allow-Origin`.
+Transcript scenarios, one file per row at `conformance/recordings/servers/ankiconnect/<dir>/<id>.yaml`. "Rec." means the reply must equal the reference recording, after `servers/transcripts` normalization (T10) and comparison (T11), with the E18 entries named in the row as `deviations.yaml` transforms (T12): "ACAO per E18" is a `replace` of the `access-control-allow-origin` header, "headers per E18" an `absent` on both CORS headers, "text per E18" an `any_string` on `/body/json/error`. A `Rec.` row whose requests carry no `Origin`, while the allow-list holds no `*`, is "ACAO per E18" whether or not the row says so: the reference sends `http://localhost` (E7.3 row 4, E18), and every such oracle scenario carries the `no-origin` tag that the R1739 transform applies to (`servers/transcripts` T12). "Meguri" means the expectation is Meguri's own (a deviation, a check of Meguri's own state such as the config document, or an app interaction the recorder cannot drive: no answer, timeouts, joined prompts, closed waiters, resolve calls): a declared scenario (`servers/transcripts` T13, with T7.2 and T7.3 steps) or a test in `core/crates/meguri-servers/tests/` (U141). Unless a row says otherwise: default settings (allow-list `["http://localhost"]`, empty deny-list, no key, read-only off), method `POST`, no `Origin`, a fresh collection whose only deck is `Default`, and replies HTTP 200 with the E5.1 headers. `ACAO` is `Access-Control-Allow-Origin`.
 
 ### E19.1 `envelope/`
+
+Written: the 30 `Rec.` rows are oracle scenarios with their goldens next to them, each recorded twice in fresh containers with byte-identical results; the 6 `Meguri` rows (`unsupported-reference`, `extra-param`, `nan-token`, `chunked`, `head-request`, `body-too-large`) are declared scenarios.
 
 | Id | Request body (or note) | Reply | Kind |
 |---|---|---|---|
@@ -556,6 +558,8 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 
 ### E19.2 `policy/`
 
+Written: the 28 `Rec.` rows are oracle scenarios with their goldens next to them; 24 of the `Meguri` rows are declared scenarios. `permission-coalesced`, `permission-bad-outcome` and `permission-apply-race` resolve the prompt by the id `i-1`: they rely on `servers/host-security` H11.2 numbering the interactions of each host built from 1, with one host per scenario (`servers/transcripts` T20). Not written: `permission-allow-lists` and `permission-deny-ignore-lists` need a partial match on the `config` output, which `servers/transcripts` T13 does not have yet (until it does, U141 tests them); `permission-closed-waiter` is a U141 test (E19.4). `permission-empty-origin` leaves ACAO unchecked until the open question on E7.3 row 6 is settled.
+
 | Id | Setup and request | Reply | Kind |
 |---|---|---|---|
 | `origin-extension` | `Origin: chrome-extension://abc`, `deckNames` v6 | 200, ACAO `chrome-extension://abc` | Rec. |
@@ -583,8 +587,8 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 | `preflight-disallowed` | `OPTIONS`, `Origin: https://evil.example` | 200, empty body, ACAO `http://localhost` | Rec. |
 | `preflight-pna-case` | as `preflight` plus `Access-Control-Request-Private-Network: TRUE` | as `preflight`, no `Access-Control-Allow-Private-Network` | Rec. |
 | `permission-allowed` | `Origin: chrome-extension://abc`, `{"action": "requestPermission", "version": 6}` | `{"result": {"permission": "granted", "requireApikey": false, "version": 6}, "error": null}` | Rec. |
-| `permission-v4` | no `Origin`, `{"action": "requestPermission"}` | `{"permission": "granted", "requireApikey": false, "version": 6}` | Rec. |
-| `permission-key` | key `k1`; no `Origin`; `requestPermission` v6 without `key` | granted with `"requireApikey": true` | Rec. |
+| `permission-v4` | no `Origin`, `{"action": "requestPermission"}` | `{"permission": "granted", "requireApikey": false, "version": 6}` | Rec. (ACAO per E18) |
+| `permission-key` | key `k1`; no `Origin`; `requestPermission` v6 without `key` | granted with `"requireApikey": true` | Rec. (ACAO per E18) |
 | `permission-deny-listed` | deny-list `["https://evil.example"]`; that origin; `requestPermission` v6 | `{"result": {"permission": "denied"}, "error": null}`, ACAO `https://evil.example`, no prompt | Rec. |
 | `permission-null` | `Origin: null`; `requestPermission` v6 | `{"result": {"permission": "denied"}, "error": null}`, no prompt | Meguri (E18) |
 | `permission-empty-origin` | `Origin: ` (one space after the colon, then nothing); `requestPermission` v6 | `{"result": {"permission": "denied"}, "error": null}`, no prompt | Meguri (E18) |
@@ -597,15 +601,15 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 | `permission-timeout` | no outcome; injected clock passes 120 s | denied; prompt removed; lists unchanged | Meguri |
 | `permission-coalesced` | two `requestPermission` from one origin at once; Allow | one prompt; both granted | Meguri |
 | `permission-coalesced-timeout` | `requestPermission` from one origin; clock +100 s; a second one from it; clock +20 s | both denied at 120 s after the first; one prompt, cancelled once | Meguri |
-| `permission-closed-waiter` | `requestPermission` from `https://site.example`; the client closes; Allow | the allow-list ends with `https://site.example`; no reply is sent | Meguri |
+| `permission-closed-waiter` | `requestPermission` from `https://site.example`; the client closes; Allow | the allow-list ends with `https://site.example`; no reply is sent | Meguri (U141 test, E19.4) |
 | `permission-bad-outcome` | a prompt open; the test host resolves with `{"answer": "maybe"}`, then Allow | the first resolve returns `false`, the prompt stays; then granted | Meguri |
 | `permission-apply-race` | a prompt open; Settings applies an edit adding `https://other.example`; then Allow from `https://site.example`; Swift applies its copy again | the allow-list holds both origins | Meguri |
 | `permission-others-served` | a prompt open; `deckNames` from `chrome-extension://abc` | answered at once | Meguri |
-| `key-missing` | key `k1`; `deckNames` v6 without `key` | `valid api key must be provided` (AE77) | Rec. |
-| `key-wrong` | key `k1`; `"key": "k2"` | `valid api key must be provided` | Rec. |
-| `key-number` | key `k1`; `"key": 1` | `valid api key must be provided` | Rec. |
-| `key-right` | key `k1`; `"key": "k1"` | `{"result": ["Default"], "error": null}` | Rec. |
-| `key-before-lookup` | key `k1`; `{"action": "nope", "version": 6}` | `valid api key must be provided` | Rec. |
+| `key-missing` | key `k1`; `deckNames` v6 without `key` | `valid api key must be provided` (AE77) | Rec. (ACAO per E18) |
+| `key-wrong` | key `k1`; `"key": "k2"` | `valid api key must be provided` | Rec. (ACAO per E18) |
+| `key-number` | key `k1`; `"key": 1` | `valid api key must be provided` | Rec. (ACAO per E18) |
+| `key-right` | key `k1`; `"key": "k1"` | `{"result": ["Default"], "error": null}` | Rec. (ACAO per E18) |
+| `key-before-lookup` | key `k1`; `{"action": "nope", "version": 6}` | `valid api key must be provided` | Rec. (ACAO per E18) |
 | `key-unset-supplied` | no key; `deckNames` v6 with `"key": "whatever"` | `{"result": ["Default"], "error": null}` (AE77) | Meguri (E18) |
 | `key-pending` | "key required" on, no key passed to the core; `deckNames` v6 with any `key` | `valid api key must be provided`; `requestPermission` still granted | Meguri |
 | `read-only` | read-only on; `addNote` v6 with a valid note; then `deckNames` v6 | `Meguri: the API is in read-only mode`, no note added; then `["Default"]` | Meguri |
@@ -616,6 +620,8 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 
 ### E19.3 `multi/` and `apiReflect`
 
+Written: the 16 `Rec.` rows are oracle scenarios with their goldens next to them, each recorded twice in fresh containers with byte-identical results; the 7 `Meguri` rows `sub-readonly`, `sub-bad-version`, `sub-permission`, `non-object-entry`, `non-object-entry-later`, `reflect-all` and `reflect-filter` are declared scenarios. `sub-snapshot` and `sub-panic` are U141 tests (E19.4): a `servers/transcripts` T7.3 step runs between exchanges, so it cannot change read-only mode between two sub-actions of one `multi`, and its `handler_panic` fault fails the whole next request to a route, not one sub-action.
+
 | Id | Request (`params` of `multi` unless noted) | Reply | Kind |
 |---|---|---|---|
 | `ae75` | outer v6; `[{"action": "deckNames"}, {"action": "nope", "version": 6}]` | `{"result": [["Default"], {"result": null, "error": "unsupported action"}], "error": null}` | Rec. |
@@ -625,8 +631,8 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 | `sub-key` | key `k1`; outer `"key": "k1"`; `[{"action": "version"}, {"action": "version", "key": "k1"}]` | `[{"result": null, "error": "valid api key must be provided"}, 6]` | Rec. |
 | `outer-key` | key `k1`; outer without key | `valid api key must be provided` | Rec. |
 | `sub-readonly` | read-only on; `[{"action": "deckNames"}, {"action": "createDeck", "params": {"deck": "A"}}]` | `[["Default"], {"result": null, "error": "Meguri: the API is in read-only mode"}]` | Meguri |
-| `sub-snapshot` | `[{"action": "deckNames"}, {"action": "createDeck", "params": {"deck": "A"}}]` with a test hook that applies read-only on between the two sub-actions | both run; deck A exists; the next request is refused by read-only | Meguri |
-| `sub-panic` | `[{"action": "version"}, <test-hooks action that panics>, {"action": "version"}]` | `[6, {"result": null, "error": "Meguri: internal error"}, 6]` | Meguri |
+| `sub-snapshot` | `[{"action": "deckNames"}, {"action": "createDeck", "params": {"deck": "A"}}]` with a test hook that applies read-only on between the two sub-actions | both run; deck A exists; the next request is refused by read-only | Meguri (U141 test, E19.4) |
+| `sub-panic` | `[{"action": "version"}, <test-hooks action that panics>, {"action": "version"}]` | `[6, {"result": null, "error": "Meguri: internal error"}, 6]` | Meguri (U141 test, E19.4) |
 | `sub-bad-version` | `[{"action": "createDeck", "version": "6", "params": {"deck": "A"}}]` | slot `"version" must be an integer`; no deck A | Meguri (E18) |
 | `sub-permission` | `[{"action": "requestPermission"}]` | slot `requestPermission cannot be used inside multi` | Meguri (E18) |
 | `non-object-entry` | outer v6; `[1]` | `{"result": null, "error": "invalid parameter: actions"}` | Meguri (E18) |
@@ -650,6 +656,7 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 - Activity log: 1,001 requests keep the newest 1,000; an `addNote` entry holds no field text; a `multi` of two sub-actions adds three entries, the `multi`'s last; a nested `multi` adds its entries in E16's order; an over-limit body's entry has the time its head was read; the log is empty after a restart with Keep log off and holds the newest 1,000 with it on; turning Keep log on stores the entries already in memory; each "activity appended" event carries the new entries in order.
 - Agent snippet media line: with `ankiconnect.media_dir` null it says `getMediaDirPath` fails until a folder is chosen; with a folder it gives the 2 s note.
 - Agent snippet: lists the endpoint with the configured port, version 6, the key requirement, the read-only state and exactly the E12.3 names; never the key.
+- E19.2 `permission-closed-waiter` (the client closes while its `requestPermission` waits, then Allow: the allow-list gains the origin and no reply is sent), and E19.3 `sub-snapshot` and `sub-panic`, as their rows state.
 - Fuzz (`ankiconnect_request`): any body, method and header set yields an E5 reply or 403 and never a panic.
 
 ## Open questions (not normative)
@@ -657,6 +664,7 @@ Planned transcript scenarios. "Rec." means the reply must equal the reference re
 Probe results against the reference are recorded here; "settled" marks a question a probe answered. A question about what Meguri should do stays open with what the probe showed.
 
 - R1739 says `Access-Control-Allow-Origin` is "<allowed origin or *>". E7.3 reads `*` for requests without `Origin`, which differs from the reference's `http://localhost` on every no-Origin transcript. If the Product Contract owner prefers transcript equality, the row changes to `http://localhost` and the E18 row goes. Observed: the reference sends `http://localhost` on every reply to a request without `Origin` (ping, actions, errors, the preflight and its 403), and `*` on every reply while the allow-list holds `*`, whatever the origin. Still open (policy).
+- E7.3 row 6 gives a denied `requestPermission` with an empty `Origin` (E7.2 row 3, E9 row 3) an empty `Access-Control-Allow-Origin` value, as received. Confirm, or choose no header or `http://localhost` for that case. E19.2 `permission-empty-origin` does not check ACAO until this is settled. Still open.
 - E9 rows 2 and 3 (no prompt for several `Origin` headers or for `Origin: null`) and E7.2 rows 2 and 3 (both refused even with `*`) extend R1744 to `requestPermission`, to repeated headers and to the `*` entry. Confirm. Observed: with `*` the reference serves `null`, an empty `Origin` and repeated headers alike, and grants `requestPermission` to `null`; without `*`, repeated headers count by their last value (the allow decision, the prompt and the deny-list entry all use it), `null` gets the prompt and Deny with the checkbox deny-lists `null`, and an empty `Origin` gets the prompt but nothing is appended. Still open (policy; E18 lists each case).
 - E12.3 makes `sync` and `guiAddCards` mutating, so read-only mode refuses them. Confirm, or make `guiAddCards` mutating only when it carries attachments. The reference has no read-only mode, so no probe applies. Still open.
 - E12.3 and `servers/ankiconnect-gui` G3 refuse a `guiBrowse` that carries `reorderCards` in read-only mode, because the sort is a collection config write. Confirm, or let read-only mode skip the sort and still navigate. No probe applies. Still open.

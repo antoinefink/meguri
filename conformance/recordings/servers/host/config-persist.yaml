@@ -1,0 +1,42 @@
+# servers/host-security H17 `config-persist` (declared, servers/transcripts T13):
+# the config is kept in the integrations store, not the collection: it survives a host restart
+# and neither step changes the collection (H10.1, H10.3). The full document is H10.2's
+# defaults with the two applied values; media_dir is the executor's default folder
+# (servers/transcripts T4, T10.3). The ping on 8800 is the exchange T3 requires. `expect:
+# {output: ...}` on a step without a reply is the T13 form proposed with this scenario (T13
+# lists no check for T7.3 outputs yet).
+id: servers/host/config-persist
+description: "config survives a host restart; the collection is untouched"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - apply_config: {ankiconnect: {port: 8800}, migaku: {extra_origins: ["https://example.org"]}}
+    expect: {no_effect: true}
+  - restart_host: {}
+    expect: {no_effect: true}
+  - config: {}
+    expect:
+      output:
+        config:
+          migaku: {enabled: false, extra_origins: ["https://example.org"]}
+          ankiconnect:
+            enabled: true
+            port: 8800
+            cors_origins: ["http://localhost"]
+            deny_origins: []
+            api_key_required: false
+            read_only: false
+            keep_log: false
+            bring_to_front: true
+            readable_folders: []
+            media_dir: {path: "<media-dir>", bookmark: ""}
+  - status: {until: {state: listening, port: 8800, addresses: ["127.0.0.1:8800", "[::1]:8800"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}

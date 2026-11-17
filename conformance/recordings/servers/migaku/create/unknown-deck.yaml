@@ -1,0 +1,45 @@
+# servers/migaku-received-log C5 `unknown-deck` (declared, servers/transcripts T13).
+# The note type exists and deckId 999 names no deck: 400 in the Migaku error
+# shape with the deck message (C2 step 3, C2's last paragraph). A failed /create
+# writes no row (C2 step 10); T13 has no check for the log yet.
+# The `card` value, before form encoding: {"noteTypeId":<T>,"deckId":999,"fields":[{"name":"Sentence","content":"Alpha 1."},{"name":"Translation","content":"Alpha 2."}]}
+# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
+# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
+# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
+# transcript format has no step or setup section for profiles (see the session's
+# proposals), and nothing this scenario checks depends on one. No Origin, so
+# Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
+# P6). All content is synthetic.
+id: servers/migaku/create/unknown-deck
+description: "deckId 999 is refused as a missing deck"
+tags: [create]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [DE, "DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+steps:
+  - http:
+      method: POST
+      target: /create
+      headers:
+        - [Content-Type, application/x-www-form-urlencoded]
+      body: {text: "version=2&card=%7B%22noteTypeId%22%3A${#m7}%2C%22deckId%22%3A999%2C%22fields%22%3A%5B%7B%22name%22%3A%22Sentence%22%2C%22content%22%3A%22Alpha+1.%22%7D%2C%7B%22name%22%3A%22Translation%22%2C%22content%22%3A%22Alpha+2.%22%7D%5D%7D"}
+    expect:
+      status: 400
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {success: false, error: "Deck 999 does not exist."}}
+      no_effect: true

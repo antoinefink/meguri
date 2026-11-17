@@ -1,0 +1,17 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-empty-origin`: requestPermission with an empty Origin (E9 row 3, E18).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# Sent as `Origin: ` (T6.2). No permission answer is scripted: a prompt would be a run error (T7.2).
+id: servers/ankiconnect/policy/permission-empty-origin
+description: requestPermission with an empty Origin is denied with no prompt
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      headers: [[Origin, ""]]
+      body: {json: {action: requestPermission, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-headers: "*"}
+      body: {json: {result: {permission: denied}, error: null}}

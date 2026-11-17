@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.1 method-put: every method is handled alike (E2).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/method-put
+description: "PUT is served like POST"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: PUT
+      body: {json: {action: version, version: 6}}

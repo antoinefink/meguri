@@ -1,0 +1,25 @@
+# specs/servers/ankiconnect-gui G12 `browse-no-query` (G3 defaults).
+# Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3);
+# activeCols with Created displayed. All values are synthetic.
+id: servers/ankiconnect/gui/browse-no-query
+description: "guiBrowse with no parameters"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {activeCols: [noteFld, template, cardDue, deck, noteCrt]}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}}
+    - {notetype: Pair, deck: Default, fields: {Front: gamma, Back: third}}
+steps:
+  - http:
+      body: {json: {action: guiBrowse, version: 6, params: {}}}

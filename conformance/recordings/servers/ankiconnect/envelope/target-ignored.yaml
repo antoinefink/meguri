@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.1 target-ignored: the request target is ignored (E2).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/target-ignored
+description: "another target and a query"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      target: "/some/path?x=1"
+      body: {json: {action: version, version: 6}}

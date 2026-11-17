@@ -1,0 +1,23 @@
+# servers/api-undo-history Y4 `add-note` (Y5 reads it). No Origin, version 6.
+# Baseline undo_status, then each write and undo_status with its rows.
+# No-notes setup: the baseline is not add_note.
+# All values are synthetic.
+id: servers/ankiconnect/undo/add-note
+description: addNote of one Pair note, undo history before and after
+tags: [undo-reference, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+steps:
+  - observe: [undo_status]
+  - http:
+      body: {json: {action: addNote, version: 6, params: {note: {deckName: Lang, modelName: Pair, fields: {Front: gamma, Back: third}}}}}
+  - observe: [undo_status, {db_dump: {tables: [notes, cards]}}]

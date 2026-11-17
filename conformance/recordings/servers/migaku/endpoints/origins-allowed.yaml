@@ -1,0 +1,83 @@
+# servers/migaku-protocol P16 `origins-allowed`.
+# Migaku web origins (the bare domain included, ASCII case-insensitive) and
+# extension origins of the three schemes are allowed; each reply echoes the origin as
+# sent, with Vary (P3.1, P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/origins-allowed
+description: "allowed Migaku web and extension origins"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://app.migaku.com"]
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "https://app.migaku.com"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+      body: {json: {ok: true, version: "4"}}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://migaku.com"]
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "https://migaku.com"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+      body: {json: {ok: true, version: "4"}}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://Study.Migaku.com"]
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "https://Study.Migaku.com"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+      body: {json: {ok: true, version: "4"}}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "moz-extension://4b1c9a0e-7d2f-4f0a-9d5e-1a2b3c4d5e6f"]
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "moz-extension://4b1c9a0e-7d2f-4f0a-9d5e-1a2b3c4d5e6f"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+      body: {json: {ok: true, version: "4"}}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "safari-web-extension://A1B2C3D4-0000-1111-2222-333344445555"]
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "safari-web-extension://A1B2C3D4-0000-1111-2222-333344445555"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+      body: {json: {ok: true, version: "4"}}

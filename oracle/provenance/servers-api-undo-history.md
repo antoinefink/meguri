@@ -2,9 +2,13 @@
 
 Spec-writer notes for `specs/servers/api-undo-history.md` and the recordings
 `conformance/recordings/servers/ankiconnect/undo/*.yaml`.
-Read at tag 26.09.3 (`refs/anki-26.09.3`); no code was copied. The AnkiConnect
-add-on source was not read: which library calls each action makes is left to
-the recordings (Y4), which were written but not run (the oracle was busy).
+Read at tag 26.09.3 (`refs/anki-26.09.3`); no code was copied. The Y4
+recordings were run on 2026-11-17; their goldens are under
+`conformance/recordings/servers/ankiconnect/undo/`. The AnkiConnect add-on
+25.11.9.0 inside the recorder image (the build pinned in
+`oracle/ankiconnect/ADDON_PIN`) was then read for which library calls each
+write action makes (Y4 outcomes) and for `guiUndo` (Y2, Y9 Q6): see
+"Transcript recordings (2026-11-17)" below.
 
 | Spec section | Anki files read | Read for |
 |---|---|---|
@@ -41,3 +45,18 @@ Recording hints for the oracle maintainer:
   reply (Y9 Q7). Two recordings that differ are drift, never settled by keeping
   one.
 - Record twice and compare before committing, as for every transcript golden.
+
+## Transcript recordings (2026-11-17)
+
+Session s-20261117T160047Z-35f65b90 (spec writer, servers transcripts).
+Pins: Anki tag 26.09.3 (`refs/anki-26.09.3`) and the AnkiConnect add-on build
+pinned in `oracle/ankiconnect/ADDON_PIN` (tag 25.11.9.0, commit `532a3c8`,
+build 2025-11-09), installed as `addons21/2055492159` in the recorder image
+`meguri-oracle-ankiconnect:recorder`. No code was copied into a spec or a
+scenario.
+
+| Subject | Sources | Read for |
+|---|---|---|
+| Y4 outcomes, the Y1/Y4 baseline corrections, and the Y2/Q6 `guiUndo` note | AnkiConnect add-on 25.11.9.0 inside the recorder image (`/opt/ankiconnect/addons21/2055492159/__init__.py`: the write actions `updateNoteFields`, `updateNote`, `updateNoteTags`, `addTags`, `replaceTags`, `changeDeck`, `deleteDecks`, `createModel`, `suspend`, `forgetCards`, `setDueDate`, `deleteNotes`, `guiAddCards`, `addNotes`, `storeMediaFile`, `deleteMediaFile`, and `guiUndo`). Anki 26.09.3: `pylib/anki/models.py` (legacy update), `rslib/src/notetype/mod.rs` (existing-id save without undo), `rslib/src/notetype/service.rs`, `rslib/src/decks/current.rs` (Select Deck op). Goldens `conformance/recordings/servers/ankiconnect/undo/*.json`. | Why each write records, empties or keeps the history: library calls saved without an undo entry, the raw update statement, the add-on's own note type check on the second note of `addNotes` and its rollback of the first, `guiAddCards`' note type save without undo, and `guiUndo` calling the main window's undo. |
+| Y4 outcome column (recorded) | Goldens `conformance/recordings/servers/ankiconnect/undo/*.json`, each read with Y5 | recorded (top only): `add-note`, `add-note-with-media`, `add-notes` (`add_note`); `add-notes-one-fails` (`delete_note`: the first note's add, then the add-on's rollback delete); `update-note`, `update-note-tags`, `update-note-tags-only`, `add-tags` (`update_tag`); `add-tags-remove` (`remove_tag`); `remove-tags-then-clear` (`remove_tag`, then `clear_unused_tags`); `delete-notes` (`delete_note`); `create-deck` (`add_deck`); `delete-decks`, `delete-decks-with-cards` (`delete_deck`); `create-model` (`add_note_type`); `suspend-then-unsuspend`, `suspend-then-suspend-false` (`suspend`, then `unbury_unsuspend`); `forget-cards` (`reset_card`); `set-due-date` (`set_due_date`). Emptied: `update-note-fields`, `update-note-fields-unchanged`, `update-note-fields-with-media`, `replace-tags`, `replace-tags-in-all-notes`, `change-deck`, `change-deck-new-deck`, `create-model-refused` (the library refused the template), `gui-add-cards`. Kept, untouched: `read-control`, `store-media-file`, `delete-media-file`. Every redo was null. |
+| Y1, Y4 baseline (corrected) | The same goldens' first `undo_status` | The common setup's baseline is `add_note`, as expected. The no-notes setup's baseline is `add_note_type`: the setup's note type addition also leaves its step, which Y1's baseline text (only the "Add Note" steps) omits. `read-control` showed the same value before and after its exchange, so the other recordings can be read (Y5). |

@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 duplicate-member: a repeated member counts with its last occurrence (E4); sent as text.
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/duplicate-member
+description: "action given twice, last wins"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {text: '{"action":"nope","action":"version","version":6}'}

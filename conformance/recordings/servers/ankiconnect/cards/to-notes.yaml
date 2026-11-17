@@ -1,0 +1,46 @@
+# servers/ankiconnect-actions A20.5 `cards/to-notes` (A11.6). All values are synthetic.
+# Both's second template shows Gloss, and n1 starts with Gloss empty, so setup gives n1
+# one card (c1) and n2 one card (c2). Step 0 fills n1's Gloss, which generates c3 for n1
+# (notes/note-records#U1), so c1 (n1) < c2 (n2) < c3 (n1). Step 2 lists c3 and c2: A11.6
+# (each note by its smallest listed card id) gives [n2, n1], ascending note id gives
+# [n1, n2], and list order gives [n1, n2]. Step 3 lists c1 too, so n1 comes first.
+# No step differs from Meguri's expected side (only the no-origin header, R1739).
+# FSRS is on, as Meguri always runs it (sched/set-due-date S1, R702).
+id: servers/ankiconnect/cards/to-notes
+description: cardsToNotes ordering by each note's smallest listed card, unknown, repeated and empty lists
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [A]
+  notetypes:
+    - name: Both
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+        - {name: Card 2, front: "{{Gloss}}", back: "{{FrontSide}}<hr>{{Term}}"}
+      css: ".card{}"
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Both, deck: A, fields: {Term: "a1", Gloss: ""}}
+    - {notetype: Pair, deck: A, fields: {Term: "a2", Gloss: "b2"}}
+steps:
+  - http:
+      body: {json: {action: updateNoteFields, version: 6, params: {note: {id: "#n1", fields: {Gloss: "b1"}}}}}
+  - observe: [{db_dump: {tables: [cards]}}]
+  - http:
+      body: {json: {action: cardsToNotes, version: 6, params: {cards: ["#c3", "#c2"]}}}
+  - http:
+      body: {json: {action: cardsToNotes, version: 6, params: {cards: ["#c3", "#c1", "#c2"]}}}
+  - http:
+      body: {json: {action: cardsToNotes, version: 6, params: {cards: ["#c2", 7]}}}
+  - http:
+      body: {json: {action: cardsToNotes, version: 6, params: {cards: ["#c3", "#c3"]}}}
+  - http:
+      body: {json: {action: cardsToNotes, version: 6, params: {cards: []}}}

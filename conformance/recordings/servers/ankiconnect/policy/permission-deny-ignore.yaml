@@ -1,0 +1,16 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-deny-ignore`: the prompt answered Deny with the ignore box.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/permission-deny-ignore
+description: Deny with ignore deny-lists the origin; the next request raises no prompt
+tags: [policy]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - permission: {answer: deny_ignore}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}

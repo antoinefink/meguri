@@ -1,0 +1,30 @@
+# servers/migaku-protocol P16 `preflight-private-network`.
+# A preflight asking for private-network access also gets
+# Access-Control-Allow-Private-Network: true (P5). EXT is the invented extension origin of P16.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/preflight-private-network
+description: "private-network preflight: the allow header is added"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: OPTIONS
+      target: /receive
+      headers:
+        - [Origin, "chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
+        - [Access-Control-Request-Method, POST]
+        - [Access-Control-Request-Headers, content-type]
+        - [Access-Control-Request-Private-Network, "true"]
+    expect:
+      status: 204
+      headers:
+        content-type: null
+        access-control-allow-origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+        access-control-allow-private-network: "true"
+      body: {empty: true}

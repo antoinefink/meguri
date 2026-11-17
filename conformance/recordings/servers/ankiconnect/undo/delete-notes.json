@@ -1,0 +1,104 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "undo_status": {
+          "redo": null,
+          "undo": "add_note"
+        }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": null,
+              "result": null
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "http://localhost",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "#c1": {
+              "data": "{}",
+              "did": "#d1",
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": "#c1",
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894698000,
+              "nid": "#n1",
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "graves": {
+            "#c2,0": {
+              "oid": "#c2",
+              "type": 0,
+              "usn": -1
+            },
+            "#n2,1": {
+              "oid": "#n2",
+              "type": 1,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "#n1": {
+              "csum": 3195417371,
+              "data": "",
+              "flags": 0,
+              "flds": "alpha\u001ffirst",
+              "guid": "#random",
+              "id": "#n1",
+              "mid": "#m7",
+              "mod": 1894698000,
+              "sfld": "alpha",
+              "tags": " old ",
+              "usn": -1
+            }
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "delete_note"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "addon": {
+      "build": "2025-11-09",
+      "sha256": "cf75820e00ebc28ba0cdcaedbbf646cac3a745121dc9de33b99020ca61a658da"
+    },
+    "anki_version": "26.9.3",
+    "ankiconnect_lock_sha256": "db0b6e483d450f46150a9e80294f651a2b7ea4babda9af460e4e28df45e90561",
+    "driver_sha256": "d210262e36b9bea44268e57ec6c0a5b0d03cbab1ed2f66931f34ff7b50e5dfae",
+    "image": "meguri-oracle-ankiconnect:recorder",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "servers/ankiconnect/undo/delete-notes",
+  "scenario_sha256": "a9e87155f107f1996b8d0e732439c5136dd4cee2c7d0d39d925d74419513c9a6",
+  "tz": "Europe/Paris"
+}

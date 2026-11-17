@@ -1,0 +1,64 @@
+# servers/migaku-protocol P16 `method-not-allowed`.
+# A listed path with an unlisted method gets 405 with an Allow header naming
+# the route's methods, then OPTIONS (P4, P8.2). No Origin, so Access-Control-Allow-Origin is * and no Vary (P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/method-not-allowed
+description: "unlisted methods get 405 with Allow"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: GET
+      target: /receive
+    expect:
+      status: 405
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+        allow: "POST, OPTIONS"
+      body: {json: {success: false, error: "Method not allowed."}}
+  - http:
+      method: POST
+      target: /srs-check
+    expect:
+      status: 405
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+        allow: "GET, OPTIONS"
+      body: {json: {success: false, error: "Method not allowed."}}
+  - http:
+      method: PUT
+      target: /srs-import
+    expect:
+      status: 405
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+        allow: "GET, POST, OPTIONS"
+      body: {json: {success: false, error: "Method not allowed."}}
+  - http:
+      method: DELETE
+      target: /anki-hello
+    expect:
+      status: 405
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+        allow: "GET, POST, OPTIONS"
+      body: {json: {success: false, error: "Method not allowed."}}

@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-v4`: requestPermission without a version.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/permission-v4
+description: requestPermission with the default version, bare result
+tags: [policy, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: requestPermission}}

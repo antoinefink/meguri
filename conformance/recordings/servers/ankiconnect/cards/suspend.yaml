@@ -1,0 +1,49 @@
+# servers/ankiconnect-actions A20.5 `cards/suspend` (A12.1, A12.2, A12.3; A18
+# ankiconnect-suspend-unknown-card). All values are synthetic.
+# The recorder runs no card-state setup section, so the first exchange suspends c3.
+# No action Meguri answers buries a card, so the table's user-buried c4 and the
+# ankiconnect-unsuspend-buried row are not in this transcript.
+# Step 7 (/steps/7/reply/body/json): the golden records the add-on's `true` for
+# suspend [#c3, 7]; Meguri's is the A18 ankiconnect-suspend-unknown-card error
+# `Card was not found: 7`. Nothing is written on either side, so step 10 compares as is.
+# FSRS is on, as Meguri always runs it (sched/set-due-date S1, R702).
+id: servers/ankiconnect/cards/suspend
+description: suspend, unsuspend, suspended and areSuspended, with an unknown id
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [A]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: A, fields: {Term: "a1", Gloss: "b1"}}
+    - {notetype: Pair, deck: A, fields: {Term: "a2", Gloss: "b2"}}
+    - {notetype: Pair, deck: A, fields: {Term: "a3", Gloss: "b3"}}
+steps:
+  - http:
+      body: {json: {action: suspend, version: 6, params: {cards: ["#c3"]}}}
+  - http:
+      body: {json: {action: suspend, version: 6, params: {cards: ["#c3"]}}}
+  - http:
+      body: {json: {action: suspend, version: 6, params: {cards: ["#c1", "#c2"]}}}
+  - http:
+      body: {json: {action: areSuspended, version: 6, params: {cards: ["#c1", "#c3", 7]}}}
+  - http:
+      body: {json: {action: unsuspend, version: 6, params: {cards: ["#c1"]}}}
+  - http:
+      body: {json: {action: unsuspend, version: 6, params: {cards: ["#c1", "#c2"]}}}
+  - observe: [{db_dump: {tables: [cards]}}]
+  - http:
+      body: {json: {action: suspend, version: 6, params: {cards: ["#c3", 7]}}}
+  - http:
+      body: {json: {action: suspended, version: 6, params: {card: 7}}}
+  - http:
+      body: {json: {action: suspended, version: 6, params: {card: "#c3"}}}
+  - observe: [{db_dump: {tables: [cards]}}]

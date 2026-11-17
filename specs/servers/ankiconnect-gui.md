@@ -3,7 +3,7 @@
 Spec: servers/ankiconnect-gui
 Requirements: R1754 (`sync`), R1782, R1783, R1784, R1785, R1786, R1787, R1788, R1733 (`searchNote` navigation); supports R1549, R1797
 Anki: 26.09.3
-Scenarios: none yet in `conformance/`. The transcript format is `servers/transcripts`; until its runner exists (U136), G12 lists the planned scenarios as request and reply tables, to become `conformance/recordings/servers/ankiconnect/gui/` (`servers/transcripts` T2; ids `servers/ankiconnect/gui/<name>`; reply shapes only).
+Scenarios: conformance/recordings/servers/ankiconnect/gui/ (`servers/transcripts` T2; ids `servers/ankiconnect/gui/<name>`; reply shapes only). G12 lists them with their status.
 
 The five GUI actions Meguri implements on its single-window Mac app (`guiBrowse`, `guiSelectCard`, `guiSelectedNotes`, `guiAddCards`, `guiEditNote`), the `sync` action, and the Browse navigation that the Migaku server's legacy `/create` `searchNote` command asks for. For each: parameters, the checks the core makes, the host interaction it raises, and the reply.
 
@@ -74,20 +74,20 @@ Checks, in this order (the first failure is the reply):
 - The mode (cards or notes) is not changed.
 - The answer `done` gives the reply; `refused` gives G2 rule 4's error.
 
-Examples (collection: notes `n1`, `n2` in deck German with cards `c1` < `c2`; `c3` in Default; Browse in cards mode, `activeCols` `["noteFld","template","cardDue","deck","noteCrt"]`, so Created is displayed and Lapses is not; sort as stored by default, `noteCrt` ascending):
+Examples (collection: notes `n1`, `n2` in deck Lang with cards `c1` < `c2`; `c3` in Default; Browse in cards mode, `activeCols` `["noteFld","template","cardDue","deck","noteCrt"]`, so Created is displayed and Lapses is not; sort as stored by default, `noteCrt` ascending):
 
 | Params | Reply | Window |
 |---|---|---|
-| `{"query": "deck:German"}` | `[c1, c2]` | Browse, search `deck:German` |
-| `{"query": "deck:German", "reorderCards": {"order": "descending", "columnId": "noteCrt"}}` | `[c1, c2]` | sorted by Created, descending |
+| `{"query": "deck:Lang"}` | `[c1, c2]` | Browse, search `deck:Lang` |
+| `{"query": "deck:Lang", "reorderCards": {"order": "descending", "columnId": "noteCrt"}}` | `[c1, c2]` | sorted by Created, descending |
 | `{}` | `[]` | Browse, previous search kept |
-| `{"query": "deck:German", "reorderCards": {"order": "up", "columnId": "noteCrt"}}` | error `invalid card order: up` | unchanged |
+| `{"query": "deck:Lang", "reorderCards": {"order": "up", "columnId": "noteCrt"}}` | error `invalid card order: up` | unchanged |
 | `{"query": "x", "reorderCards": {"order": "ascending"}}` | error `Must provide a "columnId" and a "order" property"` | unchanged |
 | `{"query": "x", "reorderCards": ["noteCrt"]}` | error `reorderCards should be a dict: ["noteCrt"]` (Meguri's JSON form) | unchanged |
 | `{"query": "x", "reorderCards": {"order": "ascending", "columnId": "cardLapses"}}` (Lapses not displayed) | error `invalid columnId: cardLapses` | unchanged |
 | `{"query": "x", "reorderCards": {"order": "ascending", "columnId": "question"}}` (with `question` added to `activeCols`) | the ids for `x` | Browse on `x`, sort unchanged |
 | `{"query": null, "reorderCards": null}` | `[]` | Browse, previous search and sort kept |
-| read-only on; `{"query": "deck:German", "reorderCards": {"order": "descending", "columnId": "noteCrt"}}` | error `Meguri: the API is in read-only mode` | unchanged |
+| read-only on; `{"query": "deck:Lang", "reorderCards": {"order": "descending", "columnId": "noteCrt"}}` | error `Meguri: the API is in read-only mode` | unchanged |
 | `{"query": "("}` | the Browse error for `(` | unchanged |
 
 ## G4. `guiSelectCard(card)` (R1783)
@@ -251,66 +251,68 @@ Each needs a `conformance/deviations.yaml` entry once transcripts exist (U136); 
 
 ## G12. Scenarios
 
-"Rec." rows compare the reply with the reference recording (`servers/transcripts` T11), with the G11 entries named as T12 transforms; "Meguri" rows are declared scenarios (T13, with the T7.3 steps) or are asserted by `core/crates/meguri-servers/tests/ankiconnect_gui.rs` (with the `TestHost` scripting answers) or by `app/MeguriUITests/Integrations/GuiActionsUITests.swift` (real HTTP to 127.0.0.1:8765, window state read by accessibility ids). Requests use `version` 6. Collection and `activeCols` as in G3's examples unless stated (the recorder's profile stores the same `activeCols`).
+"Rec." rows compare the reply with the reference recording (`servers/transcripts` T11), with the G11 entries named as T12 transforms; "Meguri" rows are declared scenarios (T13, with the T7.3 steps) or are asserted by `core/crates/meguri-servers/tests/ankiconnect_gui.rs` (with the `TestHost` scripting answers) or by `app/MeguriUITests/Integrations/GuiActionsUITests.swift` (real HTTP to 127.0.0.1:8765, window state read by accessibility ids). Requests use `version` 6. Collection and `activeCols` as in G3's examples unless stated. The scenarios store that `activeCols` through setup `config`. A new profile does not display Created: Browse shows the default cards-mode columns of `browser/config-keys` K1 (`browse-reorder-default-cols`).
+
+Each row's Kind ends with its status: "recorded" (oracle scenario with its golden in the directory), "declared" (T13 scenario file in the directory, no golden) or "tests only" (no transcript: window state, undo history or the user's Replace / Keep choice, which no transcript step can set up or read, T20; asserted by the Rust or UI tests named above). `search-note` and `search-note-huge` are Migaku scenarios: they belong under `servers/migaku/` (T2) and are not written yet.
 
 | Id | Setup and request | Reply | Kind |
 |---|---|---|---|
-| `browse-ids` | `guiBrowse {"query": "deck:German"}` | `{"result": [c1, c2], "error": null}` | Rec. |
-| `browse-reorder` | `guiBrowse {"query": "deck:German", "reorderCards": {"order": "descending", "columnId": "noteCrt"}}` | `[c1, c2]`; UI: Browse sorted by Created descending; `sortType` `noteCrt`, `sortBackwards` true | Rec. reply, Meguri window |
-| `browse-reorder-undo` | an undoable edit; then `browse-reorder` | the edit is still undoable; redo history unchanged | Meguri (G11) |
-| `browse-reorder-read-only` | read-only on; `browse-reorder`'s request | `Meguri: the API is in read-only mode`; sort keys unchanged | Meguri (G11) |
-| `browse-reorder-default-cols` | `activeCols` absent (defaults); `browse-reorder`'s request | `invalid columnId: noteCrt` | Rec. |
-| `browse-null-params` | `guiBrowse {"query": null, "reorderCards": null}` | `[]`; sort unchanged | Rec. |
-| `browse-no-query` | `guiBrowse {}` | `[]` | Rec. |
-| `browse-bad-order` | `reorderCards: {"order": "up", "columnId": "noteCrt"}` | `invalid card order: up` | Rec. |
-| `browse-missing-member` | `reorderCards: {"order": "ascending"}` | `Must provide a "columnId" and a "order" property"` | Rec. |
-| `browse-hidden-column` | `reorderCards: {"order": "ascending", "columnId": "cardLapses"}` | `invalid columnId: cardLapses` | Rec. |
-| `browse-unknown-column` | `reorderCards: {"order": "ascending", "columnId": "nope"}` | `invalid columnId: nope` | Rec. |
-| `browse-order-before-column` | `reorderCards: {"order": "up", "columnId": "nope"}` | `invalid card order: up` | Rec. |
-| `browse-order-number` | `reorderCards: {"order": 5, "columnId": "noteCrt"}` | `invalid card order: 5` | Rec. |
-| `browse-order-null` | `reorderCards: {"order": null, "columnId": "noteCrt"}` | `invalid card order: null` | Meguri (G11, text; the reference writes `None`) |
-| `browse-unsortable` | `reorderCards: {"order": "ascending", "columnId": "question"}` with Question displayed | the ids; sort unchanged; no alert | Meguri (the reference blocks on a modal notice, G11) |
-| `browse-bad-query` | `guiBrowse {"query": "("}` | the Browse error text for `(` | Meguri (window unchanged; the reference blocks on a modal warning, G11) |
-| `browse-dict-value` | `guiBrowse {"query": "x", "reorderCards": ["noteCrt"]}` | `reorderCards should be a dict: ["noteCrt"]` | Meguri (G11, text) |
-| `select-no-browse` | Browse not showing; `guiSelectCard {"card": c1}` | `false` | Rec. (reference: no browser window yet in the session) |
-| `select-in-results` | after `browse-ids`; `guiSelectCard {"card": c2}` | `true`; row c2 selected | Meguri |
-| `select-not-in-results` | after `browse-ids`, row c1 selected; `guiSelectCard {"card": c3}` | `false`; row c1 still selected | Meguri (G11) |
-| `selected-none` | Browse not showing; `guiSelectedNotes` | `[]` | Rec. |
-| `selected-rows` | Browse on `deck:German`, rows c1 and c2 selected; `guiSelectedNotes` | `[n1, n2]` | Meguri |
-| `add-unknown-deck` | `guiAddCards {"note": {"deckName": "Nope", "modelName": "Basic", "fields": {}}}` | `deck was not found: Nope` | Rec. |
-| `add-unknown-model` | deck `Default`, `modelName: "Nope"` | `model was not found: Nope` | Rec. |
-| `add-deck-first` | both unknown | `deck was not found: Nope` | Rec. |
-| `add-empty-panel` | Add panel closed; valid note with fields, tags, one `picture` by `data` | `0`; panel shows deck, note type, fields with `<img src="…">`, tags | Rec. reply, Meguri window |
-| `add-no-note` | `guiAddCards {}` | `0`; panel shown as it was | Rec. reply |
-| `add-null-note` | `guiAddCards {"note": null}` | `0`; panel shown as it was | Rec. reply |
-| `add-missing-model` | `guiAddCards {"note": {"deckName": "Default"}}` | `missing parameter: note.modelName` | Meguri (text, envelope E18) |
-| `add-bad-field-value` | valid note with `fields: {"Front": 1}` | `invalid parameter: note.fields` | Meguri (text, envelope E18) |
-| `add-refused-keeps-media` | unsaved deck-options sheet open; valid note with one `picture` by `data` | `cannot navigate: close the open sheet first`; the picture file is in the media folder | Meguri |
-| `add-draft-keep` | panel holds unsaved text; valid note; user picks Keep draft | `0`; draft unchanged | Meguri |
-| `add-draft-replace` | as above; Replace draft | `0`; panel holds the prefill | Meguri |
-| `add-close-after` | `options.closeAfterAdding: true`; user adds | panel closes after the add | Meguri |
-| `add-no-config-write` | valid note | `col` config `curDeck`, `curModel` and the Add defaults unchanged | Meguri (G11) |
-| `edit-unknown` | `guiEditNote {"note": 999}` | `note was not found: 999` | Meguri (G11) |
-| `edit-valid` | `guiEditNote {"note": n1}` | `null`; Browse on `nid:n1`, row selected, editor on n1 | Meguri (the reference fails under Anki 26.9.3, G11) |
-| `sheet-refuses` | unsaved deck-options sheet open; each of the five GUI actions | `cannot navigate: close the open sheet first`; sheet unchanged | Meguri |
-| `add-draft-refuses-browse` | Add panel holds unsaved text; `guiBrowse {"query": "deck:German"}` | `cannot navigate: close the open sheet first`; draft unchanged | Meguri |
-| `no-answer` | `TestHost` never answers `GuiBrowse` | after 10 s, `cannot navigate: Meguri did not respond`; an interaction cancelled event | Meguri |
-| `queued-timeout` | `TestHost` holds a `GuiBrowse` without an answer; a second `guiBrowse` posted 4 s later | both time out 10 s after their own posting | Meguri |
-| `wrong-answer-kind` | `TestHost` answers `GuiBrowse` with `presented`, then `done` | the first resolve returns `false`; the reply is the ids | Meguri |
-| `review-left` | review session on deck German; `guiBrowse {"query": "deck:German"}`; back to the deck | session ended as by the user's switch; resumes normally | Meguri |
-| `front-on` | window minimized; bring to front on; `guiBrowse` | window restored and active | Meguri |
-| `front-off` | window minimized; bring to front off; `guiBrowse` | window state unchanged; reply as usual | Meguri |
-| `front-off-closed` | main window closed; bring to front off; `guiBrowse`; then `guiSelectCard {"card": c1}` | the window opens on Browse, Meguri not active; then `true` | Meguri |
-| `select-no-front` | window minimized; `guiSelectCard` | window state unchanged | Meguri |
-| `sync-not-connected` | iCloud not connected; `sync` | `{"result": null, "error": "sync: auth not configured"}` | Rec. (reference without a sync login) |
-| `sync-ok` | cloud fake lane, connected; `sync` | `null` after the exchange ends `succeeded`; zero Anki-server requests | Meguri |
-| `sync-review` | review session active; `sync` | `sync: not available during a review session` | Meguri |
-| `sync-read-only` | read-only on; `sync` | `Meguri: the API is in read-only mode` | Meguri |
-| `sync-joins` | an exchange running; `sync` | the running exchange's result; no second exchange | Meguri |
-| `sync-yomitan-params` | iCloud not connected; `sync` with `params: {"version": 2}` | `sync: auth not configured` | Meguri (G11) |
-| `sync-waiting-no-class` | the exchange ends `waiting` with class none | `sync: waiting` | Meguri |
-| `search-note` | Migaku `/create` `searchNote` for n1 | Migaku reply per `servers/migaku-received-log`; Browse on `nid:n1` | Meguri |
-| `search-note-huge` | Migaku `/create` `searchNote=9999999999999999999` | Migaku `OK`; Browse on `nid:9999999999999999999`, no rows | Meguri |
+| `browse-ids` | `guiBrowse {"query": "deck:Lang"}` | `{"result": [c1, c2], "error": null}` | Rec.; recorded |
+| `browse-reorder` | `guiBrowse {"query": "deck:Lang", "reorderCards": {"order": "descending", "columnId": "noteCrt"}}` | `[c1, c2]`; UI: Browse sorted by Created descending; `sortType` `noteCrt`, `sortBackwards` true | Rec. reply, Meguri window; recorded |
+| `browse-reorder-undo` | an undoable edit; then `browse-reorder` | the edit is still undoable; redo history unchanged | Meguri (G11); tests only |
+| `browse-reorder-read-only` | read-only on; `browse-reorder`'s request | `Meguri: the API is in read-only mode`; sort keys unchanged | Meguri (G11); declared |
+| `browse-reorder-default-cols` | `activeCols` absent (defaults); `browse-reorder`'s request | `invalid columnId: noteCrt` | Rec.; recorded |
+| `browse-null-params` | `guiBrowse {"query": null, "reorderCards": null}` | `[]`; sort unchanged | Rec.; recorded |
+| `browse-no-query` | `guiBrowse {}` | `[]` | Rec.; recorded |
+| `browse-bad-order` | `reorderCards: {"order": "up", "columnId": "noteCrt"}` | `invalid card order: up` | Rec.; recorded |
+| `browse-missing-member` | `reorderCards: {"order": "ascending"}` | `Must provide a "columnId" and a "order" property"` | Rec.; recorded |
+| `browse-hidden-column` | `reorderCards: {"order": "ascending", "columnId": "cardLapses"}` | `invalid columnId: cardLapses` | Rec.; recorded |
+| `browse-unknown-column` | `reorderCards: {"order": "ascending", "columnId": "nope"}` | `invalid columnId: nope` | Rec.; recorded |
+| `browse-order-before-column` | `reorderCards: {"order": "up", "columnId": "nope"}` | `invalid card order: up` | Rec.; recorded |
+| `browse-order-number` | `reorderCards: {"order": 5, "columnId": "noteCrt"}` | `invalid card order: 5` | Rec.; recorded |
+| `browse-order-null` | `reorderCards: {"order": null, "columnId": "noteCrt"}` | `invalid card order: null` | Meguri (G11, text; the reference writes `None`); declared |
+| `browse-unsortable` | `reorderCards: {"order": "ascending", "columnId": "question"}` with Question displayed | the ids; sort unchanged; no alert | Meguri (the reference blocks on a modal notice, G11); declared |
+| `browse-bad-query` | `guiBrowse {"query": "("}` | the Browse error text for `(` | Meguri (window unchanged; the reference blocks on a modal warning, G11); declared |
+| `browse-dict-value` | `guiBrowse {"query": "x", "reorderCards": ["noteCrt"]}` | `reorderCards should be a dict: ["noteCrt"]` | Meguri (G11, text); declared |
+| `select-no-browse` | Browse not showing; `guiSelectCard {"card": c1}` | `false` | Rec. (reference: no browser window yet in the session); recorded |
+| `select-in-results` | after `browse-ids`; `guiSelectCard {"card": c2}` | `true`; row c2 selected | Meguri; declared |
+| `select-not-in-results` | after `browse-ids`, row c1 selected; `guiSelectCard {"card": c3}` | `false`; row c1 still selected | Meguri (G11); declared |
+| `selected-none` | Browse not showing; `guiSelectedNotes` | `[]` | Rec.; recorded |
+| `selected-rows` | Browse on `deck:Lang`, rows c1 and c2 selected; `guiSelectedNotes` | `[n1, n2]` | Meguri; declared |
+| `add-unknown-deck` | `guiAddCards {"note": {"deckName": "Nope", "modelName": <the scenario's own note type>, "fields": {}}}` (stock note types appear only in interop scenarios, R1959) | `deck was not found: Nope` | Rec.; recorded |
+| `add-unknown-model` | deck `Default`, `modelName: "Nope"` | `model was not found: Nope` | Rec.; recorded |
+| `add-deck-first` | both unknown | `deck was not found: Nope` | Rec.; recorded |
+| `add-empty-panel` | Add panel closed; valid note with fields, tags, one `picture` by `data` | `0`; panel shows deck, note type, fields with `<img src="…">`, tags; the recording also observes `shot.png` stored and no note added | Rec. reply, Meguri window; recorded |
+| `add-no-note` | `guiAddCards {}` | `0`; panel shown as it was | Rec. reply; recorded |
+| `add-null-note` | `guiAddCards {"note": null}` | `0`; panel shown as it was | Rec. reply; recorded |
+| `add-missing-model` | `guiAddCards {"note": {"deckName": "Default"}}` | `missing parameter: note.modelName` | Meguri (text, envelope E18); declared |
+| `add-bad-field-value` | valid note with `fields: {"Front": 1}` | `invalid parameter: note.fields` | Meguri (text, envelope E18); declared |
+| `add-refused-keeps-media` | unsaved deck-options sheet open; valid note with one `picture` by `data` | `cannot navigate: close the open sheet first`; the picture file is in the media folder | Meguri; declared |
+| `add-draft-keep` | panel holds unsaved text; valid note; user picks Keep draft | `0`; draft unchanged | Meguri; tests only |
+| `add-draft-replace` | as above; Replace draft | `0`; panel holds the prefill | Meguri; tests only |
+| `add-close-after` | `options.closeAfterAdding: true`; user adds | panel closes after the add | Meguri; tests only |
+| `add-no-config-write` | valid note | `col` config `curDeck`, `curModel` and the Add defaults unchanged | Meguri (G11); declared |
+| `edit-unknown` | `guiEditNote {"note": 999}` | `note was not found: 999` | Meguri (G11); declared |
+| `edit-valid` | `guiEditNote {"note": n1}` | `null`; Browse on `nid:n1`, row selected, editor on n1 | Meguri (the reference fails under Anki 26.9.3, G11); declared |
+| `sheet-refuses` | unsaved deck-options sheet open; each of the five GUI actions | `cannot navigate: close the open sheet first`; sheet unchanged | Meguri; declared |
+| `add-draft-refuses-browse` | Add panel holds unsaved text; `guiBrowse {"query": "deck:Lang"}` | `cannot navigate: close the open sheet first`; draft unchanged | Meguri; declared |
+| `no-answer` | `TestHost` never answers `GuiBrowse` | after 10 s, `cannot navigate: Meguri did not respond`; an interaction cancelled event | Meguri; declared |
+| `queued-timeout` | `TestHost` holds a `GuiBrowse` without an answer; a second `guiBrowse` posted 4 s later | both time out 10 s after their own posting | Meguri; declared |
+| `wrong-answer-kind` | `TestHost` answers `GuiBrowse` with `presented`, then `done` | the first resolve returns `false`; the reply is the ids | Meguri; declared |
+| `review-left` | review session on deck Lang; `guiBrowse {"query": "deck:Lang"}`; back to the deck | session ended as by the user's switch; resumes normally | Meguri; tests only |
+| `front-on` | window minimized; bring to front on; `guiBrowse` | window restored and active | Meguri; tests only |
+| `front-off` | window minimized; bring to front off; `guiBrowse` | window state unchanged; reply as usual | Meguri; tests only |
+| `front-off-closed` | main window closed; bring to front off; `guiBrowse`; then `guiSelectCard {"card": c1}` | the window opens on Browse, Meguri not active; then `true` | Meguri; tests only |
+| `select-no-front` | window minimized; `guiSelectCard` | window state unchanged | Meguri; tests only |
+| `sync-not-connected` | iCloud not connected; `sync` | `{"result": null, "error": "sync: auth not configured"}` | Rec. (reference without a sync login); recorded |
+| `sync-ok` | cloud fake lane, connected; `sync` | `null` after the exchange ends `succeeded`; zero Anki-server requests | Meguri; declared |
+| `sync-review` | review session active; `sync` | `sync: not available during a review session` | Meguri; declared |
+| `sync-read-only` | read-only on; `sync` | `Meguri: the API is in read-only mode` | Meguri; declared |
+| `sync-joins` | an exchange running; `sync` | the running exchange's result; no second exchange | Meguri; tests only |
+| `sync-yomitan-params` | iCloud not connected; `sync` with `params: {"version": 2}` | `sync: auth not configured` | Meguri (G11); declared |
+| `sync-waiting-no-class` | the exchange ends `waiting` with class none | `sync: waiting` | Meguri; declared |
+| `search-note` | Migaku `/create` `searchNote` for n1 | Migaku reply per `servers/migaku-received-log`; Browse on `nid:n1` | Meguri; not written (`servers/migaku/`) |
+| `search-note-huge` | Migaku `/create` `searchNote=9999999999999999999` | Migaku `OK`; Browse on `nid:9999999999999999999`, no rows | Meguri; not written (`servers/migaku/`) |
 
 ## Open questions (not normative)
 

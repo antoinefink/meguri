@@ -1,0 +1,24 @@
+# servers/host-security H17 `keepalive-two-requests` (declared, servers/transcripts T13):
+# a connection serves several requests in order and stays open (H7.3).
+id: servers/host/keepalive-two-requests
+description: "two pings on one kept-alive connection"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, connection: k}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+      closed: false
+  - http: {server: ankiconnect, connection: k}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+      closed: false
+  - close: k

@@ -1,0 +1,29 @@
+# servers/ankiconnect-actions A20.4 `note-tags` (A8.3, A8.4): updateNoteTags
+# with a string, getNoteTags, and a tags value of another type.
+# All values are synthetic.
+id: servers/ankiconnect/tags/note-tags
+description: updateNoteTags with a string, getNoteTags, a number as tags
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: D, fields: {Term: one, Gloss: first}, tags: [a]}
+steps:
+  - advance: 1m
+  - http:
+      body: {json: {action: updateNoteTags, version: 6, params: {note: "#n1", tags: "x y"}}}
+  - http:
+      body: {json: {action: getNoteTags, version: 6, params: {note: "#n1"}}}
+  - advance: 1m
+  - http:
+      body: {json: {action: updateNoteTags, version: 6, params: {note: "#n1", tags: 5}}}
+  - observe: [{db_dump: {tables: [notes, cards, tags]}}]

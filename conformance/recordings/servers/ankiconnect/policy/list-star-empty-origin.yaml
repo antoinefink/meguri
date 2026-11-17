@@ -1,0 +1,18 @@
+# servers/ankiconnect-envelope E19.2 `policy/list-star-empty-origin`: an empty Origin with * in the allow-list (E7.2 row 3, E18).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# The header is sent as `Origin: ` (one space after the colon, then nothing; T6.2).
+id: servers/ankiconnect/policy/list-star-empty-origin
+description: allow-list [*] still refuses an empty Origin
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {cors_origins: ["*"]}
+steps:
+  - http:
+      headers: [[Origin, ""]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}

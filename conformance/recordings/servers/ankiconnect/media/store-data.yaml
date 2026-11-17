@@ -1,0 +1,26 @@
+# specs/servers/ankiconnect-media X14 `media/store-data`: X4 rows 1, 2, 6 and 7,
+# X3.2's lenient-padding rows (X13 `ankiconnect-media-base64`: Meguri gives
+# `invalid base64 data` twice) and X3.1's source order. A = 61 0a. All values
+# are synthetic.
+id: servers/ankiconnect/media/store-data
+description: storeMediaFile from data, lowercasing, skipHash, empty data, padding, source order
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: note.txt, data: "YQo="}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: Clip.MP3, data: "YQo="}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: x.mp3, data: "YQo=", skipHash: "60b725f10c9c85c70d97880dfe8191b3"}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: x.mp3, data: ""}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: y.txt, data: "YQo=="}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: z.txt, data: "="}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: w.txt, data: "YQo=", url: 5}}}
+  - observe: [media_dir]

@@ -1,0 +1,36 @@
+# servers/migaku-protocol P16 `anki-hello`.
+# /anki-hello answers on GET and POST with port 44432, the constant, although the
+# scenario binds an ephemeral port (P12, servers/host-security H22). No Origin, so Access-Control-Allow-Origin is * and no Vary (P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/anki-hello
+description: "anki-hello on GET and POST"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: GET
+      target: /anki-hello
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {status: connect, port: 44432}}
+  - http:
+      method: POST
+      target: /anki-hello
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {status: connect, port: 44432}}

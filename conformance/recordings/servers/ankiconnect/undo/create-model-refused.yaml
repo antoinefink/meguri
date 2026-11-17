@@ -1,0 +1,30 @@
+# servers/api-undo-history Y4 `create-model-refused` (Y5 reads it). No Origin, version 6.
+# Baseline undo_status, then each write and undo_status with its rows.
+# notetypes/validation V3 no_front_field; modelNames shows nothing was added.
+# All values are synthetic.
+id: servers/ankiconnect/undo/create-model-refused
+description: createModel whose only template has no field on its front, undo history before and after
+tags: [undo-reference, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, Other, Spare]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}, tags: [old]}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}, tags: [old, spare]}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - observe: [undo_status]
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Duo, inOrderFields: [Q, A], cardTemplates: [{Front: plain, Back: "{{A}}"}], css: ".duo {}"}}}
+  - observe: [undo_status]
+  - http:
+      body: {json: {action: modelNames, version: 6}}

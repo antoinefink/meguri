@@ -1,0 +1,28 @@
+# servers/host-security H17 `port-in-use-release` (declared, servers/transcripts T13):
+# AE78: the holder releases 127.0.0.1:8765; the next retry 10 s later binds both addresses
+# (H4.3).
+id: servers/host/port-in-use-release
+description: "port freed: listening after the next retry"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - helper: {listen: "127.0.0.1:8765"}
+  - apply_config: {ankiconnect: {enabled: true}}
+  - status: {until: {state: port_in_use, port: 8765, addresses: []}, within_ms: 1000, server: ankiconnect}
+  - open: {name: v6, server: ankiconnect, address: ipv6}
+    expect: {outcome: refused}
+  - helper: {release: "127.0.0.1:8765"}
+  - advance: 10s
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, address: ipv4}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+  - http: {server: ankiconnect, address: ipv6}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}

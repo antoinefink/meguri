@@ -1,0 +1,31 @@
+# servers/migaku-protocol P16 `ws-ignored-frames`.
+# Text and binary messages get no reply and never close the socket, whatever
+# they hold; a ping gets a pong with its payload (P10.2, P10.3). ws_send base64 is a
+# binary message (bytes 00 ff). No Origin.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/ws-ignored-frames
+description: "messages are ignored; a ping gets its pong"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - ws_open:
+      name: a
+      target: /anki-connect
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+  - ws_send: {name: a, text: "not json"}
+  - ws_send: {name: a, text: '{"id":1}'}
+  - ws_send: {name: a, text: '[1,2]'}
+  - ws_send: {name: a, base64: "AP8="}
+  - ws_send: {name: a, text: '{"id":"a1","msg":"Migaku-Search","data":{"q":"x"}}'}
+  - ws_send: {name: a, ping: "p"}
+  - ws_expect: {name: a, frames: [{pong: "p"}], within_ms: 1000}
+  - status: {until: {migaku: {extension_connected: true, open_sockets: 1, last_received_at: null}}, within_ms: 1000}

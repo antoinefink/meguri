@@ -1,0 +1,21 @@
+# specs/servers/ankiconnect-actions A9.2, A16, A20.6 `notes-info-query`:
+# notesInfo with a field query returns the object of the one matching note.
+id: servers/ankiconnect/search/notes-info-query
+description: "notesInfo by a field query"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, fields: {Term: x, Gloss: first}, tags: [alpha]}
+    - {notetype: Pair, fields: {Term: y, Gloss: second}}
+steps:
+  - http:
+      body: {json: {action: notesInfo, version: 6, params: {query: "Term:x"}}}

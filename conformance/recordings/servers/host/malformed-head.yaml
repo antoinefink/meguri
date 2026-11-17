@@ -1,0 +1,61 @@
+# servers/host-security H17 `malformed-head` (declared, servers/transcripts T13):
+# heads that do not parse are answered by the host on both servers: 400, empty body,
+# Content-Length 0, Connection close (H7.2).
+id: servers/host/malformed-head
+description: "malformed request heads get 400 on both servers"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect, migaku]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: listening, addresses: ["127.0.0.1:44432", "[::1]:44432"]}, within_ms: 1000, server: migaku}
+  - http: {server: ankiconnect, raw: {text: "GARBAGE\r\n\r\n"}}
+    expect:
+      status: 400
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, raw: {text: "POST / HTTP/1.1\r\nHost: 127.0.0.1:8765\r\nX Bad: 1\r\n\r\n"}}
+    expect:
+      status: 400
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, raw: {text: "POST / HTTP/1.1\r\nHost: 127.0.0.1:8765\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"}}
+    expect:
+      status: 400
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, raw: {text: "POST / HTTP/1.1\r\nHost: 127.0.0.1:8765\r\nContent-Length: abc\r\n\r\n"}}
+    expect:
+      status: 400
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, raw: {text: "GARBAGE\r\n\r\n"}}
+    expect:
+      status: 400
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, raw: {text: "GET /srs-check HTTP/1.1\r\nHost: 127.0.0.1:44432\r\nX Bad: 1\r\n\r\n"}}
+    expect:
+      status: 400
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, raw: {text: "GET /srs-check HTTP/1.1\r\nHost: 127.0.0.1:44432\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n"}}
+    expect:
+      status: 400
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, raw: {text: "GET /srs-check HTTP/1.1\r\nHost: 127.0.0.1:44432\r\nContent-Length: abc\r\n\r\n"}}
+    expect:
+      status: 400
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true

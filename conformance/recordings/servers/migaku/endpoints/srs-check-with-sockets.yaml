@@ -1,0 +1,45 @@
+# servers/migaku-protocol P16 `srs-check-with-sockets`.
+# ok does not depend on WebSockets (P9): two open sockets change nothing.
+# No Origin, so Access-Control-Allow-Origin is * and no Vary (P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/srs-check-with-sockets
+description: "srs-check with two WebSockets open: ok true"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - ws_open:
+      name: a
+      target: /anki-connect
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+  - ws_open:
+      name: b
+      target: /anki-connect
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+  - status: {until: {migaku: {extension_connected: true, open_sockets: 2, last_received_at: null}}, within_ms: 1000}
+  - http:
+      method: GET
+      target: /srs-check
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {ok: true, version: "4"}}

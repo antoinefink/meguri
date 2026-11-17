@@ -1,0 +1,38 @@
+# specs/servers/ankiconnect-media X5, X7 (Meguri side of X13
+# `ankiconnect-media-non-files`): "" and the name of a subdirectory resolve to
+# nothing. Declared: the add-on's error for retrieveMediaFile "" names its media
+# folder inside the text (`media/read` leaves that row out), and its
+# deleteMediaFile "" moves the whole media folder (`media/delete-names`).
+# A = 61 0a. All values are synthetic.
+id: servers/ankiconnect/media/non-files
+description: retrieveMediaFile and deleteMediaFile with the empty name and a directory name
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: a.mp3, text: "a\n"}
+    - {name: sub, dir: true}
+steps:
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: ""}}}
+    expect:
+      status: 200
+      body: {json: {result: false, error: null}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: sub}}}
+    expect:
+      status: 200
+      body: {json: {result: false, error: null}}
+  - http:
+      body: {json: {action: deleteMediaFile, version: 6, params: {filename: ""}}}
+    expect:
+      status: 200
+      body: {json: {result: null, error: null}}
+      no_effect: true
+  - http:
+      body: {json: {action: deleteMediaFile, version: 6, params: {filename: sub}}}
+    expect:
+      status: 200
+      body: {json: {result: null, error: null}}
+      no_effect: true

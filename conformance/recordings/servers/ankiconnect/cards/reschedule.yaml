@@ -1,0 +1,48 @@
+# servers/ankiconnect-actions A20.5 `cards/reschedule` (A13; A18 ankiconnect-error-text).
+# All values are synthetic.
+# The API side only: a transcript cannot replay the same collection through the UI ops,
+# so the row's comparison with Reset and Set Due Date belongs to a DSL scenario.
+# Fixed day counts replace the table's range "3-7": a range draws a day that the two
+# executors draw differently (conformance/AGENTS.md, sched-ops J10).
+# Step 7: the golden records the add-on's error text `abc`; Meguri's is the A17 text
+# (A18 ankiconnect-error-text, pointer /steps/7/reply/body/json/error). Nothing is written
+# on either side, so the dumps of steps 1, 3, 6 and 10 compare without deviations.
+# Repeated ids are in cards/repeated-ids, so they change no dump here.
+# FSRS is on, as Meguri always runs it (sched/set-due-date S1, R702).
+id: servers/ankiconnect/cards/reschedule
+description: forgetCards and setDueDate, an unknown id and an invalid days text
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [A]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: A, fields: {Term: "a1", Gloss: "b1"}}
+    - {notetype: Pair, deck: A, fields: {Term: "a2", Gloss: "b2"}}
+steps:
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2"], days: "3"}}}
+  - observe: [{db_dump: {tables: [cards, revlog]}}]
+  - http:
+      body: {json: {action: forgetCards, version: 6, params: {cards: ["#c2"]}}}
+  - observe: [{db_dump: {tables: [cards, revlog]}}]
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2"], days: "5"}}}
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2"], days: "1!"}}}
+  - observe: [{db_dump: {tables: [cards, revlog]}}]
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2"], days: "abc"}}}
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: [7], days: "1"}}}
+  - http:
+      body: {json: {action: forgetCards, version: 6, params: {cards: [7]}}}
+  - observe: [{db_dump: {tables: [cards, revlog]}}]

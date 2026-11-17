@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.1 text-plain: Content-Type is ignored (E2).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/text-plain
+description: "Content-Type text/plain"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      headers: [[Content-Type, text/plain]]
+      body: {json: {action: version, version: 6}}

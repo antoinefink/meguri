@@ -38,9 +38,10 @@ This file defines the scenario file, the golden file, the normalization, the com
 | `clock` | yes | `conformance/dsl` D5 |
 | `compare` | no | `conformance/dsl` D5 (`set` pointer patterns, applied to the step outputs of T9) |
 | `server_config` | no | T4 |
-| `host_env` | no | T4.1; only with `server: host` |
+| `host_env` | no | T4.1; only with `server: host`, except `migaku_pending_switch`, also allowed with `server: migaku` |
 | `setup` | no | T5 |
-| `steps` | yes | T6 and T7; at least one exchange |
+| `migaku_routing` | no | T5.1; `source: declared` and `server: migaku` or `host` only |
+| `steps` | yes | T6 and T7; at least one exchange (an `http` step; the requests inside `pipeline` and `parallel` do not count, T13) |
 | `equivalence` | no | T14; only with `source: declared` |
 
 No other key is allowed.
@@ -63,7 +64,7 @@ The server's settings at the start of the scenario, in neutral names that both e
 
 - The recorder always runs AnkiConnect with `webBindAddress` `127.0.0.1`, `webBindPort` 8765 and no `apiLogPath`. The scenario cannot change those.
 - For `server: ankiconnect` or `migaku`, the server under test is enabled and the other server is off; `enabled` is not allowed.
-- Paths in `media_dir` and `readable_folders` are relative to the scenario's working directory, which the executor creates empty for each run. Meguri's executor maps `media_dir` to `ankiconnect.media_dir` `{path: <absolute path>, bookmark: ""}` (Linux has no bookmarks) and creates the folder; by default it uses the folder `media-dir` of the working directory. `media_dir: null` (declared only) leaves `ankiconnect.media_dir` unset, as before the user picks a folder (`servers/ankiconnect-media` X8). The recorder's `getMediaDirPath` is Anki's own media folder; both normalize to `<media-dir>` (T10.3).
+- Paths in `media_dir` and `readable_folders` are relative to the scenario's working directory, which the executor creates empty for each run. Meguri's executor maps `media_dir` to `ankiconnect.media_dir` `{path: <absolute path>, bookmark: ""}` (Linux has no bookmarks) and creates the folder; by default it uses the folder `media-dir` of the working directory. `media_dir: null` (declared only) leaves `ankiconnect.media_dir` unset, as before the user picks a folder (`servers/ankiconnect-media` X8). An `apply_config` step (T7.3) may change `ankiconnect.media_dir`; it gives `{path: <path relative to the working directory>}`, which Meguri's executor maps to `{path: <absolute path>, bookmark: ""}` in the same way. The recorder's `getMediaDirPath` is Anki's own media folder; both normalize to `<media-dir>` (T10.3).
 
 ### T4.1 `host_env`
 
@@ -72,12 +73,29 @@ The server's settings at the start of the scenario, in neutral names that both e
 | `ipv6` | `true` | `false` runs the scenario in a network namespace with no IPv6 loopback |
 | `start` | `ready` | `before_open`: setup builds the collection file, then the engine starts with nothing open and the host starts; the step `lifecycle: open` (or `open_fail`) makes the first open attempt (`servers/host-security` H3) |
 | `store_user_version` | none | the integrations store is created before the host starts with this `user_version` and the given `server_config` as its document (`servers/host-security` H10.1) |
+| `migaku_pending_switch` | `false` | the `migaku_pending_switch` construction parameter of `servers/host-security` H22, the pending-reply switch of `servers/migaku-receive` P14 (declared only; also allowed with `server: migaku`). It is not a member of `server_config`: the switch is not part of the config document (P14) |
 
 ## T5. `setup`
 
 `setup` is `conformance/dsl` D6, unchanged: the same sections, order and rules, run on a new collection created at `clock.start`. On both sides that collection holds what a new collection holds (`storage/new-collection` B11 for Meguri's executor; the recorder's is the collection of the new Anki profile): the default deck (id 1), the default preset and the six stock note types at ids `now_ms` to `now_ms` + 5 (`storage/new-collection` B7). Notes and cards made by setup get logical ids `#nN` and `#cN` (`conformance/dsl` D7.1); decks and note types get the tokens of T10.1.
 
 The recorder applies setup through Anki's library inside the running Anki (its driver add-on) before AnkiConnect receives the first request. Meguri's executor applies it through the engine before its server starts. Neither side counts setup as an exchange.
+
+### T5.1 `migaku_routing` (declared only)
+
+The Migaku profiles and routing settings at the start of the scenario. They live in the integrations store, not in the collection or the config document (`servers/host-security` H10.2), so `setup` cannot hold them. Meguri's executor saves them through `servers/migaku-routing` D2.3's operations after `setup` and before the host starts, because profiles name setup's note types and decks.
+
+```yaml
+migaku_routing:
+  profiles:
+    - {name: German, language: de, notetype: "#m7", deck: "#d1", field_map: {Word: targetWord}, defaults: {Notes: "-"}, tags: [migaku]}
+  fallback: German          # a profile name, or null (default)
+  override: null            # a profile name, or null (default): Automatic
+```
+
+- A profile holds D2.1's values: `name`, `language` (a D1 code), `notetype` and `deck` (a T10.1 token, or a name: the note type's name, the deck's full name, `Default` for deck 1), `field_map` (field name to a D3 source; absent: D4's inference), `defaults` (field name to text), `tags` (default `[]`) and `normalize_audio` (`off`, the default, or the target loudness in LUFS, such as `-20`). Profiles are saved in list order, so the first gets the first id.
+- A profile that D2.1 refuses ends the run with the status `error` (T16), naming the profile's index and D2.1's error: the starting state is not reached.
+- The routing state (D12) starts empty.
 
 ## T6. Exchanges
 
@@ -180,22 +198,30 @@ An exchange that raises a prompt with no scripted answer is a run error on both 
 |---|---|---|
 | `apply_config` | a partial config document in `servers/host-security` H10.2's nested form (`{ankiconnect: {enabled: false}}`), optionally with `api_key` | merges it into the current document and applies the result with the key through H10.3. Output `{}`, `{refused: {member: "<dotted name>"}}` or `{refused: store_read_only}` |
 | `config` | `{}` | output `{config: <the current document>}` |
-| `lifecycle` | `exclusive`, `ready`, `long_op`, `long_op_end`, `close`, `open`, `open_fail`, or `{replace: <setup>}` | puts the engine in that state (`engine/lifecycle`): `exclusive` enters an exclusive phase; `long_op` takes the long-operation slot as Check Database would; `open_fail` makes an open attempt that ends `Failed{reason}`; `{replace: ...}` completes a replacement with a new collection built from that `conformance/dsl` D6 setup, entity tokens continuing (T10.1) |
+| `lifecycle` | `exclusive`, `ready`, `long_op`, `long_op_end`, `close`, `open`, `open_fail`, `fail_corrupt`, `cloud_adopt`, `cloud_adopt_exclusive`, or `{replace: <setup>}` | puts the engine in that state (`engine/lifecycle`): `exclusive` enters an exclusive phase; `long_op` takes the long-operation slot as Check Database would; `open_fail` makes an open attempt that ends `Failed{reason}`; `fail_corrupt` makes the engine end in `Failed{Corrupt}` (L1), with the slot still held when an earlier `long_op` holds it; `cloud_adopt` takes the slot as a `CloudAdopt` does before its exclusive phase (L5, L6), and `cloud_adopt_exclusive` then makes that `CloudAdopt` enter its exclusive phase; `{replace: ...}` completes a replacement with a new collection built from that `conformance/dsl` D6 setup, entity tokens continuing (T10.1) |
 | `restart_host` | `{}` | stops the host as at app quit and builds it again on the same store and collection |
 | `helper` | `{listen: "<addr>:<port>"}`, `{release: "<addr>:<port>"}` or `{accepted: "<addr>:<port>"}` | a helper socket outside Meguri listens on, or releases, that address; `accepted` outputs `{accepted: <n>}`, the connections that helper accepted so far. A helper never reads or writes |
-| `fault` | `{listener_crash: {server}}`, `{handler_panic: {server, target}}`, `{drop_ipv4_socket: {server}}` | the host's test hooks (`servers/host-security` H22); `handler_panic` makes the next request to that route panic in its handler |
+| `fault` | `{listener_crash: {server}}`, `{handler_panic: {server, target}}`, `{drop_ipv4_socket: {server}}`, `{migaku_crash: {point: between \| before_op}}` | the host's test hooks (`servers/host-security` H22); `handler_panic` makes the next request to that route panic in its handler. `migaku_crash` stops the host, as a killed process would, at that point of the next Migaku commit: `between` after the collection commit and before `servers/migaku-receive` P17 step 3 (P24 `crash-between`, `servers/migaku-received-log` L17 `crash-before-row`); `before_op` after P17 step 1 and before the op runs (P24 `crash-hidden-row`). The request gets no reply (its `expect` gives an `outcome`, T13), and `restart_host` builds the host again |
 | `revalidate` | `{}` | calls the host's revalidate operation |
 | `resolve` | `{id, outcome}` | calls the host's resolve operation (H11.2) with that id and JSON outcome; output `{resolved: <bool>}` |
-| `events` | `{}` | output `{events: [...]}`: the host events posted since the scenario started or since the previous `events` step, in order, as `{type, ...}` objects with H11.1's payloads; status events are left out |
+| `events` | `{types?: [<type>, ...], include_status?: <bool>}` | output `{events: [...]}`: the host events posted since the scenario started or since the previous `events` step, in posting order, as `{type, ...}` objects. Status events are left out unless `include_status` is true (default false); the `TestHost` records every status event, uncoalesced (H22). With `types`, only events of those types are listed, and the others in the window are still consumed. Types and members (H11.1, H20 `HostEvent`): `status_changed` (`statuses`: the two statuses as the `status` step gives them); `received_log_changed` (no other member); `received` (`row_id` as a `#rN` token, `note_id` as a T10.1 token, `deck`); `activity_appended` (`entries`: a JSON list of `servers/ankiconnect-envelope` E16 entry objects); `media_ingest_notices` (`notices`: a JSON list of `servers/ankiconnect-media` X11.9 notices); `interaction_request` (`id`, `kind`, `payload` as a JSON value); `interaction_cancelled` (`id`). H11.2 fixes no order between an interaction's `interaction_cancelled` at its timeout and the `activity_appended` of the request that the timeout outcome then completes; a scenario that checks either uses `types` to leave the other out, or `compare.set` on the list |
 | `sockets` | `{}` | output `{sockets: [...]}`: the listening TCP addresses of the process, as `127.0.0.1:<port>` and `[::1]:<port>` strings, sorted |
 | `logs` | `{}` | output `{activity: <n>, received: <n>}`: the number of AnkiConnect activity-log entries (U141) and of Recently received rows (U140) |
-| `media_dir_scan` | `{}` | runs one scan of the external media folder (`servers/ankiconnect-media` X11.3), as Linux tests do instead of the file-system watcher |
+| `media_dir_grant` | `{path?}` | calls `media_folder_granted` (`servers/ankiconnect-media` X11.2, X11.8) on `path`, relative to the working directory (default: T4's `media_dir`), as U144 does after a pick; output `{baseline: <n>}`, or `{failed: <kind>}` with X11.8's failure kind |
+| `media_dir_scan` | `{}` | runs one scan of the external media folder (X11.3), as Linux tests do instead of the file-system watcher; output the X11.8 result `{status, rescan, ingested, notices}`, the notices without `time` |
 | `wait` | duration | real time passes; nothing else is done |
-| `ws_open` | `{name, server?, target?, headers?}` | opens a WebSocket on a new connection (Migaku); `expect` holds the handshake reply |
-| `ws_send` | `{name, text?, base64?, ping?, close?}` | sends one frame or message |
-| `ws_expect` | `{name, frames, within_ms}` | the frames the client must have received by then, in order: `{pong: <payload>}`, `{close: <code>}`, `{text: ...}`; `frames: []` means none |
+| `ws_open` | `{name, server?, target?, headers?}` | opens a WebSocket on a new connection (Migaku): a `GET` of `target` (default `/`) that sends T6.2's `Host` rule (a listed `Host` replaces the default; `no_host` is not available), then `Upgrade: websocket`, `Connection: Upgrade`, `Sec-WebSocket-Version: 13` and a `Sec-WebSocket-Key` of 16 random bytes in base64, then `headers`; `expect` holds the handshake reply (T13) |
+| `ws_send` | `{name, text?, base64?, ping?, close?, fill?, frame?}` (exactly one content member) | sends one frame or message, masked as a client does: `text` is one text message (UTF-8); `base64` is one binary message of the decoded bytes; `ping` is a ping with that payload as a UTF-8 string; `close` is `{}` (a close frame with no payload) or `{code, reason?}`, sent as given even when the code is not valid on the wire; `fill: {size, byte, kind: text \| binary}` is one message of `byte` repeated `size` times, for messages too large for YAML; `frame: {base64: <bytes>}` writes exactly these bytes as one frame, header and mask included (or no mask) |
+| `ws_expect` | `{name, frames, within_ms}` | the frames the client must have received by then, in order: `{pong: <payload>}`, `{close: <code>}`, `{close: {code, reason}}` (the reason compared too), `{close: null}` (a close frame with no status code), `{text: ...}`; `frames: []` means none |
 | `status` | `{}` or `{until: {<member>: <value>, ...}, within_ms: <n>, server?}` | output `{status: [<ankiconnect status>, <migaku status>]}` with the values of `servers/host-security` H12, `next_retry_at` as an offset in seconds from `clock.start` on the host's wall clock. With `until`, the executor reads the status again (every 50 ms of real time) until every listed member of the named server's status (`server` as in T6.1) has the value, or `within_ms` passes, which fails the step |
 | `parallel` | a list of `http` steps | sends them on separate fresh connections at the same instant and waits for all replies; outputs in list order |
+| `routing` | exactly one of `{save_profile: <profile>}`, `{delete_profile: <id>}`, `{set_fallback: <id or null>}`, `{set_override: <id or null>}`, `{record_manual_move: {profile: <id>, at: <duration from clock.start>}}`, `{list_profiles: {}}`, `{infer_field_map: "#mN"}`, `{draft_profiles: {}}`, `{confirm_drafts: [<draft>, ...]}`, `{routing_settings: {}}` (server `migaku` or `host`) | calls that operation of `servers/migaku-routing` D2.3 (or D12's `record_manual_move`) on the integrations store and the collection as they are now. A profile or draft is T5.1's form, with `id` for an existing one and none for a new one. Output `{result: <the operation's result as JSON>}` or `{refused: <error code>}`, note type and deck ids as T10.1 tokens |
+| `received_log` | `{}` | output `{rows: [...]}`: the Recently received rows (`servers/migaku-received-log` L2) written since the scenario started or since the previous `received_log` step, in receive order, each `{endpoint, status, profile, decision, route, detection: {language, confidence}, note, error}`, `profile` by name and `note` as a T10.1 token or null |
+| `received` | `{call: page \| row \| badge \| confirm \| move_eligibility \| move \| retry \| live_note \| delete_note, ...}` | makes that call of `servers/migaku-received-log` L16, with its inputs as the other members (`cursor`, `limit`, `row`, `rows`, `profile`, `deck_only`); a call that waits is awaited. Output the call's result as JSON |
+| `prune` | `{}` | runs one prune pass of `servers/migaku-received-log` L5 at the scenario clock's instant |
+| `collection` | one `conformance/dsl` D7 op (`add_deck`, filtered decks included, `edit_note`, `answer`, `set_deck`, `remove_notes`, `undo`, `redo`) | runs it on the server's collection as Browse or review would, with change-stream delivery, after every earlier exchange completed; output as the DSL op's. It is the one undo form of this file (T19 Q6) |
+
+In the outputs of `routing`, `received_log`, `received` and `events`, received-log row ids are tokens `#rN`, numbered from 1 in the order the rows were inserted; requests name rows by these tokens (T10.2's substitution applies). Note ids in them are T10.1 tokens; Migaku profile ids stay the store's own integers: a declared scenario runs only on Meguri's executor, each time on a new store.
 
 ### T7.4 What a step outputs
 
@@ -203,6 +229,7 @@ Each step outputs one value, at its index in the run's `steps` output (T9):
 
 - `http`: `{reply: <normalized reply>}` (T8, T10), or `{outcome: <kind>}` when no reply was read: `refused` (the connection was refused), `closed_without_reply` (the server closed it before any reply byte), `reset` (reset before any reply byte). Without a matching expectation (T13), an outcome is a run error of that kind.
 - `observe`: `{<kind>: <value>, ...}` as `conformance/observations` O1, then T10.6.
+- `http` with `async`: `{}` at its own index; the reply is the output of its `await` step, and `expect` goes on that step (T13).
 - `await`, `pipeline`, `open`, `status` and the T7.3 steps with an output: as their rows say.
 - every other step: `{}`.
 
@@ -329,7 +356,7 @@ Real ids differ between runs and between Anki and Meguri; tokens name entities b
 |---|---|
 | in `reply` outputs only, a member named `mod` whose value is an integer, at any depth | `"@<n>"`, where n is the value minus the epoch seconds of `clock.start` (may be negative). `observe` outputs are normalized by their own rules (`conformance/observations`, `conformance/normalized-dump`), by the next two rows and by T10.1 at T10.6's positions only |
 | in every output, `reply` and `observe` alike (a failed download's text lands in a field), every occurrence of the executor's `${fixture_base}` value inside a string | `<fixture>` (so `http://127.0.0.1:41234/missing.png download failed with return code 404` becomes `<fixture>/missing.png download failed with return code 404`) |
-| the result of `getMediaDirPath`, and any string equal to the executor's media folder path | `"<media-dir>"` |
+| the result of `getMediaDirPath`, and in every output every occurrence of the executor's media folder path inside a string (longest match first; a trailing `/` stays as written) | `<media-dir>` (so `[Errno 21] Is a directory: '<media-dir>/'`) |
 | the result of `getActiveProfile`, items of the result of `getProfiles`, and members named `profile` in `notesInfo` items, when equal to the executor's profile name | `"<profile>"` |
 | members named `id` inside items of `tmpls` and `flds` of a note type object (`findModelsById`, `findModelsByName`, `createModel` results) | `"#rand"` when an integer |
 | items of `nextReviews` (`cardsInfo`) | the characters U+2068 and U+2069 removed |
@@ -343,7 +370,7 @@ The rules apply in the order T10.3 (environment), then T10.1 (ids, at T10.5's po
 
 ### T10.5 Id positions
 
-Positions are given per action as pointers into the reply's result (the bare result when the request's `version` is 4 or less, `/result` otherwise; for `multi`, each sub-reply by its own version) and into request-independent shapes. `*` matches any one segment.
+Positions are given per action as pointers into the reply's result (the bare result when the request's `version` is 4 or less, `/result` otherwise; for `multi`, each sub-reply by its own version) and into request-independent shapes. The Migaku rows (`POST /create`, `POST /receive`) point from the body's JSON root: those replies have no result envelope. `*` matches any one segment.
 
 | Action | Note ids | Card ids | Deck ids | Note type ids |
 |---|---|---|---|---|
@@ -363,9 +390,11 @@ Positions are given per action as pointers into the reply's result (the bare res
 | `modelNamesAndIds` | | | | `/*` |
 | `findModelsById`, `findModelsByName` | | | `/*/did` | `/*/id` |
 | `createModel` | | | `/did` | `/id` |
+| `POST /create` (Migaku; `servers/migaku-received-log` C2 step 9) | `/id` | | | |
+| `POST /receive` (Migaku; `servers/migaku-receive` P18) | `/id` | | | |
 
 - An object member name that is a decimal id (`getDeckStats`) is replaced by its token as a member name.
-- Actions not in the table have no id positions; their integers are compared as they are.
+- Actions and Migaku routes not in the table have no id positions; their integers are compared as they are.
 - U141 to U143 add rows when they add actions to scenarios, in this file, with their spec change.
 
 ### T10.6 Id positions in observations
@@ -436,7 +465,16 @@ A declared scenario gives each exchange's expected reply in `expect`:
 ```
 
 - `status` is required, except with `outcome`. `body` is optional: when absent, the body is not compared; `{empty: true}` requires no bytes.
-- `expect` may also follow an `open` step (`outcome` and its times) and an `apply_config` or `restart_host` step (`no_effect` only). A step's own output checks (`status` `until`, `close_wait`) need no `expect`.
+- `expect` may also follow these steps:
+  - `open`: `outcome` and its times.
+  - `await`: the awaited exchange's reply, with the same members as on an `http` step (the `async` `http` step itself outputs `{}`, T7.4).
+  - `ws_open`: the handshake reply, as an exchange expectation.
+  - `pipeline` and `parallel`: `{replies: [<exchange expectation>, ...]}`, one per request, in list order. The requests inside them are not `http` steps and do not count toward T3's "at least one exchange".
+  - `apply_config` and `restart_host`: `no_effect`, `output`, or both.
+  - every other step whose T7.4 output is not a reply (`observe`, `config`, `resolve`, `events`, `sockets`, `logs`, `helper` `accepted`, `status` without `until`, `media_dir_grant`, `media_dir_scan`, `routing`, `received_log`, `received`, `collection`): `output` or `output_at`.
+- `output: <value>` compares the step's whole output with the value as T11 compares (`conformance/observations` O7, `compare.set` included).
+- `output_at: {<JSON pointer>: <value>, ...}` compares only the listed pointers into the output, each by O7; a pointer listed with `null` must be absent, as in `headers`. Members not listed are not compared. Use it for an output that holds values the scenario does not state, such as a `config` document's defaults.
+- A step's own output checks (`status` `until`, `close_wait`, `ws_expect`) need no `expect`.
 - `headers` lists only the headers checked. A name with the value `null` must be absent; a listed name must be present with that value. Header names not listed are not compared. Any header may be named, not only T8's compared set (the executor records all headers for declared scenarios).
 - `closed: true | false` checks whether the server closed the connection after the reply. `connection_closed_before: true` is T6.4's case.
 - `outcome: refused | closed_without_reply | reset | open` expects that connection-level outcome (T7.4) instead of a reply; `status` is then not given. For `closed_without_reply`, `within_ms` bounds when the close must come and `not_before_ms` (optional) when it may come at the earliest, counted from the last request byte sent, or from the connection's opening for `open`.
@@ -518,13 +556,14 @@ For every scenario that is not `pass`, `tools/mg servers-contract` reports, in t
 3. Settled: two fresh recorders at the same clock start gave byte-identical replies, ids included. Ids follow T10.1's "How the recorder's ids fall": they coincide across kinds and a deleted id is reused, which T10.1's entity rule and error-string rule handle. `#unknown` still needs ids of deleted entities to be at least 1,000,000,000, which holds for any clock after 2001.
 4. Settled: the add-on's `cardsInfo` `question` and `answer` start with the note type's CSS in a `<style>` element (Anki 26.9.3 renders them that way), and `servers/ankiconnect-actions` gives Meguri the same start. T10.3 normalizes nothing beyond `conformance/render-ops#Q5.4`, so any remaining difference becomes a deviation entry.
 5. Whether the AnkiConnect transcript suite should also record replies with `Origin` values of real client extensions (their extension ids). The inventory uses synthetic extension ids, since the add-on treats every extension id alike (`servers/ankiconnect-clients` C2).
-6. Transcripts cannot look below the top undo step; `servers/api-undo-history` Y5 reads recorded writes by their top step only. Proposed there (Y9 Q4), for this file's owner and the oracle maintainer, not yet a rule: a T7.1 step `undo` (no value) that runs the DSL's `undo` op (`conformance/undo-ops` V1) on the server's collection after every earlier exchange completed, on both executors, and outputs what V1's `undo` outputs. After a recorded write, `undo` then `observe: [undo_status]` shows the baseline's top step again only when the steps below were kept.
+6. Transcripts cannot look below the top undo step; `servers/api-undo-history` Y5 reads recorded writes by their top step only. Proposed there (Y9 Q4), for this file's owner and the oracle maintainer, not yet a rule: a T7.1 step `undo` (no value) that runs the DSL's `undo` op (`conformance/undo-ops` V1) on the server's collection after every earlier exchange completed, on both executors, and outputs what V1's `undo` outputs. After a recorded write, `undo` then `observe: [undo_status]` shows the baseline's top step again only when the steps below were kept. If adopted, it takes the form `collection: undo` of T7.3, then allowed in oracle scenarios too, so that the file has one undo form.
 
 ## T20. Meguri's executor
 
 - **Bind modes** (`servers/host-security` H22). Scenarios with `server: ankiconnect` or `migaku`, oracle or declared, run in the **ephemeral** mode: the server under test binds `127.0.0.1:0` only, with no probe and no `[::1]`; the `Host` default of T6.2 and `${port}` use that bound port, which the `Host` check also compares with. Scenarios with `server: host` run in the **fixed** mode: the real binding path of `servers/host-security` H4 on the configured ports (8765 unless T4's `port` says otherwise, and 44432), with the probe and `[::1]`. Each `host` scenario runs in its own network namespace (its own container network with its own loopback), so fixed ports never collide with another run, and `address: non_loopback` reaches that namespace's own interface address. The host is built with the test construction of `servers/host-security` H22, never through the FFI.
 - **Clock.** The host's clock is a test clock (`servers/host-security` H21) that is the scenario clock: `advance` moves it; real-time limits (connection timeouts, the 1 s bound of `servers/host-security` H10.4, probe and fetch limits) run in real time, which `wait` lets pass.
-- **Interactions.** The host's interactions go to a `TestHost` that T7.2 and T7.5 script, with T7.5's defaults.
+- **Interactions.** The host's interactions go to a `TestHost` that T7.2 and T7.5 script, with T7.5's defaults. Each scenario builds its own host (`servers/host-security` H22), so the first interaction a scenario posts has the id `i-1`, the second `i-2`, and so on (H11.2); `resolve` steps may name these ids.
+- **External media folder.** Meguri's executor never grants the external media folder (`servers/ankiconnect-media` X11.2) unless a step asks for it (T7.3 `media_dir_grant`), so a scenario without such a step runs every `media_dir_scan` suspended (X11.1), or `no_folder` under `media_dir: null` (X11.8).
 - **Order.** Steps run in order. A step starts after the previous one completed, except after an `async` exchange, which runs on while later steps run, until its `await`. A scenario that ends with an `async` exchange not awaited is a run error.
 - **Undo history.** Meguri's executor starts every scenario with both undo histories (undo and redo) empty: the setup leaves no step, the state in which `conformance/undo-ops` V5 has the DSL's undo scenarios start (`servers/api-undo-history` Y6).
 

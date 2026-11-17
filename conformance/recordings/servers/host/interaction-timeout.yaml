@@ -1,0 +1,37 @@
+# servers/host-security H17 `interaction-timeout` (declared, servers/transcripts T13):
+# a permission prompt with no answer ends after 120 s of the host's clock with its timeout
+# outcome, and the host posts interaction cancelled with the same id; a later resolve returns
+# false (H11.2, E9). The `events` step lists only the two interaction types (the `types`
+# filter proposed with this scenario for T7.3 `events`): the requestPermission reply also
+# adds an activity-log entry and posts activity appended (E16), whose place relative to
+# interaction cancelled no spec fixes. In posting order, the interaction request comes when
+# the prompt is posted and interaction cancelled at the timeout, so the filtered list is
+# [request, cancelled]. Event `type` names are those proposed for T7.3 `events`.
+# `expect: {output: ...}` on a step without a reply is the T13 form proposed with this
+# scenario (T13 lists no check for T7.3 outputs yet).
+id: servers/host/interaction-timeout
+description: "permission prompt times out, then is cancelled"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - interaction: {kind: PermissionPrompt, answer: none}
+  - http: {server: ankiconnect, headers: [[Origin, "https://new.example"]], body: {json: {action: requestPermission, version: 6}}, async: p}
+  - wait: 1s
+  - advance: 120s
+  - await: p
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://new.example", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: denied}, error: null}}
+  - events: {types: [interaction_request, interaction_cancelled]}
+    expect:
+      output:
+        events:
+          - {type: interaction_request, id: i-1, kind: PermissionPrompt, payload: {origin: "https://new.example"}}
+          - {type: interaction_cancelled, id: i-1}
+  - resolve: {id: i-1, outcome: {answer: allow, ignore: false}}
+    expect: {output: {resolved: false}}

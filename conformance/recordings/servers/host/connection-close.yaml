@@ -1,0 +1,18 @@
+# servers/host-security H17 `connection-close` (declared, servers/transcripts T13):
+# a request with Connection: close gets one reply carrying Connection: close, then the server
+# closes (H7.3).
+id: servers/host/connection-close
+description: "Connection: close honoured"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, headers: [[Connection, close]]}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*", connection: close}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+      closed: true

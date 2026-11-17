@@ -3,7 +3,7 @@
 Spec: servers/migaku-received-log
 Requirements: R1721, R1722, R1723, R1724, R1725, R1726, R1727, R1728 (core side of each), R1731, R1732, R1733; R1702 (payload retention), R1719 (manual moves feed routing); supports R1709, R1859; AE73 (Retry), AE74
 Anki: 26.09.3 (note adds, deletes, deck changes and undo, through the specs cited)
-Scenarios: planned for `conformance/scenarios/servers/migaku/moves/` and `conformance/scenarios/servers/migaku/create/`; L17 and C5 list them as tables until the runner of `servers/transcripts` (U136) exists
+Scenarios: `conformance/recordings/servers/migaku/create/` (C5; declared, `servers/transcripts` T13) holds 11 of C5's 12 rows. `filtered-deck`, and every row of L17 (planned for `conformance/recordings/servers/migaku/moves/`), wait for transcript steps for filtered decks, Migaku profiles and the L16 calls. Until then they are listed as tables.
 
 The core side of the Mac sidebar's "Received" page. It is a durable local log of every card the Migaku server received or failed to receive, with the operations behind Confirm, Move, Retry, Delete note, Open in Browse and Edit. The same file covers the legacy `POST /create` route. The Swift page, its toast and its menus are U145's.
 
@@ -230,7 +230,7 @@ The FFI exports U145 uses (U140, `core/crates/meguri-ffi/src/servers.rs`). The r
 
 ## L17. Scenarios
 
-Planned for `conformance/scenarios/servers/migaku/moves/`. They use `servers/migaku-receive` P24's note type `T-Mining` and its profiles, plus `ES` (Spanish, defaults Is Vocabulary Card `x` and Is Audio Card `x`, deck `ES::Mining`) on a second note type `T-Mining-ES` with the same 11 field names. Each starts by receiving cards through `/receive`.
+Planned for `conformance/recordings/servers/migaku/moves/` (`servers/transcripts` T2). They wait for transcript steps for Migaku profiles, the L16 calls, the prune pass and the fault hooks. They use `servers/migaku-receive` P24's note type `T-Mining` and its profiles, plus `ES` (Spanish, defaults Is Vocabulary Card `x` and Is Audio Card `x`, deck `ES::Mining`) on a second note type `T-Mining-ES` with the same 11 field names. Each starts by receiving cards through `/receive`.
 
 | Id | Setup | Action | Expected |
 |---|---|---|---|
@@ -258,7 +258,7 @@ Planned for `conformance/scenarios/servers/migaku/moves/`. They use `servers/mig
 
 - The route is `POST /create`, on the Migaku server, with that server's origin, CORS, `Host` and body-limit rules (`servers/migaku-protocol`, `servers/host-security`).
 - The body is a form. `multipart/form-data` with a `boundary` parameter is read as multipart. `application/x-www-form-urlencoded`, or no `Content-Type`, is read as URL-encoded: UTF-8, `+` as a space, then percent-decoding. Any other `Content-Type` fails with 400 `Unsupported form encoding.`
-- In multipart, a part whose `Content-Disposition` has a `filename` parameter is a file part. Every other part is a text field. In URL-encoded forms every pair is a text field. When a text field occurs twice, its last occurrence counts, as for a repeated JSON key in `servers/migaku-receive` P3 (Meguri rule; the add-on's choice is not recorded).
+- In multipart, a part whose `Content-Disposition` has a `filename` parameter is a file part. Every other part is a text field. The `filename` value is taken literally between its double quotes: a backslash is an ordinary character, not an escape. Browsers' `FormData` sends Windows paths this way, and C2.6 splits at `\`. In URL-encoded forms every pair is a text field. When a text field occurs twice, its last occurrence counts, as for a repeated JSON key in `servers/migaku-receive` P3 (Meguri rule; the add-on's choice is not recorded).
 - Only file parts named `files` are files of the card (C2.6). A file part with another name, and a text field named `files`, are ignored.
 - The form's kind is decided in this order:
   1. a text field named `Migaku-Deliver-Audio`, `Migaku-No-Audio-Found`, `Migaku-Accept-Data`, `Migaku-Deliver-Definitions` or `searchNote` (the first of these names, in this order, that is present): that sub-command (C3);
@@ -306,7 +306,9 @@ Sub-commands never check `version`, never wait for the collection, never read or
 
 ## C5. Scenarios
 
-Planned for `conformance/scenarios/servers/migaku/create/`, with P24's note type and profiles. `<T>` and `<D>` are the ids of `T-Mining` and `DE::Mining`.
+Each row is the declared scenario `conformance/recordings/servers/migaku/create/<id>.yaml` (`servers/transcripts` T2, T13), except `filtered-deck`, which is planned. They use P24's note type and profiles. `<T>` and `<D>` are the ids of `T-Mining` and `DE::Mining`.
+
+The written files check every reply. The `{"id": <nid>}` replies need `servers/transcripts` T10.5 id positions for Migaku replies (`/id` of `/create` and `/receive`). For the After column, they check today only what T13 and T14 can check: `no_effect` (collection and media unchanged) for the refusals and the sub-commands, and the T14 equivalence of the created note (note type, deck, fields, tags and the files the fields reference) for `multipart-two-files`, `file-path-name`, `repeated-field` and `create-row-text`. The other After checks wait: log rows (no row, Created, Manual, media names, target word and snippet), the count of notes, the rewrite to `[sound:clip.m4a]` (T14 accepts either name), files no field references, interactions, and profile `DE`'s defaults. They need T13 output expectations (on `logs`, `events` and `observe`) and a transcript key for Migaku profiles. Until then the transcripts store no profile, so the created notes have no defaults and their rows no target word or snippet. `filtered-deck` waits for a filtered-deck setup or step.
 
 | Id | Request | Reply | After |
 |---|---|---|---|
@@ -318,7 +320,7 @@ Planned for `conformance/scenarios/servers/migaku/create/`, with P24's note type
 | `search-note` | URL-encoded `searchNote=1234` | 200 text `OK` | one Browse interaction with `nid:1234` |
 | `search-note-bad` | URL-encoded `searchNote=12a` | 400 `Invalid note id.` | no interaction |
 | `form-encoding` | `Content-Type: application/json` | 400 `Unsupported form encoding.` | nothing changes |
-| `filtered-deck` | `version=2`, `card` with `noteTypeId` `<T>` and the id `<F>` of a filtered deck | 400 `Deck <F> is a filtered deck.` | nothing changes |
+| `filtered-deck` (planned) | `version=2`, `card` with `noteTypeId` `<T>` and the id `<F>` of a filtered deck | 400 `Deck <F> is a filtered deck.` | nothing changes |
 | `file-path-name` | multipart: `version=2`; valid `card`; one `files` part with `filename="C:\clips\a1.m4a"` (M4A), one part `other` with `filename="x.png"` | 200 `{"id": <nid>}` | file `a1.m4a` only; row media names `a1.m4a` |
 | `repeated-field` | URL-encoded `version=1&version=2&card=<valid>` | 200 `{"id": <nid>}` (the last `version` counts) | one note |
 | `create-row-text` | multipart: `version=2`; `card` for `<T>`, `<D>` with Target Word `<b>Hund[Hund,nn,m]</b>` and Sentence `Der Hund.` | 200 | row target word `Hund`, snippet `Der Hund.` (profile `DE` maps them) |

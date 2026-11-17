@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 not-utf8: the bytes FF FE are not UTF-8 (E4 first check).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/not-utf8
+description: "body bytes FF FE"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {base64: "//4="}

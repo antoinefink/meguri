@@ -1,0 +1,13 @@
+# servers/ankiconnect-envelope E19.2 `policy/list-star`: allow-list *.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/list-star
+description: allow-list [*] serves any origin with ACAO *
+tags: [policy]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {cors_origins: ["*"]}
+steps:
+  - http:
+      headers: [[Origin, "https://evil.example"]]
+      body: {json: {action: deckNames, version: 6}}

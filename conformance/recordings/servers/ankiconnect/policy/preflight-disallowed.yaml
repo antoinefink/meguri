@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.2 `policy/preflight-disallowed`: OPTIONS from a disallowed origin.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/preflight-disallowed
+description: preflight from a disallowed origin, 200, ACAO fallback
+tags: [policy]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: OPTIONS
+      headers: [[Origin, "https://evil.example"]]

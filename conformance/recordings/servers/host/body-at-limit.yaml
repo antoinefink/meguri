@@ -1,0 +1,23 @@
+# servers/host-security H17 `body-at-limit` (declared, servers/transcripts T13):
+# a body exactly at the limit is read whole and handed to the handler (H8): AnkiConnect parses
+# it (spaces are not empty and not JSON, E4), Migaku's /srs-import answers 501 (P11).
+id: servers/host/body-at-limit
+description: "bodies exactly at each limit reach the handler"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect, migaku]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: listening, addresses: ["127.0.0.1:44432", "[::1]:44432"]}, within_ms: 1000, server: migaku}
+  - http: {server: ankiconnect, body: {fill: {size: 268435456, byte: 32}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "invalid request: the body is not valid JSON"}}
+  - http: {server: migaku, method: POST, target: /srs-import, body: {fill: {size: 134217728, byte: 32}}}
+    expect:
+      status: 501
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: false, error: "Importing into Migaku Memory is not supported by Meguri."}}

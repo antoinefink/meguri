@@ -1,0 +1,28 @@
+# servers/host-security H17 `exclusive-phase-listening` (declared, servers/transcripts T13):
+# during an exclusive phase both servers keep listening and answer the requests that need no
+# collection at once (H3, H9.2, R1670).
+id: servers/host/exclusive-phase-listening
+description: "exclusive phase: still listening, trivial requests answered"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect, migaku]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: listening, addresses: ["127.0.0.1:44432", "[::1]:44432"]}, within_ms: 1000, server: migaku}
+  - lifecycle: exclusive
+  - http: {server: ankiconnect}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+      within_ms: 200
+  - http: {server: migaku, method: GET, target: /srs-check}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {ok: false, version: "4"}}
+      within_ms: 200
+  - status: {until: {state: listening, collection_available: false}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: listening, collection_available: false}, within_ms: 1000, server: migaku}

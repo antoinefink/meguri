@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.3 `multi/reflect-scopes-missing`: E10 row 1: scopes absent.
+# Default settings, fresh collection (deck Default only), no Origin; synthetic values.
+id: servers/ankiconnect/multi/reflect-scopes-missing
+description: "apiReflect with empty params"
+tags: [reflect, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: apiReflect, version: 6, params: {}}}

@@ -4,10 +4,13 @@ Spec-writer notes for `specs/servers/ankiconnect-envelope.md` E1-E19
 (session s-20261110T085429Z-165d83d3, wave 2, package `ankiconnect-envelope`).
 No code was copied; behavior is described in own words, and only interface
 facts are reproduced (action names, JSON keys, header names, status codes,
-port, version numbers and the short error strings listed below). No
-transcript exists yet (U136): every "Rec." expectation in E19 comes from
-reading the sources below, and the goldens `tools/mg oracle record` writes
-once the U136 recorder exists are the authority.
+port, version numbers and the short error strings listed below). These
+notes were written before any transcript existed (U136): every "Rec."
+expectation in E19 came from reading the sources below, and the goldens
+`tools/mg oracle record` writes are the authority. E19.3: the 16 "Rec." rows
+now have recorded goldens under `conformance/recordings/servers/ankiconnect/multi/`
+(`<id>.json`, add-on build 2025-11-09, Anki 26.9.3), and each golden's reply
+matches the row (see "Transcript status (2026-11-17)" below).
 
 ## The reference build
 
@@ -128,3 +131,24 @@ parser and the permission branches.
 | E18 header line without a space (R0.1) | `Origin:https://evil.example` with `deckNames`: 200 `["Default"]`, ACAO `http://localhost`. The parser splits header lines on colon-space only, so such a line is not read as `Origin` (reviewer's probe also: `Origin:` alone allowed and granted; `Origin:  http://localhost` 403) |
 | E2, E19 `head-request` (R1.2) | Meguri rule: HTTP framing for `HEAD`, `Content-Length` absent or the `GET` length, not compared; same rule as `servers/migaku-protocol` P4. No reference source |
 | E19 permission kinds (R1.4) | `permission-allow`, `permission-deny-ignore`, `permission-deny` reclassified as Rec., since the driver add-on answers the dialog (`servers-transcripts.md`, T19.1); list contents moved to new declared rows whose ids end in `-lists` |
+
+## Transcript status (2026-11-17)
+
+Spec-writer session s-20261117T160047Z-35f65b90, cluster `ac-multi`.
+
+- E19.3 "Rec." rows with goldens (`conformance/recordings/servers/ankiconnect/multi/<id>.json`, `source: oracle`): `ae75`, `outer-v4`, `empty`, `not-atomic`, `sub-key`, `outer-key`, `nested`, `reflect-repeat`, `reflect-no-scope`, `reflect-no-scope-bad-item`, `reflect-no-scope-bad-actions`, `reflect-scopes-repeat`, `reflect-scopes-null`, `reflect-scopes-string`, `reflect-scopes-missing`, `reflect-actions-string`. Every recorded reply equals the row's Reply column; no spec text changed.
+- E19.3 declared rows (`source: declared`, servers/transcripts T13, no golden): `sub-readonly`, `sub-bad-version`, `sub-permission`, `non-object-entry`, `non-object-entry-later`, `reflect-all`, `reflect-filter`. `sub-snapshot` and `sub-panic` are unit tests through `test-hooks` with no scenario file.
+- Probes against the running add-on on 2026-11-17 (made during the transcript review, reported by it; the probe outputs are not kept as goldens) confirmed the reference side of E18's `multi` and `apiReflect` rows: a sub-action with `"version": "6"` ran (its deck exists) and its slot then held a runtime text; `[createDeck B, 1]` failed as a whole with a runtime text and deck B stayed; `requestPermission` inside `multi` failed with a missing-arguments text; `apiReflect` with `actions: null` listed 121 names, equal to E12.3 plus E12.4; with `actions: ["addNote", "guiReviewActive"]` it kept `guiReviewActive`. These repeat the 2026-11-10 probes above and add the `requestPermission` and filter rows. Meguri's side of those rows stays declared.
+
+## Transcript recordings (2026-11-17)
+
+Session s-20261117T160047Z-35f65b90 (spec writer, servers transcripts).
+Pins: Anki tag 26.09.3 (`refs/anki-26.09.3`) and the AnkiConnect add-on build
+pinned in `oracle/ankiconnect/ADDON_PIN` (tag 25.11.9.0, commit `532a3c8`,
+build 2025-11-09), installed as `addons21/2055492159` in the recorder image
+`meguri-oracle-ankiconnect:recorder`. No code was copied into a spec or a
+scenario.
+
+| Subject | Sources | Read for |
+|---|---|---|
+| E19.3 `multi/` and `apiReflect` scenarios | Transcript oracle recordings only (`meguri-oracle-ankiconnect:recorder` image `37b062b02665`, add-on 25.11.9.0 archive sha256 `cf75820e…`, Anki 26.9.3). Scratch-only probes of the reference covered the 6 declared rows. No AnkiConnect or Anki source was read in this task. | Recorded replies for the 16 Rec. rows. The probes checked E18's statements behind the declared rows (non-integer sub-action version, non-object element, `requestPermission` inside `multi`, and the `apiReflect` full list and filter). |

@@ -1,0 +1,29 @@
+# servers/migaku-protocol P16 `order-host-before-origin`.
+# The Host check runs before the origin check: a refused Host gets 403 with
+# an empty body and no CORS header even from an allowed origin (P2 step 1,
+# servers/host-security H6, H15). The Host entry replaces the default Host (T6.2).
+# EXT is the invented extension origin of P16.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/order-host-before-origin
+description: "a refused Host wins over an allowed origin"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Host, "evil.example:44432"]
+        - [Origin, "chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}

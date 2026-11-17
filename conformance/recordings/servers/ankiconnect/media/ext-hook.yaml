@@ -1,0 +1,32 @@
+# specs/servers/ankiconnect-media X11.6, X14 external-folder test "AE79 core":
+# a file written into the external folder (servers/transcripts T7.1
+# media_dir_write; Meguri's media_dir of T4) and referenced by addNote before
+# any scan is copied into collection media by the add's op. Meguri only
+# (declared). A = 61 0a. All values are synthetic.
+id: servers/ankiconnect/media/ext-hook
+description: a file in the external folder referenced by addNote before any scan
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - media_dir_write: {name: clip.mp3, text: "a\n"}
+  - http:
+      body: {json: {action: addNote, version: 6, params: {note: {deckName: D, modelName: Pair, fields: {Term: word, Gloss: "[sound:clip.mp3]"}}}}}
+    expect:
+      status: 200
+      body: {json: {result: "#n1", error: null}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: clip.mp3}}}
+    expect:
+      status: 200
+      body: {json: {result: "YQo=", error: null}}
+equivalence:
+  notes: ["#n1"]

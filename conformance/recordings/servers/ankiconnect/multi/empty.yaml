@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.3 `multi/empty`: an empty actions list gives an empty result (E11).
+# Default settings, fresh collection (deck Default only), no Origin; synthetic values.
+id: servers/ankiconnect/multi/empty
+description: "multi v6 with no sub-actions"
+tags: [multi, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: multi, version: 6, params: {actions: []}}}

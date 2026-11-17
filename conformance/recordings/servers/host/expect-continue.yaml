@@ -1,0 +1,25 @@
+# servers/host-security H17 `expect-continue` (declared, servers/transcripts T13):
+# 100 Continue only once the Host check, the head hook and the declared length passed; an
+# over-limit Content-Length gets the final reply without it (H7.4, H8).
+id: servers/host/expect-continue
+description: "100 Continue within the limit, none over it"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, headers: [[Expect, 100-continue]], expect_continue: wait, body: {json: {}}}
+    expect:
+      status: 200
+      interim: [100]
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: 'invalid request: "action" must be a non-empty string'}}
+  - http: {server: ankiconnect, headers: [[Expect, 100-continue]], expect_continue: wait, declared_length: 268435457}
+    expect:
+      status: 200
+      interim: []
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*", connection: close}
+      body: {json: {result: null, error: "Meguri: the request body is too large"}}
+      closed: true

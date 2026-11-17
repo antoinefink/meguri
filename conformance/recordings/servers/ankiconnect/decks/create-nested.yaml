@@ -1,0 +1,18 @@
+# servers/ankiconnect-actions A20.1 create-nested (A5.4, A5.1). The row with
+# a filtered deck F is not here: no setup section or AnkiConnect action makes
+# a filtered deck in a transcript. Synthetic content only.
+id: servers/ankiconnect/decks/create-nested
+description: createDeck makes missing ancestors; a name equal under unicase returns the existing id
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: createDeck, version: 6, params: {deck: "A::B::C"}}}
+  - observe: [{db_dump: {tables: [decks]}}]
+  - http:
+      body: {json: {action: createDeck, version: 6, params: {deck: "a::b::c"}}}
+  - observe: [{db_dump: {tables: [decks]}}]
+  - http:
+      body: {json: {action: deckNames, version: 6}}

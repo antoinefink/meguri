@@ -1,0 +1,16 @@
+# servers/ankiconnect-envelope E19.2 `policy/origin-twice`: two Origin headers (E7.2 row 2, E18).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+id: servers/ankiconnect/policy/origin-twice
+description: two Origin headers are refused whatever their values
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://abc"], [Origin, "https://evil.example"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}

@@ -1,0 +1,149 @@
+# servers/host-security H17 `host-refused` (declared, servers/transcripts T13):
+# every refused Host form of H6.2 on both servers: 403, empty body, no CORS header, the
+# connection closed, nothing logged (H6.2, E16: a Host refusal adds no activity entry; the
+# log is kept in memory whatever Keep log says). `expect: {output: ...}` on a step without a
+# reply is the T13 form proposed with this scenario (T13 lists no check for T7.3 outputs yet).
+id: servers/host/host-refused
+description: "refused Host values on both servers, nothing logged"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect, migaku]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: listening, addresses: ["127.0.0.1:44432", "[::1]:44432"]}, within_ms: 1000, server: migaku}
+  - http: {server: ankiconnect, headers: [[Host, "evil.example:8765"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, "127.0.0.1:8766"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, "localhost"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, "localhost:"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, "localhost:08765"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, "localhost.:8765"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, "127.1:8765"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, "[0:0:0:0:0:0:0:1]:8765"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, "user@localhost:8765"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, ""]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, "localhost:8765"], [Host, "localhost:8765"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "evil.example:44432"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "127.0.0.1:44433"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "localhost"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "localhost:"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "localhost:044432"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "localhost.:44432"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "127.1:44432"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "[0:0:0:0:0:0:0:1]:44432"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "user@localhost:44432"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, ""]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "localhost:44432"], [Host, "localhost:44432"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - logs: {}
+    expect: {output: {activity: 0, received: 0}}

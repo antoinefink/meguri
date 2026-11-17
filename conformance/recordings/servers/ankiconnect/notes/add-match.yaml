@@ -1,0 +1,24 @@
+# specs/servers/ankiconnect-actions A20.3 `add-match` (A7.2 step 7): field
+# names match ignoring case; a member that names no field is ignored.
+id: servers/ankiconnect/notes/add-match
+description: addNote matches field names ignoring case and drops unknown members
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Pair, fields: {term: "x", GLOSS: "y", Other: "z"}}}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

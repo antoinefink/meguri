@@ -1,0 +1,17 @@
+# servers/host-security H17 `docker-non-loopback-refused` (declared, servers/transcripts T13):
+# R1949: a connection to the namespace's own non-loopback address is refused at the TCP level
+# on both ports (H5).
+id: servers/host/docker-non-loopback-refused
+description: "non-loopback address refused on both servers"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect, migaku]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: listening, addresses: ["127.0.0.1:44432", "[::1]:44432"]}, within_ms: 1000, server: migaku}
+  - http: {server: ankiconnect, address: non_loopback}
+    expect: {outcome: refused}
+  - http: {server: migaku, method: GET, target: /srs-check, address: non_loopback}
+    expect: {outcome: refused}

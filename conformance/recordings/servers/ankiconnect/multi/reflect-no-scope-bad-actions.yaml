@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.3 `multi/reflect-no-scope-bad-actions`: E10 row 2: actions neither null nor a list.
+# Default settings, fresh collection (deck Default only), no Origin; synthetic values.
+id: servers/ankiconnect/multi/reflect-no-scope-bad-actions
+description: "apiReflect, another scope, actions a string"
+tags: [reflect, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: apiReflect, version: 6, params: {scopes: [other], actions: "x"}}}

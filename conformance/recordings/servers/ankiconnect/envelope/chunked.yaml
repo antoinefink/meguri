@@ -1,0 +1,17 @@
+# servers/ankiconnect-envelope E19.1 chunked (declared, servers/transcripts T13):
+# a chunked request body is decoded (E2, E18, R1734).
+# Default settings, fresh collection (only deck Default), no Origin, so
+# Access-Control-Allow-Origin is * (E7.3 row 4).
+id: servers/ankiconnect/envelope/chunked
+description: "chunked body: version 6"
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      headers: [[Transfer-Encoding, chunked]]
+      body: {json: {action: version, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: 6, error: null}}

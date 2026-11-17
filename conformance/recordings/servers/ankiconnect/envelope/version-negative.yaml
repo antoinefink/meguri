@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 version-negative: -1 is an integer at most 4: bare result (E4.1).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/version-negative
+description: "version -1: bare 6"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: version, version: -1}}

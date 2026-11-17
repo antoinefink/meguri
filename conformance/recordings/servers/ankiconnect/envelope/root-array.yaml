@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 root-array: a JSON array is not an object (E4).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/root-array
+description: "body []"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: []}

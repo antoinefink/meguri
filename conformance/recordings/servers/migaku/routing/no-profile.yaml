@@ -1,0 +1,44 @@
+# servers/migaku-routing D15.1 `no-profile` (declared, servers/transcripts T13).
+# No profile is stored: resolution fails with D7.1's first error (D11 step 1),
+# HTTP 400 in the error shape (servers/migaku-protocol P8.1, servers/migaku-receive P18, P19).
+# The collection holds a Migaku-named 11-field note type (D4) with one note in
+# its deck, so D6 could draft a profile from it; a draft is not a profile (D1,
+# D6: nothing is stored before the user confirms), so the request still fails.
+# A failure changes nothing in the collection or the media folder
+# (servers/migaku-receive P2). No Origin, so Access-Control-Allow-Origin is *
+# and no Vary (servers/migaku-protocol P3.1, P6). All content is synthetic.
+id: servers/migaku/routing/no-profile
+description: with no confirmed profile, /receive fails with the no-destination error
+tags: [routing]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["German::Mining"]
+  notetypes:
+    - name: Migaku German Custom
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - {name: Card 1, front: "{{Sentence}}", back: "{{Translation}}"}
+      css: ".card {font-size: 18px;}"
+  notes:
+    - notetype: Migaku German Custom
+      deck: "German::Mining"
+      fields: {Sentence: "Alpha 1.", Translation: "Alpha 2.", Target Word: Alpha}
+steps:
+  - http:
+      method: POST
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: Hund, sentence: "Der Hund."}}
+    expect:
+      status: 400
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {success: false, error: "No Migaku destination is set up in Meguri."}}
+      no_effect: true

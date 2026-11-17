@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 ping-get: GET with no body is the ping (E5.1, R1735).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/ping-get
+description: "GET, no body: the ping"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: GET

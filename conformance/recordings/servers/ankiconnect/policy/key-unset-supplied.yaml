@@ -1,0 +1,15 @@
+# servers/ankiconnect-envelope E19.2 `policy/key-unset-supplied`: a key sent while none is set (E8, E18).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+id: servers/ankiconnect/policy/key-unset-supplied
+description: with no key set, a supplied key is ignored
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: deckNames, version: 6, key: whatever}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: [Default], error: null}}

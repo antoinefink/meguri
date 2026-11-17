@@ -1,0 +1,24 @@
+# specs/servers/ankiconnect-actions A16, A20.6 `folding`: a note whose Term is
+# `Über`, searched with the lower-case form, bare and in a field search. The
+# golden records the add-on's ASCII-only case folding; Meguri finds the note
+# (R1777, the folding deviation declared by U136, servers/transcripts T12).
+id: servers/ankiconnect/search/folding
+description: "findNotes with a lower-case non-ASCII query, bare and by field"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, fields: {Term: "Über", Gloss: one}}
+steps:
+  - http:
+      body: {json: {action: findNotes, version: 6, params: {query: "über"}}}
+  - http:
+      body: {json: {action: findNotes, version: 6, params: {query: "Term:über"}}}

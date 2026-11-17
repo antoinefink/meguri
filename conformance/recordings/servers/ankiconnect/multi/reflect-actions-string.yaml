@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.3 `multi/reflect-actions-string`: E10 row 2: actions a string while scopes holds actions.
+# Default settings, fresh collection (deck Default only), no Origin; synthetic values.
+id: servers/ankiconnect/multi/reflect-actions-string
+description: "apiReflect with actions a string"
+tags: [reflect, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: apiReflect, version: 6, params: {scopes: [actions], actions: addNote}}}

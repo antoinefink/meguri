@@ -1,0 +1,13 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-deny-listed`: requestPermission from a deny-listed origin.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/permission-deny-listed
+description: a deny-listed origin is denied with no prompt
+tags: [policy]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {deny_origins: ["https://evil.example"]}
+steps:
+  - http:
+      headers: [[Origin, "https://evil.example"]]
+      body: {json: {action: requestPermission, version: 6}}

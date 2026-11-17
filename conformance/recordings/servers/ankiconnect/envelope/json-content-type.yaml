@@ -1,0 +1,14 @@
+# servers/ankiconnect-envelope E19.1 json-content-type: a preflight, then the request with Content-Type application/json (E7.4, E2; Yomitan's shape).
+# Default settings, fresh collection (only deck Default).
+id: servers/ankiconnect/envelope/json-content-type
+description: "preflight then version 2 from an extension origin"
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: OPTIONS
+      headers: [[Origin, "chrome-extension://abc"], [Access-Control-Request-Headers, content-type]]
+  - http:
+      headers: [[Origin, "chrome-extension://abc"], [Content-Type, application/json]]
+      body: {json: {action: version, version: 2}}

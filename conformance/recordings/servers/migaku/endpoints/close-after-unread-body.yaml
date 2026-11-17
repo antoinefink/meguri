@@ -1,0 +1,30 @@
+# servers/migaku-protocol P16 `close-after-unread-body`.
+# The 404 is sent before the body is read (P2 step 4), so the request has
+# unread body bytes: the reply carries Connection: close and the connection closes (P2).
+# No Origin, so Access-Control-Allow-Origin is * and no Vary (P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/close-after-unread-body
+description: "a 404 before the body is read closes the connection"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: POST
+      target: /nope
+      headers:
+        - [Content-Length, "10"]
+      body: {text: "0123456789"}
+    expect:
+      status: 404
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+        connection: close
+      body: {json: {success: false, error: "Not found."}}
+      closed: true

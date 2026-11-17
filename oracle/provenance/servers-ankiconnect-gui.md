@@ -88,3 +88,16 @@ Same session; probe container `acenv-r02-81080` (removed afterwards).
 |---|---|
 | G11 open Add window (R0.0) | source-derived, not observable offscreen: Anki 26.09.3 `qt/aqt/addcards.py` (the close-with-callback and if-can-close methods, and the discard-or-keep question shown through the callback-based ask-user dialog) and `ts/routes/editor/NoteEditor.svelte` (the should-prompt-before-closing check, true for any non-empty field). The add-on closes the current Add window with a callback and returns the note id at once. Only the immediate `0` reply was observed (G6 row above) |
 | G2, G11, G12 `browse-order-null` (R0.5, R1.3) | `order` values `-0`, `null`, `5.0`, `1e2`, `true` gave `invalid card order: 0`, `None`, `5.0`, `100.0`, `True` |
+
+## Transcript recordings (2026-11-17)
+
+Session s-20261117T160047Z-35f65b90 (spec writer, servers transcripts).
+Pins: Anki tag 26.09.3 (`refs/anki-26.09.3`) and the AnkiConnect add-on build
+pinned in `oracle/ankiconnect/ADDON_PIN` (tag 25.11.9.0, commit `532a3c8`,
+build 2025-11-09), installed as `addons21/2055492159` in the recorder image
+`meguri-oracle-ankiconnect:recorder`. No code was copied into a spec or a
+scenario.
+
+| Subject | Sources | Read for |
+|---|---|---|
+| G12 scenarios under `conformance/recordings/servers/ankiconnect/gui/` | Transcript oracle recordings only: the AnkiConnect add-on 25.11.9.0 (build 2025-11-09) in Anki 26.9.3, image `meguri-oracle-ankiconnect:recorder`. No Anki or AnkiConnect source was read. | Checking the 20 recorded replies against G3 to G6 and G9; every one matched |

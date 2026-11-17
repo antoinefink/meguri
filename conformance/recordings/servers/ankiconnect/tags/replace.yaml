@@ -1,0 +1,46 @@
+# servers/ankiconnect-actions A20.4 `replace` (A10.1's rows): replaceTags on
+# listed notes (a missing id skipped) and replaceTagsInAllNotes. Row 3's
+# ` a OLD old ` goes through a save here, which keeps the spelling #n1
+# registered first (` a Old `, tags/tags T4).
+# `advance` before each write sets a changed note's `mod` apart from an
+# untouched one's. All values are synthetic.
+id: servers/ankiconnect/tags/replace
+description: replaceTags and replaceTagsInAllNotes over A10.1's rows
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: D, fields: {Term: one, Gloss: first}, tags: [Old, other]}
+    - {notetype: Pair, deck: D, fields: {Term: two, Gloss: second}, tags: ["old::kid"]}
+    - {notetype: Pair, deck: D, fields: {Term: three, Gloss: third}, tags: [a, OLD, old]}
+    - {notetype: Pair, deck: D, fields: {Term: four, Gloss: fourth}, tags: [a, old]}
+    - {notetype: Pair, deck: D, fields: {Term: five, Gloss: fifth}, tags: [a, old]}
+    - {notetype: Pair, deck: D, fields: {Term: six, Gloss: sixth}, tags: ["ΑΣ"]}
+steps:
+  - observe: [{db_dump: {tables: [notes]}}]
+  - advance: 1m
+  - http:
+      body: {json: {action: replaceTags, version: 6, params: {notes: ["#n1", "#n2"], tag_to_replace: old, replace_with_tag: new}}}
+  - advance: 1m
+  - http:
+      body: {json: {action: replaceTags, version: 6, params: {notes: ["#n3", 99], tag_to_replace: old, replace_with_tag: z}}}
+  - advance: 1m
+  - http:
+      body: {json: {action: replaceTags, version: 6, params: {notes: ["#n4"], tag_to_replace: old, replace_with_tag: "x y"}}}
+  - observe: [{db_dump: {tables: [notes]}}]
+  - advance: 1m
+  - http:
+      body: {json: {action: replaceTagsInAllNotes, version: 6, params: {tag_to_replace: old, replace_with_tag: ""}}}
+  - advance: 1m
+  - http:
+      body: {json: {action: replaceTagsInAllNotes, version: 6, params: {tag_to_replace: "ας", replace_with_tag: z}}}
+  - observe: [{db_dump: {tables: [notes, cards, tags]}}]

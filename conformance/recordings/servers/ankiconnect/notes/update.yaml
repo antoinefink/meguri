@@ -1,0 +1,35 @@
+# specs/servers/ankiconnect-actions A20.3 `update` (A8.1 to A8.5). The clock
+# moves 1m first so that a write shows as `mod` @60 and no write as @0; step 2
+# dumps the note after the case-sensitive miss of step 1.
+id: servers/ankiconnect/notes/update
+description: updateNoteFields, updateNote and notesModTime
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: D, fields: {Term: "x", Gloss: "y"}, tags: [a, b]}
+steps:
+  - advance: 1m
+  - http:
+      body: {json: {action: updateNoteFields, version: 6, params: {note: {id: "#n1", fields: {gloss: "q"}}}}}
+  - observe: [{db_dump: {tables: [notes]}}]
+  - http:
+      body: {json: {action: updateNoteFields, version: 6, params: {note: {id: "#n1", fields: {Gloss: "q"}}}}}
+  - http:
+      body: {json: {action: updateNote, version: 6, params: {note: {id: "#n1", tags: [c]}}}}
+  - http:
+      body: {json: {action: updateNote, version: 6, params: {note: {id: "#n1"}}}}
+  - http:
+      body: {json: {action: notesModTime, version: 6, params: {notes: ["#n1", 5]}}}
+  - http:
+      body: {json: {action: updateNoteFields, version: 6, params: {note: {id: 5, fields: {}}}}}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

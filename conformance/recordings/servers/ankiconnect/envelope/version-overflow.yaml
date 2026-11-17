@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 version-overflow: 1e400 overflows the double range: not an integer (E4.1); sent as text.
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/version-overflow
+description: "version 1e400: not an integer"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {text: '{"action":"version","version":1e400}'}

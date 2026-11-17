@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.3 `multi/outer-v4`: the outer result is bare without an outer version (E11).
+# Default settings, fresh collection (deck Default only), no Origin; synthetic values.
+id: servers/ankiconnect/multi/outer-v4
+description: "multi without version holding version v6"
+tags: [multi, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: multi, params: {actions: [{action: version, version: 6}]}}}

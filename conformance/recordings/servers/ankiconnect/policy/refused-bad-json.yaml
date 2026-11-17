@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.2 `policy/refused-bad-json`: bad JSON from a disallowed origin.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/refused-bad-json
+description: invalid JSON from a disallowed origin, 403, not the envelope error
+tags: [policy]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      headers: [[Origin, "https://evil.example"]]
+      body: {text: "{"}

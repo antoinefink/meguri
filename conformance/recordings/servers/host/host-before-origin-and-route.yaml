@@ -1,0 +1,25 @@
+# servers/host-security H17 `host-before-origin-and-route` (declared, servers/transcripts T13):
+# the Host check runs before the origin check, routing and the body (H6, H15): never 404,
+# never the origin's 403 with its own headers, never a JSON reply.
+id: servers/host/host-before-origin-and-route
+description: "Host refusal comes before origin, route and envelope"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect, migaku]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: listening, addresses: ["127.0.0.1:44432", "[::1]:44432"]}, within_ms: 1000, server: migaku}
+  - http: {server: migaku, method: GET, target: /nope, headers: [[Host, "evil.example:44432"], [Origin, "https://evil.example"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, headers: [[Host, "evil.example:8765"]], body: {json: {action: deckNames}}}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true

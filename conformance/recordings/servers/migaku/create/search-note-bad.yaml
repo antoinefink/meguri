@@ -1,0 +1,44 @@
+# servers/migaku-received-log C5 `search-note-bad` (declared, servers/transcripts T13).
+# A searchNote value that is not 1 to 19 ASCII digits gets 400 `Invalid note id.`
+# in the error shape, and no interaction (C3). No interaction answer is
+# scripted; that none was posted has no check in T13 yet.
+# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
+# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
+# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
+# transcript format has no step or setup section for profiles (see the session's
+# proposals), and nothing this scenario checks depends on one. No Origin, so
+# Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
+# P6). All content is synthetic.
+id: servers/migaku/create/search-note-bad
+description: "searchNote=12a is refused as an invalid note id"
+tags: [create]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [DE, "DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+steps:
+  - http:
+      method: POST
+      target: /create
+      headers:
+        - [Content-Type, application/x-www-form-urlencoded]
+      body: {text: "searchNote=12a"}
+    expect:
+      status: 400
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {success: false, error: "Invalid note id."}}
+      no_effect: true

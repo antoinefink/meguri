@@ -1,0 +1,22 @@
+# servers/ankiconnect-actions A20.1 get-decks (A5.3). Synthetic content only.
+id: servers/ankiconnect/decks/get-decks
+description: getDecks groups card ids by deck; an unknown card id counts as the default deck's
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [A, B]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: A, fields: {Term: alpha, Gloss: first}}
+    - {notetype: Pair, deck: B, fields: {Term: beta, Gloss: second}}
+    - {notetype: Pair, deck: A, fields: {Term: gamma, Gloss: third}}
+steps:
+  - http:
+      body: {json: {action: getDecks, version: 6, params: {cards: ["#c1", "#c2", "#c3", 999]}}}

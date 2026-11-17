@@ -1,0 +1,33 @@
+# specs/servers/ankiconnect-media X11.6 table row 5 (X11.6 step 2): a
+# referenced name that already resolves in collection media is left alone, so
+# the note uses the collection file. Meguri only (declared). A = 61 0a,
+# B = 62 0a. All values are synthetic.
+id: servers/ankiconnect/media/ext-hook-resolved
+description: an external file whose name is already in collection media is not ingested
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  media_files:
+    - {name: pic.png, text: "a\n"}
+steps:
+  - media_dir_write: {name: pic.png, text: "b\n"}
+  - http:
+      body: {json: {action: addNote, version: 6, params: {note: {deckName: D, modelName: Pair, fields: {Term: word, Gloss: "<img src=\"pic.png\">"}}}}}
+    expect:
+      status: 200
+      body: {json: {result: "#n1", error: null}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: pic.png}}}
+    expect:
+      status: 200
+      body: {json: {result: "YQo=", error: null}}
+equivalence:
+  notes: ["#n1"]

@@ -1,0 +1,25 @@
+# servers/host-security H17 `connection-limit` (declared, servers/transcripts T13):
+# at most 128 HTTP connections per server; the 129th is closed at once with no reply, and the
+# 128 open ones are still served (H7.5).
+id: servers/host/connection-limit
+description: "129th connection closed at once"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - open: {name: c, server: ankiconnect, count: 128}
+  - open: {name: x, server: ankiconnect}
+    expect: {outcome: closed_without_reply, within_ms: 1000}
+  - http: {server: ankiconnect, connection: c-1}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+  - http: {server: ankiconnect, connection: c-128}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}

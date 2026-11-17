@@ -1,0 +1,52 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-apply-race`: a Settings apply while a prompt is open (E9.1).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# The second apply_config is Swift's copy with its own append (E9.1).
+id: servers/ankiconnect/policy/permission-apply-race
+description: the core's Allow append lands on top of the apply; Swift's copy keeps both
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - permission: {answer: none}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}
+      async: p1
+  - wait: 1s
+  - apply_config: {ankiconnect: {cors_origins: ["http://localhost", "https://other.example"]}}
+  - resolve: {id: i-1, outcome: {answer: allow, ignore: false}}
+  - await: p1
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: granted, requireApikey: false, version: 6}, error: null}}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: [Default], error: null}}
+  - http:
+      headers: [[Origin, "https://other.example"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://other.example", access-control-allow-headers: "*"}
+      body: {json: {result: [Default], error: null}}
+  - apply_config: {ankiconnect: {cors_origins: ["http://localhost", "https://other.example", "https://site.example"]}}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: [Default], error: null}}
+  - http:
+      headers: [[Origin, "https://other.example"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://other.example", access-control-allow-headers: "*"}
+      body: {json: {result: [Default], error: null}}

@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 version-5: version 5: wrapped result (E5.1).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/version-5
+description: "version 5: wrapped 6"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: version, version: 5}}

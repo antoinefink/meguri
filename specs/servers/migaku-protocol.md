@@ -3,7 +3,7 @@
 Spec: servers/migaku-protocol
 Requirements: R1680, R1681, R1682, R1683, R1684, R1685, R1686, R1687, R1688, R1689, R1690; R1672 (extension connection state), R1678 (Migaku over-limit reply), R1679 (Migaku side), R1669 (Migaku trivial requests)
 Anki: 26.09.3
-Scenarios: none yet. The server transcript format is `servers/transcripts`, whose runner (U136) does not exist yet; P16 lists the planned scenarios of `conformance/recordings/servers/migaku/endpoints/` (`servers/transcripts` T2) as request and reply tables. Until U136 lands, U137 verifies P16's rows through its own Rust tests (`core/crates/meguri-servers/tests/migaku_endpoints.rs`), one test per row.
+Scenarios: conformance/recordings/servers/migaku/endpoints/ (declared, `servers/transcripts` T13; 33 of P16's 39 rows). `srs-check-corrupt`, `srs-check-cloud-adopt`, `ws-oversized`, `ws-invalid-utf8`, `ws-unmasked` and `ws-last-received` cannot be written with `servers/transcripts` T7.3's steps yet and stay U137 Rust tests (`core/crates/meguri-servers/tests/migaku_endpoints.rs`). The transcript runner (U136) does not exist yet; until it lands, U137 verifies every P16 row through those Rust tests, one test per row.
 
 The HTTP and WebSocket surface that Meguri's Mac app serves on port 44432 so that the Migaku browser extension can send cards to Meguri instead of the Migaku Anki add-on. It targets the extension versions 1.30 (build 1.30.16) and 1.31 (build 1.31.0.17, "Early Access"). The Migaku Anki add-on 0.6.6 is the compatibility reference for routes, reply shapes and headers; where Meguri differs on purpose, P15 says so. Anki itself has no part in this protocol: nothing here is observable through the `anki` oracle, and no deviation entry is needed.
 
@@ -259,7 +259,7 @@ No `conformance/deviations.yaml` entry is needed: there is no Migaku oracle (U13
 
 ## P16. Planned scenarios
 
-Each row is one scenario of `conformance/recordings/servers/migaku/endpoints/`, id `servers/migaku/endpoints/<row>`, to be written in the U136 transcript format once it exists. Unless a row says otherwise: the Migaku integration is on, the collection is Available, every request carries the default `Host` of `servers/transcripts` T6.2 (`127.0.0.1:<bound port>`: 44432 in the app, the ephemeral port in these scenarios, T20), and "CORS(x)" means P6's headers with `Access-Control-Allow-Origin: x` (and `Vary: Origin` when x is not `*`). `EXT` stands for `chrome-extension://abcdefghijklmnopabcdefghijklmnop` (an invented identifier of the Chrome form: 32 letters `a` to `p`).
+Each row is one scenario of `conformance/recordings/servers/migaku/endpoints/`, id `servers/migaku/endpoints/<row>`. Every row is declared (`servers/transcripts` T13) at `conformance/recordings/servers/migaku/endpoints/<row>.yaml`, except the six rows marked "not expressible (U137 test only)": `servers/transcripts` T7.3 has no step yet that sets up their state or sends their frames, so only U137's Rust tests check them. Unless a row says otherwise: the Migaku integration is on, the collection is Available, every request carries the default `Host` of `servers/transcripts` T6.2 (`127.0.0.1:<bound port>`: 44432 in the app, the ephemeral port in these scenarios, T20), and "CORS(x)" means P6's headers with `Access-Control-Allow-Origin: x` (and `Vary: Origin` when x is not `*`). `EXT` stands for `chrome-extension://abcdefghijklmnopabcdefghijklmnop` (an invented identifier of the Chrome form: 32 letters `a` to `p`).
 
 | Scenario | Request | Expected reply |
 |---|---|---|
@@ -271,8 +271,8 @@ Each row is one scenario of `conformance/recordings/servers/migaku/endpoints/`, 
 | `srs-check-query` | `GET /srs-check?t=1715` | 200, `{"ok":true,"version":"4"}` |
 | `srs-check-busy` | lifecycle in an exclusive phase; `GET /srs-check` | 200, `{"ok":false,"version":"4"}` within 200 ms |
 | `srs-check-long-op` | Check Database holds the long-operation slot; `GET /srs-check` | 200, `{"ok":false,"version":"4"}` within 200 ms |
-| `srs-check-corrupt` | lifecycle `Failed{Corrupt}`; `GET /srs-check` | 200, `{"ok":false,"version":"4"}` |
-| `srs-check-cloud-adopt` | a `CloudAdopt` holds the slot before its exclusive phase; `GET /srs-check` | 200, `{"ok":true,"version":"4"}` |
+| `srs-check-corrupt` (not expressible, U137 test only) | lifecycle `Failed{Corrupt}`; `GET /srs-check` | 200, `{"ok":false,"version":"4"}` |
+| `srs-check-cloud-adopt` (not expressible, U137 test only) | a `CloudAdopt` holds the slot before its exclusive phase; `GET /srs-check` | 200, `{"ok":true,"version":"4"}` |
 | `srs-check-with-sockets` | two `/anki-connect` sockets open; `GET /srs-check` | 200, `{"ok":true,"version":"4"}` |
 | `origins-allowed` | `GET /srs-check` with each `Origin`: `https://app.migaku.com`, `https://migaku.com`, `https://Study.Migaku.com`, `moz-extension://4b1c9a0e-7d2f-4f0a-9d5e-1a2b3c4d5e6f`, `safari-web-extension://A1B2C3D4-0000-1111-2222-333344445555` | 200 each, CORS echoing that origin |
 | `origins-refused` | `GET /srs-check` with each `Origin`: `https://evil.example`, `null`, `NULL`, empty value, `http://migaku.com.evil.example`, `https://migaku.com.evil.example`, `http://app.migaku.com`, `https://app.migaku.com:8443`, `https://evilmigaku.com`, `chrome-extension://`, `chrome-extension://abc/`, `http://localhost`, `http://127.0.0.1:44432`; and one request with two `Origin` headers (`EXT` twice) | 403 each, empty body, no CORS header |
@@ -286,7 +286,7 @@ Each row is one scenario of `conformance/recordings/servers/migaku/endpoints/`, 
 | `method-head` | `HEAD /srs-check` | 405, CORS(`*`), `Allow: GET, OPTIONS`, `Content-Type: application/json; charset=UTF-8`, no body (`Content-Length` not compared) |
 | `keepalive-after-404` | on one connection: `GET /nope`, then `GET /srs-check` | 404, then 200 on the same connection; neither reply carries `Connection: close` |
 | `close-after-unread-body` | `POST /nope` with `Content-Length: 10` and a 10-byte body | 404 with `Connection: close`; the connection then closes |
-| `srs-import-routes` | `GET /srs-import-info`; `POST /srs-sample-card` with body `{}`; `POST /srs-import` with body `{"decks":[1]}` | 501 each, CORS(`*`), `{"success":false,"error":"Importing into Migaku Memory is not supported by Meguri."}`; the engine records no read and no write |
+| `srs-import-routes` | `GET /srs-import-info`; `POST /srs-sample-card` with body `{}`; `POST /srs-import` with body `{"decks":[1]}` | 501 each, CORS(`*`), `{"success":false,"error":"Importing into Migaku Memory is not supported by Meguri."}`; nothing changes in the collection or the media folder (`no_effect`, `servers/transcripts` T13). That nothing is read stays a U137 test |
 | `anki-hello` | `GET /anki-hello`; `POST /anki-hello` | 200 each, `{"status":"connect","port":44432}` |
 | `body-over-limit` | `POST /receive` with `Content-Length` one byte over the Migaku limit; then the same body sent chunked without `Content-Length` | 400 each, CORS(`*`), `{"success":false,"error":"Request body is too large."}`, `Connection: close`; the `/receive` handler never runs; no Recently received row |
 | `body-at-limit` | `POST /srs-import` with a body exactly at the limit | 501 (the body was accepted and ignored) |
@@ -295,13 +295,13 @@ Each row is one scenario of `conformance/recordings/servers/migaku/endpoints/`, 
 | `ws-ignored-frames` | one socket; send text `not json`, text `{"id":1}`, text `[1,2]`, binary `00 ff`, text `{"id":"a1","msg":"Migaku-Search","data":{"q":"x"}}`, then ping with payload `p` | socket stays open; the only frame received is a pong with payload `p` |
 | `ws-busy-collection` | exclusive phase; upgrade with `Origin: EXT` | 101 |
 | `ws-limit` | 64 sockets open; a 65th upgrade | 503, `{"success":false,"error":"Too many open connections."}`; the 64 stay open |
-| `ws-oversized` | one socket; a text message one byte over the Migaku limit | close frame 1009; `open_sockets` back to 0 |
+| `ws-oversized` (not expressible, U137 test only) | one socket; a text message one byte over the Migaku limit | close frame 1009; `open_sockets` back to 0 |
 | `ws-server-off` | one socket open; the Migaku integration is turned off | close frame 1001; status Off with `extension_connected` false |
 | `ws-wrong-version` | upgrade with `Sec-WebSocket-Version: 8` | 400 `Expected a WebSocket upgrade.` with `Sec-WebSocket-Version: 13` |
-| `ws-invalid-utf8` | one socket; a text frame with payload `C3 28` | close frame 1007; a second socket opened before stays open |
-| `ws-unmasked` | one socket; an unmasked text frame `hi` | close frame 1002 |
+| `ws-invalid-utf8` (not expressible, U137 test only) | one socket; a text frame with payload `C3 28` | close frame 1007; a second socket opened before stays open |
+| `ws-unmasked` (not expressible, U137 test only) | one socket; an unmasked text frame `hi` | close frame 1002 |
 | `ws-close-codes` | three sockets; the client closes them with an empty payload, with 1000 `bye`, and with 1005 | close frames back: empty, 1000 with no reason, 1002 |
-| `ws-last-received` | one `/receive` commits at time t | status `last_received_at` = t; one status event; a later failed `/receive` leaves it at t |
+| `ws-last-received` (not expressible, U137 test only) | one `/receive` commits at time t | status `last_received_at` = t; one status event; a later failed `/receive` leaves it at t. A committing `/receive` needs a confirmed Migaku profile (`servers/migaku-routing` D7.1), and profiles are saved only through `servers/migaku-routing` D2.3's FFI operations, which no `servers/transcripts` step reaches. Proposed: a T7.3 step that saves Migaku profiles through D2.3 (or a T4 or T5 member that seeds them), which `servers/migaku-routing`'s planned rows need too. Until it exists, this row is a U137 Rust test only |
 
 Non-transcript checks (U137 tests): the fuzz target of P14 runs 10 minutes clean; P7's 200 ms answer holds while 10 `/receive` commits are queued.
 

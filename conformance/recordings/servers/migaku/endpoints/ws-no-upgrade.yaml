@@ -1,0 +1,29 @@
+# servers/migaku-protocol P16 `ws-no-upgrade`.
+# GET /anki-connect without Upgrade is not a WebSocket handshake: 400 (P10.1, P8.2).
+# The key is base64 of the ASCII bytes 0123456789abcdef. No Origin, so Access-Control-Allow-Origin is * and no Vary (P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/ws-no-upgrade
+description: "GET /anki-connect without Upgrade gets 400"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: GET
+      target: /anki-connect
+      headers:
+        - [Connection, Upgrade]
+        - [Sec-WebSocket-Version, "13"]
+        - [Sec-WebSocket-Key, "MDEyMzQ1Njc4OWFiY2RlZg=="]
+    expect:
+      status: 400
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+        upgrade: null
+      body: {json: {success: false, error: "Expected a WebSocket upgrade."}}

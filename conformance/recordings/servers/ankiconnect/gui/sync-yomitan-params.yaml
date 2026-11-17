@@ -1,0 +1,31 @@
+# specs/servers/ankiconnect-gui G12 `sync-yomitan-params` (G9, G11).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3).
+# Members of params are ignored, so the action runs (the reference fails with its unexpected-keyword text).
+id: servers/ankiconnect/gui/sync-yomitan-params
+description: "sync with a params member, as Yomitan sends it"
+tags: [gui]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {activeCols: [noteFld, template, cardDue, deck, noteCrt]}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}}
+    - {notetype: Pair, deck: Default, fields: {Front: gamma, Back: third}}
+steps:
+  - interaction: {kind: SyncNow, answer: {outcome: unavailable, reason: notConnected}}
+  - http:
+      body: {json: {action: sync, version: 6, params: {version: 2}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "sync: auth not configured"}}

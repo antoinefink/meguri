@@ -1,0 +1,30 @@
+# specs/servers/ankiconnect-media X14 `media/read` (X5): present, missing,
+# names that are not flat (Meguri: `ankiconnect-media-flat-names`), a case
+# variant (`ankiconnect-media-case-variants`). The row "" is not here: the
+# add-on's error names its media folder inside the text, which T10.3 does not
+# normalize (a golden holds no host path, T9); Meguri's `false` is
+# `media/non-files` (declared). The first observation registers the folder,
+# so that the setup file is tracked and its case variant can resolve on
+# Meguri's side (a setup file bypasses the store). A = 61 0a. All values are
+# synthetic.
+id: servers/ankiconnect/media/read
+description: retrieveMediaFile with present, missing, non-flat and case-variant names
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: a.mp3, text: "a\n"}
+steps:
+  - observe: [media_pending]
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: a.mp3}}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: missing.mp3}}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: "../collection.anki2"}}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: a/b.mp3}}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: A.MP3}}}

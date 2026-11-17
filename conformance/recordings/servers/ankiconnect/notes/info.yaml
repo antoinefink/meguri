@@ -1,0 +1,26 @@
+# specs/servers/ankiconnect-actions A20.3 `info` (A9.2). n1 is the note of
+# `update` after its writes (Gloss q, tags c). The table's third row (a note
+# whose card row was removed outside the collection's ops, A18
+# `ankiconnect-notesinfo-no-cards`) needs a direct database write in setup,
+# which transcript setup (conformance/dsl D6) does not have; it is not here.
+id: servers/ankiconnect/notes/info
+description: notesInfo by ids, one unknown, and with neither notes nor query
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: D, fields: {Term: "x", Gloss: "q"}, tags: [c]}
+steps:
+  - http:
+      body: {json: {action: notesInfo, version: 6, params: {notes: ["#n1", 5]}}}
+  - http:
+      body: {json: {action: notesInfo, version: 6, params: {}}}

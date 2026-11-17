@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.2 `policy/key-right`: a key set, the same key sent.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/key-right
+description: deckNames v6 with the right key
+tags: [policy, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {api_key: k1}
+steps:
+  - http:
+      body: {json: {action: deckNames, version: 6, key: k1}}

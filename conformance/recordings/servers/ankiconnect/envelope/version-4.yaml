@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 version-4: version 4: bare result (E5.1).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/version-4
+description: "version 4: bare 6"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: version, version: 4}}

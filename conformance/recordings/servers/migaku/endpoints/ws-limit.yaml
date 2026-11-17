@@ -1,0 +1,157 @@
+# servers/migaku-protocol P16 `ws-limit`.
+# At most 64 sockets are open at once: the 65th upgrade gets 503 instead of 101,
+# and the 64 stay open and answer pings (P10.1, P8.2). No Origin.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/ws-limit
+description: "the 65th WebSocket upgrade gets 503"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - ws_open: {name: s1, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s2, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s3, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s4, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s5, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s6, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s7, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s8, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s9, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s10, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s11, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s12, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s13, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s14, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s15, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s16, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s17, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s18, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s19, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s20, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s21, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s22, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s23, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s24, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s25, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s26, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s27, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s28, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s29, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s30, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s31, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s32, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s33, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s34, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s35, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s36, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s37, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s38, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s39, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s40, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s41, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s42, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s43, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s44, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s45, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s46, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s47, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s48, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s49, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s50, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s51, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s52, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s53, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s54, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s55, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s56, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s57, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s58, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s59, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s60, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s61, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s62, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s63, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open: {name: s64, target: /anki-connect}
+    expect: {status: 101}
+  - ws_open:
+      name: x
+      target: /anki-connect
+    expect:
+      status: 503
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {success: false, error: "Too many open connections."}}
+  - status: {until: {migaku: {extension_connected: true, open_sockets: 64, last_received_at: null}}, within_ms: 1000}
+  - ws_send: {name: s1, ping: "1"}
+  - ws_expect: {name: s1, frames: [{pong: "1"}], within_ms: 1000}
+  - ws_send: {name: s64, ping: "64"}
+  - ws_expect: {name: s64, frames: [{pong: "64"}], within_ms: 1000}

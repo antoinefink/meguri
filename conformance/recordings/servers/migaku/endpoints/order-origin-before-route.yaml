@@ -1,0 +1,26 @@
+# servers/migaku-protocol P16 `order-origin-before-route`.
+# The origin check runs before routing: an unknown path from a refused
+# origin gets the origin's 403, not 404 (P2 steps 2 and 4).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/order-origin-before-route
+description: "a refused origin on an unknown path gets 403, not 404"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: GET
+      target: /nope
+      headers:
+        - [Origin, "https://evil.example"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}

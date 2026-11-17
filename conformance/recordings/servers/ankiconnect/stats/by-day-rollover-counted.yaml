@@ -1,0 +1,36 @@
+# specs/servers/ankiconnect-actions A14, A20.7 `by-day-rollover`, Meguri's side
+# (R1774): counted rows at 03:59 and 04:01 local on 2030-01-15 (Europe/Paris,
+# rollover 4) fall on 2030-01-14 and 2030-01-15, newest date first; a type 4
+# row is left out. Declared: no action Meguri serves writes review-log rows of
+# types 0 to 3, so the rows come from setup (conformance/dsl D6.7), which the
+# recorder does not run. The oracle side is by-day-rollover.
+id: servers/ankiconnect/stats/by-day-rollover-counted
+description: "getNumCardsReviewedByDay dates counted rows by the rollover and leaves type 4 out"
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, fields: {Term: one, Gloss: first}}
+    - {notetype: Pair, fields: {Term: two, Gloss: second}}
+    - {notetype: Pair, fields: {Term: three, Gloss: third}}
+  revlog:
+    # 2030-01-15 03:59:00 local
+    - {card: "#c1", id: 1894676340000, ease: 3, ivl: 1, lastIvl: 1, factor: 2500, time: 5000, type: 1}
+    # 2030-01-15 04:01:00 local
+    - {card: "#c2", id: 1894676460000, ease: 3, ivl: 1, lastIvl: 1, factor: 2500, time: 5000, type: 1}
+    # 2030-01-15 04:02:00 local, type 4 (manual)
+    - {card: "#c3", id: 1894676520000, ease: 0, ivl: 1, lastIvl: 0, factor: 2500, time: 0, type: 4}
+steps:
+  - http:
+      body: {json: {action: getNumCardsReviewedByDay, version: 6}}
+    expect:
+      status: 200
+      body: {json: {result: [["2030-01-15", 1], ["2030-01-14", 1]], error: null}}

@@ -1,0 +1,34 @@
+# specs/servers/ankiconnect-actions A14, A20.7 `by-day-rollover`: review-log
+# rows on either side of the 04:00 rollover of one local date, read back by
+# getNumCardsReviewedByDay. No action Meguri serves writes review-log rows of
+# types 0 to 3, so the rows here are the type 4 rows of setDueDate, at 03:59
+# and 04:01. The golden records the add-on, which counts them, one per local
+# date; Meguri leaves type 4 out and answers [] (A18
+# ankiconnect-review-counts-exclusions). Meguri's dating of counted rows is
+# by-day-rollover-counted (declared).
+id: servers/ankiconnect/stats/by-day-rollover
+description: "getNumCardsReviewedByDay with setDueDate rows at 03:59 and 04:01"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T03:59:00"}
+setup:
+  config: {rollover: 4}
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, fields: {Term: one, Gloss: first}}
+    - {notetype: Pair, fields: {Term: two, Gloss: second}}
+steps:
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c1"], days: "1"}}}
+  - advance: 2m
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2"], days: "1"}}}
+  - observe: [{db_dump: {tables: [revlog]}}]
+  - http:
+      body: {json: {action: getNumCardsReviewedByDay, version: 6}}

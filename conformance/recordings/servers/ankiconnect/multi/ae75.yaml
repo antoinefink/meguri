@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.3 `multi/ae75`: AE75 (E11): a bare deckNames slot and an unsupported-action slot.
+# Default settings, fresh collection (deck Default only), no Origin; synthetic values.
+id: servers/ankiconnect/multi/ae75
+description: "multi v6: deckNames (no version) and an unknown action v6"
+tags: [multi, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: multi, version: 6, params: {actions: [{action: deckNames}, {action: nope, version: 6}]}}}

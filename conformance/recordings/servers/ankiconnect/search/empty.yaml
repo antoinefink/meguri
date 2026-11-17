@@ -1,0 +1,32 @@
+# specs/servers/ankiconnect-actions A9.1, A16, A20.6 `empty`: the empty query
+# matches every note; a missing query gives []. The notes use two note types,
+# the later type's note in the middle, so the golden shows the add-on's scan
+# order; Meguri answers ascending ids (A18 ankiconnect-search-order).
+id: servers/ankiconnect/search/empty
+description: "findNotes with an empty query and with no query"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+    - name: Gap
+      kind: cloze
+      fields: [Body, Aside]
+      templates:
+        - {name: Cloze, front: "{{cloze:Body}}", back: "{{cloze:Body}}<br>{{Aside}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, fields: {Term: one, Gloss: first}}
+    - {notetype: Gap, fields: {Body: "{{c1::two}}", Aside: second}}
+    - {notetype: Pair, fields: {Term: three, Gloss: third}}
+steps:
+  - http:
+      body: {json: {action: findNotes, version: 6, params: {query: ""}}}
+  - http:
+      body: {json: {action: findNotes, version: 6}}

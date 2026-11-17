@@ -1,0 +1,30 @@
+# servers/ankiconnect-actions A20.1 deck-stats (A5.8's example; A18
+# ankiconnect-getdeckstats-no-create). Setup has no card-state section, so
+# the review card due today in Lang is made by a setDueDate exchange (days
+# "0") before the reads. Synthetic content only.
+id: servers/ankiconnect/decks/deck-stats
+description: getDeckStats counts per deck in tree order; lookup by name; an unknown name
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::JA"]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Term: alpha, Gloss: first}}
+    - {notetype: Pair, deck: "Lang::JA", fields: {Term: beta, Gloss: second}}
+    - {notetype: Pair, deck: "Lang::JA", fields: {Term: gamma, Gloss: third}}
+steps:
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c1"], days: "0"}}}
+  - http:
+      body: {json: {action: getDeckStats, version: 6, params: {decks: ["Lang::JA", Lang, Nope]}}}
+  - observe: [{db_dump: {tables: [decks]}}]
+  - http:
+      body: {json: {action: getDeckStats, version: 6, params: {decks: ["lang::ja"]}}}

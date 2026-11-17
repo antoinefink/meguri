@@ -1,0 +1,47 @@
+# specs/servers/ankiconnect-gui G12 `queued-timeout` (G2 rule 3).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3).
+# The second request is sent 4 s after the first, which has no answer yet; each fails 10 s after it was sent.
+id: servers/ankiconnect/gui/queued-timeout
+description: "a queued GUI interaction times out from its own posting"
+tags: [gui]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {activeCols: [noteFld, template, cardDue, deck, noteCrt]}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}}
+    - {notetype: Pair, deck: Default, fields: {Front: gamma, Back: third}}
+steps:
+  - interaction: {kind: GuiBrowse, answer: none}
+  - interaction: {kind: GuiBrowse, answer: none}
+  - http:
+      body: {json: {action: guiBrowse, version: 6, params: {query: "deck:Lang"}}}
+      async: b1
+  - wait: 1s
+  - advance: 4s
+  - http:
+      body: {json: {action: guiBrowse, version: 6, params: {query: "deck:Lang"}}}
+      async: b2
+  - wait: 1s
+  - advance: 6s
+  - await: b1
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "cannot navigate: Meguri did not respond"}}
+  - advance: 4s
+  - await: b2
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "cannot navigate: Meguri did not respond"}}

@@ -3,7 +3,7 @@
 Spec: servers/migaku-routing
 Requirements: R1692, R1710, R1711, R1712, R1713, R1714, R1715, R1716, R1717, R1718, R1719, R1720, R1947; R1665 (local storage); AE71, AE87
 Anki: 26.09.3
-Scenarios: none yet. The server transcript format is `servers/transcripts`, whose runner (U136) does not exist yet; D15.1 lists the planned scenarios of `conformance/scenarios/servers/migaku/routing/` as a table. Until U136 lands, U138 verifies D15.1's rows through its own Rust tests (`tests/migaku_routing.rs`, `migaku_detect.rs`, `migaku_profiles.rs`). The synthetic corpus `conformance/corpora/migaku-routing-synthetic.jsonl` exists and holds exactly the lines of D15.2; a change to either changes both.
+Scenarios: conformance/recordings/servers/migaku/routing/ (`servers/transcripts` T2: transcripts live under `recordings/`, not `scenarios/`). Written so far: `no-profile` (declared). Every other D15.1 row needs transcript steps for profiles, routing settings and state, and an output of received-log rows, which `servers/transcripts` T7.3 does not have yet. The server transcript format is `servers/transcripts`, whose runner (U136) does not exist yet. Until U136 lands, U138 verifies D15.1's rows through its own Rust tests (`tests/migaku_routing.rs`, `migaku_detect.rs`, `migaku_profiles.rs`). The synthetic corpus `conformance/corpora/migaku-routing-synthetic.jsonl` exists and holds exactly the lines of D15.2; a change to either changes both.
 
 How Meguri chooses the note type, deck, field map, default values and tags for a card that the Migaku browser extension (1.30 and 1.31) sends to `POST /receive`. The payload names none of them (R1692). The Migaku Anki add-on 0.6.6 has no automatic routing: it uses one configured note type and deck, or the open Add window's. Everything here except the field sources of D3 and the field layout of D4's example is Meguri's own design, written to reproduce the user's history (R1718, R1947). Anki has no part in it.
 
@@ -462,7 +462,7 @@ The gates:
 
 ### D15.1 Routing scenarios
 
-Each row is one scenario of `conformance/scenarios/servers/migaku/routing/`, to be written in the U136 format. Unless a row says otherwise: profiles 1 German (`de`, Migaku German Custom, German::Mining), 2 Spanish (`es`, Migaku Spanish Custom, Spanish::Mining) and 3 Japanese (`ja`, Migaku Japanese Custom, Japanese::Mining), saved through D2.3 in that order (so ids 1, 2, 3) with the contents D6 would draft for them; a profile a row adds is saved after them and takes the next id. No override, no fallback choice, an empty routing state, and the clock at 10:00. Note types and decks are the scenario's own synthetic ones with the 11 fields of D4.
+Each row is one scenario of `conformance/recordings/servers/migaku/routing/`, id `servers/migaku/routing/<row>`, `source: declared`, in the `servers/transcripts` format. Rows that need profiles wait for that file's routing steps. Unless a row says otherwise: profiles 1 German (`de`, Migaku German Custom, German::Mining), 2 Spanish (`es`, Migaku Spanish Custom, Spanish::Mining) and 3 Japanese (`ja`, Migaku Japanese Custom, Japanese::Mining), saved through D2.3 in that order (so ids 1, 2, 3) with the contents D6 would draft for them; a profile a row adds is saved after them and takes the next id. No override, no fallback choice, an empty routing state, and the clock at 10:00. Note types and decks are the scenario's own synthetic ones with the 11 fields of D4.
 
 | Scenario | Given | Payload (`targetWord` · `sentence`) | Expected |
 |---|---|---|---|
@@ -485,7 +485,7 @@ Each row is one scenario of `conformance/scenarios/servers/migaku/routing/`, to 
 | `override` | override = profile 2 | `Hund[Hund,nn,m]` · `Der Hund.` | profile 2, `Override`; detection `de` recorded; after the override is set back to Automatic, the same payload goes to profile 1 `Auto` |
 | `override-no-last-route` | override = profile 2; a payload committed under it | then override off; `streng` · `Streng vertraulich.` | the `Override` commit left no last route: `fallback_profile` |
 | `two-japanese-profiles` | profile 4 Japanese Reading (`ja`) added; received counts 3: 2, 4: 7 | `ねこ` · `ねこ。` | profile 4, `Auto` |
-| `no-profile` | no profiles | `Hund` · `Der Hund.` | 400 `No Migaku destination is set up in Meguri.` |
+| `no-profile` | no profiles | `Hund` · `Der Hund.` | 400 `No Migaku destination is set up in Meguri.` (written, declared: `conformance/recordings/servers/migaku/routing/no-profile.yaml`) |
 | `deck-deleted` | profile 1's deck deleted | `Hund[Hund,nn,m]` · `Der Hund.` | 400 `Destination deck for German no longer exists.`; profile 1 shows `deck_missing`; profile 2 is not tried |
 | `notetype-deleted` | profile 2's note type and deck deleted | `perro[perro,n,m]` · `El perro.` | 400 `Destination note type for Spanish no longer exists.` |
 | `no-mapped-field` | profile 1's note type replaced by one with fields `Front`, `Back` (map inferred) | `Hund[Hund,nn,m]` · `Der Hund.` | 400 `No fields to map to.`; warning `no_mapped_field` |

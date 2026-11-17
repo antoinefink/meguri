@@ -1,0 +1,52 @@
+# servers/migaku-received-log C5 `create-row-text` (declared, servers/transcripts T13).
+# Multipart form (C1): `version` 2 and a `card` with Target Word
+# <b>Hund[Hund,nn,m]</b> and Sentence "Der Hund.". Reply 200 {"id": <note id>}
+# (C2 step 9), the note being #n1 (T10.1); the `id` member needs a T10.5 id
+# position for Migaku replies (see the session's proposals). The T14
+# equivalence check of #n1 compares the stored fields, the HTML and the
+# brackets included, with Anki's add of the same fields.
+# C5's point, the row's target word Hund and snippet "Der Hund." (C2 step 10,
+# L2), has no check: they come from profile DE's plan, no profile can be
+# stored, and no step reads a received-log row (see the session's proposals).
+# With no matching profile, C2 step 10 leaves both empty.
+# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
+# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
+# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
+# transcript format has no step or setup section for profiles (see the session's
+# proposals), and nothing this scenario checks depends on one. No Origin, so
+# Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
+# P6). All content is synthetic.
+id: servers/migaku/create/create-row-text
+description: "a created card's stored fields; the row's target word and snippet wait for profiles"
+tags: [create]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [DE, "DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+steps:
+  - http:
+      method: POST
+      target: /create
+      headers:
+        - [Content-Type, "multipart/form-data; boundary=b0b0b0"]
+      body: {text: "--b0b0b0\r\nContent-Disposition: form-data; name=\"version\"\r\n\r\n2\r\n--b0b0b0\r\nContent-Disposition: form-data; name=\"card\"\r\n\r\n{\"noteTypeId\":${#m7},\"deckId\":${#d2},\"fields\":[{\"name\":\"Sentence\",\"content\":\"Der Hund.\"},{\"name\":\"Target Word\",\"content\":\"<b>Hund[Hund,nn,m]</b>\"}]}\r\n--b0b0b0--\r\n"}
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {id: "#n1"}}
+equivalence:
+  notes: ["#n1"]

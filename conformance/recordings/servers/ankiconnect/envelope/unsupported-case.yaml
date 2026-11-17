@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 unsupported-case: action names are case-sensitive (E12.1).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/unsupported-case
+description: "DeckNames is not deckNames"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: DeckNames, version: 6}}

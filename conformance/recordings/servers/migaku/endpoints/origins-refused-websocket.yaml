@@ -1,0 +1,39 @@
+# servers/migaku-protocol P16 `origins-refused-websocket`.
+# The origin check also covers WebSocket upgrades: no 101, and no socket
+# is counted (P2 step 2, P10.1, P10.5).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/origins-refused-websocket
+description: "WebSocket upgrades from refused origins get 403"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - ws_open:
+      name: a
+      target: /anki-connect
+      headers: [[Origin, "https://evil.example"]]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - ws_open:
+      name: b
+      target: /anki-connect
+      headers: [[Origin, "null"]]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - status: {until: {migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}

@@ -1,0 +1,47 @@
+# servers/ankiconnect-actions A20.2 `reads` (A6, A6.1). No Origin, version 6.
+# Pair is A20's note type; Grid holds A6.1's table rows that Anki's checked
+# save accepts, one template per row. All values are synthetic.
+id: servers/ankiconnect/models/reads
+description: note type reads by name and id, and fields on templates
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+    - name: Grid
+      fields: [Term, Gloss, Note, Body]
+      templates:
+        - {name: R1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+        - {name: R2, front: "{{Term}}{{Term}}", back: "{{Term}}{{Note}}{{Note}}"}
+        - {name: R3, front: "{{#Tags}}{{Tags}}{{/Tags}}", back: "{{cloze:Body}}"}
+        - {name: R4, front: "{{type:Term}}", back: "{{text:cloze:Body}}"}
+        - {name: R5, front: "{{ Term }}", back: "{{^Term}}x{{/Term}}"}
+        - {name: R7, front: "{{FrontSide}}", back: "{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body: {json: {action: modelFieldNames, version: 6, params: {modelName: pair}}}
+  - http:
+      body: {json: {action: modelFieldsOnTemplates, version: 6, params: {modelName: Pair}}}
+  - http:
+      body: {json: {action: modelTemplates, version: 6, params: {modelName: Pair}}}
+  - http:
+      body: {json: {action: modelStyling, version: 6, params: {modelName: Pair}}}
+  - http:
+      body: {json: {action: modelFieldNames, version: 6, params: {modelName: Nope}}}
+  - http:
+      body: {json: {action: modelFieldDescriptions, version: 6, params: {modelName: Pair}}}
+  - http:
+      body: {json: {action: modelFieldFonts, version: 6, params: {modelName: Pair}}}
+  - http:
+      body: {json: {action: modelNameFromId, version: 6, params: {modelId: "#m7"}}}
+  - http:
+      body: {json: {action: modelNameFromId, version: 6, params: {modelId: 12345}}}
+  - http:
+      body: {json: {action: modelFieldsOnTemplates, version: 6, params: {modelName: Grid}}}

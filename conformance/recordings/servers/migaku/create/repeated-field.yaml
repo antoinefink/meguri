@@ -1,0 +1,51 @@
+# servers/migaku-received-log C5 `repeated-field` (declared, servers/transcripts T13).
+# `version` occurs twice; the last occurrence counts (C1), so version is 2 and
+# the card is created: 200 {"id": <note id>} (C2 step 9), the note being #n1
+# (T10.1). The `id` member needs a T10.5 id position for Migaku replies (see the
+# session's proposals). The T14 equivalence check of #n1 compares the created
+# note (T-Mining in DE::Mining, its fields and tags) with Anki's add of the same
+# fields. That exactly one note was created has no check in T13 yet:
+# equivalence does not count notes.
+# The `card` value, before form encoding (C1: `+` is a space, then
+# percent-decoding): {"noteTypeId":<T>,"deckId":<D>,"fields":[{"name":"Sentence","content":"Alpha 1."},{"name":"Translation","content":"Alpha 2."}]}
+# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
+# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
+# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
+# transcript format has no step or setup section for profiles (see the session's
+# proposals), and nothing this scenario checks depends on one. No Origin, so
+# Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
+# P6). All content is synthetic.
+id: servers/migaku/create/repeated-field
+description: "a repeated version field: the last value, 2, counts"
+tags: [create]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [DE, "DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+steps:
+  - http:
+      method: POST
+      target: /create
+      headers:
+        - [Content-Type, application/x-www-form-urlencoded]
+      body: {text: "version=1&version=2&card=%7B%22noteTypeId%22%3A${#m7}%2C%22deckId%22%3A${#d2}%2C%22fields%22%3A%5B%7B%22name%22%3A%22Sentence%22%2C%22content%22%3A%22Alpha+1.%22%7D%2C%7B%22name%22%3A%22Translation%22%2C%22content%22%3A%22Alpha+2.%22%7D%5D%7D"}
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {id: "#n1"}}
+equivalence:
+  notes: ["#n1"]

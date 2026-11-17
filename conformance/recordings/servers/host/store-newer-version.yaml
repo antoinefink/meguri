@@ -1,0 +1,20 @@
+# servers/host-security H17 `store-newer-version` (declared, servers/transcripts T13):
+# a store written by a newer build opens read-only: both servers stay off and every apply is
+# refused (H10.1, H10.3). The refused exchange is the one T3 requires. `expect: {output: ...}`
+# on a step without a reply is the T13 form proposed with this scenario (T13 lists no check
+# for T7.3 outputs yet).
+id: servers/host/store-newer-version
+description: "newer store: servers off, applies refused"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect, migaku]}
+host_env: {store_user_version: 99}
+steps:
+  - status: {until: {state: off, addresses: [], store_error: newer}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: off, addresses: [], store_error: newer}, within_ms: 1000, server: migaku}
+  - apply_config: {ankiconnect: {enabled: true}}
+    expect: {output: {refused: store_read_only}}
+  - http: {server: ankiconnect}
+    expect: {outcome: refused}

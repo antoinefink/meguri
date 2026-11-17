@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.3 `multi/reflect-scopes-repeat`: E10: repeated and extra scopes items change nothing.
+# Default settings, fresh collection (deck Default only), no Origin; synthetic values.
+id: servers/ankiconnect/multi/reflect-scopes-repeat
+description: "apiReflect with repeated scopes and a number"
+tags: [reflect, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: apiReflect, version: 6, params: {scopes: [actions, actions, 5], actions: [version]}}}

@@ -1,0 +1,22 @@
+# servers/ankiconnect-envelope E19.2 `policy/slot-held`: the long-operation slot held past the wait (E14, H9.2).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+id: servers/ankiconnect/policy/slot-held
+description: a collection action waits 30 s while Check Database holds the slot, then gets collection is not available
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - lifecycle: long_op
+  - http:
+      body: {json: {action: deckNames, version: 6}}
+      async: d1
+  - wait: 1s
+  - advance: 30s
+  - await: d1
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "collection is not available"}}
+  - advance: 1s
+  - lifecycle: long_op_end

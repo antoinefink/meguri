@@ -1,0 +1,17 @@
+# servers/host-security H17 `port-in-use-ipv4-holder` (declared, servers/transcripts T13):
+# AE78: another process holds 127.0.0.1:8765; the probe finds the port in use, nothing is
+# bound, [::1] included (H4.2, H4.3). The added exchange to [::1] is the one T3 requires.
+id: servers/host/port-in-use-ipv4-holder
+description: "port held on IPv4: port_in_use, no socket"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - helper: {listen: "127.0.0.1:8765"}
+  - apply_config: {ankiconnect: {enabled: true}}
+  - status: {until: {state: port_in_use, port: 8765, addresses: []}, within_ms: 1000, server: ankiconnect}
+  - open: {name: v6, server: ankiconnect, address: ipv6}
+    expect: {outcome: refused}
+  - http: {server: ankiconnect, address: ipv6}
+    expect: {outcome: refused}

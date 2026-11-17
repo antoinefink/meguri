@@ -1,0 +1,16 @@
+# specs/servers/ankiconnect-media X14 `media/store-traversal` (X4 step 3, X9):
+# only the last component of a `/`-separated name is kept, so the name lands
+# inside collection media. A = 61 0a. All values are synthetic.
+id: servers/ankiconnect/media/store-traversal
+description: storeMediaFile with ../collection.anki2 stores collection.anki2 inside collection media
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: a.mp3, text: "a\n"}
+steps:
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: "../collection.anki2", data: "Ygo="}}}
+  - observe: [media_dir, media_trash]

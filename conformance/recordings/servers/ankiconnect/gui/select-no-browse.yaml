@@ -1,0 +1,27 @@
+# specs/servers/ankiconnect-gui G12 `select-no-browse` (G4).
+# Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3);
+# activeCols with Created displayed. All values are synthetic.
+# No browser window has been opened in the session; the interaction is Meguri's side only (servers/transcripts T7.5).
+id: servers/ankiconnect/gui/select-no-browse
+description: "guiSelectCard before Browse was shown"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {activeCols: [noteFld, template, cardDue, deck, noteCrt]}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}}
+    - {notetype: Pair, deck: Default, fields: {Front: gamma, Back: third}}
+steps:
+  - interaction: {kind: GuiSelectCard, answer: {selected: false}}
+  - http:
+      body: {json: {action: guiSelectCard, version: 6, params: {card: "#c1"}}}

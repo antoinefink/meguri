@@ -1,0 +1,31 @@
+# specs/servers/ankiconnect-gui G12 `browse-unsortable` (G3 "The sort", G11).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3).
+# Question is displayed but not sortable: nothing is written and no alert is raised (the reference blocks on a modal notice).
+id: servers/ankiconnect/gui/browse-unsortable
+description: "guiBrowse sorting by a displayed column that cannot sort"
+tags: [gui]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {activeCols: [noteFld, template, cardDue, deck, noteCrt, question]}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}}
+    - {notetype: Pair, deck: Default, fields: {Front: gamma, Back: third}}
+steps:
+  - http:
+      body: {json: {action: guiBrowse, version: 6, params: {query: "deck:Lang", reorderCards: {order: ascending, columnId: question}}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: ["#c1", "#c2"], error: null}}
+      no_effect: true

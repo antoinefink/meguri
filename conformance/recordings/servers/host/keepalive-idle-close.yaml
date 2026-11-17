@@ -1,0 +1,26 @@
+# servers/host-security H17 `keepalive-idle-close` (declared, servers/transcripts T13):
+# an idle connection is closed 5 s after its last reply, and not before (H7.3); 4 s idle keeps
+# it open.
+id: servers/host/keepalive-idle-close
+description: "idle keep-alive connection closed after 5 s"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, connection: k}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+      closed: false
+  - wait: 4s
+  - http: {server: ankiconnect, connection: k}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+      closed: false
+  - close_wait: {name: k, not_before_ms: 4500, within_ms: 6000}

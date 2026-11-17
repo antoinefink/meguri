@@ -1,0 +1,27 @@
+# servers/migaku-protocol P16 `ws-server-off`.
+# Turning the integration off closes every open socket with 1001 and stops the
+# listener within 1 s (P10.4, servers/host-security H10.4); the status is off with
+# no socket (P10.5, H12). No Origin.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/ws-server-off
+description: "turning Migaku off closes the socket with 1001"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - ws_open:
+      name: a
+      target: /anki-connect
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+  - status: {until: {migaku: {extension_connected: true, open_sockets: 1, last_received_at: null}}, within_ms: 1000}
+  - apply_config: {migaku: {enabled: false}}
+  - ws_expect: {name: a, frames: [{close: 1001}], within_ms: 1000}
+  - status: {until: {state: off, migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}

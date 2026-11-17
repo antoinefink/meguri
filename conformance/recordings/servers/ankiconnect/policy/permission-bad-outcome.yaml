@@ -1,0 +1,23 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-bad-outcome`: a resolve with an outcome the kind does not accept (E9, H11.2).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# T13 has no expect form for a resolve output: the first resolve's `{resolved: false}` is not checked here.
+id: servers/ankiconnect/policy/permission-bad-outcome
+description: an unaccepted outcome leaves the prompt open; a later Allow grants
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - permission: {answer: none}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}
+      async: p1
+  - wait: 1s
+  - resolve: {id: i-1, outcome: {answer: maybe}}
+  - resolve: {id: i-1, outcome: {answer: allow, ignore: false}}
+  - await: p1
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: granted, requireApikey: false, version: 6}, error: null}}

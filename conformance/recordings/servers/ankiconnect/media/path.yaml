@@ -1,0 +1,22 @@
+# specs/servers/ankiconnect-media X14 `media/path` (X3.3), the rows the recorder
+# can express: a missing absolute path outside every Meguri root, a missing path
+# under a folder that does not exist, and a relative path. Meguri refuses all
+# three as not permitted (`ankiconnect-media-path-roots`, no readable folder is
+# configured: server_config readable_folders is declared only, T4). The rows
+# with a readable folder, a symbolic link and an existing outside file are not
+# here (no setup writes files outside the media folder, and an outside file's
+# bytes differ between containers).
+id: servers/ankiconnect/media/path
+description: storeMediaFile from path with paths that do not exist and a relative path
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: f.mp3, path: "/etc/does-not-exist"}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: f.mp3, path: "/tmp/r/missing.mp3"}}}
+  - http:
+      body: {json: {action: storeMediaFile, version: 6, params: {filename: f.mp3, path: "r/f.mp3"}}}
+  - observe: [media_dir]

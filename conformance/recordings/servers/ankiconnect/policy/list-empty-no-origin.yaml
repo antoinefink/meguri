@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.2 `policy/list-empty-no-origin`: empty allow-list, no Origin.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/list-empty-no-origin
+description: allow-list [] still serves a request with no Origin
+tags: [policy, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {cors_origins: []}
+steps:
+  - http:
+      body: {json: {action: deckNames, version: 6}}

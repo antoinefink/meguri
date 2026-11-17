@@ -1,0 +1,57 @@
+# servers/migaku-received-log C5 `file-path-name` (declared, servers/transcripts T13).
+# Multipart form (C1): text fields `version` 2 and a valid `card`; a file part
+# named `files` whose filename is the Windows path C:\clips\a1.m4a, holding P24's
+# M4A bytes; and a file part named `other` (filename x.png), which C1 ignores.
+# The desired name is the last path component, split at / and \ (C2 step 6),
+# so the stored file is a1.m4a. Reply 200 {"id": <note id>} (C2 step 9),
+# the note being the first entity token #n1 (T10.1). The `id` member needs a
+# T10.5 id position for Migaku replies (see the session's proposals).
+# The card's Sentence Audio field is [sound:a1.m4a], so the T14 equivalence
+# check of #n1 compares the note (type, deck, fields, tags) with Anki's add of
+# the same fields and the file it references by name and SHA-256: a stored name
+# other than a1.m4a, or other bytes, fails it. The filename is read literally
+# between its quotes, backslashes included (see the session's proposal for C1).
+# That x.png is not stored, and the row's media names (a1.m4a), have no check
+# in T13 yet.
+# The body is text with CRLF line ends; the M4A bytes are written as escapes.
+# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
+# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
+# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
+# transcript format has no step or setup section for profiles (see the session's
+# proposals), and nothing this scenario checks depends on one. No Origin, so
+# Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
+# P6). All content is synthetic.
+id: servers/migaku/create/file-path-name
+description: "a files part named by a Windows path is stored under its last component"
+tags: [create]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [DE, "DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+steps:
+  - http:
+      method: POST
+      target: /create
+      headers:
+        - [Content-Type, "multipart/form-data; boundary=b0b0b0"]
+      body: {text: "--b0b0b0\r\nContent-Disposition: form-data; name=\"version\"\r\n\r\n2\r\n--b0b0b0\r\nContent-Disposition: form-data; name=\"card\"\r\n\r\n{\"noteTypeId\":${#m7},\"deckId\":${#d2},\"fields\":[{\"name\":\"Sentence\",\"content\":\"Alpha 1.\"},{\"name\":\"Translation\",\"content\":\"Alpha 2.\"},{\"name\":\"Sentence Audio\",\"content\":\"[sound:a1.m4a]\"}]}\r\n--b0b0b0\r\nContent-Disposition: form-data; name=\"files\"; filename=\"C:\\clips\\a1.m4a\"\r\nContent-Type: audio/mp4\r\n\r\n\u0000\u0000\u0000\u0018ftypM4A \u0000\u0000\u0000\u0000M4A isom\r\n--b0b0b0\r\nContent-Disposition: form-data; name=\"other\"; filename=\"x.png\"\r\nContent-Type: image/png\r\n\r\nBeta\r\n--b0b0b0--\r\n"}
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {id: "#n1"}}
+equivalence:
+  notes: ["#n1"]

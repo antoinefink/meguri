@@ -1,0 +1,18 @@
+# servers/host-security H17 `host-absolute-target` (declared, servers/transcripts T13):
+# an absolute-form target whose authority is refused fails the Host check even when the Host
+# header passes (H6.2).
+id: servers/host/host-absolute-target
+description: "absolute-form target with a foreign authority"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, method: POST, target: "http://evil.example:8765/", headers: [[Host, "localhost:8765"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true

@@ -1,0 +1,47 @@
+# servers/migaku-protocol P16 `ws-open-two`.
+# Each socket counts from its 101 until its connection ends; the Migaku status
+# block follows (P10.1, P10.5). The client closes each with 1000, which is echoed
+# (P10.4). The count of status events is not expressible (T7.3 events leaves them out).
+# ws_send close and ws_expect close values: {code, reason} sent, the code received,
+# null for a close frame with no status code (T7.3 names the members only).
+# EXT is the invented extension origin of P16.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/ws-open-two
+description: "two sockets open and close: the status block follows"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - status: {until: {migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}
+  - ws_open:
+      name: a
+      target: /anki-connect
+      headers: [[Origin, "chrome-extension://abcdefghijklmnopabcdefghijklmnop"]]
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+  - status: {until: {migaku: {extension_connected: true, open_sockets: 1, last_received_at: null}}, within_ms: 1000}
+  - ws_open:
+      name: b
+      target: /anki-connect
+      headers: [[Origin, "chrome-extension://abcdefghijklmnopabcdefghijklmnop"]]
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+  - status: {until: {migaku: {extension_connected: true, open_sockets: 2, last_received_at: null}}, within_ms: 1000}
+  - ws_send: {name: a, close: {code: 1000}}
+  - ws_expect: {name: a, frames: [{close: 1000}], within_ms: 1000}
+  - status: {until: {migaku: {extension_connected: true, open_sockets: 1, last_received_at: null}}, within_ms: 1000}
+  - ws_send: {name: b, close: {code: 1000}}
+  - ws_expect: {name: b, frames: [{close: 1000}], within_ms: 1000}
+  - status: {until: {migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}

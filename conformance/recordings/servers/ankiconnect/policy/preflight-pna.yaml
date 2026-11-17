@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.2 `policy/preflight-pna`: OPTIONS with the private-network request header.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/preflight-pna
+description: preflight asking for private network access
+tags: [policy]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: OPTIONS
+      headers: [[Origin, "chrome-extension://abc"], [Access-Control-Request-Private-Network, "true"]]

@@ -1,0 +1,31 @@
+# servers/migaku-protocol P16 `preflight-extension`.
+# An allowed OPTIONS gets 204 with no body, no Content-Type and P6's headers,
+# and no Access-Control-Allow-Private-Network unless asked (P2 step 3, P5, P6).
+# The request headers do not change the reply (P5). EXT is the invented extension origin of P16.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/preflight-extension
+description: "preflight from the extension: 204 with the CORS headers"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: OPTIONS
+      target: /receive
+      headers:
+        - [Origin, "chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
+        - [Access-Control-Request-Method, POST]
+        - [Access-Control-Request-Headers, content-type]
+    expect:
+      status: 204
+      headers:
+        content-type: null
+        access-control-allow-origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+        access-control-allow-private-network: null
+        access-control-allow-credentials: null
+      body: {empty: true}

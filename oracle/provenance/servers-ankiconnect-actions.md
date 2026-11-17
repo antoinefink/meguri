@@ -125,3 +125,20 @@ follow `specs/servers/transcripts.md` T2 (scenario paths under
 and `media_dir`). The proposed A18 row `ankiconnect-nextreviews-isolation-marks`
 was dropped and A11.4 reworded: T10.3 removes U+2068 and U+2069 from
 `nextReviews` items, so the observed marks (A11 row above) need no deviation.
+
+## Transcript recordings (2026-11-17)
+
+Session s-20261117T160047Z-35f65b90 (spec writer, servers transcripts).
+Pins: Anki tag 26.09.3 (`refs/anki-26.09.3`) and the AnkiConnect add-on build
+pinned in `oracle/ankiconnect/ADDON_PIN` (tag 25.11.9.0, commit `532a3c8`,
+build 2025-11-09), installed as `addons21/2055492159` in the recorder image
+`meguri-oracle-ankiconnect:recorder`. No code was copied into a spec or a
+scenario.
+
+| Subject | Sources | Read for |
+|---|---|---|
+| A5 deck actions (`createDeck`, `changeDeck`, `deleteDecks`, `getDecks`, `deckNameFromId`, `getDeckStats`) and the missing filtered-deck creation | Pinned AnkiConnect add-on 25.11.9.0 in `meguri-oracle-ankiconnect:recorder` at `/opt/ankiconnect/addons21/2055492159/__init__.py` (deck actions); `oracle/driver` `setup_section` registrations; `oracle/ankiconnect/recorder/transcript.py` `STEP_KINDS` | Confirming that the recorded behavior matched A5 (no correction needed) and that no setup section or action can make a filtered deck in a transcript. Nothing was copied into the spec or scenarios. |
+| A6.2 `createModel`: check order and template naming | AnkiConnect add-on 25.11.9.0 (`ADDON_PIN`, installed as `addons21/2055492159` in `meguri-oracle-ankiconnect:recorder`), `plugin/__init__.py`, `createModel` | To confirm why the golden shows `inOrderFields`, then `cardTemplates`, then the exact-name check, then the `Front` and `Back` member errors per template, and the `Card <n>` default name. No spec text was taken from it, and the recorded behavior matches A6.2. |
+| A20.4 `tags/` transcripts (A10, A10.1, A8.3, A8.4) | Oracle recordings only, made with `oracle/ankiconnect/record.sh` and image `meguri-oracle-ankiconnect:recorder` (AnkiConnect 25.11.9.0 in Anki 26.9.3). One extra probe was run by hand from the scratchpad and not committed. No Anki or AnkiConnect source was read. | Recording goldens and checking A10's statements: tag splitting, child removal, the registry after `clearUnusedTags`, whole-tag case-insensitive replace, the `updateNoteTags` type error, `getTags` unicase order and the list-typed `tags` error |
+| A20.5 `cards/` scenarios (A11, A12, A13 card actions; A18 `ankiconnect-repeated-ids`) | AnkiConnect add-on 25.11.9.0 inside `meguri-oracle-ankiconnect:recorder` at `/opt/ankiconnect/addons21/2055492159/__init__.py` (`cardsInfo`, `cardsModTime`, `cardsToNotes`, `suspend`, `unsuspend`, `suspended`, `areSuspended`, `areDue`, `getIntervals`, `forgetCards`, `setDueDate`, `updateNoteFields`, `setSpecificValueOfCard`, `insertReviews`, `answerCards`). Anki 26.09.3: `rslib/src/scheduler/reviews.rs` (set_due_date FSRS branch); `rslib/src/notetype/mod.rs` (template checks at save, special field names); `rslib/src/template.rs` (render-time conditional evaluation); `rslib/src/notetype/render.rs` (special fields put into the render map) | Why `setDueDate` leaves `ivl` 0 under FSRS. Which actions can prepare card state, and which of them Meguri refuses. Finding a template that a checked save accepts and that fails at render. Why a repeated id makes `forgetCards` write two rows and makes `setDueDate` fail on a UNIQUE constraint. How `cardsToNotes` selects distinct note ids. |
+| A20.6 and A20.7 recordings (2026-11-17) | Recorder image `meguri-oracle-ankiconnect:recorder` (add-on 25.11.9.0, archive sha256 `cf75820e…`, Anki 26.9.3), run through `oracle/ankiconnect/record.sh`. Each of the 7 oracle scenarios was recorded twice in fresh containers, with byte-identical goldens. No Anki or AnkiConnect source was read: every golden matched the spec, so nothing needed explaining. | Confirming A16 (folding, scan order, error text, `deck:current`), A9.2 (`notesInfo` by query) and A14 (rollover dating, the strict today window with a row at exactly S excluded, type 4 rows counted) against the pinned add-on. |

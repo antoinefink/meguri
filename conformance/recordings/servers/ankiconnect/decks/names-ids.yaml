@@ -1,0 +1,12 @@
+# servers/ankiconnect-actions A20.1 names-ids (A5.2). Synthetic content only.
+id: servers/ankiconnect/decks/names-ids
+description: deckNamesAndIds in deck name order with ids
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [b, "A::C"]
+steps:
+  - http:
+      body: {json: {action: deckNamesAndIds, version: 6}}

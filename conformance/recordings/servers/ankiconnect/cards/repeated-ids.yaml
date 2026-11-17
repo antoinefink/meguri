@@ -1,0 +1,39 @@
+# servers/ankiconnect-actions A20.5 `cards/repeated-ids` (A2; A18 ankiconnect-repeated-ids).
+# All values are synthetic.
+# Step 0 makes c2 a review card with one type-4 row, the same on both sides.
+# Deviation steps (A18 ankiconnect-repeated-ids; Meguri handles first occurrences only):
+# - step 2 /steps/2/db_dump/revlog: the golden has two type-4 rows from step 1's
+#   forgetCards [#c2, #c2]; Meguri writes one (the cards are equal on both sides);
+# - step 3 /steps/3/reply/body/json: the golden is a backend database error and writes
+#   nothing; Meguri answers {result: true, error: null};
+# - step 4 /steps/4/db_dump/cards/#c2 and /steps/4/db_dump/revlog: the golden equals
+#   step 2; in Meguri c2 is a review card due 1 with one more type-4 row, as
+#   setDueDate {cards: [#c2], days: "1"} writes.
+# FSRS is on, as Meguri always runs it (sched/set-due-date S1, R702).
+id: servers/ankiconnect/cards/repeated-ids
+description: forgetCards and setDueDate with a card id listed twice
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [A]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: A, fields: {Term: "a1", Gloss: "b1"}}
+    - {notetype: Pair, deck: A, fields: {Term: "a2", Gloss: "b2"}}
+steps:
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2"], days: "3"}}}
+  - http:
+      body: {json: {action: forgetCards, version: 6, params: {cards: ["#c2", "#c2"]}}}
+  - observe: [{db_dump: {tables: [cards, revlog]}}]
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2", "#c2"], days: "1"}}}
+  - observe: [{db_dump: {tables: [cards, revlog]}}]

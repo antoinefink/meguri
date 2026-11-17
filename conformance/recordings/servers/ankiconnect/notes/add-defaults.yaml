@@ -1,0 +1,36 @@
+# specs/servers/ankiconnect-actions A20.3 `add-defaults` (A18
+# `ankiconnect-add-defaults`). Setup adds Other last, so curModel names Other,
+# not Pair. The config keys themselves hold real ids and stay out of transcript
+# dumps (servers/transcripts T10.6); the add-on's write shows as the schema-11
+# `did` of Pair that findModelsByName reports before and after the add.
+id: servers/ankiconnect/notes/add-defaults
+description: addNote and the Add-screen defaults, seen through the note type's did
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+    - name: Other
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body: {json: {action: findModelsByName, version: 6, params: {modelNames: [Pair]}}}
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Pair, fields: {term: "x", GLOSS: "y", Other: "z"}}}
+  - http:
+      body: {json: {action: findModelsByName, version: 6, params: {modelNames: [Pair]}}}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

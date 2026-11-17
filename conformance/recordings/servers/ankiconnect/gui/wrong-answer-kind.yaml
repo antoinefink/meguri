@@ -1,0 +1,36 @@
+# specs/servers/ankiconnect-gui G12 `wrong-answer-kind` (G8).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3).
+# T13 has no expect form for a resolve output: the first resolve's `{resolved: false}` is not checked here.
+id: servers/ankiconnect/gui/wrong-answer-kind
+description: "an answer of another kind leaves the interaction open"
+tags: [gui]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {activeCols: [noteFld, template, cardDue, deck, noteCrt]}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}}
+    - {notetype: Pair, deck: Default, fields: {Front: gamma, Back: third}}
+steps:
+  - interaction: {kind: GuiBrowse, answer: none}
+  - http:
+      body: {json: {action: guiBrowse, version: 6, params: {query: "deck:Lang"}}}
+      async: b1
+  - wait: 1s
+  - resolve: {id: i-1, outcome: presented}
+  - resolve: {id: i-1, outcome: done}
+  - await: b1
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: ["#c1", "#c2"], error: null}}

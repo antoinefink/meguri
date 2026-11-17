@@ -1,0 +1,21 @@
+# servers/host-security H17 `listener-crash` (declared, servers/transcripts T13):
+# a listener task that ends is restarted after 1 s on the host's timer clock; meanwhile the
+# state is binding (H9.4).
+id: servers/host/listener-crash
+description: "listener restarted 1 s after a crash"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - fault: {listener_crash: {server: ankiconnect}}
+  - status: {until: {state: binding, addresses: []}, within_ms: 1000, server: ankiconnect}
+  - advance: 1s
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}

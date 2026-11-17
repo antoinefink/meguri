@@ -1,0 +1,27 @@
+# specs/servers/ankiconnect-media X14 `media/delete-names` (X7): a case
+# variant (`ankiconnect-media-case-variants`), then "" (`ankiconnect-media-non-files`).
+# The case variant comes first: while no trash folder exists, the add-on's ""
+# moves the whole media folder into the trash, which would hide the
+# case-variant reply. After it, collection.media no longer exists in the add-on,
+# so the last step observes the trash only. The first observation registers
+# the folder, so that a pending deletion can show (a setup file bypasses the
+# store).
+# A = 61 0a, B = 62 0a. All values are synthetic.
+id: servers/ankiconnect/media/delete-names
+description: deleteMediaFile with a case variant, then the empty name
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: a.mp3, text: "a\n"}
+    - {name: b.mp3, text: "b\n"}
+steps:
+  - observe: [media_pending]
+  - http:
+      body: {json: {action: deleteMediaFile, version: 6, params: {filename: B.MP3}}}
+  - observe: [media_dir, media_trash, media_pending]
+  - http:
+      body: {json: {action: deleteMediaFile, version: 6, params: {filename: ""}}}
+  - observe: [media_trash]

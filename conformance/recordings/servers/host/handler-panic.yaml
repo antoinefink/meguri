@@ -1,0 +1,27 @@
+# servers/host-security H17 `handler-panic` (declared, servers/transcripts T13):
+# a panic in one request's handler is caught: that request gets Migaku's 500 and its
+# connection closes; a concurrent request and later requests are served (H9.4, P8.2). `expect:
+# {replies: [...]}` on `parallel` is the T13 form proposed with this scenario.
+id: servers/host/handler-panic
+description: "caught handler panic: 500 for that request only"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect, migaku]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - status: {until: {state: listening, addresses: ["127.0.0.1:44432", "[::1]:44432"]}, within_ms: 1000, server: migaku}
+  - fault: {handler_panic: {server: migaku, target: /srs-check}}
+  - parallel:
+      - http: {server: migaku, method: GET, target: /srs-check}
+      - http: {server: ankiconnect}
+    expect:
+      replies:
+        - {status: 500, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}, body: {json: {success: false, error: "Meguri hit an internal error."}}, closed: true}
+        - {status: 200, headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}, body: {json: {apiVersion: "AnkiConnect v.6"}}}
+  - http: {server: migaku, method: GET, target: /srs-check}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {ok: true, version: "4"}}

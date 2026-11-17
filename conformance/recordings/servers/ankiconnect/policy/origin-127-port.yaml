@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.2 `policy/origin-127-port`: 127.0.0.1 with a port.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/origin-127-port
+description: deckNames v6 from http://127.0.0.1:3000, ACAO echoed
+tags: [policy]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      headers: [[Origin, "http://127.0.0.1:3000"]]
+      body: {json: {action: deckNames, version: 6}}

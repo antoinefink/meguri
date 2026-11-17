@@ -1,0 +1,24 @@
+# servers/host-security H17 `revalidate-after-wake` (declared, servers/transcripts T13):
+# revalidation finds the IPv4 socket gone, closes the IPv6 one and binds both again (H9.3).
+id: servers/host/revalidate-after-wake
+description: "revalidate rebinds a dropped socket"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - fault: {drop_ipv4_socket: {server: ankiconnect}}
+  - revalidate: {}
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, address: ipv4}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+  - http: {server: ankiconnect, address: ipv6}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}

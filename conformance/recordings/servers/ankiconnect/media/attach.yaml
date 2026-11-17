@@ -1,0 +1,44 @@
+# specs/servers/ankiconnect-media X14 `media/attach`: addNote with X10.2's rows
+# 1 and 2 (row 2 on its own note, Term `word2`, so that it is no duplicate).
+# Pair and deck D are servers/ankiconnect-actions A20's. A = 61 0a, B = 62 0a,
+# C = 63 0a. All values are synthetic.
+id: servers/ankiconnect/media/attach
+description: addNote with audio attachments to one and two fields, and a picture with a mixed-case name
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note:
+              deckName: D
+              modelName: Pair
+              fields: {Term: word}
+              audio:
+                - {filename: a.mp3, data: "YQo=", fields: [Term]}
+                - {filename: b.mp3, data: "Ygo=", fields: [Term, Gloss]}
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note:
+              deckName: D
+              modelName: Pair
+              fields: {Term: word2}
+              picture: {filename: Cat.JPG, data: "Ywo=", fields: [Gloss]}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

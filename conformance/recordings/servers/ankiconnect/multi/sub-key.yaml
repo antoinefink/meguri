@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.3 `multi/sub-key`: each sub-action needs its own key (E8, E11).
+# Default settings, fresh collection (deck Default only), no Origin; synthetic values.
+id: servers/ankiconnect/multi/sub-key
+description: "key set; outer key right; one sub-action without key, one with"
+tags: [multi, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {api_key: k1}
+steps:
+  - http:
+      body: {json: {action: multi, key: k1, params: {actions: [{action: version}, {action: version, key: k1}]}}}

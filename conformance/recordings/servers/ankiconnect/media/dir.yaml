@@ -1,0 +1,13 @@
+# specs/servers/ankiconnect-media X14 `media/dir` (X8, X16.9): the add-on
+# returns Anki's media folder, which T10.3 writes as <media-dir>. Meguri's
+# executor configures `media-dir` by default (servers/transcripts T4), so its
+# reply normalizes the same; the X8 error is `media/dir-unset` (declared).
+id: servers/ankiconnect/media/dir
+description: getMediaDirPath
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: getMediaDirPath, version: 6}}

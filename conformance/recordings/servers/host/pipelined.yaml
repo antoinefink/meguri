@@ -1,0 +1,26 @@
+# servers/host-security H17 `pipelined` (declared, servers/transcripts T13):
+# two requests written back to back are answered in order on the same connection (H7.3).
+# `expect: {replies: [...]}` on `pipeline` is the T13 form proposed with this scenario. The
+# last ping, on a new connection, is the `http` exchange T3 requires.
+id: servers/host/pipelined
+description: "two pipelined pings, two replies in order"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - pipeline:
+      - {server: ankiconnect, connection: p}
+      - {server: ankiconnect, connection: p}
+    expect:
+      replies:
+        - {status: 200, headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}, body: {json: {apiVersion: "AnkiConnect v.6"}}}
+        - {status: 200, headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}, body: {json: {apiVersion: "AnkiConnect v.6"}}}
+  - close: p
+  - http: {server: ankiconnect}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}

@@ -1,0 +1,62 @@
+# specs/servers/ankiconnect-actions A20.3 `dupe-scope` (A7.3's scoped check and
+# its outcome table): a note x of Pair exists with its card in P::Q; each
+# checked note is x added to R. Step 0 checks Pair, step 1 the other note type.
+id: servers/ankiconnect/notes/dupe-scope
+description: canAddNotesWithErrorDetail across duplicate scopes and note types
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [P, "P::Q", R]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+    - name: Duo
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: "P::Q", fields: {Term: "x", Gloss: "y"}}
+steps:
+  - http:
+      body:
+        json:
+          action: canAddNotesWithErrorDetail
+          version: 6
+          params:
+            notes:
+              - {deckName: R, modelName: Pair, fields: {Term: "x"}}
+              - {deckName: R, modelName: Pair, fields: {Term: "x"}, options: {duplicateScope: deck}}
+              - deckName: R
+                modelName: Pair
+                fields: {Term: "x"}
+                options: {duplicateScope: deck, duplicateScopeOptions: {deckName: P}}
+              - deckName: R
+                modelName: Pair
+                fields: {Term: "x"}
+                options: {duplicateScope: deck, duplicateScopeOptions: {deckName: P, checkChildren: true}}
+              - deckName: R
+                modelName: Pair
+                fields: {Term: "x"}
+                options: {duplicateScope: deck, duplicateScopeOptions: {deckName: Nope, checkChildren: true}}
+  - http:
+      body:
+        json:
+          action: canAddNotesWithErrorDetail
+          version: 6
+          params:
+            notes:
+              - {deckName: R, modelName: Duo, fields: {Term: "x"}}
+              - deckName: R
+                modelName: Duo
+                fields: {Term: "x"}
+                options: {duplicateScopeOptions: {checkAllModels: true}}
+              - deckName: R
+                modelName: Duo
+                fields: {Term: "x"}
+                options: {duplicateScope: deck, duplicateScopeOptions: {checkAllModels: true}}

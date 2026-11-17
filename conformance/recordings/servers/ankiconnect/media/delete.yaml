@@ -1,0 +1,21 @@
+# specs/servers/ankiconnect-media X14 `media/delete` (X7): a present name,
+# then the same name again. The first observation registers the folder, so
+# that the setup file is known to the media database and its deletion can be
+# pending. A = 61 0a. All values are synthetic.
+id: servers/ankiconnect/media/delete
+description: deleteMediaFile trashes a present file, then finds nothing
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: a.mp3, text: "a\n"}
+steps:
+  - observe: [media_pending]
+  - http:
+      body: {json: {action: deleteMediaFile, version: 6, params: {filename: a.mp3}}}
+  - observe: [media_dir, media_trash, media_pending]
+  - http:
+      body: {json: {action: deleteMediaFile, version: 6, params: {filename: a.mp3}}}
+  - observe: [media_dir, media_trash, media_pending]

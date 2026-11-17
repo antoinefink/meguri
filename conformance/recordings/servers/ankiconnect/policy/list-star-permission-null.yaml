@@ -1,0 +1,18 @@
+# servers/ankiconnect-envelope E19.2 `policy/list-star-permission-null`: requestPermission with Origin null and * in the allow-list (E9 row 3, E7.3 row 2, E18).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# No permission answer is scripted: a prompt would be a run error (T7.2).
+id: servers/ankiconnect/policy/list-star-permission-null
+description: requestPermission with Origin null is denied with no prompt, ACAO *
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {cors_origins: ["*"]}
+steps:
+  - http:
+      headers: [[Origin, "null"]]
+      body: {json: {action: requestPermission, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: denied}, error: null}}

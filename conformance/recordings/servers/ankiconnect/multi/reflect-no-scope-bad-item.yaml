@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.3 `multi/reflect-no-scope-bad-item`: E10 row 3: items of actions are not read without the scope.
+# Default settings, fresh collection (deck Default only), no Origin; synthetic values.
+id: servers/ankiconnect/multi/reflect-no-scope-bad-item
+description: "apiReflect, another scope, a number in actions"
+tags: [reflect, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: apiReflect, version: 6, params: {scopes: [other], actions: [5]}}}

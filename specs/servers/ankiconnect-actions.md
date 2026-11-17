@@ -3,7 +3,7 @@
 Spec: servers/ankiconnect-actions
 Requirements: R1754 (except the `sync` round trip, U146), R1755, R1756, R1757, R1758, R1759, R1760, R1763, R1764, R1765, R1766, R1767, R1768, R1774, R1776, R1777, R1778, R1789, R1790 (one op per action), R1945 (client calls of these actions); supports R1775, R1779, R1780, R1948
 Anki: 26.09.3
-Scenarios: none yet. The transcript format is `servers/transcripts`, but its harness (U136) is not built; A20 lists the planned scenarios of `conformance/recordings/servers/ankiconnect/{decks,models,notes,tags,cards,search,stats,clients}/` (`servers/transcripts` T2; ids `servers/ankiconnect/<dir>/<name>`) as request and reply tables, written with the entity tokens of `servers/transcripts` T10.1. The files are written when the harness lands.
+Scenarios: conformance/recordings/servers/ankiconnect/{decks,models,notes,tags,cards,search,stats}/ (`servers/transcripts` T2; ids `servers/ankiconnect/<dir>/<name>`): oracle transcripts recorded 2026-11-17, each golden next to its scenario, and the declared `stats/by-day-rollover-counted` and `stats/today-counted`. A20 gives them as request and reply tables, written with the entity tokens of `servers/transcripts` T10.1, and says which rows are recorded and which a transcript cannot express yet. `clients/` holds `servers/ankiconnect-clients` C7's scenarios.
 
 The non-media, non-GUI actions that Meguri's AnkiConnect-compatible server (port 8765 by default) answers, with AnkiConnect's parameter names, result shapes and error strings. The interface this file targets is AnkiConnect API version 6 as served by the AnkiConnect add-on build of 2025-11-09 running in Anki 26.09.3, the build the U136 recorder pins. Its goldens are the authority on reply shapes; where Meguri differs on purpose, A18 lists the difference and its proposed deviation entry. That build was probed on 2026-11-10 (A21 Q6): the AnkiConnect replies stated in A4 to A14, A18 and A20 below are the observed ones, except where a section says a point is unverified. Meguri's own replies where it differs on purpose are specified, not observed: the A17 texts, the Meguri column of A18 (the A7.1 and A7.4 member errors among them) and the A20 rows marked (Meguri).
 
@@ -500,7 +500,7 @@ For each note that exists (missing ids skipped), when one of its stored tags mat
 | ` a old ` | `old` → (empty) | ` a ` |
 | ` ΑΣ ` | `ας` → `z` | ` z ` (lower-case form of `ΑΣ` is `ας`) |
 
-The rows were observed on the add-on. A save keeps one spelling of tags equal ignoring case (`tags/tags#T4`), so the stored ` a OLD old ` of row 3 is reached only by a direct database write; through a save the first spelling is kept and it is ` a OLD `, with the same result.
+The rows were observed on the add-on. A save keeps one spelling of tags equal ignoring case (`tags/tags#T3`, `#T4`), so the stored ` a OLD old ` of row 3 is reached only by a direct database write. Through a save it is ` a OLD `, the first spelling, or the registered spelling when the registry already holds one (` a Old ` after a note tagged `Old`), with the same result.
 
 ## A11. Finding and reading cards (R1766)
 
@@ -689,25 +689,25 @@ Each row is a proposed `conformance/deviations.yaml` entry for the U136 replay. 
 
 | Proposed id | AnkiConnect | Meguri | Scenario |
 |---|---|---|---|
-| `ankiconnect-search-order` | `findNotes`/`findCards` ids in the database's scan order (observed: `findCards {query: "deck:Lang"}` gave `[#c2, #c1]`; `findNotes {query: ""}` listed a later note type's note last) | ascending ids (R1777) | `search/current`, `search/empty` |
+| `ankiconnect-search-order` | `findNotes`/`findCards` ids in the database's scan order (observed: `findCards {query: "deck:Lang"}` gave `[#c2, #c1]`; `findNotes {query: ""}` listed a later note type's note last) | ascending ids (R1777) | `search/empty` (`search/current`'s golden is ascending already) |
 | `ankiconnect-search-error-text` | Anki's search error text: `Invalid search: ` and the message wrapped in U+2068/U+2069 (observed) | `search/errors#E7` text | `search/error` |
-| `ankiconnect-add-defaults` | every add writes `curModel`, `_nt_<id>_lastDeck`, `_deck_<id>_lastNotetype` (observed); the note type's schema-11 `did` then reads as that deck's id in `findModels*` | none written (`notes/note-records#A4`) | `notes/add-defaults` |
-| `ankiconnect-add-filtered-deck` | a filtered `deckName` is accepted and the cards go to Default (`notes/deck-placement-and-position#D2`); `canAddNoteWithErrorDetail` answers `{"canAdd": true}` (observed) | error (R1758) | `notes/add-filtered-deck` |
+| `ankiconnect-add-defaults` | every add writes `curModel`, `_nt_<id>_lastDeck`, `_deck_<id>_lastNotetype` (observed); the note type's schema-11 `did`, `null` before the first add, then reads as that deck's id in `findModels*` | none written (`notes/note-records#A4`) | `notes/add-defaults` (the `did` only; the keys themselves are asserted by Meguri's tests of `notes/note-records#A4`, A20.3) |
+| `ankiconnect-add-filtered-deck` | a filtered `deckName` is accepted and the cards go to Default (`notes/deck-placement-and-position#D2`); `canAddNoteWithErrorDetail` answers `{"canAdd": true}` (observed) | error (R1758) | none yet: `notes/add-filtered-deck` cannot be expressed in a transcript (A20.3); Meguri's tests assert A7.2 |
 | `ankiconnect-addnotes-rollback` | passing notes are added, then deleted: graves, deleted-notes log lines, `nextPos` moved, their media files kept (observed: two passing notes left four graves and moved `nextPos` from 5 to 7; an attachment file stayed) | nothing written | `notes/add-notes` |
 | `ankiconnect-failed-add-media` | attachment files of a failed add stay in the media folder (observed for a duplicate) | none left (`media/media-files#M13`) | `media/attach-rollback` |
 | `ankiconnect-canadd-no-media` | `canAdd*` fetch and store attachment files (observed: `canAddNote` with a `data` attachment stored the file) | nothing fetched or stored | `notes/can-add-media` |
 | `ankiconnect-changedeck-op` | every listed card stamped with the new `did` (also cards already there: their `mod` changes), no step remap, FSRS keys kept; a filtered target accepted (`did` the filtered deck, `odid` 0); a new name under a filtered deck fails with `Filtered decks can not have child decks.` (observed, except the step and FSRS points) | `browser/bulk-actions#B7.2`; filtered target refused | `decks/change-deck` |
 | `ankiconnect-getdeckstats-no-create` | a listed name that finds no deck creates it and reports it with zero counts (observed) | left out, nothing created | `decks/deck-stats` |
 | `ankiconnect-suspend-unknown-card` | an unknown id fails only where AnkiConnect happens to look it up (observed: `[c3, 7]` with c3 suspended gives `true`) | the first unknown id always fails, nothing written | `cards/suspend` |
-| `ankiconnect-unsuspend-buried` | with two or more listed cards, a listed buried card may be unburied (observed, A12.2) | buried cards untouched | `cards/suspend` |
+| `ankiconnect-unsuspend-buried` | with two or more listed cards, a listed buried card may be unburied (observed, A12.2) | buried cards untouched | none yet: a transcript cannot bury a card with an action Meguri answers (A20.5) |
 | `ankiconnect-review-counts-exclusions` | every review-log row counts (observed, A14) | types 4 and 5 left out (R1774) | `stats/by-day-rollover`, `stats/today` |
 | `ankiconnect-createmodel-name-clash` | a name equal under `unicase` only gets `-` and five characters derived from the clock (observed: `pair` beside `Pair` gave `pair-6455a`) | `+` appended (`notetypes/records#N4` step 7) | `models/create` |
 | `ankiconnect-createmodel-css` | Anki's stock CSS when `css` is missing or `null` (observed) | Meguri's base card CSS (`notetypes/records#N5.1`) | `models/create` |
 | `ankiconnect-cardsinfo-template-error` | Anki's template error text, after `<style></style>` (observed) | Meguri's D8 notice | `cards/info-errors` |
 | `ankiconnect-cardsinfo-latex` | `[latex]`, `[$]` and `[$$]` in `question` and `answer` replaced by LaTeX image tags, with images generated into media (or Anki's LaTeX error text) as a side effect of the read. Observed with the recorder's default preferences: `[$]x[/$]` became an `<img class=latex …>` tag naming a `latex-<40 hex>.png` file, followed by `LaTeX image generation is disabled in the preferences.`, and no file was written | left as stored, nothing written (`render/card-render-pipeline#K8`) | `cards/info-errors` |
-| `ankiconnect-notesinfo-no-cards` | a listed note without cards fails the whole action with the runtime's missing-key text (observed: the note id in decimal, `1894701600005`) | `cards: []` | `notes/info` |
-| `ankiconnect-repeated-ids` | a write list naming a card twice fails with a database error, or handles it twice (observed: `setDueDate` fails with a backend database error text reporting a failed UNIQUE constraint; `forgetCards` succeeds) | first occurrences only (A2) | `cards/reschedule` |
-| `ankiconnect-error-text` | Anki's backend error texts for the A17 cases. Observed: an invalid `days` text gives the text itself (`abc`); a deck under a filtered deck gives `Filtered decks can not have child decks.`; a refused template gives `Card template ⁨1⁩ in note type '⁨<name>⁩' has a problem.<br>` and a reason (U+2068/U+2069 around the number and the name); too deep is unverified | the A17 texts | `cards/reschedule`, `decks/create-nested`, `models/create` |
+| `ankiconnect-notesinfo-no-cards` | a listed note without cards fails the whole action with the runtime's missing-key text (observed: the note id in decimal, `1894701600005`) | `cards: []` | none yet: `notes/info`'s third row cannot be expressed in a transcript (A20.3); Meguri's tests assert A9.2 |
+| `ankiconnect-repeated-ids` | a write list naming a card twice fails with a database error, or handles it twice. Observed: `setDueDate` fails with a backend database error text that reports a failed UNIQUE constraint, and writes nothing. `forgetCards` succeeds and resets the card once per occurrence: `[c, c]` writes two review-log rows of `type` 4 (`factor` 0) where `[c]` writes one | first occurrences only (A2) | `cards/repeated-ids`: pointers `/steps/2/db_dump/revlog` (Meguri: the golden's rows without its last one, one Reset row), `/steps/3/reply/body/json` (Meguri: `{"result": true, "error": null}`), `/steps/4/db_dump/cards/#c2` (Meguri: type 2, queue 2, `due` 1, `ivl` 0, `factor` 2500, `data` `{"pos":2}`, as `setDueDate {cards: [#c2], days: "1"}` writes) and `/steps/4/db_dump/revlog` (Meguri: its step-2 rows plus one type-4 row with `factor` 2500, `ivl` 0 and `lastIvl` 0). The exact error text stays in the golden and is replaced as a whole `/body/json` |
+| `ankiconnect-error-text` | Anki's backend error texts for the A17 cases. Observed: an invalid `days` text gives the text itself (`abc`); a deck under a filtered deck gives `Filtered decks can not have child decks.`; a refused template gives `Card template ⁨1⁩ in note type '⁨<name>⁩' has a problem.<br>` and a reason (U+2068/U+2069 around the number and the name; observed for an unclosed section `{{#F}}`: `See the preview for more information.`); too deep is unverified | the A17 texts | `cards/reschedule`, `models/create`, `undo/create-model-refused` (pointer `/steps/1/reply/body/json/error`); `decks/create-nested`'s filtered-deck row cannot be expressed in a transcript yet (A20.1) |
 | `ankiconnect-note-member-types` | a string `tags` in a note object is accepted and each character becomes one tag (`"pq rs"` gives ` p q r s `); an `options` or `duplicateScopeOptions` that is a string containing none of its member names, or a list holding none, is ignored and the note added (other non-objects fail on both sides and are compared by shape); `duplicateScopeOptions` `null` fails with `argument of type 'NoneType' is not iterable` (observed, A7.1, A7.4) | member errors; `null` counts as absent | `notes/add-errors` |
 
 The search folding difference (R1777) and the envelope's differences are declared by U136 and `servers/ankiconnect-envelope`. `notes/note-records#U2`'s `note-save-same-after-normalizing` also applies to `updateNoteFields`.
@@ -727,7 +727,7 @@ Card templates that call AnkiConnect from a card (`servers/ankiconnect-clients` 
 
 ## A20. Scenarios
 
-Planned scenarios, each a list of requests (`version` 6 unless a row says otherwise, no key, no Origin) with the replies the recorder must show. Setup uses the U4 DSL (`conformance/dsl`). The scenarios define their own note types (R1959): `Pair` is a standard note type with fields `Term`, `Gloss`, one template `Card 1` (question `{{Term}}`, answer `{{FrontSide}}<hr>{{Gloss}}`) and CSS `.card{}`; `Gap` is a cloze note type with fields `Body`, `Aside` and one template (question `{{cloze:Body}}`, answer `{{cloze:Body}}<br>{{Aside}}`). Ids are written with the tokens of `servers/transcripts` T10.1: `#n1`, `#c1`, `#d1` (decks numbered in ascending id order, so `#d1` is the first deck the scenario creates), `#m1`; `1` is the Default deck. Replies are shown unwrapped as `result` or `error`. A row marked "(Meguri)" asserts Meguri's side of the A18 entry it names; the golden records AnkiConnect's. The AnkiConnect replies of these rows were probed on the pinned add-on on 2026-11-10 and matched, except where a row says what was observed; not probed: `notes/preservation`, `cards/reschedule`'s comparison with the UI ops, `search/current` with cards in `B`, and the too-deep deck error.
+The scenarios, each a list of requests (`version` 6 unless a row says otherwise, no key, no Origin) with the replies the recorder must show. Setup uses the U4 DSL (`conformance/dsl`). The recorder runs only the setup sections its driver implements, and no `cards` or `revlog` section (`conformance/dsl` D6.6 and D6.7 are drafts the driver does not implement); filtered decks and direct database writes have no setup either. Card state therefore comes from exchanges of actions Meguri answers (`suspend`, `setDueDate`, `forgetCards`, `updateNoteFields`), never from `setSpecificValueOfCard`, `answerCards` or `insertReviews`, which Meguri refuses (`servers/ankiconnect-envelope` E12). Every `cards/` scenario sets `config: {fsrs: true}`, because Meguri always runs FSRS (R702, `sched/set-due-date` S1): with FSRS off, the recorder runs SM-2 Set Due Date and SM-2 answer labels, which Meguri never produces. The scenarios define their own note types (R1959): `Pair` is a standard note type with fields `Term`, `Gloss`, one template `Card 1` (question `{{Term}}`, answer `{{FrontSide}}<hr>{{Gloss}}`) and CSS `.card{}`; `Gap` is a cloze note type with fields `Body`, `Aside` and one template (question `{{cloze:Body}}`, answer `{{cloze:Body}}<br>{{Aside}}`). Ids are written with the tokens of `servers/transcripts` T10.1: `#n1`, `#c1`, `#d1` (decks numbered in ascending id order, so `#d1` is the first deck the scenario creates), `#m1`; `1` is the Default deck. Replies are shown unwrapped as `result` or `error`. A row marked "(Meguri)" asserts Meguri's side of the A18 entry it names; the golden records AnkiConnect's. The AnkiConnect replies of these rows were probed on the pinned add-on on 2026-11-10 and matched, except where a row says what was observed; not probed: the too-deep deck error. On 2026-11-17 the scenarios of A20.1 to A20.7 were recorded; each subsection says which rows are recorded. `search/current` was recorded then: with `curDeck` naming `B`, `findCards {query: "deck:current"}` gives the cards of `B` in ascending order. Rows that a transcript cannot express yet (`notes/preservation` among them) are named in their subsection, with where Meguri's side is asserted until then.
 
 Every scenario that adds or updates a note (`notes/`, `models/create`, and `servers/ankiconnect-media` `media/attach*`) ends with `observe: [{db_dump: {tables: [notes, cards]}}, media_dir]` (the table form of `servers/transcripts` T18 and `servers/ankiconnect-clients` C5: a bare `db_dump` would hold the stock note types' rows, R1959), so the oracle's recording of the same requests carries the R1948 equivalence of note, cards and stored media (`servers/transcripts` T14).
 
@@ -744,30 +744,50 @@ Every scenario that adds or updates a note (`notes/`, `models/create`, and `serv
 | | | `deleteDecks {decks: ["A"], cardsToo: true}` | result null; deck, note and card gone with graves |
 | `names-ids` | decks `b`, `A::C` | `deckNamesAndIds` | `{"A": #d2, "A::C": #d3, "b": #d1, "Default": 1}` (creating `A::C` creates its parent `A` first; observed) |
 | `get-decks` | c1 in `A`, c2 in `B`, c3 in `A` | `getDecks {cards: [#c1, #c2, #c3, 999]}` | `{"A": [#c1, #c3], "B": [#c2], "Default": [999]}` |
-| `name-from-id` | deck `A` | `deckNameFromId {deckId: #d1}`; `{deckId: 12345}` | `"A"`; `"Default"` |
-| `change-deck` | c1 in `A`, c2 in `New::Sub`; filtered deck `F` | `changeDeck {cards: [#c1, #c2], deck: "New::Sub"}` | result null; c1 in `New::Sub`; c2's row unchanged (Meguri, `ankiconnect-changedeck-op`) |
+| `name-from-id` | deck `A` | `deckNameFromId {deckId: #d1}`; `{deckId: 12345}`; `{deckId: 0}` | `"A"`; `"Default"`; `"Default"` |
+| `change-deck` | c1 in `A`, c2 in `New::Sub`; filtered deck `F` for row 3 only (not recorded, below) | `changeDeck {cards: [#c1, #c2], deck: "New::Sub"}` | result null; c1 in `New::Sub`; c2's row unchanged (Meguri, `ankiconnect-changedeck-op`) |
 | | | `changeDeck {cards: [#c1], deck: "Brand::New"}` | result null; decks `Brand`, `Brand::New` created; c1 there |
 | | | `changeDeck {cards: [#c1], deck: "F"}` | error `cannot move cards into a filtered deck: F`, nothing written (Meguri, `ankiconnect-changedeck-op`) |
-| `deck-stats` | A5.8's example | `getDeckStats {decks: ["Lang::JA", "Lang", "Nope"]}` | A5.8's object; no deck `Nope` afterwards (Meguri, `ankiconnect-getdeckstats-no-create`) |
+| `deck-stats` | A5.8's example: decks `Lang`, `Lang::JA`; one Pair note in `Lang`, two in `Lang::JA` | `setDueDate {cards: [#c1], days: "0"}` (setup cannot set card state) | `true`; the `Lang` card is a review card due today |
+| | | `getDeckStats {decks: ["Lang::JA", "Lang", "Nope"]}` | A5.8's object; no deck `Nope` afterwards (Meguri, `ankiconnect-getdeckstats-no-create`; recorded: AnkiConnect creates `Nope` as `#d3` with zero counts) |
 | | | `getDeckStats {decks: ["lang::ja"]}` | the `Lang::JA` member only (lookup by name, A1) |
+
+Recorded 2026-11-17 (goldens match): `create-nested` rows 1 to 3, `delete`, `names-ids`, `get-decks`, `name-from-id`, `change-deck` rows 1 and 2, `deck-stats`. The two rows with filtered deck `F` are not in the recorded `create-nested` and `change-deck` transcripts: a transcript setup (`servers/transcripts` T5, `conformance/dsl` D6) has no way to make a filtered deck (no direct database write, no card-state section), and AnkiConnect has no action that makes one. They wait for a setup that can; until then Meguri's unit tests assert them from A5.4, A5.5 and A17.
 
 ### A20.2 `models/`
 
 | Scenario | Setup | Request | Reply |
 |---|---|---|---|
-| `reads` | `Pair` | `modelFieldNames {modelName: "pair"}` | `["Term", "Gloss"]` (`unicase` lookup) |
+| `reads` | `Pair`; `Grid`: fields `Term`, `Gloss`, `Note`, `Body`, one template per A6.1 row 1 to 5 and 7, named `R1` to `R5` and `R7` | `modelFieldNames {modelName: "pair"}` | `["Term", "Gloss"]` (`unicase` lookup) |
 | | | `modelFieldsOnTemplates {modelName: "Pair"}` | `{"Card 1": [["Term"], ["Gloss"]]}` |
 | | | `modelTemplates {modelName: "Pair"}` | `{"Card 1": {"Front": "{{Term}}", "Back": "{{FrontSide}}<hr>{{Gloss}}"}}` |
 | | | `modelStyling {modelName: "Pair"}` | `{"css": ".card{}"}` |
 | | | `modelFieldNames {modelName: "Nope"}` | error `model was not found: Nope` |
+| | | `modelFieldDescriptions {modelName: "Pair"}` | `["", ""]` |
+| | | `modelFieldFonts {modelName: "Pair"}` | `{"Term": {"font": "Arial", "size": 20}, "Gloss": {"font": "Arial", "size": 20}}` |
+| | | `modelNameFromId {modelId: #m7}` | `"Pair"` |
+| | | `modelNameFromId {modelId: 12345}` | error `model was not found: 12345` |
+| | | `modelFieldsOnTemplates {modelName: "Grid"}` | `{"R1": [["Term"], ["Gloss"]], "R2": [["Term", "Term"], ["Note", "Note"]], "R3": [["Tags"], ["Body"]], "R4": [["Term"], ["Body"]], "R5": [[" Term "], ["^Term"]], "R7": [[], ["Gloss"]]}` (A6.1's rows) |
 | `names` | `Pair`, then `Duo` created, then `alpha` | `modelNames` | the stock note types' and `["alpha", "Duo", "Pair"]` merged in `unicase` order of the name (not creation order) |
+| | | `modelNamesAndIds` | `{"alpha": #m9, "Basic": #m1, "Basic (and reversed card)": #m2, "Basic (optional reversed card)": #m3, "Basic (type in the answer)": #m4, "Cloze": #m5, "Duo": #m8, "Image Occlusion": #m6, "Pair": #m7}`, in the same name order |
 | `find` | `Pair` | `findModelsByName {modelNames: ["Pair"]}` | one schema-11 object (golden) |
 | | | `findModelsById {modelIds: [1]}` | error `model was not found: 1` |
+| | | `findModelsById {modelIds: [#m7]}` | the same object as `findModelsByName` |
+| | | `findModelsByName {modelNames: ["Pair", "Nope"]}` | error `model was not found: Nope` (the first name that finds none is the error; no list) |
 | `create` | `Pair` | `createModel {modelName: "Duo", inOrderFields: ["F", "B"], cardTemplates: [{Front: "{{F}}", Back: "{{B}}"}], css: ".x{}"}` | the stored object, template `Card 1` |
 | | | the same request again | error `Model name already exists` |
 | | | `createModel {modelName: "Trio", inOrderFields: [], cardTemplates: [{Front: "{{F}}", Back: ""}]}` | error `Must provide at least one field for inOrderFields` |
 | | | `createModel {modelName: "pair", inOrderFields: ["F"], cardTemplates: [{Front: "{{F}}", Back: "{{F}}"}]}` | the stored object, named `pair+` (Meguri, `ankiconnect-createmodel-name-clash`); its `css` is Meguri's base card CSS (Meguri, `ankiconnect-createmodel-css`) |
-| | | `createModel` with `cardTemplates: [{Front: "{{#F}}", Back: "x"}]` | error `invalid card template: <reason>` (Meguri, `ankiconnect-error-text`) |
+| | | `createModel {modelName: "Quad", inOrderFields: ["F"], cardTemplates: [{Front: "{{#F}}", Back: "x"}]}` | error `invalid card template: <reason>` (Meguri, `ankiconnect-error-text`) |
+| | | `createModel {modelName: "Trio", inOrderFields: ["F"], cardTemplates: []}` | error `Must provide at least one card for cardTemplates` |
+| | | `createModel {modelName: "Pair", inOrderFields: [], cardTemplates: [{Front: "{{F}}", Back: "{{F}}"}]}` | error `Must provide at least one field for inOrderFields` (before the name check) |
+| | | `createModel {modelName: "Pair", inOrderFields: ["F"], cardTemplates: [{Back: "{{F}}"}]}` | error `Model name already exists` (before the member check) |
+| | | `createModel {modelName: "Trio", inOrderFields: ["F"], cardTemplates: [{Back: "{{F}}"}]}` | error `missing parameter: Front` (Meguri, `servers/ankiconnect-envelope#E18` parameter-error texts; the add-on's is `'Front'`) |
+| | | `createModel {modelName: "Trio", inOrderFields: ["F"], cardTemplates: [{Front: "{{F}}"}]}` | error `missing parameter: Back` (Meguri, `servers/ankiconnect-envelope#E18` parameter-error texts; the add-on's is `'Back'`) |
+| | | `createModel {modelName: "Trio", inOrderFields: ["F", "G"], cardTemplates: [{Name: "X", Front: "{{F}}", Back: "{{G}}"}, {Front: "{{G}}", Back: "{{F}}"}], css: ".t{}"}` | the stored object, templates `X` and `Card 2` |
+| | | `createModel {modelName: "Gap", inOrderFields: ["Body", "Aside"], cardTemplates: [{Front: "{{cloze:Body}}", Back: "{{cloze:Body}}<br>{{Aside}}"}], css: ".g{}", isCloze: true}` | the stored object, `type` 1, `originalStockKind` 1 |
+
+Recorded 2026-11-17: every row of `reads`, `names`, `find` and `create`; the goldens match the AnkiConnect side of each row. The (Meguri) rows of `create` (the `pair` and `Quad` rows, steps 3 and 4) still need their `conformance/deviations.yaml` entries.
 
 ### A20.3 `notes/`
 
@@ -787,7 +807,7 @@ Every scenario that adds or updates a note (`notes/`, `models/create`, and `serv
 | | | with `fields: {Term: "t4"}` and `options: {duplicateScopeOptions: null}` | result `#n3` (Meguri, `ankiconnect-note-member-types`) |
 | | | `modelName: "Gap"`, `fields: {Body: "no cloze"}` | error `cannot create note for unknown reason` |
 | `add-no-card` | note type `Rev`: fields `Term`, `Gloss`, one template (question `{{Gloss}}`, answer `{{Term}}`); deck `D` | `addNote` with `fields: {Term: "x"}` | result `#n1`; one card of ordinal 0 (A7.3, A21 Q7) |
-| `add-defaults` | `Pair`, deck `D`; `curModel` another note type | `addNote` as `add-match` | result `#n1`; `curModel` and the `_nt_`/`_deck_` keys unchanged (Meguri, `ankiconnect-add-defaults`) |
+| `add-defaults` | `Pair`, then a second note type (so `curModel` names it), deck `D` | `findModelsByName {modelNames: ["Pair"]}`; `addNote` as `add-match`; `findModelsByName` again | result `#n1`; Pair's schema-11 `did` is `null` before and `#d1` after in the golden, and stays `null` in Meguri (Meguri, `ankiconnect-add-defaults`). A transcript cannot observe `curModel` or the `_nt_`/`_deck_` keys themselves: they hold real ids, and `servers/transcripts` T10.6 keeps `config` out of transcript dumps; Meguri's tests of `notes/note-records#A4` assert that they are unchanged |
 | `add-filtered-deck` | `Pair`; filtered deck `F` | `addNote` with `deckName: "F"` | error `cannot create note in filtered deck: F`, nothing written (Meguri, `ankiconnect-add-filtered-deck`) |
 | `dupe-scope` | `Pair`; decks `P`, `P::Q`, `R`; note `x` in `P::Q` | `canAddNotesWithErrorDetail` for `x` in `R` with: no options; `duplicateScope: "deck"`; `"deck"` + `deckName: "P"`; `"deck"` + `deckName: "P"`, `checkChildren: true`; `"deck"` + `deckName: "Nope"`, `checkChildren: true` | `[{"canAdd": false, "error": "cannot create note because it is a duplicate"}, {"canAdd": true}, {"canAdd": true}, {"canAdd": false, "error": "cannot create note because it is a duplicate"}, {"canAdd": true}]` |
 | | | the same with a second note type and `checkAllModels: true` | `false` without scope; `true` with `duplicateScope: "deck"` in `R` (A7.3's table) |
@@ -805,6 +825,10 @@ Every scenario that adds or updates a note (`notes/`, `models/create`, and `serv
 | `delete` | n1 | `deleteNotes {notes: [#n1, 5]}` | result null; card and note graves; a deleted-notes log line |
 | `preservation` | n1 whose `data` column and note type hold unknown values | `updateNoteFields` changing Gloss | `data` and the note type blob byte-identical (R1789) |
 
+Recorded 2026-11-17 (goldens match): `add-match`, `add-errors`, `add-no-card`, `add-defaults`, `dupe-scope`, `can-add-media`, `add-notes`, `update`, `info` rows 1 and 2, `delete`.
+
+The recorder cannot express `add-filtered-deck` (a filtered deck), `info`'s third row (a note with no card row) or `preservation` (unknown `data` and note type values). Transcript setup is `conformance/dsl` D6, which has neither filtered decks nor direct database writes, and no action that both sides serve makes these states. They wait for a transcript setup or step that writes the database (an oracle-maintainer change to `servers/transcripts` T5 or T7). Until then, Meguri's side of `ankiconnect-add-filtered-deck` and `ankiconnect-notesinfo-no-cards`, and R1789 for this server, are asserted only by Meguri's own tests from A7.2, A9.2 and A15.
+
 ### A20.4 `tags/`
 
 | Scenario | Setup | Request | Reply |
@@ -817,25 +841,55 @@ Every scenario that adds or updates a note (`notes/`, `models/create`, and `serv
 | `note-tags` | n1 ` a ` | `updateNoteTags {note: #n1, tags: "x y"}`; `getNoteTags {note: #n1}` | null; `["x", "y"]` |
 | | | `updateNoteTags {note: #n1, tags: 5}` | error `Must provide tags as a list of strings` |
 
+Recorded 2026-11-17: `add-remove`, `replace` and `note-tags` (source `oracle`); the three goldens match the rows as written.
+
 ### A20.5 `cards/`
+
+Every scenario here sets `config: {fsrs: true}` (A20).
 
 | Scenario | Setup | Request | Reply |
 |---|---|---|---|
-| `info` | a Pair note (`x`/`y`), card c1 new; a review card c2 with FSRS on | `cardsInfo {cards: [#c1, #c2, 7]}` | two objects (question `<style>.card{}</style>x`, answer `<style>.card{}</style>x<hr>y` for c1; `nextReviews` four labels) and `{}` |
-| `info-errors` | note type `Bad` whose question template fails to render (K4 template error; setup writes it to the database directly, whatever a save would accept); note type `Tex` (`{{Term}}` / `{{Term}}`) with a note whose Term is `[$]x[/$]` | `cardsInfo` on both cards | the D8 notice for `Bad` (Meguri, `ankiconnect-cardsinfo-template-error`); `Tex`'s question holds `[$]x[/$]` as stored and no media file is written (Meguri, `ankiconnect-cardsinfo-latex`) |
-| `suspend` | c1, c2 unsuspended; c3 suspended; c4 buried by the user | `suspend {cards: [#c3]}` | `false` |
+| `info` | two Pair notes in deck `A` (`x`/`y`, then `p`/`q`) | `setDueDate {cards: [#c2], days: "3"}` | `true`; c2 becomes type 2, queue 2, `due` 3, `interval` 0, `factor` 2500 |
+| | | `cardsInfo {cards: [#c1, #c2, 7]}` | two objects (question `<style>.card{}</style>x`, answer `<style>.card{}</style>x<hr>y` for c1; `nextReviews` `["<1m", "<6m", "<10m", "9d"]` for c1 and `["<10m", "1d", "2d", "9d"]` for c2, after `servers/transcripts` T10.3) and `{}` for 7 |
+| `info-errors` | note type `Bad` with fields `Term`, `Gloss`, question `{{Term}}{{#FrontSide}}z{{/FrontSide}}` and answer `{{Gloss}}`; note type `Tex` (`{{Term}}` / `{{Term}}`); one note of each, `Tex`'s Term `[$]x[/$]` | `cardsInfo {cards: [#c1, #c2]}`; then `media_dir` | below |
+| `suspend` | three Pair notes (c1 to c3) | `suspend {cards: [#c3]}` | `true`; c3 suspended |
+| | | `suspend {cards: [#c3]}` | `false` |
 | | | `suspend {cards: [#c1, #c2]}` | `true`; both suspended |
 | | | `areSuspended {cards: [#c1, #c3, 7]}` | `[true, true, null]` |
 | | | `unsuspend {cards: [#c1]}` | `null`; c1 restored |
-| | | `unsuspend {cards: [#c1, #c4, #c2]}` | `null`; c2 restored; c4 still buried (Meguri, `ankiconnect-unsuspend-buried`; the golden restores c4 too, A12.2) |
-| | | `suspend {cards: [#c3, 7]}` | error `Card was not found: 7`; nothing written (Meguri, `ankiconnect-suspend-unknown-card`) |
+| | | `unsuspend {cards: [#c1, #c2]}` (c1 unsuspended, c2 suspended) | `null`; c2 restored |
+| | | `suspend {cards: [#c3, 7]}` | error `Card was not found: 7`; nothing written (Meguri, `ankiconnect-suspend-unknown-card`; the golden gives `true` and writes nothing; pointer `/steps/7/reply/body/json`) |
 | | | `suspended {card: 7}` | error `Card was not found: 7` |
-| `intervals` | c1 new; c2 with rows ivl −600, 1, 4; c3 learning with one row ivl −1800 dated now − 3600 s | `getIntervals {cards: [#c1, #c2, #c3]}`; `{cards: [#c2], complete: true}` | `[0, 4, -1800]`; `[[-600, 1, 4]]` |
-| | | `areDue {cards: [#c1, #c3]}` | `[true, true]` |
-| `reschedule` | the same collection twice, one replayed through the API, one through the UI ops | `forgetCards {cards: [#c2]}` / the UI's Reset on c2 with "Restore original position" on and "Reset repetition and lapse counts" off; `setDueDate {cards: [#c2], days: "3-7"}` / UI Set Due Date `3-7` | card and review-log rows equal; `"1!"` resets the interval as S4 says |
-| | | `forgetCards {cards: [#c2, #c2]}` | rows as for `[#c2]` (Meguri, `ankiconnect-repeated-ids`) |
-| | | `setDueDate {cards: [#c2], days: "abc"}` | error `invalid days value: abc`, nothing written (Meguri, `ankiconnect-error-text`) |
-| `to-notes` | A11.6's rows | `cardsToNotes` | A11.6's result |
+| | | `suspended {card: #c3}` | `true` |
+| `intervals` | three Pair notes (c1 to c3) | `setDueDate {cards: [#c2], days: "1"}`, then `days: "4"`; `setDueDate {cards: [#c3], days: "0"}` | `true` each; c2 has two type-4 rows of `ivl` 0; c3 is type 2, queue 2, `due` today |
+| | | `getIntervals {cards: [#c1, #c2, #c3]}`; `{cards: [#c2], complete: true}` | `[0, 0, 0]`; `[[0, 0]]` |
+| | | `areDue {cards: [#c1, #c2, #c3]}` | `[true, false, true]` |
+| | | `getIntervals {cards: [7]}`; `{cards: [7], complete: true}`; `areDue {cards: [7]}` | error `list index out of range`; `[[]]`; error `list index out of range` |
+| | | `forgetCards {cards: [#c2]}`; then `getIntervals {cards: [#c2]}`, `{cards: [#c2], complete: true}`, `areDue {cards: [#c2]}` | `null`; `[0]`; `[0]`; `[true]` |
+| `reschedule` | two Pair notes | `setDueDate {cards: [#c2], days: "3"}` | `true`; c2 type 2, `due` 3, `factor` 2500, one type-4 row |
+| | | `forgetCards {cards: [#c2]}` | `null`; `due` back to position 2, a type-4 row with `factor` 0 |
+| | | `setDueDate {cards: [#c2], days: "5"}`, then `days: "1!"` | `true`; `true`; `ivl` stays 0, because `!` changes nothing with FSRS on (`sched/set-due-date` S4.2) |
+| | | `setDueDate {cards: [#c2], days: "abc"}` | error `invalid days value: abc`, nothing written (Meguri, `ankiconnect-error-text`; the golden's error is `abc`; pointer `/steps/7/reply/body/json/error`) |
+| | | `setDueDate {cards: [7], days: "1"}`; `forgetCards {cards: [7]}` | `true`; `null`; nothing written |
+| `repeated-ids` | two Pair notes | `setDueDate {cards: [#c2], days: "3"}` | `true` |
+| | | `forgetCards {cards: [#c2, #c2]}` | `null`; rows as for `[#c2]` (Meguri, `ankiconnect-repeated-ids`; the golden writes two Reset rows) |
+| | | `setDueDate {cards: [#c2, #c2], days: "1"}` | `true`; c2 due 1 as for `[#c2]` (Meguri, `ankiconnect-repeated-ids`; the golden is a database error that writes nothing) |
+| `to-notes` | note type `Both`: fields `Term`, `Gloss`, two templates, the second with front `{{Gloss}}`; n1 (`Both`) added with Gloss empty (card c1 only); Pair note n2 owns c2 | `updateNoteFields {note: {id: #n1, fields: {Gloss: "b1"}}}` | `null`; c3 generated for n1 (`notes/note-records#U1`), so c1 (n1) < c2 (n2) < c3 (n1) |
+| | | `cardsToNotes {cards: [#c3, #c2]}` | `[#n2, #n1]` (n2's smallest listed card c2 < n1's c3; ascending note id or list order would give `[#n1, #n2]`) |
+| | | `{cards: [#c3, #c1, #c2]}` | `[#n1, #n2]` |
+| | | `{cards: [#c2, 7]}` | `[#n2]` |
+| | | `{cards: [#c3, #c3]}` | `[#n1]` |
+| | | `{cards: []}` | `[]` |
+
+`info-errors`: a checked save accepts `Bad` (FrontSide is a special field name, `notetypes/validation#V3` rule 2.3), and its render fails because FrontSide is not in the field map (`render/special-fields` P4: `unknown_conditional`), so no direct database write is needed. In the golden, `question` and `answer` of the `Bad` card are each `<style></style>` followed by Anki's template error text, which links to its docs; Meguri gives its D8 notice after `<style></style>` (Meguri, `ankiconnect-cardsinfo-template-error`). For `Tex`, the golden's question and answer are each the CSS prefix, a LaTeX image tag naming a `latex-<40 hex>.png` file, and Anki's text saying that LaTeX generation is disabled; Meguri's are `<style>.card{}</style>[$]x[/$]` as stored (Meguri, `ankiconnect-cardsinfo-latex`). `media_dir` is empty on both sides. The deviation pointers are `/steps/0/reply/body/json/result/0/question`, `.../0/answer`, `.../1/question` and `.../1/answer`.
+
+The `reschedule` dumps after each write compare without deviations. A11.6's prose and example stay as written; the `to-notes` golden confirms them.
+
+Recorded 2026-11-17: `info`, `info-errors`, `suspend`, `intervals` (FSRS-on `setDueDate` rows only), `reschedule`, `repeated-ids` and `to-notes`. Three parts cannot be recorded in a transcript yet:
+
+- A card buried by the user: no action Meguri answers buries a card, so `ankiconnect-unsuspend-buried` needs another scenario (a declared transcript, or recorder support for `conformance/dsl` D6.6 card setup).
+- Learning rows in `intervals` (`ivl` −600, and −1800 back-dated): the recorder has no D6.7, and Meguri refuses `insertReviews` and `answerCards`. Until the recorder supports review-log setup, A12.4's below −1200 branch and the latest-row reading of A12.5 have only their A12 tables as evidence.
+- The comparison of `forgetCards` and `setDueDate` with the UI's Reset and Set Due Date on the same collection (A13): a transcript runs no DSL ops, so it belongs in a `conformance/dsl` sched-ops scenario (`conformance/sched-ops`). It uses fixed day texts, because the two executors draw a range's day differently.
 
 ### A20.6 `search/`
 
@@ -844,15 +898,21 @@ Every scenario that adds or updates a note (`notes/`, `models/create`, and `serv
 | `folding` | a note `Über` | `findNotes {query: "über"}` | `[#n1]` (declared U136 deviation R1777; the golden is `[]`: the add-on finds `Über` neither with `über` nor with `Term:über`, observed) |
 | `current` | decks `A`, `B`, `curDeck` = `B`, cards in both | `findCards {query: "deck:current"}` | the cards of `B`, ascending |
 | `error` | any | `findNotes {query: "("}` | error: E7's `unclosed_group` text |
-| `empty` | 3 notes | `findNotes {query: ""}`; `findNotes {}` | all 3 ascending; `[]` |
+| `empty` | 3 notes | `findNotes {query: ""}`; `findNotes {}` | all 3 ascending (Meguri, `ankiconnect-search-order`; the golden is `[#n1, #n3, #n2]`); `[]` |
 | `notes-info-query` | 2 notes | `notesInfo {query: "Term:x"}` | the matching note's object |
+
+Recorded 2026-11-17: all five rows; each golden matches the row and the A18 entries it names.
 
 ### A20.7 `stats/`
 
 | Scenario | Setup | Request | Reply |
 |---|---|---|---|
-| `by-day-rollover` | zone Europe/Paris, rollover 4, rows at 03:59 and 04:01 local on one date, one type 4 row | `getNumCardsReviewedByDay` | two dates, newest first, the type 4 row left out |
-| `today` | rows at S − 1, S, S + 1 ms, one type 5 row in the window | `getNumCardsReviewedToday` | 1 |
+| `by-day-rollover` | zone Europe/Paris, rollover 4, clock 2030-01-15 03:59; `setDueDate {cards: [#c1], days: "1"}`, `advance 2m`, `setDueDate {cards: [#c2], days: "1"}` (type 4 rows at 03:59 and 04:01 local: no action Meguri serves writes rows of other types) | `getNumCardsReviewedByDay` | `[]` (Meguri, `ankiconnect-review-counts-exclusions`; the golden is `[["2030-01-15", 1], ["2030-01-14", 1]]`) |
+| `by-day-rollover-counted` (declared) | zone Europe/Paris, rollover 4, setup review-log rows (`conformance/dsl` D6.7) of type 1 at 03:59 and 04:01 local on 2030-01-15 and one of type 4 at 04:02 | `getNumCardsReviewedByDay` | `[["2030-01-15", 1], ["2030-01-14", 1]]`: two dates, newest first, the type 4 row left out |
+| `today` | zone Europe/Paris, rollover 4, clock 2030-01-15 03:59:59; `setDueDate` on `#c1`, `#c2`, `#c3` with `advance 1s` between them (type 4 rows at S − 1 s, S and S + 1 s, S the day start 04:00:00) | `getNumCardsReviewedToday` | `0` (Meguri, `ankiconnect-review-counts-exclusions`; the golden is `1`: the row at S is outside the window) |
+| `today-counted` (declared) | zone Europe/Paris, rollover 4, setup review-log rows of type 1 at S − 1, S and S + 1 ms, and one of type 5 inside the window | `getNumCardsReviewedToday` | 1 |
+
+Recorded 2026-11-17: `by-day-rollover` and `today`, with type 4 `setDueDate` rows. The declared `by-day-rollover-counted` and `today-counted` keep the counted-row assertions; their `revlog` setup is `conformance/dsl` D6.7, a draft.
 
 ### A20.8 `clients/`
 

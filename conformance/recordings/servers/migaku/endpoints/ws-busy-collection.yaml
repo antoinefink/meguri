@@ -1,0 +1,25 @@
+# servers/migaku-protocol P16 `ws-busy-collection`.
+# The upgrade does not need the collection: it succeeds during an exclusive
+# phase, within P7's 200 ms (P7, P10.1). EXT is the invented extension origin of P16.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/ws-busy-collection
+description: "a WebSocket upgrade succeeds during an exclusive phase"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - lifecycle: exclusive
+  - ws_open:
+      name: a
+      target: /anki-connect
+      headers: [[Origin, "chrome-extension://abcdefghijklmnopabcdefghijklmnop"]]
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+      within_ms: 200

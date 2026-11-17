@@ -1,0 +1,212 @@
+# servers/migaku-protocol P16 `origins-refused`.
+# Every origin outside P3.1's rules is refused with 403, an empty body and no
+# CORS header (P2 step 2, P3.1, P6): other web origins, null in any case, an empty
+# value, look-alike hosts, http, a port, an empty or malformed extension identifier,
+# localhost and loopback. Two Origin headers are refused even when each is allowed.
+# EXT is the invented extension origin of P16.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/origins-refused
+description: "refused origins get 403 with no CORS header"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://evil.example"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "null"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "NULL"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, ""]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "http://migaku.com.evil.example"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://migaku.com.evil.example"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "http://app.migaku.com"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://app.migaku.com:8443"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://evilmigaku.com"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "chrome-extension://"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "chrome-extension://abc/"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "http://localhost"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "http://127.0.0.1:44432"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
+        - [Origin, "chrome-extension://abcdefghijklmnopabcdefghijklmnop"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}

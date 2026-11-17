@@ -1,0 +1,18 @@
+# servers/ankiconnect-envelope E19.3 `multi/sub-bad-version`: a sub-action with a non-integer version is refused before it runs (E11 row 1, E18).
+# Meguri's own behavior (declared, servers/transcripts T13). Default settings
+# unless given, fresh collection (deck Default only), no Origin, so
+# Access-Control-Allow-Origin is * (E7.3); all values are synthetic.
+id: servers/ankiconnect/multi/sub-bad-version
+description: 'createDeck A with version "6" inside multi; no deck A'
+tags: [multi]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: multi, params: {actions: [{action: createDeck, version: "6", params: {deck: A}}]}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: [{result: null, error: "invalid request: \"version\" must be an integer"}]}
+      no_effect: true

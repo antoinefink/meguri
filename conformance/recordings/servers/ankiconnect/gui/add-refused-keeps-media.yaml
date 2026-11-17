@@ -1,0 +1,47 @@
+# specs/servers/ankiconnect-gui G12 `add-refused-keeps-media` (G6 core work step 3, G2 rule 4).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3).
+# The refused answer stands for an unsaved deck-options sheet. The picture (conformance/fixtures/servers/ankiconnect/pixel.png,
+# inlined) is stored before the interaction and stays: retrieveMediaFile reads it back.
+id: servers/ankiconnect/gui/add-refused-keeps-media
+description: "a refused guiAddCards keeps its stored picture"
+tags: [gui]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {activeCols: [noteFld, template, cardDue, deck, noteCrt]}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}}
+    - {notetype: Pair, deck: Default, fields: {Front: gamma, Back: third}}
+steps:
+  - interaction: {kind: GuiAddCards, answer: refused}
+  - http:
+      body:
+        json:
+          action: guiAddCards
+          version: 6
+          params:
+            note:
+              deckName: Lang
+              modelName: Pair
+              fields: {Front: delta, Back: fourth}
+              picture: {data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mNgAAAAAgAB5Sfe/AAAAABJRU5ErkJggg==", filename: shot.png, fields: [Back]}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "cannot navigate: close the open sheet first"}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: shot.png}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mNgAAAAAgAB5Sfe/AAAAABJRU5ErkJggg==", error: null}}

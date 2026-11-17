@@ -1,0 +1,34 @@
+# specs/servers/ankiconnect-media X14 `media/attach-notes` (X10.2 step 3,
+# servers/ankiconnect-actions A7.6): addNotes whose second note's attachment
+# fails with no fields. A = 61 0a. All values are synthetic.
+id: servers/ankiconnect/media/attach-notes
+description: addNotes with a good attachment, then a failing attachment without fields
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body:
+        json:
+          action: addNotes
+          version: 6
+          params:
+            notes:
+              - deckName: D
+                modelName: Pair
+                fields: {Term: one}
+                audio: {filename: a.mp3, data: "YQo=", fields: [Term]}
+              - deckName: D
+                modelName: Pair
+                fields: {Term: two}
+                audio: {filename: x.mp3, url: "ftp://h/x"}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

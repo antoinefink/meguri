@@ -1,0 +1,39 @@
+# servers/ankiconnect-actions A20.4 `add-remove` (A10): addTags splits the tag
+# text at separators, removeTags also removes children, getTags lists the
+# registry, clearUnusedTags drops rows no note uses. `advance` before each
+# write sets a changed note's `mod` apart from an untouched one's.
+# All values are synthetic.
+id: servers/ankiconnect/tags/add-remove
+description: addTags, removeTags with a parent, getTags before and after clearUnusedTags
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: D, fields: {Term: one, Gloss: first}, tags: [a]}
+    - {notetype: Pair, deck: D, fields: {Term: two, Gloss: second}, tags: ["b::c"]}
+steps:
+  - advance: 1m
+  - http:
+      body: {json: {action: addTags, version: 6, params: {notes: ["#n1", "#n2"], tags: "x  y"}}}
+  - observe: [{db_dump: {tables: [notes]}}]
+  - advance: 1m
+  - http:
+      body: {json: {action: removeTags, version: 6, params: {notes: ["#n2"], tags: "b"}}}
+  - observe: [{db_dump: {tables: [notes]}}]
+  - http:
+      body: {json: {action: getTags, version: 6}}
+  - advance: 1m
+  - http:
+      body: {json: {action: clearUnusedTags, version: 6}}
+  - http:
+      body: {json: {action: getTags, version: 6}}
+  - observe: [{db_dump: {tables: [notes, cards, tags]}}]

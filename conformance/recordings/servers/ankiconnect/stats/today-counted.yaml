@@ -1,0 +1,39 @@
+# specs/servers/ankiconnect-actions A14, A20.7 `today`, Meguri's side (R1774):
+# S is the start of the current day in ms, 2030-01-15 04:00:00 local
+# (Europe/Paris, rollover 4); the window is id > S (stats/day-buckets B2).
+# Counted rows at S - 1, S and S + 1 ms and a type 5 row inside the window
+# give 1. Declared: no action Meguri serves writes review-log rows of these
+# types, so the rows come from setup (conformance/dsl D6.7), which the recorder
+# does not run. The oracle side is today.
+id: servers/ankiconnect/stats/today-counted
+description: "getNumCardsReviewedToday counts after the day start and leaves type 5 out"
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, fields: {Term: one, Gloss: first}}
+    - {notetype: Pair, fields: {Term: two, Gloss: second}}
+    - {notetype: Pair, fields: {Term: three, Gloss: third}}
+  revlog:
+    # S - 1 ms
+    - {card: "#c1", id: 1894676399999, ease: 3, ivl: 1, lastIvl: 1, factor: 2500, time: 5000, type: 1}
+    # S
+    - {card: "#c2", id: 1894676400000, ease: 3, ivl: 1, lastIvl: 1, factor: 2500, time: 5000, type: 1}
+    # S + 1 ms
+    - {card: "#c3", id: 1894676400001, ease: 3, ivl: 1, lastIvl: 1, factor: 2500, time: 5000, type: 1}
+    # 2030-01-15 05:00:00 local, type 5 (rescheduled)
+    - {card: "#c1", id: 1894680000000, ease: 0, ivl: 2, lastIvl: 1, factor: 2500, time: 0, type: 5}
+steps:
+  - http:
+      body: {json: {action: getNumCardsReviewedToday, version: 6}}
+    expect:
+      status: 200
+      body: {json: {result: 1, error: null}}

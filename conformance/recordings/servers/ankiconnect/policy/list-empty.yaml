@@ -1,0 +1,13 @@
+# servers/ankiconnect-envelope E19.2 `policy/list-empty`: empty allow-list, extension origin.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/list-empty
+description: allow-list [] refuses an extension origin
+tags: [policy]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {cors_origins: []}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://abc"]]
+      body: {json: {action: deckNames, version: 6}}

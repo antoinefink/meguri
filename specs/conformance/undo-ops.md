@@ -58,7 +58,7 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 |---|---|---|
 | `add_deck` | Add Deck | |
 | `add_note` | Add Note | `add_note`, `setup.notes` |
-| `add_note_type` | Add Note Type | |
+| `add_note_type` | Add Note Type | `setup.notetypes` |
 | `answer_card` | Answer Card | `answer` (`sched/answering` A7) |
 | `build_deck` | Build Deck | (building or rebuilding a filtered deck) |
 | `bury` | Bury | `bury` (`sched-ops.md` J2) |
@@ -101,7 +101,7 @@ Pending Meguri-only row: U140 adds `move_received_card` | Move Received Card (a 
 
 ## V5. Writing undo scenarios
 
-- **Start from an empty history.** What the undo history holds after `setup` is not part of the language: Anki records the setup's note additions as "Add Note" steps, and Meguri's executor need not. An undo scenario runs a `db_exec` whose statement does not begin with `select` before its first `undo`, `redo` or `undo_status`; `record-ops.md` W1 empties both histories after such a statement on both executors. A statement that changes nothing does (`UPDATE notes SET usn = usn WHERE 0`), and so does one the scenario needs anyway (a server `usn`).
+- **Start from an empty history.** What the undo history holds after `setup` is not part of the language: Anki records the setup's note type additions as "Add Note Type" steps and its note additions as "Add Note" steps, and Meguri's executor need not. An undo scenario runs a `db_exec` whose statement does not begin with `select` before its first `undo`, `redo` or `undo_status`; `record-ops.md` W1 empties both histories after such a statement on both executors. A statement that changes nothing does (`UPDATE notes SET usn = usn WHERE 0`), and so does one the scenario needs anyway (a server `usn`).
 - **Steps that empty Anki's history.** Besides such a `db_exec`, the oracle closes and opens the collection for `reopen`, `handoff`, `legacy_update` and the observations `legacy_json` and `blob_decode`, and runs `check_db` without an undo record: each empties both histories in Anki. Keep them out of the stretch between a step and its undo unless that is what the scenario shows.
 - **The clock matters.** Two note edits less than 60 seconds apart can merge into one step (`engine/undo` A3): `advance` at least `1m` between edits that must stay separate steps.
 - **One scheduler day.** Keep a step and its undo in the same scheduler day: Meguri empties the history at rollover, Anki only when it next builds its study queues.
@@ -111,4 +111,4 @@ Pending Meguri-only row: U140 adds `move_received_card` | Move Received Card (a 
 
 - The oracle driver implements `undo`, `redo`, `remove_config`, `set_config`'s `undoable` and `undo_status` with U25's oracle-maintainer work, together with `protocol.json` and the testkit's scenario model; until then the undo scenarios have no goldens.
 - Meguri's executor implements `undo`, `redo` and `undo_status` in its undo adapter (`core/crates/meguri-testkit/src/exec/undo.rs`), and `undoable` and `remove_config` beside `set_config`, once the conformance session runs ops through the engine (U38's `CoreHost::open`). Until then the undo scenarios are `pending` (`dsl.md` D10), and so is any that needs another area's adapter (`edit_note` and `delete_notes`: U27; `answer`: U44) or the new collection that every undo scenario starts from (`dsl.md` D8, U28).
-- The AnkiConnect recorder runs `undo_status` in its `observe` step (`servers/transcripts` T7.1) on Anki's running collection; the reference recordings of `conformance/recordings/servers/ankiconnect/undo/` use it to record Anki's history before and after each AnkiConnect write (`servers/api-undo-history` Y4, Y5). An add-on step name with no V4 id fails them (V2).
+- The AnkiConnect recorder runs `undo_status` in its `observe` step (`servers/transcripts` T7.1) on Anki's running collection; the reference recordings of `conformance/recordings/servers/ankiconnect/undo/` use it to record Anki's history before and after each AnkiConnect write (`servers/api-undo-history` Y4, Y5). All 31 are recorded, and each golden's first `undo_status` is the setup's last step: `add_note_type` where the setup adds no notes, `add_note` otherwise. An add-on step name with no V4 id fails them (V2).

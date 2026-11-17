@@ -1,0 +1,26 @@
+# servers/host-security H17 `host-websocket` (declared, servers/transcripts T13):
+# a WebSocket upgrade with a refused Host gets the same 403 and no 101 (H6.2).
+# This file relies on the T7.3 `ws_open` sentence proposed with it: `ws_open` sends
+# Upgrade: websocket, Connection: Upgrade, Sec-WebSocket-Version: 13 and a
+# Sec-WebSocket-Key, and the T6.2 Host rule applies (a listed Host replaces the default),
+# so the request is a valid upgrade whose only fault is its single Host value.
+id: servers/host/host-websocket
+description: "WebSocket upgrade refused by the Host check"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [migaku]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:44432", "[::1]:44432"]}, within_ms: 1000, server: migaku}
+  - ws_open: {name: w, server: migaku, target: /anki-connect, headers: [[Host, "evil.example:44432"]]}
+    expect:
+      status: 403
+      headers: {content-length: "0", connection: close, content-type: null, access-control-allow-origin: null, access-control-allow-headers: null, access-control-allow-methods: null, access-control-allow-private-network: null}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, method: GET, target: /srs-check}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {ok: true, version: "4"}}

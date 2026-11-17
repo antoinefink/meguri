@@ -1,0 +1,24 @@
+# servers/host-security H17 `port-in-use-wildcard-holder` (declared, servers/transcripts T13):
+# another process listens on the wildcard address of 44432 (as Anki's Migaku add-on does): the
+# probe connects, so Meguri binds nothing and never takes its connections (H4.2). The helper
+# accepts the probe's connection and the `open`'s: 2 (H17 says 1; see the correction proposed
+# with this scenario). `expect: {output: ...}` on a step without a reply is the T13 form
+# proposed with this scenario (T13 lists no check for T7.3 outputs yet).
+id: servers/host/port-in-use-wildcard-holder
+description: "wildcard holder of 44432: port_in_use, connections still reach the holder"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - helper: {listen: "0.0.0.0:44432"}
+  - apply_config: {migaku: {enabled: true}}
+  - status: {until: {state: port_in_use, port: 44432, addresses: []}, within_ms: 1000, server: migaku}
+  - sockets: {}
+    expect: {output: {sockets: []}}
+  - open: {name: h, server: migaku, address: ipv4}
+    expect: {outcome: open}
+  - helper: {accepted: "0.0.0.0:44432"}
+    expect: {output: {accepted: 2}}
+  - http: {server: migaku, method: GET, target: /srs-check, address: ipv6}
+    expect: {outcome: refused}

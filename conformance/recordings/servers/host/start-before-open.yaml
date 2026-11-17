@@ -1,0 +1,23 @@
+# servers/host-security H17 `start-before-open` (declared, servers/transcripts T13):
+# no socket before the first open attempt of the process ends; then listening (H3, R1666).
+# `expect: {output: ...}` on a step without a reply is the T13 form proposed with this
+# scenario (T13 lists no check for T7.3 outputs yet).
+id: servers/host/start-before-open
+description: "no socket until the first open attempt ends"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+host_env: {start: before_open}
+steps:
+  - status: {until: {state: waiting_for_collection, addresses: []}, within_ms: 1000, server: ankiconnect}
+  - sockets: {}
+    expect: {output: {sockets: []}}
+  - lifecycle: open
+  - status: {until: {state: listening}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}

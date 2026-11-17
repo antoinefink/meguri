@@ -1,0 +1,27 @@
+# servers/migaku-protocol P16 `origins-refused-preflight`.
+# The origin check runs before preflight: a disallowed OPTIONS gets 403
+# (P2 steps 2 and 3).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/origins-refused-preflight
+description: "a preflight from a refused origin gets 403"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: OPTIONS
+      target: /receive
+      headers:
+        - [Origin, "https://evil.example"]
+        - [Access-Control-Request-Method, POST]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}

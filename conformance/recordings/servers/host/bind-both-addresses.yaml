@@ -1,0 +1,21 @@
+# servers/host-security H17 `bind-both-addresses` (declared, servers/transcripts T13):
+# the AnkiConnect server listens on 127.0.0.1 and [::1] (H4.1, H12).
+id: servers/host/bind-both-addresses
+description: "both loopback addresses bound, a ping on each"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, address: ipv4}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+  - http: {server: ankiconnect, address: ipv6}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}

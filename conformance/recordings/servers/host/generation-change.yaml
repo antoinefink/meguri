@@ -1,0 +1,17 @@
+# servers/host-security H17 `generation-change` (declared, servers/transcripts T13):
+# after a collection replacement, the next request works on the new collection (H9.1).
+id: servers/host/generation-change
+description: "requests after a replacement see the new collection"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - lifecycle: {replace: {decks: [Other]}}
+  - http: {server: ankiconnect, body: {json: {action: deckNames, version: 6}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: [Default, Other], error: null}}

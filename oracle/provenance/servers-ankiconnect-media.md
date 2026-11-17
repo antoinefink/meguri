@@ -113,3 +113,16 @@ these requests, reading the media folder directly after each:
 The script and its output stayed in the session scratchpad (no private
 data). Every request is listed above, so a reviewer can re-run it against
 the same image. The X16 rows marked "(re-probe)" state the replies.
+
+## Transcript recordings (2026-11-17)
+
+Session s-20261117T160047Z-35f65b90 (spec writer, servers transcripts).
+Pins: Anki tag 26.09.3 (`refs/anki-26.09.3`) and the AnkiConnect add-on build
+pinned in `oracle/ankiconnect/ADDON_PIN` (tag 25.11.9.0, commit `532a3c8`,
+build 2025-11-09), installed as `addons21/2055492159` in the recorder image
+`meguri-oracle-ankiconnect:recorder`. No code was copied into a spec or a
+scenario.
+
+| Subject | Sources | Read for |
+|---|---|---|
+| X14 recorded replies (store, read, names, delete, dir, attachments, path), the `deleteMediaFile ""` folder move, and its os error 2 reply when the media database is in step with the folder | Oracle recordings: `conformance/recordings/servers/ankiconnect/media/*.json` (AnkiConnect 25.11.9.0 in Anki 26.9.3, image `meguri-oracle-ankiconnect:recorder`, recorded 2026-11-17, twice and byte-identical; `read` and `delete-names` re-recorded twice after the review fix), plus one unkept by-hand run of the first `delete-names` version. Anki source at the pin `refs/anki-26.09.3`: `rslib/src/media/mod.rs` (`MediaManager::remove_files` and `transact`) and `rslib/src/media/files.rs` (`remove_files`, `trash_folder`). No AnkiConnect source was read. | Checking X14/X16 statements against goldens, and explaining why `deleteMediaFile ""` replies `null` without a prior registration and `No such file or directory (os error 2)` with one. |

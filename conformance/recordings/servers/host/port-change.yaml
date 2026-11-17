@@ -1,0 +1,23 @@
+# servers/host-security H17 `port-change` (declared, servers/transcripts T13):
+# a new ankiconnect.port takes effect at the apply: 8765 is released, 8766 is bound (H4.4).
+# `open` has no port member, so the release of 8765 is checked through the status addresses
+# and `sockets` (H5, H12). `expect: {output: ...}` on a step without a reply is the T13 form
+# proposed with this scenario (T13 lists no check for T7.3 outputs yet).
+id: servers/host/port-change
+description: "port 8765 to 8766 at the apply"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - apply_config: {ankiconnect: {port: 8766}}
+  - status: {until: {state: listening, port: 8766, addresses: ["127.0.0.1:8766", "[::1]:8766"]}, within_ms: 1000, server: ankiconnect}
+  - sockets: {}
+    expect: {output: {sockets: ["127.0.0.1:8766", "[::1]:8766"]}}
+  - http: {server: ankiconnect, headers: [[Host, "127.0.0.1:8766"]]}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}

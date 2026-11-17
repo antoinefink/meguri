@@ -1,0 +1,114 @@
+# specs/servers/ankiconnect-actions A20.3 `add-errors` (A7.1 to A7.4, A18
+# `ankiconnect-note-member-types`), one step per row in the table's order.
+# Steps 8, 9 and 11: the golden records the add-on's outcome; Meguri's is the
+# A18 entry's. Step 10's runtime text is compared by shape.
+id: servers/ankiconnect/notes/add-errors
+description: addNote errors, their order, duplicates and options
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+    - name: Gap
+      kind: cloze
+      fields: [Body, Aside]
+      templates:
+        - {name: Cloze, front: "{{cloze:Body}}", back: "{{cloze:Body}}<br>{{Aside}}"}
+steps:
+  # 0: unknown note type
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Nope, fields: {Term: "x"}}}
+  # 1: unknown note type and no fields: the note type error comes first (A7.2)
+  - http:
+      body: {json: {action: addNote, version: 6, params: {note: {deckName: D, modelName: Nope}}}}
+  # 2: unknown deck
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: Nope, modelName: Pair, fields: {Term: "x"}}}
+  # 3: empty first field
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Pair, fields: {Term: "", Gloss: "y"}}}
+  # 4, 5: the same note twice; the second is a duplicate
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Pair, fields: {Term: "x"}}}
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Pair, fields: {Term: "x"}}}
+  # 6: the duplicate allowed
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note: {deckName: D, modelName: Pair, fields: {Term: "x"}, options: {allowDuplicate: true}}
+  # 7: allowDuplicate of another type; the option error comes before the duplicate check
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note: {deckName: D, modelName: Pair, fields: {Term: "x"}, options: {allowDuplicate: "yes"}}
+  # 8: tags as a string
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Pair, fields: {Term: "t1"}, tags: "pq rs"}}
+  # 9: options a string naming no member
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Pair, fields: {Term: "t2"}, options: "xyz"}}
+  # 10: options a number
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Pair, fields: {Term: "t3"}, options: 5}}
+  # 11: duplicateScopeOptions null
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note: {deckName: D, modelName: Pair, fields: {Term: "t4"}, options: {duplicateScopeOptions: null}}
+  # 12: a cloze note type with no cloze in its text
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params: {note: {deckName: D, modelName: Gap, fields: {Body: "no cloze"}}}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

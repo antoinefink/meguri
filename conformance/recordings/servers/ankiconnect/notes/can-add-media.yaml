@@ -1,0 +1,30 @@
+# specs/servers/ankiconnect-actions A20.3 `can-add-media` (A7.7, A18
+# `ankiconnect-canadd-no-media`): canAddNote with a data attachment. The golden
+# shows whether the add-on stored the file; Meguri stores nothing.
+id: servers/ankiconnect/notes/can-add-media
+description: canAddNote with an audio data attachment
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body:
+        json:
+          action: canAddNote
+          version: 6
+          params:
+            note:
+              deckName: D
+              modelName: Pair
+              fields: {Term: "x", Gloss: "y"}
+              audio: {filename: a.mp3, data: "YQo=", fields: [Term]}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

@@ -1,0 +1,53 @@
+# servers/migaku-protocol P16 `srs-import-routes`.
+# The three import routes answer 501; a body is read and ignored, and nothing
+# in the collection or the media folder changes (P11). No Origin, so Access-Control-Allow-Origin is * and no Vary (P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/srs-import-routes
+description: "the Migaku Memory import routes answer 501"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      method: GET
+      target: /srs-import-info
+    expect:
+      status: 501
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {success: false, error: "Importing into Migaku Memory is not supported by Meguri."}}
+      no_effect: true
+  - http:
+      method: POST
+      target: /srs-sample-card
+      body: {json: {}}
+    expect:
+      status: 501
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {success: false, error: "Importing into Migaku Memory is not supported by Meguri."}}
+      no_effect: true
+  - http:
+      method: POST
+      target: /srs-import
+      body: {json: {decks: [1]}}
+    expect:
+      status: 501
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {success: false, error: "Importing into Migaku Memory is not supported by Meguri."}}
+      no_effect: true

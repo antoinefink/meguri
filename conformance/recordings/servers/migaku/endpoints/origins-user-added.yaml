@@ -1,0 +1,71 @@
+# servers/migaku-protocol P16 `origins-user-added`.
+# An extra origin matches exactly apart from ASCII case; an explicit port or a
+# trailing / does not match (P3.1 user-added, P3.2). Each allowed reply echoes its own
+# value (P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/origins-user-added
+description: "user-added origins match apart from ASCII case only"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config:
+  extra_origins: ["https://example.org"]
+steps:
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://example.org"]
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "https://example.org"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+      body: {json: {ok: true, version: "4"}}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://EXAMPLE.org"]
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "https://EXAMPLE.org"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: Origin
+      body: {json: {ok: true, version: "4"}}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://example.org:443"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}
+  - http:
+      method: GET
+      target: /srs-check
+      headers:
+        - [Origin, "https://example.org/"]
+    expect:
+      status: 403
+      headers:
+        access-control-allow-origin: null
+        access-control-allow-headers: null
+        access-control-allow-methods: null
+        access-control-allow-private-network: null
+        vary: null
+      body: {empty: true}

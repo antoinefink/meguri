@@ -1,0 +1,19 @@
+# servers/host-security H17 `keepalive-idle-before-first` (declared, servers/transcripts T13):
+# a connection that sends nothing is closed about 5 s after accept, with no reply (H7.3). The
+# ping is the exchange T3 requires.
+id: servers/host/keepalive-idle-before-first
+description: "silent connection closed after 5 s"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - open: {name: c, server: ankiconnect}
+    expect: {outcome: closed_without_reply, not_before_ms: 4500, within_ms: 6000}
+  - http: {server: ankiconnect}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}

@@ -1,0 +1,17 @@
+# servers/ankiconnect-actions A20.1 name-from-id (A5.7), with the id 0 that
+# A5.7 also names. Synthetic content only.
+id: servers/ankiconnect/decks/name-from-id
+description: deckNameFromId; an id with no deck gives the default deck's name
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [A]
+steps:
+  - http:
+      body: {json: {action: deckNameFromId, version: 6, params: {deckId: "#d1"}}}
+  - http:
+      body: {json: {action: deckNameFromId, version: 6, params: {deckId: 12345}}}
+  - http:
+      body: {json: {action: deckNameFromId, version: 6, params: {deckId: 0}}}

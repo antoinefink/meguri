@@ -1,0 +1,18 @@
+# servers/ankiconnect-envelope E19.2 `policy/busy-non-collection`: an action that needs no collection during an exclusive phase (E14, E12).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# The scenario clock does not move before the reply, so a version held for the collection would never be answered.
+id: servers/ankiconnect/policy/busy-non-collection
+description: version v6 is answered at once while the collection is exclusive
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - lifecycle: exclusive
+  - http:
+      body: {json: {action: version, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: 6, error: null}}
+  - lifecycle: ready

@@ -1,0 +1,54 @@
+# specs/servers/ankiconnect-media X14 `media/attach-fail`: X10.2's rows 3, 4
+# and 6, each on its own Term so that none is a duplicate of another. Row 3's
+# appended text: Meguri's (`ankiconnect-media-error-text`); row 6's file left in
+# media: the add-on's (`ankiconnect-failed-add-media`). A = 61 0a. All values
+# are synthetic.
+id: servers/ankiconnect/media/attach-fail
+description: addNote whose attachment fails with fields, without fields, and with a list entry in fields
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note:
+              deckName: D
+              modelName: Pair
+              fields: {Term: word}
+              audio: {filename: x.mp3, url: "ftp://h/x", fields: [Gloss]}
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note:
+              deckName: D
+              modelName: Pair
+              fields: {Term: word4}
+              audio: {filename: x.mp3, url: "ftp://h/x"}
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note:
+              deckName: D
+              modelName: Pair
+              fields: {Term: word6}
+              audio: {filename: x.mp3, data: "YQo=", fields: [Gloss, [x]]}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

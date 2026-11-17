@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 version-big-digits: a long digit string is an integer of 5 or more (E4.1); sent as text so the digits are exact.
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/version-big-digits
+description: "version 99999999999999999999999"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {text: '{"action":"version","version":99999999999999999999999}'}

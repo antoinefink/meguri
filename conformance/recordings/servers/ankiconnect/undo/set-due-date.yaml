@@ -1,0 +1,30 @@
+# servers/api-undo-history Y4 `set-due-date` (Y5 reads it). No Origin, version 6.
+# Baseline undo_status, then each write and undo_status with its rows.
+# FSRS is on, as Meguri always runs it (sched/set-due-date S1, R702), as in
+# cards/reschedule; the baseline is still the last setup note's step.
+# All values are synthetic.
+id: servers/ankiconnect/undo/set-due-date
+description: setDueDate the first card to 1 day, undo history before and after
+tags: [undo-reference, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Lang, Other, Spare]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}, tags: [old]}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}, tags: [old, spare]}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - observe: [undo_status]
+  - http:
+      body: {json: {action: setDueDate, version: 6, params: {cards: ["#c1"], days: "1"}}}
+  - observe: [undo_status, {db_dump: {tables: [cards]}}]

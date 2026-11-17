@@ -1,0 +1,21 @@
+# specs/servers/ankiconnect-actions A16, A20.6 `error`: a query with an
+# unclosed group. The golden records Anki's search error text; Meguri answers
+# search/errors E7's `unclosed_group` text (A18 ankiconnect-search-error-text).
+id: servers/ankiconnect/search/error
+description: "findNotes with an unclosed bracket"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, fields: {Term: one, Gloss: first}}
+steps:
+  - http:
+      body: {json: {action: findNotes, version: 6, params: {query: "("}}}

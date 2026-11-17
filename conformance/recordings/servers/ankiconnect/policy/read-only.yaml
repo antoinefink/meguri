@@ -1,0 +1,30 @@
+# servers/ankiconnect-envelope E19.2 `policy/read-only`: read-only mode (E13).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+id: servers/ankiconnect/policy/read-only
+description: a mutating action is refused and changes nothing; a read is served
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {read_only: true}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+steps:
+  - http:
+      body: {json: {action: addNote, version: 6, params: {note: {deckName: Default, modelName: Pair, fields: {Front: alpha, Back: first}}}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "Meguri: the API is in read-only mode"}}
+      no_effect: true
+  - http:
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: [Default], error: null}}

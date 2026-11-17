@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-allowed`: requestPermission from an allowed origin.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/permission-allowed
+description: requestPermission v6 from an extension origin, granted, no prompt
+tags: [policy]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      headers: [[Origin, "chrome-extension://abc"]]
+      body: {json: {action: requestPermission, version: 6}}

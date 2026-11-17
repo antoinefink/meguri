@@ -1,0 +1,21 @@
+# servers/ankiconnect-envelope E19.2 `policy/busy-short`: the collection exclusive for 3 s (E14, H9.2).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+id: servers/ankiconnect/policy/busy-short
+description: a collection action waits for a short exclusive phase, then runs
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - lifecycle: exclusive
+  - http:
+      body: {json: {action: deckNames, version: 6}}
+      async: d1
+  - wait: 1s
+  - advance: 3s
+  - lifecycle: ready
+  - await: d1
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: [Default], error: null}}

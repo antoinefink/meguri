@@ -1,0 +1,12 @@
+# servers/ankiconnect-envelope E19.2 `policy/key-missing`: a key set, none sent.
+# Fresh collection (deck Default only); all values are synthetic.
+id: servers/ankiconnect/policy/key-missing
+description: deckNames v6 without key while a key is set
+tags: [policy, no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {api_key: k1}
+steps:
+  - http:
+      body: {json: {action: deckNames, version: 6}}

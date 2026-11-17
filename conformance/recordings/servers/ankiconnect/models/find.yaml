@@ -1,0 +1,24 @@
+# servers/ankiconnect-actions A20.2 `find` (A6). No Origin, version 6.
+# All values are synthetic.
+id: servers/ankiconnect/models/find
+description: findModelsByName and findModelsById, found and not found
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body: {json: {action: findModelsByName, version: 6, params: {modelNames: [Pair]}}}
+  - http:
+      body: {json: {action: findModelsById, version: 6, params: {modelIds: [1]}}}
+  - http:
+      body: {json: {action: findModelsById, version: 6, params: {modelIds: ["#m7"]}}}
+  - http:
+      body: {json: {action: findModelsByName, version: 6, params: {modelNames: [Pair, Nope]}}}

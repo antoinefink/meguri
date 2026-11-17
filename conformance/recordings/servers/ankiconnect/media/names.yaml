@@ -1,0 +1,26 @@
+# specs/servers/ankiconnect-media X14 `media/names` (X6): X6's folder and rows,
+# then the empty pattern. The add-on lists in directory order
+# (`ankiconnect-media-names-order`). All values are synthetic.
+id: servers/ankiconnect/media/names
+description: getMediaFilesNames with globs, the default pattern, a case-different name and the empty pattern
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: a.mp3, text: "a\n"}
+    - {name: b.mp3, text: "b\n"}
+    - {name: c.jpg, text: "c\n"}
+    - {name: .hidden.mp3, text: "d\n"}
+steps:
+  - http:
+      body: {json: {action: getMediaFilesNames, version: 6, params: {pattern: "*.mp3"}}}
+  - http:
+      body: {json: {action: getMediaFilesNames, version: 6, params: {pattern: "[ab].*"}}}
+  - http:
+      body: {json: {action: getMediaFilesNames, version: 6}}
+  - http:
+      body: {json: {action: getMediaFilesNames, version: 6, params: {pattern: A.MP3}}}
+  - http:
+      body: {json: {action: getMediaFilesNames, version: 6, params: {pattern: ""}}}

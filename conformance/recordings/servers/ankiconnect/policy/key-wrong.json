@@ -1,0 +1,41 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": "valid api key must be provided",
+              "result": null
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "http://localhost",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "addon": {
+      "build": "2025-11-09",
+      "sha256": "cf75820e00ebc28ba0cdcaedbbf646cac3a745121dc9de33b99020ca61a658da"
+    },
+    "anki_version": "26.9.3",
+    "ankiconnect_lock_sha256": "db0b6e483d450f46150a9e80294f651a2b7ea4babda9af460e4e28df45e90561",
+    "driver_sha256": "d210262e36b9bea44268e57ec6c0a5b0d03cbab1ed2f66931f34ff7b50e5dfae",
+    "image": "meguri-oracle-ankiconnect:recorder",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "servers/ankiconnect/policy/key-wrong",
+  "scenario_sha256": "9a9f085d0896dc81cfd3cc1fafc07633a206b4bdf945a96789f64eebb6bc1a96",
+  "tz": "Europe/Paris"
+}

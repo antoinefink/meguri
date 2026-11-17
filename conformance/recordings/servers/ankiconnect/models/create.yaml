@@ -1,0 +1,42 @@
+# servers/ankiconnect-actions A20.2 `create` (A6.2). No Origin, version 6.
+# Steps 0 to 4 are A20.2's rows in order; steps 5 to 11 check A6.2's check
+# order, member errors, template names and isCloze. All values are synthetic.
+id: servers/ankiconnect/models/create
+description: createModel results, checks in order, name clash and template names
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Duo, inOrderFields: [F, B], cardTemplates: [{Front: "{{F}}", Back: "{{B}}"}], css: ".x{}"}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Duo, inOrderFields: [F, B], cardTemplates: [{Front: "{{F}}", Back: "{{B}}"}], css: ".x{}"}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Trio, inOrderFields: [], cardTemplates: [{Front: "{{F}}", Back: ""}]}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: pair, inOrderFields: [F], cardTemplates: [{Front: "{{F}}", Back: "{{F}}"}]}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Quad, inOrderFields: [F], cardTemplates: [{Front: "{{#F}}", Back: "x"}]}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Trio, inOrderFields: [F], cardTemplates: []}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Pair, inOrderFields: [], cardTemplates: [{Front: "{{F}}", Back: "{{F}}"}]}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Pair, inOrderFields: [F], cardTemplates: [{Back: "{{F}}"}]}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Trio, inOrderFields: [F], cardTemplates: [{Back: "{{F}}"}]}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Trio, inOrderFields: [F], cardTemplates: [{Front: "{{F}}"}]}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Trio, inOrderFields: [F, G], cardTemplates: [{Name: X, Front: "{{F}}", Back: "{{G}}"}, {Front: "{{G}}", Back: "{{F}}"}], css: ".t{}"}}}
+  - http:
+      body: {json: {action: createModel, version: 6, params: {modelName: Gap, inOrderFields: [Body, Aside], cardTemplates: [{Front: "{{cloze:Body}}", Back: "{{cloze:Body}}<br>{{Aside}}"}], css: ".g{}", isCloze: true}}}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

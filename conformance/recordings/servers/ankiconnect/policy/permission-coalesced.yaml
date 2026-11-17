@@ -1,0 +1,32 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-coalesced`: two requestPermission from one origin while its prompt is open (E9 one prompt per origin).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# One answer is scripted (none), so a second prompt would be a run error (T7.5 default). i-1 is the first interaction id of the host (H11.2).
+id: servers/ankiconnect/policy/permission-coalesced
+description: the second request joins the open prompt; one Allow grants both
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - permission: {answer: none}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}
+      async: p1
+  - wait: 1s
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}
+      async: p2
+  - wait: 1s
+  - resolve: {id: i-1, outcome: {answer: allow, ignore: false}}
+  - await: p1
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: granted, requireApikey: false, version: 6}, error: null}}
+  - await: p2
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: granted, requireApikey: false, version: 6}, error: null}}

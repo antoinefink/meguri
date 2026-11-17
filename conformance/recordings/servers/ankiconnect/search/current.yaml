@@ -1,0 +1,28 @@
+# specs/servers/ankiconnect-actions A16, A20.6 `current`: deck:current reads
+# curDeck (search/query-model Q8, decks/decks D11). Setup config runs before
+# setup decks (conformance/dsl D6), so curDeck is written as the id that the
+# second setup deck, B, takes under the frozen clock: clock.start in ms plus 1
+# (storage/ids-usn-mtime I2; A takes clock.start in ms). The golden records the
+# add-on's order; Meguri answers ascending ids (A18 ankiconnect-search-order).
+id: servers/ankiconnect/search/current
+description: "findCards with deck:current, curDeck naming the second of two decks"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {curDeck: 1894698000001}
+  decks: [A, B]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: A, fields: {Term: one, Gloss: first}}
+    - {notetype: Pair, deck: B, fields: {Term: two, Gloss: second}}
+    - {notetype: Pair, deck: B, fields: {Term: three, Gloss: third}}
+steps:
+  - http:
+      body: {json: {action: findCards, version: 6, params: {query: "deck:current"}}}

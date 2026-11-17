@@ -1,0 +1,17 @@
+# servers/host-security H17 `port-in-use-retry-time` (declared, servers/transcripts T13):
+# attempts start 10 s apart on the host's timer clock; next_retry_at is the next start, as
+# seconds from clock.start (H4.3, H12, servers/transcripts T7.3).
+id: servers/host/port-in-use-retry-time
+description: "next_retry_at moves by 10 s per attempt"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - helper: {listen: "127.0.0.1:8765"}
+  - apply_config: {ankiconnect: {enabled: true}}
+  - status: {until: {state: port_in_use, port: 8765, next_retry_at: 10}, within_ms: 1000, server: ankiconnect}
+  - advance: 10s
+  - status: {until: {state: port_in_use, port: 8765, next_retry_at: 20}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect, address: ipv6}
+    expect: {outcome: refused}

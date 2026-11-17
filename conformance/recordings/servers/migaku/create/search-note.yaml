@@ -1,0 +1,48 @@
+# servers/migaku-received-log C5 `search-note` (declared, servers/transcripts T13).
+# searchNote with 1 to 19 ASCII digits starts the detached host interaction
+# BrowseNote (servers/ankiconnect-gui G8, G10) with payload {"nid": "1234"}
+# and replies 200 plain-text OK without waiting for it (C3). No `interaction`
+# step: BrowseNote gets T7.5's default answer, done, and an explicit answer
+# could be left unused, since the reply does not wait. That exactly
+# one interaction with that payload was posted has no check in T13 yet (the
+# output of an `events` step cannot carry an expectation).
+# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
+# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
+# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
+# transcript format has no step or setup section for profiles (see the session's
+# proposals), and nothing this scenario checks depends on one. No Origin, so
+# Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
+# P6). All content is synthetic.
+id: servers/migaku/create/search-note
+description: "searchNote=1234 is acknowledged with OK and opens Browse on nid:1234"
+tags: [create]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [DE, "DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+steps:
+  - http:
+      method: POST
+      target: /create
+      headers:
+        - [Content-Type, application/x-www-form-urlencoded]
+      body: {text: "searchNote=1234"}
+    expect:
+      status: 200
+      headers:
+        content-type: "text/plain; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {text: OK}
+      no_effect: true

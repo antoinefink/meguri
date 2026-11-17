@@ -1,0 +1,26 @@
+# servers/ankiconnect-actions A20.1 delete (A5.6). Synthetic content only.
+id: servers/ankiconnect/decks/delete
+description: deleteDecks needs cardsToo, matches names exactly, then removes deck, note and card
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [A]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: A, fields: {Term: alpha, Gloss: first}}
+steps:
+  - http:
+      body: {json: {action: deleteDecks, version: 6, params: {decks: [A]}}}
+  - http:
+      body: {json: {action: deleteDecks, version: 6, params: {decks: [a], cardsToo: true}}}
+  - observe: [{db_dump: {tables: [notes, cards, decks, graves]}}]
+  - http:
+      body: {json: {action: deleteDecks, version: 6, params: {decks: [A], cardsToo: true}}}
+  - observe: [{db_dump: {tables: [notes, cards, decks, graves]}}]

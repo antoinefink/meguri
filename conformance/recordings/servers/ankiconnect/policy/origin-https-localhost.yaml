@@ -1,0 +1,16 @@
+# servers/ankiconnect-envelope E19.2 `policy/origin-https-localhost`: https://localhost on the default list (E7.2 row 6, E18 localhost rule).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+id: servers/ankiconnect/policy/origin-https-localhost
+description: deckNames v6 from https://localhost is served, ACAO echoed
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      headers: [[Origin, "https://localhost"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://localhost", access-control-allow-headers: "*"}
+      body: {json: {result: [Default], error: null}}

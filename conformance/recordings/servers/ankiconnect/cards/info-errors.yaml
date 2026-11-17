@@ -1,0 +1,38 @@
+# servers/ankiconnect-actions A20.5 `cards/info-errors` (A11.3; A18 ankiconnect-cardsinfo-template-error,
+# ankiconnect-cardsinfo-latex). All values are synthetic.
+# `Bad`'s question has a section on FrontSide, which is not in the field map at render
+# (render/special-fields: an unknown_conditional error) but which a checked save accepts,
+# so setup needs no direct database write.
+# Step 0 deviation pointers: /steps/0/reply/body/json/result/0/question and .../0/answer
+# (A18 ankiconnect-cardsinfo-template-error: Meguri's D8 notice after <style></style>);
+# /steps/0/reply/body/json/result/1/question and .../1/answer (A18
+# ankiconnect-cardsinfo-latex: Meguri keeps [$]x[/$] as stored after the CSS prefix).
+# Step 1 (media_dir empty) compares as is.
+# FSRS is on, as Meguri always runs it (sched/set-due-date S1, R702).
+id: servers/ankiconnect/cards/info-errors
+description: cardsInfo of a card whose question fails to render and of a card holding LaTeX
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [A]
+  notetypes:
+    - name: Bad
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}{{#FrontSide}}z{{/FrontSide}}", back: "{{Gloss}}"}
+      css: ".card{}"
+    - name: Tex
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{Term}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Bad, deck: A, fields: {Term: "a", Gloss: "b"}}
+    - {notetype: Tex, deck: A, fields: {Term: "[$]x[/$]"}}
+steps:
+  - http:
+      body: {json: {action: cardsInfo, version: 6, params: {cards: ["#c1", "#c2"]}}}
+  - observe: [media_dir]

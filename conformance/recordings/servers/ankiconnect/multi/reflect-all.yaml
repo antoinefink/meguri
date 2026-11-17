@@ -1,0 +1,17 @@
+# servers/ankiconnect-envelope E19.3 `multi/reflect-all`: apiReflect lists exactly the 73 names of E12.3 in code point order (E10 row 5, E12.4).
+# Meguri's own behavior (declared, servers/transcripts T13). Default settings
+# unless given, fresh collection (deck Default only), no Origin, so
+# Access-Control-Allow-Origin is * (E7.3); all values are synthetic.
+id: servers/ankiconnect/multi/reflect-all
+description: "apiReflect v6, actions null"
+tags: [reflect]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: apiReflect, version: 6, params: {scopes: [actions], actions: null}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: {scopes: [actions], actions: [addNote, addNotes, addTags, apiReflect, areDue, areSuspended, canAddNote, canAddNoteWithErrorDetail, canAddNotes, canAddNotesWithErrorDetail, cardsInfo, cardsModTime, cardsToNotes, changeDeck, clearUnusedTags, createDeck, createModel, deckNameFromId, deckNames, deckNamesAndIds, deleteDecks, deleteMediaFile, deleteNotes, findCards, findModelsById, findModelsByName, findNotes, forgetCards, getActiveProfile, getDeckStats, getDecks, getIntervals, getMediaDirPath, getMediaFilesNames, getNoteTags, getNumCardsReviewedByDay, getNumCardsReviewedToday, getProfiles, getTags, guiAddCards, guiBrowse, guiEditNote, guiSelectCard, guiSelectedNotes, loadProfile, modelFieldDescriptions, modelFieldFonts, modelFieldNames, modelFieldsOnTemplates, modelNameFromId, modelNames, modelNamesAndIds, modelStyling, modelTemplates, multi, notesInfo, notesModTime, reloadCollection, removeTags, replaceTags, replaceTagsInAllNotes, requestPermission, retrieveMediaFile, setDueDate, storeMediaFile, suspend, suspended, sync, unsuspend, updateNote, updateNoteFields, updateNoteTags, version]}, error: null}}

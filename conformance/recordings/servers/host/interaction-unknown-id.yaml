@@ -1,0 +1,23 @@
+# servers/host-security H17 `interaction-unknown-id` (declared, servers/transcripts T13):
+# resolving an id that names no interaction changes nothing and returns false (H11.2). The
+# ping is the exchange T3 requires; it posts no event but status events. `expect: {output:
+# ...}` on a step without a reply is the T13 form proposed with this scenario (T13 lists no
+# check for T7.3 outputs yet).
+id: servers/host/interaction-unknown-id
+description: "resolve of an unknown interaction id"
+tags: [host]
+server: host
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {enabled: [ankiconnect]}
+steps:
+  - status: {until: {state: listening, addresses: ["127.0.0.1:8765", "[::1]:8765"]}, within_ms: 1000, server: ankiconnect}
+  - http: {server: ankiconnect}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
+  - resolve: {id: i-999, outcome: "done"}
+    expect: {output: {resolved: false}}
+  - events: {}
+    expect: {output: {events: []}}

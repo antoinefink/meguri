@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 version-float: 6.0 is an integer (E4.1); sent as text so the bytes are exactly 6.0.
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/version-float
+description: "version 6.0 counts as 6"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {text: '{"action":"version","version":6.0}'}

@@ -1,0 +1,11 @@
+# servers/ankiconnect-envelope E19.1 params-null: params null is not an object (E4).
+# Default settings, fresh collection (only deck Default), no Origin unless given.
+id: servers/ankiconnect/envelope/params-null
+description: "params is null"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - http:
+      body: {json: {action: version, params: null}}

@@ -1,0 +1,33 @@
+# specs/servers/ankiconnect-media X14 `media/attach-rollback` (X10.2,
+# servers/ankiconnect-actions A18 `ankiconnect-failed-add-media`): a duplicate
+# add with an attachment; the add-on leaves the file, Meguri does not.
+# B = 62 0a. All values are synthetic.
+id: servers/ankiconnect/media/attach-rollback
+description: a duplicate addNote with an attachment
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+  notes:
+    - {notetype: Pair, deck: D, fields: {Term: x}}
+steps:
+  - http:
+      body:
+        json:
+          action: addNote
+          version: 6
+          params:
+            note:
+              deckName: D
+              modelName: Pair
+              fields: {Term: x}
+              audio: {filename: n.mp3, data: "Ygo=", fields: [Gloss]}
+  - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]
