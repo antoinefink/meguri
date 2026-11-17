@@ -94,10 +94,15 @@ pub fn forward(host: &CoreHost, clock: &dyn Clock) -> Result<Vec<Value>> {
     let c = host.collection()?;
     let reader = c.reader(ReaderRole::Query)?;
     let nt = notetypes::read::by_name(&*reader, "Observatory Study")?.ok_or("missing-authored-type")?;
-    let mut draft = notetypes::Draft::of(nt);
-    draft.notetype.templates[0].config.q_format = changes["question"].as_str().ok_or("recipe-question")?.into();
-    draft.notetype.templates[0].config.a_format = changes["answer"].as_str().ok_or("recipe-answer")?.into();
-    draft.notetype.config.css = changes["css"].as_str().ok_or("recipe-css")?.into();
+    // Retain the original aggregate and template identity through the other edits.
+    let formats = notetypes::TemplateFormatsUpdate {
+        notetype: nt.id,
+        base: notetypes::AggregateDigest::of(&nt),
+        template: notetypes::TemplateIdentity::of(nt.templates.first().ok_or("missing-authored-template")?),
+        front: changes["question"].as_str().ok_or("recipe-question")?.into(),
+        back: changes["answer"].as_str().ok_or("recipe-answer")?.into(),
+        css: Some(changes["css"].as_str().ok_or("recipe-css")?.into()),
+    };
     let mut deck = reader.deck_rows()?.into_iter().find(|d| d.name == "Observatory\u{1f}North").ok_or("missing-authored-deck")?;
     let mut keep = None;
     let mut delete = None;
@@ -129,17 +134,9 @@ pub fn forward(host: &CoreHost, clock: &dyn Clock) -> Result<Vec<Value>> {
     need(matches!(result, AnswerOutcome::Accepted { .. }), "review-not-accepted")?;
     host.review().end(session_id)?;
     notes::delete(&c, vec![delete.ok_or("missing-delete-note")?], OpSource::UserUndoable)?;
-    // Source lead: template edits are refused by the public plain-save API. Attempt
-    // it once, retain the limitation, and still freeze the preceding supported
-    // note/review/deletion inputs. No raw write or alternate API substitutes it.
-    let limitations = match notetypes::save(&c, draft, Default::default()) {
-        Ok(_) => Vec::new(),
-        Err(error) => vec![json!({"operation":"public_notetype_save", "outcome":"refused",
-            "affected_values":["question","answer","css"],
-            "source_lead":"unsupported_public_authoring",
-            "error_kind":if matches!(error, meguri_engine::EngineError::InvalidArgument { .. }) { "invalid_argument" } else { "other" }})],
-    };
-    Ok(limitations)
+    let saved = notetypes::update_template_formats(&c, formats, Default::default(), Default::default())?.value;
+    need(saved.id == nt.id, "template-formats-notetype-mismatch")?;
+    Ok(Vec::new())
 }
 pub fn set_media(host: &CoreHost, target: &Value) -> Result<()> {
     let service = host.media()?;
