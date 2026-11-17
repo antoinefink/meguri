@@ -828,6 +828,16 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'docker/sync-web.Dockerfile.dockerignore':
+        'd0f1710720bc5b9d16c22f715f1094909a5978401fd22c65ecefcb07e66c60c6',
+    'server/web/scripts/audit-applicability.py':
+        '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
+    'server/web/scripts/audit-assessment.json':
+        '69fc817296d3e614184f2c00d8a04a5103fcebeaed8aa7a40d225e375fb1014d',
+    'tools/tests/meguri_sync.bats':
+        '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
+    'tools/tests/sync_web_applicability_test.py':
+        'cd3ebde8aee79cf4b16199847f60340dcfe5dd691eff5442a1bac86c2f31ff80',
     # Complete public tooling review: incoming_contract_review, 2026-11-17.
     "tools/mg.d/core.sh":
         "75592aa65666a46bb1260657ac45e85629d30ebdc1bb545b3eecb3b03a2842b4",
@@ -843,7 +853,7 @@ PUBLIC_ARTIFACTS = {
     "core/crates/meguri-sync/src/provider/bootstrap.rs":
         "23fcbee1dfd8a262378e71c91841dab18f27ea210ba4c085126d5257741abd8e",
     'docs/process/review-log/meguri-sync-U11.md':
-        'b1f55fc58d2c7319cb2ab7cca6492eee9810b867956f4acd949bff84be8d22a3',
+        '0c346236c3ff8af871444237053e8d6dd93c0eae7b04de31f58856f6ddfda5fd',
     'tools/tests/sync_recovery.bats':
         '6f6fd41c4c891150029db7abafd2b46022eea2b8f52cabc96bff1ca10981ce83',
     'tools/scripts/private-scan/tests/test_private_scan.py':
@@ -1001,7 +1011,7 @@ PUBLIC_ARTIFACTS = {
     'tools/gate/tiers.yaml':
         'b0d9c7cf88b554e7f2f3814b56048ac704febdac8e840861299da9662b71c9b5',
     'tools/mg.d/sync-web.sh':
-        '4a3b7447a94259878fdc5460b6dc65891ad238a5334be5ebc2472d220f3f0756',
+        'e96c97800779b5d2deae7b36bb0912e43cedf4e8c3b6d40b6c3f81d0206747f1',
     'server/web/upstream-records.json':
         'e04eceba6bc281397bf6379e28e6232ac93143f1de536de20fe1c46c500e3037',
     'server/web/src/style.css':
@@ -1009,13 +1019,13 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/app.tsx':
         '4e3224e691b9887c4e5aa8dee485118fb5308e20b15d15ccb0d885cb0915e8fd',
     'server/web/scripts/run.sh':
-        '89b19d043629e58a3ceabaad029064ddc4e1d479bdf338102f51c4809c53c0a8',
+        '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
         'f2f38f36f9f092dec3723f3425047d2f10f4fb32b7c411242c2b1b32c6a1a2f4',
     'server/web/notices/rolldown-THIRD-PARTY-LICENSE.txt':
         'a877291d800ed43692f3f9ae09d8e01cc6f7293ad39d43896059c188ffbb8b7c',
     'server/web/DEPENDENCIES.md':
-        'eab8aa0fb4938f5e3881df295dc93f6a457b5bb4735efbbbdcd2a6983f32fbdf',
+        '098b5299fe78468b47d91c44ef75fec8e7bf8a1c41b49a227993f8f652228e94',
     'server/build.rs':
         'a4dba10f1d809a0c05836778c7c075b2e2243d7c4aeeff12ddc6f9eec3cfc6e4',
     'docker/sync-web.Dockerfile':
