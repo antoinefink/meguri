@@ -234,12 +234,14 @@ SH
   mg_detail() { :; }
   mg_count() { :; }
   mg_on_exit() { printf '%s\n' "$1" >>"$MG_RUN_DIR/hooks"; }
-  mg_sync_package__candidate_input() { printf '{"package":{"assets_sha256":"synthetic-assets"}}\n'; }
+  mg_sync_package__candidate_input() {
+    cp "$BATS_TEST_TMPDIR/product/assets.json" "$2/synthetic-assets"
+    printf '{"package":{"assets_sha256":"synthetic-assets"}}\n'
+  }
   mg_sync_package__init() {
     mkdir "$MG_SYNC_INSTANCE"
     printf '{"volume":"synthetic-volume"}\n' >"$MG_SYNC_INSTANCE/instance.json"
     printf '{"name":"synthetic-service"}\n' >"$MG_SYNC_INSTANCE/container.json"
-    cp "$BATS_TEST_TMPDIR/product/assets.json" "$MG_RUN_DIR/package-artifacts/synthetic-assets"
   }
   mg_sync_package__start() {
     printf '[{"Id":"service-id","Image":"service-image","State":{"Running":true,"StartedAt":"same-start"},"Config":{},"Mounts":[],"HostConfig":{}}]\n' >"$MG_RUN_DIR/service-container.json"
