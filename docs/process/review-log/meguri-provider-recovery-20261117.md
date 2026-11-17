@@ -419,3 +419,21 @@ zero failed, zero skipped. Healthy provider retirement reaches a fresh
 preview. The injected rollback failure still blocks preview. The earlier
 red and setup failures stay retained. The CPU window was released from
 the actual terminal JSON. AppModel and full-gate verification remain open.
+
+## Return preview succeeds; later handoff failures remain
+
+`swift-test/20261117T045218Z-72512`, clean `647a0298`: eight passed, two failed, zero skipped. Both return previews now succeed. Later Keep Local Only fails on an active status result after Core rotates its guard. The collection-replacement workflow also retains an unavailable start-engine result whose first throw is not yet identified. Cancellation observed after cleanup proves no cause.
+
+The local-only repair routes both guard-changing Core calls through the ordered input lane after original command, account, result and acknowledgement owners end. It joins its exact action and checks backend, service, generation, revision and retained action identity before the later handoff. New work and background expiry revoke that identity. The new regression holds a real status result before acknowledgement, requires the original guard to remain unchanged, then joins the result and requires local-only completion.
+
+Author exports `050402-76976`, `052213-83872` and `053020-87297`; independent reviews `051313-79962` and `052715-86100` identified and closed the completion-identity, test-trigger and expiry gaps. Final review `053320-89907` has no required P0–P1 findings. Root verifies that the only change from the prior candidate is the one expiry reset; all other source bytes are retained. Existing workflow assertions and deadlines stay unchanged.
+
+The separate DEBUG diagnostic records the original start-engine failure stage and cancellation Boolean before awaited cleanup. It retains the existing command-scoped first-value latch and fixed error tags. Runtime reasons use only exact public constants; unknown payloads remain generic. This is no error classification waiver or behavioral repair. The original author's temporary-only patch was retained verbatim from its report; all three complete source digests match the filtered review export. Export `052655-85488` adds the two reviewed missing catches and eight formatter, privacy and cancellation regressions. Independent review `053041-87825` clears P0–P2. Native execution remains pending.
+
+Prebound fixture export `045342-74663` declares the existing provider choice before opening its owned Host and refreshes real admission after its actual baseline. Independent non-author `provider_public_snapshot_review` clears P0–P2. Only the native-policy test hook and native-absence fixture change; defaults and first-setup fixtures remain local-only. Focused execution is pending.
+
+Public snapshot review: non-author `provider_public_snapshot_review` read the complete final `SyncCoordinator.swift`, including comments, literals, embedded data and paths. It classifies PUBLIC at SHA-256 `47903ac33875073d10b1fd32fd2834f18fb986b5d38f31e5cd460922fe173a8b`, 2,866 lines and 165,088 bytes. Only that path's exact map entry may refresh after byte verification. No matcher, token, access or threshold changes.
+
+Original app gate base remains `1416a520542a8c5daa38a23bfe398da704c3d6c9`. No full-gate pass, Unit completion or sync acceptance is claimed.
+
+Source checks pass: privacy `053628-91998` scans all eleven changed paths; static `053623-90935` passes three stages; similarity `053623-90796` scans eight code files with zero flags or allowlisted entries. Root read the filtered report. Scanner regression `053626-91564` passes its one selected case. Author and reviewer exports produce identical complete source bytes. Focused runtime checks are still pending.

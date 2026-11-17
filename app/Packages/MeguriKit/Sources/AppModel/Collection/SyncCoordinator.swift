@@ -275,6 +275,9 @@ public final class SyncCoordinator {
                                acknowledged: CheckedContinuation<Bool, any Error>)
         case resumeBinding(CloudConnectionPreview, preparation: ResumePreparation, service: CoreCloudConnectionService, generation: UInt64, revision: UInt64,
                            acknowledged: CheckedContinuation<ResumeAdmission, any Error>)
+        case localOnly(stopOnly: Bool, preview: CloudConnectionPreview?, previewOwner: UUID?, preparation: ResumePreparation,
+                       backend: any SyncCoordinatorBackend, service: CoreCloudConnectionService, generation: UInt64, revision: UInt64,
+                       acknowledged: CheckedContinuation<LocalOnlyAdmission, any Error>)
         case nativeInput(@Sendable () async throws -> CloudPolicyOutput, generation: UInt64, revision: UInt64,
                          phaseOwner: UUID?, acknowledged: CheckedContinuation<CloudPolicyOutput, any Error>)
         case nativeInputReturned(CloudPolicyOutput, acknowledged: CheckedContinuation<CloudPolicyOutput, any Error>)
@@ -292,10 +295,11 @@ public final class SyncCoordinator {
         case barrier(CheckedContinuation<Void, Never>)
     }
     // A tracked own task has not entered native work yet: explicit discovery
-    // joins its first account read, or Resume joins previous policy work.
+    // joins its first account read, or a guard-changing action joins policy work.
     // The input lane revokes preparation before either enters Core/native work.
     private final class ResumePreparation { let id = UUID() }
     private enum ResumeAdmission { case pending, cancelled, resumed(CloudOriginalCommandProofYield) }
+    private enum LocalOnlyAdmission { case pending, cancelled, accepted }
     private enum ProofOwner: Equatable {
         case command(UUID), own(UUID)
         var commandID: UUID? { if case .command(let id) = self { id } else { nil } }
@@ -309,6 +313,9 @@ public final class SyncCoordinator {
         case accountAccepted(read: UInt64, verified: Bool, succeeded: Bool)
         case resultReduced(command: UInt64?, read: UInt64?, cancellation: Bool, shutdownOwned: Bool, before: UInt64, after: UInt64)
         case resumeEntered, resumeReturned, resumeRefused(authorityChanged: Bool), resumeCancelled
+        #if DEBUG
+        case localOnlyPolicyWaiting
+        #endif
         case ownCoreStarted
         case ownDrainWaiting(UUID), ownDrainJoined(UUID)
         case dependencyRevocationJoined(UUID)
@@ -397,6 +404,9 @@ public final class SyncCoordinator {
     private var proofWaits: [UUID: ProofWait] = [:]
     private var quiescentDependencies: [UUID: UUID] = [:]
     private var ownOwner: UUID?
+    // Retain the last actual task's identity after finish clears active work.
+    // A resumed action must also detect newer work that has already finished.
+    private var latestOwnOwner: UUID?
     private var ownResumePreparation: (owner: UUID, token: ResumePreparation)?
     private var heldAccountCompletion: Input?
     private var readyPreviewOwner: (service: CoreCloudConnectionService, generation: UInt64, revision: UInt64, id: UUID)?
@@ -1159,44 +1169,85 @@ public final class SyncCoordinator {
         let expected = generation, revision = hostRevision
         let ready: CloudConnectionPreview?
         if case .ready(let handle, _) = preview {
-            guard let owner = readyPreviewOwner, owner.generation == expected, owner.revision == revision else { return }
+            guard let owner = readyPreviewOwner, owner.service === connection,
+                  owner.generation == expected, owner.revision == revision else { return }
             ready = handle
         } else { ready = nil }
+        let previewOwner = readyPreviewOwner?.id
+        let preparation = ResumePreparation()
         connectionFailure = nil
         cancellingConnectionOperation = true
-        startOwnTask(backend: backend, generation: expected, revision: revision) { [self] in
+        var completedLocalOnlyOwner: UUID?
+        let action = startOwnTask(backend: backend, generation: expected, revision: revision, resumePreparation: preparation) { [self] in
             defer { finishOwnWork(); cancellingConnectionOperation = false }
+            guard let originalOwner = ownOwner else { return }
+            func currentOwner() -> Bool {
+                !Task.isCancelled && !closing && !suspended && !replacing && !backendRetired
+                    && expected == generation && revision == hostRevision && self.backend === backend
+                    && backend.connection === connection && ownOwner == originalOwner && ownTask?.isCancelled == false
+            }
+            func current() -> Bool {
+                currentOwner() && ownResumePreparation?.owner == originalOwner && ownResumePreparation?.token === preparation
+            }
             do {
                 var checkedPreview = ready
+                var checkedPreviewOwner = previewOwner
+                guard current() else { return }
                 let pending = try await connection.recoveryStatus()
-                guard !closing, expected == generation, revision == hostRevision, self.backend === backend else { return }
+                guard current(), readyPreviewOwner?.id == checkedPreviewOwner else { return }
                 if let pending {
                     guard !stopOnly, pending.publicationConflictCancellable, let own = backend.own else {
                         throw BridgeError.cloudConnection(.busy)
                     }
                     try await own.cancel(pending.operation)
-                    guard !closing, expected == generation, revision == hostRevision, self.backend === backend else { return }
-                    let current = try await connection.recoveryStatus()
-                    guard !closing, expected == generation, revision == hostRevision, self.backend === backend else { return }
-                    recovery = current
-                    guard current == nil else { throw BridgeError.cloudConnection(.busy) }
+                    guard current(), readyPreviewOwner?.id == checkedPreviewOwner else { return }
+                    let currentRecovery = try await connection.recoveryStatus()
+                    guard current(), readyPreviewOwner?.id == checkedPreviewOwner else { return }
+                    recovery = currentRecovery
+                    guard currentRecovery == nil else { throw BridgeError.cloudConnection(.busy) }
                     preview = nil; readyPreviewOwner = nil; checkedPreview = nil
+                    checkedPreviewOwner = nil
                 }
-                if stopOnly { try await backend.stopSyncing() }
-                else { try await connection.keepLocalOnly(generation: expected, preview: checkedPreview) }
-                guard !closing, expected == generation, revision == hostRevision else { return }
+                var accepted = false
+                while !accepted {
+                    let admission: LocalOnlyAdmission = try await withCheckedThrowingContinuation {
+                        enqueue(.localOnly(stopOnly: stopOnly, preview: checkedPreview, previewOwner: checkedPreviewOwner,
+                            preparation: preparation, backend: backend, service: connection,
+                            generation: expected, revision: revision, acknowledged: $0))
+                    }
+                    switch admission {
+                    case .cancelled: return
+                    case .accepted: accepted = true
+                    case .pending:
+                        await prepareConnectionAuthority()
+                        // These originals return only after their actual result
+                        // ACKs. Never join this local action's ownTask.
+                        for original in Array(operationTasks.values) { await original.value }
+                    }
+                }
+                guard currentOwner() else { return }
                 preview = nil; readyPreviewOwner = nil
                 try await saveEnabled(false)
+                guard currentOwner() else { return }
                 receive(.refresh(.cloud))
+                completedLocalOnlyOwner = originalOwner
             } catch {
-                if expected == generation, revision == hostRevision, !closing {
+                if expected == generation, revision == hostRevision, self.backend === backend,
+                   backend.connection === connection, ownOwner == originalOwner, !closing {
                     recordConnectionFailure(error)
                     receive(.refresh(.cloud))
                 }
             }
         }
-        await ownTask?.value
-        if provider != nil, connectionFailure == nil { await changeProvider(to: .localOnly) }
+        await action.task.value
+        // finishOwnWork released the active slot before this waiter resumed.
+        // Supersession still revokes this exact completed action's handoff.
+        guard completedLocalOnlyOwner == action.owner, latestOwnOwner == action.owner,
+              ownOwner == nil, ownTask == nil, !action.task.isCancelled, !Task.isCancelled,
+              !closing, !suspended, !replacing, !backendRetired, !providerActionInProgress,
+              expected == generation, revision == hostRevision, self.backend === backend,
+              backend.connection === connection, provider != nil, connectionFailure == nil else { return }
+        await changeProvider(to: .localOnly)
     }
     public func confirmPublication() async { await confirmConnection(.publication) }
     public func confirmPublication(onConfirmation: @escaping @MainActor (CloudPublicationConfirmation.Result) -> Void,
@@ -1385,17 +1436,20 @@ public final class SyncCoordinator {
             }
         }
     }
-    private func startOwnTask(backend original: any SyncCoordinatorBackend, generation expected: UInt64, revision: UInt64,
-                              resumePreparation: ResumePreparation? = nil, operation: @escaping @MainActor () async -> Void) {
+    @discardableResult private func startOwnTask(backend original: any SyncCoordinatorBackend, generation expected: UInt64, revision: UInt64,
+                              resumePreparation: ResumePreparation? = nil, operation: @escaping @MainActor () async -> Void) -> (owner: UUID, task: Task<Void, Never>) {
         let id = UUID()
         ownOwner = id
+        latestOwnOwner = id
         ownResumePreparation = resumePreparation.map { (id, $0) }
-        ownTask = Task { [self] in
+        let task = Task { [self] in
             let admission: @Sendable (CloudOriginalCommandProofYield) async throws -> Void = { [self] proof in
                 try await admitProof(proof, owner: .own(id), backend: original, generation: expected, revision: revision)
             }
             await CloudOriginalCommandProofYield.$admission.withValue(admission) { await operation() }
         }
+        ownTask = task
+        return (id, task)
     }
     private func finishOwnWork() {
         if let id = ownOwner {
@@ -1634,6 +1688,7 @@ public final class SyncCoordinator {
         if suspended { pendingExpiry = true }
         else {
             cancelCommands(.expiry)
+            latestOwnOwner = nil
             ownTask?.cancel()
             receive(.backgroundExpiring)
         }
@@ -1739,6 +1794,7 @@ public final class SyncCoordinator {
         if !corePhase.isEmpty {
             switch input {
             case .resumeBinding: observeResumePolicyDrain?(.waiting)
+            case .localOnly: observeCausalBoundary?(.localOnlyPolicyWaiting, nil)
             case .completeAccount: observeAccountPolicyDrain?(.waiting)
             default: break
             }
@@ -2033,6 +2089,37 @@ public final class SyncCoordinator {
                 #endif
                 acknowledged.resume(throwing: error)
             }
+        case .localOnly(let stopOnly, let handle, let previewOwner, let preparation, let original, let service, let expected, let revision, let acknowledged):
+            guard !closing, !suspended, !replacing, !backendRetired, ownTask?.isCancelled == false,
+                  expected == generation, revision == hostRevision, backend === original, original.connection === service,
+                  ownResumePreparation?.owner == ownOwner, ownResumePreparation?.token === preparation,
+                  readyPreviewOwner?.id == previewOwner else {
+                acknowledged.resume(returning: .cancelled)
+                return
+            }
+            if let owner = readyPreviewOwner {
+                guard owner.service === service, owner.generation == expected, owner.revision == revision,
+                      case .ready = preview else {
+                    acknowledged.resume(returning: .cancelled)
+                    return
+                }
+            }
+            let queuedResult = inputQueue.contains { if case .result = $0 { return true }; return false }
+            guard operationTasks.isEmpty, accountTask == nil, pendingAccountRead == nil, !queuedResult else {
+                #if DEBUG
+                observeCausalBoundary?(.localOnlyPolicyWaiting, nil)
+                #endif
+                acknowledged.resume(returning: .pending)
+                return
+            }
+            // Both mutations rotate Core's guard. Keep later inputs queued
+            // through the actual call, after all original result/ACK owners end.
+            ownResumePreparation = nil
+            do {
+                if stopOnly { try await original.stopSyncing() }
+                else { try await service.keepLocalOnly(generation: expected, preview: handle) }
+                acknowledged.resume(returning: .accepted)
+            } catch { acknowledged.resume(throwing: error) }
         case .result(let result, let expected, let revision, let shutdownCancelled, let supersededAccountCancellation, let nativeCancellationOwned, let acknowledged):
             #if DEBUG
             let failureBefore = failureRevision

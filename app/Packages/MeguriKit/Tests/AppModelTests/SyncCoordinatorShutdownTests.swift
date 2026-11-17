@@ -936,6 +936,92 @@ extension ReviewCollectionStartupTests {
 }
 
 extension ReviewCollectionStartupTests {
+    #if DEBUG
+    @Test func keepLocalOnlyJoinsTheActualStatusResultAcknowledgementBeforeRotatingItsGuard() async throws {
+        try await withShutdownHarness(mediaEnabled: false) { harness in
+            try #require(await harness.sync.changeProvider(to: .localOnly))
+            try await harness.owner.prepareCloudConnectionPreview()
+            await harness.sync.waitForConnectionPreview()
+            guard case .ready = harness.sync.preview else {
+                Issue.record("Expected the real ready return preview")
+                return
+            }
+            // Finish discovery's account proof and trailing refresh. Install
+            // the hold before changing the actual unpaused settings to Pause.
+            await harness.sync.drainOperations()
+            try #require(!harness.sync.settings.paused)
+            let originalCoordinator = harness.sync
+            let backend = try harness.backend
+            let originalGuard = try await backend.workflow.currentGuard()
+            try #require(!harness.sync.operationFailed && harness.sync.connectionFailure == nil)
+            let resultGate = SyncOwnerGate()
+            let held = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let waiting = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            var heldCommand: CloudPolicyCommand?
+            var heldResult: SyncCommandResult?
+            var acknowledgementJoined = false, localOnlyReturned = false
+            backend.afterExecution = { command, result in
+                guard case .statusChanged = command.action, heldCommand == nil else { return }
+                heldCommand = command; heldResult = result
+                #expect(!Task.isCancelled && result.error == nil && !result.deferred)
+                held.continuation.yield(true)
+                await resultGate.hold()
+                #expect(!Task.isCancelled && !acknowledgementJoined)
+                do {
+                    #expect(try await backend.workflow.currentGuard() == originalGuard)
+                } catch { Issue.record("Original local-only guard read failed") }
+            }
+            originalCoordinator.observeCausalBoundary = { boundary, command in
+                switch boundary {
+                case .localOnlyPolicyWaiting: waiting.continuation.yield(true)
+                case .commandAcknowledgementJoined:
+                    if let command, command.raw === heldCommand?.raw { acknowledgementJoined = true }
+                default: break
+                }
+            }
+            defer {
+                backend.afterExecution = nil; originalCoordinator.observeCausalBoundary = nil
+                resultGate.release(); held.continuation.finish(); waiting.continuation.finish()
+            }
+            var choosing: Task<Void, Never>?
+            do {
+                originalCoordinator.setDeviceSettings(paused: true, automatic: false, media: false)
+                // The status Core phase is held by this result: an input
+                // barrier here would wait for the same ACK we have not released.
+                try #require(try await serviceAppSignal(held.stream, stage: "local-only actual status result held"))
+                let result = try #require(heldResult)
+                try #require(heldCommand != nil)
+                #expect(result.error == nil && !result.deferred)
+                #expect(originalCoordinator.settings.paused && !acknowledgementJoined)
+                let action = Task {
+                    await originalCoordinator.keepLocalOnly()
+                    localOnlyReturned = true
+                }
+                choosing = action
+                try #require(try await serviceAppSignal(waiting.stream, stage: "local-only ordered admission waiting"))
+                #expect(!localOnlyReturned && !acknowledgementJoined && !backend.closed)
+                #expect(try await backend.workflow.currentGuard() == originalGuard)
+                resultGate.release()
+                await action.value
+            } catch {
+                resultGate.release()
+                await choosing?.value
+                await originalCoordinator.drainOperations()
+                throw error
+            }
+            #expect(localOnlyReturned && acknowledgementJoined)
+            #expect(originalCoordinator.preview == nil && originalCoordinator.connectionFailure == nil)
+            #expect(!originalCoordinator.operationFailed && originalCoordinator.failureRevision == 0)
+            #expect(backend.closed && backend.closeReturned == 1)
+            #expect(harness.sync !== originalCoordinator && harness.sync.providerState?.selection == .localOnly)
+            #expect(harness.sync.settings.paused && !harness.sync.settings.enabled)
+            #expect(harness.owner.state == .ready && harness.sync.setupState == .attached)
+            #expect(!harness.sync.operationFailed && harness.sync.connectionFailure == nil)
+            #expect(try await harness.backend.workflow.currentGuard() != originalGuard)
+            originalCoordinator.observeCausalBoundary = nil
+        }
+    }
+    #endif
     @Test func genuineShutdownResultFinalizesOnOriginalAuthorityBeforeNativeClose() async throws {
         try await withShutdownHarness { harness in
             let backend = try harness.backend
