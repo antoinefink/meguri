@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'tools/tests/sync_recovery.bats':
+        '69258c1009d530ff656b6e4409c54af5513170a9d86d36c57f1460c0a2c2ca1a',
     'tools/scripts/private-scan/tests/test_private_scan.py':
         'f6a486a548efb3a11731237f9d1802f9329b55532c2933ea74704158964288f1',
     'oracle/meguri-sync-server/retained_observer.py':
@@ -1038,7 +1040,7 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/validation.py':
         '0b18623520af011b829fee4f31728ffda31c2c99cc10046b7143b9fdba2a7034',
     'tools/mg.d/meguri-sync-reference.sh':
-        'd0c67f154ed4b9d61c5a28f6c24208a538535d186fbc4ef23d9c5f7289be9ac6',
+        '22b22805784716bd48be8142d8b86d04b0a69c1e216d78fed542944a8cbc0f85',
 
     'docs/process/review-log/meguri-sync-reference-privacy.md':
         '4ef0a4f96b31e513f73415ac2160a9ce14e335fbd9cc841ddbe4ed2159e643a8',
