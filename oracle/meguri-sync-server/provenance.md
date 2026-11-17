@@ -68,3 +68,37 @@ Every normal sender and receiver call now requires public NO_CHANGES completion.
 The observation retains each actor's raw public SDK decision. Existing wire,
 tuple-count and database comparisons remain enabled. No SDK implementation
 source or guessed numeric enum mapping was used.
+
+## U11 exact local package and Desktop31 author
+
+Author session: `s-20261116T225916Z-981c8d1b`. Source base:
+`a7feba8c5e63ca95d31fa950f8286e6c60580454`. The session metadata commit remains
+`9e452d099c1127a15e1b2792bb8dbdfad1288804`.
+
+The author read this quarantine, its existing scheduling/deck adapters, neutral
+specifications and public package manifests. No Anki implementation checkout,
+private collection, installed personal app or credential input was read. The
+new code uses the pinned public SDK and original synthetic recipes. It adds no
+production code, dependency or source translation. Package archive inspection
+rehashes bytes without extracting source files.
+
+The export contains source only. Native parsing checked syntax. No test, build,
+server, Docker container or client ran during authoring. Independent source and
+prepared-input review, MG verification and final artifact execution remain
+required. Preflight admission supplies no compatibility credit. Historical
+intermediate evidence keeps its identity and scope.
+
+### U11 source repair round 1
+
+The original 16-file export remains frozen at patch SHA-256
+`7ba4554dff1d6c8924d7fa2f3c5e0da006e75703470bf0c0c938db7b26243aea`.
+The same author addresses independent review findings F1–F5 in a separate export.
+The repair pins the approved recipe bytes, uses empty media witnesses, binds each
+legacy action to actual events, preserves the original rich baseline and rejects
+reused segment resources. Configuration projections retain all keys and values.
+
+The reviewed MG factory remains responsible for fresh initialization. Oracle
+validation checks its actual retained runtime identities; it does not claim to
+verify secret initialization console output. No such output is retained here.
+The repair adds four guard test methods to the original twelve. No test or
+runtime ran. A new complete-content review and parent-owned MG checks remain due.

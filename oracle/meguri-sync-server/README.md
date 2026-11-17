@@ -128,3 +128,32 @@ snapshot through public SDK operations, without importing or synchronizing the
 preserved dirty profile. Exact whole-file-name/hash equality, all non-col user
 tables and card/review rows remain compared. No GUI procedure, candidate restore,
 Mobile behavior or general dirty-media conflict rule is claimed.
+
+Final Desktop delivery uses nine fixed `candidate --phase final-…` segments:
+`full`, `normal`, `media`, `migration`, `replacement-upload`,
+`replacement-download`, `metadata-only`, `fresh-fresh` and `rich`.
+Each segment uses a fresh job-owned candidate instance and the existing protected
+credential pair. The package image and outer MG identity remain identical.
+
+`--stage execute` accepts only `final_package_preflight` from `/in/preflight.json`.
+It retains raw observations and a non-credit admission. MG captures that
+admission's hash, measures the actual after-state and supplies the complete final
+receipt. `--stage record` makes no client requests. It binds unchanged observations
+to that final receipt. `final-assemble --input /in` reads the nine fixed directories
+under `/in/segments/` and requires their exact 31-case union.
+
+The six additions freeze actual authoritative values before submission. Semantic
+validation compares retained values and rows; claimed true booleans alone fail.
+The migration source is isolated at fixed loopback port 8081. Its process and
+cleanup evidence remain separate from the candidate at port 8080. These paths
+provide no Mobile, retained-peer, GUI, deployment or broad catalog credit.
+
+Source repair round 1 keeps the execute/record paths and nine segment CLI values
+unchanged. Replacement media observations use new empty directories and cursors
+before reconciliation and again at the final observation. Legacy final cases
+retain actual actor/action events with capture, first-submit and completion order.
+Each action binds its own inputs and original baseline. Rich mutations preserve
+all untouched baseline values, including complete configuration values. Assembly
+rejects reused candidate containers, creation nonces or data volumes. The owning
+MG factory proves initialization and cleanup; its secret console output never
+enters this evidence store.

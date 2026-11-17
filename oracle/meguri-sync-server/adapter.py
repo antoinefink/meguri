@@ -31,6 +31,9 @@ from synthetic import FIXTURE, EDGE_FIXTURE
 
 PHASE = "identity"
 RECORDER_ERRORS = []
+FINAL_CAPTURE = None
+FINAL_MEASURE = False
+FINAL_LEGACY = None
 
 
 def runtime():
@@ -71,14 +74,21 @@ def free_port():
 
 
 @contextlib.contextmanager
-def reference_server(root, credentials=None):
-    port = free_port()
+def reference_server(root, credentials=None, fixed_port=None, evidence=None):
+    require(fixed_port in {None,8081}, "invalid owned source port")
+    port = free_port() if fixed_port is None else fixed_port
+    if fixed_port is not None:
+        with socket.socket() as available:available.bind(('127.0.0.1',fixed_port))
     username, password = credentials if credentials is not None else ("synthetic-" + secrets.token_hex(8), secrets.token_hex(24))
     env = {key: value for key, value in os.environ.items() if not key.startswith("SYNC_") and "proxy" not in key.lower()}
     env.update(SYNC_BASE=str(root), SYNC_HOST="127.0.0.1", SYNC_PORT=str(port), SYNC_USER1=f"{username}:{password}")
     process = subprocess.Popen([sys.executable, "-m", "anki.syncserver"], env=env,
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
+        if evidence is not None:
+            stat=pathlib.Path('/proc')/str(process.pid)/'stat'
+            start_ticks=int(stat.read_text().rsplit(')',1)[1].split()[19])
+            evidence.update(owned_pid=process.pid,process_start_ticks=start_ticks,started_monotonic_ns=time.monotonic_ns(),executable_sha256=sha(pathlib.Path(sys.executable).read_bytes()),cleanup_complete=False)
         deadline = time.monotonic() + 20
         while True:
             require(process.poll() is None, "reference server exited before readiness")
@@ -88,12 +98,15 @@ def reference_server(root, credentials=None):
                 require(time.monotonic() < deadline, "reference server readiness deadline")
                 time.sleep(0.05)
         yield port, username, password
+        if evidence is not None:require(process.poll() is None,'owned source exited before cleanup')
     finally:
         process.terminate()
         try: process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+        if evidence is not None:
+            evidence.update(cleanup_complete=process.poll() is not None,exit_code=process.returncode)
 
 
 def unpack(data):
@@ -170,6 +183,7 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
         return self.rfile.read(length)
 
     def do_POST(self):
+        started=time.monotonic() if FINAL_MEASURE else None
         try:
             raw = self._body()
             header = json.loads(self.headers["anki-sync"])
@@ -248,6 +262,7 @@ class RecorderHandler(http.server.BaseHTTPRequestHandler):
                         detail['media_begin'] = {'usn': media['data']['usn'], 'sk_type': type(media['data']['sk']).__name__, 'sk_empty': media['data']['sk'] == ''}
                     else:
                         detail['media_result'] = media['data']
+            if started is not None:detail['elapsed_ms']=int((time.monotonic()-started)*1000)
             self.server.observations.append(detail)
             if detail.get('request_mutation') in {'idle-delay','idle-expire'}:
                 self.server.idle_completed.set()
@@ -290,6 +305,7 @@ def collection(root, name, fixture):
     col.models.add(model)
     for other in col.models.all_names_and_ids():
         if other.id != model["id"]: col.models.remove(other.id)
+    if FINAL_LEGACY is not None:col.sched.today
     return col, model
 
 
@@ -301,9 +317,12 @@ def add_note(col, model, values):
 
 
 def full(col, auth, upload):
+    started=time.monotonic()
+    if FINAL_CAPTURE is not None: FINAL_CAPTURE(col,'full-upload' if upload else 'full-download')
     col.close_for_full_sync()
     try: col.full_upload_or_download(auth=auth, server_usn=None, upload=upload)
     finally: col.reopen(after_full_sync=True)
+    if FINAL_CAPTURE is not None: FINAL_CAPTURE(col,'full-upload' if upload else 'full-download',int((time.monotonic()-started)*1000))
 
 
 def snapshot(col):
@@ -313,6 +332,8 @@ def snapshot(col):
 
 
 def media_sync(col, auth, timeout=30):
+    started=time.monotonic()
+    if FINAL_CAPTURE is not None: FINAL_CAPTURE(col,'media')
     col.sync_media(auth)
     deadline = time.monotonic() + timeout
     while col.media_sync_status().active:
@@ -320,6 +341,7 @@ def media_sync(col, auth, timeout=30):
             col.abort_media_sync()
             raise TimeoutError('media sync deadline')
         time.sleep(0.01)
+    if FINAL_CAPTURE is not None: FINAL_CAPTURE(col,'media',int((time.monotonic()-started)*1000))
 
 
 def native_request(port, auth, method, body, session, retain_input=False):
@@ -513,25 +535,36 @@ def smoke(fixture, target=None, full_only=False):
                 a, model = collection(root, "a", fixture); clients.append(a)
                 add_note(a, model, fixture["notes"][0])
                 b, _ = collection(root, "b", fixture); clients.append(b)
+                trace=FINAL_LEGACY
+                if trace is not None:trace.prepare(a)
                 endpoint = f"http://127.0.0.1:{record.server_port}/"
                 PHASE = 'native-login'
-                auth_a = a.sync_login(username=username, password=password, endpoint=endpoint)
-                auth_b = b.sync_login(username=username, password=password, endpoint=endpoint)
-                initial = a.sync_collection(auth_a, sync_media=False)
+                auth_a = trace.call(a,'client_a','login',record,lambda:a.sync_login(username=username,password=password,endpoint=endpoint),1,comparison='unchanged') if trace is not None else a.sync_login(username=username,password=password,endpoint=endpoint)
+                auth_b = trace.call(b,'client_b','login',record,lambda:b.sync_login(username=username,password=password,endpoint=endpoint),comparison='unchanged',auxiliary=True) if trace is not None else b.sync_login(username=username,password=password,endpoint=endpoint)
+                initial_started=time.monotonic()
+                if FINAL_CAPTURE is not None: FINAL_CAPTURE(a,'initial-decision')
+                initial = trace.call(a,'client_a','decision',record,lambda:a.sync_collection(auth_a,sync_media=False),2,comparison='unchanged') if trace is not None else a.sync_collection(auth_a,sync_media=False)
+                if FINAL_CAPTURE is not None: FINAL_CAPTURE(a,'initial-decision',int((time.monotonic()-initial_started)*1000))
                 initial_requirement = {SyncOutput.FULL_UPLOAD: 'full_upload', SyncOutput.FULL_DOWNLOAD: 'full_download',
                                        SyncOutput.FULL_SYNC: 'full_sync', SyncOutput.NO_CHANGES: 'no_changes'}[initial.required]
                 PHASE = 'blank-account-download'
                 blank, _ = collection(root, 'blank', fixture); clients.append(blank)
-                auth_blank = blank.sync_login(username=username, password=password, endpoint=endpoint)
-                full(blank, auth_blank, False)
+                auth_blank = trace.call(blank,'fresh_client','login',record,lambda:blank.sync_login(username=username,password=password,endpoint=endpoint),3,comparison='unchanged') if trace is not None else blank.sync_login(username=username,password=password,endpoint=endpoint)
+                if trace is not None:trace.call(blank,'fresh_client','full-download',record,lambda:full(blank,auth_blank,False),3,comparison='blank')
+                else:full(blank,auth_blank,False)
                 blank_counts = [blank.db.scalar('select count(*) from notes'), blank.db.scalar('select count(*) from cards')]
                 PHASE = 'full-upload'
-                full(a, auth_a, True)
+                if trace is not None:
+                    trace.authoritative(a,'client_a',4)
+                    trace.call(a,'client_a','full-upload',record,lambda:full(a,auth_a,True),4)
+                else:full(a,auth_a,True)
                 PHASE = 'full-download'
-                full(b, auth_b, False)
+                if trace is not None:trace.call(b,'client_b','full-download',record,lambda:full(b,auth_b,False),5)
+                else:full(b,auth_b,False)
                 integrity = b.db.scalar('pragma integrity_check')
                 full_equal = snapshot(a) == snapshot(b)
-                full(b, auth_b, False)
+                if trace is not None:trace.call(b,'client_b','full-download',record,lambda:full(b,auth_b,False),5)
+                else:full(b,auth_b,False)
                 full_equal = full_equal and snapshot(a) == snapshot(b)
                 if full_only:
                     require(not record.errors,'recording is incomplete')
@@ -615,19 +648,38 @@ if __name__ == "__main__":
             require(isinstance(request.get('target'),dict),'candidate target missing')
             require(request['target'].get('server',{}).get('kind') == 'meguri_sync','candidate peer kind mismatch')
             require(type(request.get('full_only')) is bool,'candidate phase is malformed')
-            require(request.get('phase') in {'full','normal','media','complete'},'candidate phase is unknown')
-            if request['phase'] == 'media':
+            phase=request.get('phase')
+            from final_contract import SEGMENTS
+            require(phase in {'full','normal','media','complete'} or phase in {'final-'+segment for segment in SEGMENTS},'candidate phase is unknown')
+            FINAL_MEASURE=phase.startswith('final-')
+            if phase.startswith('final-') and phase.removeprefix('final-') not in {'full','normal','media'}:
+                import final_desktop
+                result=final_desktop.run(sys.modules[__name__],phase.removeprefix('final-'),request['target'],request['case'])
+                phase=None
+            elif phase.startswith('final-'):
+                from final_desktop import LegacyTrace
+                from evidence import candidate_selection
+                FINAL_LEGACY=LegacyTrace(phase,candidate_selection(phase))
+                FINAL_CAPTURE=None
+                phase=phase.removeprefix('final-')
+            if phase is None: pass
+            elif phase == 'media':
                 import media
                 result = media.run(sys.modules[__name__],request['fixture'],request['target'])
-            elif request['phase'] == 'normal':
+            elif phase == 'normal':
                 import normal
                 result = normal.exact_numbers(normal.run(sys.modules[__name__],request['fixture'],request['target'],sdk_only=True))
             else:
                 result = smoke(request['fixture'],request['target'],request['full_only'])
+            if request['phase'].startswith('final-') and phase is not None:
+                result['phase']=request['phase'];result['prepared_inputs']=FINAL_LEGACY.inputs;result['legacy_events']=FINAL_LEGACY.result()
         elif request['mode'] == 'smoke':
             require(type(request.get('full_only',False)) is bool,'reference phase is malformed')
             result = smoke(request['fixture'],full_only=request.get('full_only',False))
         else: raise ValueError('unknown SDK request mode')
+        if request.get('phase','').startswith('final-'):
+            from final_desktop import resources
+            result['runtime_environment']=resources()
         sys.stdout.buffer.write(encoded(result))
     except BaseException as error:
         # Never export source frames, backend messages or collection content.

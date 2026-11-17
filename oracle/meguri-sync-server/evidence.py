@@ -104,6 +104,12 @@ def edge_selection():
 
 
 def candidate_selection(phase):
+    if phase.startswith('final-'):
+        from final_contract import segment_selection
+        return segment_selection(phase,candidate_selection)
+    if phase == 'final':
+        from final_contract import selection as final_selection
+        return final_selection(candidate_selection)
     require(phase in {'full','normal','media','complete'},'unknown candidate phase')
     contract = copy.deepcopy(media_selection() if phase == 'media' else normal_selection(sdk_only=True) if phase == 'normal' else selection())
     contract['lane_kind'] = 'candidate'
@@ -205,17 +211,24 @@ def record(result, out, invocation, package=None, input_store=None):
     store = Artifacts(out / 'artifacts')
     package_hash = None
     if package is not None:
-        for key in ('executable_artifact_sha256','lock_artifact_sha256','mg_build_receipt_sha256','execution_binding_sha256'):
-            store.put(input_store.read(package[key]))
+        from candidate import retained_dependencies
+        for digest in retained_dependencies(package,input_store,invocation):
+            store.put(input_store.read(digest))
         package_hash = store.put_json(package)
+    final=result.get('phase','').startswith('final-')
     expected_fixture = DIRTY_FIXTURE if result.get('probe_kind') == 'recovery-dirty' else RECOVERY_FIXTURE if result.get('probe_kind') == 'recovery' else MEDIA_FIXTURE if 'media_results' in result else MATRIX_FIXTURE if result.get('probe_kind') == 'normal-matrix' else NORMAL_FIXTURE if 'normal_results' in result and result.get('probe_kind') != 'normal-matrix' else EDGE_FIXTURE if result.get('probe_kind') == 'edges' else FIXTURE
+    if 'final_results' in result:
+        from final_contract import recipes
+        expected_fixture=recipes()
     require(same_value(result['fixture'],expected_fixture),'returned fixture differs from the supplied original input')
     fixture_bytes = encoded(expected_fixture)
     fixture_input = store.put(fixture_bytes)
     fixture_manifest = {'format': 'meguri-sync-fixtures-v1', 'entries': [{'sha256': fixture_input, 'bytes': len(fixture_bytes), 'kind': 'original-synthetic-json'}]}
     fixture_hash = store.put_json(fixture_manifest)
     runtime_hash = store.put_json(result['runtime'])
-    if 'dirty_results' in result:
+    if 'final_results' in result:
+        actual={(row['family'],row['variants'][0]):result['final_results'][row['variants'][0]] for row in contract['cases']}
+    elif 'dirty_results' in result:
         actual = {(row['family'],row['variants'][0]):result['dirty_results'][row['variants'][0]] for row in contract['cases']}
     elif 'recovery_results' in result:
         actual = {(row['family'],row['variants'][0]):result['recovery_results'][row['variants'][0]] for row in contract['cases']}
@@ -224,6 +237,16 @@ def record(result, out, invocation, package=None, input_store=None):
     else:
         actual = {(row['family'],row['variants'][0]):result['normal_results'][row['variants'][0]] for row in contract['cases']} if 'normal_results' in result else edge_observations(result) if result.get('probe_kind') == 'edges' else observations(result)
     invocation['selection'] = [row['id'] for row in contract['cases']]
+    execution_invocation_hash=store.put_json(invocation) if final else None
+    generated=[]
+    if final:
+        from final_contract import NEUTRAL, RECIPE_SHA256
+        require(store.put((NEUTRAL/'final-fixture-recipes.json').read_bytes()) == RECIPE_SHA256,'final recipe bytes changed')
+        for row in result.get('prepared_inputs',result.get('final_details',{}).get('inputs',[])):
+            digest=store.put_json(row['value'])
+            require(digest == row['sha256'],'prepared input changed after freeze')
+            generated.append(digest)
+        require(bool(generated),'final actual action inputs missing')
     manifest = {key: copy.deepcopy(invocation[key]) for key in ('source_commit','batch_base','source_sha256','lock_sha256','mg_job','arguments')}
     if package is not None: manifest['executable_sha256'] = package['server']['executable_sha256']
     manifest.update(format='meguri-sync-server-v1', baseline_release='26.09.3', document_kind='evidence',
@@ -237,6 +260,14 @@ def record(result, out, invocation, package=None, input_store=None):
         case['status'] = 'matched' if same_value(unique_named(case['expected']), unique_named(case['observed'])) else 'different'
         if case['status'] == 'different': case['reason'] = 'Named current-reference observations differ from the selected contract.'
         exact_input = None
+        final_inputs=[]
+        if final:
+            for index,action in enumerate(case['actions']):
+                exact=store.put_json({'format':'meguri-sync-final-action-manifest-v1','case_id':case['id'],'action_index':index,'actor':action['actor'],
+                    'recipe_sha256':RECIPE_SHA256,'frozen_input_sha256':__import__('final_checks').action_input_hashes(result,case,index) if 'legacy_events' in result else generated,'execution_invocation_sha256':execution_invocation_hash})
+                action['fixture_sha256']=exact;final_inputs.append(exact)
+            entries=[{'sha256':digest,'bytes':len(store.read(digest)),'kind':'original-synthetic-json'} for digest in dict.fromkeys([fixture_input,RECIPE_SHA256]+generated+final_inputs)]
+            case['fixture_sha256']=store.put_json({'format':'meguri-sync-fixtures-v1','entries':entries})
         if result.get('probe_kind') == 'normal-matrix':
             exact_input = store.put_json({'format':'meguri-sync-matrix-action-input-v1','fixture':expected_fixture,'traffic':result['case_inputs'][case['variants'][0]]})
             case_manifest = {'format':'meguri-sync-fixtures-v1','entries':[{'sha256':fixture_input,'bytes':len(fixture_bytes),'kind':'original-synthetic-json'},{'sha256':exact_input,'bytes':len(store.read(exact_input)),'kind':'original-synthetic-json'}]}
@@ -245,9 +276,11 @@ def record(result, out, invocation, package=None, input_store=None):
         bound = binding(manifest, case)
         observation_hash = store.put_json({'format': 'meguri-sync-neutral_observation-v1', 'binding': bound, 'details': result})
         receipt_hash = store.put_json({'format': 'meguri-sync-mg_receipt-v1', 'binding': bound, 'run_id': invocation['run_id'],
-                                      'selection': invocation['selection'], 'completed_ids': invocation['selection'], 'runtime_receipt_sha256': runtime_hash})
+                                      'selection': invocation['selection'], 'completed_ids': invocation['selection'], 'runtime_receipt_sha256': runtime_hash,**({'execution_invocation_sha256':execution_invocation_hash,'child_phase':result['phase']} if final else {})})
         case['artifacts'] = [{'role':'synthetic_input', 'sha256':digest, 'bytes':len(store.read(digest))}
                              for digest in dict.fromkeys((case['fixture_sha256'], fixture_input))]
+        if final:
+            for digest in dict.fromkeys([RECIPE_SHA256]+generated+final_inputs):case['artifacts'].append({'role':'synthetic_input','sha256':digest,'bytes':len(store.read(digest))})
         if exact_input is not None: case['artifacts'].append({'role':'synthetic_input','sha256':exact_input,'bytes':len(store.read(exact_input))})
         case['artifacts'] += [{'role':role, 'sha256':digest, 'bytes':len(store.read(digest))}
                               for role,digest in (('neutral_observation',observation_hash),('mg_receipt',receipt_hash))]

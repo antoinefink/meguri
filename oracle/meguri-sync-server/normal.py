@@ -115,12 +115,18 @@ def environment(api, root, count=1, target=None):
                 a,model=api.collection(root,'a',FIXTURE);clients.append(a)
                 for index in range(count): api.add_note(a,model,[f'Aster cue {index}',f'Aster response {index}'])
                 b,_=api.collection(root,'b',FIXTURE);clients.append(b)
+                trace=getattr(api,'FINAL_LEGACY',None)
+                if trace is not None:trace.setup=True;trace.prepare(a);trace.authoritative(a,'client_a')
                 endpoint=f'http://127.0.0.1:{record.server_port}/'
-                aa=a.sync_login(username=user,password=password,endpoint=endpoint)
-                ab=b.sync_login(username=user,password=password,endpoint=endpoint)
-                api.full(a,aa,True);api.full(b,ab,False)
+                aa=trace.call(a,'client_a','login',record,lambda:a.sync_login(username=user,password=password,endpoint=endpoint),comparison='unchanged',auxiliary=True) if trace is not None else a.sync_login(username=user,password=password,endpoint=endpoint)
+                ab=trace.call(b,'client_b','login',record,lambda:b.sync_login(username=user,password=password,endpoint=endpoint),comparison='unchanged',auxiliary=True) if trace is not None else b.sync_login(username=user,password=password,endpoint=endpoint)
+                if trace is not None:
+                    trace.call(a,'client_a','setup-upload',record,lambda:api.full(a,aa,True),auxiliary=True)
+                    trace.call(b,'client_b','setup-download',record,lambda:api.full(b,ab,False),auxiliary=True)
+                else:api.full(a,aa,True);api.full(b,ab,False)
                 # Bring A's cursor/stamps up to the post-download server state.
                 sync(a,aa,record,'client_a')
+                if trace is not None:trace.setup=False
                 yield a,b,model,aa,ab,record,port,clients
                 require(not record.errors,'normal recording incomplete')
             finally:
@@ -129,7 +135,18 @@ def environment(api, root, count=1, target=None):
 
 
 def sync(col,auth,recorder=None,actor=None):
-    result=col.sync_collection(auth,sync_media=False)
+    import sys
+    api=sys.modules.get('adapter') or sys.modules.get('__main__')
+    capture=getattr(api,'FINAL_CAPTURE',None)
+    started=time.monotonic()
+    if capture is not None:capture(col,'normal-'+str(actor))
+    trace=getattr(api,'FINAL_LEGACY',None)
+    if trace is not None:
+        def perform():
+            answer=col.sync_collection(auth,sync_media=False);col.models=type(col.models)(col);return answer
+        result=trace.call(col,actor,'normal',recorder,perform,auxiliary=getattr(trace,'setup',False))
+    else:result=col.sync_collection(auth,sync_media=False)
+    if capture is not None:capture(col,'normal-'+str(actor),int((time.monotonic()-started)*1000))
     if recorder is not None:
         recorder.sdk_completions.append({'actor':actor,'required':result.required})
     require(result.required == SyncOutput.NO_CHANGES,'normal SDK outcome requires full transfer')
@@ -138,46 +155,61 @@ def sync(col,auth,recorder=None,actor=None):
 
 
 def sdk(api,root,f,results,details,target=None,bidirectional=False):
-    root.mkdir()
+    root.mkdir();trace=getattr(api,'FINAL_LEGACY',None)
+    if trace is not None:trace.use('sdk-no-change','sdk-one-review','sdk-bidirectional-edits-deletes','sdk-object-config-tag-exchange','sdk-reverse-review','sdk-reverse-object-config-tag','sdk-reverse-delete')
     with environment(api,root/'exchange',3,target) as (a,b,model,aa,ab,rec,port,clients):
         # A settled no-change exchange measures actual wire payloads.
+        if trace is not None:trace.use('sdk-no-change');trace.authoritative(a,'client_a')
         sync(a,aa,rec,'client_a');before=len(rec.observations);settled=sync(a,aa,rec,'client_a')
         rows=rec.observations[before:]
         results['sdk-no-change']={'required':settled.required,'routes':[r['route'] for r in rows],'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in rows),'request_body_bytes_positive':all(r['request_bytes']>0 for r in rows)}
         details['no_change']=rows
+        if trace is not None:sync(b,ab,rec,'client_b')
         # A review through the public scheduler, then a real receiving client.
+        if trace is not None:trace.use('sdk-one-review')
         api.PHASE='normal-sdk-review-get'
         time.sleep(1.05)
         card=a.sched.getCard(); require(card is not None,'synthetic review card unavailable')
         api.PHASE='normal-sdk-review-answer'
         a.sched.answerCard(card,3)
+        if trace is not None:trace.authoritative(a,'client_a')
         before=len(rec.observations);sync(a,aa,rec,'client_a');review_rows=rec.observations[before:]
         sync(b,ab,rec,'client_b')
         chunks=[r['normal_request']['chunk'] for r in review_rows if r['route']=='/sync/applyChunk']
         results['sdk-one-review']={'review_occurrences':sum(len(c.get('revlog',[])) for c in chunks),'card_occurrences':sum(len(c.get('cards',[])) for c in chunks),'note_occurrences':sum(len(c.get('notes',[])) for c in chunks),'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in review_rows),'receiver_equal':api.snapshot(a)==api.snapshot(b)}
         details['one_review']=review_rows
         if bidirectional:
+            if trace is not None:trace.use('sdk-reverse-review')
             api.PHASE='normal-sdk-reverse-review'
             time.sleep(1.05)
             card=b.sched.getCard();require(card is not None,'reverse synthetic review card unavailable')
             b.sched.answerCard(card,3)
+            if trace is not None:trace.authoritative(b,'client_b')
             before=len(rec.observations);sync(b,ab,rec,'client_b');reverse_rows=rec.observations[before:]
             sync(a,aa,rec,'client_a')
             chunks=[r['normal_request']['chunk'] for r in reverse_rows if r['route']=='/sync/applyChunk']
             results['sdk-reverse-review']={'review_occurrences':sum(len(c.get('revlog',[])) for c in chunks),'card_occurrences':sum(len(c.get('cards',[])) for c in chunks),'note_occurrences':sum(len(c.get('notes',[])) for c in chunks),'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in reverse_rows),'receiver_equal':api.snapshot(a)==api.snapshot(b)}
             details['reverse_review']=reverse_rows
         # Both directions, plus ordinary note deletion (with its card grave).
+        if trace is not None:trace.use('sdk-bidirectional-edits-deletes')
         api.PHASE='normal-sdk-edit-delete'
         note_id=a.find_notes('')[0]
-        time.sleep(1.05);n=a.get_note(note_id);n.fields[1]='Aster forward';a.update_note(n);sync(a,aa,rec,'client_a');sync(b,ab,rec,'client_b')
+        time.sleep(1.05);n=a.get_note(note_id);n.fields[1]='Aster forward';a.update_note(n)
+        if trace is not None:trace.authoritative(a,'client_a')
+        sync(a,aa,rec,'client_a');sync(b,ab,rec,'client_b')
         forward=api.snapshot(a)==api.snapshot(b)
-        time.sleep(1.05);n=b.get_note(note_id);n.fields[1]='Aster reverse';b.update_note(n);sync(b,ab,rec,'client_b');sync(a,aa,rec,'client_a')
+        time.sleep(1.05);n=b.get_note(note_id);n.fields[1]='Aster reverse';b.update_note(n)
+        if trace is not None:trace.authoritative(b,'client_b')
+        sync(b,ab,rec,'client_b');sync(a,aa,rec,'client_a')
         reverse=api.snapshot(a)==api.snapshot(b)
         delete_id=a.find_notes('')[-1];delete_card=a.db.scalar('select id from cards where nid=?',delete_id)
-        time.sleep(1.05);a.remove_notes([delete_id]);sync(a,aa,rec,'client_a');sync(b,ab,rec,'client_b')
+        time.sleep(1.05);a.remove_notes([delete_id])
+        if trace is not None:trace.authoritative(a,'client_a')
+        sync(a,aa,rec,'client_a');sync(b,ab,rec,'client_b')
         results['sdk-bidirectional-edits-deletes']={'forward_equal':forward,'reverse_equal':reverse,'deleted_note_absent':b.db.scalar('select count(*) from notes where id=?',delete_id)==0,'deleted_card_absent':b.db.scalar('select count(*) from cards where id=?',delete_card)==0}
         # Author every changed object; schema shape and templates remain our own.
         time.sleep(1.05)
+        if trace is not None:trace.use('sdk-object-config-tag-exchange')
         api.PHASE='normal-sdk-objects'
         m=a.models.get(model['id']);m['css']='.card { color: #234567; }';a.models.save(m)
         api.PHASE='normal-sdk-deck-preset'
@@ -185,12 +217,16 @@ def sdk(api,root,f,results,details,target=None,bidirectional=False):
         api.PHASE='normal-sdk-config-tag'
         a.set_config(f['conf_key'],f['conf_value'])
         n=a.get_note(note_id);n.tags=[f['tag']];a.update_note(n)
+        if trace is not None:trace.authoritative(a,'client_a')
         sync(a,aa,rec,'client_a');sync(b,ab,rec,'client_b')
         api.PHASE='normal-sdk-object-receive'
         model_forward=b.models.get(model['id'])['css']=='.card { color: #234567; }'
-        time.sleep(1.05);m=b.models.get(model['id']);m['css']='.card { color: #345678; }';b.models.save(m);sync(b,ab,rec,'client_b');sync(a,aa,rec,'client_a')
+        time.sleep(1.05);m=b.models.get(model['id']);m['css']='.card { color: #345678; }';b.models.save(m)
+        if trace is not None:trace.authoritative(b,'client_b')
+        sync(b,ab,rec,'client_b');sync(a,aa,rec,'client_a')
         results['sdk-object-config-tag-exchange']={'model_forward':model_forward,'model_reverse':a.models.get(model['id'])['css']=='.card { color: #345678; }','deck_received':b.decks.get(did)['name']==f['deck'],'preset_received':b.decks.get_config(cid)['name']==f['preset'],'tag_received':f['tag'] in b.tags.all(),'config_received':b.get_config(f['conf_key'])==f['conf_value']}
         if bidirectional:
+            if trace is not None:trace.use('sdk-reverse-object-config-tag')
             api.PHASE='normal-sdk-reverse-objects'
             time.sleep(1.05)
             reverse_deck=b.decks.id(f['deck']+' reverse')
@@ -199,13 +235,16 @@ def sdk(api,root,f,results,details,target=None,bidirectional=False):
             b.set_config(f['conf_key'],reverse_config)
             reverse_tag=f['tag']+'Reverse'
             n=b.get_note(note_id);n.tags=[reverse_tag];b.update_note(n)
+            if trace is not None:trace.authoritative(b,'client_b')
             before=len(rec.observations);sync(b,ab,rec,'client_b');sync(a,aa,rec,'client_a');reverse_rows=rec.observations[before:]
             results['sdk-reverse-object-config-tag']={'deck_received':a.decks.get(reverse_deck)['name']==f['deck']+' reverse','preset_received':a.decks.get_config(reverse_preset['id'])['name']==f['preset']+' reverse','tag_received':reverse_tag in a.tags.all(),'config_received':a.get_config(f['conf_key'])==reverse_config,'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in reverse_rows),'receiver_equal':api.snapshot(a)==api.snapshot(b)}
             details['reverse_objects']=reverse_rows
+            if trace is not None:trace.use('sdk-reverse-delete')
             api.PHASE='normal-sdk-reverse-delete'
             delete_id=next(ident for ident in b.find_notes('') if ident!=note_id)
             delete_card=b.db.scalar('select id from cards where nid=?',delete_id)
             time.sleep(1.05);b.remove_notes([delete_id])
+            if trace is not None:trace.authoritative(b,'client_b')
             before=len(rec.observations);sync(b,ab,rec,'client_b');sync(a,aa,rec,'client_a');reverse_rows=rec.observations[before:]
             results['sdk-reverse-delete']={'deleted_note_absent':a.db.scalar('select count(*) from notes where id=?',delete_id)==0,'deleted_card_absent':a.db.scalar('select count(*) from cards where id=?',delete_card)==0,'full_transfer_count':sum(r['route'] in {'/sync/upload','/sync/download'} for r in reverse_rows),'receiver_equal':api.snapshot(a)==api.snapshot(b)}
             details['reverse_delete']=reverse_rows
@@ -213,10 +252,12 @@ def sdk(api,root,f,results,details,target=None,bidirectional=False):
         details['exchange_sdk_completions']=rec.sdk_completions
     api.PHASE='normal-sdk-boundaries'
     for count in f['note_counts']:
+        if trace is not None:trace.use('sdk-250-boundary' if count == 125 else 'sdk-multichunk')
         with environment(api,root/('boundary-'+str(count)),1,target) as (a,b,model,aa,ab,rec,port,clients):
             time.sleep(1.05)
             # New rows: exactly two tuples per note; initial fixture row is unchanged.
             for index in range(count): api.add_note(a,a.models.get(model['id']),[f'Boundary cue {index}',f'Boundary response {index}'])
+            if trace is not None:trace.authoritative(a,'client_a')
             before=len(rec.observations);sync(a,aa,rec,'client_a');sent=rec.observations[before:]
             before=len(rec.observations);sync(b,ab,rec,'client_b');received=rec.observations[before:]
             sc=[r['normal_request']['chunk'] for r in sent if r['route']=='/sync/applyChunk']
@@ -225,6 +266,7 @@ def sdk(api,root,f,results,details,target=None,bidirectional=False):
             results[variant]={'sent_lengths':[length(c) for c in sc],'sent_done':[c['done'] for c in sc],'received_lengths':[length(c) for c in rc],'received_done':[c['done'] for c in rc],'unique_note_ids':len({n[0] for c in rc for n in c.get('notes',[])}),'unique_card_ids':len({n[0] for c in rc for n in c.get('cards',[])}),'receiver_equal':api.snapshot(a)==api.snapshot(b)}
             details[variant]={'sender':sent,'receiver':received,'sdk_completions':rec.sdk_completions}
     api.PHASE='normal-sdk-graves'
+    if trace is not None:trace.use('sdk-251-graves')
     with environment(api,root/'graves',251,target) as (a,b,model,aa,ab,rec,port,clients):
         time.sleep(1.05)
         # Author an otherwise valid fixture with card-only graves and orphan notes.
@@ -232,6 +274,7 @@ def sdk(api,root,f,results,details,target=None,bidirectional=False):
         a.db.executemany('insert into graves(usn,oid,type) values(-1,?,0)',[(ident,) for ident in card_ids])
         a.db.execute('delete from cards')
         a.db.execute('update col set mod=?',int(time.time()*1000)+1000)
+        if trace is not None:trace.authoritative(a,'client_a')
         before=len(rec.observations);sync(a,aa,rec,'client_a');sent=rec.observations[before:];sync(b,ab,rec,'client_b')
         graves=[r['normal_request']['chunk'] for r in sent if r['route']=='/sync/applyGraves']
         results['sdk-251-graves']={'sent_grave_lengths':[sum(len(v) for v in c.values()) for c in graves],'sent_card_graves':sum(len(c['cards']) for c in graves),'receiver_card_count':b.db.scalar('select count(*) from cards'),'receiver_note_count':b.db.scalar('select count(*) from notes')}
