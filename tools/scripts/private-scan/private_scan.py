@@ -835,11 +835,11 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/retained_observer.py':
         'f096346a86c3bb55d2e9835cb6558c04526e2fbbfa333388e954868cfe919816',
     'tools/tests/sync_retained.bats':
-        'eb5ea4a210dbe1f29f5f5e9866db1bcc981089210456ff7b88349c30706f1e17',
+        'c94a487808d3811a98554cef92ea3376917008385c5b90866d9d1282cc2b84f4',
     'tools/mg.d/sync-retained.sh':
         '1eaa29368bf416e3dc709da6fe4ab98946132fdab2ea711a09e79187c43eef30',
     'conformance/peers/retained-sync/support.py':
-        'f605ec30665e9846024e7f2ff55e8a3fd67a21df9a5681fefd2911a2c66fc04e',
+        '505aec87b545694a1bad048b0b70c8dbe67ce222de902a60763fb1890c76dc5e',
     'conformance/peers/retained-sync/src/main.rs':
         '44d0b8067924aebc307ffc3c5a5960c16b692e6148d3e584a55bd2ecb1d0bee7',
     'conformance/peers/retained-sync/src/fixture.rs':
@@ -1133,9 +1133,9 @@ PUBLIC_ARTIFACTS = {
 # Keys pin exact repository-path UTF-8 bytes; values pin complete file bytes.
 PUBLIC_VENDOR_ARTIFACTS = {
     'f81e67fcb2e3dbe8379aead1ebe38904691e35f510169970a987710496d3ed77':
-        '568c39b3036eb885fca8c03d2c5a98775c590dd55b9a53289c294886eba8069c',
+        '2737bb166428505bf82c9c83402380005c80e722de64e5ab0501454cdedcc396',
     '1abb17517ad6c3616bc662765627c8e3419b3d81f0b8eaf3358cf4af9d316a33':
-        'de1f829e3237684f1e69ec93a4a6337e4ac1c358be0fb72047310d8b677b7821',
+        '4277a0a7966305c630f9fddc4848341fce58486ce4b34dc35e3679c8e3f642a6',
     '25ea9fbf9d10948d08a6ead80c9f83ec2154ae34f40f881e4659eff9349d258f': 'd08c9fb8ec612b54a95978b5411f5c91218d8ef4a4ac1ba64b1d5d0ac116e076',
     '987ec1929a5a69b01078144679a1a93b0ae01cb133c1a3eb19b18c2094e4e400': '3cf5ea37ea7bad31fe17f2650ea6ad0a7a570724a2435458d1ed1efb2dcf4715',
     '35a74f0278dd035158c7c188707978180be6dac754422f7bc506b0a6b16f626e': 'a3754a3582a6ab4247c2ace9f9686f8757f94691b01e86f340234c4c18073a1b',
