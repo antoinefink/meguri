@@ -828,6 +828,10 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete PUBLIC review: Codex provider_test_delta_review, 2026-11-17.
+    "docs/process/review-log/native-own-handoff-attribution-20261117.md":
+        "05a9ce3d8eeecf5e249a920c444ca767eb915060cd7360d4a85e744d5931951e",
+
     # Complete final-content PUBLIC review: U37/t1m3, native-repair-fix1, 2026-11-17.
     "core/crates/meguri-ffi/src/cloud_policy_execution.rs":
         "d12ca5c4b84bbebf1916f6166715f86c255c57380091affd8f8780475bf9f3f9",
@@ -868,7 +872,7 @@ PUBLIC_ARTIFACTS = {
         "1ed9e31a27b7f3f194d055a182f7097377437a5bacb1fa40377e3aad64818482",
     # Complete public-file review: provider_test_delta_review, 2026-11-17.
     "docs/process/verification-status.md":
-        "29dd78f97f36ce88ea67ad274d1fa91d951cdd76e6a99f9cdfa5c03bbc5f28db",
+        "acc51afe68cbaca83ceb2f15f5c7ee698e1b11ff6301cd411edad3d7080c1cae",
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
         'd17a17aafe357db445010b6d580ad11bac91f5d7e23496088de5f60f865b9130',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
