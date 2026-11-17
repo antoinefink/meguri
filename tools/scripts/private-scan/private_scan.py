@@ -849,6 +849,9 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: incoming_contract_review, 2026-11-17.
     "docs/process/review-log/cloud-protocol-consent-fixtures-20261117.md":
         "8f37e85fa552b7eece8721914aaf2c6c48c7608308b7c3c242088599b816398a",
+    # Complete public-file review: U244/t1mf, 2026-11-17.
+    "app/Packages/MeguriKit/Tests/AppModelTests/IssuedStartupAdmissionRegressionTests.swift":
+        "1ed9e31a27b7f3f194d055a182f7097377437a5bacb1fa40377e3aad64818482",
     # Complete public-file review: provider_test_delta_review, 2026-11-17.
     "docs/process/verification-status.md":
         "29dd78f97f36ce88ea67ad274d1fa91d951cdd76e6a99f9cdfa5c03bbc5f28db",
