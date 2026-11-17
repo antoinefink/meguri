@@ -346,9 +346,8 @@ impl MeguriRoundAdmission {
     pub(crate) fn check_media_effect(&self) -> std::result::Result<(), MeguriRoundRefusal> { self.check_selected(false) }
     fn check_selected(&self, check_media: bool) -> std::result::Result<(), MeguriRoundRefusal> {
         if let Some(refusal) = self.refusal() { return Err(refusal); }
-        self.current(check_media).map_err(|error| {
+        self.current(check_media).inspect_err(|&error| {
             self.refusal.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_or_insert(error);
-            error
         })
     }
     // Only a storage-minted conditional reset from this job's exact store and
@@ -485,9 +484,10 @@ fn check_epoch_document(doc: &ProviderDocument, expected: &MeguriBinding,
     generation: u64, publication: Option<&Publication>) -> Result<()> {
     if doc.selection != Selection::Meguri || doc.meguri.as_ref() != Some(expected.connection())
         || doc.meguri_binding.as_ref() != Some(expected) { return Err(MeguriReadyRefusal::BindingChanged); }
-    if let Some(handoff) = &doc.handoff {
-        if handoff.old != Selection::Meguri || handoff.generation != generation
-            || handoff.publication.as_ref() != publication { return Err(MeguriReadyRefusal::BindingChanged); }
+    if let Some(handoff) = &doc.handoff
+        && (handoff.old != Selection::Meguri || handoff.generation != generation
+            || handoff.publication.as_ref() != publication) {
+        return Err(MeguriReadyRefusal::BindingChanged);
     }
     Ok(())
 }

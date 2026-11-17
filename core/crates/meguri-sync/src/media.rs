@@ -298,8 +298,9 @@ impl Stage<'_> {
         let admission = self.job.meguri_admission();
         let cancel = self.cancel.clone();
         move || {
-            if let Some(admission) = &admission {
-                if cancel.is_cancelled() || admission.check_media_effect().is_err() { return Err(MediaError::Cancelled); }
+            if let Some(admission) = &admission
+                && (cancel.is_cancelled() || admission.check_media_effect().is_err()) {
+                return Err(MediaError::Cancelled);
             }
             Ok(())
         }
@@ -314,13 +315,12 @@ impl Stage<'_> {
         if matches!(error, MediaError::Cancelled) && self.job.admission_refused() {
             return self.job.check_admission().expect_err("retained admission refusal");
         }
-        if let Some(expected) = &self.baseline {
-            if let Some(owner) = &expected.owner {
-                match self.store().bound_sync_baseline(owner, expected.epoch) {
-                    Ok(current) if &current != expected => { self.binding_changed.set(true); return state_changed(); }
-                    Err(MediaBoundCheckError::Changed) => { self.binding_changed.set(true); return state_changed(); }
-                    _ => {} // A read failure cannot replace the genuine original storage error.
-                }
+        if let Some(expected) = &self.baseline
+            && let Some(owner) = &expected.owner {
+            match self.store().bound_sync_baseline(owner, expected.epoch) {
+                Ok(current) if &current != expected => { self.binding_changed.set(true); return state_changed(); }
+                Err(MediaBoundCheckError::Changed) => { self.binding_changed.set(true); return state_changed(); }
+                _ => {} // A read failure cannot replace the genuine original storage error.
             }
         }
         if matches!(error, MediaError::Cancelled) && self.cancel.is_cancelled() { return stopped(&self.cancel); }
