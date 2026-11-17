@@ -833,17 +833,17 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/retained_observer.py':
         'f096346a86c3bb55d2e9835cb6558c04526e2fbbfa333388e954868cfe919816',
     'tools/tests/sync_retained.bats':
-        '8c0348f9c7b5b192888c05e495f9f63a869e519e2eeb045c53b3f3d92e077846',
+        '1318c582d9f1498ec550076c61a58c06fa93a2a7a0d66d7fd6b29b4addfa4f27',
     'tools/mg.d/sync-retained.sh':
-        '55d3589c59ced756820c384b7b40f4178cc521c00b307d8538855d0de733a654',
+        '1eaa29368bf416e3dc709da6fe4ab98946132fdab2ea711a09e79187c43eef30',
     'conformance/peers/retained-sync/support.py':
-        'a3cd45851b256d4e67818336be871f7d2888d91607b4bf0b9c429c6159a594f9',
+        'f1d2a058ddd450360f7868a4d9ad51c22e9258948d0d0ffc33bd01dd4ef261c8',
     'conformance/peers/retained-sync/src/main.rs':
-        '96ee38a91af6995240770ef5e746724ef963c4651ccda1fe465e36eae6064c86',
+        '44d0b8067924aebc307ffc3c5a5960c16b692e6148d3e584a55bd2ecb1d0bee7',
     'conformance/peers/retained-sync/src/fixture.rs':
         'ec557ca25da094639920884f790a39f1e183f7a1bd744b76c241932f7e84e546',
     'conformance/peers/retained-sync/README.md':
-        '951e431e7e42f330d508411a783c62322789ba04036151540356c4a2076cbc0c',
+        '625a27d5cdfefedd533ce970e774d5802e15ff16b9d24feb1b99fa81f06bbee9',
     'conformance/peers/retained-sync/AGENTS.md':
         'a1aba360d6591c26719cf41483087415844925d55fdc8646419848aa68f30a06',
     'server/web/scripts/fixture.mjs':
@@ -885,7 +885,7 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/sync-package.sh':
         '8ae4752a6c3951f74a376ab363517fbd18a788c6fd2d098423d19fca6a177a22',
     'tools/tests/sync_package.bats':
-        'ad0fbcbd9e321173ccb62280951f4eeca246c863b24160036902a0ac72022a51',
+        'ad789138b10de371c34454dced42b9843049a1ba687fc5e678c71b3201e08130',
     'tools/tests/sync_package_context_test.py':
         '8ab26e4e6910de0308e22390276749dd2ae23615fea1bc87f29aa19880768132',
     # Independently reviewed public Docker lifecycle tooling, exact bytes.
@@ -1102,7 +1102,7 @@ PUBLIC_ARTIFACTS = {
         '6cc7dc20556c191e0644282d73259eb8ff8e23f7f98dbd76f107ae80b7eb9494',
 
     'tools/mg.d/meguri-sync.sh':
-        '12cf86e1b1f26e23a379cec6a2e0a8bd00beb7969354aedae16932bbcc268f75',
+        'bde5cecf8b56ddf89a0a38fbdb20ab69486c82499d3c972b85dde46adf50eba7',
 
     'tools/tests/sync_server.bats':
         '6c0ad95ca4dafd841dc7dd5bc239dd810b11758a413f0b5219de28e89abda470',
