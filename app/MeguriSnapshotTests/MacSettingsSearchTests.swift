@@ -48,6 +48,19 @@ import Testing
                 try #require(collection.sync.providerState?.selection == .localOnly)
                 window.contentViewController = controller
                 window.orderFront(nil); window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded()
+                var lastObservedNativePickerCount: Int?
+                do {
+                    try await waitForNativeAccountState {
+                        window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded(); window.displayIfNeeded()
+                        let pickerCount = nativeServicePickers(in: controller.view).count
+                        lastObservedNativePickerCount = pickerCount
+                        return pickerCount > 0
+                    }
+                } catch {
+                    recordNativeServiceMountDiagnostic(window: window, controller: controller,
+                        lastObservedNativePickerCount: lastObservedNativePickerCount)
+                    throw error
+                }
                 let picker = try #require(nativeServicePickers(in: controller.view).first)
                 #expect(Set(picker.itemTitles) == [SyncText.value("sync.service.iCloud"), SyncText.value("sync.service.meguri")])
                 picker.selectItem(withTitle: SyncText.value("sync.service.meguri"))
@@ -113,6 +126,77 @@ import Testing
         if let picker = view as? NSPopUpButton,
            picker.itemTitles.contains(SyncText.value("sync.service.meguri")) { matches.append(picker) }
         return matches + view.subviews.flatMap { nativeServicePickers(in: $0) }
+    }
+    // Diagnostic only: fixed categories, bounded public getters, no AX actions.
+    private func recordNativeServiceMountDiagnostic(window: NSWindow, controller: NSViewController,
+        lastObservedNativePickerCount: Int?) {
+        let root = controller.view
+        let controllerAttached = window.contentViewController === controller
+        let hostAttached = root.window === window
+        let contentAttached = window.contentView === root
+        let mounted = controllerAttached && hostAttached && contentAttached
+        var visited: Set<ObjectIdentifier> = []
+        var objectLimit = false, depthLimit = false, incomplete = !mounted, readFailed = !mounted
+        let roleSelector = #selector(NSAccessibilityProtocol.accessibilityRole)
+        let childrenSelector = #selector(NSAccessibilityProtocol.accessibilityChildren)
+        func find(_ object: NSObject, depth: Int) -> NSObject? {
+            guard !visited.contains(ObjectIdentifier(object)) else { return nil }
+            guard visited.count < 128 else { objectLimit = true; incomplete = true; return nil }
+            visited.insert(ObjectIdentifier(object))
+            // Never follow an AX edge into a window or a view owned elsewhere.
+            if object is NSWindow { incomplete = true; return nil }
+            if let view = object as? NSView, let owner = view.window, owner !== window {
+                incomplete = true; return nil
+            }
+            if let identifier = accessibilityString(in: object,
+                selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier)) {
+                if identifier == "settings.accountSync.service" { return object }
+            } else { readFailed = true; incomplete = true }
+            guard let children = accessibilityValue(in: object, selector: childrenSelector) as? NSArray else {
+                readFailed = true; incomplete = true; return nil
+            }
+            defer { withExtendedLifetime(children) {} }
+            guard depth < 16 else {
+                if children.count > 0 { depthLimit = true; incomplete = true }
+                return nil
+            }
+            for index in 0..<children.count {
+                guard visited.count < 128 else { objectLimit = true; incomplete = true; break }
+                guard let child = children.object(at: index) as? NSObject else {
+                    readFailed = true; incomplete = true; continue
+                }
+                if let found = find(child, depth: depth + 1) { return found }
+            }
+            return nil
+        }
+        let found = mounted ? find(root, depth: 0) : nil
+        let lookup = found != nil ? "found" : (readFailed || incomplete ? "read-failed" : "not-found")
+        var category = "missing", role = "missing"
+        if let found {
+            category = found is NSPopUpButton ? "NSPopUpButton" : (found is NSView ? "NSView" : "other")
+            if let value = accessibilityString(in: found, selector: roleSelector) {
+                switch value {
+                case NSAccessibility.Role.popUpButton.rawValue: role = "popup"
+                case NSAccessibility.Role.comboBox.rawValue: role = "combo"
+                case NSAccessibility.Role.menuButton.rawValue: role = "menu-button"
+                case NSAccessibility.Role.group.rawValue: role = "group"
+                default: role = "other"
+                }
+            }
+        }
+        print("nativeServiceMount controllerAttached=\(controllerAttached) hostAttached=\(hostAttached)"
+            + " contentAttached=\(contentAttached) windowVisible=\(window.isVisible)"
+            + " windowOcclusionVisible=\(window.occlusionState.contains(.visible))"
+            + " hostFrameNonempty=\(!root.frame.isEmpty) hostBoundsNonempty=\(!root.bounds.isEmpty)"
+            + " windowFrameNonempty=\(!window.frame.isEmpty)"
+            + " nativePickerMatches=LAST-OBSERVED:\(lastObservedNativePickerCount.map { String($0) } ?? "not-observed")"
+            + " axService=\(lookup) category=\(category) role=\(role)"
+            + " objectLimit=\(objectLimit) depthLimit=\(depthLimit) incomplete=\(incomplete)"
+            + " roleGetterAvailable=\(found?.responds(to: roleSelector) ?? false)"
+            + " childrenGetterAvailable=\(found?.responds(to: childrenSelector) ?? false)"
+            + " pickSelectorAvailable=\(found?.responds(to: NSSelectorFromString("accessibilityPerformPick")) ?? false)"
+            + " pressSelectorAvailable=\(found?.responds(to: NSSelectorFromString("accessibilityPerformPress")) ?? false)"
+            + " showMenuSelectorAvailable=\(found?.responds(to: NSSelectorFromString("accessibilityPerformShowMenu")) ?? false)")
     }
     private func nativeAccountElement(_ identifier: String, in root: NSObject) throws -> NSObject? {
         var visited: Set<ObjectIdentifier> = []
