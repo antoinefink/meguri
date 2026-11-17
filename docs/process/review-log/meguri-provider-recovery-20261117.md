@@ -479,3 +479,9 @@ Test-preparation checks pass: privacy `062936-33399`, static `062939-34248` and 
 ## Held-status repair passes
 
 `swift-test/20261117T063505Z-37392`, clean `3a4bf8bb`: eleven passed, one failed, zero skipped. All ten original methods and the held-status regression pass. The older proof method passes Reopen; Resume times out before its target status command. The retained trace contains an earlier result and ACK, fixture configuration, then Resume admission. It proves no cause beyond that boundary. Independent source diagnosis continues without changing assertions or deadlines. CPU ownership was released from the actual terminal result.
+
+## Observe the remaining Resume boundary
+
+Author `064206-43447` changes only the old proof test trace. Existing Resume entry, return and refusal callbacks now record fixed markers; refusal retains only its authority-change Boolean. Another fixed marker records account-resolver callback entry before its guard. Review `064648-44630` finds no P0–P2 issues. Root verifies exact author/reviewer bytes. Both windows, all assertions, trace bounds, namespaces, waits and deadlines remain. No cause or behavior repair is claimed; the focused method must supply the next observation.
+
+Trace-source static `065324-47813` and similarity `065324-48188` pass; the filtered one-file report has no flags. Privacy passes after a public count/classification prose rewrite. Failed scan `065324-47973` remains retained; no source or guard changed during that rewrite.

@@ -1046,11 +1046,15 @@ extension ReviewCollectionStartupTests {
                 case .commandAcknowledgementJoined: trace.record("command.ack.join.return", command: ordinal)
                 case .proofResultReduced: trace.record("proof.result.reduced")
                 case .proofAcknowledgementSending: trace.record("proof.ack.send")
+                case .resumeEntered: trace.record("resume.entered")
+                case .resumeReturned: trace.record("resume.returned")
+                case .resumeRefused(let authorityChanged):
+                    trace.record(authorityChanged ? "resume.refused.authorityChanged.true" : "resume.refused.authorityChanged.false")
                 case .localOnlyPolicyWaiting, .ownCoreStarted, .dependencyRevocationJoined(_),
                      .ownDrainWaiting(_), .ownDrainJoined(_),
                      .corePredecessorWaiting(_), .corePredecessorReleased(_),
                      .accountCompletion, .accountAccepted, .resultReduced,
-                     .resumeEntered, .resumeReturned, .resumeRefused, .resumeCancelled: break
+                     .resumeCancelled: break
                 }
             }
             #endif
@@ -1091,6 +1095,7 @@ extension ReviewCollectionStartupTests {
             // Let the actual resolver start before the held status command.
             // A status held before read admission would block that admission.
             harness.factory.beforeAccountReturn = {
+                trace.record("fixture.beforeAccountReturn.entry")
                 guard !holdArmed else { return }
                 holdArmed = true
                 harness.sync.setDeviceSettings(paused: false, automatic: false, media: false)
