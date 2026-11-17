@@ -80,13 +80,14 @@ public struct ErrorStateView: View {
 }
 
 extension View {
-    /// Native state actions: regular on Mac, large with audited text contrast
-    /// on touch platforms.
+    /// Native state actions: regular on Mac, large rounded-rectangle with
+    /// audited text contrast on touch platforms.
     func stateViewActions() -> some View {
         #if os(macOS)
         buttonStyle(.bordered).controlSize(.regular)
         #else
-        buttonStyle(.bordered).controlSize(.large).tint(ColorToken.textPrimary.color)
+        buttonStyle(.bordered).controlSize(.large).buttonBorderShape(.roundedRectangle)
+            .tint(ColorToken.textPrimary.color)
         #endif
     }
 }

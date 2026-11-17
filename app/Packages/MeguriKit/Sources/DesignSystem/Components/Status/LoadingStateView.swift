@@ -15,13 +15,12 @@ public struct LoadingStateView: View {
         Group {
             if let fractionDone {
                 ProgressView(value: min(max(fractionDone, 0), 1)) { label }
-                    .tint(.token(.progressFill))
             } else {
                 ProgressView { label }
             }
         }
         .foregroundStyle(.token(.textSecondary))
-        .padding(Spacing.large)
+        .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

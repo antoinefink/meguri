@@ -77,8 +77,17 @@ struct SettingsCollectionFilesSection: View {
             CollectionActionRow {
                 Button { if let present { present(.collectionEntry) } else { collection?.entry.present() } } label: {
                     Text("Import Collection", bundle: .module)
+                        #if !os(macOS)
+                        // Borderless draws no bezel: the label carries the touch target.
+                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                        .contentShape(Rectangle())
+                        #endif
                 }
+                #if os(macOS)
                 .buttonStyle(.bordered)
+                #else
+                .buttonStyle(.borderless)
+                #endif
                 .controlSize(.regular)
                 .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                 .contentShape(Rectangle())
@@ -90,8 +99,17 @@ struct SettingsCollectionFilesSection: View {
             CollectionActionRow {
                 Button { if let present { present(.collectionExport) } else { collection?.collectionExport.present() } } label: {
                     Text("Export Collection", bundle: .module)
+                        #if !os(macOS)
+                        // Borderless draws no bezel: the label carries the touch target.
+                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                        .contentShape(Rectangle())
+                        #endif
                 }
+                #if os(macOS)
                 .buttonStyle(.bordered)
+                #else
+                .buttonStyle(.borderless)
+                #endif
                 .controlSize(.regular)
                 .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                 .contentShape(Rectangle())

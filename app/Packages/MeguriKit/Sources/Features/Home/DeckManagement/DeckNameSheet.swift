@@ -12,7 +12,7 @@ public struct DeckNameSheet: View {
     public var body: some View {
         #if os(macOS)
         // A Mac sheet has no navigation bar: the form leads, buttons along the bottom.
-        content.frame(width: 420)
+        content.presentationSizing(.form.fitted(horizontal: false, vertical: true))
         #else
         NavigationStack { content }
         #endif
@@ -30,10 +30,12 @@ public struct DeckNameSheet: View {
             #if os(macOS)
             .formStyle(.grouped)
             .scrollDisabled(true)
-            .fixedSize(horizontal: false, vertical: true)
             #endif
             #if !os(macOS)
             .navigationTitle(title)
+            #endif
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -35,13 +35,9 @@ public struct HomeView: View {
                     // Keeps the screen's and the page's identifiers on separate elements.
                     GeometryReader { _ in deckPage(deck) }
                 } else {
-                    #if os(macOS)
                     GeometryReader { geometry in
                         scrollContent(availableHeight: geometry.size.height)
                     }
-                    #else
-                    scrollContent()
-                    #endif
                 }
             }
         }
@@ -133,14 +129,12 @@ public struct HomeView: View {
         guard case .ready = collection.state, !collection.decks.isEmpty else { return false }
         return deckID.flatMap { collection.deckPage($0) } == nil
     }
+    /// N2: every state view is centred in the pane; only the deck list starts at the top.
     private var centersContent: Bool {
-        #if os(macOS)
         if case .ready = collection.state { return collection.decks.isEmpty }
-        if case .noFile = collection.state { return true }
-        #endif
-        return false
+        return true
     }
-    private func scrollContent(availableHeight: CGFloat = 0) -> some View {
+    private func scrollContent(availableHeight: CGFloat) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.large) {
                 if let record = collection.previousRecord, !record.answers.isEmpty {
@@ -151,8 +145,14 @@ public struct HomeView: View {
                     }
                 }
                 if let error = collection.error, !hasFailed {
-                    Text(verbatim: error).foregroundStyle(.token(.statusError))
-                        .accessibilityIdentifier("home.collection.error")
+                    // A symbol with the colour, so colour is not the only cue.
+                    Label {
+                        Text(verbatim: error)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.token(.statusError))
+                            .accessibilityHidden(true)
+                    }
+                    .accessibilityIdentifier("home.collection.error")
                 }
                 content
             }
@@ -345,6 +345,7 @@ struct HomeCollectionEmptyContent: View {
     }
 }
 
+/// Styled by EmptyStateView's state actions, like the Connect button beside it.
 struct HomeCollectionImportButton: View {
     let canPresent: Bool
     let action: () -> Void
@@ -352,15 +353,8 @@ struct HomeCollectionImportButton: View {
         Button(action: action) {
             Text("Import Collection")
         }
-        .buttonStyle(.bordered)
         #if os(macOS)
-        .controlSize(.regular)
-        // EmptyStateView supplies a text-primary tint for its touch controls.
-        .tint(nil)
-        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-        .contentShape(Rectangle())
-        #else
-        .tint(ColorToken.textPrimary.color)
+        // As ErrorStateView's retry: the Mac target audit reads this frame.
         .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
         .contentShape(Rectangle())
         #endif
@@ -499,6 +493,8 @@ private struct HomeDeckBranch: View {
     let frameChanged: (Int64, CGRect?) -> Void
     #if os(macOS)
     @Environment(\.locale) private var locale
+    #else
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     #endif
 
     private var path: String {
@@ -574,41 +570,15 @@ private struct HomeDeckBranch: View {
 
     private var row: some View {
         Button { select(node.id) } label: {
-            HStack {
-                if node.filtered {
-                    Image(systemName: "line.3.horizontal.decrease.circle")
-                        .imageScale(.small)
-                        .accessibilityHidden(true)
-                }
+            rowContent
                 #if os(macOS)
-                Text(verbatim: node.name.components(separatedBy: "::").last ?? node.name)
-                    .accessibilityIdentifier("home.deck.name.\(node.id)")
-                Spacer()
-                if let plainCounts {
-                    Text(verbatim: plainCounts)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
-                }
+                .frame(minHeight: ControlMetrics.minimumTarget)
                 #else
-                Text(verbatim: node.name.components(separatedBy: "::").last ?? node.name)
-                    .accessibilityIdentifier("home.deck.name.\(node.id)")
-                Spacer()
-                if node.counts.total > 0 {
-                    Text(node.counts.total, format: .number)
-                        .foregroundStyle(.token(.textSecondary))
-                        .monospacedDigit()
-                        .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
-                }
+                // A childless row's button fills its cell; one beside a disclosure doesn't.
+                .frame(minHeight: node.children.isEmpty ? nil : ControlMetrics.minimumTarget)
                 #endif
-            }
-            #if os(macOS)
-            .frame(minHeight: ControlMetrics.minimumTarget)
-            #else
-            // A childless row's button fills its cell; one beside a disclosure doesn't.
-            .frame(minHeight: node.children.isEmpty ? nil : ControlMetrics.minimumTarget)
-            #endif
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
         }
         // Keep the row action distinct from its native disclosure control.
         .buttonStyle(.plain)
@@ -625,7 +595,28 @@ private struct HomeDeckBranch: View {
         .deckMenu(collection: collection, deck: node)
     }
 
+    @ViewBuilder private var filteredSymbol: some View {
+        if node.filtered {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .accessibilityHidden(true)
+        }
+    }
+
     #if os(macOS)
+    private var rowContent: some View {
+        HStack {
+            filteredSymbol
+            Text(verbatim: node.name.components(separatedBy: "::").last ?? node.name)
+                .accessibilityIdentifier("home.deck.name.\(node.id)")
+            Spacer()
+            if let plainCounts {
+                Text(verbatim: plainCounts)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
+            }
+        }
+    }
+
     /// N11.5: non-zero counts as trailing secondary text, without colours.
     private var plainCounts: String? {
         let new = node.counts.new.formatted(.number.locale(locale))
@@ -635,6 +626,35 @@ private struct HomeDeckBranch: View {
                      node.counts.learning == 0 ? nil : String(localized: "\(learning) learning", bundle: .module),
                      node.counts.review == 0 ? nil : String(localized: "\(review) to review", bundle: .module)].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+    #else
+    private var rowContent: some View {
+        // At the accessibility sizes the count goes under the name, which then keeps the row's width.
+        let stacks = dynamicTypeSize.isAccessibilitySize
+        return (stacks ? AnyLayout(VStackLayout(alignment: .leading)) : AnyLayout(HStackLayout())) {
+            HStack {
+                filteredSymbol
+                Text(verbatim: node.name.components(separatedBy: "::").last ?? node.name)
+                    .accessibilityIdentifier("home.deck.name.\(node.id)")
+            }
+            if !stacks { Spacer() }
+            if node.counts.total > 0 {
+                Text(node.counts.total, format: .number)
+                    .foregroundStyle(.token(.textSecondary))
+                    .monospacedDigit()
+                    // A number never splits across lines.
+                    .lineLimit(1)
+                    .fixedSize()
+                    .accessibilityIdentifier("home.deck.rowCounts.\(node.id)")
+            }
+            if !stacks, node.children.isEmpty {
+                // The disclosure's column, inside the button so the row keeps its tap area:
+                // leaf counts line up with their parent's.
+                Color.clear
+                    .frame(width: ControlMetrics.minimumTarget)
+                    .accessibilityHidden(true)
+            }
+        }
     }
     #endif
 }
@@ -735,7 +755,6 @@ private struct HomeSidebarBranch: View {
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .listRowBackground(ColorToken.surface.color)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text(verbatim: path))
             .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
@@ -747,7 +766,8 @@ private struct HomeSidebarBranch: View {
         .deckMenu(collection: collection, deck: node)
         .tag(SidebarItem.deck(DeckID(node.id)))
         #if os(macOS)
-        .badge(Text(node.counts.review, format: .number))
+        // An integer badge, which the system hides at zero (N11.5).
+        .badge(Int(node.counts.review))
         #endif
     }
 }

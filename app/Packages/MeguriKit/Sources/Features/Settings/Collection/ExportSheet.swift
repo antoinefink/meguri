@@ -46,11 +46,18 @@ struct CollectionExportContent: View {
                     Text("The .colpkg file includes every deck, note, card and saved review, plus images, audio and other media.", bundle: .module)
                         .accessibilityIdentifier("settings.importExport.explanation")
                     if presentation.busy {
-                        ProgressView { Text(LocalizedStringKey(presentation.title), bundle: .module) }
-                            .frame(minWidth: 44, minHeight: 44)
-                            .accessibilityLabel(Text(LocalizedStringKey(presentation.title), bundle: .module))
-                            .accessibilityValue(Text("In progress", bundle: .module))
-                            .accessibilityIdentifier("settings.importExport.progress")
+                        HStack {
+                            ProgressView()
+                                #if os(macOS)
+                                .controlSize(.small)
+                                #endif
+                                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                                .accessibilityLabel(Text(LocalizedStringKey(presentation.title), bundle: .module))
+                                .accessibilityValue(Text("In progress", bundle: .module))
+                                .accessibilityIdentifier("settings.importExport.progress")
+                            Text(LocalizedStringKey(presentation.title), bundle: .module)
+                                .accessibilityHidden(true)
+                        }
                     } else if presentation.saved {
                         Label { Text("Saved", bundle: .module) } icon: { Image(systemName: "checkmark.circle") }
                             .font(.headline)
@@ -71,7 +78,7 @@ struct CollectionExportContent: View {
                             actionLabel("Prepare Export")
                         }
                             #if os(macOS)
-                            .frame(minWidth: 28, minHeight: 28)
+                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                             .contentShape(Rectangle())
                             #endif
                             .accessibilityIdentifier("settings.importExport.prepare")
@@ -81,7 +88,7 @@ struct CollectionExportContent: View {
                             actionLabel("Choose Save Location")
                         }
                             #if os(macOS)
-                            .frame(minWidth: 28, minHeight: 28)
+                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                             .contentShape(Rectangle())
                             #endif
                             .accessibilityIdentifier("settings.importExport.choose")
@@ -91,7 +98,7 @@ struct CollectionExportContent: View {
                             actionLabel("Retry Export Cleanup")
                         }
                             #if os(macOS)
-                            .frame(minWidth: 28, minHeight: 28)
+                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                             .contentShape(Rectangle())
                             #endif
                             .accessibilityIdentifier("settings.importExport.retryCleanup")
@@ -101,36 +108,36 @@ struct CollectionExportContent: View {
                             actionLabel("Discard Prepared Export")
                         }
                             #if os(macOS)
-                            .frame(minWidth: 28, minHeight: 28)
+                            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                             .contentShape(Rectangle())
                             #endif
                             .accessibilityIdentifier("settings.importExport.discard")
                     }
                 }
-                .padding(Spacing.large)
+                .padding()
                 .frame(maxWidth: ContentWidth.readable, alignment: .leading)
                 .frame(maxWidth: .infinity)
             }
             .accessibilityIdentifier("settings.importExport.content")
-            .background(.token(.backgroundPrimary))
-            .safeAreaInset(edge: .bottom) {
+            .safeAreaBar(edge: .bottom) {
                 Button(action: close) {
                     actionLabel(presentation.busy ? LocalizedStringKey("Cancel Export") : LocalizedStringKey("Done"))
                 }
                     #if os(macOS)
-                    .frame(minWidth: 28, minHeight: 28)
+                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
                     .contentShape(Rectangle())
                     #endif
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("settings.importExport.close")
-                    .padding(Spacing.large)
+                    .padding()
                     .frame(maxWidth: ContentWidth.readable, alignment: .leading)
                     .frame(maxWidth: .infinity)
-                    .background(.token(.backgroundPrimary))
             }
             .buttonStyle(.bordered)
             #if os(macOS)
             .controlSize(.regular)
+            #else
+            .buttonBorderShape(.roundedRectangle)
             #endif
             .navigationTitle(Text("Export Collection", bundle: .module))
             #if os(iOS)
@@ -143,7 +150,7 @@ struct CollectionExportContent: View {
     private func actionLabel(_ title: LocalizedStringKey) -> some View {
         Text(title, bundle: .module)
             #if !os(macOS)
-            .frame(minWidth: 44, minHeight: 44)
+            .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
             .contentShape(Rectangle())
             #endif
     }

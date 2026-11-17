@@ -50,7 +50,9 @@ private struct DeckMenuAffordances: ViewModifier {
                 .focused($menuFocused)
                 .accessibilityIdentifier("home.deckMenu.open.\(deck.id)")
                 .menuStyle(.button)
+                .menuIndicator(.hidden)
                 .buttonStyle(.borderless)
+                .fixedSize()
                 .opacity(hovering || menuFocused ? 1 : 0)
                 .help(Text("Deck Actions", bundle: .module))
             }

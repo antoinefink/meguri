@@ -10,13 +10,9 @@ public enum HomeDeckListPreview: PreviewStates {
                 if state == .typical || state == .overflow {
                     HomeDeckTree(nodes: nodes(overflow: state == .overflow), select: { _ in })
                 } else {
-                    #if os(macOS)
                     GeometryReader { geometry in
                         scrollContent(state: state, availableHeight: geometry.size.height)
                     }
-                    #else
-                    scrollContent(state: state)
-                    #endif
                 }
             }
             .background(.token(.backgroundPrimary))
@@ -25,13 +21,9 @@ public enum HomeDeckListPreview: PreviewStates {
             .accessibilityIdentifier("home.collection.screen")
         } }
     }
-    private static func scrollContent(state: PreviewState, availableHeight: CGFloat = 0) -> some View {
-        #if os(macOS)
-        let centersContent = state == .empty
-        #else
-        let centersContent = false
-        #endif
-        return ScrollView {
+    /// Every state view is centred, as in `HomeView` (N2).
+    private static func scrollContent(state: PreviewState, availableHeight: CGFloat) -> some View {
+        ScrollView {
             VStack(alignment: .leading, spacing: Spacing.large) {
                 switch state {
                 case .empty: HomeCollectionEmptyContent(importAction: {})
@@ -43,7 +35,7 @@ public enum HomeDeckListPreview: PreviewStates {
             .padding(Spacing.medium)
             .frame(maxWidth: ContentWidth.readable, alignment: .leading)
             .frame(maxWidth: .infinity)
-            .frame(minHeight: centersContent ? availableHeight : 0, alignment: centersContent ? .center : .top)
+            .frame(minHeight: availableHeight, alignment: .center)
         }
     }
     private static func nodes(overflow: Bool) -> [CountedDeckNode] {

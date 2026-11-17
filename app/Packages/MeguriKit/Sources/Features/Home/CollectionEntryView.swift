@@ -168,8 +168,13 @@ struct CollectionEntryContent: View {
                 }
                 if let message = presentation.message {
                     Section {
-                        Text(verbatim: message)
-                            .accessibilityIdentifier("onboarding.collectionImport.error")
+                        Label {
+                            Text(verbatim: message)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .symbolRenderingMode(.multicolor)
+                        }
+                        .accessibilityIdentifier("onboarding.collectionImport.error")
                         if presentation.canContinueRecovery {
                             Button("Continue Recovery", action: actions.continueRecovery)
                                 .accessibilityIdentifier("onboarding.collectionImport.recover")
@@ -238,8 +243,8 @@ struct CollectionEntryContent: View {
                         }
                     }
                 }
-                Section {
-                    if presentation.canChoose {
+                if presentation.canChoose {
+                    Section {
                         if presentation.needsReinspection {
                             Button("Inspect Again", action: actions.reinspect)
                                 .accessibilityIdentifier("onboarding.collectionImport.reinspect")
@@ -247,10 +252,6 @@ struct CollectionEntryContent: View {
                         Button("Choose File", action: actions.chooseFile)
                             .accessibilityIdentifier("onboarding.collectionImport.choose")
                     }
-                    Button(presentation.busy ? "Cancel Import" : "Cancel", action: actions.dismiss)
-                        .keyboardShortcut(.cancelAction)
-                        .disabled((presentation.busy && !presentation.canCancel) || presentation.requiresRecovery)
-                        .accessibilityIdentifier("onboarding.collectionImport.cancel")
                 }
             }
             .formStyle(.grouped)
@@ -259,6 +260,14 @@ struct CollectionEntryContent: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(presentation.busy ? "Cancel Import" : "Cancel", action: actions.dismiss)
+                        .keyboardShortcut(.cancelAction)
+                        .disabled((presentation.busy && !presentation.canCancel) || presentation.requiresRecovery)
+                        .accessibilityIdentifier("onboarding.collectionImport.cancel")
+                }
+            }
         }
         .presentationSizing(.form)
         .interactiveDismissDisabled(presentation.busy || presentation.requiresRecovery)

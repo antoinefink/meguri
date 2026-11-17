@@ -236,6 +236,11 @@ public struct GoToDeckView: View {
                 } else if model.snapshot == nil {
                     ContentUnavailableView {
                         Label { Text("Couldn’t Load Decks", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
+                    } description: {
+                        if let message = model.message {
+                            messageText(message)
+                                .accessibilityIdentifier("home.goToDeck.message")
+                        }
                     } actions: {
                         Button { Task { await reload() } } label: { Text("Retry", bundle: .module) }
                             .accessibilityIdentifier("home.goToDeck.retry")
@@ -248,9 +253,13 @@ public struct GoToDeckView: View {
                                 .accessibilityIdentifier("home.goToDeck.deck.\(entry.id)")
                         }
                         if model.canCreate {
-                            Text("Create deck named \(model.query)", bundle: .module)
-                                .tag(GoToDeckModel.Selection.create)
-                                .accessibilityIdentifier("home.goToDeck.create")
+                            Label {
+                                Text("Create deck named \(model.query)", bundle: .module)
+                            } icon: {
+                                Image(systemName: "plus")
+                            }
+                            .tag(GoToDeckModel.Selection.create)
+                            .accessibilityIdentifier("home.goToDeck.create")
                         }
                     }
                     .disabled(model.hasSavedResult)
@@ -269,18 +278,17 @@ public struct GoToDeckView: View {
                         }
                     }
                 }
-                if let message = model.message {
-                    messageText(message)
-                        .accessibilityIdentifier("home.goToDeck.message")
-                }
-                if model.checkingName { ProgressView().accessibilityIdentifier("home.goToDeck.checkingName") }
-                if model.message == .lookupFailed {
-                    Button { model.retryLookup() } label: { Text("Retry", bundle: .module) }
-                        .accessibilityIdentifier("home.goToDeck.retryLookup")
-                }
-                if model.busy { ProgressView().accessibilityIdentifier("home.goToDeck.progress") }
+                #if os(macOS)
+                status
+                #endif
             }
             #if !os(macOS)
+            .safeAreaBar(edge: .bottom) {
+                if showsStatus {
+                    VStack { status }
+                        .padding()
+                }
+            }
             .searchable(text: $model.query, prompt: Text("Search Decks", bundle: .module))
             #endif
             .disabled(model.busy)
@@ -291,6 +299,7 @@ public struct GoToDeckView: View {
             #endif
             #if !os(macOS)
             .navigationTitle(Text("Go to Deck", bundle: .module))
+            .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -308,8 +317,9 @@ public struct GoToDeckView: View {
             }
         }
         #if os(macOS)
-        .frame(width: 480, height: 420)
+        .frame(idealWidth: 480, idealHeight: 420)
         #endif
+        .presentationSizing(.form)
         .interactiveDismissDisabled(model.busy || collection.goToDeckBusy)
         #if os(macOS)
         // Without a navigation stack, the sheet's identifier needs its own container.
@@ -318,6 +328,37 @@ public struct GoToDeckView: View {
         .accessibilityIdentifier("home.goToDeck.sheet")
         .onChange(of: layout, initial: true) { _, value in model.liveLayout = value }
         .task(id: collection.goToDeckPresentation) { await reload() }
+    }
+    /// The load failure's unavailable view carries the message itself.
+    private var showsLoadFailure: Bool { !model.loading && model.snapshot == nil }
+    #if !os(macOS)
+    private var showsStatus: Bool {
+        (model.message != nil && !showsLoadFailure) || model.checkingName || model.message == .lookupFailed || model.busy
+    }
+    #endif
+    @ViewBuilder private var status: some View {
+        if let message = model.message, !showsLoadFailure {
+            messageText(message)
+                .accessibilityIdentifier("home.goToDeck.message")
+        }
+        if model.checkingName {
+            ProgressView()
+                #if os(macOS)
+                .controlSize(.small)
+                #endif
+                .accessibilityIdentifier("home.goToDeck.checkingName")
+        }
+        if model.message == .lookupFailed {
+            Button { model.retryLookup() } label: { Text("Retry", bundle: .module) }
+                .accessibilityIdentifier("home.goToDeck.retryLookup")
+        }
+        if model.busy {
+            ProgressView()
+                #if os(macOS)
+                .controlSize(.small)
+                #endif
+                .accessibilityIdentifier("home.goToDeck.progress")
+        }
     }
     private func reload() async {
         guard let token = collection.goToDeckPresentation else { return }
