@@ -843,7 +843,7 @@ PUBLIC_ARTIFACTS = {
         "6bb6bb78447586c080d7b19adc9aae19447489c2d9d5f36bca3bd471863cb76f",
 
     'docs/process/review-log/meguri-sync-U10.md':
-        '565221177f72b2182784c8c442b1c07eda55c6d33186dfe1add3f36e0474cdf0',
+        '5c252409842d08d9d53f0b196ca737e8ec2051fa28aa38ed6fecd219e70a9126',
     'server/Dockerfile':
         '324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8',
     'server/README.md':

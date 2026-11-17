@@ -1,7 +1,8 @@
 # Local Docker package and recovery
 
-The local Docker unit is implemented and its focused verification passed.
-Final unit source is 8ada1bf5542f8187dd38d40316cf92fcf45769b6.
+The initial local Docker unit and its focused verification completed on 2026-11-16.
+Its source was 8ada1bf5542f8187dd38d40316cf92fcf45769b6.
+The 2026-11-17 master integration and license correction are recorded below.
 The actual tested image was built from clean source
 8a2f4dac99c8dcb8d612551ef2682d05327ffa75. A later correction changes only
 README/help text and public provenance metadata. All 148 frozen package-input
@@ -122,3 +123,51 @@ screen has a minor singular account-count copy issue for the final UI review.
 Final exact-image Desktop, retained-Meguri and actual AnkiMobile evidence remains
 required. No full coherent-gate, final device, production or app acceptance is
 claimed here. Original commits remain unsquashed and nothing was pushed.
+
+## Master integration and current MIT package, 2026-11-17
+
+Normal merge 44b8c55d445530915fe80444eb6ae8f0dfa36b7c preserved all 26
+original U10 commits. Nineteen nonmetadata paths matched the completed U10
+source exactly; the two metadata resolutions preserved the complete main
+ledger prefix and all 14 original U10 appends. Independent complete-content
+review and parent byte/AST checks passed. No U11 or phone-helper code landed.
+The focused main integration checks passed: privacy, provenance, six
+package/scanner/registry checks and supported similarity.
+
+Fresh master initially lacked its checkout-scoped web dependency cache.
+Package test 20261117T150059Z-92370 failed before any smoke case. Supported
+locked install, dependency audit and browser installation then passed. No
+versions or lockfiles changed. The next package test, 20261117T150719Z-19691,
+failed at the obsolete requirement for an MPL notice. Both failures remain.
+
+The first-party workspace and model now use MIT. Compared with the initial
+148 frozen package inputs, only core/Cargo.toml had changed before this repair.
+Filtered fixer s-20261116T204829Z-38c8479a corrected the package assertion
+and current NOTICE/README wording. It retained complete nonempty approved
+license inventories, license text and usage, unmodified model/workspace
+source archives, and all input/notice/archive hashes and private-context guards.
+Third-party license policy and dependency versions did not change.
+
+Independent reviewer s-20261116T204829Z-eadb1b04 read all four complete
+files. MG cleanroom/20261117T152310Z-46891 reported CLEAR/PUBLIC; its report
+has SHA-256 ac1f05abb939e9fe43fdb54526e3ae2aecb23515311ab84d23de6577bc1d0981.
+Main commits 92b23410e and c145b92861fd67799cbb852cc7b74ed2a78d8136
+preserve the unrelated remote, app and Core history. The former updates only
+three existing reviewed public hashes; scanner behavior remains unchanged.
+
+Focused main checks all passed: private/20261117T153830Z-63620,
+static-checks/20261117T153831Z-63987, six selected tests in
+selftest/20261117T153832Z-64478, and three supported files in
+similarity/20261117T153921Z-73065. Two unsupported files received no
+similarity credit. All receipt paths below are under the main checkout.
+
+Actual clean-master sync-server-package-test/20261117T154144Z-246/result.json
+passed four cases, zero failed/skipped, on c145b92861fd67799cbb852cc7b74ed2a78d8136.
+The real image build and browser/native collection, review and media checks
+ran across same-volume restart. This is current master package evidence,
+not Desktop31, Retained8, Mobile10 or app-provider acceptance.
+
+The main source/CPU window was released after that terminal result. The live
+owner-authorized Test endpoint was not changed. The original 480df4526514e294f5a3a16dd4ab83a1fbcc7f47
+U10-U11 coherent batch gate remains pending. Backup/restore, publishing and
+production deployment remain outside this delivery.
