@@ -1,0 +1,29 @@
+# specs/servers/ankiconnect-gui G12 `browse-reorder-first-direction` (G3 "The sort", G11).
+# Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3);
+# activeCols with Created displayed. The new collection's sort is noteFld ascending, so noteCrt is a
+# new sort column, whose first direction is descending. All values are synthetic.
+# The reference replaces the requested ascending by descending (sortBackwards true); Meguri writes
+# the requested direction (false), a deviations.yaml replace (R1782) on the observed sortBackwards.
+id: servers/ankiconnect/gui/browse-reorder-first-direction
+description: "guiBrowse sorting ascending on a new column whose first direction is descending"
+tags: [no-origin]
+server: ankiconnect
+source: oracle
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {activeCols: [noteFld, template, cardDue, deck, noteCrt]}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}}
+    - {notetype: Pair, deck: Default, fields: {Front: gamma, Back: third}}
+steps:
+  - http:
+      body: {json: {action: guiBrowse, version: 6, params: {query: "deck:Lang", reorderCards: {order: ascending, columnId: noteCrt}}}}
+  - observe: [browser_config]

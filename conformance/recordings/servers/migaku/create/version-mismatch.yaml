@@ -1,15 +1,16 @@
 # servers/migaku-received-log C5 `version-mismatch` (declared, servers/transcripts T13).
 # A card form whose `version` is not exactly 2 gets HTTP 200 in plain text with
-# the mismatch message, and nothing else happens (C2 step 1, L18 Q1; P8.1 of
-# servers/migaku-protocol for the content type). C5's "nothing changes" for the
-# log (no row) has no check in T13 yet; no_effect covers the collection and media.
+# the mismatch message, and nothing else happens (C2 step 1, L18 Q1;
+# servers/migaku-protocol P8.1 for the content type): no_effect covers the
+# collection and the media folder, `logs` the absence of a row.
 # The `card` value, before form encoding (C1: `+` is a space, then
-# percent-decoding): {"noteTypeId":<T>,"deckId":<D>,"fields":[{"name":"Sentence","content":"Alpha 1."},{"name":"Translation","content":"Alpha 2."}]}
-# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
-# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
-# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
-# transcript format has no step or setup section for profiles (see the session's
-# proposals), and nothing this scenario checks depends on one. No Origin, so
+# percent-decoding):
+# {"noteTypeId":<T>,"deckId":<D>,"fields":[{"name":"Sentence","content":"Alpha
+# 1."},{"name":"Translation","content":"Alpha 2."}]}
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2, C5's <D>), created in that order. No Migaku
+# profile is stored; nothing this scenario checks depends on one. No Origin, so
 # Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
 # P6). All content is synthetic.
 id: servers/migaku/create/version-mismatch
@@ -45,3 +46,7 @@ steps:
         vary: null
       body: {text: "Card could not be created: Version mismatch"}
       no_effect: true
+  - logs: {}
+    expect:
+      output_at:
+        "/received": 0

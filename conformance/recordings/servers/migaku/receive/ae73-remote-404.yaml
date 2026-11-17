@@ -1,0 +1,51 @@
+# servers/migaku-receive P24 `ae73-remote-404` (declared, servers/transcripts T13).
+# Item 1 is served (D6.9 http_fixtures, ${fixture_base}); item 2's path has no
+# fixture, so the fixture server answers 404 (conformance/editor-ops E2) and
+# the request fails with P19's download message for item 2 (P8). no_effect:
+# no note and no media file (P2, P16 step 5). The row is Failed with the
+# payload kept (P20). The checks of media.staging/ and the media journal run in
+# Meguri's own tests (P24).
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/ae73-remote-404
+description: "AE73: a remote item answering 404 fails the request and leaves nothing"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+  http_fixtures:
+    - {path: /a, content_type: audio/mp4, text: "\u0000\u0000\u0000\u0018ftypM4A \u0000\u0000\u0000\u0000M4A isom"}
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund[Hund,nn,m]", sentence: "Der Hund.", sentenceAudio: [{id: "a1", input: "${fixture_base}/a"}, {id: "a2", input: "${fixture_base}/b"}]}}
+    expect:
+      status: 400
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: false, error: "Could not download sentenceAudio item 2: HTTP 404."}}
+      no_effect: true
+  - received_log: {}
+    expect:
+      output_at:
+        "/rows/0/status": "Failed"
+        "/rows/0/error": "Could not download sentenceAudio item 2: HTTP 404."
+        "/rows/1": null

@@ -1,0 +1,81 @@
+# servers/migaku-protocol P16 `ws-last-received`.
+# A /receive that commits sets last_received_at to the commit's time on the
+# host's wall clock, which is the scenario clock (servers/host-security H21;
+# servers/transcripts T20): 2030-01-15T10:00:00 Europe/Paris is 1894698000000 ms.
+# One status event follows. A later failed /receive leaves the value and posts no
+# status event (P10.5). The first `events` step only empties the window of the
+# events posted while the host started.
+# The profile DE (servers/transcripts T5.1, saved through servers/migaku-routing
+# D2.3) maps Word and Sentence of the setup note type T-Word and adds to the deck
+# Mining; the override forces it, so detection plays no part. The new note is #n1
+# (servers/transcripts T10.1, T10.5). The failing body {} maps nothing
+# (servers/migaku-receive P19 "Nothing to add"). No Origin, so
+# Access-Control-Allow-Origin is * and no Vary (P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All content is synthetic.
+id: servers/migaku/endpoints/ws-last-received
+description: "a committing /receive sets last_received_at once; a failed one leaves it"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Mining]
+  notetypes:
+    - name: T-Word
+      fields: [Word, Sentence]
+      templates:
+        - {name: Card 1, front: "{{Word}}", back: "{{Sentence}}"}
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: DE, language: de, notetype: T-Word, deck: Mining, field_map: {Word: targetWord, Sentence: sentence}}
+  fallback: null
+  override: DE
+steps:
+  - status: {until: {state: listening, migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}
+  - events: {include_status: true}
+  - http:
+      method: POST
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: Hund, sentence: "Der Hund."}}
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - status: {until: {migaku: {extension_connected: false, open_sockets: 0, last_received_at: 1894698000000}}, within_ms: 1000}
+  - events: {types: [status_changed], include_status: true}
+    expect:
+      output_at:
+        /events/0/statuses/1/migaku/last_received_at: 1894698000000
+        /events/1: null
+  - advance: 60s
+  - http:
+      method: POST
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {}}
+    expect:
+      status: 400
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {success: false, error: "Nothing to add: every mapped field is empty."}}
+  - status: {}
+    expect:
+      output_at:
+        /status/1/migaku/last_received_at: 1894698000000
+  - events: {types: [status_changed], include_status: true}
+    expect:
+      output: {events: []}

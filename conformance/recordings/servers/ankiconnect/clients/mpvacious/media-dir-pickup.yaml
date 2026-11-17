@@ -1,0 +1,51 @@
+# servers/ankiconnect-clients C3 rows 26 and 31, C7 mpvacious/media-dir-pickup (R1771).
+# Meguri only (declared, servers/transcripts T13): the add-on has no external
+# folder. Env M (C2, C5): no Origin, no Content-Type, version 6. Setup is C6's.
+# The folder is granted while still empty (T7.3 media_dir_grant; without a grant
+# every scan is suspended, T20), so neither file is a baseline file
+# (servers/ankiconnect-media X11.2). The first scan records both as pending and
+# the second, seeing the same size and time, copies them (X11.3). The picture is
+# the 67-byte 1x1 PNG of C6, inlined. All values are synthetic.
+id: servers/ankiconnect/clients/mpvacious/media-dir-pickup
+description: files written into the external media folder reach collection media after two scans
+tags: [client:mpvacious]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      body: {json: {action: getMediaDirPath, version: 6}}
+    expect:
+      status: 200
+      body: {json: {result: "<media-dir>", error: null}}
+  - media_dir_grant: {}
+    expect:
+      output: {baseline: 0}
+  - media_dir_write: {name: mpv_a.mp3, base64: "AAECAw=="}
+  - media_dir_write: {name: mpv_s.png, base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mNgAAAAAgAB5Sfe/AAAAABJRU5ErkJggg=="}
+  - media_dir_scan: {}
+    expect:
+      output: {status: done, rescan: true, ingested: 0, notices: []}
+  - media_dir_scan: {}
+    expect:
+      output: {status: done, rescan: false, ingested: 2, notices: []}
+  - observe: [media_dir]
+    expect:
+      output:
+        media_dir:
+          mpv_a.mp3: {sha1: a02a05b025b928c039cf1ae7e8ee04e7c190c0db, size: 4}
+          mpv_s.png: {sha1: 5a9d058778beb4e96d1f968a29a98ecc3d9dff06, size: 67}
+          old.mp3: {sha1: e129f27c5103bc5cc44bcdf0a15e160d445066ff, size: 16}

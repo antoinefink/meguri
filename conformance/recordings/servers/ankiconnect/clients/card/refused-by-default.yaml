@@ -1,0 +1,41 @@
+# servers/ankiconnect-clients C7 card/refused-by-default (R1679, R1744).
+# Meguri only (declared, servers/transcripts T13). A card page in Meguri's card
+# webview calls AnkiConnect (C2 row 5). Its Origin is meguri-media://media or
+# null (C9.6); both are refused under the default allow-list
+# (servers/ankiconnect-envelope E7.2 rows 3 and 7), with a 403 that carries no
+# CORS header (E7.3 row 1). No Content-Type is sent: the server ignores it
+# (R1734). Setup is C6's. All values are synthetic.
+id: servers/ankiconnect/clients/card/refused-by-default
+description: a card page's AnkiConnect call is refused by default, for either card origin
+tags: [client:card]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      headers: [[Origin, "meguri-media://media"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}
+  - http:
+      headers: [[Origin, "null"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}

@@ -1,14 +1,12 @@
 # servers/host-security H17 `interaction-timeout` (declared, servers/transcripts T13):
 # a permission prompt with no answer ends after 120 s of the host's clock with its timeout
 # outcome, and the host posts interaction cancelled with the same id; a later resolve returns
-# false (H11.2, E9). The `events` step lists only the two interaction types (the `types`
-# filter proposed with this scenario for T7.3 `events`): the requestPermission reply also
-# adds an activity-log entry and posts activity appended (E16), whose place relative to
-# interaction cancelled no spec fixes. In posting order, the interaction request comes when
-# the prompt is posted and interaction cancelled at the timeout, so the filtered list is
-# [request, cancelled]. Event `type` names are those proposed for T7.3 `events`.
-# `expect: {output: ...}` on a step without a reply is the T13 form proposed with this
-# scenario (T13 lists no check for T7.3 outputs yet).
+# false (H11.2, E9). The `events` step lists only the two interaction types (T7.3 `events`
+# `types`): the requestPermission reply also adds an activity-log entry and posts activity
+# appended (E16), whose place relative to interaction cancelled no spec fixes. In posting
+# order, the interaction request comes when the prompt is posted and interaction cancelled at
+# the timeout, so the filtered list is [request, cancelled]. Event `type` names are T7.3's.
+# Step outputs are checked with T13 `output`.
 id: servers/host/interaction-timeout
 description: "permission prompt times out, then is cancelled"
 tags: [host]

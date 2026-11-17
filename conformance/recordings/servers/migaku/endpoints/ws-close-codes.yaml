@@ -1,11 +1,11 @@
 # servers/migaku-protocol P16 `ws-close-codes`.
 # A client close gets a close frame back: an empty payload is echoed empty, a
 # valid code is echoed without its reason, and 1005 (not allowed on the wire) gets
-# 1002 (P10.4). That the 1000 reply has no reason is not expressible (ws_expect
-# compares the code only).
-# ws_send close and ws_expect close values: {code, reason} sent, the code received,
-# null for a close frame with no status code (T7.3 names the members only).
+# 1002 (P10.4). The 1000 reply is compared with its reason, which must be empty
+# (servers/transcripts T7.3 `ws_expect` {close: {code, reason}}).
 # No Origin.
+# The last step is a plain /srs-check: servers/transcripts T3 needs one http
+# exchange, and it shows the server still answers after the close.
 # Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
 # oracle (P15). The integration is on, the collection Available, each request carries
 # the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
@@ -48,7 +48,13 @@ steps:
   - ws_send: {name: a, close: {}}
   - ws_expect: {name: a, frames: [{close: null}], within_ms: 1000}
   - ws_send: {name: b, close: {code: 1000, reason: bye}}
-  - ws_expect: {name: b, frames: [{close: 1000}], within_ms: 1000}
+  - ws_expect: {name: b, frames: [{close: {code: 1000, reason: ""}}], within_ms: 1000}
   - ws_send: {name: c, close: {code: 1005}}
   - ws_expect: {name: c, frames: [{close: 1002}], within_ms: 1000}
   - status: {until: {migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}
+  - http:
+      method: GET
+      target: /srs-check
+    expect:
+      status: 200
+      body: {json: {ok: true, version: "4"}}

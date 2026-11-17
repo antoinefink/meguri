@@ -1,7 +1,7 @@
 # specs/servers/ankiconnect-actions A20.3 `add-errors` (A7.1 to A7.4, A18
 # `ankiconnect-note-member-types`), one step per row in the table's order.
 # Steps 8, 9 and 11: the golden records the add-on's outcome; Meguri's is the
-# A18 entry's. Step 10's runtime text is compared by shape.
+# A18 entry's. Step 10's text is A18 `ankiconnect-member-error-text`.
 id: servers/ankiconnect/notes/add-errors
 description: addNote errors, their order, duplicates and options
 tags: [no-origin]

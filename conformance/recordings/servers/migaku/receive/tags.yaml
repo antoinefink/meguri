@@ -1,0 +1,43 @@
+# servers/migaku-receive P24 `tags` (declared, servers/transcripts T13).
+# Profile DE has the tag mined to add (P16 step 4, tags/tags T4).
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/tags
+description: "a profile's tags to add are stored on the note"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}, tags: ["mined"]}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund", sentence: "Der Hund."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/db_dump/notes/#n1/tags": " mined "
+equivalence:
+  notes: ["#n1"]

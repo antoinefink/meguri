@@ -1,12 +1,11 @@
 # servers/migaku-received-log C5 `form-encoding` (declared, servers/transcripts T13).
 # A Content-Type that is neither multipart/form-data with a boundary nor
-# application/x-www-form-urlencoded (nor absent) fails with 400
-# `Unsupported form encoding.` before the form is read (C1).
-# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
-# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
-# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
-# transcript format has no step or setup section for profiles (see the session's
-# proposals), and nothing this scenario checks depends on one. No Origin, so
+# application/x-www-form-urlencoded (nor absent) fails with 400 `Unsupported
+# form encoding.` before the form is read (C1). No row.
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2, C5's <D>), created in that order. No Migaku
+# profile is stored; nothing this scenario checks depends on one. No Origin, so
 # Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
 # P6). All content is synthetic.
 id: servers/migaku/create/form-encoding
@@ -42,3 +41,7 @@ steps:
         vary: null
       body: {json: {success: false, error: "Unsupported form encoding."}}
       no_effect: true
+  - logs: {}
+    expect:
+      output_at:
+        "/received": 0

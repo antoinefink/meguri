@@ -1,0 +1,76 @@
+# servers/migaku-received-log L17 `browse-deck-back` (declared, servers/transcripts T13).
+# After the deck move of `deck-move-undo`, Browse's Change Deck puts the card
+# back in DE::Mining, its listed deck before the move. That is L13's undo
+# pattern, so it counts as an undo (L18 Q6): the row is Created with profile
+# DE, the decision Manual, and record_manual_move names DE, so a D10 tie 5
+# minutes later goes to DE by `recent`.
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1), DE::Mining (#d2) and DE::Other (#d3). Profiles are servers/transcripts
+# T5.1 values, saved in list order on a new store, so the first has id 1; a
+# profile without field_map infers R1712's map (servers/migaku-routing D4). L16
+# calls are `received` steps (T7.3), read in the JSON form of L16.1. No Origin,
+# so Access-Control-Allow-Origin is * (servers/migaku-protocol P6). All content
+# is synthetic.
+id: servers/migaku/moves/browse-deck-back
+description: "Change Deck in Browse back to the old deck counts as an undo of the move"
+tags: ["moves"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE", "DE::Mining", "DE::Other"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+    - {name: "DE2", language: "de", notetype: "T-Mining", deck: "DE::Other", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Hund[Hund,nn,m]", "sentence": "Der Hund.", "translation": "Alpha 2.", "definitions": "<p>Alpha 3.</p>", "sentenceAudio": [{"id": "s1", "input": "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - routing: {set_override: null}
+  - advance: 1m
+  - received: {call: move, rows: ["#r1"], profile: 2, deck_only: false}
+    expect:
+      output: [{row: "#r1", result: deck_move}]
+  - advance: 1m
+  - collection: {change_deck: {cards: ["#c1"], deck: "DE::Mining"}}
+    expect:
+      output: {change_deck: {count: 1}}
+  - received: {call: row, row: "#r1"}
+    expect:
+      output_at:
+        "/status": "Created"
+        "/decision": "Manual"
+        "/note": "#n1"
+        "/profile/name": "DE"
+  - advance: 5m
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Café", "sentence": "Ist das Café zu?"}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n2"}}
+  - received: {call: row, row: "#r2"}
+    expect:
+      output_at:
+        "/route": "recent"
+        "/profile/name": "DE"

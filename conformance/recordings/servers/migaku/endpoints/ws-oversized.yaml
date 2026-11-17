@@ -1,0 +1,35 @@
+# servers/migaku-protocol P16 `ws-oversized`.
+# A text message one byte over the Migaku body limit (134,217,728 bytes) closes
+# the socket with 1009, and the socket no longer counts as open (P10.2, P10.5).
+# The message is 134,217,729 spaces (byte 32), valid UTF-8. No Origin.
+# The last step is a plain /srs-check: servers/transcripts T3 needs one http
+# exchange, and it shows the server still answers after the close.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/ws-oversized
+description: "a text message over the Migaku limit closes the socket with 1009"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - ws_open:
+      name: a
+      target: /anki-connect
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+  - status: {until: {migaku: {extension_connected: true, open_sockets: 1, last_received_at: null}}, within_ms: 1000}
+  - ws_send: {name: a, fill: {size: 134217729, byte: 32, kind: text}}
+  - ws_expect: {name: a, frames: [{close: 1009}], within_ms: 5000}
+  - status: {until: {migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}
+  - http:
+      method: GET
+      target: /srs-check
+    expect:
+      status: 200
+      body: {json: {ok: true, version: "4"}}

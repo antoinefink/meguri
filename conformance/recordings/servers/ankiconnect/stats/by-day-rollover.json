@@ -48,7 +48,7 @@
               "ease": 0,
               "factor": 2500,
               "id": 1894676340000,
-              "ivl": 1,
+              "ivl": 0,
               "lastIvl": 0,
               "time": 0,
               "type": 4,
@@ -59,7 +59,7 @@
               "ease": 0,
               "factor": 2500,
               "id": 1894676460000,
-              "ivl": 1,
+              "ivl": 0,
               "lastIvl": 0,
               "time": 0,
               "type": 4,
@@ -97,11 +97,11 @@
     },
     "anki_version": "26.9.3",
     "ankiconnect_lock_sha256": "db0b6e483d450f46150a9e80294f651a2b7ea4babda9af460e4e28df45e90561",
-    "driver_sha256": "d210262e36b9bea44268e57ec6c0a5b0d03cbab1ed2f66931f34ff7b50e5dfae",
+    "driver_sha256": "3156f4a44f53eeac44cc03a8952ae2c42c82606bcedf6602ac2a2b2d4da7ba40",
     "image": "meguri-oracle-ankiconnect:recorder",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "servers/ankiconnect/stats/by-day-rollover",
-  "scenario_sha256": "dc8fca097e8a39a52f16d9bb1329de2c477e8d93f911ad4f19e47c0ad30bc4cc",
+  "scenario_sha256": "121ed91763eab9316643d9818e5914c59747773a3b28001548649dafc6b073cb",
   "tz": "Europe/Paris"
 }

@@ -1,0 +1,54 @@
+# servers/migaku-receive P24 `ae72-japanese` (declared, servers/transcripts T13).
+# Override JA. Sentence Audio joins the two items with LF <br> LF (P6); the
+# only image goes to Screenshot (firstImage) and Images (restImages) stays
+# empty; JA's defaults set Is Audio Card x and leave Is Vocabulary Card empty
+# (P7). Stored names are the raw ids plus P9's extensions (P10).
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/ae72-japanese
+description: "AE72: a Japanese card with two sentence audios and a screenshot"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["JA::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "JA", language: "ja", notetype: "T-Mining", deck: "JA::Mining", defaults: {"Is Audio Card": "x"}}
+  override: "JA"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "猫[ねこ;h]", sentence: "ねこがすき。", sentenceAudio: [{id: "s1", input: "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}, {id: "s2", input: "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29tAAAACA=="}], images: [{id: "i1", src: "data:image/webp;base64,UklGRg4AAABXRUJQVlA4TAIAAAAvAA=="}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/db_dump/notes/#n1/flds": "ねこがすき。\u001f\u001f猫[ねこ;h]\u001f\u001f<img src=\"i1.webp\">\u001f[sound:s1.m4a]\n<br>\n[sound:s2.m4a]\u001f\u001f\u001f\u001f\u001fx"
+        "/media_dir": {"i1.webp": {sha1: "8a04b73ce223732f83a0d287b0a37311a5492321", size: 22}, "s1.m4a": {sha1: "0bccca510c663e4251e7b61eadf7f0a9e4075776", size: 24}, "s2.m4a": {sha1: "b01fdfc2217d6b0909104a698185dc7ad0be9340", size: 28}}
+  - received_log: {}
+    expect:
+      output_at:
+        "/rows/0/status": "Created"
+        "/rows/0/profile": "JA"
+        "/rows/0/note": "#n1"
+        "/rows/1": null
+equivalence:
+  notes: ["#n1"]

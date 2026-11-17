@@ -1,5 +1,7 @@
 # servers/ankiconnect-actions A20.4 `note-tags` (A8.3, A8.4): updateNoteTags
-# with a string, getNoteTags, and a tags value of another type.
+# with a string, getNoteTags, and a tags value of another type; then a
+# missing note for getNoteTags and updateNoteTags, and a missing note with a
+# tags value of another type (A8.3's order).
 # All values are synthetic.
 id: servers/ankiconnect/tags/note-tags
 description: updateNoteTags with a string, getNoteTags, a number as tags
@@ -26,4 +28,10 @@ steps:
   - advance: 1m
   - http:
       body: {json: {action: updateNoteTags, version: 6, params: {note: "#n1", tags: 5}}}
+  - http:
+      body: {json: {action: getNoteTags, version: 6, params: {note: 5}}}
+  - http:
+      body: {json: {action: updateNoteTags, version: 6, params: {note: 5, tags: [x]}}}
+  - http:
+      body: {json: {action: updateNoteTags, version: 6, params: {note: 5, tags: 5}}}
   - observe: [{db_dump: {tables: [notes, cards, tags]}}]

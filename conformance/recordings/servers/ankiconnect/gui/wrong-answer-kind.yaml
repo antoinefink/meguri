@@ -1,7 +1,8 @@
 # specs/servers/ankiconnect-gui G12 `wrong-answer-kind` (G8).
 # Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
 # Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3).
-# T13 has no expect form for a resolve output: the first resolve's `{resolved: false}` is not checked here.
+# The first resolve gives GuiBrowse an answer it does not accept (G8): it returns false and the
+# interaction stays open, so the second resolve, a valid answer, returns true and gives the reply.
 id: servers/ankiconnect/gui/wrong-answer-kind
 description: "an answer of another kind leaves the interaction open"
 tags: [gui]
@@ -28,7 +29,9 @@ steps:
       async: b1
   - wait: 1s
   - resolve: {id: i-1, outcome: presented}
+    expect: {output: {resolved: false}}
   - resolve: {id: i-1, outcome: done}
+    expect: {output: {resolved: true}}
   - await: b1
     expect:
       status: 200

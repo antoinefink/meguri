@@ -1,0 +1,45 @@
+# servers/migaku-receive P24 `warn-duplicate` (declared, servers/transcripts T13).
+# A T-Mining note with Target Word <b>Hund</b> exists (#n1). The new note's
+# key Hund equals it (P21), so its row carries Possible duplicate; the add is
+# not stopped. The transcript checks the add; the warning has no transcript
+# output yet (received_log rows have no warnings member), so Meguri's own
+# tests check it (P24).
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/warn-duplicate
+description: "a target word already in the note type: the add goes through"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+  notes:
+    - {notetype: T-Mining, deck: "DE::Mining", fields: {Sentence: "Ein Hund.", Target Word: "<b>Hund</b>"}}
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund[Hund,nn,m]", sentence: "Der Hund."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n2"}}
+equivalence:
+  notes: ["#n2"]

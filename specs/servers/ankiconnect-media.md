@@ -3,7 +3,7 @@
 Spec: servers/ankiconnect-media
 Requirements: R1761, R1762, R1769, R1770, R1771, R1772, R1773; AE79 (core part); supports R1779, R1780, R1789, R1790
 Anki: 26.09.3
-Scenarios: conformance/recordings/servers/ankiconnect/media/ (X14; `servers/transcripts` T2; ids `servers/ankiconnect/media/<name>`). Oracle goldens recorded 2026-11-17. Declared Meguri-only scenarios: `dir-unset`, `non-files` and `ext-hook*`; `ext-ungranted` is held until `servers/transcripts` T20 states that Meguri's executor never grants an external folder. The external-folder tests that need a grant, a scan result or a crash stay Meguri's own (`ankiconnect_extmedia.rs`). X16 records the add-on's replies as probed on 2026-11-10.
+Scenarios: conformance/recordings/servers/ankiconnect/media/ (X14; `servers/transcripts` T2; ids `servers/ankiconnect/media/<name>`). Oracle goldens recorded 2026-11-17. Declared Meguri-only scenarios: `dir-unset`, `non-files`, `ext-hook*` and the external-folder scenarios of X14 (`ext-*`, with the grant and scan steps of `servers/transcripts` T7.3; Meguri's executor grants only when a step asks, T20). The external-folder tests that need a crash or an absolute path in a request stay Meguri's own (`ankiconnect_extmedia.rs`, `ankiconnect_paths.rs`, X14). X16 records the add-on's replies as probed on 2026-11-10.
 
 The media actions of Meguri's AnkiConnect-compatible server (`storeMediaFile`, `retrieveMediaFile`, `getMediaFilesNames`, `deleteMediaFile`, `getMediaDirPath`), the `audio`, `video` and `picture` attachments that note actions accept, the rules for the `path` and `url` content sources, and the external media folder that `getMediaDirPath` returns and whose files become collection media. The interface targeted is AnkiConnect API version 6 as served by the AnkiConnect add-on build of 2025-11-09 in Anki 26.09.3 (the build U136 pins). The external folder, the readable folders and the source restrictions are Meguri's (R1770–R1773): AnkiConnect returns Anki's own media folder and reads any path.
 
@@ -91,7 +91,7 @@ Fetched with the shared fetcher of `servers/host-security#H13`, with AnkiConnect
 
 | Failure | Error |
 |---|---|
-| a scheme other than `http` or `https`, for the URL or for a redirect target | `cannot download <url> (only http and https are allowed)` |
+| the fetcher's `UnsupportedUrl`: a scheme other than `http` or `https`, for the URL or for a redirect target, and also a URL that is not absolute, has no host or cannot be parsed (`nonsense`, `http:///x`), and a redirect `Location` that does not resolve to such a URL | `cannot download <url> (only http and https are allowed)` |
 | a 6th redirect would be needed | `cannot download <url> (too many redirects)` |
 | the download, from the start of the fetch (name resolution included) to its last body byte, takes more than 30 s (`servers/host-security#H13`) | `cannot download <url> (timed out)` |
 | the body passes 268,435,456 bytes | `cannot download <url> (too large)` |
@@ -102,7 +102,7 @@ Fetched with the shared fetcher of `servers/host-security#H13`, with AnkiConnect
 
 ### X3.5 When the bytes are obtained
 
-Decoding `data`, reading a `path` and downloading a `url` happen before the action's op opens, on the request's worker and never on the collection writer (`engine/op-model#O2`), so a 30 s download never holds up collection writes, the UI's included. Each source yields either its bytes or its error text (X3.2 to X3.4). The op then only names and writes files (X4 steps 3 to 5, X10.2) and builds fields; it reads no file outside the collection media folder and makes no network request.
+Decoding `data`, reading a `path` and downloading a `url` happen before the action's op opens, on the request's worker and never on the collection writer (`engine/op-model#O2`), so a 30 s download never holds up collection writes, the UI's included. Each source yields either its bytes or its error text (X3.2 to X3.4). The op then only names and writes files (X4 steps 3 to 5, X10.2) and builds fields; it reads no content source and makes no network request. The only files outside the collection media folder that an op reads are the external-folder files of X11.6's hook, in the note actions of X10.3.
 
 ## X4. `storeMediaFile` (R1769)
 
@@ -210,7 +210,7 @@ The add-on gives these field values (X16.10), except for its own texts (`ankicon
 
 ### X10.3 The external folder before the commit
 
-Every note add or update of this file and of `servers/ankiconnect-actions` (`addNote`, `addNotes`, `updateNoteFields`, `updateNote`) runs X11.6's hook on its final field values inside its op, before the commit.
+Every note add or update of this file and of `servers/ankiconnect-actions` (`addNote`, `addNotes`, `updateNoteFields`, `updateNote`) runs X11.6's hook on its final field values inside its op, before the commit. The hook runs after the values are built, attachments included, and right before the note is checked: in `servers/ankiconnect-actions` A7.2 after the `options` step and before the check (for `addNote` and each note of `addNotes`), and in A8.1 after the attachment step and before the update (for `updateNoteFields` and `updateNote` with `fields`). So the field check of A7.3 (empty and duplicate), the sort field and the checksum all see the values after X11.6 step 3's rewrite, and the note stored is the note checked. The `canAdd*` actions run no hook (A7.7).
 
 ## X11. The external media folder (R1770, R1771, AE79)
 
@@ -305,9 +305,9 @@ So an external file never replaces a collection file that did not come from it: 
 Before a note add or update of X10.3 commits, inside its op:
 
 1. Extract the media names its final field values reference (`text/media-references#M4`).
-2. For each name that does not resolve in collection media (`media/media-files#M5`, staged files of the op included) and that is a regular file directly in the external folder (looked up by that exact name, on the volume's rules), ingest it at once (X11.4 in its "note hook" column, staged in the op), whatever its index state (`baseline`, `pending`, `conflict` or none). No second observation is needed here: the tool referenced it, so it is complete. The hook runs while scans are suspended too, as long as an external folder is configured and is an allowed root.
+2. For each name that does not resolve in collection media (`media/media-files#M5`, staged files of the op included) and that is a regular file directly in the external folder (looked up by that exact name, on the volume's rules), ingest it at once (X11.4 in its "note hook" column, staged in the op), whatever its index state (`baseline`, `pending`, `conflict` or none). No second observation is needed here: the tool referenced it, so it is complete. The hook runs while scans are suspended too, as long as an external folder is configured and is an allowed root. While they are suspended (X11.1), the index belongs to another folder or to none, so the hook neither reads nor changes it: every name counts as having no entry (no `stored_name`, so X11.4's third row never applies), and step 4 writes no index change.
 3. When step 2 stored the file under a name other than the referenced one (a transformed name, or M3's name after a conflict), every reference in the note's fields that used the referenced name is rewritten to the stored name.
-4. The index changes (entry `ingested` with the file's current size and modification time and its `stored_name`) and the notices are kept with the op: written and posted only after the op commits (X11.1), dropped when it rolls back.
+4. The index changes (entry `ingested` with the file's current size and modification time and its `stored_name`) and the notices are kept with the op: written and posted only after the op commits (X11.1), dropped when it rolls back. Index changes exist only while scans are not suspended (the configured path equals the index path); a suspended hook posts its notices and changes no entry. Once the folder is granted, the grant's baseline lists the file like any other (X11.2); if the user returns to the index's own folder instead, its entries are as they were, so a file of that folder with the same name is not mistaken for the copy the hook made.
 
 The file's bytes are read for this step inside the op; the external folder is local and the hook reads only files that notes reference. Names that resolve already, and names not in the external folder, are left alone. `addNotes` runs the hook for every note of the batch; a rolled-back batch leaves no ingested file and no index change, so later scans still copy a non-baseline file.
 
@@ -315,7 +315,8 @@ The file's bytes are read for this step inside the op; the external folder is lo
 |---|---|---|---|
 | `clip.mp3` written just now (not yet scanned) | `addNote` with Term `[sound:clip.mp3]` | `clip.mp3` copied into collection media in the add's op; pending for sync; Check Media reports no missing file (AE79) | `media/ext-hook` (declared) |
 | `Clip.mp3` | `addNote` with `[sound:Clip.mp3]` | stored as `Clip.mp3` (case kept) | `media/ext-hook-case` (declared) |
-| `doc.pdf` (baseline) | `addNote` with `<img src="doc.pdf">` | `doc.pdf` ingested; entry `ingested` | none (needs a grant step, X14) |
+| `doc.pdf` (baseline) | `addNote` with `<img src="doc.pdf">` | `doc.pdf` ingested; entry `ingested` | `media/ext-baseline` (declared) |
+| `clip.mp3`, while scans are suspended (no grant yet, or the folder moved) | `addNote` with `[sound:clip.mp3]` | `clip.mp3` ingested; the index unchanged (step 4) | `media/ext-ungranted`, `media/ext-moved` (declared) |
 | `a?b.png` (a name F1 changes) | `addNote` with `<img src="a?b.png">` | stored as `ab.png`; the field holds `<img src="ab.png">`; a `renamed` notice | `media/ext-hook-renamed` (declared) |
 | `pic.png`, while collection media holds an unrelated `pic.png` | `addNote` with `<img src="pic.png">` | the name resolves already, so nothing is ingested and the note uses the collection file | `media/ext-hook-resolved` (declared) |
 | `a?b.png`, while collection media holds an unrelated `ab.png` | `addNote` with `<img src="a?b.png">` | stored under M3's hash name of `ab.png`; the field holds that name; a `renamed` notice | `media/ext-hook-collision` (declared) |
@@ -332,7 +333,7 @@ Two core operations, exported to Swift and called directly by Linux tests. Neith
 
 | Operation | Input | Result | Failures (nothing changes) |
 |---|---|---|---|
-| `media_folder_granted` | `path`: the absolute path of the picked folder | the number of `baseline` entries recorded | `not_a_directory`, `unreadable` (the folder cannot be listed), `store_error` (the integrations store cannot be written) |
+| `media_folder_granted` | `path`: the absolute path of the picked folder | the number of `baseline` entries recorded | `not_a_directory` (nothing exists at `path`, or it is not a directory), `unreadable` (the folder cannot be listed), `store_error` (the integrations store cannot be written) |
 | `ingest_external_media` | none | `status`, `rescan`, `ingested`, `notices` (below) | `store_error` |
 
 `ingest_external_media` result members:
@@ -340,11 +341,17 @@ Two core operations, exported to Swift and called directly by Linux tests. Neith
 | Member | Value |
 |---|---|
 | `status` | `done`; `no_folder` (no external folder configured, or it is not an allowed root); `suspended` (X11.1); `folder_unavailable` (listing the folder failed); `collection_unavailable` (the collection is not available, `engine/lifecycle` L6, or the media op could not run) |
-| `rescan` | true when an entry is `pending` after the scan, or the status is `collection_unavailable`; the caller then scans again 0.5 s later (X11.5) |
+| `rescan` | true when the scan ran (`done`) and an entry is `pending` after it, or the status is `collection_unavailable`; the caller then scans again 0.5 s later (X11.5) |
 | `ingested` | the number of files this scan wrote into collection media |
 | `notices` | the X11.9 notices of this scan, in name order |
 
-With `no_folder`, `suspended` or `folder_unavailable`, nothing was written. With `collection_unavailable`, no file was copied and no entry was confirmed; only index changes that need no media write (new or updated `pending` and `baseline` values, removed entries) were written.
+With `no_folder`, `suspended` or `folder_unavailable`, nothing was written and `rescan` is false, whatever the index holds: the next file-system event, launch or grant brings the next scan. With `collection_unavailable`, no file was copied and no entry was confirmed; only index changes that need no media write (new or updated `pending` and `baseline` values, removed entries) were written.
+
+**FFI form** (`core/crates/meguri-ffi/src/servers.rs`, the module of `servers/host-security#H20`). Both operations return `NotStarted` before `servers_start` and `Unsupported` on iPhone and iPad (H20). The failure kinds of the table above that concern the folder are values of the result, not errors; `store_error` is a `ServersError`:
+
+- `media_folder_granted(path: String) -> Result<MediaFolderGrant, ServersError>`. `MediaFolderGrant` is an enum: `Granted { baseline: u32 }`, `NotADirectory`, `Unreadable`.
+- `ingest_external_media() -> Result<IngestResult, ServersError>`. `IngestResult` is a record `{ status: IngestStatus, rescan: bool, ingested: u32, notices: Vec<IngestNotice> }`; `IngestStatus` an enum `Done`, `NoFolder`, `Suspended`, `FolderUnavailable`, `CollectionUnavailable`; `IngestNotice` a record `{ time_ms: i64, external_name: String, stored_name: Option<String>, kind: IngestNoticeKind }` (X11.9's members, `time_ms` its `time`); `IngestNoticeKind` an enum `Renamed`, `Skipped`, `Conflict`.
+- `store_error` is `ServersError::StoreReadOnly` when the integrations store is open read-only (`servers/host-security#H10.1`) and `ServersError::Internal { message }` for any other store failure. The `media_dir_grant` and `media_dir_scan` steps of `servers/transcripts` T7.3 write the snake-case names of the tables above (`{failed: not_a_directory}`, `status: no_folder`, `kind: conflict`).
 
 ### X11.9 Ingest notices
 
@@ -385,7 +392,40 @@ Proposed `conformance/deviations.yaml` entries for the U136 replay. "Scenario" n
 | `ankiconnect-media-error-text` | the runtime's error texts for decoding, file, download and parameter errors, also where they are appended to fields (X10.2 step 3); X16 lists the observed ones | X12's, and the envelope's parameter texts | `media/attach-fail`, `media/path` |
 | `ankiconnect-media-attach-fields-type` | for a failing attachment: a string `fields` is matched character by character and an object `fields` by its member names, the error text appended to the fields so named, and the note is added (`{}` appends nothing); a number, `true` or `null` fails the note with the runtime's text (`'int' object is not iterable`, `'bool' object is not iterable`, `'NoneType' object is not iterable`) (X16.10) | any non-list `fields` of a failing attachment, `null` included, fails the note with `invalid parameter: fields` (X10.2 step 3; X15 Q7) | `media/attach-fail` |
 
-The case rules of `media/media-files#M14` apply to every stored name; `ankiconnect-media-case-variants` names the cases the probe showed, and other cases need their own entries where a golden shows them. The failed-add and `canAdd*` differences are `servers/ankiconnect-actions` A18's (`ankiconnect-failed-add-media`: `media/attach-rollback`; `ankiconnect-canadd-no-media`: `notes/can-add-media`). A list or object entry in `fields` fails the note in the add-on and in Meguri (X10.2 step 2); the file the add-on leaves behind is `ankiconnect-failed-add-media`'s. The probe also showed that the add-on's `canAddNote` returns `false` when an attachment fails with no `fields` (X16.10), where Meguri's check, which ignores attachments, can return `true`; A18's `ankiconnect-canadd-no-media` should name that reply too.
+The case rules of `media/media-files#M14` apply to every stored name; `ankiconnect-media-case-variants` names the cases the probe showed, and other cases need their own entries where a golden shows them. The failed-add and `canAdd*` differences are `servers/ankiconnect-actions` A18's (`ankiconnect-failed-add-media`: `media/attach-fail`, `media/attach-notes`, `media/attach-rollback`; `ankiconnect-canadd-no-media`: `notes/can-add-media`). A list or object entry in `fields` fails the note in the add-on and in Meguri (X10.2 step 2); the file the add-on leaves behind is `ankiconnect-failed-add-media`'s. The probe also showed that the add-on's `canAddNote` returns `false` when an attachment fails with no `fields` (X16.10), where Meguri's check, which ignores attachments, can return `true`; A18's `ankiconnect-canadd-no-media` should name that reply too.
+
+### X13.1 Replay entries
+
+The `conformance/deviations.yaml` entries that the recorded scenarios of X14 need, one per pointer (`servers/transcripts` T12; `conformance/dsl` D13: one `pointer` and one `replace` each). Pointers address the golden's normalized step outputs, steps counted from 0 as the transcript lists them. Every entry has `scenarios: [servers/ankiconnect/media/<scenario>]` (one entry below lists three), `transform: {replace: <Meguri's value>}`, and as its `summary` the Meguri column of the X13 row whose id its own id starts with. The other recorded scenarios (`attach`, `skip-hash`, `delete`, `dir`, `store-traversal`) need none; the envelope's entries (the `no-origin` header, `servers/transcripts` T12) apply to all of them as to every scenario without `Origin`. `ankiconnect-media-url-limits`, `-attach-fields-type` and `-dir` have no golden pointer: Meguri's side of each is asserted by its tests (X14) and by `media/dir-unset`.
+
+Values: `{A}` is `{"sha1": "3f786850e387550fdab836ed7e6dc881de23001b", "size": 2}` (a `media_dir` member for A), `{B}` the same with `"sha1": "89e6c98d92887913cadf06b2adb97f26cde4849b"`; `n:A` is the `media_trash` item `{"name": "n", "sha1": "3f786850e387550fdab836ed7e6dc881de23001b", "size": 2}`, `n:B` likewise; `err(t)` is `{"result": null, "error": "t"}`. Tests are in `core/crates/meguri-servers/tests/`.
+
+| Entry id | Req | Scenario | Pointer | Meguri's value | Test |
+|---|---|---|---|---|---|
+| `ankiconnect-media-base64-extra-padding` | R1769 | `store-data` | `/steps/4/reply/body/json` | `err(invalid base64 data)` | `ankiconnect_media.rs` `base64_strict` |
+| `ankiconnect-media-base64-padding-only` | R1769 | `store-data` | `/steps/5/reply/body/json` | `err(invalid base64 data)` | the same |
+| `ankiconnect-media-base64-files` | R1769 | `store-data` | `/steps/7/media_dir` | `{"clip.mp3": {A}, "note.txt": {A}, "w.txt": {A}}` | the same |
+| `ankiconnect-media-case-variants-store` | R1769 | `store-conflict` | `/steps/3/reply/body/json/result` | `"c9.mp3"` | `ankiconnect_media.rs` `store_case_variant_replaces` |
+| `ankiconnect-media-case-variants-store-files` | R1769 | `store-conflict` | `/steps/4/media_dir` | `{"c3.mp3": {B}, "c4-89e6c98d92887913cadf06b2adb97f26cde4849b.mp3": {B}, "c4.mp3": {A}, "c5.mp3": {A}, "c9.mp3": {B}}` | the same |
+| `ankiconnect-media-delete-existing-trash` | R1571 | `store-conflict` | `/steps/4/media_trash` | `[c3.mp3:A, c9.mp3:A]` (no `c5.mp3`: identical content is kept, `ankiconnect-media-delete-existing`; `c9.mp3` trashed: `ankiconnect-media-case-variants`) | `ankiconnect_media.rs` `store_same_content_trashes_nothing` |
+| `ankiconnect-media-flat-names-read-parent` | R1769 | `read` | `/steps/3/reply/body/json` | `err(invalid media file name: ../collection.anki2)` | `ankiconnect_media.rs` `flat_name_check` |
+| `ankiconnect-media-flat-names-read-sub` | R1769 | `read` | `/steps/4/reply/body/json` | `err(invalid media file name: a/b.mp3)` | the same |
+| `ankiconnect-media-case-variants-read` | R1769 | `read` | `/steps/5/reply/body/json/result` | `"YQo="` | `ankiconnect_media.rs` `read_case_variant` |
+| `ankiconnect-media-names-order-mp3` | R1769 | `names` | `/steps/0/reply/body/json/result` | `["a.mp3", "b.mp3"]` | `ankiconnect_media.rs` `names_sorted_files_only` |
+| `ankiconnect-media-names-order-set` | R1769 | `names` | `/steps/1/reply/body/json/result` | `["a.mp3", "b.mp3"]` | the same |
+| `ankiconnect-media-names-order-all` | R1769 | `names` | `/steps/2/reply/body/json/result` | `["a.mp3", "b.mp3", "c.jpg"]` | the same |
+| `ankiconnect-media-names-order-empty` | R1769 | `names` | `/steps/4/reply/body/json/result` | `[]` | the same |
+| `ankiconnect-media-case-variants-delete-pending` | R1769 | `delete-names` | `/steps/2/media_pending` | `{"a.mp3": "3f786850e387550fdab836ed7e6dc881de23001b", "b.mp3": null}` | `ankiconnect_media.rs` `delete_case_variant` |
+| `ankiconnect-media-case-variants-delete-files` | R1769 | `delete-names` | `/steps/2/media_dir` | `{"a.mp3": {A}}` | the same |
+| `ankiconnect-media-case-variants-delete-trash` | R1769 | `delete-names` | `/steps/2/media_trash` | `[b.mp3:B]` | the same |
+| `ankiconnect-media-non-files-delete` | R1769 | `delete-names` | `/steps/3/reply/body/json` | `{"result": null, "error": null}` | `servers/ankiconnect/media/non-files` |
+| `ankiconnect-media-non-files-trash` | R1769 | `delete-names` | `/steps/4/media_trash` | `[b.mp3:B]` | the same |
+| `ankiconnect-media-error-text-no-fields` | R1762 | `attach-fail` | `/steps/1/reply/body/json/error` | `"missing parameter: fields"` | `ankiconnect_media.rs` `attachment_failure_texts` |
+| `ankiconnect-media-error-text-fields-entry` | R1762 | `attach-fail` | `/steps/2/reply/body/json/error` | `"invalid parameter: fields"` | the same |
+| `ankiconnect-media-error-text-appended` | R1762 | `attach-fail` | `/steps/3/db_dump/notes/#n1/flds` | `"word\u001fcannot download ftp://h/x (only http and https are allowed)"` (`sfld` and `csum` are of `word` and stay) | the same |
+| `ankiconnect-media-error-text-batch` | R1760 | `attach-notes` | `/steps/0/reply/body/json/error` | `"['missing parameter: fields']"` | the same |
+
+The entry for the files of failed adds is `servers/ankiconnect-actions` A18's `ankiconnect-failed-add-media` (its requirement, summary and test as A18 gives them): one entry with `scenarios: [servers/ankiconnect/media/attach-fail, servers/ankiconnect/media/attach-notes, servers/ankiconnect/media/attach-rollback]`, `pointer: /steps/*/media_dir` and `transform: {replace: {}}`, which holds because each of the three has exactly one `media_dir` observation (step 3, 1 and 1). Those of `media/path` are `ankiconnect-media-path-roots-absent`, `-outside` and `-relative` (R1772, test `ankiconnect_paths.rs` `path_outside_roots_refused`), at `/steps/0/reply/body/json/error`, `/steps/1/reply/body/json/error` and `/steps/2/reply/body/json/error`, with the values `"cannot read file: /etc/does-not-exist (not permitted)"`, `"cannot read file: /tmp/r/missing.mp3 (not permitted)"` and `"cannot read file: r/f.mp3 (not permitted)"`. When a scenario's steps change, its pointers change in the same change.
 
 ## X14. Scenarios
 
@@ -402,7 +442,7 @@ Requests are `version` 6 without key or Origin; replies shown unwrapped. The add
 | `media/delete` (recorded) | `a.mp3` = A, registered by an `observe: [media_pending]` before the first request (the add-on records no deletion for a file it never registered) | `deleteMediaFile {filename: "a.mp3"}`; again | `null`, file in the trash, deletion pending; `null`, nothing |
 | `media/delete-names` (recorded) | `a.mp3` = A, `b.mp3` = B, registered by an `observe: [media_pending]` | `deleteMediaFile {filename: "B.MP3"}`; then `{filename: ""}`. The case variant comes first because the add-on's `""` moves the whole folder into the trash (X7), which would hide the case-variant reply; the observation after `""` reads only `media_trash` | Add-on: `null`, nothing trashed, no deletion pending; then error `No such file or directory (os error 2)`, both files in the trash. Meguri: `null`, `b.mp3` in the trash, its deletion pending, `a.mp3` kept (`ankiconnect-media-case-variants`); then `null`, nothing trashed (`ankiconnect-media-non-files`) |
 | `media/dir` (recorded) | none | `getMediaDirPath` | `"<media-dir>"` (`servers/transcripts` T10.3; Meguri's executor configures `media-dir` by default, T4, so both sides normalize the same and no deviation entry applies) |
-| `media/dir-unset` (declared) | `server_config: {media_dir: null}` | `getMediaDirPath` | error X8 (Meguri, `ankiconnect-media-dir`) |
+| `media/dir-unset` (declared) | `server_config: {media_dir: null}` | `getMediaDirPath`; `media_dir_scan` | error X8 (Meguri, `ankiconnect-media-dir`); `{status: no_folder, rescan: false, ingested: 0, notices: []}` (X11.8) |
 | `media/attach` (recorded) | `Pair`, deck `D` | `addNote` with X10.2's rows 1 and 2 | fields as X10.2; files stored |
 | `media/attach-fail` (recorded) | the same | X10.2's rows 3, 4 and 6 | as X10.2 (row 3's appended text: Meguri, `ankiconnect-media-error-text`; row 6's missing file: Meguri, `ankiconnect-failed-add-media`) |
 | `media/attach-rollback` (recorded) | the same, with a note `x` already in `D` | `addNote` with Term `x` (a duplicate) and `audio: {filename: "n.mp3", data: "Ygo=", fields: ["Gloss"]}` | error `cannot create note because it is a duplicate`; no `n.mp3` in media (Meguri, `ankiconnect-failed-add-media`) |
@@ -410,31 +450,33 @@ Requests are `version` 6 without key or Origin; replies shown unwrapped. The add
 | `media/skip-hash` (recorded) | the same | `addNote` with `audio: {filename: "x.mp3", data: <A>, skipHash: "60b725f10c9c85c70d97880dfe8191b3", fields: ["Term"]}` | note added, Term without a reference, no file (the MD5 of A) |
 | `media/path` (recorded) | none (no readable folder) | `storeMediaFile {filename: "f.mp3", path: "/etc/does-not-exist"}`; `{…, path: "/tmp/r/missing.mp3"}`; `{…, path: "r/f.mp3"}` | the add-on: error `[Errno 2] No such file or directory: '<path>'` for each. Meguri: error `cannot read file: <path> (not permitted)` for each (X3.3 steps 1 and 2; `ankiconnect-media-path-roots`) |
 
-The `path` rows with a readable folder (`/tmp/r` holding `f.mp3`: `/tmp/r/f.mp3` gives `"f.mp3"`, `/tmp/r/missing.mp3` gives `cannot read file: /tmp/r/missing.mp3 (not found)`), a symbolic link `out` → `/etc/hosts` inside it (`cannot read file: /tmp/r/out (not permitted)`) and an existing file outside every root (`/etc/hosts`: `cannot read file: /etc/hosts (not permitted)`) are Meguri's own tests (`ankiconnect_media.rs`): `readable_folders` is declared only (`servers/transcripts` T4), no setup writes files or links outside the media folder, and an outside file's bytes differ between containers. They become a declared scenario once `servers/transcripts` can create files and links outside the media folder and name their absolute paths.
+The `path` rows with a readable folder (`/tmp/r` holding `f.mp3`: `/tmp/r/f.mp3` gives `"f.mp3"`, `/tmp/r/missing.mp3` gives `cannot read file: /tmp/r/missing.mp3 (not found)`), a symbolic link `out` → `/etc/hosts` inside it (`cannot read file: /tmp/r/out (not permitted)`), an existing file outside every root (`/etc/hosts`: `cannot read file: /etc/hosts (not permitted)`), and a root configured through a symbolic link (a temporary folder holding `real/r/f.mp3` and a link `link` → `real`, with `readable_folders` `[<tmp>/link/r]`: `path` `<tmp>/link/r/f.mp3` and `<tmp>/real/r/f.mp3` both give `"f.mp3"`, X3.3, the case of `/tmp` and `/private/tmp` on macOS) are Meguri's own tests (`core/crates/meguri-servers/tests/ankiconnect_paths.rs`, which also holds the external folder's "path root" row below): `readable_folders` is declared only (`servers/transcripts` T4), no setup writes files or links outside the media folder, and an outside file's bytes differ between containers. They become a declared scenario once `servers/transcripts` can create files and links outside the media folder and name their absolute paths.
 
-The `url` source is tested against a local HTTP stub in Meguri's own tests (`core/crates/meguri-servers/tests/ankiconnect_media.rs`): 5 redirects succeed, 6 fail; `file://` and `ftp://` fail; a 404 gives `<url> download failed with return code 404`; a 204 succeeds with no bytes; a body above the cap fails with `too large`; a stalled body fails once the 30 s limit passes (real time: fetch limits do not follow the host's test clock, `servers/host-security#H21`); while a download stalls, a UI write and another API write commit without waiting for it (X3.5).
+The `url` source is tested against a local HTTP stub in Meguri's own tests (`core/crates/meguri-servers/tests/ankiconnect_media.rs`): 5 redirects succeed, 6 fail; `file://`, `ftp://`, `nonsense` (no scheme) and `http:///x` (no host) fail with `cannot download <url> (only http and https are allowed)`; a 404 gives `<url> download failed with return code 404`; a 204 succeeds with no bytes; a body above the cap fails with `too large`; a stalled body fails once the 30 s limit passes (real time: fetch limits do not follow the host's test clock, `servers/host-security#H21`); while a download stalls, a UI write and another API write commit without waiting for it (X3.5).
 
-External-folder tests (Meguri only, `ankiconnect_extmedia.rs`, a temporary folder in Docker). The Scenario column names the declared transcript that covers a test, or its hook part; a test with none stays Rust-only, because it needs a grant step (`media_folder_granted`, X11.2), a scan result (X11.8) or a crash, which `servers/transcripts` T7 does not express yet:
+External-folder tests (Meguri only, `ankiconnect_extmedia.rs`, a temporary folder in Docker). The Scenario column names the declared transcript that covers a test, or its hook part. Those transcripts grant with `media_dir_grant` and scan with `media_dir_scan` (`servers/transcripts` T7.3); every one that expects a scan to run starts with a grant, because Meguri's executor never grants by itself (T20). Two tests stay Rust-only, each for the reason its row gives: a crash between the media commit and the index write (T7.3 `fault` has no such point), and a `path` inside the external folder (a transcript cannot put the folder's absolute path into a request, T10.2). The "closed app" transcript writes its file just before `restart_host`: in Docker nothing watches the folder, so that file is seen only by the scans after the restart, as a file written while the app is quit:
 
 | Test | Steps | Expected | Scenario |
 |---|---|---|---|
 | AE79 core | write `clip.mp3`, then `addNote` with `[sound:clip.mp3]` before any scan | `clip.mp3` in collection media before the commit, pending for sync; Check Media: used, nothing missing | `media/ext-hook` (declared) |
-| idempotent scan | scan until no entry is `pending`; scan again with no change | the last scan writes nothing (media, journal, index) | none |
-| re-ingest | modify an ingested `clip.mp3`; scan twice | collection `clip.mp3` has the new bytes; the old bytes in `media.trash`; pending | none |
-| case kept | write `Clip.mp3`; scan twice | stored as `Clip.mp3` | hook form: `media/ext-hook-case` (declared) |
-| mid-write | append to a file between two scans; then stop | ingested only after two equal observations, with the full bytes | none |
-| baseline | grant a folder holding 3 files; scan; edit one; scan | no write | none |
-| baseline referenced | then `addNote` referencing one of them | only that file ingested | none |
+| idempotent scan | grant; write `clip.mp3`; scan until no entry is `pending`; scan again with no change | the scans give `rescan` true and 0 ingested, then false and 1; the last scan writes nothing (media, journal, index) and reports 0 | `media/ext-scan-idempotent` (declared; the journal and index parts Rust-only) |
+| re-ingest | modify an ingested `clip.mp3`; scan twice | collection `clip.mp3` has the new bytes; the old bytes in `media.trash`; pending | `media/ext-reingest` (declared) |
+| case kept | write `Clip.mp3`; scan twice | stored as `Clip.mp3` | `media/ext-scan-case`; hook form `media/ext-hook-case` (declared) |
+| mid-write | grow a file between two scans; then stop | ingested only after two equal observations, with the full bytes | `media/ext-mid-write` (declared) |
+| baseline | grant a folder holding 3 files; scan; edit one; scan | `{baseline: 3}`; no write | `media/ext-baseline` (declared) |
+| baseline referenced | then `addNote` referencing one of them | only that file ingested, with its edited bytes; the next scan writes nothing | `media/ext-baseline` (declared) |
 | batch | `addNotes` with a note referencing a baseline file | ingested before the commit; a failing batch leaves none | hook form: `media/ext-hook-batch` (declared) |
-| rollback then scan | write `new.mp3`; `addNotes` whose first note references it and whose second fails; scan twice | the batch leaves no file and no index change; the two scans copy `new.mp3` | hook part: `media/ext-hook-batch` (declared) |
-| unrelated name | collection media holds `pic.png` = A (added in the editor); write `pic.png` = B into the folder; scan twice | collection `pic.png` still A; entry `conflict`; one `conflict` notice | none |
+| rollback then scan | write `new.mp3`; `addNotes` whose first note references it and whose second fails; scan twice | the batch leaves no file and no index change; the two scans copy `new.mp3` | `media/ext-rollback-scan`; hook part also `media/ext-hook-batch` (declared) |
+| unrelated name | collection media holds `pic.png` = A (added in the editor); write `pic.png` = B into the folder; scan twice | collection `pic.png` still A; entry `conflict`; one `conflict` notice, in the scan result and as a host event | `media/ext-conflict` (declared) |
 | transformed collision | collection media holds `ab.png` = A; write `a?b.png` = B; `addNote` referencing `a?b.png` | B stored under M3's hash name of `ab.png`; the field references it; `ab.png` still A; a `renamed` notice | `media/ext-hook-collision` (declared) |
-| grant then apply | grant P2 while the config names P1; scan; apply P2; scan twice | the first scan is `suspended`; then P2's new files only | none |
-| apply then grant | apply P2 while the index is P1's; write a file into P2; scan; grant P2; scan twice | the first scan is `suspended`; the file written before the grant is `baseline`, not copied | none |
-| moved folder | the config's path changes to P3 without a grant (a moved folder); write a file; scan; `addNote` referencing it | the scan is `suspended`; the note's file is ingested by the hook | `media/ext-ungranted`, held until `servers/transcripts` T20 states that Meguri's executor never grants a folder |
-| crash after commit | stop the process between an ingest's media commit and its index write; relaunch; scan | nothing written twice; the entry becomes `ingested` | none |
-| closed app | add a file while the engine is closed; launch scan twice | the file ingested; no new baseline at launch | none |
-| path root | `storeMediaFile` with `path` inside the external folder | succeeds | none |
+| grant then apply | grant P2 while the config names P1; scan; apply P2; scan twice | the first scan is `suspended`; then P2's new files only | `media/ext-grant-then-apply` (declared) |
+| apply then grant | apply P2 while the index is P1's; write a file into P2; scan; grant P2; scan twice | the first scan is `suspended`; the file written before the grant is `baseline`, not copied | `media/ext-apply-then-grant` (declared) |
+| no grant | write a file; scan; `addNote` referencing it | the scan is `suspended` (T20); a grant of a missing folder fails with `not_a_directory` and changes nothing; the note's file is ingested by the hook | `media/ext-ungranted` (declared) |
+| moved folder | the config's path changes from the granted P1 to P3 without a grant (a moved folder); write a file into P3; scan; `addNote` referencing it; apply P1 again; scan twice | the scan is `suspended`; the note's file is ingested by the hook and the index is unchanged (X11.6 step 4), so P1's file of the same name stays `baseline` and the collection copy keeps P3's bytes | `media/ext-moved` (declared) |
+| collection closed | grant; close the collection; write a file; scan; open it; scan | `collection_unavailable` with `rescan` true and the file recorded `pending`; then the file ingested | `media/ext-collection-closed` (declared) |
+| crash after commit | stop the process between an ingest's media commit and its index write; relaunch; scan | nothing written twice; the entry becomes `ingested` | none: no fault point there (T7.3 `fault`) |
+| closed app | add a file while the app is quit; launch scan twice | the file ingested; no new baseline at launch | `media/ext-closed-app` (declared) |
+| path root | `storeMediaFile` with `path` inside the external folder | succeeds | none: the request needs the folder's absolute path (`ankiconnect_paths.rs`) |
 
 ## X15. Open questions
 

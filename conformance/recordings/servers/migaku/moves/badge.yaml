@@ -1,0 +1,121 @@
+# servers/migaku-received-log L17 `badge` (declared, servers/transcripts T13).
+# No override. #r1 is a servers/migaku-routing D10 tie (2 against 2): uncertain,
+# no language, decision Fallback (label Uncertain, L4). #r2 is Hangul: ko,
+# confident, but no profile is Korean, so it is uncertain too and Fallback with
+# the language ko (label Fallback). Both go to the fallback profile: no last
+# route (Fallback commits set none, D12), most received cards, lowest id. #r3
+# is a confident German card sent while the collection is exclusive: after the
+# 5 s wait it fails with Meguri is busy (switch off, servers/migaku-receive
+# P14). The badge counts all three (L9); confirming #r2 leaves 2; a Retry
+# that routes #r3 Auto to DE leaves 1 (L9, L14).
+# Relies on a servers/transcripts T10.1 rule proposed with this file:
+# entities get tokens after every step, not only after exchanges (the note a
+# Retry or a drain creates is the next #nN).
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1), T-Mining-ES
+# (#m8) with the same fields, and the decks DE (#d1), DE::Mining (#d2), ES
+# (#d3) and ES::Mining (#d4). Profiles are servers/transcripts T5.1 values,
+# saved in list order on a new store, so the first has id 1; a profile without
+# field_map infers R1712's map (servers/migaku-routing D4). L16 calls are
+# `received` steps (T7.3), read in the JSON form of L16.1. No Origin, so
+# Access-Control-Allow-Origin is * (servers/migaku-protocol P6). All content is
+# synthetic.
+id: servers/migaku/moves/badge
+description: "the badge counts Uncertain, Fallback and Failed rows until confirmed or fixed"
+tags: ["moves"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE", "DE::Mining", "ES", "ES::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+    - name: T-Mining-ES
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+    - {name: "ES", language: "es", notetype: "T-Mining-ES", deck: "ES::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: null
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Café", "sentence": "Ist das Café zu?"}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - advance: 1m
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "개", "sentence": "개가 짖어요."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n2"}}
+  - advance: 1m
+  - lifecycle: exclusive
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Hund[Hund,nn,m]", "sentence": "Der Hund."}}
+      async: b
+  - wait: 1s
+  - advance: 5s
+  - await: b
+    expect:
+      status: 400
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: false, error: "Meguri is busy"}}
+  - lifecycle: ready
+  - received: {call: badge}
+    expect:
+      output: {count: 3}
+  - received: {call: page, limit: 200}
+    expect:
+      output_at:
+        "/rows/0/id": "#r3"
+        "/rows/0/status": "Failed"
+        "/rows/0/error": "Meguri is busy"
+        "/rows/1/id": "#r2"
+        "/rows/1/decision": "Fallback"
+        "/rows/1/detection": {language: "ko", confidence: "uncertain"}
+        "/rows/2/id": "#r1"
+        "/rows/2/decision": "Fallback"
+        "/rows/2/detection": {language: null, confidence: "uncertain"}
+  - received: {call: confirm, rows: ["#r2"]}
+    expect:
+      output: {}
+  - received: {call: badge}
+    expect:
+      output: {count: 2}
+  - advance: 1m
+  - received: {call: retry, row: "#r3"}
+    expect:
+      output: {result: created, note: "#n3"}
+  - received: {call: badge}
+    expect:
+      output: {count: 1}
+  - received: {call: row, row: "#r3"}
+    expect:
+      output_at:
+        "/status": "Created"
+        "/decision": "Auto"
+        "/route": "detected"
+        "/profile/name": "DE"

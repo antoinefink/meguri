@@ -3,7 +3,7 @@
 Spec: servers/migaku-routing
 Requirements: R1692, R1710, R1711, R1712, R1713, R1714, R1715, R1716, R1717, R1718, R1719, R1720, R1947; R1665 (local storage); AE71, AE87
 Anki: 26.09.3
-Scenarios: conformance/recordings/servers/migaku/routing/ (`servers/transcripts` T2: transcripts live under `recordings/`, not `scenarios/`). Written so far: `no-profile` (declared). Every other D15.1 row needs transcript steps for profiles, routing settings and state, and an output of received-log rows, which `servers/transcripts` T7.3 does not have yet. The server transcript format is `servers/transcripts`, whose runner (U136) does not exist yet. Until U136 lands, U138 verifies D15.1's rows through its own Rust tests (`tests/migaku_routing.rs`, `migaku_detect.rs`, `migaku_profiles.rs`). The synthetic corpus `conformance/corpora/migaku-routing-synthetic.jsonl` exists and holds exactly the lines of D15.2; a change to either changes both.
+Scenarios: conformance/recordings/servers/migaku/routing/ (`servers/transcripts` T2: transcripts live under `recordings/`, not `scenarios/`). Written so far (declared, `servers/transcripts` T13): `no-profile`, `tie-recent-route`, `tie-60-minutes`, `tie-61-minutes`, `fallback-not-last-route`, `manual-move-recent`, `override` and `counts-only-on-commit`. The other D15.1 rows can be written with `servers/transcripts` T5.1 (`migaku_routing`: profiles, fallback, override), T4.1's `migaku_pending_switch`, T7.3's `routing` (D2.3's operations and `record_manual_move`), `received_log` and `lifecycle` steps and T7.1's `advance`, except the three that delete a deck or a note type while the scenario runs (`deck-deleted`, `notetype-deleted`, `pending-profile-deck-deleted`): T7.3's `collection` step has no deck or note type deletion, and T5.1 cannot start from a profile whose deck or note type is gone (D2.1 refuses to save it). Those three are U138 Rust tests only until that step admits the deletions. Received counts are reached only through commits (T5.1 starts the state empty), so `tie-default-fallback` and `two-japanese-profiles` commit their cards under the override first. The server transcript format is `servers/transcripts`, whose runner (U136) does not exist yet. Until U136 lands, U138 verifies D15.1's rows through its own Rust tests (`tests/migaku_routing.rs`, `migaku_detect.rs`, `migaku_profiles.rs`). The synthetic corpus `conformance/corpora/migaku-routing-synthetic.jsonl` exists and holds exactly the lines of D15.2; a change to either changes both.
 
 How Meguri chooses the note type, deck, field map, default values and tags for a card that the Migaku browser extension (1.30 and 1.31) sends to `POST /receive`. The payload names none of them (R1692). The Migaku Anki add-on 0.6.6 has no automatic routing: it uses one configured note type and deck, or the open Add window's. Everything here except the field sources of D3 and the field layout of D4's example is Meguri's own design, written to reproduce the user's history (R1718, R1947). Anki has no part in it.
 
@@ -224,7 +224,7 @@ Resolution (D13) fails, with HTTP 400 in the error shape of `servers/migaku-prot
 ### D7.2 When the checks run
 
 - Resolution (D13) runs when `servers/migaku-receive` asks for the destination (its stage 3), with the profiles and the routing state as they are then; a request that the commit sends back to that stage (a collection replacement, a changed field list) is resolved again.
-- The note type and deck checks run again at commit, on the generation the commit runs on (`servers/migaku-receive`). A pending entry keeps the profile chosen at its arrival; only these checks run again when it drains, and a failure turns it into a Failed row with the message. A pending entry whose profile was deleted fails with `servers/migaku-receive`'s message for that case.
+- The note type and deck checks run again at commit, on the generation the commit runs on (`servers/migaku-receive`). A pending entry keeps the profile and the plan chosen at its arrival and is never routed again. When it drains, exactly these checks run, in this order, and the first that fails turns it into a Failed row with its `servers/migaku-receive` P19 message (P15): the profile no longer exists; its note type or its deck no longer exists (the note type first, with D7.1's messages); the note type's field list differs from the one the plan was built from. The `No fields to map to.` check does not run again: the stored plan already passed it.
 
 ### D7.3 Profile warnings
 
@@ -329,6 +329,11 @@ Words that are common in both languages (`es`, `das`, `des`, `den`, `a`) are in 
 | `Peña` | `Peña und Kühn` | 2 (`und` 1, `ü` 1) | 2 (`ñ` 2) | uncertain |
 | `streng[streng,adj,\|streng,adv,]` | `Streng vertraulich.` | 0 | 0 | uncertain (AE71) |
 | `Berlin[Berlin,nnp,]` | `in[in,prep,\|in,adp,] Berlin` | 4 (nnp 2, prep 2) | 2 (adp 2) | `de` |
+| `glurbt` | `Es glurbt[glurben,aux,].` | 3 (aux 2, `glurben` 1: the tag `aux` also counts the verb ending) | 0 (`es` is in neither list) | `de` |
+| `Madrid[Madrid,propn,]` | `en Madrid` | 0 | 3 (propn 2, `en` 1) | `es` |
+| `wandern[wandern,v,]` | `Wir zorbeln[zorbeln,v,] zur Straße.` | 5 (`wandern` 1 by `ern`, `zorbeln` 1 by `eln`, `ß` 1, `wir` 1, `zur` 1) | 0 | `de` |
+| `plim` | `¡Plim ya!` | 0 | 2 (`¡` 1, `ya` 1) | `es` |
+| `blicado` | `Ya blicado[blicar,v,m].` | 0 | 3 (v m 1, `blicar` 1, `ya` 1) | `es` |
 
 ## D11. Choosing a profile (R1719, R1720)
 
@@ -367,7 +372,7 @@ Stored in the integrations store and kept across restarts:
 
 ### D13.1 For `/receive`
 
-Resolution takes the payload and `at` and returns either a D7.1 failure (with the message) or:
+Resolution takes the payload and `at` and returns either a D7.1 failure or a result. A failure at D11 step 1 (no profile) carries only the message: no profile, decision, route or detection, so its Failed row has none (`servers/migaku-received-log` L2, L4). A failure at D11 step 5 carries the message and also the chosen profile's id and name, the decision, the route and the detection, which `servers/migaku-receive` P20 writes on the Failed row. A result holds:
 
 | Member | Content |
 |---|---|
@@ -382,7 +387,13 @@ Resolution takes the payload and `at` and returns either a D7.1 failure (with th
 
 The language is the one D9 or D10 found, none when they found none. The confidence is `uncertain` when D9 or D10 was uncertain, and also when they were confident for a language that no profile has (D11 step 4). For example, Hangul with no Korean profile gives language `ko`, `uncertain`. With the override set, the confidence is what steps 3 and 4 would have given without it.
 
-The signals are a list of `{signal, language, points}` with signal names `script:kana`, `script:hangul`, `script:han`, `script:cjk_symbol`, `tag:<tag>`, `gender:<m or f>`, `ending:<ending>`, `letter:<character>` and `stopword:<word>`, one entry per counted occurrence, in text order. They are for display and debugging only.
+The signals are a list of `{signal, language, points}`. They are for display and debugging, but tests compare them, so their content and order are fixed:
+
+- **Script** (D9 rows 1 to 4): exactly one entry, for the row that applied: `script:kana`, `script:hangul`, `script:han` or `script:cjk_symbol`, with that row's language (for `script:han`, D9.1's language, or none when D9.1 is uncertain) and 0 points. It is the whole list: no Latin signal follows it.
+- **Latin** (D9 row 5): one entry per counted occurrence of D10, with D10's language and points: `tag:<tag>` and `ending:<ending>` (both in lower case; at most one listed ending can match a lemma, since no listed ending is the end of another), `gender:<m or f>`, `letter:<character>` (the character as it appears) and `stopword:<word>`. No points: no entry.
+- **Order** of the Latin entries: by position in the prepared text (D8 step 4). An alternative's entries take the position of its bracket group's `[`, in the order tag, gender, ending, and the alternatives of one group follow each other in group order. A letter takes its own position; a stopword the position of its token's first character. At one position a letter comes before a stopword.
+
+For example, D10.2's first row gives `tag:nn` (de, 2) for the target word's group, then for the sentence `stopword:der` (de, 1), `tag:nn` (de, 2), `letter:ä` (de, 1) and `ending:en` (de, 1) for `kräht[krähen,v,]`, whose `ä` comes before its group's `[`.
 
 Resolution does not change the routing state; `servers/migaku-receive` reports the commit, and D12 applies then.
 
@@ -462,7 +473,7 @@ The gates:
 
 ### D15.1 Routing scenarios
 
-Each row is one scenario of `conformance/recordings/servers/migaku/routing/`, id `servers/migaku/routing/<row>`, `source: declared`, in the `servers/transcripts` format. Rows that need profiles wait for that file's routing steps. Unless a row says otherwise: profiles 1 German (`de`, Migaku German Custom, German::Mining), 2 Spanish (`es`, Migaku Spanish Custom, Spanish::Mining) and 3 Japanese (`ja`, Migaku Japanese Custom, Japanese::Mining), saved through D2.3 in that order (so ids 1, 2, 3) with the contents D6 would draft for them; a profile a row adds is saved after them and takes the next id. No override, no fallback choice, an empty routing state, and the clock at 10:00. Note types and decks are the scenario's own synthetic ones with the 11 fields of D4.
+Each row is one scenario of `conformance/recordings/servers/migaku/routing/`, id `servers/migaku/routing/<row>`, `source: declared`, in the `servers/transcripts` format. The header's Scenarios line says which are written and which cannot be written yet. A committed card in "Given" is a `/receive` of that kind sent at that time; a row's checks read the decision, route and detection from `received_log` rows. Unless a row says otherwise: profiles 1 German (`de`, Migaku German Custom, German::Mining), 2 Spanish (`es`, Migaku Spanish Custom, Spanish::Mining) and 3 Japanese (`ja`, Migaku Japanese Custom, Japanese::Mining), saved through D2.3 in that order (so ids 1, 2, 3) with the contents D6 would draft for them; a profile a row adds is saved after them and takes the next id. No override, no fallback choice, an empty routing state, and the clock at 10:00. Note types and decks are the scenario's own synthetic ones with the 11 fields of D4.
 
 | Scenario | Given | Payload (`targetWord` · `sentence`) | Expected |
 |---|---|---|---|
@@ -470,11 +481,11 @@ Each row is one scenario of `conformance/recordings/servers/migaku/routing/`, id
 | `tie-61-minutes` | a German card committed `Auto` at 08:59; fallback choice profile 2 | same | profile 2, `Fallback`, route `fallback_profile` |
 | `tie-60-minutes` | a German card committed `Auto` at 09:00 | same | profile 1, `Fallback`, `recent` |
 | `tie-default-fallback` | received counts 1: 3, 2: 5, 3: 5; no last route | same | profile 2 (highest count, lower id than 3), `Fallback`, `fallback_profile` |
-| `fallback-not-last-route` | a Spanish card committed with decision `Fallback` at 09:55; a German card committed `Auto` at 09:40 | same | profile 1 (the `Fallback` commit did not move the last route), `recent` |
+| `fallback-not-last-route` | fallback choice profile 2; a German card committed `Auto` at 08:00; at 09:30 the uncertain payload below commits to profile 2 as `Fallback`, `fallback_profile` (the last route is 90 minutes old); at 09:45 the fallback choice set to profile 3 | same | profile 3, `Fallback`, `fallback_profile`: the 09:30 `Fallback` commit did not move the last route (had it moved it, the result would be profile 2, `recent`) |
 | `manual-move-recent` | `record_manual_move(1, 10:00)`; clock 10:05 | same | profile 1, `Fallback`, `recent` |
 | `german-tags` | — | `Hahn[Hahn,nn,m]` · `Der[der,art,m] Hahn[Hahn,nn,m] kräht[krähen,v,].` | profile 1, `Auto`, `detected`; signals include `tag:nn` twice |
 | `spanish-tags` | — | `perro[perro,n,m]` · `El[el,det,m] perro[perro,n,m] ladra[ladrar,v,].` | profile 2, `Auto` |
-| `scoring-table` | — | each row of D10.2 | the result of that row (uncertain rows route by step 4) |
+| `scoring-table` | each D10.2 row runs from this starting state on its own | each row of D10.2 | the result of that row: a confident row goes to its language's profile, `Auto`; an uncertain row goes to profile 1 (no last route, all counts 0, lowest id), `Fallback`, `fallback_profile` |
 | `kana-only` | — | `ねこ` · `ねこがいる。` | profile 3, `Auto` |
 | `kanji-and-kana` | — | `猫[ねこ;h]` · `猫[ねこ;h]が好[す;a]き。` | profile 3, `Auto` |
 | `fullwidth-only` | — | `！` · `ＡＢＣ` | profile 3, `Auto` |
@@ -483,15 +494,15 @@ Each row is one scenario of `conformance/recordings/servers/migaku/routing/`, id
 | `han-ja-only` | — | `猫` · `我有猫` | profile 3, `Auto` |
 | `han-zh-only` | profile 4 Chinese (`zh`) added, then profiles 1, 2 and 3 deleted | `猫` · `我有猫` | profile 4, `Auto`, detection `zh` confident |
 | `override` | override = profile 2 | `Hund[Hund,nn,m]` · `Der Hund.` | profile 2, `Override`; detection `de` recorded; after the override is set back to Automatic, the same payload goes to profile 1 `Auto` |
-| `override-no-last-route` | override = profile 2; a payload committed under it | then override off; `streng` · `Streng vertraulich.` | the `Override` commit left no last route: `fallback_profile` |
+| `override-no-last-route` | override = profile 2; a payload committed under it | then override off; `streng` · `Streng vertraulich.` | the `Override` commit left no last route but counted: profile 2 (count 1), `Fallback`, `fallback_profile` |
 | `two-japanese-profiles` | profile 4 Japanese Reading (`ja`) added; received counts 3: 2, 4: 7 | `ねこ` · `ねこ。` | profile 4, `Auto` |
-| `no-profile` | no profiles | `Hund` · `Der Hund.` | 400 `No Migaku destination is set up in Meguri.` (written, declared: `conformance/recordings/servers/migaku/routing/no-profile.yaml`) |
-| `deck-deleted` | profile 1's deck deleted | `Hund[Hund,nn,m]` · `Der Hund.` | 400 `Destination deck for German no longer exists.`; profile 1 shows `deck_missing`; profile 2 is not tried |
-| `notetype-deleted` | profile 2's note type and deck deleted | `perro[perro,n,m]` · `El perro.` | 400 `Destination note type for Spanish no longer exists.` |
+| `no-profile` | no profiles | `Hund` · `Der Hund.` | 400 `No Migaku destination is set up in Meguri.`; one Failed row with that error and no profile, decision, route or detection (D13.1); after a German profile is saved, Retry of that row creates the note from the kept payload |
+| `deck-deleted` (U138 Rust test only) | profile 1's deck deleted | `Hund[Hund,nn,m]` · `Der Hund.` | 400 `Destination deck for German no longer exists.`; profile 1 shows `deck_missing`; profile 2 is not tried |
+| `notetype-deleted` (U138 Rust test only) | profile 2's note type and deck deleted | `perro[perro,n,m]` · `El perro.` | 400 `Destination note type for Spanish no longer exists.` |
 | `no-mapped-field` | profile 1's note type replaced by one with fields `Front`, `Back` (map inferred) | `Hund[Hund,nn,m]` · `Der Hund.` | 400 `No fields to map to.`; warning `no_mapped_field` |
-| `counts-only-on-commit` | — | a German payload whose media fails (`servers/migaku-receive`), then `streng` · `Streng vertraulich.` | the failure changed neither the count nor the last route: second card `fallback_profile` |
+| `counts-only-on-commit` | — | `perro[perro,n,m]` · `El perro.` with one `sentenceAudio` item whose `input` is `data:audio/mpeg;base64` (no comma: invalid, `servers/migaku-receive` P8), routed to profile 2 `Auto` and failing with `Could not read sentenceAudio item 1: invalid data URL.`; one minute later `streng[streng,adj,\|streng,adv,]` · `Streng vertraulich.` | the failure changed neither the count nor the last route: the second card goes to profile 1 (all counts 0, lowest id), `Fallback`, `fallback_profile`; a counted failure would give profile 2 |
 | `pending-uses-arrival-time` | a German card committed `Auto` at 09:30; collection busy from 10:00 to 10:40 with the pending reply accepted (`servers/migaku-receive`); uncertain payload arrives at 10:20 and is queued | `streng[streng,adj,\|streng,adv,]` · `Streng vertraulich.` | routed at 10:20 to profile 1, `recent` (50 minutes after 09:30); committed at 10:40 to profile 1 |
-| `pending-profile-deck-deleted` | as above with a confident German payload queued; profile 1's deck deleted before 10:40 | `Hund[Hund,nn,m]` · `Der Hund.` | at drain: Failed row `Destination deck for German no longer exists.`; no other profile tried |
+| `pending-profile-deck-deleted` (U138 Rust test only) | as above with a confident German payload queued; profile 1's deck deleted before 10:40 | `Hund[Hund,nn,m]` · `Der Hund.` | at drain: Failed row `Destination deck for German no longer exists.`; no other profile tried |
 | `field-map-custom` | — | (inference only) on the 11 fields | D4's R1712 table |
 | `prefill` | a collection with Migaku German Custom (notes in German::Mining), Migaku Spanish Custom (Spanish::Mining), Migaku Japanese Custom (Japanese::Audio::Mining), and Migaku Japanese with no notes | (first enable) | three drafts as D6's table, with D5's defaults; the empty stock type gets none; nothing stored before confirmation |
 | `prefill-deck-most-notes` | Migaku German Custom with 5 recent notes in German::Mining, 2 in German::Old, 9 older than 90 days in German::Old | (first enable) | deck German::Mining |

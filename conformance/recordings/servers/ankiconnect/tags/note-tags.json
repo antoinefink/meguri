@@ -59,6 +59,57 @@
         }
       },
       {
+        "reply": {
+          "body": {
+            "json": {
+              "error": "Note was not found: 5",
+              "result": null
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "http://localhost",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": "Note was not found: 5",
+              "result": null
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "http://localhost",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": "Must provide tags as a list of strings",
+              "result": null
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "http://localhost",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
         "db_dump": {
           "cards": {
             "#c1": {
@@ -128,11 +179,11 @@
     },
     "anki_version": "26.9.3",
     "ankiconnect_lock_sha256": "db0b6e483d450f46150a9e80294f651a2b7ea4babda9af460e4e28df45e90561",
-    "driver_sha256": "d210262e36b9bea44268e57ec6c0a5b0d03cbab1ed2f66931f34ff7b50e5dfae",
+    "driver_sha256": "3156f4a44f53eeac44cc03a8952ae2c42c82606bcedf6602ac2a2b2d4da7ba40",
     "image": "meguri-oracle-ankiconnect:recorder",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "servers/ankiconnect/tags/note-tags",
-  "scenario_sha256": "6c14416292248dc750f599d78cd00dc05205f17cdc1747b36814e709a83e7c4e",
+  "scenario_sha256": "5041e8e4dfae3cfe5be3a43ad17793db7659da3199e1e3d6645f63ecac78bc5a",
   "tz": "Europe/Paris"
 }

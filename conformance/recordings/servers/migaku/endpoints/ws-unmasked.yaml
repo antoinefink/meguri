@@ -1,0 +1,33 @@
+# servers/migaku-protocol P16 `ws-unmasked`.
+# An unmasked client frame is a framing fault: the socket closes with 1002
+# (P10.2). The frame is 81 02 68 69: a FIN text frame, no mask bit, payload "hi". No Origin.
+# The last step is a plain /srs-check: servers/transcripts T3 needs one http
+# exchange, and it shows the server still answers after the close.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/ws-unmasked
+description: "an unmasked client frame closes the socket with 1002"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - ws_open:
+      name: a
+      target: /anki-connect
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+  - ws_send: {name: a, frame: {base64: "gQJoaQ=="}}
+  - ws_expect: {name: a, frames: [{close: 1002}], within_ms: 1000}
+  - status: {until: {migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}
+  - http:
+      method: GET
+      target: /srs-check
+    expect:
+      status: 200
+      body: {json: {ok: true, version: "4"}}

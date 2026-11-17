@@ -1,0 +1,72 @@
+# servers/migaku-receive P24 `retry-text-window` (declared, servers/transcripts T13).
+# No item: a match is by text (P12). At +599 s the earlier receive is within
+# 600 s, so the reply carries #n1 and nothing is written (no row). At +1200 s
+# the only created receive is 1200 s old, so a second note is made. advance is
+# the host's test clock (servers/transcripts T7.1).
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/retry-text-window
+description: "a text-only body sent again within 600 s is a retry; after 600 s it is new"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund[Hund,nn,m]", sentence: "Der Hund."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - advance: 599s
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund[Hund,nn,m]", sentence: "Der Hund."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - advance: 601s
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund[Hund,nn,m]", sentence: "Der Hund."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n2"}}
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/db_dump/notes/#n3": null
+  - received_log: {}
+    expect:
+      output_at:
+        "/rows/0/note": "#n1"
+        "/rows/1/note": "#n2"
+        "/rows/2": null
+equivalence:
+  notes: ["#n1", "#n2"]

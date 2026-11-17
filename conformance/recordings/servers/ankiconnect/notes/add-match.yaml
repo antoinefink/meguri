@@ -1,5 +1,7 @@
 # specs/servers/ankiconnect-actions A20.3 `add-match` (A7.2 step 7): field
-# names match ignoring case; a member that names no field is ignored.
+# names match ignoring case; a member that names no field is ignored. Then
+# canAddNoteWithErrorDetail (A7.7) for a new note, a duplicate of the added
+# one and an unknown note type.
 id: servers/ankiconnect/notes/add-match
 description: addNote matches field names ignoring case and drops unknown members
 tags: [no-origin]
@@ -21,4 +23,10 @@ steps:
           action: addNote
           version: 6
           params: {note: {deckName: D, modelName: Pair, fields: {term: "x", GLOSS: "y", Other: "z"}}}
+  - http:
+      body: {json: {action: canAddNoteWithErrorDetail, version: 6, params: {note: {deckName: D, modelName: Pair, fields: {Term: "w"}}}}}
+  - http:
+      body: {json: {action: canAddNoteWithErrorDetail, version: 6, params: {note: {deckName: D, modelName: Pair, fields: {Term: "x"}}}}}
+  - http:
+      body: {json: {action: canAddNoteWithErrorDetail, version: 6, params: {note: {deckName: D, modelName: Nope, fields: {Term: "w"}}}}}
   - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

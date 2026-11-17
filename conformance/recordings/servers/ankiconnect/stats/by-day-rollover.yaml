@@ -5,7 +5,9 @@
 # and 04:01. The golden records the add-on, which counts them, one per local
 # date; Meguri leaves type 4 out and answers [] (A18
 # ankiconnect-review-counts-exclusions). Meguri's dating of counted rows is
-# by-day-rollover-counted (declared).
+# by-day-rollover-counted (declared). FSRS is on, as Meguri always runs it
+# (sched/set-due-date S1, R702): with it off the recorder runs SM-2 Set Due
+# Date, whose rows Meguri never writes (A20).
 id: servers/ankiconnect/stats/by-day-rollover
 description: "getNumCardsReviewedByDay with setDueDate rows at 03:59 and 04:01"
 tags: [no-origin]
@@ -13,7 +15,7 @@ server: ankiconnect
 source: oracle
 clock: {tz: Europe/Paris, start: "2030-01-15T03:59:00"}
 setup:
-  config: {rollover: 4}
+  config: {rollover: 4, fsrs: true}
   notetypes:
     - name: Pair
       fields: [Term, Gloss]

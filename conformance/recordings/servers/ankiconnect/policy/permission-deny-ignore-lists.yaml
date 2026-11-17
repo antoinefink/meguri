@@ -1,0 +1,22 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-deny-ignore-lists`: the config document after Deny with the checkbox (E9 outcome table, E9.1; AE76).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+id: servers/ankiconnect/policy/permission-deny-ignore-lists
+description: Deny with the checkbox appends the origin to the deny-list and leaves the allow-list as it was
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - permission: {answer: deny_ignore}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: denied}, error: null}}
+  - config: {}
+    expect:
+      output_at:
+        /config/ankiconnect/cors_origins: ["http://localhost"]
+        /config/ankiconnect/deny_origins: ["https://site.example"]

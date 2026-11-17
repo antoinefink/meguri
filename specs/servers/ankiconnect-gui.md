@@ -7,7 +7,7 @@ Scenarios: conformance/recordings/servers/ankiconnect/gui/ (`servers/transcripts
 
 The five GUI actions Meguri implements on its single-window Mac app (`guiBrowse`, `guiSelectCard`, `guiSelectedNotes`, `guiAddCards`, `guiEditNote`), the `sync` action, and the Browse navigation that the Migaku server's legacy `/create` `searchNote` command asks for. For each: parameters, the checks the core makes, the host interaction it raises, and the reply.
 
-Targets: AnkiConnect API version 6, as served by the AnkiConnect add-on build of 2025-11-09 ("the reference"). The reference opens separate Qt windows; Meguri navigates its one main window instead, so window behavior is Meguri's (R1782–R1788) and only reply shapes are compared with recordings. G11 lists the differences. The reference replies stated in this file were checked against that build running in the transcript oracle (Anki 26.9.3, offscreen), except the G11 rows on modal notices, on the first sort direction, on filtered decks and on the question an open Add window asks before it is replaced, which would block the oracle, need a setup it does not have yet or cannot be seen offscreen; where a check changed the text, the section says "observed".
+Targets: AnkiConnect API version 6, as served by the AnkiConnect add-on build of 2025-11-09 ("the reference"). The reference opens separate Qt windows; Meguri navigates its one main window instead, so window behavior is Meguri's (R1782–R1788) and only reply shapes are compared with recordings. G11 lists the differences. The reference replies stated in this file were checked against that build running in the transcript oracle (Anki 26.9.3, offscreen), except the G11 rows on modal notices, on filtered decks and on the question an open Add window asks before it is replaced, which would block the oracle, need a setup it does not have yet or cannot be seen offscreen; where a check changed the text, the section says "observed".
 
 Everything before the action runs (origin, key, registry lookup, read-only mode, parameter checks, the 30 s collection wait, reply wrapping and error envelopes) is `servers/ankiconnect-envelope` (E3). Registry flags of these actions are its E12.3. Searches are Browse's (`search/query-model`, `browser/result-sets`); column keys and sorting are `browser/config-keys` K3 to K6. The host-interaction channel is `servers/host-security` H11.2 (U135).
 
@@ -44,7 +44,7 @@ Error strings of this file:
 | `Must provide a "columnId" and a "order" property"` | G3 | reference text, including its unbalanced final quote |
 | `invalid card order: <order>` | G3 | reference prefix; `<order>` as below |
 | `invalid columnId: <columnId>` | G3 | reference prefix; `<columnId>` as below |
-| `Meguri: the API is in read-only mode` | G3 | envelope E13 |
+| `Meguri: the API is in read-only mode` | G3, G6, G9 | envelope E13 |
 | G9's `sync: …` strings | G9 | Meguri, except `sync: auth not configured` |
 
 `<value>`, `<order>` and `<columnId>`: a string is written as it is, with no quotes. Any other value is written as compact JSON: no white space, object members in the order received, strings with only the escapes JSON requires (`"`, `\` and the controls below U+0020, as `\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, else `\u` and 4 lower-case hex digits), other characters as raw UTF-8, numbers as received. The reference writes non-string values in its language runtime's text form of the parsed value instead (observed: `['noteCrt']`, `True`, `None` for `null`, `5`, `0` for `-0`, `5.0` for `5.0`, `100.0` for `1e2`). So the texts are equal only for strings and for integers written in plain digits, with an optional `-`, other than `-0` (G11).
@@ -69,12 +69,12 @@ Checks, in this order (the first failure is the reply):
 | 7 | `query`, when present, parses and runs | the Browse error message (`search/errors#E7`) |
 
 - The reply is the card ids that `findCards` returns for `query` (`servers/ankiconnect-actions`: the same search engine, ascending ids, R1776, R1777), whatever mode Browse is in. Without `query` the reply is `[]`, as in the reference (observed for `{}` and for `{"query": null, "reorderCards": null}`). The reference checks `order` before `columnId` (observed: `order` `up` with `columnId` `nope` gives `invalid card order: up`), as rows 4 and 6 do.
-- **The sort.** With `reorderCards` and a column sortable in the mode, the core writes the sort as `browser/config-keys#K5.2` "Set sort (`columnId`, `order`)" does (the mode's column and backwards keys, each written only when it changes), as one `LocalApi` op (envelope E14), not as the UI's `UserNonUndoable` write of `#K10.2`: no undo entry, and the undo and redo history is not cleared (G2 rule 7). It commits before the interaction is posted. When the column is not sortable in the mode (`question`, `answer`; `stability`, `difficulty`, `retrievability` in notes mode), nothing is written, the sort is left unchanged and the action still succeeds, with no alert. The reference also keeps its sort and replies the ids, but only after the user dismisses a modal notice (G11).
+- **The sort.** With `reorderCards` and a column sortable in the mode, the core writes the sort as `browser/config-keys#K5.2` "Set sort (`columnId`, `order`)" does (the mode's column and backwards keys, each written only when it changes), as one `LocalApi` op (envelope E14), not as the UI's `UserNonUndoable` write of `#K10.2`: no undo entry, and the undo and redo history is not cleared (G2 rule 7). It is written only after every check of the table has passed: a request that fails check 7 writes nothing. It commits before the interaction is posted. When the column is not sortable in the mode (`question`, `answer`; `stability`, `difficulty`, `retrievability` in notes mode), nothing is written, the sort is left unchanged and the action still succeeds, with no alert. The reference also keeps its sort and replies the ids, but only after the user dismisses a modal notice (G11).
 - The interaction asks the app to show Browse with `query` as its search text and run it as if the user had entered it (`browser/result-sets#H3`); Browse shows the sort the collection now holds. When the interaction is refused or times out, a sort already written stays.
 - The mode (cards or notes) is not changed.
 - The answer `done` gives the reply; `refused` gives G2 rule 4's error.
 
-Examples (collection: notes `n1`, `n2` in deck Lang with cards `c1` < `c2`; `c3` in Default; Browse in cards mode, `activeCols` `["noteFld","template","cardDue","deck","noteCrt"]`, so Created is displayed and Lapses is not; sort as stored by default, `noteCrt` ascending):
+Examples (collection: notes `n1`, `n2` in deck Lang with cards `c1` < `c2`; `c3` in Default; Browse in cards mode, `activeCols` `["noteFld","template","cardDue","deck","noteCrt"]`, so Created is displayed and Lapses is not; sort as a new collection stores it, `sortType` `noteFld` and `sortBackwards` false, so noteFld ascending (`browser/config-keys` K1, K5.1). The `noteCrt` descending request below therefore writes both keys: `sortType` `noteCrt`, `sortBackwards` true):
 
 | Params | Reply | Window |
 |---|---|---|
@@ -121,6 +121,8 @@ Examples (collection: notes `n1`, `n2` in deck Lang with cards `c1` < `c2`; `c3`
 | `note.options.closeAfterAdding` | boolean | `false` |
 
 Other members of `note` and of `note.options` (for example `allowDuplicate`) are ignored.
+
+`guiAddCards` is mutating (envelope E12.3): in read-only mode it gets `Meguri: the API is in read-only mode` before the member checks below (envelope E3 row 10), with or without `note` and attachments; nothing is stored and no interaction is posted.
 
 Member errors (envelope E12.2, checked before the collection wait, in this order; the first is the reply): `missing parameter: note.deckName`, `missing parameter: note.modelName`; `invalid parameter: note.deckName`, `invalid parameter: note.modelName`; `invalid parameter: note.fields` when `fields` is not an object or one of its values is not a string; `invalid parameter: note.tags` when `tags` is not a list or one of its elements is not a string; `invalid parameter: note.options` when it is not an object; `invalid parameter: note.options.closeAfterAdding` when it is not a boolean. An attachment's own member errors are `servers/ankiconnect-media` X10.2's.
 
@@ -224,17 +226,17 @@ Ids in payloads and answers are JSON integers. Example: `{"outcome": "unavailabl
 
 ## G11. Differences from AnkiConnect
 
-Each needs a `conformance/deviations.yaml` entry once transcripts exist (U136); window behavior is not recorded and needs none.
+Window behavior is not recorded and needs no `conformance/deviations.yaml` entry; nor do the rows that only declared scenarios or tests check (G12). The recorded GUI goldens need two entries (`servers/transcripts` T12): the envelope's R1739 `replace` of `access-control-allow-origin`, which every one of them needs because their requests carry no `Origin` (`servers/ankiconnect-envelope` E7.3 row 4, E18), and the R1782 `replace` of `/steps/1/browser_config/sortBackwards` by `false` in `browse-reorder-first-direction`. No recorded GUI reply body differs from Meguri's.
 
 | Case | Reference | Meguri | Req |
 |---|---|---|---|
 | where GUI actions show | separate browser, Add and Edit windows | the main window's Browse and in-window Add panel | R1782, R1784, R1786 |
 | `guiBrowse` with a bad `reorderCards` | the browser opens and searches, then the error is replied (observed: the selection that follows uses the new search's rows) | the error is replied and nothing changes | R1782 |
 | `guiBrowse` with a non-string `query` | error with a runtime text, after the browser opened | `invalid parameter: query` | R1782 |
-| `guiBrowse` with a query that fails to parse | the browser opens and shows a modal warning; request handling stops until it is dismissed; then the error is replied | the error is replied at once and nothing changes | R1782, R1791 |
+| `guiBrowse` with a query that fails to parse | the browser opens and shows a modal warning; request handling stops until it is dismissed; then the error is replied | the error is replied at once and nothing changes, the sort included | R1782, R1791 |
 | texts of `reorderCards should be a dict:`, `invalid card order:`, `invalid columnId:` with a value that is `-0` or is neither a string nor an integer in plain digits | the parsed value in its language runtime's text form (`None`, `True`, `0` for `-0`, `100.0` for `1e2`) | the value as compact JSON (G2) | R1782 |
 | `guiBrowse` with a column not sortable in the mode | a modal notice; request handling stops until it is dismissed | no notice; sort unchanged | R1782, R1791 |
-| `guiBrowse` new sort column whose first direction is descending | the requested `ascending` is replaced by descending | the requested direction is used | R1782 |
+| `guiBrowse` new sort column whose first direction is descending | the requested `ascending` is replaced by descending (observed: `sortBackwards` true after `ascending` on `noteCrt` from the new collection's `noteFld`) | the requested direction is used | R1782 |
 | `guiBrowse` sort write | the browser's own sort setting (a write the user cannot undo) | a `LocalApi` op that leaves the undo history (G3); refused in read-only mode | R1796, R1779 |
 | `guiSelectCard` with a card not in the results | clears the selection; `true` while the browser window exists | selection unchanged; `false` | R1783 |
 | `guiSelectCard` with a non-integer `card` (`"1"`) | `true` while the browser window exists | `invalid parameter: card` | R1783 |
@@ -253,17 +255,19 @@ Each needs a `conformance/deviations.yaml` entry once transcripts exist (U136); 
 
 "Rec." rows compare the reply with the reference recording (`servers/transcripts` T11), with the G11 entries named as T12 transforms; "Meguri" rows are declared scenarios (T13, with the T7.3 steps) or are asserted by `core/crates/meguri-servers/tests/ankiconnect_gui.rs` (with the `TestHost` scripting answers) or by `app/MeguriUITests/Integrations/GuiActionsUITests.swift` (real HTTP to 127.0.0.1:8765, window state read by accessibility ids). Requests use `version` 6. Collection and `activeCols` as in G3's examples unless stated. The scenarios store that `activeCols` through setup `config`. A new profile does not display Created: Browse shows the default cards-mode columns of `browser/config-keys` K1 (`browse-reorder-default-cols`).
 
-Each row's Kind ends with its status: "recorded" (oracle scenario with its golden in the directory), "declared" (T13 scenario file in the directory, no golden) or "tests only" (no transcript: window state, undo history or the user's Replace / Keep choice, which no transcript step can set up or read, T20; asserted by the Rust or UI tests named above). `search-note` and `search-note-huge` are Migaku scenarios: they belong under `servers/migaku/` (T2) and are not written yet.
+Each row's Kind ends with its status: "recorded" (oracle scenario with its golden in the directory), "declared" (T13 scenario file in the directory, no golden) or "tests only" (no transcript: window state, undo history or the user's Replace / Keep choice, which no transcript step can set up or read, T20; asserted by the Rust or UI tests named above). `search-note` and `search-note-huge` are Migaku scenarios under `servers/migaku/` (T2): `search-note` is `servers/migaku/create/search-note`; `search-note-huge` is not written yet.
 
 | Id | Setup and request | Reply | Kind |
 |---|---|---|---|
 | `browse-ids` | `guiBrowse {"query": "deck:Lang"}` | `{"result": [c1, c2], "error": null}` | Rec.; recorded |
-| `browse-reorder` | `guiBrowse {"query": "deck:Lang", "reorderCards": {"order": "descending", "columnId": "noteCrt"}}` | `[c1, c2]`; UI: Browse sorted by Created descending; `sortType` `noteCrt`, `sortBackwards` true | Rec. reply, Meguri window; recorded |
+| `browse-reorder` | `guiBrowse {"query": "deck:Lang", "reorderCards": {"order": "descending", "columnId": "noteCrt"}}`; then `browser_config` observed | `[c1, c2]`; UI: Browse sorted by Created descending; `sortType` `noteCrt`, `sortBackwards` true | Rec. reply and sort keys, Meguri window; recorded |
+| `browse-reorder-first-direction` | `guiBrowse {"query": "deck:Lang", "reorderCards": {"order": "ascending", "columnId": "noteCrt"}}` (noteCrt is not the stored sort column); then `browser_config` observed | `[c1, c2]`; `sortType` `noteCrt`, `sortBackwards` false | Rec. with G11's first-direction entry (the reference writes true); recorded |
 | `browse-reorder-undo` | an undoable edit; then `browse-reorder` | the edit is still undoable; redo history unchanged | Meguri (G11); tests only |
 | `browse-reorder-read-only` | read-only on; `browse-reorder`'s request | `Meguri: the API is in read-only mode`; sort keys unchanged | Meguri (G11); declared |
 | `browse-reorder-default-cols` | `activeCols` absent (defaults); `browse-reorder`'s request | `invalid columnId: noteCrt` | Rec.; recorded |
 | `browse-null-params` | `guiBrowse {"query": null, "reorderCards": null}` | `[]`; sort unchanged | Rec.; recorded |
 | `browse-no-query` | `guiBrowse {}` | `[]` | Rec.; recorded |
+| `browse-payload` | `guiBrowse {}`; then the interaction events | `[]`; one `GuiBrowse` request with payload `{"query": null}` | Meguri (G8); declared |
 | `browse-bad-order` | `reorderCards: {"order": "up", "columnId": "noteCrt"}` | `invalid card order: up` | Rec.; recorded |
 | `browse-missing-member` | `reorderCards: {"order": "ascending"}` | `Must provide a "columnId" and a "order" property"` | Rec.; recorded |
 | `browse-hidden-column` | `reorderCards: {"order": "ascending", "columnId": "cardLapses"}` | `invalid columnId: cardLapses` | Rec.; recorded |
@@ -273,6 +277,7 @@ Each row's Kind ends with its status: "recorded" (oracle scenario with its golde
 | `browse-order-null` | `reorderCards: {"order": null, "columnId": "noteCrt"}` | `invalid card order: null` | Meguri (G11, text; the reference writes `None`); declared |
 | `browse-unsortable` | `reorderCards: {"order": "ascending", "columnId": "question"}` with Question displayed | the ids; sort unchanged; no alert | Meguri (the reference blocks on a modal notice, G11); declared |
 | `browse-bad-query` | `guiBrowse {"query": "("}` | the Browse error text for `(` | Meguri (window unchanged; the reference blocks on a modal warning, G11); declared |
+| `browse-bad-query-with-sort` | `guiBrowse {"query": "(", "reorderCards": {"order": "descending", "columnId": "noteCrt"}}` | the Browse error text for `(`; nothing written; no interaction | Meguri (G3 "The sort"); declared |
 | `browse-dict-value` | `guiBrowse {"query": "x", "reorderCards": ["noteCrt"]}` | `reorderCards should be a dict: ["noteCrt"]` | Meguri (G11, text); declared |
 | `select-no-browse` | Browse not showing; `guiSelectCard {"card": c1}` | `false` | Rec. (reference: no browser window yet in the session); recorded |
 | `select-in-results` | after `browse-ids`; `guiSelectCard {"card": c2}` | `true`; row c2 selected | Meguri; declared |
@@ -283,6 +288,8 @@ Each row's Kind ends with its status: "recorded" (oracle scenario with its golde
 | `add-unknown-model` | deck `Default`, `modelName: "Nope"` | `model was not found: Nope` | Rec.; recorded |
 | `add-deck-first` | both unknown | `deck was not found: Nope` | Rec.; recorded |
 | `add-empty-panel` | Add panel closed; valid note with fields, tags, one `picture` by `data` | `0`; panel shows deck, note type, fields with `<img src="…">`, tags; the recording also observes `shot.png` stored and no note added | Rec. reply, Meguri window; recorded |
+| `add-payload` | `fields: {"Front": "delta", "back": "x", "Nope": "y"}`, `tags: ["t1"]`, one `picture` by `data` with `fields: ["Back"]`, `options.closeAfterAdding: true`; then the interaction events | `0`; one `GuiAddCards` request whose payload holds fields `{"Front": "delta", "Back": "<img src=\"shot.png\">"}`, tags `["t1"]` and `close_after_adding` true (its deck and note type ids are not checked: `servers/transcripts` T10 has no id positions in `events` outputs) | Meguri (G6 steps 2 and 3, G8); declared |
+| `add-read-only` | read-only on; valid note without attachments | `Meguri: the API is in read-only mode`; nothing written; no interaction | Meguri; declared |
 | `add-no-note` | `guiAddCards {}` | `0`; panel shown as it was | Rec. reply; recorded |
 | `add-null-note` | `guiAddCards {"note": null}` | `0`; panel shown as it was | Rec. reply; recorded |
 | `add-missing-model` | `guiAddCards {"note": {"deckName": "Default"}}` | `missing parameter: note.modelName` | Meguri (text, envelope E18); declared |
@@ -296,7 +303,7 @@ Each row's Kind ends with its status: "recorded" (oracle scenario with its golde
 | `edit-valid` | `guiEditNote {"note": n1}` | `null`; Browse on `nid:n1`, row selected, editor on n1 | Meguri (the reference fails under Anki 26.9.3, G11); declared |
 | `sheet-refuses` | unsaved deck-options sheet open; each of the five GUI actions | `cannot navigate: close the open sheet first`; sheet unchanged | Meguri; declared |
 | `add-draft-refuses-browse` | Add panel holds unsaved text; `guiBrowse {"query": "deck:Lang"}` | `cannot navigate: close the open sheet first`; draft unchanged | Meguri; declared |
-| `no-answer` | `TestHost` never answers `GuiBrowse` | after 10 s, `cannot navigate: Meguri did not respond`; an interaction cancelled event | Meguri; declared |
+| `no-answer` | `TestHost` never answers `GuiBrowse` | after 10 s, `cannot navigate: Meguri did not respond`; the `GuiBrowse` request event with payload `{"query": "deck:Lang"}`, then an interaction cancelled event; a later `resolve` returns `false` | Meguri; declared |
 | `queued-timeout` | `TestHost` holds a `GuiBrowse` without an answer; a second `guiBrowse` posted 4 s later | both time out 10 s after their own posting | Meguri; declared |
 | `wrong-answer-kind` | `TestHost` answers `GuiBrowse` with `presented`, then `done` | the first resolve returns `false`; the reply is the ids | Meguri; declared |
 | `review-left` | review session on deck Lang; `guiBrowse {"query": "deck:Lang"}`; back to the deck | session ended as by the user's switch; resumes normally | Meguri; tests only |
@@ -311,7 +318,7 @@ Each row's Kind ends with its status: "recorded" (oracle scenario with its golde
 | `sync-joins` | an exchange running; `sync` | the running exchange's result; no second exchange | Meguri; tests only |
 | `sync-yomitan-params` | iCloud not connected; `sync` with `params: {"version": 2}` | `sync: auth not configured` | Meguri (G11); declared |
 | `sync-waiting-no-class` | the exchange ends `waiting` with class none | `sync: waiting` | Meguri; declared |
-| `search-note` | Migaku `/create` `searchNote` for n1 | Migaku reply per `servers/migaku-received-log`; Browse on `nid:n1` | Meguri; not written (`servers/migaku/`) |
+| `search-note` | Migaku `/create` `searchNote` for n1 | Migaku reply per `servers/migaku-received-log`; Browse on `nid:n1` | Meguri; declared (`servers/migaku/create/search-note`) |
 | `search-note-huge` | Migaku `/create` `searchNote=9999999999999999999` | Migaku `OK`; Browse on `nid:9999999999999999999`, no rows | Meguri; not written (`servers/migaku/`) |
 
 ## Open questions (not normative)
@@ -325,5 +332,5 @@ Probe results against the reference are recorded with each question. A question 
 - G9: the `sync:` error texts other than `sync: auth not configured` are this draft's; no source fixes them. Observed: without a sync login the reference replies `sync: auth not configured`, and with `params` `{"version": 2}` it fails with its unexpected-keyword text. Still open (accept the texts). G10: the `/create` `searchNote` request shape is `servers/migaku-received-log`'s; this file takes its 1 to 19 digit value as the payload.
 - G9: `SyncNow` has no timeout, relying on every exchange ending with a P12.6 result. Decide whether a safety limit (and its error text) is wanted for an app that never answers, given that `sync/policy` P12.5 sets no overall time limit on the exchange.
 - G2 rule 5: with bring to front off, a closed main window is opened without activating Meguri. Confirm, or keep the window closed and refuse the action.
-- G2 rule 6: what the screen shows when a navigating action ends a review session (for example whether N11.6's session summary appears) belongs to U150/U175's exit, which no spec defines yet. `review-left` cannot be finalized until it does.
+- G2 rule 6: what the screen shows when a navigating action ends a review session (for example whether the end-of-session summary of R91–R101, U157's, appears; R91 shows none when a session ends through a sidebar selection, D/B/T or another deck) belongs to U150/U175's exit, which no spec defines yet. `review-left` cannot be finalized until it does.
 - G2 note: should a navigating action that arrives during a review session still switch to Browse (asbplayer's refresh option sends two `guiBrowse` after every note update)? R1788 says it leaves the session; the Product Contract owner may prefer to leave the review in place and update Browse in the background. `servers/ankiconnect-clients` should list the asbplayer call.

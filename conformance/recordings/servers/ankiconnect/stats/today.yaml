@@ -4,7 +4,8 @@
 # no action Meguri serves writes other types, and durations are whole seconds).
 # The golden records the add-on, which counts the S + 1 s row; Meguri leaves
 # type 4 out and answers 0 (A18 ankiconnect-review-counts-exclusions). The
-# millisecond edges and the type 5 row are today-counted (declared).
+# millisecond edges and the type 5 row are today-counted (declared). FSRS is
+# on, as Meguri always runs it (sched/set-due-date S1, R702; A20).
 id: servers/ankiconnect/stats/today
 description: "getNumCardsReviewedToday with setDueDate rows around the day start"
 tags: [no-origin]
@@ -12,7 +13,7 @@ server: ankiconnect
 source: oracle
 clock: {tz: Europe/Paris, start: "2030-01-15T03:59:59"}
 setup:
-  config: {rollover: 4}
+  config: {rollover: 4, fsrs: true}
   notetypes:
     - name: Pair
       fields: [Term, Gloss]

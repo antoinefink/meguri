@@ -3,7 +3,7 @@
 Spec: servers/migaku-receive
 Requirements: R1691, R1692, R1693, R1694, R1695, R1696, R1697, R1698, R1699, R1700, R1701, R1702, R1703, R1704, R1705, R1706, R1707, R1729, R1730, R1797 (Migaku branch); supports R1709, R1721, R1800, R1946, R1948; AE72, AE73
 Anki: 26.09.3 (the note add and the media store, through the specs cited)
-Scenarios: planned for `conformance/scenarios/servers/migaku/receive/` with fixtures in `conformance/fixtures/servers/migaku/`; the transcript format is `servers/transcripts`, whose runner (U136) does not exist yet and which has no step for this file's fault hooks, so P24 lists each scenario as a request and reply table
+Scenarios: `conformance/recordings/servers/migaku/receive/` (declared, `servers/transcripts` T13; id `servers/migaku/receive/<P24 row id>`) holds 31 of P24's 35 rows, some of them in part. P24 names the rows and the parts that run in Meguri's own tests, and why.
 
 How Meguri's Migaku server turns one `POST /receive` into exactly one note with its media: atomically, without duplicates when the client retries, and in arrival order. It also covers the wait when the collection is busy.
 
@@ -238,7 +238,7 @@ So a specific audio or image MIME type always decides, as R1695 says, and the fi
 | `../../` | `png` | `<11 hex>.png` | none | `<11 hex>.png` |
 | 42 (a number) | `png` | `<11 hex>.png` | none | `<11 hex>.png` |
 | `k9` | `m4a` | `k9.m4a` | `k9.m4a`, same bytes | `k9.m4a` (nothing written) |
-| `k9` | `m4a` | `k9.m4a` | `k9.m4a`, other bytes B | `k9-<hash of B>.m4a` |
+| `k9` (the item's bytes are B) | `m4a` | `k9.m4a` | `k9.m4a` with other bytes A | `k9-<hash of B>.m4a`: the hash of the item's bytes B (`media/media-files` M4), never of the file already there |
 
 ## P11. Loudness normalization (R1697)
 
@@ -297,7 +297,10 @@ The receive index that holds the raw ids, the text pair, whether there were item
 
 The collection is unavailable exactly when `engine/lifecycle` L6 says it is not available. For example, an exclusive phase of a full sync, restore or `.colpkg` import makes it unavailable, and so does Check Database holding the long-operation slot, without any lifecycle change. A `CloudAdopt` that holds the slot but has not entered its exclusive phase does not.
 
-- Stage 5 waits on the waiter (`servers/host-security` H9.2, which wraps L6) until the collection is available or 5 s after arrival, whichever comes first. A request waiting behind an earlier request in the FIFO is waiting on that request, not on the collection, but its 5 s still run from its own arrival.
+- Stage 5 waits on the waiter (`servers/host-security` H9.2, which wraps L6) until the collection is available or 5 s after arrival, whichever comes first. The 5 s limit is a limit on the collection only, never on the request's turn in the FIFO (P13):
+  - At the 5 s mark, the busy outcome of the table below applies only when the collection is unavailable at that instant.
+  - A request that is blocked only by earlier entries of the FIFO, with the collection available, has no limit: it waits for its turn, however long the earlier requests take (P8 allows 8 s per remote item).
+  - When its turn comes after its 5 s mark and the collection is unavailable then, it takes the busy outcome at once. The same holds when the collection became unavailable after the 5 s mark while the request was still waiting for its turn.
 - When the commit op is refused with `CollectionUnavailable` or `StaleGeneration` (`engine/lifecycle` L3, L4), the request goes back to stage 5 with the rest of its 5 s. It then resolves the destination again on the new generation (P5).
 - When the collection is still unavailable 5 s after arrival and the request's items are ready, the outcome depends on the switch:
 
@@ -468,15 +471,17 @@ None of these can be compared with an oracle: there is no Migaku add-on oracle (
 
 ## P24. Scenarios
 
-Planned for `conformance/scenarios/servers/migaku/receive/`, in the transcript format of `servers/transcripts` once its runner exists (U136). Each scenario defines its own 11-field note type `T-Mining` with the field names of R1712 and a synthetic template whose question is `{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}`. Profiles: `JA` (Japanese, defaults Is Vocabulary Card empty and Is Audio Card `x`), `DE` (German, both `x`), both with R1712's map, a deck each (`JA::Mining`, `DE::Mining`) and no tags, unless a row says otherwise. Media: `M4A` = base64 `AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t`, `M4A2` = `AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29tAAAACA==`, `WEBP` = `UklGRg4AAABXRUJQVlA4TAIAAAAvAA==`, `MP3` = `SUQzBAAAAAAAAA==`, `GIF` = `R0lGODlhAQABAAAAAA==`, `OGG` = `T2dnUwACAAAAAAAAAAA=`. "Remote" items are served by the harness's local HTTP stub. The routing override forces the profile wherever detection is not under test.
+The transcripts are in `conformance/recordings/servers/migaku/receive/`, one file per row, named by the row's id (`servers/transcripts` T2), except the four rows that the table after the rows keeps out. They are declared scenarios (T13), and every one that creates a note carries a T14 `equivalence` block (P22). The runner (U136) does not exist yet. The steps they use: `migaku_routing` (T5.1) for the profiles and the override; `host_env.migaku_pending_switch` (T4.1) for the switch; `lifecycle` `exclusive`, `ready`, `long_op`, `long_op_end` and `{replace: ...}` for a busy or replaced collection; `advance` (T7.1) for the host's test clock; `parallel`; `restart_host`; `fault {migaku_crash: ...}`; `routing`; `observe` with `db_dump` `notes` and `media_dir`; `received_log` (T7.3). Remote items come from the scenario's `http_fixtures` (`conformance/dsl` D6.9, `conformance/editor-ops` E2) at `${fixture_base}` (T10.2). A request whose pending entry must have drained before a check is followed by a later request (the sentinel), whose commit waits for the entries ahead of it (P13, P15).
+
+Each scenario defines its own 11-field note type `T-Mining` with the field names of R1712 and a synthetic template whose question is `{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}`. Profiles: `JA` (Japanese, defaults Is Vocabulary Card empty and Is Audio Card `x`), `DE` (German, both `x`), both with R1712's map, a deck each (`JA::Mining`, `DE::Mining`) and no tags, unless a row says otherwise. Media: `M4A` = base64 `AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t`, `M4A2` = `AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29tAAAACA==`, `WEBP` = `UklGRg4AAABXRUJQVlA4TAIAAAAvAA==`, `MP3` = `SUQzBAAAAAAAAA==`, `GIF` = `R0lGODlhAQABAAAAAA==`, `OGG` = `T2dnUwACAAAAAAAAAAA=`. "Remote" items are served at `${fixture_base}`; a path with no fixture gets 404. The routing override forces the profile wherever detection is not under test.
 
 | Id | Setup | Request | Reply | After |
 |---|---|---|---|---|
 | `ae72-japanese` | override `JA` | `targetWord` `猫[ねこ;h]`, a kana `sentence`, `sentenceAudio` ids `s1`, `s2` with `data:audio/mp4;base64,<M4A>` and `<M4A2>`, `images` id `i1` `data:image/webp;base64,<WEBP>` | 200 `{"success": true, "created": true, "id": <nid>}` | one note in `JA::Mining`; Sentence Audio `[sound:s1.m4a]\n<br>\n[sound:s2.m4a]`; Screenshot `<img src="i1.webp">`; Images empty; Is Audio Card `x`; Is Vocabulary Card empty; files `s1.m4a`, `s2.m4a`, `i1.webp`; row Created |
-| `ae73-remote-404` | override `DE`; stub: `/a` serves M4A, `/b` 404 | `sentenceAudio` `a1` `http://<stub>/a`, `a2` `http://<stub>/b` | 400 `{"success": false, "error": "Could not download sentenceAudio item 2: HTTP 404."}` | no note; no file in the folder, `media.staging/` or the journal; row Failed with payload kept |
+| `ae73-remote-404` | override `DE`; fixture `/a` serves M4A, no fixture `/b` | `sentenceAudio` `a1` `${fixture_base}/a`, `a2` `${fixture_base}/b` | 400 `{"success": false, "error": "Could not download sentenceAudio item 2: HTTP 404."}` | no note; no file in the folder, `media.staging/` or the journal; row Failed with payload kept |
 | `ae73-slow-retry` | override `DE`; commit delayed 11 s by the harness's fault hook | request R (`sentenceAudio` `r1` M4A); after 10 s the same R again | first: 200 `created: true, id: N`; second: 200 `created: true, id: N` | exactly one note; one row |
 | `retry-text-window` | override `DE`; clock injectable | no items, `targetWord` `Hund[Hund,nn,m]`, `sentence` `Der Hund.`; same body at +599 s; same body at +1200 s | 200 id N; 200 id N; 200 id M ≠ N | two notes |
-| `retry-empty-ids` | override `DE` | two different bodies 60 s apart, each one `images` item with `"id": ""` and GIF | two 200 with different ids | two notes; two `<11 hex>.gif` files |
+| `retry-empty-ids` | override `DE`, Images ← `images` | the same body twice, 60 s apart, with one `images` item with `"id": ""` and GIF | two 200 with different ids | two notes; two `<11 hex>.gif` files |
 | `retry-media-other-word` | override `DE` | body A: `targetWord` `Hahn[Hahn,nn,m]`, `sentence` `Der Hahn kräht.`, `sentenceAudio` id `s9` (M4A); 30 s later body B: the same `sentence` and item, `targetWord` `kräht[krähen,v,]` | 200 id N; 200 id M ≠ N | two notes; B's Sentence Audio `[sound:s9.m4a]`, the file reused (P10) |
 | `retry-text-after-media` | override `DE` | body A with `targetWord` `Katze[Katze,nn,f]`, `sentence` `Die Katze.` and one `images` item `i7` (GIF); 30 s later body B with the same two texts and no item | 200 id N; 200 id M ≠ N | two notes (a text match needs E without items too) |
 | `content-type` | override `DE` | three valid bodies with different texts and no items: one sent as `text/plain`, one with no `Content-Type`, one with an extra key `"zzz": 1` | three 200 | three notes |
@@ -485,29 +490,50 @@ Planned for `conformance/scenarios/servers/migaku/receive/`, in the transcript f
 | `verbatim-html` | override `DE`; `normalize_note_text` on | `sentence` `<strong>Hahn[Hahn,nn,m]</strong> kräht[krähen,v,]. cafe` U+0301 U+0007 `!`; `targetWord` `cafe` U+0301 U+0007 | 200 | Sentence stored as `<strong>Hahn[Hahn,nn,m]</strong> kräht[krähen,v,]. café!`: the HTML and the brackets byte-equal, `café` with U+00E9, the U+0007 removed (N2); Target Word `café` (U+00E9); both equal to the oracle's add of the same fields (P22) |
 | `tags` | profile `DE` with tags to add `mined` | valid body | 200 | note tags ` mined ` |
 | `naming` | override `DE`; folder holds `k9.m4a` = M4A and `k8.m4a` = M4A | `sentenceAudio` ids `a/b..c` (M4A), `` (M4A2), `k9` (M4A), `k8` (M4A2) | 200 | Sentence Audio names `abc.m4a`, `<11 hex>.m4a`, `k9.m4a` (reused, not rewritten), `k8-<hash of M4A2>.m4a` |
-| `extensions` | override `DE`, map Word Audio ← `wordAudio`, Images ← `images` | `wordAudio`: `data:application/octet-stream;base64,<MP3>`, `data:audio/ogg;base64,<OGG>`; `images`: `data:image/gif;base64,<GIF>` | 200 | names end `.mp3`, `.ogg`, `.gif` |
-| `remote-limits` | stub: `/r6` redirects 6 times, `/slow` answers after 9 s, `/ok1`–`/ok3` each after 2 s | separate requests: `http://<stub>/r6`; `ftp://<stub>/x`; `http://<stub>/slow`; then three items `/ok1`–`/ok3` | 400 `too many redirects.`; 400 `unsupported URL.`; 400 `timed out.`; 200 within 3 s | one note, from the last request |
+| `extensions` | override `DE`, map Word Audio ← `wordAudio`, Images ← `images` | `wordAudio`: `w1` `data:application/octet-stream;base64,<MP3>`, `w2` `data:audio/ogg;base64,<OGG>`; `images`: `g1` `data:image/gif;base64,<GIF>` | 200 | names `w1.mp3`, `w2.ogg`, `g1.gif` |
+| `remote-limits` | fixtures: `/r6` redirects 6 times, `/slow` answers after 9 s, `/ok1`–`/ok3` each after 2 s | separate requests: `${fixture_base}/r6`; `ftp://127.0.0.1/x`; three items `/ok1`–`/ok3`; then `${fixture_base}/slow`, last so that its delay does not overlap the concurrent fetches | 400 `too many redirects.`; 400 `unsupported URL.`; 200 within 3 s; 400 `timed out.` | one note, from the `/ok1`–`/ok3` request |
 | `disk-full` | fault hook: staging write fails with ENOSPC | valid body with one item | 400 `No space left on device` | no note; no staged file left |
 | `busy-short` | `ExclusiveBusy` for 2 s from arrival | valid body | 200 `created: true` after about 2 s | one note |
-| `busy-long-off` | switch off; `ExclusiveBusy` for 10 s | valid body | 400 `Meguri is busy` after about 5 s | no note, also after `Ready`; row Failed, payload kept; no pending entry |
+| `busy-long-off` | switch off; `ExclusiveBusy` for 10 s | valid body | 400 `Meguri is busy` after about 5 s | no note from this body, also after `Ready`: a later request after `Ready` gets the first note id; row Failed, payload kept; no pending entry |
 | `busy-long-on` | switch on; `ExclusiveBusy` for 10 s | valid body | 200 `{"success": true, "created": false}` after about 5 s | row Pending; on `Ready` one note and row Created; the entry survives a restart before `Ready` |
 | `busy-check-db` | switch on; Check Database holds the slot for 10 s | valid body | 200 `created: false` after about 5 s | note created right after the slot is released, with no lifecycle change |
-| `busy-three` | switch on; `ExclusiveBusy` for 7 s | three bodies at 0, 0.5 and 1 s | each 200 `created: false`, at about 5, 5.5 and 6 s | three notes after `Ready`, ids in arrival order |
-| `busy-three-off` | switch off; `ExclusiveBusy` for 7 s | three bodies at 0, 0.5 and 1 s | each 400 `Meguri is busy`, at about 5, 5.5 and 6 s | no note; three Failed rows |
-| `pending-replaced` | switch on; one pending entry for `DE`; then `CollectionReplaced` by a collection without `DE::Mining` | — | — | no note; row Failed `Destination deck for DE no longer exists.` |
-| `crash-between` | fault hook: kill after the collection commit, before P17 step 3; once for a live request, once for a drain | restart, then the same body again within 600 s | 200 with the first note's id | exactly one note; row Created with that id |
-| `order-ten` | override `DE` | ten different bodies sent at once | ten 200 | note ids increase in arrival order |
+| `busy-three` | switch on; `ExclusiveBusy` for 10 s | three bodies at 0, 1 and 2 s | each 200 `created: false`, at 5, 6 and 7 s | three notes after `Ready`, ids in arrival order |
+| `busy-three-off` | switch off; `ExclusiveBusy` for 10 s | three bodies at 0, 1 and 2 s | each 400 `Meguri is busy`, at 5, 6 and 7 s | no note from these bodies (a later request after `Ready` gets the first note id); three Failed rows |
+| `pending-replaced` | switch on; one pending entry for `DE`; then `CollectionReplaced` by a new collection that has only the stock note types and no `DE::Mining`, so no note type has the id stored for `T-Mining` | — | — | no note; row Failed `Destination note type for DE no longer exists.` (the note type message wins, P19) |
+| `crash-between` | fault hook: kill after the collection commit, before P17 step 3; once for a live request, once for a drain (`crash-between` holds the live request) | restart, then the same body again within 600 s | 200 with the first note's id | exactly one note; row Created with that id |
+| `order-ten` | override `DE` | ten different bodies sent at once, then one more | ten 200, then 200 with the eleventh id | note ids increase in arrival order |
 | `add-defaults-kept` | override `DE`; `curModel` and the two key families set to other ids | valid body | 200 | `curModel`, `_nt_*_lastDeck`, `_deck_*_lastNotetype` unchanged |
 | `warn-duplicate` | override `DE`; a `T-Mining` note with Target Word `<b>Hund</b>` exists | `targetWord` `Hund[Hund,nn,m]` | 200 | row warning Possible duplicate |
 | `warn-empty-front` | override `DE` | items only in `sentenceAudio`; no `wordAudio` | 200 | row warning Front would be empty |
 | `warn-media-missing` | override `DE` | `definitions` `<img src="absent.png">` | 200 | row warning Media missing |
-| `unused-items` | profile `DE` mapping no field to `images`, `firstImage` or `restImages` | `images` items `http://<stub>/b` (404), one with no `src`, one with only `"r2Url": "https://example.invalid/x"` | 200 | the stub saw no request; no image file |
+| `unused-items` | profile `DE` mapping no field to `images`, `firstImage` or `restImages` | `images` items `${fixture_base}/b` (404), one with no `src`, one with only `"r2Url": "https://example.invalid/x"` | 200 | the fixture server saw no request; no image file |
 | `used-item-no-data` | override `DE` | one `sentenceAudio` item `{"id": "q1"}` with no `input` | 400 `Invalid card data: sentenceAudio item 1 has no media data.` | no note; row Failed |
-| `case-insensitive-data` | override `DE` | `sentenceAudio` `DATA:audio/mp4;BASE64,<M4A>` | 200 | file `.m4a` |
-| `remote-redirect-scheme` | stub: `/to-ftp` answers 302 with `Location: ftp://<stub>/x`; `/no-loc` answers 302 without `Location` | two requests, one item each | 400 `unsupported URL.`; 400 `HTTP 302.` | no note |
+| `case-insensitive-data` | override `DE` | `sentenceAudio` `c1` `DATA:audio/mp4;BASE64,<M4A>` | 200 | file `c1.m4a` |
+| `remote-redirect-scheme` | fixtures: `/to-ftp` answers 302 with `Location: ftp://127.0.0.1/x`; `/no-loc` answers 302 without `Location` | two requests, one item each | 400 `unsupported URL.`; 400 `HTTP 302.` | no note |
 | `crash-hidden-row` | fault hook: kill after P17 step 1, before the op runs | restart | — | no note; one Failed row with the internal error and its payload; the row was never readable before the restart |
+| `fifo-slow-first` | override `DE`; collection available; fixture `/slow7` answers M4A after 7 s | request A with one item `${fixture_base}/slow7`; 1 s later request B with no item | A: 200 `created: true` after about 7 s; B: 200 `created: true` right after A, not busy at its 5 s mark (P14) | two notes, A's id lower |
 
-AE71's routing case is `servers/migaku-routing`'s. Scenarios for P14's switch rows, P17 and the fault hooks run in Meguri's own tests until `servers/transcripts` has steps for them; its `lifecycle` step (T7.3) already covers `ExclusiveBusy` and the long-operation slot. The fuzz target (`core/fuzz/fuzz_targets/migaku_receive_payload.rs`) feeds arbitrary bodies and checks that no request panics and that no staged file survives a request.
+AE71's routing case is `servers/migaku-routing`'s.
+
+Rows and parts of rows that run in Meguri's own tests (`core/crates/meguri-servers/tests/`, U139), each for the capability that the transcript format lacks:
+
+| Row | Part | Missing capability |
+|---|---|---|
+| `ae73-slow-retry` | all | a test hook that delays the commit (`servers/host-security` H22 lists none) |
+| `disk-full` | all | a test hook that fails a staging write with ENOSPC; an observation of `media.staging/` |
+| `add-defaults-kept` | all | a `db_dump` of `config`: `servers/transcripts` T10.6 leaves `config` out of transcript dumps |
+| `fifo-slow-first` | all | the row mixes a real-time download with the 5 s mark on the test clock, and no step lines the two up |
+| `ae73-remote-404` | no file in `media.staging/` or the media journal | an observation of `media.staging/` and of the journal (`observe` has `media_dir`, `media_trash` and `media_pending` only) |
+| `naming`, `retry-empty-ids` | the `<11 hex>` names | random names have no T10 normalization and the random source no H22 parameter, so no expected name can be written |
+| `crash-between` | the drain half | no step waits until the fault hook has fired during a drain, so a restart could come before it |
+| `crash-hidden-row` | the row never readable before the restart | the host is down then |
+| `warn-duplicate`, `warn-empty-front`, `warn-media-missing` | the row's warning | `received_log` rows have no warnings member, and the `received` call's row has no stated JSON form; the transcripts check the add |
+| `unused-items` | no request reached the fixture server | no step reports the fixture server's requests |
+| `remote-redirect-scheme` | the redirect to `ftp://` | `http_fixtures` `redirect_to` names only a path on the fixture server's own origin |
+| `pending-replaced` | a pending entry whose deck alone is gone | no step deletes a deck alone, and no replacement is promised to keep a note type's id |
+| `busy-long-off` | no pending entry | no step reads the pending queue; the transcript's later request after `Ready` gets the first note id, so nothing drained before it |
+
+The fuzz target (`core/fuzz/fuzz_targets/migaku_receive_payload.rs`) feeds arbitrary bodies and checks that no request panics and that no staged file survives a request.
 
 ## P25. Open questions
 

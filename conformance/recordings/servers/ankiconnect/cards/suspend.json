@@ -289,6 +289,89 @@
             }
           }
         }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": null,
+              "result": true
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "http://localhost",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "#c1": {
+              "data": "{}",
+              "did": "#d1",
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": "#c1",
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894698000,
+              "nid": "#n1",
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "#c2": {
+              "data": "{}",
+              "did": "#d1",
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": "#c2",
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894698000,
+              "nid": "#n2",
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "#c3": {
+              "data": "{}",
+              "did": "#d1",
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": "#c3",
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894698000,
+              "nid": "#n3",
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": -1,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          }
+        }
       }
     ]
   },
@@ -299,11 +382,11 @@
     },
     "anki_version": "26.9.3",
     "ankiconnect_lock_sha256": "db0b6e483d450f46150a9e80294f651a2b7ea4babda9af460e4e28df45e90561",
-    "driver_sha256": "d210262e36b9bea44268e57ec6c0a5b0d03cbab1ed2f66931f34ff7b50e5dfae",
+    "driver_sha256": "3156f4a44f53eeac44cc03a8952ae2c42c82606bcedf6602ac2a2b2d4da7ba40",
     "image": "meguri-oracle-ankiconnect:recorder",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "servers/ankiconnect/cards/suspend",
-  "scenario_sha256": "19c11db5d708334d3e3f398d5b94bf71f922f5743951cf32e0e9e73e1831bfde",
+  "scenario_sha256": "031d251a5da7dcf151284712aa1c57e37830bd470682e1c150698cfeb3c32f51",
   "tz": "Europe/Paris"
 }

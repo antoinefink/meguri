@@ -1,0 +1,82 @@
+# servers/migaku-routing D15.1 `override` (declared, servers/transcripts T13).
+# With the override on Spanish (profile 2), a German card goes to Spanish with
+# decision `Override`, route `override`; detection still runs and records `de`
+# confident (D11 step 2, D13.1). After the override is set back to Automatic,
+# the same card, 11 minutes later (past the 600 s retry window), goes to German
+# by detection.
+# Starting state of D15.1: profiles 1 German, 2 Spanish, 3 Japanese, saved
+# through D2.3 in that order (servers/transcripts T5.1), with D4's inferred
+# map and D5's defaults for their languages; routing state empty.
+# The German card `Hund[Hund,nn,m]` · `Der Hund.` scores German 3, Spanish 0
+# (D10: nn 2, `der` 1), so it commits `Auto`, `detected`.
+# No two requests with the same texts lie within 600 s, so none is a retry
+# (servers/migaku-receive P12). No Origin header (servers/migaku-protocol
+# P3.1, P6). All content is synthetic.
+id: servers/migaku/routing/override
+description: "the override wins over detection until it is set back to Automatic"
+tags: [routing]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["German::Mining", "Spanish::Mining", "Japanese::Mining"]
+  notetypes:
+    - name: Migaku German Custom
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - {name: Card 1, front: "{{Sentence}}", back: "{{Translation}}"}
+      css: ".card {font-size: 18px;}"
+    - name: Migaku Spanish Custom
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - {name: Card 1, front: "{{Sentence}}", back: "{{Translation}}"}
+      css: ".card {font-size: 18px;}"
+    - name: Migaku Japanese Custom
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - {name: Card 1, front: "{{Sentence}}", back: "{{Translation}}"}
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: German, language: de, notetype: Migaku German Custom, deck: "German::Mining", defaults: {Is Vocabulary Card: x, Is Audio Card: x}}
+    - {name: Spanish, language: es, notetype: Migaku Spanish Custom, deck: "Spanish::Mining", defaults: {Is Vocabulary Card: x, Is Audio Card: x}}
+    - {name: Japanese, language: ja, notetype: Migaku Japanese Custom, deck: "Japanese::Mining", defaults: {Is Audio Card: x}}
+  fallback: null
+  override: Spanish
+steps:
+  - http:
+      method: POST
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund[Hund,nn,m]", sentence: "Der Hund."}}
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - received_log: {}
+    expect:
+      output:
+        rows:
+          - {endpoint: receive, status: Created, profile: Spanish, decision: Override, route: override, detection: {language: de, confidence: confident}, note: "#n1", error: null}
+  - routing: {set_override: null}
+  - advance: 11m
+  - http:
+      method: POST
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund[Hund,nn,m]", sentence: "Der Hund."}}
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+      body: {json: {success: true, created: true, id: "#n2"}}
+  - received_log: {}
+    expect:
+      output:
+        rows:
+          - {endpoint: receive, status: Created, profile: German, decision: Auto, route: detected, detection: {language: de, confidence: confident}, note: "#n2", error: null}

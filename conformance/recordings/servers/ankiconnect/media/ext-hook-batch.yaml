@@ -1,10 +1,10 @@
 # specs/servers/ankiconnect-media X11.6 (last paragraph), the hook form of the
-# X14 external-folder tests "batch" and "rollback then scan": a failing addNotes
-# batch (servers/ankiconnect-actions A7.6: the second note duplicates the
-# first) leaves no ingested file; the same note alone then ingests it. The
-# baseline and scan parts of those tests need a grant step (not in
-# servers/transcripts T7). Meguri only (declared). A = 61 0a. All values are
-# synthetic.
+# X14 external-folder test "batch": a failing addNotes batch
+# (servers/ankiconnect-actions A7.6: the second note duplicates the first)
+# leaves no ingested file; the same note alone then ingests it. The baseline
+# part of that test is media/ext-baseline, and the scans after a rolled-back
+# batch are media/ext-rollback-scan. Meguri only (declared). A = 61 0a. All
+# values are synthetic.
 id: servers/ankiconnect/media/ext-hook-batch
 description: addNotes referencing an external file, failing and then succeeding
 server: ankiconnect

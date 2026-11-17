@@ -1,8 +1,7 @@
 # servers/host-security H17 `store-newer-version` (declared, servers/transcripts T13):
 # a store written by a newer build opens read-only: both servers stay off and every apply is
-# refused (H10.1, H10.3). The refused exchange is the one T3 requires. `expect: {output: ...}`
-# on a step without a reply is the T13 form proposed with this scenario (T13 lists no check
-# for T7.3 outputs yet).
+# refused (H10.1, H10.3). The refused exchange is the one T3 requires. Step outputs are
+# checked with T13 `output`.
 id: servers/host/store-newer-version
 description: "newer store: servers off, applies refused"
 tags: [host]

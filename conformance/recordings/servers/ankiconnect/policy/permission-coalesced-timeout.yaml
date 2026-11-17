@@ -1,6 +1,6 @@
 # servers/ankiconnect-envelope E19.2 `policy/permission-coalesced-timeout`: a joined request ends with the first request's timeout (E9 one prompt per origin).
 # Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
-# A prompt of its own for p2 would be a run error (T7.5 default); a timer of its own would leave p2 waiting past this point.
+# A prompt of its own for p2 would be a run error (T7.5 default); a timer of its own would leave p2 waiting past this point. The events show one prompt, cancelled once.
 id: servers/ankiconnect/policy/permission-coalesced-timeout
 description: both requests are denied 120 s after the first was posted
 tags: [policy]
@@ -31,3 +31,9 @@ steps:
       status: 200
       headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
       body: {json: {result: {permission: denied}, error: null}}
+  - events: {types: [interaction_request, interaction_cancelled]}
+    expect:
+      output:
+        events:
+          - {type: interaction_request, id: i-1, kind: PermissionPrompt, payload: {origin: "https://site.example"}}
+          - {type: interaction_cancelled, id: i-1}

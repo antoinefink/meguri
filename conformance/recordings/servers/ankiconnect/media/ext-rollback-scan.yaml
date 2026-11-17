@@ -1,0 +1,66 @@
+# specs/servers/ankiconnect-media X11.1 (index written after the commit),
+# X11.6 (last paragraph), X14 external-folder test "rollback then scan": a
+# failing addNotes batch (servers/ankiconnect-actions A7.6: the second note
+# duplicates the first) leaves no ingested file and no index change, so the
+# next two scans still copy new.mp3; the same note alone is then added and
+# uses that copy. Meguri only (declared). A = 61 0a. All values are synthetic.
+id: servers/ankiconnect/media/ext-rollback-scan
+description: a rolled-back addNotes leaves the external file for the scans to copy
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - media_dir_grant: {}
+    expect:
+      output: {baseline: 0}
+  - media_dir_write: {name: new.mp3, text: "a\n"}
+  - http:
+      body:
+        json:
+          action: addNotes
+          version: 6
+          params:
+            notes:
+              - {deckName: D, modelName: Pair, fields: {Term: one, Gloss: "[sound:new.mp3]"}}
+              - {deckName: D, modelName: Pair, fields: {Term: one}}
+    expect:
+      status: 200
+      body: {json: {result: null, error: "['cannot create note because it is a duplicate']"}}
+      no_effect: true
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: new.mp3}}}
+    expect:
+      status: 200
+      body: {json: {result: false, error: null}}
+  - media_dir_scan: {}
+    expect:
+      output: {status: done, rescan: true, ingested: 0, notices: []}
+  - media_dir_scan: {}
+    expect:
+      output: {status: done, rescan: false, ingested: 1, notices: []}
+  - http:
+      body:
+        json:
+          action: addNotes
+          version: 6
+          params:
+            notes:
+              - {deckName: D, modelName: Pair, fields: {Term: one, Gloss: "[sound:new.mp3]"}}
+    expect:
+      status: 200
+      body: {json: {result: ["#n1"], error: null}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: new.mp3}}}
+    expect:
+      status: 200
+      body: {json: {result: "YQo=", error: null}}
+equivalence:
+  notes: ["#n1"]

@@ -3,7 +3,7 @@
 Spec: servers/migaku-received-log
 Requirements: R1721, R1722, R1723, R1724, R1725, R1726, R1727, R1728 (core side of each), R1731, R1732, R1733; R1702 (payload retention), R1719 (manual moves feed routing); supports R1709, R1859; AE73 (Retry), AE74
 Anki: 26.09.3 (note adds, deletes, deck changes and undo, through the specs cited)
-Scenarios: `conformance/recordings/servers/migaku/create/` (C5; declared, `servers/transcripts` T13) holds 11 of C5's 12 rows. `filtered-deck`, and every row of L17 (planned for `conformance/recordings/servers/migaku/moves/`), wait for transcript steps for filtered decks, Migaku profiles and the L16 calls. Until then they are listed as tables.
+Scenarios: `conformance/recordings/servers/migaku/create/` (C5) and `conformance/recordings/servers/migaku/moves/` (L17), all declared (`servers/transcripts` T13). Every C5 row is written. Every L17 row is written except `retention` and `retry-ae73`: L17 says what each still needs, and U140's Rust tests cover both until then.
 
 The core side of the Mac sidebar's "Received" page. It is a durable local log of every card the Migaku server received or failed to receive, with the operations behind Confirm, Move, Retry, Delete note, Open in Browse and Edit. The same file covers the legacy `POST /create` route. The Swift page, its toast and its menus are U145's.
 
@@ -128,12 +128,12 @@ A move takes one or more rows and a destination profile P (note type Tp, deck Dp
 | status Pending or Failed | cannot move | `This card was not added.` |
 | status Deleted | cannot move | `The note no longer exists.` |
 | P's note type is missing, or its deck is missing or not usable (a filtered deck, `notes/deck-placement-and-position`) | cannot move | the R1715 message of `servers/migaku-receive` P19 |
-| the live note's note type is Tp and its cards are all in Dp | cannot move | `The card is already in this note type and deck.` |
+| the live note's note type is Tp and every card of it has `did` Dp | cannot move | `The card is already in this note type and deck.` |
 | the live note's note type is Tp | deck move | none |
 | some card of the live note has a review-log row | deck move only | `This card has review history, so only its deck can change.` |
 | otherwise | full move | none |
 
-Any review-log row counts, a manual one included. The eligibility call returns this table's result per row without changing anything. U145 offers "Move deck only to <Dp>" with the reason when the result is "deck move only".
+Any review-log row counts, a manual one included. A card's deck here is its `did`, as in `browser/bulk-actions` B7.2 step 2: a card in a filtered deck whose home deck is Dp is not in Dp, so its note gets a deck move, which sends that card home (L11). The eligibility call returns this table's result per row without changing anything. U145 offers "Move deck only to <Dp>" with the reason when the result is "deck move only".
 
 ## L11. Moves: deck change
 
@@ -159,6 +159,8 @@ Let Ps be the row's current profile, which gives Ts's field plan and defaults. A
 
 When the row has no current profile (it was deleted), only rule 1 applies, and the default rule applies only to fields with no source.
 
+This is not `servers/migaku-routing` D5's step, which fills every empty value that has a default. Here a copied empty value stays empty unless it equals the source default (`edited-default`), and a copied value that equals the source default is replaced even when it is not empty. Only a field with no source is filled as D5 fills it.
+
 **The rest:**
 
 - Tags: N's tags, unchanged. P's tags to add are not applied.
@@ -175,16 +177,17 @@ Example (AE74). Ts is the Spanish Custom type with defaults Is Vocabulary Card `
 - One move call on any number of rows is one op with source `UserUndoable` and one undo step (`engine/op-model` O1, `engine/undo` M1). Within it, rows are handled in the order given: deck moves through L11 and full moves through L12's add and delete. Rows that cannot move, and "deck move only" rows when the caller did not accept them, are skipped and reported. When no row moves, the op writes nothing and records no step.
 - **Step name and catalog.** The step is named `Move Received Card`, whatever the number of rows, as Anki's step names do not change with the count ("Delete Note", "Change Deck"). It is a Meguri step with no Anki counterpart; `conformance/undo-ops` V4 names it as the pending Meguri-only step `move_received_card`, which U140 adds to V4's table together with the engine's step name, as `engine/undo` M1 allows only V4 names (L18 Q4). The op's catalog entry (`engine/op-model` O9, added by U140 with the op) is `migaku_move`, undo class undoable, no long write. Delete note (L15) uses the existing "Delete Note" step.
 - The call returns, per row, one of: full move (with the new note id and the dropped fields of L12), deck move, or skipped with the L10 reason.
-- Each moved row gets a move-history entry: the move op's seq, from note and to note (equal for a deck move), from profile and to profile, to deck, and for a deck move each card's deck before the move (card id and deck id). A new entry is in effect.
+- Each moved row gets a move-history entry: the move op's seq, from note and to note (equal for a deck move), from profile and to profile, to deck, and for a deck move every card of the live note with its `did` before the move (card id and deck id), cards already in Dp that B7.2 step 2 skips included. A new entry is in effect.
+- **Write order and crashes.** The collection op and the entries are two writes (L1), so the entries are written in two transactions. Before the op is submitted, one transaction writes each row's entry as **planned**: not in effect, and for a full move with the GUID N' will get (a new GUID, `text/guid` G3) in place of the to note. After the op commits, one transaction gives each entry its to note id, marks it in effect and sets the decisions (below). When the op fails or is refused, one transaction removes the planned entries. A planned entry counts for nothing in L3 and in the patterns below. Launch and the full reconcile (L8) resolve every planned entry left by a crash: a full move whose GUID is a note of the collection while the from note is gone takes that note as its to note; a deck move whose listed cards all exist with `did` the to deck is complete. A complete entry is marked in effect, its row's decision becomes Manual, and `record_manual_move` gets the to profile and the reconcile's instant. Any other planned entry is removed. So a crash between the op and the second transaction never leaves a row Deleted while N' exists.
 
 **In effect.** No event names the step an undo or redo restored (`engine/change-stream` S3 publishes only change sets; `engine/undo` M4 names the undone step to the caller alone, and each undo and redo records a step with a new id). So whether an entry is in effect is a stored flag that the subscriber of L8 changes only when the collection shows the pattern an undo or a redo leaves:
 
 | Entry | Undo pattern: the flag turns off | Redo pattern: the flag turns on |
 |---|---|---|
 | full move | the to note does not exist and the from note exists | the to note exists and the from note does not exist |
-| deck move | every card listed in the entry exists and is in the deck it was in before the move | every card listed in the entry exists and is in the to deck |
+| deck move | every card listed in the entry exists and its `did` is the one the entry lists for it | every card listed in the entry exists and its `did` is the to deck |
 
-- After every `Changes` event that lists a note or a card of a row with move history, the subscriber checks that row's entries, newest first, and applies the table. A change that shows neither pattern leaves the flag as it is: a later deck change in Browse, or deleting the to note in Browse, is not an undo. Deleting the to note makes the row Deleted by L3 instead.
+- After every `Changes` event that lists a note or a card of a row with move history, the subscriber checks that row's entries, newest first, and applies the table. A change that shows neither pattern leaves the flag as it is: a later deck change in Browse to a third deck, or deleting the to note in Browse, is not an undo. Deleting the to note makes the row Deleted by L3 instead. A Browse change that puts every listed card back on its listed `did` shows the undo pattern and counts as an undo (L18 Q6).
 - An undo restores N under its id and removes N'; a redo restores N' under its id (`engine/undo` M4, M5). So after the flag changes, the row's live note, deck, note type and status follow (L3).
 - The row's profile, note type and deck follow the newest entry in effect, or the receive's values with none.
 - Every committed move, and every flag change of this table, sets the decision of each row concerned to Manual. It also calls routing's `record_manual_move` with the profile the card now belongs to (P after a move or a redo pattern, the from profile after an undo pattern) and the instant: the move's commit, or the instant the subscriber handles the event (from the injectable clock) for an undo or redo (`servers/migaku-routing` D12, R1719). An uncertain card received within 60 minutes then follows the user's correction.
@@ -228,36 +231,81 @@ The FFI exports U145 uses (U140, `core/crates/meguri-ffi/src/servers.rs`). The r
 | live note | row id | note id, or `deleted` (L15) | no |
 | delete note | row id | none, or the op's error (L15) | yes |
 
+### L16.1 JSON form
+
+The calls' results as JSON, the form `servers/transcripts` T7.3's `received` step outputs (and the values its `received_log` step reports). Ids are integers here; in transcripts, row ids are `#rN` tokens and note ids T10.1 tokens.
+
+A **row** (`page`, `row`) is an object with these members:
+
+| Member | Value |
+|---|---|
+| `id` | the row id |
+| `endpoint` | `receive` or `create` |
+| `receive_time` | integer, milliseconds since the epoch |
+| `target_word`, `snippet` | strings (L2; `""` when empty) |
+| `media` | `{sentence_audio: [...], word_audio: [...], images: [...]}`, stored names in L2's order |
+| `profile` | `{id, name}`, or `null` |
+| `language` | the profile's D1 code, or `null` |
+| `decision` | `Auto`, `Fallback`, `Override`, `Manual`, or `null` (L4) |
+| `route` | `detected`, `recent`, `fallback_profile`, `override`, or `null` |
+| `detection` | `{language: <code or null>, confidence: confident \| uncertain}`, or `null` when routing did not run |
+| `original_note` | note id or `null` |
+| `note` | the live note (L3) when it exists, otherwise `null` |
+| `deck`, `notetype` | ids or `null` (L2) |
+| `status` | `Pending`, `Failed`, `Created`, `Moved` or `Deleted` |
+| `warnings` | a list of `possible_duplicate`, `front_would_be_empty`, `media_missing`, in that order |
+| `error` | the Failed message, otherwise `null` |
+| `confirmed` | boolean |
+| `failed_at` | integer milliseconds (L2's failed instant), or `null` |
+| `payload` | boolean: the row holds a payload, so Retry can run it (L14) |
+
+| Call | Result |
+|---|---|
+| page | `{rows: [<row>, ...], next: {receive_time, id} or null}` |
+| row | `<row>` |
+| badge count | `{count: <n>}` |
+| confirm | `{}` |
+| move eligibility | `[{row, eligibility: full_move \| deck_move \| deck_move_only \| cannot_move, reason?}, ...]`, in input order; `reason` only with the last two |
+| move | `[{row, result: full_move, new_note, dropped_fields: [<field name>, ...]} \| {row, result: deck_move} \| {row, result: skipped, reason}, ...]`, in input order; or `{error: <message>}` |
+| retry | `{result: created, note}`, `{result: matched, note}`, `{result: failed, message}`, `{result: pending}` or `{result: retry_unavailable}` |
+| live note | `{note: <id>}`, or `{note: null}` for `deleted` |
+| delete note | `{}` or `{error: <message>}` |
+
+A row id that names no visible row gives `{error: not_found}` (`confirm` ignores them, L16; for `move eligibility` and `move`, that row's item is `{row, error: not_found}`).
+
 ## L17. Scenarios
 
-Planned for `conformance/recordings/servers/migaku/moves/` (`servers/transcripts` T2). They wait for transcript steps for Migaku profiles, the L16 calls, the prune pass and the fault hooks. They use `servers/migaku-receive` P24's note type `T-Mining` and its profiles, plus `ES` (Spanish, defaults Is Vocabulary Card `x` and Is Audio Card `x`, deck `ES::Mining`) on a second note type `T-Mining-ES` with the same 11 field names. Each starts by receiving cards through `/receive`.
+Each written row is the declared scenario `conformance/recordings/servers/migaku/moves/<id>.yaml` (`servers/transcripts` T2, T13). They use `servers/migaku-receive` P24's 11-field note type `T-Mining` and profile `DE` (German, deck `DE::Mining`, defaults Is Vocabulary Card `x` and Is Audio Card `x`), with R1712's map (inferred, `servers/migaku-routing` D4). Profiles on other note types have their own copy of `T-Mining` with the same 11 field names and template: `ES` (Spanish, `T-Mining-ES`, `ES::Mining`, both defaults `x`) and `JA` (Japanese, `T-Mining-JA`, `JA::Mining`, Is Audio Card `x` only), so that a move from them is a full move. `DE2` is German on `T-Mining` with `DE::Other`. Profiles are stored by the transcript key `migaku_routing` (T5.1), `DE` first. Cards arrive through `/receive`, the override forcing the profile wherever detection is not under test. The L16 calls are the `received` step (T7.3), checked on L16.1's JSON. Undo and redo, Browse's delete and Change Deck, and reviews are `collection` steps. `record_manual_move` has no output of its own: a scenario sees it by sending a card whose detection is a `servers/migaku-routing` D10 tie within 60 minutes, which D11 step 4 then routes to the last route's profile (route `recent`) rather than the fallback profile.
 
 | Id | Setup | Action | Expected |
 |---|---|---|---|
 | `ae74-cross` | an unreviewed card received into `ES` | move to `DE` | a `T-Mining` note in `DE::Mining` with the same Sentence, Translation, Target Word, Definitions and media names, Is Vocabulary Card `x`, Is Audio Card `x`; the `ES` note deleted with note and card graves; `col.scm` unchanged; status Moved, decision Manual; one undo restores the `ES` note and its id and the status Created; redo makes the `T-Mining` note live again under the same id, status Moved |
-| `ae74-reviewed` | as above, then one review of its card | eligibility for `DE`; then move with deck-only accepted | eligibility "deck move only" with the L10 reason; after the move every card of the note is in `DE::Mining`, the note keeps its id and note type |
+| `ae74-reviewed` | as above, then one review of its card | eligibility for `DE`; move with deck-only not accepted; then with deck-only accepted | eligibility "deck move only" with the L10 reason; the first move skips the row with that reason; after the second every card of the note is in `DE::Mining`, the note keeps its id and note type |
 | `edited-default` | a card received into `ES`; its Is Audio Card edited to empty | move to `DE` | Is Audio Card stays empty, Is Vocabulary Card `x` |
-| `ja-to-de` | a card received into `JA` | move to `DE` | Is Vocabulary Card `x`, Is Audio Card `x` |
-| `three-one-reviewed` | three cards received into `ES`, one of them reviewed | move all three to `DE`, deck-only not accepted | one undo step; two full moves; the reviewed row skipped with the L10 reason; one undo restores both |
-| `deleted-row` | a received card | delete its note in Browse; then undo | row Deleted; then Created |
+| `ja-to-de` | a card received into `JA` | move to `DE` | Is Vocabulary Card `x` (empty equals "no default"), Is Audio Card `x` |
+| `three-one-reviewed` | three cards received into `ES`, one of them reviewed | move all three to `DE`, deck-only not accepted | one undo step, `move_received_card`; two full moves; the reviewed row skipped with the L10 reason; one undo restores both |
+| `deleted-row` | a received card | delete its note in Browse; then undo | row Deleted, live note none; then Created |
 | `deleted-while-off` | a received card; Migaku off; delete the note; Migaku on | server start | row Deleted |
-| `retention` | 600 rows within 10 days; separately 520 rows older than 30 days | prune pass | all 600 kept; newest 500 of the 520 kept |
-| `badge` | one Uncertain row (Fallback, no detected language: a D10 tie), one Fallback row (Fallback, detected `ko` with no Korean profile) and one Failed row, unconfirmed | count; confirm the Fallback row; Retry the Failed one successfully with decision Auto | labels Uncertain and Fallback; 3; 2; 1 |
-| `deck-move-undo` | a card received into `DE`; a second deck `DE::Other`; a profile `DE2` with `T-Mining` and `DE::Other` | move to `DE2`; undo; redo | deck move; status Moved, then Created, then Moved; the decision Manual after each; three `record_manual_move` calls with `DE2`, `DE`, `DE2` |
-| `browse-deck-change` | the row of `deck-move-undo` after the move | Change Deck in Browse to `DE::Mining` | entry stays in effect, status Moved; no `record_manual_move` call (neither pattern of L13) |
+| `retention` | 600 rows within 10 days; separately 520 rows older than 30 days | prune pass | all 600 kept; newest 500 of the 520 kept. Not written: a transcript makes rows only through exchanges, one per row, and has no step that seeds the log with stored rows |
+| `badge` | one Uncertain row (Fallback, no detected language: a D10 tie), one Fallback row (Fallback, detected `ko` with no Korean profile) and one Failed row (busy, switch off), unconfirmed | count; confirm the Fallback row; Retry the Failed one successfully with decision Auto | detected languages none and `ko`, so labels Uncertain and Fallback; 3; 2; 1 |
+| `deck-move-undo` | a card received into `DE`; a second deck `DE::Other`; a profile `DE2` with `T-Mining` and `DE::Other` | move to `DE2`; undo; redo; after each, a D10 tie | deck move; status Moved, then Created, then Moved; the decision Manual after each; the three ties routed to `DE2`, `DE`, `DE2` with route `recent`, which shows the three `record_manual_move` calls |
+| `browse-deck-change` | the row of `deck-move-undo` after the move; a third deck `DE::Later` | Change Deck in Browse to `DE::Later`; then a D10 tie | entry stays in effect, status Moved; the tie still routed to `DE2` (neither pattern of L13, no `record_manual_move` with another profile) |
+| `browse-deck-back` | the row of `deck-move-undo` after the move | Change Deck in Browse back to `DE::Mining`; then a D10 tie | the undo pattern of L13 (Q6): status Created, decision Manual; the tie routed to `DE` |
 | `crash-before-row` | fault hook of `servers/migaku-receive` P24 `crash-between`, live request | restart; read page | one Created row with the note id, media names from the note's fields, and warnings; no hidden row |
-| `retry-ae73` | a Failed row from `ae73-remote-404`; the stub then serves `/b` | Retry | note created; row Created; payload deleted |
-| `retry-pruned` | a Failed row 8 days old | Retry | `retry_unavailable` |
-| `pending-old` | switch on; a pending entry 8 days old; collection made available | launch | the entry commits before the prune pass; row Created |
-| `pending-old-fails` | switch on; a pending entry 8 days old whose deck was deleted | launch | row Failed with the R1715 deck message; payload kept, pruned 7 days after the drain; Retry available |
-| `pending-retry` | switch on; a Pending row; collection available | Retry | one note |
+| `retry-ae73` | a Failed row from `ae73-remote-404`; the stub then serves `/b` | Retry | note created; row Created; payload deleted. Not written: a transcript's HTTP fixtures (`conformance/dsl` D6.9) cannot change between the request and the Retry; `retry-busy` covers the same Retry outcome |
+| `retry-busy` | switch off; a Failed row `Meguri is busy` (the collection exclusive for more than 5 s), then the collection ready | Retry | `created` with the note; row Created, payload deleted, receive time unchanged; one row |
+| `retry-pruned` | a Failed row 8 days old | prune pass; Retry | payload kept at 6 days, gone at 8; `retry_unavailable` |
+| `pending-old` | switch on; a pending entry 8 days old, the collection still unavailable | prune pass; restart; collection made available | the row stays Pending with its payload through the prune; then the entry commits; row Created |
+| `pending-old-fails` | switch on; a pending entry 8 days old; then a collection replacement (every id new, so the profile's note type and deck are gone) | the drain | row Failed with the R1715 note type message (`servers/migaku-receive` P19: with both gone, the note type message); payload kept 6 days after the drain, gone after 8; Retry available, failing again without moving the failed instant; then `retry_unavailable` |
+| `pending-retry` | switch on; a Pending row; collection unavailable | Retry; then the collection made available | `pending`; then one note, row Created |
 | `supersede` | a Failed row for item ids `{a, b}` | a receive with ids `{a, b}` that succeeds | one Created row; the Failed row and its payload gone |
-| `manual-route` | profiles `DE`, `ES`; a move to `DE` at 10:00 | at 10:05, a card whose detection is uncertain | routed to `DE` with decision Fallback |
+| `manual-route` | profiles `DE`, `ES`; a card received into `ES`, then moved to `DE` at 10:00 | at 10:05, a card whose detection is uncertain | routed to `DE` with decision Fallback and route `recent` (without the move, the fallback profile would be `ES`, which has the most received cards) |
 
 ## C1. `/create`: the request (R1731)
 
 - The route is `POST /create`, on the Migaku server, with that server's origin, CORS, `Host` and body-limit rules (`servers/migaku-protocol`, `servers/host-security`).
 - The body is a form. `multipart/form-data` with a `boundary` parameter is read as multipart. `application/x-www-form-urlencoded`, or no `Content-Type`, is read as URL-encoded: UTF-8, `+` as a space, then percent-decoding. Any other `Content-Type` fails with 400 `Unsupported form encoding.`
+- The media type is the `Content-Type` value up to its first `;`, with white space removed at both ends, compared without regard to ASCII case. Parameters are ignored, except `boundary` for multipart: its name compares without regard to ASCII case, and its value is taken exactly, without the double quotes when it is quoted. A `charset` parameter changes nothing, so a browser's `application/x-www-form-urlencoded;charset=UTF-8` is URL-encoded and read as UTF-8 (`form-encoding-charset`). A multipart type with no `boundary` is not multipart and fails as above.
 - In multipart, a part whose `Content-Disposition` has a `filename` parameter is a file part. Every other part is a text field. The `filename` value is taken literally between its double quotes: a backslash is an ordinary character, not an escape. Browsers' `FormData` sends Windows paths this way, and C2.6 splits at `\`. In URL-encoded forms every pair is a text field. When a text field occurs twice, its last occurrence counts, as for a repeated JSON key in `servers/migaku-receive` P3 (Meguri rule; the add-on's choice is not recorded).
 - Only file parts named `files` are files of the card (C2.6). A file part with another name, and a text field named `files`, are ignored.
 - The form's kind is decided in this order:
@@ -306,9 +354,9 @@ Sub-commands never check `version`, never wait for the collection, never read or
 
 ## C5. Scenarios
 
-Each row is the declared scenario `conformance/recordings/servers/migaku/create/<id>.yaml` (`servers/transcripts` T2, T13), except `filtered-deck`, which is planned. They use P24's note type and profiles. `<T>` and `<D>` are the ids of `T-Mining` and `DE::Mining`.
+Each row is the declared scenario `conformance/recordings/servers/migaku/create/<id>.yaml` (`servers/transcripts` T2, T13). They use P24's note type `T-Mining` and decks; the rows that need a matching profile store P24's `DE` with the transcript key `migaku_routing` (T5.1). `<T>` and `<D>` are the ids of `T-Mining` and `DE::Mining`; `<F>` is the small fixed id of a filtered deck that the scenario inserts with `db_exec` (`conformance/deck-ops` K13).
 
-The written files check every reply. The `{"id": <nid>}` replies need `servers/transcripts` T10.5 id positions for Migaku replies (`/id` of `/create` and `/receive`). For the After column, they check today only what T13 and T14 can check: `no_effect` (collection and media unchanged) for the refusals and the sub-commands, and the T14 equivalence of the created note (note type, deck, fields, tags and the files the fields reference) for `multipart-two-files`, `file-path-name`, `repeated-field` and `create-row-text`. The other After checks wait: log rows (no row, Created, Manual, media names, target word and snippet), the count of notes, the rewrite to `[sound:clip.m4a]` (T14 accepts either name), files no field references, interactions, and profile `DE`'s defaults. They need T13 output expectations (on `logs`, `events` and `observe`) and a transcript key for Migaku profiles. Until then the transcripts store no profile, so the created notes have no defaults and their rows no target word or snippet. `filtered-deck` waits for a filtered-deck setup or step.
+Every reply is checked, the `{"id": <nid>}` replies through T10.5's `/id` position. The After column is checked too: `no_effect` (collection and media unchanged) for the refusals and the sub-commands; the row through the `received` step (L16.1) and the absence of a row through `logs`; the stored fields, the rewrite to `[sound:clip.m4a]` and the profile's defaults through `observe` (`db_dump` and `media_dir`); interactions through `events`; and the T14 equivalence of each created note (note type, deck, fields, tags and the files the fields reference).
 
 | Id | Request | Reply | After |
 |---|---|---|---|
@@ -320,8 +368,9 @@ The written files check every reply. The `{"id": <nid>}` replies need `servers/t
 | `search-note` | URL-encoded `searchNote=1234` | 200 text `OK` | one Browse interaction with `nid:1234` |
 | `search-note-bad` | URL-encoded `searchNote=12a` | 400 `Invalid note id.` | no interaction |
 | `form-encoding` | `Content-Type: application/json` | 400 `Unsupported form encoding.` | nothing changes |
-| `filtered-deck` (planned) | `version=2`, `card` with `noteTypeId` `<T>` and the id `<F>` of a filtered deck | 400 `Deck <F> is a filtered deck.` | nothing changes |
-| `file-path-name` | multipart: `version=2`; valid `card`; one `files` part with `filename="C:\clips\a1.m4a"` (M4A), one part `other` with `filename="x.png"` | 200 `{"id": <nid>}` | file `a1.m4a` only; row media names `a1.m4a` |
+| `form-encoding-charset` | a valid URL-encoded card, once with `Content-Type: application/x-www-form-urlencoded;charset=UTF-8` and once with `APPLICATION/X-WWW-FORM-URLENCODED` | 200 `{"id": <nid>}` both times | two notes (C1: the media type ignores ASCII case and parameters) |
+| `filtered-deck` | `version=2`, `card` with `noteTypeId` `<T>` and the id `<F>` of a filtered deck | 400 `Deck <F> is a filtered deck.` | nothing changes; no row |
+| `file-path-name` | multipart: `version=2`; valid `card`; one `files` part with `filename="C:\clips\a1.m4a"` (M4A), one part `other` with `filename="x.png"` | 200 `{"id": <nid>}` | file `a1.m4a` only; row media names `a1.m4a`, no profile (none is stored) |
 | `repeated-field` | URL-encoded `version=1&version=2&card=<valid>` | 200 `{"id": <nid>}` (the last `version` counts) | one note |
 | `create-row-text` | multipart: `version=2`; `card` for `<T>`, `<D>` with Target Word `<b>Hund[Hund,nn,m]</b>` and Sentence `Der Hund.` | 200 | row target word `Hund`, snippet `Der Hund.` (profile `DE` maps them) |
 
@@ -332,5 +381,5 @@ The written files check every reply. The `{"id": <nid>}` replies need `servers/t
 - **Q3. Sub-command shape and replies.** The sources name the five sub-commands and say they get plain-text acknowledgements, but not how the extension sends them (C1 assumes a form field of that name) or the exact texts. C3 replies `OK`. `/create` is legacy (R1731), and the plan treats `/receive` as the live route, so the risk is low. A recording of the extension's `/create` traffic would settle both.
 - **Q4. The move step's name.** Settled for the spec: `conformance/undo-ops` V4 names L13's `Move Received Card` (id `move_received_card`) as its pending Meguri-only row. U140 adds that row to V4's table in the same change as the engine's step name (the engine test keeps the two equal), so `engine/undo` M1 accepts it and `undo_status` reports it. Two more entries outside the specs come with the op: the `undo_step` enum of `conformance/schema/observation.schema.json` (which mirrors V4) gets `move_received_card`, and `engine/op-model` O9 gets the catalog entry `migaku_move` (L13). Reusing "Change Deck" or "Change Note Type" was rejected: it would mislabel a move that mixes both kinds of rows.
 - **Q5. `/create` into a filtered deck.** The sources do not say what the add-on does with a `deckId` that names a filtered deck. Anki's add would place the cards elsewhere (`notes/deck-placement-and-position` D2), which contradicts R1732's "exactly that deck", so C2.3 refuses it.
-- **Q6. Undo detection.** L13 recognizes an undo or a redo of a move from the state it leaves, since no event names the restored step. A user who restores exactly the same state by other means (for example moving every card of a deck-moved note back to their old decks in Browse) is treated as an undo: the decision stays Manual and routing gets one more `record_manual_move`. A change-stream event naming the restored step (a cross-area change to `engine/change-stream` and `engine/undo`) would remove this case.
+- **Q6. Undo detection.** L13 recognizes an undo or a redo of a move from the state it leaves, since no event names the restored step. A user who restores exactly the same state by other means (for example moving every card of a deck-moved note back to their old decks in Browse) is treated as an undo: the decision stays Manual and routing gets one more `record_manual_move` (L17 `browse-deck-back`). A change-stream event naming the restored step (a cross-area change to `engine/change-stream` and `engine/undo`) would remove this case.
 - **Q7. Uncertain and Fallback labels.** R1722 names both labels, R1719 flags every card it routes as "Uncertain", and routing gives all of them the decision `Fallback` (`servers/migaku-routing` D11). L4 reads Uncertain as "the language could not be detected" and Fallback as "the detected language has no profile". Another reading would key the label on the route (`recent` against `fallback_profile`). Both count for the badge alike, so only the label text depends on the choice.

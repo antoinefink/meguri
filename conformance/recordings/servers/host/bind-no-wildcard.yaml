@@ -1,7 +1,6 @@
 # servers/host-security H17 `bind-no-wildcard` (declared, servers/transcripts T13):
 # both servers on: the process listens on the two loopback addresses of each port and nothing
-# else (H4.1, H5). `expect: {output: ...}` on a step without a reply is the T13 form proposed
-# with this scenario (T13 lists no check for T7.3 outputs yet).
+# else (H4.1, H5). The `sockets` output is checked with T13 `output`.
 id: servers/host/bind-no-wildcard
 description: "only loopback sockets, never a wildcard"
 tags: [host]

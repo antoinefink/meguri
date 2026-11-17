@@ -1,0 +1,122 @@
+# servers/migaku-receive P24 `order-ten` (declared, servers/transcripts T13).
+# Ten bodies sent at the same instant (T7.3 parallel). Which arrives first is
+# not fixed, so the replies are checked for status only. Commits follow
+# arrival order (P13), so note ids do too: the rows, listed in receive order
+# (servers/transcripts T7.3 received_log), name #n1 to #n10 in that order
+# (tokens follow ascending ids, T10.1). A later request (Q11) gives the
+# transcript its top-level http step (T3) and gets #n11.
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/order-ten
+description: "ten concurrent requests give ten notes whose ids follow arrival order"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - parallel:
+      - http:
+          target: /receive
+          headers:
+            - [Content-Type, application/json]
+          body: {json: {targetWord: "Q1", sentence: "Q1 q."}}
+      - http:
+          target: /receive
+          headers:
+            - [Content-Type, application/json]
+          body: {json: {targetWord: "Q2", sentence: "Q2 q."}}
+      - http:
+          target: /receive
+          headers:
+            - [Content-Type, application/json]
+          body: {json: {targetWord: "Q3", sentence: "Q3 q."}}
+      - http:
+          target: /receive
+          headers:
+            - [Content-Type, application/json]
+          body: {json: {targetWord: "Q4", sentence: "Q4 q."}}
+      - http:
+          target: /receive
+          headers:
+            - [Content-Type, application/json]
+          body: {json: {targetWord: "Q5", sentence: "Q5 q."}}
+      - http:
+          target: /receive
+          headers:
+            - [Content-Type, application/json]
+          body: {json: {targetWord: "Q6", sentence: "Q6 q."}}
+      - http:
+          target: /receive
+          headers:
+            - [Content-Type, application/json]
+          body: {json: {targetWord: "Q7", sentence: "Q7 q."}}
+      - http:
+          target: /receive
+          headers:
+            - [Content-Type, application/json]
+          body: {json: {targetWord: "Q8", sentence: "Q8 q."}}
+      - http:
+          target: /receive
+          headers:
+            - [Content-Type, application/json]
+          body: {json: {targetWord: "Q9", sentence: "Q9 q."}}
+      - http:
+          target: /receive
+          headers:
+            - [Content-Type, application/json]
+          body: {json: {targetWord: "Q10", sentence: "Q10 q."}}
+    expect:
+      replies:
+        - {status: 200, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}}
+        - {status: 200, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}}
+        - {status: 200, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}}
+        - {status: 200, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}}
+        - {status: 200, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}}
+        - {status: 200, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}}
+        - {status: 200, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}}
+        - {status: 200, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}}
+        - {status: 200, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}}
+        - {status: 200, headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}}
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Q11", sentence: "Q11 q."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n11"}}
+  - received_log: {}
+    expect:
+      output_at:
+        "/rows/0/note": "#n1"
+        "/rows/1/note": "#n2"
+        "/rows/2/note": "#n3"
+        "/rows/3/note": "#n4"
+        "/rows/4/note": "#n5"
+        "/rows/5/note": "#n6"
+        "/rows/6/note": "#n7"
+        "/rows/7/note": "#n8"
+        "/rows/8/note": "#n9"
+        "/rows/9/note": "#n10"
+        "/rows/10/note": "#n11"
+        "/rows/11": null
+equivalence:
+  notes: ["#n1", "#n2", "#n3", "#n4", "#n5", "#n6", "#n7", "#n8", "#n9", "#n10", "#n11"]

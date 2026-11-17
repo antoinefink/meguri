@@ -1,0 +1,83 @@
+# servers/migaku-received-log L17 `pending-old-fails` (declared, servers/transcripts T13).
+# Switch on: a card sent while the collection is exclusive gets a Pending row.
+# Eight days later the collection is replaced by one built from a new setup
+# (T7.3 lifecycle replace): every id is new, so profile DE's note type and deck
+# no longer exist. The drain fails the entry with the note type message, which
+# wins when both are gone (servers/migaku-receive P15, P19): the row turns
+# Failed, its failed instant is the drain, and the raw body stays as its
+# payload (L5). Six days after the drain the payload is kept and Retry runs it
+# (failing again, which does not move the failed instant, L14); eight days
+# after the drain it is gone and Retry is unavailable.
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2). Profiles are servers/transcripts T5.1 values,
+# saved in list order on a new store, so the first has id 1; a profile without
+# field_map infers R1712's map (servers/migaku-routing D4). L16 calls are
+# `received` steps (T7.3), read in the JSON form of L16.1. No Origin, so
+# Access-Control-Allow-Origin is * (servers/migaku-protocol P6). All content is
+# synthetic.
+id: servers/migaku/moves/pending-old-fails
+description: "a pending entry that fails at the drain keeps its payload for 7 days from the drain"
+tags: ["moves"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+host_env: {migaku_pending_switch: true}
+setup:
+  decks: ["DE", "DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - lifecycle: exclusive
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Hund[Hund,nn,m]", "sentence": "Der Hund."}}
+      async: b
+  - wait: 1s
+  - advance: 5s
+  - await: b
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: false}}
+  - advance: 8d
+  - lifecycle: {replace: {decks: ["Other"]}}
+  - lifecycle: ready
+  - wait: 1s
+  - received: {call: row, row: "#r1"}
+    expect:
+      output_at:
+        "/status": "Failed"
+        "/error": "Destination note type for DE no longer exists."
+        "/payload": true
+  - advance: 6d
+  - prune: {}
+  - received: {call: row, row: "#r1"}
+    expect:
+      output_at:
+        "/payload": true
+  - received: {call: retry, row: "#r1"}
+    expect:
+      output: {result: failed, message: "Destination note type for DE no longer exists."}
+  - advance: 2d
+  - prune: {}
+  - received: {call: row, row: "#r1"}
+    expect:
+      output_at:
+        "/status": "Failed"
+        "/payload": false
+  - received: {call: retry, row: "#r1"}
+    expect:
+      output: {result: retry_unavailable}

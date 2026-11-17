@@ -1,0 +1,35 @@
+# specs/servers/ankiconnect-media X11.5 (launch), X14 external-folder test
+# "closed app": a file written into the granted folder just before the host
+# stops is first seen by the scans after restart_host. In Docker nothing
+# watches the folder, so this is the same as a file written while the app is
+# quit. The index survives the restart and the restart records no new
+# baseline, so the confirming scan copies the file. Meguri only (declared).
+# A = 61 0a. All values are synthetic.
+id: servers/ankiconnect/media/ext-closed-app
+description: a file written while the app is closed is copied by the scans after the next launch
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - media_dir_grant: {}
+    expect:
+      output: {baseline: 0}
+  - media_dir_write: {name: clip.mp3, text: "a\n"}
+  - restart_host: {}
+    expect: {no_effect: true}
+  - media_dir_scan: {}
+    expect:
+      output: {status: done, rescan: true, ingested: 0, notices: []}
+  - media_dir_scan: {}
+    expect:
+      output: {status: done, rescan: false, ingested: 1, notices: []}
+  - http:
+      body: {json: {action: getMediaFilesNames, version: 6}}
+    expect:
+      status: 200
+      body: {json: {result: [clip.mp3], error: null}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: clip.mp3}}}
+    expect:
+      status: 200
+      body: {json: {result: "YQo=", error: null}}

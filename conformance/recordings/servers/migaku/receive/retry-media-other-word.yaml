@@ -1,0 +1,57 @@
+# servers/migaku-receive P24 `retry-media-other-word` (declared, servers/transcripts T13).
+# Body B has A's sentence and item id but another targetWord: a media match
+# needs equal targetWord and sentence (P12, Q5), so B adds a second note. B's
+# item has the same id and bytes, so it reuses s9.m4a (P10, media/media-files
+# M3 row a): the folder holds one file.
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/retry-media-other-word
+description: "same media ids with another target word is a new card"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hahn[Hahn,nn,m]", sentence: "Der Hahn kräht.", sentenceAudio: [{id: "s9", input: "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - advance: 30s
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "kräht[krähen,v,]", sentence: "Der Hahn kräht.", sentenceAudio: [{id: "s9", input: "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n2"}}
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/db_dump/notes/#n2/flds": "Der Hahn kräht.\u001f\u001fkräht[krähen,v,]\u001f\u001f\u001f[sound:s9.m4a]\u001f\u001f\u001f\u001fx\u001fx"
+        "/media_dir": {"s9.m4a": {sha1: "0bccca510c663e4251e7b61eadf7f0a9e4075776", size: 24}}
+equivalence:
+  notes: ["#n1", "#n2"]

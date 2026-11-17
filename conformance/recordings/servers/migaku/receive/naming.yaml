@@ -1,0 +1,51 @@
+# servers/migaku-receive P24 `naming` (declared, servers/transcripts T13).
+# Before the request the media folder holds k9.m4a and k8.m4a, both M4A
+# (setup media_files). Raw id a/b..c gives abc.m4a (P10 step 1); k9 with the
+# same bytes reuses k9.m4a (M3 row a); k8 with M4A2 gets the hash name of
+# M4A2's SHA-1 (M3 row c, M4). The row's item with an empty id (11 random hex
+# digits) is left out: random names have no transcript form yet (P24).
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/naming
+description: "stored names: filtered ids, lowercase, reuse and hash names"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+  media_files:
+    - {name: k9.m4a, text: "\u0000\u0000\u0000\u0018ftypM4A \u0000\u0000\u0000\u0000M4A isom"}
+    - {name: k8.m4a, text: "\u0000\u0000\u0000\u0018ftypM4A \u0000\u0000\u0000\u0000M4A isom"}
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund", sentence: "Der Hund.", sentenceAudio: [{id: "a/b..c", input: "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}, {id: "k9", input: "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}, {id: "k8", input: "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29tAAAACA=="}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/db_dump/notes/#n1/flds": "Der Hund.\u001f\u001fHund\u001f\u001f\u001f[sound:abc.m4a]\n<br>\n[sound:k9.m4a]\n<br>\n[sound:k8-b01fdfc2217d6b0909104a698185dc7ad0be9340.m4a]\u001f\u001f\u001f\u001fx\u001fx"
+        "/media_dir": {"abc.m4a": {sha1: "0bccca510c663e4251e7b61eadf7f0a9e4075776", size: 24}, "k8-b01fdfc2217d6b0909104a698185dc7ad0be9340.m4a": {sha1: "b01fdfc2217d6b0909104a698185dc7ad0be9340", size: 28}, "k8.m4a": {sha1: "0bccca510c663e4251e7b61eadf7f0a9e4075776", size: 24}, "k9.m4a": {sha1: "0bccca510c663e4251e7b61eadf7f0a9e4075776", size: 24}}
+equivalence:
+  notes: ["#n1"]

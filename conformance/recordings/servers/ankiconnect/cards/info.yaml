@@ -1,6 +1,7 @@
 # servers/ankiconnect-actions A20.5 `cards/info` (A11.2, A11.3, A11.4). All values are synthetic.
 # The recorder runs no card-state setup section (conformance/dsl D6.6 is a draft), so the
 # first exchange makes c2 a review card with setDueDate (A13) before cardsInfo reads it.
+# The last exchange is cardsModTime with an unknown id (A11.5).
 # FSRS is on, as Meguri always runs it (sched/set-due-date S1, R702).
 id: servers/ankiconnect/cards/info
 description: cardsInfo of a new card, a review card with FSRS on, and an unknown id
@@ -25,3 +26,5 @@ steps:
       body: {json: {action: setDueDate, version: 6, params: {cards: ["#c2"], days: "3"}}}
   - http:
       body: {json: {action: cardsInfo, version: 6, params: {cards: ["#c1", "#c2", 7]}}}
+  - http:
+      body: {json: {action: cardsModTime, version: 6, params: {cards: ["#c1", 7]}}}

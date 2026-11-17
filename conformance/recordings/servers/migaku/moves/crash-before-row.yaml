@@ -1,0 +1,55 @@
+# servers/migaku-received-log L17 `crash-before-row` (declared, servers/transcripts T13).
+# The fault hook stops the host after the collection commit and before
+# servers/migaku-receive P17 step 3 (T7.3 migaku_crash between), so the request
+# gets no reply. After the restart, recovery finds the intent's GUID in the
+# collection and completes the hidden row as Created (P17): its note, its media
+# names read from the note's fields that the plan maps to sentenceAudio, and
+# its warnings computed then (P21: Is Audio Card is x and Word Audio is empty,
+# so the front is blank). The page shows exactly that row (L6).
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2). Profiles are servers/transcripts T5.1 values,
+# saved in list order on a new store, so the first has id 1; a profile without
+# field_map infers R1712's map (servers/migaku-routing D4). L16 calls are
+# `received` steps (T7.3), read in the JSON form of L16.1. No Origin, so
+# Access-Control-Allow-Origin is * (servers/migaku-protocol P6). All content is
+# synthetic.
+id: servers/migaku/moves/crash-before-row
+description: "after a crash between the commit and the row write, recovery writes one Created row"
+tags: ["moves"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE", "DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - fault: {migaku_crash: {point: between}}
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Hund[Hund,nn,m]", "sentence": "Der Hund.", "translation": "Alpha 2.", "definitions": "<p>Alpha 3.</p>", "sentenceAudio": [{"id": "s1", "input": "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}]}}
+    expect: {outcome: closed_without_reply}
+  - restart_host: {}
+  - received: {call: page, limit: 200}
+    expect:
+      output_at:
+        "/rows/0/id": "#r1"
+        "/rows/0/status": "Created"
+        "/rows/0/note": "#n1"
+        "/rows/0/media": {sentence_audio: ["s1.m4a"], word_audio: [], images: []}
+        "/rows/0/warnings": ["front_would_be_empty"]
+        "/rows/0/payload": false
+        "/rows/1": null

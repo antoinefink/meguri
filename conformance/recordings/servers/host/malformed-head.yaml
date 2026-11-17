@@ -1,8 +1,10 @@
 # servers/host-security H17 `malformed-head` (declared, servers/transcripts T13):
-# heads that do not parse are answered by the host on both servers: 400, empty body,
-# Content-Length 0, Connection close (H7.2).
+# requests that do not parse are answered by the host on both servers, with an empty body,
+# Content-Length 0 and Connection close (H7.2): 400 for a bad line or framing headers and
+# for a malformed chunk size, 505 for another HTTP version, 431 for 101 header fields (Host
+# and 100 others).
 id: servers/host/malformed-head
-description: "malformed request heads get 400 on both servers"
+description: "malformed requests get 400, 431 or 505 on both servers"
 tags: [host]
 server: host
 source: declared
@@ -54,6 +56,42 @@ steps:
       body: {empty: true}
       closed: true
   - http: {server: migaku, raw: {text: "GET /srs-check HTTP/1.1\r\nHost: 127.0.0.1:44432\r\nContent-Length: abc\r\n\r\n"}}
+    expect:
+      status: 400
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, raw: {text: "POST / HTTP/2.0\r\nHost: 127.0.0.1:8765\r\n\r\n"}}
+    expect:
+      status: 505
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, raw: {text: "POST / HTTP/1.1\r\nHost: 127.0.0.1:8765\r\nX-F1: 1\r\nX-F2: 1\r\nX-F3: 1\r\nX-F4: 1\r\nX-F5: 1\r\nX-F6: 1\r\nX-F7: 1\r\nX-F8: 1\r\nX-F9: 1\r\nX-F10: 1\r\nX-F11: 1\r\nX-F12: 1\r\nX-F13: 1\r\nX-F14: 1\r\nX-F15: 1\r\nX-F16: 1\r\nX-F17: 1\r\nX-F18: 1\r\nX-F19: 1\r\nX-F20: 1\r\nX-F21: 1\r\nX-F22: 1\r\nX-F23: 1\r\nX-F24: 1\r\nX-F25: 1\r\nX-F26: 1\r\nX-F27: 1\r\nX-F28: 1\r\nX-F29: 1\r\nX-F30: 1\r\nX-F31: 1\r\nX-F32: 1\r\nX-F33: 1\r\nX-F34: 1\r\nX-F35: 1\r\nX-F36: 1\r\nX-F37: 1\r\nX-F38: 1\r\nX-F39: 1\r\nX-F40: 1\r\nX-F41: 1\r\nX-F42: 1\r\nX-F43: 1\r\nX-F44: 1\r\nX-F45: 1\r\nX-F46: 1\r\nX-F47: 1\r\nX-F48: 1\r\nX-F49: 1\r\nX-F50: 1\r\nX-F51: 1\r\nX-F52: 1\r\nX-F53: 1\r\nX-F54: 1\r\nX-F55: 1\r\nX-F56: 1\r\nX-F57: 1\r\nX-F58: 1\r\nX-F59: 1\r\nX-F60: 1\r\nX-F61: 1\r\nX-F62: 1\r\nX-F63: 1\r\nX-F64: 1\r\nX-F65: 1\r\nX-F66: 1\r\nX-F67: 1\r\nX-F68: 1\r\nX-F69: 1\r\nX-F70: 1\r\nX-F71: 1\r\nX-F72: 1\r\nX-F73: 1\r\nX-F74: 1\r\nX-F75: 1\r\nX-F76: 1\r\nX-F77: 1\r\nX-F78: 1\r\nX-F79: 1\r\nX-F80: 1\r\nX-F81: 1\r\nX-F82: 1\r\nX-F83: 1\r\nX-F84: 1\r\nX-F85: 1\r\nX-F86: 1\r\nX-F87: 1\r\nX-F88: 1\r\nX-F89: 1\r\nX-F90: 1\r\nX-F91: 1\r\nX-F92: 1\r\nX-F93: 1\r\nX-F94: 1\r\nX-F95: 1\r\nX-F96: 1\r\nX-F97: 1\r\nX-F98: 1\r\nX-F99: 1\r\nX-F100: 1\r\n\r\n"}}
+    expect:
+      status: 431
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: ankiconnect, raw: {text: "POST / HTTP/1.1\r\nHost: 127.0.0.1:8765\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n\r\n"}}
+    expect:
+      status: 400
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, raw: {text: "POST /srs-import HTTP/2.0\r\nHost: 127.0.0.1:44432\r\n\r\n"}}
+    expect:
+      status: 505
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, raw: {text: "POST /srs-import HTTP/1.1\r\nHost: 127.0.0.1:44432\r\nX-F1: 1\r\nX-F2: 1\r\nX-F3: 1\r\nX-F4: 1\r\nX-F5: 1\r\nX-F6: 1\r\nX-F7: 1\r\nX-F8: 1\r\nX-F9: 1\r\nX-F10: 1\r\nX-F11: 1\r\nX-F12: 1\r\nX-F13: 1\r\nX-F14: 1\r\nX-F15: 1\r\nX-F16: 1\r\nX-F17: 1\r\nX-F18: 1\r\nX-F19: 1\r\nX-F20: 1\r\nX-F21: 1\r\nX-F22: 1\r\nX-F23: 1\r\nX-F24: 1\r\nX-F25: 1\r\nX-F26: 1\r\nX-F27: 1\r\nX-F28: 1\r\nX-F29: 1\r\nX-F30: 1\r\nX-F31: 1\r\nX-F32: 1\r\nX-F33: 1\r\nX-F34: 1\r\nX-F35: 1\r\nX-F36: 1\r\nX-F37: 1\r\nX-F38: 1\r\nX-F39: 1\r\nX-F40: 1\r\nX-F41: 1\r\nX-F42: 1\r\nX-F43: 1\r\nX-F44: 1\r\nX-F45: 1\r\nX-F46: 1\r\nX-F47: 1\r\nX-F48: 1\r\nX-F49: 1\r\nX-F50: 1\r\nX-F51: 1\r\nX-F52: 1\r\nX-F53: 1\r\nX-F54: 1\r\nX-F55: 1\r\nX-F56: 1\r\nX-F57: 1\r\nX-F58: 1\r\nX-F59: 1\r\nX-F60: 1\r\nX-F61: 1\r\nX-F62: 1\r\nX-F63: 1\r\nX-F64: 1\r\nX-F65: 1\r\nX-F66: 1\r\nX-F67: 1\r\nX-F68: 1\r\nX-F69: 1\r\nX-F70: 1\r\nX-F71: 1\r\nX-F72: 1\r\nX-F73: 1\r\nX-F74: 1\r\nX-F75: 1\r\nX-F76: 1\r\nX-F77: 1\r\nX-F78: 1\r\nX-F79: 1\r\nX-F80: 1\r\nX-F81: 1\r\nX-F82: 1\r\nX-F83: 1\r\nX-F84: 1\r\nX-F85: 1\r\nX-F86: 1\r\nX-F87: 1\r\nX-F88: 1\r\nX-F89: 1\r\nX-F90: 1\r\nX-F91: 1\r\nX-F92: 1\r\nX-F93: 1\r\nX-F94: 1\r\nX-F95: 1\r\nX-F96: 1\r\nX-F97: 1\r\nX-F98: 1\r\nX-F99: 1\r\nX-F100: 1\r\n\r\n"}}
+    expect:
+      status: 431
+      headers: {content-length: "0", connection: close}
+      body: {empty: true}
+      closed: true
+  - http: {server: migaku, raw: {text: "POST /srs-import HTTP/1.1\r\nHost: 127.0.0.1:44432\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\n\r\n"}}
     expect:
       status: 400
       headers: {content-length: "0", connection: close}

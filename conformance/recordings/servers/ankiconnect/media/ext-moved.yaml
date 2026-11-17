@@ -1,0 +1,63 @@
+# specs/servers/ankiconnect-media X11.2 (third row), X11.6 step 2 and step 4,
+# X14 external-folder test "moved folder": the config moves from the granted
+# folder media-dir to moved without a grant, so scans are suspended; the note
+# hook ingests moved/clip.mp3 and leaves the index alone. Back on media-dir,
+# its own clip.mp3 is still a baseline entry: the scans copy nothing and the
+# collection keeps the bytes from moved. The folder moved exists because
+# apply_config creates it (servers/transcripts T4), and media_dir_write writes
+# into the folder the config names at that step (T7.1). Meguri only
+# (declared). A = 61 0a, C = 62 62 0a. All values are synthetic.
+id: servers/ankiconnect/media/ext-moved
+description: a moved external folder suspends scans; the hook ingests without touching the index
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - media_dir_write: {name: clip.mp3, text: "a\n"}
+  - media_dir_grant: {}
+    expect:
+      output: {baseline: 1}
+  - apply_config: {ankiconnect: {media_dir: {path: moved}}}
+    expect:
+      output: {}
+  - media_dir_write: {name: clip.mp3, text: "bb\n"}
+  - media_dir_scan: {}
+    expect:
+      output: {status: suspended, rescan: false, ingested: 0, notices: []}
+  - http:
+      body: {json: {action: addNote, version: 6, params: {note: {deckName: D, modelName: Pair, fields: {Term: word, Gloss: "[sound:clip.mp3]"}}}}}
+    expect:
+      status: 200
+      body: {json: {result: "#n1", error: null}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: clip.mp3}}}
+    expect:
+      status: 200
+      body: {json: {result: "YmIK", error: null}}
+  - media_dir_scan: {}
+    expect:
+      output: {status: suspended, rescan: false, ingested: 0, notices: []}
+  - apply_config: {ankiconnect: {media_dir: {path: media-dir}}}
+    expect:
+      output: {}
+  - media_dir_scan: {}
+    expect:
+      output: {status: done, rescan: false, ingested: 0, notices: []}
+  - media_dir_scan: {}
+    expect:
+      output: {status: done, rescan: false, ingested: 0, notices: []}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: clip.mp3}}}
+    expect:
+      status: 200
+      body: {json: {result: "YmIK", error: null}}
+equivalence:
+  notes: ["#n1"]

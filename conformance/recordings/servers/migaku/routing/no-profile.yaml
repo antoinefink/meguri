@@ -6,7 +6,15 @@
 # D6: nothing is stored before the user confirms), so the request still fails.
 # A failure changes nothing in the collection or the media folder
 # (servers/migaku-receive P2). No Origin, so Access-Control-Allow-Origin is *
-# and no Vary (servers/migaku-protocol P3.1, P6). All content is synthetic.
+# and no Vary (servers/migaku-protocol P3.1, P6).
+# The failure writes one Failed row with the error and, since D11 step 1
+# fails before any choice, no profile, decision, route or detection (D13.1,
+# servers/migaku-received-log L2, L4, L16.1: detection is null when routing
+# did not run); its payload is kept (servers/migaku-receive
+# P20). After a German profile is saved (its map inferred by D4, no defaults),
+# Retry of that row runs the kept payload again (L14): it is routed to German
+# and creates note #n2 (the setup note is #n1) with the payload's texts in
+# Sentence and Target Word and every other field empty. All content is synthetic.
 id: servers/migaku/routing/no-profile
 description: with no confirmed profile, /receive fails with the no-destination error
 tags: [routing]
@@ -42,3 +50,16 @@ steps:
         vary: null
       body: {json: {success: false, error: "No Migaku destination is set up in Meguri."}}
       no_effect: true
+  - received_log: {}
+    expect:
+      output:
+        rows:
+          - {endpoint: receive, status: Failed, profile: null, decision: null, route: null, detection: null, note: null, error: "No Migaku destination is set up in Meguri."}
+  - routing: {save_profile: {name: German, language: de, notetype: Migaku German Custom, deck: "German::Mining"}}
+  - received: {call: retry, row: "#r1"}
+    expect:
+      output: {result: created, note: "#n2"}
+  - observe: [{db_dump: {tables: [notes]}}]
+    expect:
+      output_at:
+        /db_dump/notes/#n2/flds: "Der Hund.\u001f\u001fHund\u001f\u001f\u001f\u001f\u001f\u001f\u001f\u001f"

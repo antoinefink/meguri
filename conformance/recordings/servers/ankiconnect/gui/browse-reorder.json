@@ -21,6 +21,33 @@
           },
           "status": 200
         }
+      },
+      {
+        "browser_config": {
+          "activeCols": ["noteFld", "template", "cardDue", "deck", "noteCrt"],
+          "activeNoteCols": ["noteFld", "note", "template", "noteTags"],
+          "browserNoteSortBackwards": false,
+          "browserTableShowNotesMode": false,
+          "collapseCardState": false,
+          "collapseDecks": false,
+          "collapseFlags": false,
+          "collapseNotetypes": false,
+          "collapseSavedSearches": false,
+          "collapseTags": false,
+          "collapseToday": false,
+          "defaultSearchText": "",
+          "flagLabels": {},
+          "ignoreAccentsInSearch": false,
+          "normalize_note_text": true,
+          "noteSortType": null,
+          "previewBothSides": false,
+          "resetCountsBrowser": false,
+          "restorePositionBrowser": true,
+          "savedFilters": {},
+          "setDueBrowser": "0",
+          "sortBackwards": true,
+          "sortType": "noteCrt"
+        }
       }
     ]
   },
@@ -31,11 +58,11 @@
     },
     "anki_version": "26.9.3",
     "ankiconnect_lock_sha256": "db0b6e483d450f46150a9e80294f651a2b7ea4babda9af460e4e28df45e90561",
-    "driver_sha256": "d210262e36b9bea44268e57ec6c0a5b0d03cbab1ed2f66931f34ff7b50e5dfae",
+    "driver_sha256": "3156f4a44f53eeac44cc03a8952ae2c42c82606bcedf6602ac2a2b2d4da7ba40",
     "image": "meguri-oracle-ankiconnect:recorder",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "servers/ankiconnect/gui/browse-reorder",
-  "scenario_sha256": "eab6fc6a1df10d24d4941838917be20b257ac2929ad4075822f8af45b4e1718b",
+  "scenario_sha256": "8bcb19740e3c249293496706533cd2ba335e4fac666de7b540e9904ff39922d0",
   "tz": "Europe/Paris"
 }

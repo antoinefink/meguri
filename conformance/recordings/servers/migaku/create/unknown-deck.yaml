@@ -1,13 +1,14 @@
 # servers/migaku-received-log C5 `unknown-deck` (declared, servers/transcripts T13).
 # The note type exists and deckId 999 names no deck: 400 in the Migaku error
-# shape with the deck message (C2 step 3, C2's last paragraph). A failed /create
-# writes no row (C2 step 10); T13 has no check for the log yet.
-# The `card` value, before form encoding: {"noteTypeId":<T>,"deckId":999,"fields":[{"name":"Sentence","content":"Alpha 1."},{"name":"Translation","content":"Alpha 2."}]}
-# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
-# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
-# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
-# transcript format has no step or setup section for profiles (see the session's
-# proposals), and nothing this scenario checks depends on one. No Origin, so
+# shape with the deck message (C2 step 3, C2's last paragraph). A failed
+# /create writes no row (C2 step 10).
+# The `card` value, before form encoding:
+# {"noteTypeId":<T>,"deckId":999,"fields":[{"name":"Sentence","content":"Alpha
+# 1."},{"name":"Translation","content":"Alpha 2."}]}
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2, C5's <D>), created in that order. No Migaku
+# profile is stored; nothing this scenario checks depends on one. No Origin, so
 # Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
 # P6). All content is synthetic.
 id: servers/migaku/create/unknown-deck
@@ -43,3 +44,7 @@ steps:
         vary: null
       body: {json: {success: false, error: "Deck 999 does not exist."}}
       no_effect: true
+  - logs: {}
+    expect:
+      output_at:
+        "/received": 0

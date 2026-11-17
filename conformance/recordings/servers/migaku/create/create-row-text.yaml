@@ -1,23 +1,23 @@
 # servers/migaku-received-log C5 `create-row-text` (declared, servers/transcripts T13).
 # Multipart form (C1): `version` 2 and a `card` with Target Word
 # <b>Hund[Hund,nn,m]</b> and Sentence "Der Hund.". Reply 200 {"id": <note id>}
-# (C2 step 9), the note being #n1 (T10.1); the `id` member needs a T10.5 id
-# position for Migaku replies (see the session's proposals). The T14
-# equivalence check of #n1 compares the stored fields, the HTML and the
-# brackets included, with Anki's add of the same fields.
-# C5's point, the row's target word Hund and snippet "Der Hund." (C2 step 10,
-# L2), has no check: they come from profile DE's plan, no profile can be
-# stored, and no step reads a received-log row (see the session's proposals).
-# With no matching profile, C2 step 10 leaves both empty.
-# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
-# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
-# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
-# transcript format has no step or setup section for profiles (see the session's
-# proposals), and nothing this scenario checks depends on one. No Origin, so
-# Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
-# P6). All content is synthetic.
+# (C2 step 9, servers/transcripts T10.5), the note being #n1. The stored fields
+# keep the HTML and the brackets, and the empty flags take profile DE's
+# defaults (C2 step 5).
+# The row's target word and snippet come from the fields that profile DE's plan
+# maps to targetWord and sentence (C2 step 10): Target Word, bracket syntax
+# removed (servers/migaku-syntax S5) and HTML stripped (text/strip-html H4),
+# gives Hund; Sentence gives "Der Hund.". The T14 equivalence check of #n1
+# compares the stored fields with Anki's add of the same fields.
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2, C5's <D>), created in that order. Profile DE
+# (servers/transcripts T5.1: T-Mining, DE::Mining, defaults Is Vocabulary Card
+# and Is Audio Card x, R1712's inferred map) is the matching profile of C2 step
+# 4; on a new store it has id 1. No Origin, so Access-Control-Allow-Origin is *
+# and no Vary (servers/migaku-protocol P3.1, P6). All content is synthetic.
 id: servers/migaku/create/create-row-text
-description: "a created card's stored fields; the row's target word and snippet wait for profiles"
+description: "a created card's stored fields, profile DE's defaults and the row's target word and snippet"
 tags: [create]
 server: migaku
 source: declared
@@ -32,6 +32,9 @@ setup:
           front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
           back: "{{Translation}}"
       css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
 steps:
   - http:
       method: POST
@@ -48,5 +51,19 @@ steps:
         access-control-allow-methods: "POST, GET, OPTIONS"
         vary: null
       body: {json: {id: "#n1"}}
+  - observe: [{db_dump: {tables: [notes]}}]
+    expect:
+      output_at:
+        "/db_dump/notes/#n1/flds": "Der Hund.\u001f\u001f<b>Hund[Hund,nn,m]</b>\u001f\u001f\u001f\u001f\u001f\u001f\u001fx\u001fx"
+  - received: {call: row, row: "#r1"}
+    expect:
+      output_at:
+        "/endpoint": "create"
+        "/status": "Created"
+        "/decision": "Manual"
+        "/profile/name": "DE"
+        "/target_word": "Hund"
+        "/snippet": "Der Hund."
+        "/warnings": ["front_would_be_empty"]
 equivalence:
   notes: ["#n1"]

@@ -3,7 +3,7 @@
 Spec: servers/host-security
 Requirements: R1663, R1665, R1666, R1668, R1670, R1672 (status model), R1673, R1674, R1675, R1676, R1677, R1678, R1789 (write path), R1790 (read concurrency), R1949; AE78; R1659; supports R1664, R1667, R1669, R1671, R1679, R1748, R1750, R1797
 Anki: 26.09.3 (no Anki behavior: both protocols are add-on protocols, and Anki's own collection behavior is reached only through the specs cited)
-Scenarios: `conformance/recordings/servers/host/` (40 declared transcripts, one per H17 row; `servers/transcripts` T2, T13). 12 of them (`bind-no-wildcard`, `host-refused`, `port-change`, `port-refused-values`, `port-in-use-wildcard-holder`, `pipelined`, `handler-panic`, `start-before-open`, `config-persist`, `store-newer-version`, `interaction-unknown-id`, `interaction-timeout`) check step outputs and replies with `servers/transcripts` T13 `expect.output` and `expect.replies`, and are valid only once T13 defines them; `interaction-timeout` also needs the T7.3 `events` `types` filter, and `host-websocket` the T7.3 `ws_open` handshake sentence.
+Scenarios: `conformance/recordings/servers/host/` (40 declared transcripts, one per H17 row; `servers/transcripts` T2, T13). They run on Meguri's executor through `tools/mg servers-contract` (U136); before U136 lands, U135's Rust tests cover each H17 row through the H22 construction.
 
 What both of Meguri's local servers share on the Mac: where and when they listen, how they find out that another app holds their port, the `Host` check that runs before anything else, HTTP/1.1 framing, keep-alive and body limits, how requests reach the collection, how the servers survive sleep, wake and collection replacement, the status each server reports, the local integrations store, and the channel between the Rust host and Swift.
 
@@ -21,6 +21,8 @@ Other files own the protocols:
 - **Port**: the TCP port of a server. Migaku: always 44432 (R1675). AnkiConnect: the `ankiconnect.port` setting (H10), default 8765. In the test-only ephemeral bind mode (H22) it is the port the operating system gave the IPv4 socket. **Bound port**: the port the server's listener set is bound to; in the app it always equals the port.
 - **Listener set**: the listening sockets of one server, at most two: `127.0.0.1:<port>` and `[::1]:<port>`.
 - **Host**: the part of the engine side that owns both servers, their runtime, the integrations store and the channel to Swift (H11). The app builds one host per process; tests may build several (H22).
+- **Process engine**: the process's one engine (`engine/lifecycle`), which exists from process start with nothing open (`NoCollection`, generation 0), holds the lifecycle state, the generation, the change stream and the L6 wait, and outlives every collection opened on it. In the app it is the FFI runtime's `ProcessCore` (`meguri-host`). Each `CoreHost` (`engine/host` H1) is one successful open of a collection on it; a failed open leaves no `CoreHost`, and the process engine then holds `Failed{reason}`.
+- **Collection source**: what the host is built on (H9.1): the process engine, and read access to the `CoreHost` currently open on it, if any.
 - **Available**: the collection is available in the sense of `engine/lifecycle` L6.
 - **Head hook**, **error responder**, **handler**: the three parts each protocol supplies to the host (H19). The error responder turns a host-level refusal (H8's over-limit body, H9.4's caught failure) into that server's own error reply. The host never writes a protocol body itself, except the empty-body replies of H6 and H7.
 - **Config snapshot**: the immutable copy of the integrations config (H10) that a request reads from its first byte to its reply.
@@ -39,8 +41,9 @@ Other files own the protocols:
 | on, and no open attempt of this process has ended yet | `waiting_for_collection`; no socket |
 | on, after the first open attempt of this process ended, whatever its outcome | binding (H4), then `listening` or `port_in_use` |
 
-- The host is created when the app launches, but it opens no socket and does no network work until the first open attempt of the process ends: the engine reports the collection `Ready`, `Failed{Corrupt}` or `Failed{reason}` (`engine/lifecycle` L1, R1666). The servers therefore never delay launch or the first frame. When that event arrives, every enabled server starts binding at once, in parallel. After a failed first open the servers listen with `collection_available: false`, so Settings shows "Collection unavailable" (R1672) and clients get their protocol's unavailable error rather than a refused connection (H18.7).
+- The host is created when the app launches, but it opens no socket and does no network work until the first open attempt of the process ends: the process engine reports the collection `Ready`, `Failed{Corrupt}` or `Failed{reason}` (`engine/lifecycle` L1, R1666; how the host sees it: H9.1). The servers therefore never delay launch or the first frame. When that event arrives, every enabled server starts binding at once, in parallel. After a failed first open the servers listen with `collection_available: false`, so Settings shows "Collection unavailable" (R1672) and clients get their protocol's unavailable error rather than a refused connection (H18.7).
 - `NoCollection` before any open attempt (the process has not tried to open a collection yet) counts as "not ended": the servers wait.
+- Swift calls `servers_start` (H20) before its first open attempt, and tests start the host before their first open attempt or after one has ended (H22). The host is therefore never started while an open attempt runs, so the state it reads at start tells it whether the first attempt has ended (H9.1).
 - Once a server listens, it keeps listening until its setting is turned off, its port changes (H4.4), or the process ends. A later exclusive phase, a collection replacement, a close and reopen, a failed open or sleep never stop it (R1670); while the collection is not available, requests that need it follow their protocol's wait rules (H9) and the status shows `collection_available: false`.
 - Turning a server on after the first open attempt ended starts binding at once, whether the collection is available or not.
 
@@ -66,7 +69,7 @@ The probe and the bind of one attempt run back to back with no wait between them
 
 ### H4.3 Port in use and retry
 
-- When the port is in use, the server's state is `port_in_use{port}` and it holds no socket. It tries again with the full probe of H4.2 each time. Attempts start 10 s apart, measured from the start of the previous attempt (a slow attempt, such as a 500 ms probe timeout, does not push the next one back). The retry period runs on the host's timer clock (H21), so tests advance it without waiting.
+- When the port is in use, the server's state is `port_in_use{port}` and it holds no socket. It tries again with the full probe of H4.2 each time. A retry attempt leaves the state `port_in_use` while it runs: it never passes through `binding`, so it posts no status event of its own. Only its outcome can change the status: `listening` when it binds, or, when the port is still in use, a new `next_retry_at` alone, which posts no event (H12). Attempts start 10 s apart, measured from the start of the previous attempt (a slow attempt, such as a 500 ms probe timeout, does not push the next one back). The retry period runs on the host's timer clock (H21), so tests advance it without waiting.
 - When an attempt finds the port free and the bind succeeds, the state becomes `listening` within that attempt. A free port is found at once (the probe is refused) and the bind takes no wait, so the server listens on a port freed by Anki quitting within 10 s of it being freed, plus the few milliseconds of the probe and the bind (AE78).
 - A revalidation (H9.3) while `port_in_use` starts an attempt at once; the next attempts then start 10 s apart from it.
 - Settings shows, from this status, "Port <n> is in use by another app — quit Anki or change the port" (R1674). The text is U144's; the host only reports the state and the port. For the Migaku server, whose port cannot change, U144 shows its own variant.
@@ -182,7 +185,10 @@ Each server serves at most 128 HTTP connections at once (upgraded WebSockets do 
 
 ### H9.1 Handles and generations
 
-- In the app, the host uses the engine session that the FFI opened: `servers_start` (H20) takes no collection argument and builds the host on the `CoreHost` that the FFI already holds. In headless runs (Docker, conformance), the test construction (H22) is given a `CoreHost` opened on the scenario's collection (`engine/host` H1).
+- The host is built on a collection source (H1), never on one `CoreHost`, so it exists and waits before the first open attempt, keeps listening after a failed open, and serves the collection of each later open or replacement. In the app, `servers_start` (H20) takes no collection argument: the host uses the FFI runtime's process engine, which exists with nothing open from process start (Swift calls `servers_start` before its first open attempt, H3), and reads the FFI's current `CoreHost` when it needs one. In headless runs (Docker, conformance), the test construction (H22) is given a process engine created with nothing open and the slot where the test places the `CoreHost` of each open it makes.
+- The host learns of each open, failed open, close and replacement from the process engine's change stream (`Lifecycle` and `CollectionReplaced`, `engine/change-stream` S3), and of each return of availability from `Available` (`engine/lifecycle` L6). It subscribes before it reads the lifecycle state at start. The host is never started while an open attempt runs (H3), so at start it reads either `NoCollection` at generation 0 or a state after an attempt ended. The first open attempt of the process has ended (H3) at the first `Lifecycle` event of `Ready`, `Failed{Corrupt}` or `Failed{reason}`, or at once when the state read at start is none of `NoCollection`, `Opening` and `Upgrading`, or the generation is above 0. The host needs no other notification.
+- With no `CoreHost` (before any open, after a failed open or a close), the L6 wait still runs on the process engine, and the status reports `collection_available: false` (H12).
+- A handler that needs a provider the `CoreHost` owns (the media store, `engine/host` H2) takes the current `CoreHost` for that request together with its handle. When there is none, the collection is unavailable for that request: it waits as H9.2 says and then gets its protocol's unavailable error.
 - A handler gets a collection handle of the current generation (`engine/lifecycle` L3) for each request, never one kept from an earlier request. After `CollectionReplaced{g+1}` (`engine/change-stream` S3), the next request works on generation g+1.
 - A read request that fails with `StaleGeneration` because a replacement completed while it waited takes a new handle and runs once more, within its protocol's remaining wait time. A write request follows its protocol's rule (for Migaku, `servers/migaku-receive` P14).
 
@@ -213,8 +219,18 @@ Each server serves at most 128 HTTP connections at once (upgraded WebSockets do 
 ### H10.1 The file
 
 - `meguri-integrations.db`, a SQLite file in the app-private Application Support directory, beside the collection's folder, never inside it (KTD12). Files that later units keep with it (pending `/receive` payloads, `servers/migaku-receive` P15) go in the folder `meguri-integrations/` beside it.
+- The directory is given to the host, never derived from a `CoreHost`, because the host opens the store before any collection is open (H3, H10.3). In the app, Swift passes it to `servers_start` as `integrations_directory` (H20): the directory that holds the collection's folder, that is the parent of the `collection_directory` it passes when it opens the collection. The store is `<integrations_directory>/meguri-integrations.db`, its corrupt copies (below) are renamed in the same directory, and the folder is `<integrations_directory>/meguri-integrations/`. The host creates the directory's entries it needs, never the directory itself. In tests the H22 `store` parameter is that directory.
 - Nothing in it is ever written to the collection: no config key, no column, no `col.mod` change. Sync, `.apkg` and `.colpkg` export never carry it (R1665). Changing any integration setting leaves the collection file byte for byte as it was.
-- The schema has a version in `PRAGMA user_version`. U135 creates version 1 with one table for the config document. Units that need tables (U138 profiles and routing state, U139 the received log, the receive index, the intents and the pending queue, U140 the move history, U141 the activity log, U143 the external-folder index; `servers/migaku-received-log` L1) add migrations in unit order; each migration raises the version by one and runs in one transaction at open.
+- The schema has a version in `PRAGMA user_version`. U135 creates version 1, which holds one table:
+
+  ```sql
+  CREATE TABLE config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    document TEXT NOT NULL
+  );
+  ```
+
+  At most one row, with `id` 1; `document` is the H10.2 document as compact JSON in UTF-8, unknown members included. A new store has no row, which reads as every default; the first apply (H10.3) inserts the row, and later applies replace `document`. `servers/transcripts` T4.1 `store_user_version` writes this row with the scenario's `server_config` as the document, then sets the version. Units that need tables (U138 profiles and routing state, U139 the received log, the receive index, the intents and the pending queue, U140 the move history, U141 the activity log, U143 the external-folder index; `servers/migaku-received-log` L1) add migrations in unit order; each migration raises the version by one and runs in one transaction at open.
 - At open, a version higher than this build knows (a newer Meguri wrote it) is not migrated down: the store opens read-only, every server stays `off`, and the status reports `store_error: "newer"` until a matching build runs. A file that fails SQLite's quick check, or cannot be opened, is renamed `meguri-integrations.db.corrupt-<UTC yyyyMMddTHHmmssZ>` and a new store with defaults is created; the status reports `store_error: "recreated"` once, until the next apply.
 - The API key is never in the store, the logs or the status. Swift keeps it in the Keychain and passes it with each apply (H10.3).
 
@@ -318,7 +334,7 @@ Some requests need the user or the UI: AnkiConnect's permission alert (R1749, R1
 
 ### H11.3 The audio transcoder
 
-The one blocking callback into Swift (named in KTD9): `AudioTranscoder`, which `servers/migaku-receive` P11 calls to re-encode received audio. It exists on every slice; only the macOS app implements it (U144), and Linux test builds use a pass-through. It is called only from a blocking thread registered with the engine (`engine/jobs`), never from a server worker or the dispatcher thread.
+The one blocking callback into Swift (named in KTD9): `AudioTranscoder` (its signature: H20), which `servers/migaku-receive` P11 calls to re-encode received audio. It exists on every slice; only the macOS app implements it (U144), and Linux test builds use a pass-through. It is called only from a blocking thread registered with the engine (`engine/jobs`), never from a server worker or the dispatcher thread.
 
 ## H12. Status (R1672)
 
@@ -335,7 +351,7 @@ Each server reports a status value:
 | `store_error` | null, `"newer"` or `"recreated"` (H10.1); a property of the one integrations store, so always the same on both servers |
 | `migaku` | Migaku only: the block of `servers/migaku-protocol` P10.5, in every state; absent on the AnkiConnect server |
 
-- `binding` covers the probe and bind attempt of H4.2 and the restart wait of H9.4; it normally lasts well under a second and Settings may show it as Off.
+- `binding` covers the probe and bind attempt of H4.2 and the restart wait of H9.4; it normally lasts well under a second and Settings may show it as Off. It is entered only for the first attempt after the server is turned on, after the first open attempt ends (H3), after a port change (H4.4), after a revalidation closed the IPv4 socket (H9.3) and for a restart (H9.4). Attempts made from `port_in_use` (the retry ticks of H4.3 and a revalidation) stay in `port_in_use` until one binds.
 - Settings maps the status to R1672's wording (U144):
 
   | Status | Shown |
@@ -345,7 +361,8 @@ Each server reports a status value:
   | `listening`, `collection_available: false` | Collection unavailable |
   | `port_in_use` | Port in use by another app (R1674's sentence) |
 
-- A status event (H11.1) carries both servers' values. One is posted on every change of any member except `next_retry_at` alone, including every change of availability (`Available` and each loss of availability, `engine/lifecycle` L6).
+- A status event (H11.1) carries both servers' values. One is posted on every change of any member except `next_retry_at` alone. For `collection_available`, the host re-reads availability (`engine/lifecycle` L6) at each event of the process engine's change stream that can change it: `Available`, every `Lifecycle` event (an open, a failed open, a close, an exclusive phase and its end, `Failed{Corrupt}`) and `CollectionReplaced` (H9.1), and posts an event when the value changed.
+- The engine publishes no event when the long-operation slot is taken in `Ready` (Check Database, `.apkg` apply, or a replacement op before its exclusive phase; `engine/lifecycle` L5). That loss of availability is therefore not posted when it happens: a `servers_status` read (H20) reports it at once, since `collection_available` is computed when the status is read, and the next status event of any cause carries it. Its end is posted, because a slot release that makes the collection available publishes `Available`.
 
 ## H13. The shared fetcher
 
@@ -426,14 +443,14 @@ Each row is one declared scenario, written as `conformance/recordings/servers/ho
 | `port-change` | AnkiConnect listening on 8765; `apply_config {ankiconnect: {port: 8766}}`; `status {until: {state: listening, port: 8766, addresses: ["127.0.0.1:8766", "[::1]:8766"]}, within_ms: 1000}`; `sockets`; ping to `Host: 127.0.0.1:8766` on 8766 | status reached; `sockets` `["127.0.0.1:8766", "[::1]:8766"]` (nothing on 8765; `open` has no port member and always uses the server's current port); ping OK |
 | `port-refused-values` | `apply_config` with `ankiconnect.port` 80, 1023, 44432, 65536 and `"8765"` | each refused with member `ankiconnect.port`; `status` unchanged |
 | `docker-non-loopback-refused` (R1949) | both servers on; an exchange to `address: non_loopback` on each | outcome `refused` on both |
-| `host-accepted` | one request each with `Host`: `127.0.0.1:<p>`, `localhost:<p>`, `LocalHost:<p>`, `[::1]:<p>`, `host.docker.internal:<p>`, no `Host` header (`no_host`), and `localhost:<p>` sent to `address: ipv6`; on both servers | OK each |
-| `host-refused` | one request each with `Host`: `evil.example:<p>`, `127.0.0.1:<p+1>`, `localhost`, `localhost:`, `localhost:0<p>`, `localhost.:<p>`, `127.1:<p>`, `[0:0:0:0:0:0:0:1]:<p>`, `user@localhost:<p>`, empty, and two `Host` headers `localhost:<p>`; on both servers; then `logs` | 403 each, empty body, `content-length: 0`, `connection: close`, no `content-type`, no `access-control-*` header, `closed: true`; `logs` `{activity: 0, received: 0}` |
+| `host-accepted` | one request each with `Host`: `127.0.0.1:<p>`, `localhost:<p>`, `LocalHost:<p>`, `[::1]:<p>`, `host.docker.internal:<p>`, no `Host` header (`no_host`), `localhost:<p>` sent to `address: ipv6`, and `localhost:<p>` with a tab before it and a space after it; on both servers | OK each |
+| `host-refused` | one request each with `Host`: `evil.example:<p>`, `127.0.0.1:<p+1>`, `localhost`, `localhost:`, `localhost:0<p>`, `localhost.:<p>`, `127.1:<p>`, `2130706433:<p>`, `0x7f000001:<p>`, `[0:0:0:0:0:0:0:1]:<p>`, `[::ffff:127.0.0.1]:<p>`, `::1:<p>`, `user@localhost:<p>`, empty, and two `Host` headers `localhost:<p>`; on both servers; then `logs` | 403 each, empty body, `content-length: 0`, `connection: close`, no `content-type`, no `access-control-*` header, `closed: true`; `logs` `{activity: 0, received: 0}` |
 | `host-absolute-target` | `POST http://evil.example:<p>/ HTTP/1.1` with `Host: localhost:<p>` | 403 as above |
 | `host-before-origin-and-route` | Migaku `GET /nope`, `Host: evil.example:44432`, `Origin: https://evil.example`; AnkiConnect `{"action":"deckNames"}` with `Host: evil.example:8765` | 403 empty each (never 404, never the origin's 403 with its own headers, never a JSON reply) |
 | `host-websocket` | `ws_open` Migaku `/anki-connect` with `Host: evil.example:44432` | handshake reply 403, no 101 |
-| `malformed-head` | `raw` requests: `GARBAGE\r\n\r\n`; a header line `X Bad: 1`; `Content-Length: 5` and `Transfer-Encoding: chunked` together; `Content-Length: abc` | 400 each, empty body, `closed: true` |
+| `malformed-head` | `raw` requests on both servers: `GARBAGE\r\n\r\n`; a header line `X Bad: 1`; `Content-Length: 5` and `Transfer-Encoding: chunked` together; `Content-Length: abc`; the version `HTTP/2.0` in the request line; `Host` and 100 other header fields; a chunked body whose chunk size is `zz` | 400 each, except 505 for `HTTP/2.0` and 431 for 101 header fields; empty body, `closed: true` |
 | `head-too-large` | a request with one header whose value is `fill {size: 70000, byte: 0x61}` | 431, `closed: true` |
-| `body-at-limit` | AnkiConnect: a body `fill {size: 268435456, byte: 0x20}` with `Content-Length`; Migaku: `POST /srs-import` with `fill {size: 134217728, byte: 0x20}` | the handler runs: AnkiConnect replies with its JSON-parse error envelope (a body of spaces is not empty and not JSON), Migaku 501 |
+| `body-at-limit` | AnkiConnect: a body `fill {size: 268435456, byte: 0x20}` with `Content-Length`; Migaku: `POST /srs-import` with `fill {size: 134217728, byte: 0x20}`; then both again with `Transfer-Encoding: chunked` (one chunk, `servers/transcripts` T6.2) | the handler runs each time: AnkiConnect replies with its JSON-parse error envelope (a body of spaces is not empty and not JSON), Migaku 501 |
 | `body-over-limit-length` | the same with limit + 1 in `declared_length` | the server's over-limit reply at once, before any body byte is sent, `connection: close`; the handler never runs |
 | `body-over-limit-chunked` | limit + 1 bytes sent with `Transfer-Encoding: chunked`, no `Content-Length` | the over-limit reply after the limit is passed (the executor ignores its own write error, `servers/transcripts` T6.4), `connection: close`; `no_effect: true` |
 | `expect-continue` | AnkiConnect `Expect: 100-continue`, `expect_continue: wait`, body `{}`; then the same with `declared_length` over the limit | first: `interim: [100]`, then the reply; second: the over-limit reply, `interim: []` |
@@ -457,7 +474,7 @@ Each row is one declared scenario, written as `conformance/recordings/servers/ho
 | `interaction-unknown-id` | `resolve {id: "i-999", outcome: "done"}` | `{resolved: false}`; `events` lists nothing |
 | `interaction-timeout` | `interaction {kind: PermissionPrompt, answer: none}`; AnkiConnect `{"action":"requestPermission","version":6}` from `Origin: https://new.example` with `async: p`; advance 120 s; `await: p`; `events`; `resolve` with the posted id | the reply `{"result":{"permission":"denied"},"error":null}` (the timeout outcome, `servers/ankiconnect-envelope` E9); `events` holds the interaction request and then interaction cancelled with the same id; `{resolved: false}` |
 
-Non-transcript checks (U135 Rust and Swift tests, not transcripts): the probe count of the retry schedule (one at enable, none 9 s later, the next at 10 s); the probe never connects to Meguri's own socket (`port-in-use-*` with Meguri already listening on the other server's port); the launch path runs no probe or bind before the first open attempt ends (R1666); the store file of `store-newer-version` is unchanged byte for byte; the host fuzz target of H9.4 runs 10 minutes clean; the status never lists an address outside `127.0.0.1` and `::1` across every scenario above; and on an iOS simulator build every operation of H20 returns `Unsupported` while the same generated bindings start the servers on the Mac (U6 symbol check).
+Non-transcript checks (U135 Rust and Swift tests, not transcripts): the probe count of the retry schedule (one at enable, none 9 s later, the next at 10 s); the probe never connects to Meguri's own socket (`port-in-use-*` with Meguri already listening on the other server's port); the launch path runs no probe or bind before the first open attempt ends (R1666); the store file of `store-newer-version` is unchanged byte for byte; a store that fails SQLite's quick check, and one that cannot be opened, are each renamed `meguri-integrations.db.corrupt-<UTC>` with the host's wall time (H21) in the name, a new store with the defaults is created, `config` returns the defaults, the status reports `store_error: "recreated"`, and after one valid apply `store_error` is null (H10.1; `servers/transcripts` T4.1 has no member that sets up a corrupt store); the host fuzz target of H9.4 runs 10 minutes clean; the status never lists an address outside `127.0.0.1` and `::1` across every scenario above; and on an iOS simulator build every operation of H20 returns `Unsupported` while the same generated bindings start the servers on the Mac (U6 symbol check).
 
 ## H18. Open questions
 
@@ -492,18 +509,18 @@ The host's operations in `core/crates/meguri-ffi/src/servers.rs`, identical on e
 
 | Operation | Input | Output | Errors |
 |---|---|---|---|
-| `servers_start` | `listener: HostEventListener`, `transcoder: AudioTranscoder` | none. Creates the process's one host on the engine session the FFI holds (H9.1), opens the store and reads the first snapshot (H10.3), registers the listener (events posted before are delivered then, H11.1) | `AlreadyStarted`, `NoEngine` (the FFI holds no engine session yet), `Unsupported` |
+| `servers_start` | `integrations_directory: String`, `listener: HostEventListener`, `transcoder: AudioTranscoder` | none. Creates the process's one host on the FFI runtime's collection source (H9.1). Swift calls it before its first open attempt, so the host sees that attempt end (H3); opens the store in `integrations_directory` (H10.1) and reads the first snapshot (H10.3); registers the listener (events posted before are delivered then, H11.1) | `AlreadyStarted`, `Internal` (the process engine could not be created, or the store could neither be opened nor recreated), `Unsupported` |
 | `servers_apply_config` | `document: String`, `api_key: Option<String>` | none (H10.3) | `InvalidConfig { member }`, `StoreReadOnly`, `NotStarted`, `Unsupported` |
 | `servers_config` | none | `String`: the current document, every default filled in, unknown members kept | `NotStarted`, `Unsupported` |
 | `servers_status` | none | `Vec<ServerStatus>`: AnkiConnect first, then Migaku | `NotStarted`, `Unsupported` |
 | `servers_revalidate` | none | none (H9.3) | `NotStarted`, `Unsupported` |
 | `servers_resolve_interaction` | `id: String`, `outcome: String` | `bool` (H11.2) | `NotStarted`, `Unsupported` |
 
-- `ServersError`: `Unsupported`, `NotStarted`, `AlreadyStarted`, `NoEngine`, `InvalidConfig { member: String }` (H10.3's dotted name, or `document`), `StoreReadOnly`, `Internal { message: String }` (an unexpected store failure; the message is for logs and holds no key or request content).
+- `ServersError`: `Unsupported`, `NotStarted`, `AlreadyStarted`, `InvalidConfig { member: String }` (H10.3's dotted name, or `document`), `StoreReadOnly`, `Internal { message: String }` (the process engine failed to start, or an unexpected store failure; the message is for logs and holds no key or request content). There is no error for a missing collection: the servers start and wait without one (H3).
 - `HostEventListener`: a callback interface with one method, `on_event(event: HostEvent)`, which returns at once (H11.1).
 - `HostEvent`: `StatusChanged { statuses: Vec<ServerStatus> }`; `ReceivedLogChanged`; `Received { row_id: i64, note_id: i64, deck: String }`; `ActivityAppended { entries: String }` (a JSON list of `servers/ankiconnect-envelope` E16 entries); `MediaIngestNotices { notices: String }` (a JSON list of `servers/ankiconnect-media` X11.9 notices); `InteractionRequest { id: String, kind: String, payload: String }`; `InteractionCancelled { id: String }`.
 - `ServerStatus`: `server: ServerKind` (`AnkiConnect`, `Migaku`), `state: ServerState` (`Off`, `WaitingForCollection`, `Binding`, `Listening`, `PortInUse`), `port: u16`, `addresses: Vec<String>`, `collection_available: bool`, `next_retry_at: Option<String>`, `store_error: Option<StoreError>` (`Newer`, `Recreated`), `migaku: Option<MigakuStatus>` (the record of `servers/migaku-protocol` P10.5, owned by U137). The values are H12's.
-- `AudioTranscoder`: the foreign trait of H11.3; its method is `servers/migaku-receive` P11's.
+- `AudioTranscoder`: the foreign trait of H11.3, with one method, `transcode(audio: Vec<u8>, target_lufs: f64, min_bitrate: u32) -> TranscodeOutcome`. `audio` is the item's bytes as read, `target_lufs` the target loudness in LUFS (for example `-20.0`), `min_bitrate` the minimum bit rate in bit/s (128,000). `TranscodeOutcome`: `Encoded { bytes: Vec<u8> }` (AAC audio in an MPEG-4 container) or `Failed { message: String }` (for the log only). The meaning of the call is `servers/migaku-receive` P11's.
 - On iPhone and iPad every operation returns `Unsupported` and changes nothing (H2); the callback interfaces exist and are never called.
 - Other units add their own operations to the same module: the profile and routing operations (`servers/migaku-routing` D2.3, U138), the received-log calls (`servers/migaku-received-log` L16, U140), the activity log and the agent snippet (`servers/ankiconnect-envelope` E16, E17, U141), and the external media folder (`servers/ankiconnect-media` X11.8, U143). Each returns `NotStarted` before `servers_start` and `Unsupported` on iPhone and iPad.
 
@@ -528,8 +545,8 @@ Rust tests and U136's testkit build the host directly, never through H20, with t
 
 | Parameter | Values | In the app |
 |---|---|---|
-| `collection` | a `CoreHost` session (`engine/host` H1) | the FFI's (H9.1) |
-| `store` | the path of the integrations store | Application Support (H10.1) |
+| `collection` | a collection source (H1): a process engine created with nothing open (`ProcessCore`), on which the test makes each open attempt (`servers/transcripts` T4.1 `start`, T7.3 `lifecycle: open`, `open_fail`), and the slot where it places the resulting `CoreHost`, or nothing after a failed open. The test builds the host before its first open attempt or after an attempt has ended, never while one runs (H3) | the FFI runtime's (H9.1) |
+| `store` | the integrations directory (H10.1) | `servers_start`'s `integrations_directory` |
 | `bind` | `Fixed` (H4 as written) or `Ephemeral` | `Fixed` |
 | `clock` | the system clock or a test clock (H21) | system |
 | `interactions` | the Swift channel or a `TestHost` | Swift |

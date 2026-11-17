@@ -1,0 +1,62 @@
+# servers/migaku-receive P24 `content-type` (declared, servers/transcripts T13).
+# P3: a text/plain body, a body with no Content-Type and a body with an extra
+# key are all read as the payload. Three texts, so no retry match.
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/content-type
+description: "the body is read as JSON whatever the Content-Type; unknown keys are ignored"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      body: {json: {targetWord: "Alpha", sentence: "Alpha."}}
+      headers:
+        - [Content-Type, text/plain]
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - http:
+      target: /receive
+      body: {json: {targetWord: "Beta", sentence: "Beta."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n2"}}
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Gamma", sentence: "Gamma.", zzz: 1}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n3"}}
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/db_dump/notes/#n1/flds": "Alpha.\u001f\u001fAlpha\u001f\u001f\u001f\u001f\u001f\u001f\u001fx\u001fx"
+        "/db_dump/notes/#n2/flds": "Beta.\u001f\u001fBeta\u001f\u001f\u001f\u001f\u001f\u001f\u001fx\u001fx"
+        "/db_dump/notes/#n3/flds": "Gamma.\u001f\u001fGamma\u001f\u001f\u001f\u001f\u001f\u001f\u001fx\u001fx"
+equivalence:
+  notes: ["#n1", "#n2", "#n3"]

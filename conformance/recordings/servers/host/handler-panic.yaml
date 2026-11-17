@@ -1,7 +1,7 @@
 # servers/host-security H17 `handler-panic` (declared, servers/transcripts T13):
 # a panic in one request's handler is caught: that request gets Migaku's 500 and its
-# connection closes; a concurrent request and later requests are served (H9.4, P8.2). `expect:
-# {replies: [...]}` on `parallel` is the T13 form proposed with this scenario.
+# connection closes; a concurrent request and later requests are served (H9.4, P8.2). The
+# `parallel` replies are checked with T13 `{replies: [...]}`.
 id: servers/host/handler-panic
 description: "caught handler panic: 500 for that request only"
 tags: [host]

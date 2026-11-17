@@ -1,7 +1,7 @@
 # servers/host-security H17 `pipelined` (declared, servers/transcripts T13):
 # two requests written back to back are answered in order on the same connection (H7.3).
-# `expect: {replies: [...]}` on `pipeline` is the T13 form proposed with this scenario. The
-# last ping, on a new connection, is the `http` exchange T3 requires.
+# The `pipeline` replies are checked with T13 `{replies: [...]}`. The last ping, on a new
+# connection, is the `http` exchange T3 requires.
 id: servers/host/pipelined
 description: "two pipelined pings, two replies in order"
 tags: [host]

@@ -1,0 +1,70 @@
+# servers/migaku-received-log L17 `supersede` (declared, servers/transcripts T13).
+# A card with sentenceAudio ids a and b fails with Meguri is busy (switch off):
+# Failed row #r1 with its payload. The same body, sent again once the
+# collection is ready, is not a retry (#r1 created no note, servers/migaku-receive
+# P12) and creates the note: row #r2 Created. Its retry key matches #r1's by
+# media (P12's key match), so #r1 and its payload are removed (L7).
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2). Profiles are servers/transcripts T5.1 values,
+# saved in list order on a new store, so the first has id 1; a profile without
+# field_map infers R1712's map (servers/migaku-routing D4). L16 calls are
+# `received` steps (T7.3), read in the JSON form of L16.1. No Origin, so
+# Access-Control-Allow-Origin is * (servers/migaku-protocol P6). All content is
+# synthetic.
+id: servers/migaku/moves/supersede
+description: "a successful receive removes the Failed row with the same retry key"
+tags: ["moves"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE", "DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - lifecycle: exclusive
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Hund[Hund,nn,m]", "sentence": "Der Hund.", "sentenceAudio": [{"id": "a", "input": "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}, {"id": "b", "input": "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29tAAAACA=="}]}}
+      async: b
+  - wait: 1s
+  - advance: 5s
+  - await: b
+    expect:
+      status: 400
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: false, error: "Meguri is busy"}}
+  - lifecycle: ready
+  - advance: 1m
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Hund[Hund,nn,m]", "sentence": "Der Hund.", "sentenceAudio": [{"id": "a", "input": "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}, {"id": "b", "input": "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29tAAAACA=="}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - received: {call: page, limit: 200}
+    expect:
+      output_at:
+        "/rows/0/id": "#r2"
+        "/rows/0/status": "Created"
+        "/rows/0/note": "#n1"
+        "/rows/1": null
+  - received: {call: row, row: "#r1"}
+    expect:
+      output: {error: not_found}

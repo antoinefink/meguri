@@ -1,0 +1,42 @@
+# servers/migaku-protocol P16 `srs-check-cloud-adopt`.
+# A CloudAdopt holding the long-operation slot before its exclusive phase leaves
+# the collection Available: ok is true. Once that CloudAdopt enters its exclusive
+# phase, ok is false (P1, P9; engine/lifecycle L5, L6). No Origin, so
+# Access-Control-Allow-Origin is * and no Vary (P6).
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/srs-check-cloud-adopt
+description: "srs-check while a CloudAdopt holds the slot: ok true, then false in its exclusive phase"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - lifecycle: cloud_adopt
+  - http:
+      method: GET
+      target: /srs-check
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {ok: true, version: "4"}}
+      within_ms: 200
+  - lifecycle: cloud_adopt_exclusive
+  - http:
+      method: GET
+      target: /srs-check
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {ok: false, version: "4"}}
+      within_ms: 200

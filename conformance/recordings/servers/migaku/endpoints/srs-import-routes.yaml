@@ -1,6 +1,7 @@
 # servers/migaku-protocol P16 `srs-import-routes`.
 # The three import routes answer 501; a body is read and ignored, and nothing
 # in the collection or the media folder changes (P11). No Origin, so Access-Control-Allow-Origin is * and no Vary (P6).
+# None of them writes a Recently received row (P11).
 # Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
 # oracle (P15). The integration is on, the collection Available, each request carries
 # the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
@@ -51,3 +52,6 @@ steps:
         vary: null
       body: {json: {success: false, error: "Importing into Migaku Memory is not supported by Meguri."}}
       no_effect: true
+  - received_log: {}
+    expect:
+      output: {rows: []}

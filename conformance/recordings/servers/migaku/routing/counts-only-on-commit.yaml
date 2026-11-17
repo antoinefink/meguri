@@ -1,0 +1,78 @@
+# servers/migaku-routing D15.1 `counts-only-on-commit` (declared, servers/transcripts T13).
+# A Spanish card (`perro[perro,n,m]` · `El perro.`: n 2, `el` 1) is routed to
+# Spanish `Auto`, then fails reading its used sentence audio item: its data URL
+# has no comma (servers/migaku-receive P8, P19). The failure changes nothing
+# (P2) and neither counts for Spanish nor sets the last route (D12). One minute
+# later an uncertain card goes to German (all counts 0, lowest id) by
+# `fallback_profile`; a counted failure would have sent it to Spanish.
+# Starting state of D15.1: profiles 1 German, 2 Spanish, 3 Japanese, saved
+# through D2.3 in that order (servers/transcripts T5.1), with D4's inferred
+# map and D5's defaults for their languages; routing state empty.
+# The uncertain card is D10.2's `streng` row (0 against 0, AE71).
+# No two requests with the same texts lie within 600 s, so none is a retry
+# (servers/migaku-receive P12). No Origin header (servers/migaku-protocol
+# P3.1, P6). All content is synthetic.
+id: servers/migaku/routing/counts-only-on-commit
+description: "a failed receive changes neither the received count nor the last route"
+tags: [routing]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["German::Mining", "Spanish::Mining", "Japanese::Mining"]
+  notetypes:
+    - name: Migaku German Custom
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - {name: Card 1, front: "{{Sentence}}", back: "{{Translation}}"}
+      css: ".card {font-size: 18px;}"
+    - name: Migaku Spanish Custom
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - {name: Card 1, front: "{{Sentence}}", back: "{{Translation}}"}
+      css: ".card {font-size: 18px;}"
+    - name: Migaku Japanese Custom
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - {name: Card 1, front: "{{Sentence}}", back: "{{Translation}}"}
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: German, language: de, notetype: Migaku German Custom, deck: "German::Mining", defaults: {Is Vocabulary Card: x, Is Audio Card: x}}
+    - {name: Spanish, language: es, notetype: Migaku Spanish Custom, deck: "Spanish::Mining", defaults: {Is Vocabulary Card: x, Is Audio Card: x}}
+    - {name: Japanese, language: ja, notetype: Migaku Japanese Custom, deck: "Japanese::Mining", defaults: {Is Audio Card: x}}
+  fallback: null
+  override: null
+steps:
+  - http:
+      method: POST
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "perro[perro,n,m]", sentence: "El perro.", sentenceAudio: [{id: m1, title: "", input: "data:audio/mpeg;base64", r2Url: null, uploadId: null}]}}
+    expect:
+      status: 400
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+      body: {json: {success: false, error: "Could not read sentenceAudio item 1: invalid data URL."}}
+      no_effect: true
+  - advance: 1m
+  - http:
+      method: POST
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "streng[streng,adj,|streng,adv,]", sentence: "Streng vertraulich."}}
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - received_log: {}
+    expect:
+      output:
+        rows:
+          - {endpoint: receive, status: Failed, profile: Spanish, decision: Auto, route: detected, detection: {language: es, confidence: confident}, note: null, error: "Could not read sentenceAudio item 1: invalid data URL."}
+          - {endpoint: receive, status: Created, profile: German, decision: Fallback, route: fallback_profile, detection: {language: null, confidence: uncertain}, note: "#n1", error: null}

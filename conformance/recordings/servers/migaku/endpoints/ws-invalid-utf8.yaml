@@ -1,0 +1,48 @@
+# servers/migaku-protocol P16 `ws-invalid-utf8`.
+# A text message whose bytes are not valid UTF-8 closes that socket with 1007;
+# another socket stays open and still answers a ping (P10.2). The frame is one
+# masked FIN text frame (81 82), mask key 01 02 03 04, payload C3 28 masked
+# (C2 2A): C3 28 is a lead byte followed by a byte that cannot continue it. No Origin.
+# The last step is a plain /srs-check: servers/transcripts T3 needs one http
+# exchange, and it shows the server still answers after the close.
+# Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
+# oracle (P15). The integration is on, the collection Available, each request carries
+# the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
+id: servers/migaku/endpoints/ws-invalid-utf8
+description: "a text message with invalid UTF-8 closes its socket with 1007, not the other"
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - ws_open:
+      name: a
+      target: /anki-connect
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+  - ws_open:
+      name: b
+      target: /anki-connect
+    expect:
+      status: 101
+      headers:
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+  - status: {until: {migaku: {extension_connected: true, open_sockets: 2, last_received_at: null}}, within_ms: 1000}
+  - ws_send: {name: a, frame: {base64: "gYIBAgMEwio="}}
+  - ws_expect: {name: a, frames: [{close: 1007}], within_ms: 1000}
+  - status: {until: {migaku: {extension_connected: true, open_sockets: 1, last_received_at: null}}, within_ms: 1000}
+  - ws_send: {name: b, ping: "p"}
+  - ws_expect: {name: b, frames: [{pong: "p"}], within_ms: 1000}
+  - http:
+      method: GET
+      target: /srs-check
+    expect:
+      status: 200
+      body: {json: {ok: true, version: "4"}}

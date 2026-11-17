@@ -26,6 +26,74 @@
           },
           "status": 200
         }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": null,
+              "result": ["<profile>"]
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "http://localhost",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": null,
+              "result": "<profile>"
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "http://localhost",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": null,
+              "result": false
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "http://localhost",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
+      },
+      {
+        "reply": {
+          "body": {
+            "json": {
+              "error": null,
+              "result": null
+            }
+          },
+          "closed": true,
+          "headers": {
+            "access-control-allow-headers": "*",
+            "access-control-allow-origin": "http://localhost",
+            "content-type": "application/json"
+          },
+          "status": 200
+        }
       }
     ]
   },
@@ -36,11 +104,11 @@
     },
     "anki_version": "26.9.3",
     "ankiconnect_lock_sha256": "db0b6e483d450f46150a9e80294f651a2b7ea4babda9af460e4e28df45e90561",
-    "driver_sha256": "d210262e36b9bea44268e57ec6c0a5b0d03cbab1ed2f66931f34ff7b50e5dfae",
+    "driver_sha256": "3156f4a44f53eeac44cc03a8952ae2c42c82606bcedf6602ac2a2b2d4da7ba40",
     "image": "meguri-oracle-ankiconnect:recorder",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "servers/ankiconnect/decks/names-ids",
-  "scenario_sha256": "c5d891d8d3975a436c9201dae153698e8ef7e3f9b2bbeb6479ab20c87cd6cd86",
+  "scenario_sha256": "02d39f03e874a093a0e1fce010100293a3e18ae8a0a46bb45e8cdaac8fbf3b07",
   "tz": "Europe/Paris"
 }

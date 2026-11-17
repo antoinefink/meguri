@@ -1,0 +1,67 @@
+# servers/migaku-received-log L17 `edited-default` (declared, servers/transcripts T13).
+# Is Audio Card of the received ES note is edited to empty in the editor. On
+# the move to DE (L12), the empty value differs from the ES default x, so it
+# stays empty; Is Vocabulary Card still equals the ES default and takes DE's x.
+# This is not servers/migaku-routing D5's fill of empty values. The T14 check
+# compares the moved note with Anki's add of the same fields.
+# Relies on two servers/transcripts T10.1 rules proposed with this file:
+# entities get tokens after every step, not only after exchanges (the move's
+# new note is the next #nN), and a note or card that an undo or redo restores
+# under its id takes back its retired token.
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1), T-Mining-ES
+# (#m8) with the same fields, and the decks DE (#d1), DE::Mining (#d2), ES
+# (#d3) and ES::Mining (#d4). Profiles are servers/transcripts T5.1 values,
+# saved in list order on a new store, so the first has id 1; a profile without
+# field_map infers R1712's map (servers/migaku-routing D4). L16 calls are
+# `received` steps (T7.3), read in the JSON form of L16.1. No Origin, so
+# Access-Control-Allow-Origin is * (servers/migaku-protocol P6). All content is
+# synthetic.
+id: servers/migaku/moves/edited-default
+description: "a flag the user cleared stays cleared after a move"
+tags: ["moves"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE", "DE::Mining", "ES", "ES::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+    - name: T-Mining-ES
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+    - {name: "ES", language: "es", notetype: "T-Mining-ES", deck: "ES::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "ES"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Hund[Hund,nn,m]", "sentence": "Der Hund.", "translation": "Alpha 2.", "definitions": "<p>Alpha 3.</p>", "sentenceAudio": [{"id": "s1", "input": "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - collection: {edit_note: {note: "#n1", fields: {"Is Audio Card": ""}}}
+  - received: {call: move, rows: ["#r1"], profile: 1, deck_only: false}
+    expect:
+      output: [{row: "#r1", result: full_move, new_note: "#n2", dropped_fields: []}]
+  - observe: [{db_dump: {tables: [notes]}}]
+    expect:
+      output_at:
+        "/db_dump/notes/#n2/flds": "Der Hund.\u001fAlpha 2.\u001fHund[Hund,nn,m]\u001f<p>Alpha 3.</p>\u001f\u001f[sound:s1.m4a]\u001f\u001f\u001f\u001fx\u001f"
+equivalence:
+  notes: ["#n2"]

@@ -1,7 +1,6 @@
 # servers/host-security H17 `port-refused-values` (declared, servers/transcripts T13):
 # ankiconnect.port outside 1024..65535, 44432 or not an integer is refused, naming the member;
-# nothing changes (H4.4, H10.3). `expect: {output: ...}` on a step without a reply is the T13
-# form proposed with this scenario (T13 lists no check for T7.3 outputs yet).
+# nothing changes (H4.4, H10.3). Step outputs are checked with T13 `output`.
 id: servers/host/port-refused-values
 description: "bad ports refused, server unchanged on 8765"
 tags: [host]

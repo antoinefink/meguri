@@ -1,7 +1,10 @@
 # specs/servers/ankiconnect-gui G12 `no-answer` (G2 rule 3, G8).
 # Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
 # Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3).
-# T13 has no expect form for an events output: the interaction cancelled event of the last step is not checked here.
+# The `events` step lists only the two interaction types: the timeout's reply also posts activity
+# appended, whose place relative to interaction cancelled H11.2 does not fix (servers/transcripts T7.3).
+# The request event carries G8's GuiBrowse payload; the cancelled event comes at the timeout, and a
+# later answer is not accepted (the last resolve returns false).
 id: servers/ankiconnect/gui/no-answer
 description: "a GUI interaction with no answer times out after 10 s"
 tags: [gui]
@@ -33,4 +36,11 @@ steps:
       status: 200
       headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
       body: {json: {result: null, error: "cannot navigate: Meguri did not respond"}}
-  - events: {}
+  - events: {types: [interaction_request, interaction_cancelled]}
+    expect:
+      output:
+        events:
+          - {type: interaction_request, id: i-1, kind: GuiBrowse, payload: {query: "deck:Lang"}}
+          - {type: interaction_cancelled, id: i-1}
+  - resolve: {id: i-1, outcome: done}
+    expect: {output: {resolved: false}}

@@ -1,10 +1,12 @@
 # servers/migaku-protocol P16 `ws-open-two`.
 # Each socket counts from its 101 until its connection ends; the Migaku status
 # block follows (P10.1, P10.5). The client closes each with 1000, which is echoed
-# (P10.4). The count of status events is not expressible (T7.3 events leaves them out).
-# ws_send close and ws_expect close values: {code, reason} sent, the code received,
-# null for a close frame with no status code (T7.3 names the members only).
+# (P10.4). Each of the four changes of open_sockets (1, 2, 1, 0) posts one status
+# event (P10.5); the first `events` step only empties the window of the events
+# posted while the host started.
 # EXT is the invented extension origin of P16.
+# The last step is a plain /srs-check: servers/transcripts T3 needs one http
+# exchange, and it shows the server still answers after the close.
 # Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
 # oracle (P15). The integration is on, the collection Available, each request carries
 # the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
@@ -14,7 +16,8 @@ server: migaku
 source: declared
 clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
 steps:
-  - status: {until: {migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}
+  - status: {until: {state: listening, migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}
+  - events: {include_status: true}
   - ws_open:
       name: a
       target: /anki-connect
@@ -45,3 +48,19 @@ steps:
   - ws_send: {name: b, close: {code: 1000}}
   - ws_expect: {name: b, frames: [{close: 1000}], within_ms: 1000}
   - status: {until: {migaku: {extension_connected: false, open_sockets: 0, last_received_at: null}}, within_ms: 1000}
+  - events: {types: [status_changed], include_status: true}
+    expect:
+      output_at:
+        /events/0/statuses/1/migaku/open_sockets: 1
+        /events/0/statuses/1/migaku/extension_connected: true
+        /events/1/statuses/1/migaku/open_sockets: 2
+        /events/2/statuses/1/migaku/open_sockets: 1
+        /events/3/statuses/1/migaku/open_sockets: 0
+        /events/3/statuses/1/migaku/extension_connected: false
+        /events/4: null
+  - http:
+      method: GET
+      target: /srs-check
+    expect:
+      status: 200
+      body: {json: {ok: true, version: "4"}}

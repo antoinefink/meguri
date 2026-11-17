@@ -1,18 +1,17 @@
 # servers/migaku-received-log C5 `repeated-field` (declared, servers/transcripts T13).
 # `version` occurs twice; the last occurrence counts (C1), so version is 2 and
-# the card is created: 200 {"id": <note id>} (C2 step 9), the note being #n1
-# (T10.1). The `id` member needs a T10.5 id position for Migaku replies (see the
-# session's proposals). The T14 equivalence check of #n1 compares the created
-# note (T-Mining in DE::Mining, its fields and tags) with Anki's add of the same
-# fields. That exactly one note was created has no check in T13 yet:
-# equivalence does not count notes.
+# the card is created: 200 {"id": <note id>} (C2 step 9, servers/transcripts
+# T10.5), the note being #n1. The dump and `logs` show exactly one note and one
+# row. The T14 equivalence check of #n1 compares the created note (T-Mining in
+# DE::Mining, its fields and tags) with Anki's add of the same fields.
 # The `card` value, before form encoding (C1: `+` is a space, then
-# percent-decoding): {"noteTypeId":<T>,"deckId":<D>,"fields":[{"name":"Sentence","content":"Alpha 1."},{"name":"Translation","content":"Alpha 2."}]}
-# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
-# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
-# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
-# transcript format has no step or setup section for profiles (see the session's
-# proposals), and nothing this scenario checks depends on one. No Origin, so
+# percent-decoding):
+# {"noteTypeId":<T>,"deckId":<D>,"fields":[{"name":"Sentence","content":"Alpha
+# 1."},{"name":"Translation","content":"Alpha 2."}]}
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2, C5's <D>), created in that order. No Migaku
+# profile is stored; nothing this scenario checks depends on one. No Origin, so
 # Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
 # P6). All content is synthetic.
 id: servers/migaku/create/repeated-field
@@ -47,5 +46,14 @@ steps:
         access-control-allow-methods: "POST, GET, OPTIONS"
         vary: null
       body: {json: {id: "#n1"}}
+  - observe: [{db_dump: {tables: [notes]}}]
+    expect:
+      output_at:
+        "/db_dump/notes/#n1/mid": "#m7"
+        "/db_dump/notes/#n2": null
+  - logs: {}
+    expect:
+      output_at:
+        "/received": 1
 equivalence:
   notes: ["#n1"]

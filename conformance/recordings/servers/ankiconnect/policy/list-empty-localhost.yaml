@@ -1,0 +1,53 @@
+# servers/ankiconnect-envelope E19.2 `policy/list-empty-localhost`: the localhost rule needs the http://localhost entry (E7.2 row 6 and its table's "Allow-list []" column).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# The cases of the rule that only Meguri has (https://localhost, a localhost port, https://127.0.0.1 with a port, E18) are refused too; policy/list-empty and policy/list-empty-127-port are the oracle's.
+id: servers/ankiconnect/policy/list-empty-localhost
+description: allow-list [] refuses every origin the localhost rule would allow
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {cors_origins: []}
+steps:
+  - http:
+      headers: [[Origin, "http://localhost"]]
+      body: {json: {action: version, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}
+  - http:
+      headers: [[Origin, "https://localhost"]]
+      body: {json: {action: version, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}
+  - http:
+      headers: [[Origin, "http://localhost:8080"]]
+      body: {json: {action: version, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}
+  - http:
+      headers: [[Origin, "http://127.0.0.1"]]
+      body: {json: {action: version, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}
+  - http:
+      headers: [[Origin, "https://127.0.0.1:8443"]]
+      body: {json: {action: version, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}
+  - http:
+      headers: [[Origin, "safari-web-extension://x"]]
+      body: {json: {action: version, version: 6}}
+    expect:
+      status: 403
+      headers: {content-type: null, content-length: "0", access-control-allow-origin: null, access-control-allow-headers: null}
+      body: {empty: true}

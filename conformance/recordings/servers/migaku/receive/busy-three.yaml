@@ -1,0 +1,101 @@
+# servers/migaku-receive P24 `busy-three` (declared, servers/transcripts T13).
+# Three bodies arrive at 0, 1 and 2 s during an exclusive phase. Each gets the
+# pending reply at its own 5 s mark (5, 6 and 7 s). After Ready they commit in
+# arrival order (P13, P15), so their note ids follow that order: #n1 is Alpha,
+# #n2 Beta, #n3 Gamma. The sentinel commits after them.
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/busy-three
+description: "switch on: three busy requests drain in arrival order"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+host_env: {migaku_pending_switch: true}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - lifecycle: exclusive
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Alpha", sentence: "Alpha."}}
+      async: a
+  - wait: 1s
+  - advance: 1s
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Beta", sentence: "Beta."}}
+      async: b
+  - wait: 1s
+  - advance: 1s
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Gamma", sentence: "Gamma."}}
+      async: c
+  - wait: 1s
+  - advance: 3s
+  - await: a
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: false}}
+  - advance: 1s
+  - await: b
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: false}}
+  - advance: 1s
+  - await: c
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: false}}
+  - advance: 3s
+  - lifecycle: ready
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Omega", sentence: "Omega omega."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n4"}}
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/db_dump/notes/#n1/flds": "Alpha.\u001f\u001fAlpha\u001f\u001f\u001f\u001f\u001f\u001f\u001fx\u001fx"
+        "/db_dump/notes/#n2/flds": "Beta.\u001f\u001fBeta\u001f\u001f\u001f\u001f\u001f\u001f\u001fx\u001fx"
+        "/db_dump/notes/#n3/flds": "Gamma.\u001f\u001fGamma\u001f\u001f\u001f\u001f\u001f\u001f\u001fx\u001fx"
+  - received_log: {}
+    expect:
+      output_at:
+        "/rows/0/note": "#n1"
+        "/rows/1/note": "#n2"
+        "/rows/2/note": "#n3"
+        "/rows/3/note": "#n4"
+        "/rows/4": null
+equivalence:
+  notes: ["#n1", "#n2", "#n3", "#n4"]

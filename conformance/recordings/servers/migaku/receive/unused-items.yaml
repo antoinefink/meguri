@@ -1,0 +1,48 @@
+# servers/migaku-receive P24 `unused-items` (declared, servers/transcripts T13).
+# Profile DE maps no field to images, firstImage or restImages, so no image is
+# used (P6): the 404 URL, the item without src and the item with only r2Url
+# fail nothing and leave no file (P4). That the fixture server saw no request
+# is checked in Meguri's own tests (P24).
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/unused-items
+description: "items the profile does not use are never read"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+  http_fixtures:
+    - {path: /a, content_type: audio/mp4, text: "\u0000\u0000\u0000\u0018ftypM4A \u0000\u0000\u0000\u0000M4A isom"}
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}, field_map: {Sentence: "sentence", Translation: "translation", "Target Word": "targetWord", Definitions: "definitions", Screenshot: "none", "Sentence Audio": "sentenceAudio", "Word Audio": "wordAudio", Images: "none", "Example Sentences": "exampleSentences"}}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund", sentence: "Der Hund.", images: [{id: "u1", src: "${fixture_base}/b"}, {id: "u2"}, {id: "u3", r2Url: "https://example.invalid/x"}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/media_dir": {}
+equivalence:
+  notes: ["#n1"]

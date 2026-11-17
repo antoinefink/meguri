@@ -1,0 +1,82 @@
+# servers/migaku-received-log L17 `ae74-reviewed` (declared, servers/transcripts T13).
+# The card received into ES is reviewed once (a `collection` answer, as review
+# would), so its note has review history: eligibility for DE is "deck move
+# only" with L10's reason. A move that does not accept deck-only skips the row
+# and changes nothing (L13: no step when no row moves). Accepted, the card goes
+# to DE::Mining (L11) and the note keeps its id and note type T-Mining-ES.
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1), T-Mining-ES
+# (#m8) with the same fields, and the decks DE (#d1), DE::Mining (#d2), ES
+# (#d3) and ES::Mining (#d4). Profiles are servers/transcripts T5.1 values,
+# saved in list order on a new store, so the first has id 1; a profile without
+# field_map infers R1712's map (servers/migaku-routing D4). L16 calls are
+# `received` steps (T7.3), read in the JSON form of L16.1. No Origin, so
+# Access-Control-Allow-Origin is * (servers/migaku-protocol P6). All content is
+# synthetic.
+id: servers/migaku/moves/ae74-reviewed
+description: "a reviewed card can change only its deck"
+tags: ["moves"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE", "DE::Mining", "ES", "ES::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+    - name: T-Mining-ES
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+    - {name: "ES", language: "es", notetype: "T-Mining-ES", deck: "ES::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "ES"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Hund[Hund,nn,m]", "sentence": "Der Hund.", "translation": "Alpha 2.", "definitions": "<p>Alpha 3.</p>", "sentenceAudio": [{"id": "s1", "input": "data:audio/mp4;base64,AAAAGGZ0eXBNNEEgAAAAAE00QSBpc29t"}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - collection: {answer: {card: "#c1", rating: good}}
+  - received: {call: move_eligibility, rows: ["#r1"], profile: 1}
+    expect:
+      output: [{row: "#r1", eligibility: deck_move_only, reason: "This card has review history, so only its deck can change."}]
+  - received: {call: move, rows: ["#r1"], profile: 1, deck_only: false}
+    expect:
+      output: [{row: "#r1", result: skipped, reason: "This card has review history, so only its deck can change."}]
+  - received: {call: row, row: "#r1"}
+    expect:
+      output_at:
+        "/status": "Created"
+        "/decision": "Override"
+  - received: {call: move, rows: ["#r1"], profile: 1, deck_only: true}
+    expect:
+      output: [{row: "#r1", result: deck_move}]
+  - observe: [{db_dump: {tables: [notes, cards]}}]
+    expect:
+      output_at:
+        "/db_dump/notes/#n1/mid": "#m8"
+        "/db_dump/notes/#n2": null
+        "/db_dump/cards/#c1/nid": "#n1"
+        "/db_dump/cards/#c1/did": "#d2"
+  - received: {call: row, row: "#r1"}
+    expect:
+      output_at:
+        "/status": "Moved"
+        "/decision": "Manual"
+        "/note": "#n1"
+        "/profile/name": "DE"

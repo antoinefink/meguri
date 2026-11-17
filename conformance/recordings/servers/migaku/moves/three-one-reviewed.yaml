@@ -1,0 +1,118 @@
+# servers/migaku-received-log L17 `three-one-reviewed` (declared, servers/transcripts T13).
+# Three cards received into ES one second apart; the second is reviewed. One
+# move of all three to DE without deck-only: rows are handled in the order
+# given, so #r1 and #r3 get full moves (new notes #n4 and #n5, in that order)
+# and #r2 is skipped with L10's reason (L13). The whole call is one undo step,
+# `move_received_card` (L13, conformance/undo-ops V4), and one undo restores
+# both moved rows. Pages are newest first (L6).
+# Relies on two servers/transcripts T10.1 rules proposed with this file:
+# entities get tokens after every step, not only after exchanges (the move's
+# new note is the next #nN), and a note or card that an undo or redo restores
+# under its id takes back its retired token.
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1), T-Mining-ES
+# (#m8) with the same fields, and the decks DE (#d1), DE::Mining (#d2), ES
+# (#d3) and ES::Mining (#d4). Profiles are servers/transcripts T5.1 values,
+# saved in list order on a new store, so the first has id 1; a profile without
+# field_map infers R1712's map (servers/migaku-routing D4). L16 calls are
+# `received` steps (T7.3), read in the JSON form of L16.1. No Origin, so
+# Access-Control-Allow-Origin is * (servers/migaku-protocol P6). All content is
+# synthetic.
+id: servers/migaku/moves/three-one-reviewed
+description: "three rows in one move: two full moves, one skipped, one undo step"
+tags: ["moves"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE", "DE::Mining", "ES", "ES::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+    - name: T-Mining-ES
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+    - {name: "ES", language: "es", notetype: "T-Mining-ES", deck: "ES::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "ES"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Hund[Hund,nn,m]", "sentence": "Der Hund.", "translation": "Alpha 2."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - advance: 1s
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Katze[Katze,nn,f]", "sentence": "Die Katze.", "translation": "Beta 2."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n2"}}
+  - advance: 1s
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {"targetWord": "Hahn[Hahn,nn,m]", "sentence": "Der Hahn kräht.", "translation": "Gamma 2."}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n3"}}
+  - collection: {answer: {card: "#c2", rating: good}}
+  - advance: 1m
+  - received: {call: move, rows: ["#r1", "#r2", "#r3"], profile: 1, deck_only: false}
+    expect:
+      output: [{row: "#r1", result: full_move, new_note: "#n4", dropped_fields: []}, {row: "#r2", result: skipped, reason: "This card has review history, so only its deck can change."}, {row: "#r3", result: full_move, new_note: "#n5", dropped_fields: []}]
+  - observe: [undo_status]
+    expect:
+      output: {undo_status: {undo: move_received_card, redo: null}}
+  - received: {call: page, limit: 200}
+    expect:
+      output_at:
+        "/rows/0/id": "#r3"
+        "/rows/0/status": "Moved"
+        "/rows/0/note": "#n5"
+        "/rows/1/id": "#r2"
+        "/rows/1/status": "Created"
+        "/rows/1/decision": "Override"
+        "/rows/2/id": "#r1"
+        "/rows/2/status": "Moved"
+        "/rows/2/note": "#n4"
+        "/rows/3": null
+  - collection: {undo: {}}
+  - received: {call: page, limit: 200}
+    expect:
+      output_at:
+        "/rows/0/status": "Created"
+        "/rows/0/note": "#n3"
+        "/rows/0/decision": "Manual"
+        "/rows/1/status": "Created"
+        "/rows/1/note": "#n2"
+        "/rows/2/status": "Created"
+        "/rows/2/note": "#n1"
+        "/rows/2/decision": "Manual"
+  - observe: [{db_dump: {tables: [notes]}}]
+    expect:
+      output_at:
+        "/db_dump/notes/#n4": null
+        "/db_dump/notes/#n5": null
+        "/db_dump/notes/#n1/mid": "#m8"
+        "/db_dump/notes/#n3/mid": "#m8"

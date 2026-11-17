@@ -1,0 +1,54 @@
+# servers/migaku-received-log C5 `filtered-deck` (declared, servers/transcripts T13).
+# The note type exists and deckId 900 names a filtered deck: 400 `Deck 900 is a
+# filtered deck.` in the error shape (C2 step 3, L18 Q5), since the cards could
+# not go to exactly that deck. No row. The filtered deck is a `decks` row
+# inserted with db_exec before the request, as conformance/deck-ops K13 says:
+# fixed id 900 (below 1,000,000, so no token, T10.1, and the message names it
+# as is), a rescheduling filtered deck with the search deck:x.
+# The `card` value, before form encoding:
+# {"noteTypeId":<T>,"deckId":900,"fields":[{"name":"Sentence","content":"Alpha
+# 1."},{"name":"Translation","content":"Alpha 2."}]}
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2, C5's <D>), created in that order. No Migaku
+# profile is stored; nothing this scenario checks depends on one. No Origin, so
+# Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
+# P6). All content is synthetic.
+id: servers/migaku/create/filtered-deck
+description: "a deckId that names a filtered deck is refused"
+tags: [create]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [DE, "DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+steps:
+  - collection: {db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}}
+  - http:
+      method: POST
+      target: /create
+      headers:
+        - [Content-Type, application/x-www-form-urlencoded]
+      body: {text: "version=2&card=%7B%22noteTypeId%22%3A${#m7}%2C%22deckId%22%3A900%2C%22fields%22%3A%5B%7B%22name%22%3A%22Sentence%22%2C%22content%22%3A%22Alpha+1.%22%7D%2C%7B%22name%22%3A%22Translation%22%2C%22content%22%3A%22Alpha+2.%22%7D%5D%7D"}
+    expect:
+      status: 400
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+        access-control-allow-headers: "access-control-allow-origin,content-type"
+        access-control-allow-methods: "POST, GET, OPTIONS"
+        vary: null
+      body: {json: {success: false, error: "Deck 900 is a filtered deck."}}
+      no_effect: true
+  - logs: {}
+    expect:
+      output_at:
+        "/received": 0

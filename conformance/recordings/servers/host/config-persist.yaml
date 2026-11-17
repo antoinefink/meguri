@@ -2,9 +2,8 @@
 # the config is kept in the integrations store, not the collection: it survives a host restart
 # and neither step changes the collection (H10.1, H10.3). The full document is H10.2's
 # defaults with the two applied values; media_dir is the executor's default folder
-# (servers/transcripts T4, T10.3). The ping on 8800 is the exchange T3 requires. `expect:
-# {output: ...}` on a step without a reply is the T13 form proposed with this scenario (T13
-# lists no check for T7.3 outputs yet).
+# (servers/transcripts T4, T10.3). The ping on 8800 is the exchange T3 requires. Step
+# outputs are checked with T13 `output`.
 id: servers/host/config-persist
 description: "config survives a host restart; the collection is untouched"
 tags: [host]

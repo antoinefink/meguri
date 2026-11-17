@@ -1,0 +1,22 @@
+# servers/ankiconnect-envelope E19.2 `policy/permission-allow-lists`: the config document after Allow (E9 outcome table, E9.1).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+id: servers/ankiconnect/policy/permission-allow-lists
+description: Allow appends the origin to the allow-list and leaves the deny-list as it was
+tags: [policy]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+steps:
+  - permission: {answer: allow}
+  - http:
+      headers: [[Origin, "https://site.example"]]
+      body: {json: {action: requestPermission, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
+      body: {json: {result: {permission: granted, requireApikey: false, version: 6}, error: null}}
+  - config: {}
+    expect:
+      output_at:
+        /config/ankiconnect/cors_origins: ["http://localhost", "https://site.example"]
+        /config/ankiconnect/deny_origins: []

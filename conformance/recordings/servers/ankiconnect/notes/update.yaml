@@ -1,6 +1,7 @@
 # specs/servers/ankiconnect-actions A20.3 `update` (A8.1 to A8.5). The clock
 # moves 1m first so that a write shows as `mod` @60 and no write as @0; step 2
-# dumps the note after the case-sensitive miss of step 1.
+# dumps the note after the case-sensitive miss of step 1. Step 8: a missing
+# note with neither `fields` nor `tags` (A8.2's order).
 id: servers/ankiconnect/notes/update
 description: updateNoteFields, updateNote and notesModTime
 tags: [no-origin]
@@ -32,4 +33,6 @@ steps:
       body: {json: {action: notesModTime, version: 6, params: {notes: ["#n1", 5]}}}
   - http:
       body: {json: {action: updateNoteFields, version: 6, params: {note: {id: 5, fields: {}}}}}
+  - http:
+      body: {json: {action: updateNote, version: 6, params: {note: {id: 5}}}}
   - observe: [{db_dump: {tables: [notes, cards]}}, media_dir]

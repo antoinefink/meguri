@@ -1,0 +1,96 @@
+# servers/migaku-routing D15.1 `fallback-not-last-route` (declared, servers/transcripts T13).
+# `Fallback` commits never move the last route (D12). Fallback choice Spanish
+# (profile 2). A German card commits `Auto` at 08:00. At 09:30 the last route
+# is 90 minutes old, so an uncertain card commits to Spanish as `Fallback`,
+# `fallback_profile`. At 09:45 the fallback choice becomes Japanese (profile
+# 3). At 10:00 the same uncertain card (30 minutes later: no retry) goes to
+# Japanese by `fallback_profile`; had the 09:30 commit moved the last route,
+# it would have gone to Spanish by `recent`.
+# Starting state of D15.1: profiles 1 German, 2 Spanish, 3 Japanese, saved
+# through D2.3 in that order (servers/transcripts T5.1), with D4's inferred
+# map and D5's defaults for their languages; routing state empty.
+# The German card `Hund[Hund,nn,m]` · `Der Hund.` scores German 3, Spanish 0
+# (D10: nn 2, `der` 1), so it commits `Auto`, `detected`.
+# The uncertain card is D10.2's `streng` row (0 against 0, AE71).
+# No two requests with the same texts lie within 600 s, so none is a retry
+# (servers/migaku-receive P12). No Origin header (servers/migaku-protocol
+# P3.1, P6). All content is synthetic.
+id: servers/migaku/routing/fallback-not-last-route
+description: "a Fallback commit does not become the last route"
+tags: [routing]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T08:00:00"}
+setup:
+  decks: ["German::Mining", "Spanish::Mining", "Japanese::Mining"]
+  notetypes:
+    - name: Migaku German Custom
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - {name: Card 1, front: "{{Sentence}}", back: "{{Translation}}"}
+      css: ".card {font-size: 18px;}"
+    - name: Migaku Spanish Custom
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - {name: Card 1, front: "{{Sentence}}", back: "{{Translation}}"}
+      css: ".card {font-size: 18px;}"
+    - name: Migaku Japanese Custom
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - {name: Card 1, front: "{{Sentence}}", back: "{{Translation}}"}
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: German, language: de, notetype: Migaku German Custom, deck: "German::Mining", defaults: {Is Vocabulary Card: x, Is Audio Card: x}}
+    - {name: Spanish, language: es, notetype: Migaku Spanish Custom, deck: "Spanish::Mining", defaults: {Is Vocabulary Card: x, Is Audio Card: x}}
+    - {name: Japanese, language: ja, notetype: Migaku Japanese Custom, deck: "Japanese::Mining", defaults: {Is Audio Card: x}}
+  fallback: Spanish
+  override: null
+steps:
+  - http:
+      method: POST
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund[Hund,nn,m]", sentence: "Der Hund."}}
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - advance: 1h30m
+  - http:
+      method: POST
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "streng[streng,adj,|streng,adv,]", sentence: "Streng vertraulich."}}
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+      body: {json: {success: true, created: true, id: "#n2"}}
+  - advance: 15m
+  - routing: {set_fallback: 3}
+  - advance: 15m
+  - http:
+      method: POST
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "streng[streng,adj,|streng,adv,]", sentence: "Streng vertraulich."}}
+    expect:
+      status: 200
+      headers:
+        content-type: "application/json; charset=UTF-8"
+        access-control-allow-origin: "*"
+      body: {json: {success: true, created: true, id: "#n3"}}
+  - received_log: {}
+    expect:
+      output:
+        rows:
+          - {endpoint: receive, status: Created, profile: German, decision: Auto, route: detected, detection: {language: de, confidence: confident}, note: "#n1", error: null}
+          - {endpoint: receive, status: Created, profile: Spanish, decision: Fallback, route: fallback_profile, detection: {language: null, confidence: uncertain}, note: "#n2", error: null}
+          - {endpoint: receive, status: Created, profile: Japanese, decision: Fallback, route: fallback_profile, detection: {language: null, confidence: uncertain}, note: "#n3", error: null}

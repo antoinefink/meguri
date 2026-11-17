@@ -3,7 +3,7 @@
 Spec: servers/ankiconnect-envelope
 Requirements: R1734, R1735, R1736, R1737, R1738, R1739, R1740, R1741, R1742, R1743, R1744, R1745, R1746, R1747, R1748, R1749, R1750, R1751, R1752, R1753, R1775, R1779, R1780, R1781, R1790 (one action, one op), R1797; AE75, AE76, AE77; supports R1659, R1679, R1795
 Anki: 26.09.3
-Scenarios: conformance/recordings/servers/ankiconnect/{envelope,policy,multi}/ (`servers/transcripts` T2; ids `servers/ankiconnect/<dir>/<name>`): 74 oracle transcripts with their goldens (envelope 30, policy 28, multi 16) and 37 declared scenarios (`servers/transcripts` T13; envelope 6, policy 24, multi 7). E19 lists every row as a request and reply table and says which rows are not transcripts.
+Scenarios: conformance/recordings/servers/ankiconnect/{envelope,policy,multi}/ (`servers/transcripts` T2; ids `servers/ankiconnect/<dir>/<name>`): 75 oracle transcripts with their goldens (envelope 30, policy 29, multi 16) and 40 declared scenarios (`servers/transcripts` T13; envelope 6, policy 27, multi 7). E19 lists every row as a request and reply table and says which rows are not transcripts.
 
 What the AnkiConnect-compatible server on the AnkiConnect port (default 8765) does with one HTTP request before and after an action runs: the request and reply envelope, API versions, the ping, origin gating and CORS, the API key, `requestPermission`, `apiReflect`, `multi`, read-only mode, the collection wait, the action registry, the activity log and the connection snippet for agents.
 
@@ -455,6 +455,17 @@ The other R1738 strings (`model was not found: <name>`, `deck was not found: <na
 - Each added entry is posted to the app in the host event "activity appended" (`servers/host-security` H11.1), whose payload is the list of entries added since the previous such event, in the order added, each in the shape above.
 - While "Keep log" (`ankiconnect.keep_log`) is off, the default, the log lives only in memory and is empty at the next launch. While it is on, each entry is also written to the integrations store, in a table that U141's migration adds (`servers/host-security` H10.1) holding the members above, and the newest 1,000 are loaded at launch. Turning it on writes the entries already in memory to the store at once. Turning it off deletes the stored entries; the in-memory log stays until quit.
 
+### E16.1 Calls
+
+The FFI operation U144 uses to read the log (U141, `core/crates/meguri-ffi/src/servers.rs`, `servers/host-security` H20). It returns at once, `NotStarted` before `servers_start` and `Unsupported` on iPhone and iPad.
+
+| Operation | Input | Output | Errors |
+|---|---|---|---|
+| `servers_activity_log` | none | `String`: a JSON list of every entry the in-memory log holds when the call runs (at most 1,000), in the order added (`seq` ascending), each in the shape above | `NotStarted`, `Unsupported` |
+
+- The entries loaded from the store at launch (Keep log on) are in the log from `servers_start` on, but no "activity appended" event carries them: Swift reads the whole log with this call once its listener is registered, then adds the entries of each later event. An entry found both in the call's result and in an event has the same `seq`; Swift keeps one copy per `seq`.
+- There is no call that clears the log. Turning Keep log off (an apply, `servers/host-security` H10.3) deletes the stored entries, as above.
+
 ## E17. Connection info for agents (R1781)
 
 The core builds the Markdown snippet that "Copy connection info for agents" copies, from the current settings and the registry. Its lines, in order (`<…>` filled in):
@@ -477,6 +488,16 @@ The core builds the Markdown snippet that "Copy connection info for agents" copi
 - The media line depends on whether `ankiconnect.media_dir` is set (`servers/host-security` H10.2, `servers/ankiconnect-media` X1, X8), read when the snippet is built.
 - The snippet is an English, user-facing string assembled by the core; its wording may change without a spec change, but the facts listed (endpoint, version 6, key requirement, read-only state, the action names, the three notes) must be present.
 
+### E17.1 Calls
+
+The FFI operation behind "Copy connection info for agents" (U141, `core/crates/meguri-ffi/src/servers.rs`, `servers/host-security` H20). It returns at once, `NotStarted` before `servers_start` and `Unsupported` on iPhone and iPad.
+
+| Operation | Input | Output | Errors |
+|---|---|---|---|
+| `servers_agent_snippet` | none | `String`: the snippet above, built when the call runs from the config snapshot then current (port, key set as E8 defines it, read-only mode, `ankiconnect.media_dir`) and the registry | `NotStarted`, `Unsupported` |
+
+- Swift copies the string to the pasteboard as it is; it adds and changes nothing (U144).
+
 ## E18. Differences from AnkiConnect
 
 Each needs an entry in `conformance/deviations.yaml` once the transcripts exist (U136), naming the test that asserts Meguri's behavior.
@@ -493,12 +514,12 @@ Each needs an entry in `conformance/deviations.yaml` once the transcripts exist 
 | an `Origin` header line without a space after the colon (`Origin:` with nothing after it, `Origin:https://evil.example`) | the line is not read (`servers/host-security` H16), so the request counts as having no `Origin`: it is served, `requestPermission` is granted with no prompt, and `Access-Control-Allow-Origin` is `http://localhost` (observed); a value after two spaces keeps one leading space and matches no entry (observed: `Origin:  http://localhost` gets 403) | the header is read as HTTP defines it, without the white space around the value: `Origin:` is an empty `Origin` (E7.2 row 3) and `Origin:https://evil.example` is that origin | R1744, R1677 |
 | `requestPermission` with `Origin: null` while the allow-list holds `*` | granted | denied, no prompt (E9 row 3) | R1744 |
 | JSON tokens `NaN`, `Infinity`, `-Infinity`, and nesting deeper than 128 levels | accepted by its decoder | `invalid request: the body is not valid JSON` | R1734 |
-| sub-action check order | key, then action lookup, then the call (a bad `version` or `params` shows only when the action runs) | `version` and `params` first (E11 row 1), then key and lookup | R1752 |
+| sub-action check order | key, then action lookup, then the call: a `params` that is not an object fails its slot; `version` is checked only after the call (row "sub-action with a non-integer `version`") | `version` and `params` first (E11 row 1), then key and lookup | R1752 |
 | `key` other than `null` sent while no key is configured (`""`, `false` and `0` included) | `valid api key must be provided` | ignored | R1747 |
 | unknown `params` members (also on `requestPermission`, before any prompt) | error (unexpected keyword argument) | ignored | R1740 |
 | texts of envelope and parameter errors (E15.2) | language runtime messages | Meguri's strings | R1737, R1740 |
 | non-string item in `apiReflect` `actions` while `scopes` holds `actions` | language runtime error text | `actions has invalid value` | R1751 |
-| sub-action with a non-integer `version` | the action runs, then the reply fails | refused before it runs | R1752 |
+| sub-action with a non-integer `version` | the action runs and its changes stay; then a value that cannot be compared with 4 (a string, `null`, a list, an object) fails its slot with a language runtime error text, while a boolean and a number with a fraction are compared with 4 by value (`true` as 1, `false` as 0): at most 4 gives a bare result, more a wrapped one (observed: `"6"` on `createDeck` failed the slot and the deck existed; `true` and `3.5` bare, `6.5` wrapped) | refused before it runs | R1752 |
 | non-object element of `multi`'s `actions` | whole call fails, runtime text, after the elements before it ran (their changes stay) | whole call fails, `invalid parameter: actions`; nothing runs | R1753 |
 | `requestPermission` inside `multi` | fails with a missing-argument text | `requestPermission cannot be used inside multi` | R1749 |
 | E12.4 actions | implemented | `unsupported action` | R1775 |
@@ -558,7 +579,7 @@ Written: the 30 `Rec.` rows are oracle scenarios with their goldens next to them
 
 ### E19.2 `policy/`
 
-Written: the 28 `Rec.` rows are oracle scenarios with their goldens next to them; 24 of the `Meguri` rows are declared scenarios. `permission-coalesced`, `permission-bad-outcome` and `permission-apply-race` resolve the prompt by the id `i-1`: they rely on `servers/host-security` H11.2 numbering the interactions of each host built from 1, with one host per scenario (`servers/transcripts` T20). Not written: `permission-allow-lists` and `permission-deny-ignore-lists` need a partial match on the `config` output, which `servers/transcripts` T13 does not have yet (until it does, U141 tests them); `permission-closed-waiter` is a U141 test (E19.4). `permission-empty-origin` leaves ACAO unchecked until the open question on E7.3 row 6 is settled.
+Written: the 29 `Rec.` rows are oracle scenarios with their goldens next to them; 27 of the `Meguri` rows are declared scenarios. `permission-timeout`, `permission-coalesced`, `permission-coalesced-timeout`, `permission-bad-outcome` and `permission-apply-race` name the prompt by the id `i-1` (and `permission-timeout` its second prompt by `i-2`): they rely on `servers/host-security` H11.2 numbering the interactions of each host built from 1, with one host per scenario (`servers/transcripts` T20). `permission-timeout`, `permission-coalesced` and `permission-coalesced-timeout` check the `PermissionPrompt` interaction itself with an `events` step (`servers/transcripts` T7.3): its kind, its payload `{"origin": ...}`, and whether and how often it was cancelled. `permission-allow-lists` and `permission-deny-ignore-lists` read the lists with a `config` step and `output_at` (T13). Not written: `permission-closed-waiter` is a U141 test (E19.4). `permission-empty-origin` leaves ACAO unchecked until the open question on E7.3 row 6 is settled.
 
 | Id | Setup and request | Reply | Kind |
 |---|---|---|---|
@@ -572,6 +593,8 @@ Written: the 28 `Rec.` rows are oracle scenarios with their goldens next to them
 | `origin-localhost-port` | `Origin: http://localhost:8080`, `deckNames` v6 | 200, ACAO echoed | Meguri (E18) |
 | `origin-127-junk-port` | `Origin: http://127.0.0.1:x`, `deckNames` v6 | 403 | Meguri (E18) |
 | `list-empty` | allow-list `[]`; `Origin: chrome-extension://abc` | 403 | Rec. (headers) |
+| `list-empty-127-port` | allow-list `[]`; `Origin: http://127.0.0.1:3000`; `version` v6 | 403 | Rec. (headers) |
+| `list-empty-localhost` | allow-list `[]`; `version` v6 from each of `http://localhost`, `https://localhost`, `http://localhost:8080`, `http://127.0.0.1`, `https://127.0.0.1:8443`, `safari-web-extension://x` | 403, empty body, no CORS headers, each (E7.2 row 6 needs the `http://localhost` entry, also for the cases only Meguri's rule has) | Meguri (E18) |
 | `list-empty-no-origin` | allow-list `[]`; no `Origin` | 200 | Rec. (ACAO) |
 | `list-star` | allow-list `["*"]`; `Origin: https://evil.example` | 200, ACAO `*` | Rec. |
 | `list-star-null` | allow-list `["*"]`; `Origin: null` | 403 | Meguri (E18) |
@@ -594,12 +617,12 @@ Written: the 28 `Rec.` rows are oracle scenarios with their goldens next to them
 | `permission-empty-origin` | `Origin: ` (one space after the colon, then nothing); `requestPermission` v6 | `{"result": {"permission": "denied"}, "error": null}`, no prompt | Meguri (E18) |
 | `permission-params` | `Origin: https://site.example`; `requestPermission` v6 with `params: {"x": 1}`; test host answers Allow | granted | Meguri (E18) |
 | `permission-allow` | `Origin: https://site.example`; `permission: allow`; `requestPermission` v6; then `deckNames` v6 from it | granted; then 200 `["Default"]`, ACAO `https://site.example` | Rec. |
-| `permission-allow-lists` | as `permission-allow`, then a `config` step (`servers/transcripts` T7.3) | the allow-list ends with `https://site.example`; the deny-list is unchanged | Meguri (Meguri's config document) |
+| `permission-allow-lists` | as the `requestPermission` of `permission-allow`, then a `config` step (`servers/transcripts` T7.3) | granted; the allow-list is `["http://localhost", "https://site.example"]`; the deny-list stays `[]` | Meguri (Meguri's config document) |
 | `permission-deny-ignore` | `Origin: https://site.example`; `permission: deny_ignore`; `requestPermission` v6; then `requestPermission` again with no scripted answer | both `{"permission": "denied"}`; the second raises no prompt (a prompt would be a run error, T7.2) | Rec. |
-| `permission-deny-ignore-lists` | as `permission-deny-ignore`, then a `config` step | the deny-list holds the origin (AE76); the allow-list is unchanged | Meguri (Meguri's config document) |
+| `permission-deny-ignore-lists` | as the first `requestPermission` of `permission-deny-ignore`, then a `config` step | denied; the deny-list is `["https://site.example"]` (AE76); the allow-list stays `["http://localhost"]` | Meguri (Meguri's config document) |
 | `permission-deny` | `Origin: https://site.example`; `permission: deny` before each of two `requestPermission` v6 | both denied; each consumed its scripted answer, so the second raised a prompt of its own (T7.2) | Rec. |
-| `permission-timeout` | no outcome; injected clock passes 120 s | denied; prompt removed; lists unchanged | Meguri |
-| `permission-coalesced` | two `requestPermission` from one origin at once; Allow | one prompt; both granted | Meguri |
+| `permission-timeout` | no outcome; injected clock passes 120 s | denied; one `PermissionPrompt` with payload `{"origin": "https://site.example"}`, then interaction cancelled for it; lists unchanged, so a later request from the origin raises a new prompt | Meguri |
+| `permission-coalesced` | two `requestPermission` from one origin at once; Allow | one prompt, not cancelled; both granted | Meguri |
 | `permission-coalesced-timeout` | `requestPermission` from one origin; clock +100 s; a second one from it; clock +20 s | both denied at 120 s after the first; one prompt, cancelled once | Meguri |
 | `permission-closed-waiter` | `requestPermission` from `https://site.example`; the client closes; Allow | the allow-list ends with `https://site.example`; no reply is sent | Meguri (U141 test, E19.4) |
 | `permission-bad-outcome` | a prompt open; the test host resolves with `{"answer": "maybe"}`, then Allow | the first resolve returns `false`, the prompt stays; then granted | Meguri |
@@ -652,7 +675,8 @@ Written: the 16 `Rec.` rows are oracle scenarios with their goldens next to them
 
 ### E19.4 Unit tests without transcripts (U141)
 
-- Stand-in actions registered through `test-hooks` (one read, one mutating, one gui) exercise E3, E13 and E14 before U142 and U146 land; U142 replays E19 with the real actions.
+- Stand-in actions registered through `test-hooks` (one read, one mutating, one gui) exercise E3, E13 and E14 before U142 and U146 land; U142 replays E19 with the real actions. The stand-ins have names of their own, none of them in E12.3 or E12.4. Only Meguri's unit tests register them; the transcript executor (`servers/transcripts` T20) registers none, so an `apiReflect` result in an E19 replay never lists one.
+- **The U141 gate.** At U141 the registry holds the four E12.3 actions this file owns: `apiReflect`, `multi`, `requestPermission` and `version`. An E19 scenario must pass at U141 when Meguri, running it, looks up no other E12.3 name (E3 row 9, E11 row 4) and none of its expected `apiReflect` results lists another E12.3 name. Names outside E12.3 (`nope`, `DeckNames`, the E12.4 names such as `guiReviewActive`) never make a scenario `pending`: their `unsupported action` reply is compared as usual, at U141 already. So a scenario that names `deckNames`, `createDeck` or `addNote` still passes at U141 when the request is answered before the lookup: the 403 rows (E3 row 6), the key refusals (E3 row 8: `key-missing`, `key-wrong`, `key-number`, `key-pending`), and `sub-bad-version` and `non-object-entry-later` (E11 row 1 and E11's parameter error). The other scenarios (those in which `deckNames`, `createDeck` or `addNote` is looked up, and `reflect-filter`) pass from U142 on, and `reflect-all` once U142, U143 and U146 have all landed. Until then Meguri's executor reports them `pending` (`servers/transcripts` T15), never `fail`.
 - Activity log: 1,001 requests keep the newest 1,000; an `addNote` entry holds no field text; a `multi` of two sub-actions adds three entries, the `multi`'s last; a nested `multi` adds its entries in E16's order; an over-limit body's entry has the time its head was read; the log is empty after a restart with Keep log off and holds the newest 1,000 with it on; turning Keep log on stores the entries already in memory; each "activity appended" event carries the new entries in order.
 - Agent snippet media line: with `ankiconnect.media_dir` null it says `getMediaDirPath` fails until a folder is chosen; with a folder it gives the 2 s note.
 - Agent snippet: lists the endpoint with the configured port, version 6, the key requirement, the read-only state and exactly the E12.3 names; never the key.

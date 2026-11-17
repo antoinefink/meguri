@@ -1,6 +1,9 @@
-# servers/ankiconnect-actions A20.1 names-ids (A5.2). Synthetic content only.
+# servers/ankiconnect-actions A20.1 names-ids (A5.2), then A4's profile
+# actions: the profile name reads as <profile> on both sides (servers/transcripts
+# T10.3), and loadProfile with a name no side has gives false. Synthetic
+# content only.
 id: servers/ankiconnect/decks/names-ids
-description: deckNamesAndIds in deck name order with ids
+description: deckNamesAndIds in deck name order with ids; the profile actions
 tags: [no-origin]
 server: ankiconnect
 source: oracle
@@ -10,3 +13,11 @@ setup:
 steps:
   - http:
       body: {json: {action: deckNamesAndIds, version: 6}}
+  - http:
+      body: {json: {action: getProfiles, version: 6}}
+  - http:
+      body: {json: {action: getActiveProfile, version: 6}}
+  - http:
+      body: {json: {action: loadProfile, version: 6, params: {name: "no such profile"}}}
+  - http:
+      body: {json: {action: reloadCollection, version: 6}}

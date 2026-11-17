@@ -1,0 +1,46 @@
+# servers/migaku-receive P24 `extensions` (declared, servers/transcripts T13).
+# application/octet-stream is generic, so the ID3 bytes give mp3 (P9 row 3);
+# audio/ogg gives ogg and image/gif gives gif (P9 row 1). Profile DE maps Word
+# Audio to wordAudio and Images to images (Screenshot none).
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/extensions
+description: "the extension comes from the MIME type, or from the first bytes when it is generic"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}, field_map: {Sentence: "sentence", Translation: "translation", "Target Word": "targetWord", Definitions: "definitions", Screenshot: "none", "Sentence Audio": "sentenceAudio", "Word Audio": "wordAudio", Images: "images", "Example Sentences": "exampleSentences"}}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Hund", sentence: "Der Hund.", wordAudio: [{id: "w1", input: "data:application/octet-stream;base64,SUQzBAAAAAAAAA=="}, {id: "w2", input: "data:audio/ogg;base64,T2dnUwACAAAAAAAAAAA="}], images: [{id: "g1", src: "data:image/gif;base64,R0lGODlhAQABAAAAAA=="}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/db_dump/notes/#n1/flds": "Der Hund.\u001f\u001fHund\u001f\u001f\u001f\u001f[sound:w1.mp3]\n<br>\n[sound:w2.ogg]\u001f<img src=\"g1.gif\">\u001f\u001fx\u001fx"
+        "/media_dir": {"g1.gif": {sha1: "23f1ca80a21f5aa645555e211134083754d80ea8", size: 13}, "w1.mp3": {sha1: "f4830f00aa48a2cb7d3cea6ead764f20ce85cbaf", size: 10}, "w2.ogg": {sha1: "46d2d3c4fe634bf7ade3374d047c79a840847f52", size: 14}}
+equivalence:
+  notes: ["#n1"]

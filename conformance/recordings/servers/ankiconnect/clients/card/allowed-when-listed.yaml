@@ -1,0 +1,35 @@
+# servers/ankiconnect-clients C7 card/allowed-when-listed (R1679 opt-in).
+# Meguri only (declared, servers/transcripts T13). With the card origin added to
+# the allow-list, a card page's call is served (servers/ankiconnect-envelope
+# E7.2 row 5), and Access-Control-Allow-Origin repeats the request's Origin
+# (E7.3 row 3). This holds only if the card webview sends meguri-media://media;
+# if it sends null, R1744 refuses it whatever the list holds and this scenario
+# cannot pass (C9.6). Setup is C6's. All values are synthetic.
+id: servers/ankiconnect/clients/card/allowed-when-listed
+description: a card page's AnkiConnect call is served once its origin is in the allow-list
+tags: [client:card]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+server_config: {cors_origins: ["http://localhost", "meguri-media://media"]}
+setup:
+  decks: [Lang, "Lang::Mining"]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning, Audio, Picture]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}{{Audio}}{{Picture}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Vocab, deck: "Lang::Mining", fields: {Word: alpha, Meaning: first}, tags: [mined]}
+    - {notetype: Vocab, deck: Lang, fields: {Word: beta, Meaning: second}}
+  media_files:
+    - {name: old.mp3, fill: {size: 16, byte: 0}}
+steps:
+  - http:
+      headers: [[Origin, "meguri-media://media"]]
+      body: {json: {action: deckNames, version: 6}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "meguri-media://media", access-control-allow-headers: "*"}
+      body: {json: {result: [Default, Lang, "Lang::Mining"], error: null}}

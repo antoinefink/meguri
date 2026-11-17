@@ -1,6 +1,6 @@
 # servers/ankiconnect-envelope E19.2 `policy/permission-timeout`: a prompt with no outcome (E9 outcome table, H11.2).
 # Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
-# The 403 shows the allow-list unchanged; the last request consumes its scripted deny, so it raised a new prompt: the first one is gone and the origin is not deny-listed (T7.2).
+# The events show one PermissionPrompt with the origin as its payload, cancelled at the timeout (E9, H11.2). The 403 shows the allow-list unchanged; the last request consumes its scripted deny, so it raised a new prompt: the first one is gone and the origin is not deny-listed (T7.2).
 id: servers/ankiconnect/policy/permission-timeout
 description: no outcome within 120 s denies; the prompt is gone and no list changed
 tags: [policy]
@@ -20,6 +20,12 @@ steps:
       status: 200
       headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
       body: {json: {result: {permission: denied}, error: null}}
+  - events: {types: [interaction_request, interaction_cancelled]}
+    expect:
+      output:
+        events:
+          - {type: interaction_request, id: i-1, kind: PermissionPrompt, payload: {origin: "https://site.example"}}
+          - {type: interaction_cancelled, id: i-1}
   - http:
       headers: [[Origin, "https://site.example"]]
       body: {json: {action: deckNames, version: 6}}
@@ -35,3 +41,8 @@ steps:
       status: 200
       headers: {content-type: application/json, access-control-allow-origin: "https://site.example", access-control-allow-headers: "*"}
       body: {json: {result: {permission: denied}, error: null}}
+  - events: {types: [interaction_request, interaction_cancelled]}
+    expect:
+      output:
+        events:
+          - {type: interaction_request, id: i-2, kind: PermissionPrompt, payload: {origin: "https://site.example"}}

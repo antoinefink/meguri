@@ -3,6 +3,7 @@
 # by Content-Length before any body byte, and by counted bytes for a chunked body;
 # the /receive handler never runs and nothing is written (P2 step 7, P8.2, P8.3,
 # servers/host-security H8). No Origin, so Access-Control-Allow-Origin is * and no Vary (P6).
+# Neither request writes a Recently received row (P8.3, servers/migaku-receive P20).
 # Meguri's own behavior (declared, servers/transcripts T13): the Migaku server has no
 # oracle (P15). The integration is on, the collection Available, each request carries
 # the default Host of T6.2 on the ephemeral port (T20). All values are synthetic.
@@ -46,3 +47,6 @@ steps:
       body: {json: {success: false, error: "Request body is too large."}}
       closed: true
       no_effect: true
+  - received_log: {}
+    expect:
+      output: {rows: []}

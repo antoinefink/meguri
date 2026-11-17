@@ -1,0 +1,35 @@
+# specs/servers/ankiconnect-gui G12 `browse-payload` (G3 defaults, G8 payload JSON).
+# Meguri's own behavior (declared, servers/transcripts T13); all values are synthetic.
+# Collection of G3's examples: n1, n2 in deck Lang (cards c1 < c2), n3 in Default (c3).
+# Without `query` the GuiBrowse payload holds a null query, so Browse keeps its search.
+id: servers/ankiconnect/gui/browse-payload
+description: "guiBrowse with no query posts a null query"
+tags: [gui]
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {activeCols: [noteFld, template, cardDue, deck, noteCrt]}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+      css: ".card {font-size: 20px;}"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: {Front: alpha, Back: first}}
+    - {notetype: Pair, deck: Lang, fields: {Front: beta, Back: second}}
+    - {notetype: Pair, deck: Default, fields: {Front: gamma, Back: third}}
+steps:
+  - http:
+      body: {json: {action: guiBrowse, version: 6, params: {}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: [], error: null}}
+  - events: {types: [interaction_request]}
+    expect:
+      output:
+        events:
+          - {type: interaction_request, id: i-1, kind: GuiBrowse, payload: {query: null}}

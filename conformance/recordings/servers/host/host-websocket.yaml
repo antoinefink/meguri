@@ -1,9 +1,8 @@
 # servers/host-security H17 `host-websocket` (declared, servers/transcripts T13):
 # a WebSocket upgrade with a refused Host gets the same 403 and no 101 (H6.2).
-# This file relies on the T7.3 `ws_open` sentence proposed with it: `ws_open` sends
-# Upgrade: websocket, Connection: Upgrade, Sec-WebSocket-Version: 13 and a
-# Sec-WebSocket-Key, and the T6.2 Host rule applies (a listed Host replaces the default),
-# so the request is a valid upgrade whose only fault is its single Host value.
+# `ws_open` (T7.3) sends Upgrade: websocket, Connection: Upgrade, Sec-WebSocket-Version: 13
+# and a Sec-WebSocket-Key, and the T6.2 Host rule applies (a listed Host replaces the
+# default), so the request is a valid upgrade whose only fault is its single Host value.
 id: servers/host/host-websocket
 description: "WebSocket upgrade refused by the Host check"
 tags: [host]

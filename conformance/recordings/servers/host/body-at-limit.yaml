@@ -1,6 +1,8 @@
 # servers/host-security H17 `body-at-limit` (declared, servers/transcripts T13):
-# a body exactly at the limit is read whole and handed to the handler (H8): AnkiConnect parses
-# it (spaces are not empty and not JSON, E4), Migaku's /srs-import answers 501 (P11).
+# a body exactly at the limit is read whole and handed to the handler (H8), sent with
+# Content-Length and then as one chunk (T6.2 step 5; the limit counts decoded bytes):
+# AnkiConnect parses it (spaces are not empty and not JSON, E4), Migaku's /srs-import answers
+# 501 (P11).
 id: servers/host/body-at-limit
 description: "bodies exactly at each limit reach the handler"
 tags: [host]
@@ -17,6 +19,16 @@ steps:
       headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
       body: {json: {result: null, error: "invalid request: the body is not valid JSON"}}
   - http: {server: migaku, method: POST, target: /srs-import, body: {fill: {size: 134217728, byte: 32}}}
+    expect:
+      status: 501
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: false, error: "Importing into Migaku Memory is not supported by Meguri."}}
+  - http: {server: ankiconnect, headers: [[Transfer-Encoding, chunked]], body: {fill: {size: 268435456, byte: 32}}}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {result: null, error: "invalid request: the body is not valid JSON"}}
+  - http: {server: migaku, method: POST, target: /srs-import, headers: [[Transfer-Encoding, chunked]], body: {fill: {size: 134217728, byte: 32}}}
     expect:
       status: 501
       headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}

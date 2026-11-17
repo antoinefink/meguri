@@ -1505,3 +1505,260 @@ deviations:
     scenarios: [sched/options/ignore-date/future]
     pointer: /steps/*/legacy_json/presets/Main/mod
     transform: {replace: 1894705200}
+  # specs/servers/ankiconnect-actions A18: Meguri's AnkiConnect collection
+  # actions where they differ from the add-on on purpose. Each entry's test is
+  # the transcript (servers/transcripts T11, T12); its pointers address the
+  # normalized golden. The R1739 no-origin and R1777 entries, and the envelope's
+  # (servers/ankiconnect-envelope E18), are U136's and U141's.
+  - id: ankiconnect-search-order
+    requirement: R1777
+    summary: "findNotes and findCards list ids in ascending order; the add-on lists them in its scan order (servers/ankiconnect-actions A16, A18)."
+    test: servers/ankiconnect/search/empty
+    scenarios: [servers/ankiconnect/search/empty]
+    pointer: "/steps/0/reply/body/json/result"
+    transform: {replace: ["#n1", "#n2", "#n3"]}
+  - id: ankiconnect-search-error-text
+    requirement: R1778
+    summary: "A search error carries Browse's message (servers/ankiconnect-actions A16; search/errors E7 unclosed_group); the add-on gives Anki's text."
+    test: servers/ankiconnect/search/error
+    scenarios: [servers/ankiconnect/search/error]
+    pointer: "/steps/0/reply/body/json/error"
+    transform: {replace: "This `(` is never closed by a `)`. To find the bracket itself, quote it or write `\\(`."}
+  - id: ankiconnect-add-defaults
+    requirement: R1757
+    summary: "An add through the server writes no Add-screen defaults, so the note type's schema-11 did stays null (servers/ankiconnect-actions A3, A18; notes/note-records A4)."
+    test: servers/ankiconnect/notes/add-defaults
+    scenarios: [servers/ankiconnect/notes/add-defaults]
+    pointer: "/steps/2/reply/body/json/result/0/did"
+    transform: {replace: null}
+  - id: ankiconnect-addnotes-rollback
+    requirement: R1760
+    summary: "A failing addNotes writes nothing: no graves of passing notes that the add-on adds and deletes (servers/ankiconnect-actions A7.6, A18)."
+    test: servers/ankiconnect/notes/add-notes
+    scenarios: [servers/ankiconnect/notes/add-notes]
+    pointer: "/steps/4/db_dump/graves"
+    transform: {replace: {}}
+  - id: ankiconnect-addnotes-rollback-pos-1
+    requirement: R1760
+    summary: "After the failed addNotes requests the next new position is still 1, so the first added card takes position 1 (the add-on moved it to 4)."
+    test: servers/ankiconnect/notes/add-notes
+    scenarios: [servers/ankiconnect/notes/add-notes]
+    pointer: "/steps/6/db_dump/cards/#c1/due"
+    transform: {replace: 1}
+  - id: ankiconnect-addnotes-rollback-pos-2
+    requirement: R1760
+    summary: "As ankiconnect-addnotes-rollback-pos-1, for the second card (position 2; the add-on gives 5)."
+    test: servers/ankiconnect/notes/add-notes
+    scenarios: [servers/ankiconnect/notes/add-notes]
+    pointer: "/steps/6/db_dump/cards/#c2/due"
+    transform: {replace: 2}
+  - id: ankiconnect-canadd-no-media
+    requirement: R1757
+    summary: "canAddNote fetches and stores no attachment, so the media folder stays empty at both dumps (servers/ankiconnect-actions A7.7, A18)."
+    test: servers/ankiconnect/notes/can-add-media
+    scenarios: [servers/ankiconnect/notes/can-add-media]
+    pointer: "/steps/*/media_dir"
+    transform: {replace: {}}
+  - id: ankiconnect-canadd-no-media-failed
+    requirement: R1757
+    summary: "canAddNote reads no attachment, so a failing attachment without fields does not refuse the note (servers/ankiconnect-actions A7.7, A18); the add-on answers false."
+    test: servers/ankiconnect/notes/can-add-media
+    scenarios: [servers/ankiconnect/notes/can-add-media]
+    pointer: "/steps/2/reply/body/json/result"
+    transform: {replace: true}
+  - id: ankiconnect-canadd-no-media-failed-detail
+    requirement: R1757
+    summary: "As ankiconnect-canadd-no-media-failed, for canAddNoteWithErrorDetail (the add-on reports its runtime text for the missing fields member)."
+    test: servers/ankiconnect/notes/can-add-media
+    scenarios: [servers/ankiconnect/notes/can-add-media]
+    pointer: "/steps/3/reply/body/json/result"
+    transform: {replace: {"canAdd": true}}
+  - id: ankiconnect-changedeck-op
+    requirement: R1755
+    summary: "changeDeck skips a card already in the target deck, so its mod stays at the setup instant at both dumps (servers/ankiconnect-actions A5.5, A18; browser/bulk-actions B7.2); the add-on stamps it."
+    test: servers/ankiconnect/decks/change-deck
+    scenarios: [servers/ankiconnect/decks/change-deck]
+    pointer: "/steps/*/db_dump/cards/#c2/mod"
+    transform: {replace: 1894698000}
+  - id: ankiconnect-getdeckstats-no-create
+    requirement: R1755
+    summary: "getDeckStats leaves out a name that finds no deck and creates nothing (servers/ankiconnect-actions A5.8, A18); the add-on creates Nope and reports it."
+    test: servers/ankiconnect/decks/deck-stats
+    scenarios: [servers/ankiconnect/decks/deck-stats]
+    pointer: "/steps/1/reply/body/json/result"
+    transform: {replace: {"#d1": {"deck_id": "#d1", "learn_count": 0, "name": "Lang", "new_count": 2, "review_count": 1, "total_in_deck": 1}, "#d2": {"deck_id": "#d2", "learn_count": 0, "name": "JA", "new_count": 2, "review_count": 0, "total_in_deck": 2}}}
+  - id: ankiconnect-getdeckstats-no-create-decks
+    requirement: R1755
+    summary: "As ankiconnect-getdeckstats-no-create: the deck dump after the read holds no deck Nope."
+    test: servers/ankiconnect/decks/deck-stats
+    scenarios: [servers/ankiconnect/decks/deck-stats]
+    pointer: "/steps/2/db_dump/decks"
+    transform: {replace: {"#d1": {"common": {"sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"}, "id": "#d1", "kind": {"sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"}, "mtime_secs": 1894698000, "name": "Lang", "usn": -1}, "#d2": {"common": {"sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"}, "id": "#d2", "kind": {"sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"}, "mtime_secs": 1894698000, "name": "Lang\u001fJA", "usn": -1}, "1": {"common": {"sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"}, "id": 1, "kind": {"sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"}, "mtime_secs": 0, "name": "Default", "usn": 0}}}
+  - id: ankiconnect-suspend-unknown-card
+    requirement: R1767
+    summary: "suspend fails on the first unknown id and writes nothing (servers/ankiconnect-actions A12.1, A18); the add-on answers true for [#c3, 7] with #c3 suspended."
+    test: servers/ankiconnect/cards/suspend
+    scenarios: [servers/ankiconnect/cards/suspend]
+    pointer: "/steps/7/reply/body/json"
+    transform: {replace: {"error": "Card was not found: 7", "result": null}}
+  - id: ankiconnect-review-counts-exclusions
+    requirement: R1774
+    summary: "getNumCardsReviewedByDay leaves out review-log rows of type 4 and 5, so the two setDueDate rows count for no date (servers/ankiconnect-actions A14, A18; stats/counting-rules N6); the add-on counts every row."
+    test: servers/ankiconnect/stats/by-day-rollover
+    scenarios: [servers/ankiconnect/stats/by-day-rollover]
+    pointer: "/steps/4/reply/body/json/result"
+    transform: {replace: []}
+  - id: ankiconnect-review-counts-exclusions-today
+    requirement: R1774
+    summary: "As ankiconnect-review-counts-exclusions, for getNumCardsReviewedToday: the setDueDate row after the day start is not counted (the add-on gives 1)."
+    test: servers/ankiconnect/stats/today
+    scenarios: [servers/ankiconnect/stats/today]
+    pointer: "/steps/6/reply/body/json/result"
+    transform: {replace: 0}
+  - id: ankiconnect-createmodel-name-clash
+    requirement: R1756
+    summary: "createModel with a name equal to another note type's only under unicase appends + (servers/ankiconnect-actions A6.2, A18; notetypes/records N4 step 7); the add-on appends a clock-derived suffix."
+    test: servers/ankiconnect/models/create
+    scenarios: [servers/ankiconnect/models/create]
+    pointer: "/steps/3/reply/body/json/result/name"
+    transform: {replace: "pair+"}
+  - id: ankiconnect-createmodel-css
+    requirement: R1756
+    summary: "createModel without css stores Meguri's base card CSS (servers/ankiconnect-actions A6.2, A18; notetypes/records N5.1, notetypes/stock-kinds K6); the add-on stores Anki's stock CSS. The value is the text of core/crates/meguri-engine/src/notetypes/stock/templates/card.css and changes with it."
+    test: servers/ankiconnect/models/create
+    scenarios: [servers/ankiconnect/models/create]
+    pointer: "/steps/3/reply/body/json/result/css"
+    transform: {replace: "/* Meguri's card styling for its stock note types: system text, centred,\n   with the page's own light and dark colours. */\n.card {\n  font-family: system-ui, -apple-system, \"Helvetica Neue\", sans-serif;\n  font-size: 1.3em;\n  line-height: 1.45;\n  text-align: center;\n  color: var(--fg, #1d1d1f);\n  background-color: var(--canvas, #f5f5f7);\n}\n\n.card.nightMode,\n.nightMode .card {\n  color: var(--fg, #f5f5f7);\n  background-color: var(--canvas, #1d1d1f);\n}\n\n.card .prompt,\n.card .response,\n.card .extra {\n  margin: 0.4em auto;\n  max-width: 40em;\n}\n\n.card .extra {\n  font-size: 0.85em;\n  opacity: 0.85;\n}\n"}
+  - id: ankiconnect-cardsinfo-template-error
+    requirement: R1766
+    summary: "cardsInfo shows Meguri's template-error notice after <style></style> (servers/ankiconnect-actions A11.3, A18; render/display-transform D8, D10); the add-on shows Anki's text."
+    test: servers/ankiconnect/cards/info-errors
+    scenarios: [servers/ankiconnect/cards/info-errors]
+    pointer: "/steps/0/reply/body/json/result/0/question"
+    transform: {replace: "<style></style>The front template has an error:<br>The section {{#FrontSide}} tests a field this note type does not have.<br><a href='<anki-docs>/templates/errors.html#template-syntax-error'>More information</a>"}
+  - id: ankiconnect-cardsinfo-template-error-answer
+    requirement: R1766
+    summary: "As ankiconnect-cardsinfo-template-error, for the answer, which shows the same notice."
+    test: servers/ankiconnect/cards/info-errors
+    scenarios: [servers/ankiconnect/cards/info-errors]
+    pointer: "/steps/0/reply/body/json/result/0/answer"
+    transform: {replace: "<style></style>The front template has an error:<br>The section {{#FrontSide}} tests a field this note type does not have.<br><a href='<anki-docs>/templates/errors.html#template-syntax-error'>More information</a>"}
+  - id: ankiconnect-cardsinfo-latex
+    requirement: R1766
+    summary: "cardsInfo leaves LaTeX as stored and generates no image (servers/ankiconnect-actions A11.3, A18; render/card-render-pipeline K8); the add-on puts a LaTeX image tag and a notice in its place."
+    test: servers/ankiconnect/cards/info-errors
+    scenarios: [servers/ankiconnect/cards/info-errors]
+    pointer: "/steps/0/reply/body/json/result/1/question"
+    transform: {replace: "<style>.card{}</style>[$]x[/$]"}
+  - id: ankiconnect-cardsinfo-latex-answer
+    requirement: R1766
+    summary: "As ankiconnect-cardsinfo-latex, for the answer."
+    test: servers/ankiconnect/cards/info-errors
+    scenarios: [servers/ankiconnect/cards/info-errors]
+    pointer: "/steps/0/reply/body/json/result/1/answer"
+    transform: {replace: "<style>.card{}</style>[$]x[/$]"}
+  - id: ankiconnect-repeated-ids
+    requirement: R1768
+    summary: "forgetCards with a card listed twice resets it once: one Reset row (servers/ankiconnect-actions A2, A18); the add-on resets it once per occurrence."
+    test: servers/ankiconnect/cards/repeated-ids
+    scenarios: [servers/ankiconnect/cards/repeated-ids]
+    pointer: "/steps/2/db_dump/revlog"
+    transform: {replace: {"1894698000000": {"cid": "#c2", "ease": 0, "factor": 2500, "id": 1894698000000, "ivl": 0, "lastIvl": 0, "time": 0, "type": 4, "usn": -1}, "1894698000001": {"cid": "#c2", "ease": 0, "factor": 0, "id": 1894698000001, "ivl": 0, "lastIvl": 0, "time": 0, "type": 4, "usn": -1}}}
+  - id: ankiconnect-repeated-ids-reply
+    requirement: R1768
+    summary: "setDueDate with a card listed twice succeeds as for the card once; the add-on fails with a database error and writes nothing."
+    test: servers/ankiconnect/cards/repeated-ids
+    scenarios: [servers/ankiconnect/cards/repeated-ids]
+    pointer: "/steps/3/reply/body/json"
+    transform: {replace: {"error": null, "result": true}}
+  - id: ankiconnect-repeated-ids-card
+    requirement: R1768
+    summary: "As ankiconnect-repeated-ids-reply: #c2 is the review card due tomorrow that setDueDate days \"1\" makes."
+    test: servers/ankiconnect/cards/repeated-ids
+    scenarios: [servers/ankiconnect/cards/repeated-ids]
+    pointer: "/steps/4/db_dump/cards/#c2"
+    transform: {replace: {"data": "{\"pos\":2}", "did": "#d1", "due": 1, "factor": 2500, "flags": 0, "id": "#c2", "ivl": 0, "lapses": 0, "left": 0, "mod": 1894698000, "nid": "#n2", "odid": 0, "odue": 0, "ord": 0, "queue": 2, "reps": 0, "type": 2, "usn": -1}}
+  - id: ankiconnect-repeated-ids-revlog
+    requirement: R1768
+    summary: "As ankiconnect-repeated-ids-reply: the review log holds the rows of step 2 and one Set Due Date row."
+    test: servers/ankiconnect/cards/repeated-ids
+    scenarios: [servers/ankiconnect/cards/repeated-ids]
+    pointer: "/steps/4/db_dump/revlog"
+    transform: {replace: {"1894698000000": {"cid": "#c2", "ease": 0, "factor": 2500, "id": 1894698000000, "ivl": 0, "lastIvl": 0, "time": 0, "type": 4, "usn": -1}, "1894698000001": {"cid": "#c2", "ease": 0, "factor": 0, "id": 1894698000001, "ivl": 0, "lastIvl": 0, "time": 0, "type": 4, "usn": -1}, "1894698000002": {"cid": "#c2", "ease": 0, "factor": 2500, "id": 1894698000002, "ivl": 0, "lastIvl": 0, "time": 0, "type": 4, "usn": -1}}}
+  - id: ankiconnect-error-text
+    requirement: R1768
+    summary: "An invalid days text gives the Meguri text of servers/ankiconnect-actions A17 (A18 ankiconnect-error-text); the add-on gives the text itself."
+    test: servers/ankiconnect/cards/reschedule
+    scenarios: [servers/ankiconnect/cards/reschedule]
+    pointer: "/steps/7/reply/body/json/error"
+    transform: {replace: "invalid days value: abc"}
+  - id: ankiconnect-error-text-template
+    requirement: R1756
+    summary: "createModel with a template that does not parse gives the Meguri text of servers/ankiconnect-actions A17 (A18 ankiconnect-error-text); the add-on gives Anki's template problem text."
+    test: servers/ankiconnect/models/create
+    scenarios: [servers/ankiconnect/models/create]
+    pointer: "/steps/4/reply/body/json/error"
+    transform: {replace: "invalid card template: template 1 has a syntax error on its front"}
+  - id: ankiconnect-error-text-no-front-field
+    requirement: R1756
+    summary: "createModel with a front that names no field gives the Meguri text of servers/ankiconnect-actions A17 (A18 ankiconnect-error-text)."
+    test: servers/ankiconnect/undo/create-model-refused
+    scenarios: [servers/ankiconnect/undo/create-model-refused]
+    pointer: "/steps/1/reply/body/json/error"
+    transform: {replace: "invalid card template: template 1 has no field on its front"}
+  - id: ankiconnect-note-member-types
+    requirement: R1757
+    summary: "A string tags member of a note is a member error (servers/ankiconnect-actions A7.1, A18 ankiconnect-note-member-types); the add-on adds the note with one tag per character."
+    test: servers/ankiconnect/notes/add-errors
+    scenarios: [servers/ankiconnect/notes/add-errors]
+    pointer: "/steps/8/reply/body/json"
+    transform: {replace: {"error": "invalid parameter: note.tags", "result": null}}
+  - id: ankiconnect-note-member-types-options
+    requirement: R1757
+    summary: "An options member that is a string is a member error (servers/ankiconnect-actions A7.2 step 9, A7.4); the add-on ignores it and adds the note."
+    test: servers/ankiconnect/notes/add-errors
+    scenarios: [servers/ankiconnect/notes/add-errors]
+    pointer: "/steps/9/reply/body/json"
+    transform: {replace: {"error": "invalid parameter: note.options", "result": null}}
+  - id: ankiconnect-note-member-types-null
+    requirement: R1757
+    summary: "duplicateScopeOptions null counts as absent and the note is added (servers/ankiconnect-actions A7.4); the add-on fails with a runtime text."
+    test: servers/ankiconnect/notes/add-errors
+    scenarios: [servers/ankiconnect/notes/add-errors]
+    pointer: "/steps/11/reply/body/json"
+    transform: {replace: {"error": null, "result": "#n3"}}
+  - id: ankiconnect-note-member-types-notes
+    requirement: R1757
+    summary: "As ankiconnect-note-member-types: the notes are x, x and t4 (the note of step 11); the add-on holds t1 with letter tags and t2 instead."
+    test: servers/ankiconnect/notes/add-errors
+    scenarios: [servers/ankiconnect/notes/add-errors]
+    pointer: "/steps/13/db_dump/notes"
+    transform: {replace: {"#n1": {"csum": 301378958, "data": "", "flags": 0, "flds": "x\u001f", "guid": "#random", "id": "#n1", "mid": "#m7", "mod": 1894698000, "sfld": "x", "tags": "", "usn": -1}, "#n2": {"csum": 301378958, "data": "", "flags": 0, "flds": "x\u001f", "guid": "#random", "id": "#n2", "mid": "#m7", "mod": 1894698000, "sfld": "x", "tags": "", "usn": -1}, "#n3": {"csum": 2850009435, "data": "", "flags": 0, "flds": "t4\u001f", "guid": "#random", "id": "#n3", "mid": "#m7", "mod": 1894698000, "sfld": "t4", "tags": "", "usn": -1}}}
+  - id: ankiconnect-note-member-types-cards
+    requirement: R1757
+    summary: "As ankiconnect-note-member-types-notes, for the cards: #c3 belongs to t4 at position 3, and no fourth card exists."
+    test: servers/ankiconnect/notes/add-errors
+    scenarios: [servers/ankiconnect/notes/add-errors]
+    pointer: "/steps/13/db_dump/cards"
+    transform: {replace: {"#c1": {"data": "{}", "did": "#d1", "due": 1, "factor": 0, "flags": 0, "id": "#c1", "ivl": 0, "lapses": 0, "left": 0, "mod": 1894698000, "nid": "#n1", "odid": 0, "odue": 0, "ord": 0, "queue": 0, "reps": 0, "type": 0, "usn": -1}, "#c2": {"data": "{}", "did": "#d1", "due": 2, "factor": 0, "flags": 0, "id": "#c2", "ivl": 0, "lapses": 0, "left": 0, "mod": 1894698000, "nid": "#n2", "odid": 0, "odue": 0, "ord": 0, "queue": 0, "reps": 0, "type": 0, "usn": -1}, "#c3": {"data": "{}", "did": "#d1", "due": 3, "factor": 0, "flags": 0, "id": "#c3", "ivl": 0, "lapses": 0, "left": 0, "mod": 1894698000, "nid": "#n3", "odid": 0, "odue": 0, "ord": 0, "queue": 0, "reps": 0, "type": 0, "usn": -1}}}
+  - id: ankiconnect-member-error-text
+    requirement: R1740
+    summary: "An options member that is a number gives the member error of servers/ankiconnect-actions A7.2 step 9; the add-on gives its language runtime text (servers/ankiconnect-envelope E18)."
+    test: servers/ankiconnect/notes/add-errors
+    scenarios: [servers/ankiconnect/notes/add-errors]
+    pointer: "/steps/10/reply/body/json/error"
+    transform: {replace: "invalid parameter: note.options"}
+  - id: ankiconnect-member-error-text-front
+    requirement: R1740
+    summary: "A cardTemplates element without Front gives the member error of servers/ankiconnect-actions A6.2; the add-on gives the key in quotation marks."
+    test: servers/ankiconnect/models/create
+    scenarios: [servers/ankiconnect/models/create]
+    pointer: "/steps/8/reply/body/json/error"
+    transform: {replace: "missing parameter: Front"}
+  - id: ankiconnect-member-error-text-back
+    requirement: R1740
+    summary: "As ankiconnect-member-error-text-front, for a missing Back."
+    test: servers/ankiconnect/models/create
+    scenarios: [servers/ankiconnect/models/create]
+    pointer: "/steps/9/reply/body/json/error"
+    transform: {replace: "missing parameter: Back"}

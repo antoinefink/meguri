@@ -1,0 +1,93 @@
+# servers/migaku-receive P24 `remote-limits` (declared, servers/transcripts T13).
+# /r6 redirects 6 times before /r0 (D6.9 redirect_to, 302 by default): the
+# sixth redirect fails (P8). ftp:// is not http or https. /slow sends its
+# status line after 9 s, past the 8 s limit, which runs in real time
+# (servers/transcripts T20); it is sent last, so the fixture server is not
+# still serving it while /ok1 to /ok3 are fetched. Those each wait 2 s and are
+# fetched at the same time, so that request takes about 2 s (P8
+# "Concurrency").
+# The collection holds P24's 11-field note type T-Mining (the first setup note
+# type, #m7, servers/transcripts T10.1) and the profile decks. Profiles are
+# servers/transcripts T5.1 values; a profile without field_map infers R1712's
+# map (servers/migaku-routing D4). No Origin, so Access-Control-Allow-Origin
+# is * (servers/migaku-protocol P6). All content is synthetic.
+id: servers/migaku/receive/remote-limits
+description: "remote items: six redirects, another scheme, the 8 s limit, and concurrent downloads"
+tags: ["receive"]
+server: migaku
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["DE::Mining"]
+  notetypes:
+    - name: T-Mining
+      fields: [Sentence, Translation, Target Word, Definitions, Screenshot, Sentence Audio, Word Audio, Images, Example Sentences, Is Vocabulary Card, Is Audio Card]
+      templates:
+        - name: Card 1
+          front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
+          back: "{{Translation}}"
+      css: ".card {font-size: 18px;}"
+  http_fixtures:
+    - {path: /r6, redirect_to: /r5}
+    - {path: /r5, redirect_to: /r4}
+    - {path: /r4, redirect_to: /r3}
+    - {path: /r3, redirect_to: /r2}
+    - {path: /r2, redirect_to: /r1}
+    - {path: /r1, redirect_to: /r0}
+    - {path: /r0, content_type: audio/mp4, text: "\u0000\u0000\u0000\u0018ftypM4A \u0000\u0000\u0000\u0000M4A isom"}
+    - {path: /slow, content_type: audio/mp4, text: "\u0000\u0000\u0000\u0018ftypM4A \u0000\u0000\u0000\u0000M4A isom", delay_ms: 9000}
+    - {path: /ok1, content_type: audio/mp4, text: "\u0000\u0000\u0000\u0018ftypM4A \u0000\u0000\u0000\u0000M4A isom", delay_ms: 2000}
+    - {path: /ok2, content_type: audio/mp4, text: "\u0000\u0000\u0000\u0018ftypM4A \u0000\u0000\u0000\u0000M4A isom", delay_ms: 2000}
+    - {path: /ok3, content_type: audio/mp4, text: "\u0000\u0000\u0000\u0018ftypM4A \u0000\u0000\u0000\u0000M4A isom", delay_ms: 2000}
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
+  override: "DE"
+steps:
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Alpha", sentenceAudio: [{id: "x1", input: "${fixture_base}/r6"}]}}
+    expect:
+      status: 400
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: false, error: "Could not download sentenceAudio item 1: too many redirects."}}
+      no_effect: true
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Beta", sentenceAudio: [{id: "x2", input: "ftp://127.0.0.1/x"}]}}
+    expect:
+      status: 400
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: false, error: "Could not read sentenceAudio item 1: unsupported URL."}}
+      no_effect: true
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Delta", sentenceAudio: [{id: "k1", input: "${fixture_base}/ok1"}, {id: "k2", input: "${fixture_base}/ok2"}, {id: "k3", input: "${fixture_base}/ok3"}]}}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: true, created: true, id: "#n1"}}
+      within_ms: 3000
+  - http:
+      target: /receive
+      headers:
+        - [Content-Type, application/json]
+      body: {json: {targetWord: "Gamma", sentenceAudio: [{id: "x3", input: "${fixture_base}/slow"}]}}
+    expect:
+      status: 400
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {success: false, error: "Could not download sentenceAudio item 1: timed out."}}
+      no_effect: true
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/db_dump/notes/#n2": null
+        "/media_dir": {"k1.m4a": {sha1: "0bccca510c663e4251e7b61eadf7f0a9e4075776", size: 24}, "k2.m4a": {sha1: "0bccca510c663e4251e7b61eadf7f0a9e4075776", size: 24}, "k3.m4a": {sha1: "0bccca510c663e4251e7b61eadf7f0a9e4075776", size: 24}}
+equivalence:
+  notes: ["#n1"]

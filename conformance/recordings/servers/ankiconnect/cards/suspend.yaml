@@ -6,6 +6,8 @@
 # Step 7 (/steps/7/reply/body/json): the golden records the add-on's `true` for
 # suspend [#c3, 7]; Meguri's is the A18 ankiconnect-suspend-unknown-card error
 # `Card was not found: 7`. Nothing is written on either side, so step 10 compares as is.
+# Step 11: suspend [#c3, #c3] with c3 suspended; A12.1's result rule reads the list as
+# given (two entries), A2 reduces it to [#c3] for the op.
 # FSRS is on, as Meguri always runs it (sched/set-due-date S1, R702).
 id: servers/ankiconnect/cards/suspend
 description: suspend, unsuspend, suspended and areSuspended, with an unknown id
@@ -46,4 +48,7 @@ steps:
       body: {json: {action: suspended, version: 6, params: {card: 7}}}
   - http:
       body: {json: {action: suspended, version: 6, params: {card: "#c3"}}}
+  - observe: [{db_dump: {tables: [cards]}}]
+  - http:
+      body: {json: {action: suspend, version: 6, params: {cards: ["#c3", "#c3"]}}}
   - observe: [{db_dump: {tables: [cards]}}]

@@ -1,6 +1,6 @@
 # servers/host-security H17 `host-accepted` (declared, servers/transcripts T13):
 # every accepted Host form, and no Host, on both servers; a Host passes on any socket of its
-# server (H6.1).
+# server, and spaces and tabs at both ends of the value are removed first (H6.1).
 id: servers/host/host-accepted
 description: "accepted Host values on both servers"
 tags: [host]
@@ -46,6 +46,11 @@ steps:
       status: 200
       headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
       body: {json: {apiVersion: "AnkiConnect v.6"}}
+  - http: {server: ankiconnect, headers: [[Host, "\tlocalhost:8765 "]]}
+    expect:
+      status: 200
+      headers: {content-type: application/json, access-control-allow-origin: "*", access-control-allow-headers: "*"}
+      body: {json: {apiVersion: "AnkiConnect v.6"}}
   - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "127.0.0.1:44432"]]}
     expect:
       status: 200
@@ -77,6 +82,11 @@ steps:
       headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
       body: {json: {ok: true, version: "4"}}
   - http: {server: migaku, method: GET, target: /srs-check, address: ipv6, headers: [[Host, "localhost:44432"]]}
+    expect:
+      status: 200
+      headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}
+      body: {json: {ok: true, version: "4"}}
+  - http: {server: migaku, method: GET, target: /srs-check, headers: [[Host, "\tlocalhost:44432 "]]}
     expect:
       status: 200
       headers: {content-type: "application/json; charset=UTF-8", access-control-allow-origin: "*"}

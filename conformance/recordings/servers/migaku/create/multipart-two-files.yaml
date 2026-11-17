@@ -4,26 +4,26 @@
 # two `files` parts, Clip.m4a (P24's M4A bytes) and pic.png. New names are
 # stored lowercased (media/media-files M3 row b), so Clip.m4a is stored as
 # clip.m4a and the field is rewritten to [sound:clip.m4a] (C2 step 6). Reply
-# 200 {"id": <note id>} (C2 step 9), the note being #n1 (T10.1); the `id`
-# member needs a T10.5 id position for Migaku replies (see the session's
-# proposals).
-# The T14 equivalence check of #n1 compares the note (type, deck, fields, tags)
-# with Anki's add of the same fields, and the file the fields reference by name
-# and SHA-256. It does not prove the rewrite: a Meguri that kept
-# [sound:Clip.m4a] and stored Clip.m4a would agree with Anki's add of that
-# record too. pic.png is referenced by no field, so T14 does not see it. Its
-# bytes are a text stub: a text body cannot send the PNG signature byte 0x89
-# as one byte, and a base64 body would lose T10.2's ${#m7} substitution.
-# C5's defaults from profile DE (Is Vocabulary Card and Is Audio Card x) are
-# not set up: no profile is stored, so both fields stay empty here. The stored
-# files and the Created/Manual row have no check in T13 yet.
-# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
-# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
-# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
-# transcript format has no step or setup section for profiles (see the session's
-# proposals), and nothing this scenario checks depends on one. No Origin, so
-# Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
-# P6). All content is synthetic.
+# 200 {"id": <note id>} (C2 step 9, servers/transcripts T10.5), the note being
+# #n1.
+# Profile DE matches (same note type and deck, C2 step 4), so the empty Is
+# Vocabulary Card and Is Audio Card take its defaults, x (C2 step 5). The dump
+# shows the rewritten field, the defaults and the tags; the folder holds both
+# files, pic.png although no field references it. The row (C2 step 10) is
+# Created with decision Manual, profile DE, the audio under sentence audio and
+# the PNG under images (servers/migaku-receive P9), the snippet from Sentence
+# and an empty target word (Target Word is empty); Is Audio Card x with no Word
+# Audio makes the front blank (P21). The T14 equivalence check compares the
+# note with Anki's add of the same fields and the referenced file. pic.png's
+# bytes are a text stub: a text body cannot send the PNG signature byte 0x89 as
+# one byte, and a base64 body would lose T10.2's ${#m7} substitution.
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2, C5's <D>), created in that order. Profile DE
+# (servers/transcripts T5.1: T-Mining, DE::Mining, defaults Is Vocabulary Card
+# and Is Audio Card x, R1712's inferred map) is the matching profile of C2 step
+# 4; on a new store it has id 1. No Origin, so Access-Control-Allow-Origin is *
+# and no Vary (servers/migaku-protocol P3.1, P6). All content is synthetic.
 id: servers/migaku/create/multipart-two-files
 description: "a card with two files: the audio is stored lowercased and the field follows"
 tags: [create]
@@ -40,6 +40,9 @@ setup:
           front: "{{#Is Audio Card}}{{Word Audio}}{{/Is Audio Card}}{{^Is Audio Card}}{{Sentence}}{{/Is Audio Card}}"
           back: "{{Translation}}"
       css: ".card {font-size: 18px;}"
+migaku_routing:
+  profiles:
+    - {name: "DE", language: "de", notetype: "T-Mining", deck: "DE::Mining", defaults: {"Is Vocabulary Card": "x", "Is Audio Card": "x"}}
 steps:
   - http:
       method: POST
@@ -56,5 +59,26 @@ steps:
         access-control-allow-methods: "POST, GET, OPTIONS"
         vary: null
       body: {json: {id: "#n1"}}
+  - observe: [{db_dump: {tables: [notes]}}, media_dir]
+    expect:
+      output_at:
+        "/db_dump/notes/#n1/flds": "Ein Text.\u001f\u001f\u001f\u001f\u001f[sound:clip.m4a]\u001f\u001f\u001f\u001fx\u001fx"
+        "/db_dump/notes/#n1/tags": " legacy "
+        "/db_dump/notes/#n2": null
+        "/media_dir/clip.m4a": {sha1: "0bccca510c663e4251e7b61eadf7f0a9e4075776", size: 24}
+        "/media_dir/pic.png": {sha1: "cba508b12182b68f501d6af46c4f03f8fc5d2473", size: 5}
+        "/media_dir/Clip.m4a": null
+  - received: {call: row, row: "#r1"}
+    expect:
+      output_at:
+        "/endpoint": "create"
+        "/status": "Created"
+        "/decision": "Manual"
+        "/note": "#n1"
+        "/profile/name": "DE"
+        "/media": {sentence_audio: ["clip.m4a"], word_audio: [], images: ["pic.png"]}
+        "/target_word": ""
+        "/snippet": "Ein Text."
+        "/warnings": ["front_would_be_empty"]
 equivalence:
   notes: ["#n1"]

@@ -1,0 +1,55 @@
+# specs/servers/ankiconnect-media X11.1 (suspension), X11.6 step 2 and step 4,
+# X11.8, X14 external-folder test "no grant": Meguri's executor never grants
+# by itself (servers/transcripts T20), so every scan is suspended; a grant of a
+# folder that does not exist fails and changes nothing; getMediaDirPath still
+# answers (X8) and the note hook still ingests a referenced file. Meguri only
+# (declared). A = 61 0a. All values are synthetic.
+id: servers/ankiconnect/media/ext-ungranted
+description: scans are suspended without a grant while the note hook still ingests
+server: ankiconnect
+source: declared
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [D]
+  notetypes:
+    - name: Pair
+      fields: [Term, Gloss]
+      templates:
+        - {name: Card 1, front: "{{Term}}", back: "{{FrontSide}}<hr>{{Gloss}}"}
+      css: ".card{}"
+steps:
+  - media_dir_grant: {path: missing}
+    expect:
+      output: {failed: not_a_directory}
+  - media_dir_write: {name: clip.mp3, text: "a\n"}
+  - media_dir_scan: {}
+    expect:
+      output: {status: suspended, rescan: false, ingested: 0, notices: []}
+  - media_dir_scan: {}
+    expect:
+      output: {status: suspended, rescan: false, ingested: 0, notices: []}
+  - http:
+      body: {json: {action: getMediaDirPath, version: 6}}
+    expect:
+      status: 200
+      body: {json: {result: "<media-dir>", error: null}}
+  - http:
+      body: {json: {action: getMediaFilesNames, version: 6}}
+    expect:
+      status: 200
+      body: {json: {result: [], error: null}}
+  - http:
+      body: {json: {action: addNote, version: 6, params: {note: {deckName: D, modelName: Pair, fields: {Term: word, Gloss: "[sound:clip.mp3]"}}}}}
+    expect:
+      status: 200
+      body: {json: {result: "#n1", error: null}}
+  - http:
+      body: {json: {action: retrieveMediaFile, version: 6, params: {filename: clip.mp3}}}
+    expect:
+      status: 200
+      body: {json: {result: "YQo=", error: null}}
+  - media_dir_scan: {}
+    expect:
+      output: {status: suspended, rescan: false, ingested: 0, notices: []}
+equivalence:
+  notes: ["#n1"]

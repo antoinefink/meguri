@@ -1,7 +1,6 @@
 # servers/host-security H17 `start-before-open` (declared, servers/transcripts T13):
 # no socket before the first open attempt of the process ends; then listening (H3, R1666).
-# `expect: {output: ...}` on a step without a reply is the T13 form proposed with this
-# scenario (T13 lists no check for T7.3 outputs yet).
+# Step outputs are checked with T13 `output`.
 id: servers/host/start-before-open
 description: "no socket until the first open attempt ends"
 tags: [host]

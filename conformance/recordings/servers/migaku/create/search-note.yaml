@@ -1,16 +1,14 @@
 # servers/migaku-received-log C5 `search-note` (declared, servers/transcripts T13).
 # searchNote with 1 to 19 ASCII digits starts the detached host interaction
-# BrowseNote (servers/ankiconnect-gui G8, G10) with payload {"nid": "1234"}
-# and replies 200 plain-text OK without waiting for it (C3). No `interaction`
-# step: BrowseNote gets T7.5's default answer, done, and an explicit answer
-# could be left unused, since the reply does not wait. That exactly
-# one interaction with that payload was posted has no check in T13 yet (the
-# output of an `events` step cannot carry an expectation).
-# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
-# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
-# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
-# transcript format has no step or setup section for profiles (see the session's
-# proposals), and nothing this scenario checks depends on one. No Origin, so
+# BrowseNote (servers/ankiconnect-gui G8, G10) with payload {"nid": "1234"} and
+# replies 200 plain-text OK without waiting for it (C3). No `interaction` step:
+# BrowseNote gets T7.5's default answer, done, and an explicit answer could be
+# left unused, since the reply does not wait. The `events` step shows exactly
+# one such interaction, the scenario's first (id i-1, T20). No row (C3).
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2, C5's <D>), created in that order. No Migaku
+# profile is stored; nothing this scenario checks depends on one. No Origin, so
 # Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
 # P6). All content is synthetic.
 id: servers/migaku/create/search-note
@@ -46,3 +44,10 @@ steps:
         vary: null
       body: {text: OK}
       no_effect: true
+  - events: {types: [interaction_request]}
+    expect:
+      output: {events: [{type: interaction_request, id: "i-1", kind: BrowseNote, payload: {nid: "1234"}}]}
+  - logs: {}
+    expect:
+      output_at:
+        "/received": 0

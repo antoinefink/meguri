@@ -1,7 +1,8 @@
 # specs/servers/ankiconnect-media X8, X14 `media/dir` (Meguri side of X13
 # `ankiconnect-media-dir`): with no external folder configured,
-# getMediaDirPath is an error. Declared: server_config media_dir is not available
-# on the recorder (servers/transcripts T4), whose reply is `media/dir`.
+# getMediaDirPath is an error, and a scan reports no_folder (X11.8). Declared:
+# server_config media_dir is not available on the recorder (servers/transcripts
+# T4), whose reply is `media/dir`.
 id: servers/ankiconnect/media/dir-unset
 description: getMediaDirPath with no external folder configured
 server: ankiconnect
@@ -14,3 +15,6 @@ steps:
     expect:
       status: 200
       body: {json: {result: null, error: "no media folder is set up: choose one in Meguri Settings › AnkiConnect › Media Folder"}}
+  - media_dir_scan: {}
+    expect:
+      output: {status: no_folder, rescan: false, ingested: 0, notices: []}

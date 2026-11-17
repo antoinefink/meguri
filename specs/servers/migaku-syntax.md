@@ -90,10 +90,10 @@ The result is HTML in the same sense as the input: entities are left as they are
 | Family | `reading` |
 |---|---|
 | CJK | for each annotation, in order: its content up to the first `;` (or all of it when there is none), then up to the first `,` of that part. The non-empty parts are joined with no separator. |
-| European | for each annotation, in order: its first alternative (the content up to the first `\|`), split at `,`. The third part, with white space trimmed at both ends, is kept when it exists and is not empty. The kept parts are joined with one U+0020 SPACE. |
+| European | for each annotation, in order: its first alternative (the content up to the first `\|`), split at `,`. The fourth part, with white space trimmed at both ends, is kept when it exists and is not empty. The kept parts are joined with one U+0020 SPACE. |
 | Korean | the empty string (Meguri rule, Q4) |
 
-R1693 defines `reading` as the readings inside the brackets with the pitch suffix after `;` dropped for CJK text, and as the IPA part for European text. The CJK row keeps only the reading and drops the dictionary form, and joining several readings is a Meguri rule (Q1). The European row takes the IPA as the third comma-separated part of the first alternative. In the European form of S2 the third part is the gender, so this row may not match the add-on's output (Q2).
+R1693 defines `reading` as the readings inside the brackets with the pitch suffix after `;` dropped for CJK text, and as the IPA part for European text. The CJK row keeps only the reading and drops the dictionary form, and joining several readings is a Meguri rule (Q1). The European row takes the IPA as a fourth comma-separated part of the first alternative, after the lemma, the part-of-speech tag and the gender of S2's form. A three-part annotation, the form S2 shows, has no IPA, so its reading is empty and the gender never becomes a reading. Where the add-on puts the IPA is not known (Q2).
 
 ## S7. What never changes
 
@@ -147,8 +147,8 @@ Readings:
 | `ノート[;n1]` | CJK | (empty) |
 | `行[い,行く;h]` | CJK | `い` |
 | `食べる` | CJK | (empty) |
-| `Hund[Hund,nn,m]` | European | `m` (see Q2) |
-| `Haus[Haus,nn,n,haʊs]` | European | `n` (see Q2) |
+| `Hund[Hund,nn,m]` | European | (empty: no fourth part; see Q2) |
+| `Haus[Haus,nn,n,haʊs]` | European | `haʊs` (see Q2) |
 | `streng[streng,adj,\|streng,adv,]` | European | (empty) |
 | `학교[학교,n,]` | Korean | (empty) |
 
@@ -159,7 +159,7 @@ These are pure functions with no oracle. Meguri's unit tests (`core/crates/megur
 ## S10. Open questions
 
 - **Q1. CJK reading.** The add-on's reading is the bracket content without the `;pitch` part. Does it keep the dictionary form after the comma, and how does it combine the readings of several annotations and the text outside them? S6 keeps only the reading part and joins the parts with nothing between them. The add-on's output for `見[み;h]る 書[か;k1]く` and `行[い,行く;h]` would settle it.
-- **Q2. European reading.** Does the add-on's IPA come from the third comma-separated part, which in S2's European form is the gender, or from a fourth part that S2's form does not show? S6 takes the third part. The add-on's output for a word that carries an IPA part would settle it.
+- **Q2. European reading.** Where does the add-on's IPA come from: a fourth comma-separated part after the gender, which S2's form does not show, or somewhere else? S6 takes the fourth part, and gives an empty reading for the three-part form, so that the gender is never stored as a reading (R1693 asks for the IPA part). The add-on's output for a word that carries an IPA part would settle it.
 - **Q3. CJK spaces.** Does the add-on remove the spaces between annotated Japanese tokens, and by which rule? S5 step 3 is Meguri's rule.
 - **Q4. Korean.** What is the add-on's Korean rule? S4 to S6 treat Korean as European for stripping, with an empty reading. The default profiles of R1714 include no Korean profile.
 - **Q5. European braces.** Raw groups are known only in Japanese text. S5 leaves braces in European text unchanged.

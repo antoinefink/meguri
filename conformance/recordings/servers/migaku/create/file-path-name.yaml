@@ -1,24 +1,21 @@
 # servers/migaku-received-log C5 `file-path-name` (declared, servers/transcripts T13).
 # Multipart form (C1): text fields `version` 2 and a valid `card`; a file part
-# named `files` whose filename is the Windows path C:\clips\a1.m4a, holding P24's
-# M4A bytes; and a file part named `other` (filename x.png), which C1 ignores.
-# The desired name is the last path component, split at / and \ (C2 step 6),
-# so the stored file is a1.m4a. Reply 200 {"id": <note id>} (C2 step 9),
-# the note being the first entity token #n1 (T10.1). The `id` member needs a
-# T10.5 id position for Migaku replies (see the session's proposals).
-# The card's Sentence Audio field is [sound:a1.m4a], so the T14 equivalence
-# check of #n1 compares the note (type, deck, fields, tags) with Anki's add of
-# the same fields and the file it references by name and SHA-256: a stored name
-# other than a1.m4a, or other bytes, fails it. The filename is read literally
-# between its quotes, backslashes included (see the session's proposal for C1).
-# That x.png is not stored, and the row's media names (a1.m4a), have no check
-# in T13 yet.
-# The body is text with CRLF line ends; the M4A bytes are written as escapes.
-# The collection holds P24's 11-field note type T-Mining (#m7, the first setup
-# note type, servers/transcripts T10.1) and the decks DE (#d1) and DE::Mining
-# (#d2, C5's <D>), created in that order. No Migaku profile is stored: the
-# transcript format has no step or setup section for profiles (see the session's
-# proposals), and nothing this scenario checks depends on one. No Origin, so
+# named `files` whose filename is the Windows path C:\clips\a1.m4a, holding
+# P24's M4A bytes; and a file part named `other` (filename x.png), which C1
+# ignores. The filename is read literally between its quotes, backslashes
+# included (C1), and the desired name is the last path component, split at /
+# and \ (C2 step 6), so the stored file is a1.m4a and x.png is not stored.
+# Reply 200 {"id": <note id>} (C2 step 9, servers/transcripts T10.5), the note
+# being #n1.
+# The row's media names are a1.m4a under sentence audio (C2 step 10); with no
+# matching profile its target word and snippet are empty. The card's Sentence
+# Audio field is [sound:a1.m4a], so the T14 equivalence check compares the note
+# with Anki's add of the same fields and the file by name and SHA-256. The body
+# is text with CRLF line ends; the M4A bytes are written as escapes.
+# The collection holds servers/migaku-receive P24's 11-field note type T-Mining
+# (#m7, the first setup note type, servers/transcripts T10.1) and the decks DE
+# (#d1) and DE::Mining (#d2, C5's <D>), created in that order. No Migaku
+# profile is stored; nothing this scenario checks depends on one. No Origin, so
 # Access-Control-Allow-Origin is * and no Vary (servers/migaku-protocol P3.1,
 # P6). All content is synthetic.
 id: servers/migaku/create/file-path-name
@@ -53,5 +50,17 @@ steps:
         access-control-allow-methods: "POST, GET, OPTIONS"
         vary: null
       body: {json: {id: "#n1"}}
+  - observe: [media_dir]
+    expect:
+      output: {media_dir: {a1.m4a: {sha1: "0bccca510c663e4251e7b61eadf7f0a9e4075776", size: 24}}}
+  - received: {call: row, row: "#r1"}
+    expect:
+      output_at:
+        "/endpoint": "create"
+        "/status": "Created"
+        "/decision": "Manual"
+        "/media": {sentence_audio: ["a1.m4a"], word_audio: [], images: []}
+        "/target_word": ""
+        "/snippet": ""
 equivalence:
   notes: ["#n1"]
