@@ -48,7 +48,10 @@ The author's report-body digest is not the Git export digest.
 The new synthetic Host regression holds the original qualifier, observes actual
 setup contention, releases it and joins both workers before assertions. It then
 requires pending successor consent, unchanged rows and ACK history, and actual
-replacement Bind and scan. Execution remains pending.
+replacement Bind and scan. Actual `core-test/20261117T104709Z-94718` passes
+all six selected consent and restoration methods with zero failures or skips
+on clean `1dd82b55f`. This includes the new concurrency regression. No whole
+binary, native-overlap or integration-gate acceptance is inferred.
 
 Ordinary privacy `104513Z-87110` flags the provider file. The independent
 complete-file public review admits only its exact SHA-256
