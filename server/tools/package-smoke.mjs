@@ -5,7 +5,7 @@ import { createServer, request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import { once } from 'node:events';
 import assert from 'node:assert/strict';
 const phase = process.argv[2];
@@ -31,10 +31,32 @@ const request = (path, body, cookie = '', extra = {}) => new Promise((resolve, r
 let proxy;
 try {
   await mkdir('/tmp/tls');
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
-    '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1', '-keyout', '/tmp/tls/key.pem', '-out', '/tmp/tls/cert.pem'], { stdio: 'ignore' });
-  cert = await readFile('/tmp/tls/cert.pem');
-  proxy = createServer({ key: await readFile('/tmp/tls/key.pem'), cert }, (incoming, outgoing) => {
+  if (providerFixture) {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+      '-subj', '/CN=Meguri Provider Fixture CA', '-addext', 'basicConstraints=critical,CA:TRUE',
+      '-addext', 'keyUsage=critical,keyCertSign', '-keyout', '/tmp/tls/ca-key.pem', '-out', '/tmp/tls/ca.pem'], { stdio: 'ignore' });
+    execFileSync('openssl', ['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=localhost',
+      '-keyout', '/tmp/tls/key.pem', '-out', '/tmp/tls/server.csr'], { stdio: 'ignore' });
+    await writeFile('/tmp/tls/server.ext', 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost,IP:127.0.0.1\n',
+      { mode: 0o600, flag: 'wx' });
+    execFileSync('openssl', ['x509', '-req', '-in', '/tmp/tls/server.csr', '-CA', '/tmp/tls/ca.pem',
+      '-CAkey', '/tmp/tls/ca-key.pem', '-set_serial', '1', '-days', '1', '-extfile', '/tmp/tls/server.ext',
+      '-out', '/tmp/tls/cert.pem'], { stdio: 'ignore' });
+  } else {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
+      '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1', '-keyout', '/tmp/tls/key.pem', '-out', '/tmp/tls/cert.pem'], { stdio: 'ignore' });
+  }
+  const serverCert = await readFile('/tmp/tls/cert.pem');
+  cert = providerFixture ? await readFile('/tmp/tls/ca.pem') : serverCert;
+  if (providerFixture) {
+    const caCertificate = new X509Certificate(cert);
+    const serverCertificate = new X509Certificate(serverCert);
+    assert(caCertificate.ca === true, 'Provider fixture CA role required');
+    assert(serverCertificate.ca === false, 'Provider fixture server leaf role required');
+    assert(serverCertificate.checkHost('localhost', { subject: 'never' }) === 'localhost', 'Provider fixture localhost SAN required');
+    assert(serverCertificate.verify(caCertificate.publicKey), 'Provider fixture CA signature required');
+  }
+  proxy = createServer({ key: await readFile('/tmp/tls/key.pem'), cert: serverCert }, (incoming, outgoing) => {
     const headers = { ...incoming.headers, 'x-forwarded-for': '127.0.0.1', 'x-forwarded-proto': 'https' };
     delete headers['x-forwarded-host'];
     const upstream = httpRequest({ hostname: '127.0.0.1', port: 8080, method: incoming.method, path: incoming.url, headers }, response => {
@@ -53,7 +75,7 @@ try {
     const setup = await request('/api/setup', { token, username, password });
     assert.equal(setup.status, 201);
     await mkdir('/tmp/provider-fixture', { mode: 0o700 });
-    execFileSync('openssl', ['x509', '-in', '/tmp/tls/cert.pem', '-outform', 'DER',
+    execFileSync('openssl', ['x509', '-in', '/tmp/tls/ca.pem', '-outform', 'DER',
       '-out', '/tmp/provider-fixture/ca.der'], { stdio: 'ignore' });
     // Set an explicit private mode (OpenSSL's output follows umask).
     const der = await readFile('/tmp/provider-fixture/ca.der');
