@@ -828,6 +828,22 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'docs/process/review-log/meguri-sync-U10.md':
+        '565221177f72b2182784c8c442b1c07eda55c6d33186dfe1add3f36e0474cdf0',
+    'server/Dockerfile':
+        '324a94c05aafbbf38065174f70578eb044337ea6d0ded209977196b685a1ccd8',
+    'server/README.md':
+        '66e29ca5c1fb282f4cb5af33791e1129c8ca9c09a266eef24bbc9dd26220238c',
+    'server/compose.yaml':
+        '03737d36cd35810513c04e39a193b707e14228ca997e116ca93557c09e7a0d9b',
+    'server/tools/package-context.py':
+        '84db291e6ba4b27dbc5bfef38dc01434342cd4d06016e901ae544c212fd55724',
+    'tools/mg.d/sync-package.sh':
+        '0385c96b9fff90961214012cf2077653704a61752377e6aa746ddadc8011ca63',
+    'tools/tests/sync_package.bats':
+        'a8a9f046c1f5f7aa9fc9b55c04a43d60eff2d631136ab3f4133b1c8dbee22514',
+    'tools/tests/sync_package_context_test.py':
+        '8d8d511920aaecc53c7ac0801ebb013955fea587fef03c64dc4d0fad1ebda3f3',
     "core/crates/meguri-ffi/src/sync_tests.rs":
         "461fb731a22379b6bbe009cd968526c3e706f6e08ae769ff014bc82c63a85135",
     # Complete public-file review: incoming_contract_review, 2026-11-17.
@@ -864,7 +880,7 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/conformance-edge.py':
         'db717ee3b016fb7f351552cdf9bbff12eff88936d16aefb9b6aabbdd04fa6f8e',
     'specs/conformance/meguri-sync-candidate.md':
-        '305e2b5c509129d49d71dbb35298c5350a847412672649bb2de91df669c55d35',
+        '17992fe697babc4d609586223cb2ecf3d6b371a8864123dcdf453aa76e406d5f',
     'docs/process/review-log/meguri-sync-normal-candidate.md':
         'a071d74e332b444e750964a80c7651915d23700b7221f55b183a998001c16996',
     'docs/process/review-log/meguri-sync-U8.md':
@@ -880,7 +896,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/collection/changes.rs':
         '83f506e218e17d7c878c5381110c76277d3c64e767eb8a3da299d50c81a92b33',
     'tools/gate/tiers.yaml':
-        '7d25001cc4ca9ee9ef630a1f63bcc29fb653a2ec5913c973605427d397410f6e',
+        'd63c27f6b8673ba9581c433695f3f35154d25a4f19e482a1aa846b7b22be9028',
     'tools/mg.d/sync-web.sh':
         '278ad9f6f50691f5e8447189d248404a016bf626fe4c51974ebd3b1e27f8a22b',
     'server/web/upstream-records.json':
@@ -890,7 +906,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/app.tsx':
         '4e3224e691b9887c4e5aa8dee485118fb5308e20b15d15ccb0d885cb0915e8fd',
     'server/web/scripts/run.sh':
-        '02636655a6eaace0500e9804a520fa6ff269b1f361ad55cbc0eff30bca34e6ce',
+        'ffb7660f0da45f44125a20d1ce2888094e80810cade350714c537eb9f52d67d3',
     'server/web/package-lock.json':
         'f2f38f36f9f092dec3723f3425047d2f10f4fb32b7c411242c2b1b32c6a1a2f4',
     'server/web/notices/rolldown-THIRD-PARTY-LICENSE.txt':
@@ -923,7 +939,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        '6c13c33e4a64819ed7565480f95c633e7ecc0779fbe5760ab1f240d5e1de5c3e',
+        'db3d0429ab2026c1799c33bff95d98a7f950d432957fbea6db3a52125b6085ae',
     # Independently reviewed first-party license scope, exact complete text.
     'LICENSING.md':
         '98c119e6dedf0192268fc328b9a8e0be58771760a4bc2156387db57ae97c7f2a',
@@ -973,7 +989,7 @@ PUBLIC_ARTIFACTS = {
     "specs/servers/meguri-sync-web.md":
         '416530b250c2dd1868f67fe30df9798dbaac586a1d5747baf603f87e00463d99',
     "specs/conformance/meguri-sync-server.md":
-        "80984e2e5df4d7a0e84cef6ac186ad2d67a041d61b5029d853169fa01ff0814c",
+        '4c0e7651ab72236ad31320925e8c1c163c6dc7f1904e9c0c3e52df50e8f9e479',
     "conformance/schema/meguri-sync-server.schema.json":
         "cd905c134ed497f166566e18733465fa7e992156944957ee16c2e17ca586814a",
     # Same delegated maintenance: independently authored/reviewed tooling,
@@ -1044,7 +1060,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/semantic.rs':
         '3da133a09e7d4e3f225a696fad20652c465309522f97825f78a8f022e2f18945',
     'server/src/storage/tests.rs':
-        'ad552c0f8ee03fd30aed02177781877457d98f1a343a94d76012204f4c4f7dca',
+        '2fca66030368d01fbdf61c1bf5596834c2a0fb570c9df1b18855055c7ae54084',
     'server/tests/accounts.rs':
         '7e0fa1344776c603a782ff3327e7aa47791357d21e049b9d26cb05cdb4adb2d5',
     'server/tests/http_contract.rs':

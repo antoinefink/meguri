@@ -20,6 +20,30 @@ fn private_sentinel(path: &Path) {
     fs::write(path, b"synthetic data: preserve exactly\0\xff").unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
 }
+#[test]
+fn cross_directory_publication_preserves_collision_and_moves_to_absent_destination() {
+    let temp = tempfile::tempdir().unwrap();
+    let parent = fs::File::open(temp.path()).unwrap();
+    let from = owned::dir(&parent, "from", true).unwrap();
+    let to = owned::dir(&parent, "to", true).unwrap();
+    owned::write_new(&from, "stage", b"staged bytes").unwrap();
+    owned::write_new(&to, "existing", b"destination bytes").unwrap();
+
+    let error = owned::publish_between(&from, "stage", &to, "existing").unwrap_err();
+    let errno = std::io::Error::last_os_error();
+    assert_eq!(errno.raw_os_error(), Some(libc::EEXIST));
+    assert_eq!(error.code, "storage_unavailable");
+    assert_eq!(owned::read(&to, "existing").unwrap(), b"destination bytes");
+    assert_eq!(owned::read(&from, "stage").unwrap(), b"staged bytes");
+
+    owned::publish_between(&from, "stage", &to, "absent").unwrap();
+    assert_eq!(owned::read(&to, "absent").unwrap(), b"staged bytes");
+    assert_eq!(
+        fs::metadata(temp.path().join("from/stage")).unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+    assert_eq!(owned::read(&to, "existing").unwrap(), b"destination bytes");
+}
 fn reserve(root: &DataRoot, kind: &str, issuer: Option<&str>) -> String {
     let id = crypto::random_token().unwrap();
     let mut c = open(root.database(), false).unwrap();

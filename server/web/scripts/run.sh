@@ -106,6 +106,12 @@ case "$mode" in
         cp node_modules/playwright-core/browsers.json "${web_output}/browsers.json"
         node node_modules/playwright/cli.js install chromium
         ;;
+      package-browser)
+        # Use this image's prepared locked graph and Chromium, never the runtime.
+        cp /package-smoke.mjs ./package-smoke.mjs
+        cp node_modules/playwright-core/browsers.json "${web_output}/package-browsers-${2:?phase required}.json"
+        node ./package-smoke.mjs "${2:?phase required}" browser
+        ;;
       browser)
         test -f /fixture/fixture.json
         mkdir -p "${web_output}/browser-artifacts"

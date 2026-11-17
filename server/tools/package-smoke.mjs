@@ -1,0 +1,114 @@
+// SPDX-License-Identifier: MIT
+// Private HTTPS fixture, adapted from the existing browser fixture. The server
+// process lives in the actual runtime container; this image supplies clients only.
+import { createServer, request as httpsRequest } from 'node:https';
+import { request as httpRequest } from 'node:http';
+import { execFileSync } from 'node:child_process';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { once } from 'node:events';
+import assert from 'node:assert/strict';
+const phase = process.argv[2];
+const browserMode = process.argv[3] === 'browser';
+assert(['seed', 'check'].includes(phase));
+const origin = 'https://localhost:18443';
+const credentials = { username: 'package.admin', password: 'Synthetic package password 2026' };
+let cert;
+const request = (path, body, cookie = '', extra = {}) => new Promise((resolve, reject) => {
+  const req = httpsRequest(origin + path, { ca: cert,
+    family: 4, method: body === undefined ? 'GET' : 'POST', headers: { Origin: origin,
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(cookie ? { Cookie: cookie } : {}), ...extra } }, response => {
+    const chunks = [];
+    response.on('data', chunk => chunks.push(chunk)); response.on('error', reject);
+    response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, bytes: Buffer.concat(chunks) }));
+  });
+  req.setTimeout(30000, () => req.destroy(new Error('Request deadline')));
+  req.on('error', reject); req.end(body === undefined ? undefined : JSON.stringify(body));
+});
+let proxy;
+try {
+  await mkdir('/tmp/tls');
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=localhost',
+    '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1', '-keyout', '/tmp/tls/key.pem', '-out', '/tmp/tls/cert.pem'], { stdio: 'ignore' });
+  cert = await readFile('/tmp/tls/cert.pem');
+  proxy = createServer({ key: await readFile('/tmp/tls/key.pem'), cert }, (incoming, outgoing) => {
+    const headers = { ...incoming.headers, 'x-forwarded-for': '127.0.0.1', 'x-forwarded-proto': 'https' };
+    delete headers['x-forwarded-host'];
+    const upstream = httpRequest({ hostname: '127.0.0.1', port: 8080, method: incoming.method, path: incoming.url, headers }, response => {
+      outgoing.writeHead(response.statusCode, response.headers); response.pipe(outgoing);
+    });
+    upstream.on('error', () => { if (!outgoing.headersSent) outgoing.writeHead(502); outgoing.end(); });
+    incoming.on('aborted', () => upstream.destroy()); outgoing.on('close', () => upstream.destroy()); incoming.pipe(upstream);
+  });
+  proxy.listen(18443, '127.0.0.1'); await once(proxy, 'listening');
+  if (browserMode) {
+    // Installed locked tooling lives only in the existing browser container.
+    const { chromium, expect } = await import('@playwright/test');
+    const browser = await chromium.launch({ headless: true, timeout: 30000 });
+    try {
+      const context = await browser.newContext({ baseURL: origin, ignoreHTTPSErrors: true });
+      context.setDefaultTimeout(8000); context.setDefaultNavigationTimeout(30000);
+      const page = await context.newPage();
+      const errors = [];
+      page.on('pageerror', error => errors.push(error.name));
+      if (phase === 'seed') {
+        const token = (await readFile('/data/owner/state/setup-token', 'utf8')).trim();
+        await page.goto(`/setup#token=${encodeURIComponent(token)}`);
+        await expect(page.getByRole('heading', { name: 'Set up Meguri Sync', exact: true })).toBeVisible();
+        await page.getByLabel('Username', { exact: true }).fill(credentials.username);
+        await page.getByLabel('New password', { exact: true }).fill(credentials.password);
+        await page.getByLabel('Confirm new password', { exact: true }).fill(credentials.password);
+        await page.getByRole('button', { name: 'Set up Meguri Sync', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+      }
+      await page.goto('/login');
+      await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+      await page.getByLabel('Username', { exact: true }).fill(credentials.username);
+      await page.getByLabel('Password', { exact: true }).fill(credentials.password);
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Connect your devices', exact: true })).toBeVisible();
+      await expect(page.getByLabel('Server URL', { exact: true })).toHaveValue(`${origin}/`);
+      await expect(page.getByLabel('Username', { exact: true })).toHaveValue(credentials.username);
+      const cookie = (await context.cookies()).find(item => item.name === '__Host-meguri-session');
+      assert(cookie?.secure && cookie.httpOnly && cookie.sameSite === 'Strict');
+      await page.getByRole('link', { name: 'Accounts', exact: true }).click();
+      await expect(page.getByRole('heading', { name: `${credentials.username} (you)`, exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Create invitation', exact: true })).toBeVisible();
+      await page.screenshot({ path: `/out/browser-${phase}.png`, fullPage: true });
+      await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+      assert.deepEqual(errors, []);
+      await writeFile(`/out/browser-${phase}.json`, JSON.stringify({ phase,
+        checks: [phase === 'seed' ? 'rendered-setup-form' : 'account-after-runtime-restart',
+          'rendered-login-form', 'connection-details', 'secure-cookie', 'admin-account', 'sign-out'],
+        browser: browser.version() }) + '\n');
+    } finally { await browser.close(); }
+  } else {
+    const health = await request('/health'); assert.equal(health.status, 200);
+    const login = await request('/api/login', credentials); assert.equal(login.status, 200);
+    const setCookie = login.headers['set-cookie']; assert.equal(setCookie.length, 1);
+    assert.match(setCookie[0], /; Secure/); assert.match(setCookie[0], /; HttpOnly/); assert.match(setCookie[0], /SameSite=Strict/);
+    const cookie = setCookie[0].split(';')[0];
+    const me = await request('/api/me', undefined, cookie); assert.equal(me.status, 200);
+    assert.equal(JSON.parse(me.bytes).data.username, credentials.username);
+    // The proxy strips spoofed authority; the exact browser Origin still governs.
+    const badOrigin = await request('/api/login', credentials, '', { Origin: 'https://wrong.example.test' });
+    assert.equal(badOrigin.status, 403);
+    const assets = JSON.parse(await readFile('/package/assets.json', 'utf8'));
+    assert(assets.some(asset => asset.path.endsWith('.js')));
+    for (const asset of assets) {
+      const response = await request(asset.path === '/index.html' ? '/login' : asset.path);
+      assert.equal(response.status, 200); assert.equal(response.bytes.length, asset.bytes);
+      assert.equal(createHash('sha256').update(response.bytes).digest('hex'), asset.sha256);
+    }
+    execFileSync('/smoke/native', [phase], { stdio: ['ignore', 'inherit', 'inherit'] });
+    const logout = await request('/api/logout', {}, cookie); assert.equal(logout.status, 200);
+    await writeFile(`/out/${phase}.json`, JSON.stringify({ phase, checks: ['health', 'https-login', 'secure-cookie', 'account', 'origin', 'embedded-assets', 'native-collection-review-media'], assets: assets.length }) + '\n');
+  }
+} catch {
+  // No API bodies, secrets or capability URLs in ordinary logs.
+  console.error(`Packaged service smoke failed: ${browserMode ? 'browser-' : ''}${phase}`); process.exitCode = 1;
+} finally {
+  if (proxy) { proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); }
+}
