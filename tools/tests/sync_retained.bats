@@ -979,6 +979,296 @@ PY
   [ "$status" -eq 0 ]
 }
 
+@test "retained declared edits bind home and original ancestors to one review's statistics in both directions" {
+  run python3 - "$REPO_ROOT" <<'PY'
+import copy, importlib.util, json, pathlib, sys
+repo = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location('retained', repo / 'conformance/peers/retained-sync/support.py')
+s = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(s)
+# Public synthetic whole-table policy inputs only: no SDK, HTTP, worker or
+# runtime observations. Exercise the real shared proof without substituting it.
+recipes = s.load_json(s.RECIPES)
+def integer(value):
+    return dict(integer=str(value))
+def text(value):
+    return dict(text_hex=value.encode().hex())
+def blob(value):
+    return dict(blob_hex=value.hex())
+def short_text(tag, value):
+    data = value.encode()
+    assert 0 < tag < 16 and len(data) < 128
+    return bytes([(tag << 3) | 2, len(data)]) + data
+def preset(part):
+    # Public P6.6 fields 9, 10, 23 and 24; these fixture values fit one byte.
+    return bytes([0x48, part['new_per_day'], 0x50, part['reviews_per_day']]) + (
+        b'' if part['autoplay'] else b'\xb8\x01\x01') + bytes([0xc0, 0x01, part['maximum_answer_seconds']])
+def row(table, **cells):
+    return [cells.get(column, integer(0)) for column in s.COLUMNS[table].split()]
+def table(value, name):
+    return value['tables'][name]['rows']
+def identified(value, name, identity):
+    return next(r for r in table(value, name) if r[0] == integer(identity))
+initial = dict(format='meguri-retained-snapshot-v1',
+    tables={name: dict(columns=columns.split(), rows=[]) for name, columns in s.COLUMNS.items()},
+    media_sha256={'public-synthetic.txt': 'f' * 64})
+table(initial, 'col').append(row('col', id=integer(1), ver=integer(18),
+    conf=text('{}'), models=text('{}'), decks=text('{}'), dconf=text('{}'), tags=text('{}')))
+for offset, note in enumerate(recipes['rich_initial']['notes']):
+    table(initial, 'notes').append(row('notes', id=integer(11 + offset), guid=text('synthetic-' + note['key']),
+        mid=integer(21), tags=text(' orbit '), flds=text('\x1f'.join(note['fields'])),
+        sfld=text(note['fields'][0]), data=text('')))
+    table(initial, 'cards').append(row('cards', id=integer(31 + offset), nid=integer(11 + offset),
+        did=integer(41), data=text('{"pos":7,"custom":"public synthetic"}')))
+table(initial, 'notetypes').extend([
+    row('notetypes', id=integer(21), name=text(recipes['rich_initial']['note_type']), config=blob(short_text(3, recipes['rich_initial']['template']['css']))),
+    row('notetypes', id=integer(22), name=text('Other public type'), config=blob(b'\x08\x01'))])
+for ordinal, name in enumerate(recipes['rich_initial']['fields_in_order']):
+    table(initial, 'fields').append(row('fields', ntid=integer(21), ord=integer(ordinal), name=text(name), config=blob(b'')))
+table(initial, 'templates').extend([
+    row('templates', ntid=integer(21), name=text(recipes['rich_initial']['template']['name']),
+        config=blob(short_text(1, recipes['rich_initial']['template']['question']) + short_text(2, recipes['rich_initial']['template']['answer']))),
+    row('templates', ntid=integer(22), name=text(recipes['rich_initial']['template']['name']), config=blob(b'\x0a\x05other'))])
+table(initial, 'tags').append(row('tags', tag=text('orbit'), config=blob(b'')))
+child_name = recipes['rich_initial']['deck']['name'].replace('::', '\x1f')
+parent_name = child_name.rsplit('\x1f', 1)[0]
+for did, name, common in [(41, child_name, b'\x10\x01'), (42, parent_name, b'\x08\x01\x10\x01'),
+    (43, parent_name + '\x1fSouth', b'\x08\x01\x40\x01'), (44, 'Unrelated', b'\xfa\x0f\x01x'),
+    (1, 'Default', b'\x10\x01')]:
+    table(initial, 'decks').append(row('decks', id=integer(did), name=text(name),
+        common=blob(common), kind=blob(b'\x0a\x02\x08\x3d')))
+normal = b'\x08\x3d' + short_text(4, recipes['rich_initial']['deck']['description'])
+identified(initial, 'decks', 41)[5] = blob(bytes([0x0a, len(normal)]) + normal)
+table(initial, 'deck_config').extend([
+    row('deck_config', id=integer(61), name=text(recipes['rich_initial']['preset']['name']), config=blob(preset(recipes['rich_initial']['preset']))),
+    row('deck_config', id=integer(62), name=text('Other public preset'), config=blob(b'\x48\x01'))])
+table(initial, 'config').extend([
+    row('config', KEY=text('meguri_sync_fixture'), val=blob(json.dumps(recipes['rich_initial']['config']['meguri_sync_fixture']).encode())),
+    row('config', KEY=text('foreign'), val=blob(b'{"keep": [1, 2]}'))])
+
+def edited(before, direction):
+    after = copy.deepcopy(before)
+    changes = recipes['rich_' + direction + '_changes']
+    delete_id = 12 if direction == 'forward' else 13
+    table(after, 'notes')[:] = [r for r in table(after, 'notes') if r[0] != integer(delete_id)]
+    table(after, 'cards')[:] = [r for r in table(after, 'cards') if r[1] != integer(delete_id)]
+    keep = identified(after, 'notes', 11)
+    fields = bytes.fromhex(keep[6]['text_hex']).decode().split('\x1f')
+    fields[1 if direction == 'forward' else 2] = changes['keep_answer' if direction == 'forward' else 'keep_context']
+    keep[6] = text('\x1f'.join(fields))
+    card = identified(after, 'cards', 31)
+    card[6], card[7], card[8], card[11] = integer(1), integer(1), integer(100), integer(1 if direction == 'forward' else 2)
+    card[17] = text('{"public":"actual scheduler data remains opaque in this proof"}')
+    table(after, 'revlog').append([integer(v) for v in
+        ((101, 31, -1, 3, -60, 0, 2500, 900, 0) if direction == 'forward' else
+         (102, 31, -1, 2, -90, -60, 2500, 1100, 0))])
+    table(after, 'graves').extend([[integer(v) for v in values] for values in
+        ((delete_id, 1, -1), (delete_id + 20, 0, -1))])
+    identified(after, 'notetypes', 21)[4] = blob(short_text(3, changes['css']))
+    table(after, 'templates')[0][5] = blob(short_text(1, changes['question']) + short_text(2, changes['answer']))
+    child = identified(after, 'decks', 41)
+    child[4] = blob(bytes.fromhex('080110012001388407' if direction == 'forward' else '1001200138d00f'))
+    normal = b'\x08\x3d' + short_text(4, changes['deck_description'])
+    child[5] = blob(bytes([0x0a, len(normal)]) + normal)
+    identified(after, 'decks', 42)[4] = blob(bytes.fromhex('080110012001388407' if direction == 'forward' else '08011001200138d00f'))
+    identified(after, 'deck_config', 61)[4] = blob(preset(changes['preset']))
+    table(after, 'config')[0][3] = blob(json.dumps(changes['config']['meguri_sync_fixture']).encode())
+    return after
+
+forward = edited(initial, 'forward')
+reverse = edited(forward, 'reverse')
+pairs = [(initial, forward, 'forward'), (forward, reverse, 'reverse')]
+original_bytes = [s.encoded(v) for v in (initial, forward, reverse)]
+for before, after, direction in pairs:
+    assert s.declared_edit(before, after, direction) is after
+    assert s.declared_edit(before, after, direction, limited=True) is after
+    # Only existing protocol stamp exclusions remain in force.
+    stamped = copy.deepcopy(after)
+    for name, columns in s.COLUMNS.items():
+        for r in table(stamped, name):
+            for i, column in enumerate(columns.split()):
+                if column in s.STAMPS[name]:
+                    r[i] = integer(987)
+    assert s.declared_edit(before, stamped, direction) is stamped
+
+    def rejects(label, mutate_before=None, mutate_after=None):
+        old, new = copy.deepcopy(before), copy.deepcopy(after)
+        if mutate_before:
+            mutate_before(old)
+        if mutate_after:
+            mutate_after(new)
+        try:
+            s.declared_edit(old, new, direction)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(direction + ': admitted ' + label)
+
+    def set_cell(name, identity, column, value):
+        return lambda v: identified(v, name, identity).__setitem__(column, value)
+    for did in (1, 42, 43, 44):
+        for column, value in [(0, integer(999)), (1, text('Changed name')), (5, blob(b'changed kind'))]:
+            rejects('deck identity/name/kind', mutate_after=set_cell('decks', did, column, value))
+    for did in (1, 43, 44):
+        rejects('nonancestor common', mutate_after=set_cell('decks', did, 4, blob(b'\x08\x01\x10\x01\x20\x01\x38\x84\x07')))
+    for did in (1, 42, 43, 44):
+        # Changing both card copies cannot make another original did authored.
+        rejects('wrong original review did', set_cell('cards', 31, 2, integer(did)), set_cell('cards', 31, 2, integer(did)))
+    for column, value in [(0, integer(999)), (1, integer(33)), (2, integer(42)), (3, integer(1)), (16, integer(1))]:
+        rejects('review card identity', mutate_after=set_cell('cards', 31, column, value))
+    for queue in (-3, -2, -1, 4, 99, 1 if direction == 'forward' else 0):
+        rejects('ineligible original queue', mutate_before=set_cell('cards', 31, 7, integer(queue)))
+    # Complete raw comparisons reject known-field drift, duplicate/default
+    # encodings, and unknown/other bytes on either side, not just lost fields.
+    for did in (41, 42):
+        for which in ('before', 'after', 'both'):
+            for suffix in ('1801', '2001', '2801', '3001', '3801', '4001', 'fa0f0178',
+                           '0801', '1001', '0800', '1000', '1800', '2000', '2800', '3800', '80'):
+                def append_common(value, did=did, suffix=suffix):
+                    cell = identified(value, 'decks', did)[4]
+                    cell['blob_hex'] += suffix
+                rejects('deck ' + str(did) + ' extra raw bytes ' + which,
+                    append_common if which in ('before', 'both') else None,
+                    append_common if which in ('after', 'both') else None)
+    # Keep the parent correct while corrupting only complete HOME bytes.
+    # Include structurally valid but wrong counters, elapsed time and flags;
+    # the append cases above also cover day, duplicate/default/unknown/other.
+    home_raw_cases = (
+        [('before', ('', '08011001', '1000', '10012001', '10012801', '10013801')),
+         ('after', ('', '080110012002388407', '080110012801388407',
+                    '080110012001388507', '10012001388407', '080110002001388407'))]
+        if direction == 'forward' else
+        [('before', ('', '080110012002388407', '080110012801388407',
+                     '080110012001388507', '10012001388407', '080110002001388407')),
+         ('after', ('', '1001200238d00f', '1001280138d00f', '1001200138d10f',
+                    '08011001200138d00f', '1000200138d00f'))])
+    for which, raws in home_raw_cases:
+        for raw in raws:
+            mutate = set_cell('decks', 41, 4, blob(bytes.fromhex(raw)))
+            rejects('correct parent with malformed home ' + which,
+                mutate if which == 'before' else None, mutate if which == 'after' else None)
+    for raw in ('08011001', '080110012002388407', '080110012801388407',
+                '080110012001388507', '10012001388407', '0801100118012001388407'):
+        rejects('wrong after counter/category/time/day/flag', mutate_after=set_cell('decks', 42, 4, blob(bytes.fromhex(raw))))
+    rejects('wrong original parent baseline', mutate_before=set_cell('decks', 42, 4, blob(b'')))
+    for elapsed in (-1, 63001, 901 if direction == 'forward' else 64000):
+        rejects('review time bounds', mutate_after=lambda v, elapsed=elapsed: table(v, 'revlog')[-1].__setitem__(7, integer(elapsed)))
+    def matched_invalid_time(value):
+        # Matching home/parent arithmetic must not excuse a wrong fixed forward
+        # elapsed time or a reverse time above the authored 63-second cap.
+        table(value, 'revlog')[-1][7] = integer(901 if direction == 'forward' else 63001)
+        identified(value, 'decks', 42)[4] = blob(bytes.fromhex(
+            '080110012001388507' if direction == 'forward' else '080110012001389df303'))
+        identified(value, 'decks', 41)[4] = blob(bytes.fromhex(
+            '080110012001388507' if direction == 'forward' else '10012001389df303'))
+    rejects('matched but disallowed review time', mutate_after=matched_invalid_time)
+    def matched_invalid_queue(value):
+        identified(value, 'cards', 31)[7] = integer(1 if direction == 'forward' else 0)
+    def matched_invalid_category(value):
+        identified(value, 'decks', 42)[4] = blob(bytes.fromhex(
+            '08011001388407' if direction == 'forward' else '08011001200238d00f'))
+        identified(value, 'decks', 41)[4] = blob(bytes.fromhex(
+            '08011001388407' if direction == 'forward' else '1001200238d00f'))
+    rejects('matched but disallowed original queue', matched_invalid_queue, matched_invalid_category)
+    rejects('time not bound to common', mutate_after=lambda v: table(v, 'revlog')[-1].__setitem__(7, integer(899)))
+    for column, value in [(1, integer(33)), (3, integer(4))]:
+        rejects('new review identity/grade', mutate_after=lambda v, column=column, value=value: table(v, 'revlog')[-1].__setitem__(column, value))
+    def extra_review(value):
+        review = copy.deepcopy(table(value, 'revlog')[-1])
+        review[0] = integer(999)
+        table(value, 'revlog').append(review)
+    rejects('extra review', mutate_after=extra_review)
+    if direction == 'reverse':
+        rejects('original history mutation', mutate_after=lambda v: table(v, 'revlog')[0].__setitem__(7, integer(901)))
+        rejects('original history removal', mutate_after=lambda v: table(v, 'revlog').pop(0))
+    for name, identity, column, value in [('notes', 11, 10, text('data drift')),
+        ('notes', 11, 5, text('tags drift')), ('cards', 31, 11, integer(99)),
+        ('notetypes', 22, 4, blob(b'config drift')), ('deck_config', 62, 4, blob(b'config drift'))]:
+        rejects('existing data/settings guard', mutate_after=set_cell(name, identity, column, value))
+    if direction == 'forward':
+        rejects('unreviewed card data', mutate_after=set_cell('cards', 33, 17, text('data drift')))
+    for name in ('col', 'fields', 'tags'):
+        rejects('whole table drift', mutate_after=lambda v, name=name: table(v, name)[0].__setitem__(-1, blob(b'drift')))
+    rejects('other template config', mutate_after=lambda v: table(v, 'templates')[1].__setitem__(5, blob(b'drift')))
+    rejects('foreign config bytes', mutate_after=lambda v: table(v, 'config')[1].__setitem__(3, blob(b'{"keep":[1,2]}')))
+    rejects('declared config value', mutate_after=lambda v: table(v, 'config')[0].__setitem__(3, blob(b'{}')))
+    rejects('whole media drift', mutate_after=lambda v: v['media_sha256'].clear())
+    rejects('missing tombstone', mutate_after=lambda v: table(v, 'graves').pop())
+    for name, identity, columns in [('notetypes', 21, (4,)), ('deck_config', 61, (4,)), ('decks', 41, (4, 5))]:
+        def undo_edit(value, name=name, identity=identity, columns=columns):
+            old, new = identified(before, name, identity), identified(value, name, identity)
+            for column in columns:
+                new[column] = copy.deepcopy(old[column])
+        rejects('required selected object edit', mutate_after=undo_edit)
+
+# Reverse category comes from its original queue, regardless of log type.
+# These are prospective policy pairs, not a claimed reverse observation.
+for elapsed, parent_common, home_common in [
+    (0, '080110012001388407', '10012001388407'),
+    (63000, '080110012001389cf303', '10012001389cf303')]:
+    after = copy.deepcopy(reverse)
+    table(after, 'revlog')[-1][7] = integer(elapsed)
+    identified(after, 'decks', 42)[4] = blob(bytes.fromhex(parent_common))
+    identified(after, 'decks', 41)[4] = blob(bytes.fromhex(home_common))
+    assert s.declared_edit(forward, after, 'reverse') is after
+    # Regression: correct parent arithmetic alone cannot admit stale HOME time.
+    identified(after, 'decks', 41)[4] = copy.deepcopy(identified(reverse, 'decks', 41)[4])
+    try:
+        s.declared_edit(forward, after, 'reverse')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('reverse elapsed time admitted with stale home')
+for queue in (2, 3):
+    before, after = copy.deepcopy(forward), copy.deepcopy(reverse)
+    identified(before, 'cards', 31)[7] = integer(queue)
+    identified(after, 'decks', 42)[4] = blob(bytes.fromhex('080110012001280138d00f'))
+    identified(after, 'decks', 41)[4] = blob(bytes.fromhex('10012001280138d00f'))
+    assert table(after, 'revlog')[-1][8] == integer(0)
+    assert s.declared_edit(before, after, 'reverse') is after
+    # A correct parent must not hide a missing HOME review counter.
+    identified(after, 'decks', 41)[4] = blob(bytes.fromhex('1001200138d00f'))
+    try:
+        s.declared_edit(before, after, 'reverse')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('reverse review category admitted with stale home')
+    identified(after, 'decks', 41)[4] = blob(bytes.fromhex('10012001280138d00f'))
+    identified(after, 'decks', 42)[4] = blob(bytes.fromhex('08011001200138d00f'))
+    try:
+        s.declared_edit(before, after, 'reverse')
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('reverse review category taken from revlog.type')
+
+# Ancestors are resolved from original names; renaming an after-row cannot
+# grant an unrelated row permission. Missing immediate parents stop traversal.
+before, after = copy.deepcopy(initial), copy.deepcopy(forward)
+identified(after, 'decks', 44)[1] = text(parent_name)
+try:
+    s.declared_edit(before, after, 'forward')
+except ValueError:
+    pass
+else:
+    raise AssertionError('after-name ancestor admitted')
+for value in (before, after):
+    table(value, 'decks')[:] = [r for r in table(value, 'decks') if r[0] != integer(42)]
+identified(after, 'decks', 44)[1] = text('Unrelated')
+assert s.declared_edit(before, after, 'forward') is after
+identified(after, 'decks', 1)[4] = blob(bytes.fromhex('080110012001388407'))
+try:
+    s.declared_edit(before, after, 'forward')
+except ValueError:
+    pass
+else:
+    raise AssertionError('default deck exemption admitted')
+assert [s.encoded(v) for v in (initial, forward, reverse)] == original_bytes
+PY
+  [ "$status" -eq 0 ]
+}
+
 @test "retained peer successful offline companion capture checkpoint and final attachment preserve complete closure" {
   run python3 - "$REPO_ROOT" "$BATS_TEST_TMPDIR" <<'PY'
 import copy, importlib.util, pathlib, sys

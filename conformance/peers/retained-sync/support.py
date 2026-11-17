@@ -609,9 +609,9 @@ def declared_edit(baseline, authority, direction, limited=False):
     """Retain original cells except declared edits and actual scheduler output.
 
     Settings blobs remain byte-exact, with changes confined to their declared
-    authored row/column. Independent review of those actual settings and the
-    preparation rules remains required; they are never normalized or decoded
-    through a second SDK implementation here.
+    authored row/column and DeckCommon bounded by the fixed review. Independent
+    review of those actual settings and preparation rules remains required;
+    they are never normalized or decoded through a second SDK implementation.
     """
     before, after = projection(baseline), projection(authority)
     require(direction in ('forward', 'reverse'), 'declared direction')
@@ -668,6 +668,62 @@ def declared_edit(baseline, authority, direction, limited=False):
     review = logs_after[next(iter(set(logs_after) - set(logs_before)))]
     kept_card = cards_before[next(iter(reviewed_cards))][0]
     require(review[1] == kept_card and review[3] == dict(integer='3' if direction == 'forward' else '2'), 'declared review identity and grade')
+    # The fixed fixture answers in its creation day (0). Only the original
+    # home deck and the existing original name ancestors receive statistics
+    # (sched/answer.rs); neither an after-row name nor deck id 1 grants scope.
+    original_decks = rows(before, 'decks')
+    child_name = recipes['rich_initial']['deck']['name'].replace('::', '\x1f')
+    children = [row for row in original_decks.values() if text(row[1]) == child_name]
+    require(len(children) == 1, 'original authored child deck')
+    original_card = cards_before[next(iter(reviewed_cards))]
+    require(original_card[2] == children[0][0], 'original review home deck')
+    exact(original_card[7], 'integer')
+    queue = int(original_card[7]['integer'])
+    require(queue == 0 if direction == 'forward' else queue in (1, 2, 3), 'fixed review queue')
+    exact(review[7], 'integer')
+    elapsed = int(review[7]['integer'])
+    require(0 <= elapsed <= changes['preset']['maximum_answer_seconds'] * 1000 and
+            (direction != 'forward' or elapsed == 900), 'fixed review time')
+
+    def review_common(study_collapsed, new_count, review_count, milliseconds):
+        # Finite P6.4 construction, not a decoder/normalizer. The browser flag
+        # is true; day and legacy learning count are zero. Comparing
+        # complete bytes rejects other/unknown fields, even unchanged ones.
+        data = bytearray(b'\x08\x01' if study_collapsed else b'')
+        data.extend(b'\x10\x01')
+        for tag, value in ((4, new_count), (5, review_count), (7, milliseconds)):
+            if value:
+                data.append(tag << 3)
+                while value >= 128:
+                    data.append((value & 127) | 128)
+                    value >>= 7
+                data.append(value)
+        return dict(blob_hex=data.hex())
+
+    # Reverse starts with the prior forward's one New answer and 900 ms.
+    # Its own original queue, never revlog.type, determines the next counter
+    # (deck_sched.rs). Learning adds time only; Review/InterdayLearning add
+    # review count. No day rollover/reset is admitted by this fixed authority.
+    prior_new, prior_time = (0, 0) if direction == 'forward' else (1, 900)
+    next_new, next_review, next_time = prior_new + int(queue == 0), int(queue in (2, 3)), prior_time + elapsed
+    parent_before = review_common(True, prior_new, 0, prior_time)
+    parent_after = review_common(True, next_new, next_review, next_time)
+    # Only HOME's authored study-collapse toggle differs from its ancestors;
+    # its complete statistics use that same actual original queue and time.
+    home_before = review_common(direction == 'reverse', prior_new, 0, prior_time)
+    home_after = review_common(direction == 'forward', next_new, next_review, next_time)
+    require(children[0][4] == home_before, 'fixed original home common bytes')
+    ancestor_keys = set()
+    ancestor_name = text(children[0][1])
+    while '\x1f' in ancestor_name:
+        ancestor_name = ancestor_name.rsplit('\x1f', 1)[0]
+        parents = [(key, row) for key, row in original_decks.items() if text(row[1]) == ancestor_name]
+        require(len(parents) <= 1, 'unique original ancestor')
+        if not parents:
+            break
+        key, parent = parents[0]
+        require(parent[4] == parent_before, 'fixed original ancestor common bytes')
+        ancestor_keys.add(key)
     grave_before, grave_after = rows(before, 'graves'), rows(after, 'graves')
     require(set(grave_before) <= set(grave_after) and all(grave_after[k] == v for k, v in grave_before.items()), 'original deletion history')
     deleted_oids = [deleted_note] + [cards_before[k][0] for k in deleted_cards]
@@ -698,7 +754,11 @@ def declared_edit(baseline, authority, direction, limited=False):
                 selected_count += 1
             for index, column in enumerate(columns):
                 if column in mutable and selected:
+                    if name == 'decks' and column == 'common':
+                        require(new[index] == home_after, 'single review home common bytes')
                     changed = changed or new[index] != old[index]
+                elif name == 'decks' and key in ancestor_keys and column == 'common':
+                    require(new[index] == parent_after, 'single review ancestor common bytes')
                 else:
                     require(new[index] == old[index], 'undeclared authored cell changed')
         require(selected_count == 1, 'original authored object')
