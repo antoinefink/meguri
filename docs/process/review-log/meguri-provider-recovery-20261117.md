@@ -451,3 +451,9 @@ Fixture author `054134-95711` adds an explicit local-only opening for the negati
 Snapshot decision: PUBLIC. The independent non-author `provider_public_snapshot_review` inspected the entire final coordinator, with all comments, literals, data and paths. Actual bytes match SHA-256 `d17a17aafe357db445010b6d580ad11bac91f5d7e23496088de5f60f865b9130`: 2,866 lines, 165,110 bytes. Only its existing map value changes. Preserve the failed receipts, batch base and acceptance limits.
 
 Correction checks pass: privacy `054753-3096` covers six paths; static `054702-2305` passes three stages; similarity `054659-1499` scans three files with zero flags or exemptions. Root read the filtered report. Scanner `054700-1910` passes its selected case. The prior prose scan `054702-2416` remains retained; its fixed public sentence was rewritten without changing source or policy.
+
+## Corrected source reaches the next checks
+
+CoreBridge `swift-test/20261117T054856Z-3873`, clean `fb353d51`: two passes, one failure, zero skips. The negative case opens LocalOnly, then receives `cloud runtime account is unverified` from baseline preparation. Its three refusal checks do not run. Keep this failed setup receipt and use a separate local-only fixture that needs no connected baseline.
+
+AppModel `swift-test/20261117T055023Z-5307`, the same clean commit, stops at test compilation: the production actor correction compiles, but an existing exhaustive observer in `InitialCloudAdoptionTests` needs the new DEBUG event case. Zero workflow tests executed. Both failed receipts remain; the CPU window was released from the actual terminal JSON. Source diagnosis continues, with all assertions retained.
