@@ -3105,6 +3105,85 @@ fn bind_and_write(host: &CoreHost, service: &mut Service<SeededRandom>, scope: &
 }
 
 #[test]
+fn replacement_publication_consent_waits_for_its_actual_binding() {
+    use meguri_sync::provider::Selection;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("replacement-publication-consent");
+    generated(&dir);
+    let host = open_prior_icloud_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(716)).unwrap();
+    let predecessor = publish_cold_resume_pending(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let qualified = host.provider_authority().snapshot().unwrap();
+    assert!(qualified.binding.is_some() && !qualified.legacy_binding_pending);
+    let rows = cold_resume_rows(&host);
+    let history = cold_resume_entities(&host);
+    assert!(history.iter().any(|entity| entity.mark.is_some()
+        && entity.local_rev > entity.acked_rev && entity.acked_rev > 0
+        && entity.acked_payload.is_some() && !entity.acked_system_fields.is_empty()));
+
+    let preview = actual_preview(&host, &mut service, &scope());
+    assert!(preview.active.is_some() && preview.cloud.is_some());
+    assert_eq!(preview.active_epoch, Some(predecessor.facts.epoch));
+    let id = runtime.confirm_connection_publication(&preview, &collection).unwrap();
+    let confirmed = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(confirmed.id, id);
+    assert_eq!(confirmed.step, PublishStep::Confirmed);
+    assert_eq!(confirmed.reason, cloud::control_codec::EpochReason::ReplaceCloud as u8);
+    assert_eq!(confirmed.binding_before.as_ref().unwrap().id, predecessor.id);
+    assert_eq!(confirmed.binding_before.as_ref().unwrap().state, cloud::BindingState::Active);
+    assert!(confirmed.binding_after.is_none());
+    assert_ne!(confirmed.epoch, predecessor.facts.epoch);
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&predecessor));
+
+    runtime.provider_accept_icloud_connection().unwrap();
+    host.refresh_provider_admission();
+    let accepted = host.provider_authority().snapshot().unwrap();
+    assert_eq!(accepted.selection, Selection::ICloud);
+    assert!(accepted.settings.enabled && !accepted.settings.paused && accepted.handoff.is_none());
+    assert!(runtime.publication_op().unwrap().as_ref() == Some(&confirmed));
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&predecessor));
+    assert_eq!(cold_resume_rows(&host), rows);
+    for entity in &history {
+        assert_eq!(runtime.binding_entity(predecessor.id, &entity.name).unwrap().as_ref(), Some(entity));
+    }
+    assert!(accepted.legacy_binding_pending,
+        "confirmed replacement setup consent must wait for the operation's target epoch, not qualify its active predecessor");
+
+    runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+    let replacement = runtime.status().unwrap().binding.unwrap();
+    let bound = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(bound.binding_after, Some(replacement.id));
+    assert_ne!(replacement.id, predecessor.id);
+    assert_eq!(replacement.facts.state, cloud::BindingState::Active);
+    assert_eq!(replacement.facts.epoch, confirmed.epoch);
+    assert_eq!(replacement.facts.account, confirmed.account);
+    assert_eq!(replacement.facts.publication, confirmed.confirmed_publication);
+    runtime.perform_publication_local(id, LocalWork::WriteDecision, &collection).unwrap();
+    own_until_scan(&host, &mut service);
+    assert!(host.provider_authority().permits_icloud_binding(&replacement));
+    runtime.require_provider_collection_admission().unwrap();
+    assert!(!host.provider_authority().snapshot().unwrap().legacy_binding_pending);
+    runtime.reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30))
+        .expect("the actual replacement binding must qualify and complete its real scan");
+    let status = runtime.status().unwrap();
+    assert_eq!(status.binding.as_ref(), Some(&replacement));
+    assert!(status.stored_usable && status.identity_verified && status.scan_completed_this_open);
+    assert!(!status.scan_required && !status.tracking_stopped);
+    let op = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(op.id, id);
+    assert_eq!(op.binding_after, Some(replacement.id));
+    assert!(!op.switch_sent && op.active_attempt.is_none());
+    assert_eq!(cold_resume_rows(&host), rows);
+    for entity in &history {
+        assert_eq!(runtime.binding_entity(predecessor.id, &entity.name).unwrap().as_ref(), Some(entity));
+    }
+    host.close().unwrap();
+}
+
+#[test]
 fn cancel_replacement_requalifies_restored_provider_before_reconciliation() {
     use cloud::runtime::RuntimeError;
     use meguri_engine::device_state::{DeviceState, PublicationDecision};

@@ -838,12 +838,27 @@ fn epoch_crt_gate_committed_media_trash_settles_after_mismatch_with_real_intent_
     assert!(!pending[0].inbox_ids.is_empty());
     assert!(runtime.incoming_wal_receipts().is_empty());
     change_local_crt(&host, local_crt(&host) + 1);
+    collection.run(
+        meguri_engine::OpSpec::named("settle rollover", meguri_engine::OpSource::Rollover)
+            .stamp(meguri_storage::StampMode::Raw),
+        |_| Ok(()),
+    ).unwrap();
+    let rows = cold_resume_rows(&host);
     let seq = collection.last_seq();
+    let identity = {
+        let lease = collection.reader(ReaderRole::Query).unwrap();
+        let snapshot = lease.snapshot().unwrap();
+        assert_eq!(snapshot.seq(), seq);
+        snapshot.wal_identity()
+    }; // Release the snapshot and Query lease before drain or another reader.
     runtime.drain_incoming(&collection, Duration::from_secs(30)).unwrap();
     assert_eq!(collection.last_seq(), seq);
+    assert_eq!(cold_resume_rows(&host), rows);
     assert!(!file.exists());
     assert!(runtime.apply_intents(binding.id).unwrap().is_empty());
     assert!(!runtime.incoming_wal_receipts().is_empty());
+    assert!(runtime.incoming_wal_receipts().iter().any(|receipt|
+        receipt.identity() == identity && receipt.through() >= seq));
     assert!(runtime.inbox_entries(binding.id).unwrap().iter().all(|entry| entry.entry.record_name != before.name));
     assert_mismatch(&host, &sdk, true);
     host.close().unwrap();
