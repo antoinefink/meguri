@@ -1246,6 +1246,7 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/meguri-provider-test.sh': 'f12c6fad08789bd3265b776a27c19527f6a263b82e3e383e48fcd20eb8595d30',
     'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
     'tools/tests/meguri_provider_real_server.bats': '994836e305243dddf45cc77147ea7e10342a8b04427717b197a5822ee7a6ceb4',
+    'app/Packages/MeguriKit/Tests/AppModelTests/CloudPreviewActivityTests.swift': '9ad2c7dfb1e320bf428f622df4137fc660375692936788bc8202c11e43dbeded',
 }
 
 

@@ -15,12 +15,13 @@ extension ReviewCollectionStartupTests {
         var attachments = 0
         let sync = SyncCoordinator(bootstrap: {
             try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-first-preview", environment: .development,
-                status: .available, identity: Data("synthetic-first-account".utf8))
-        }, makeBackend: { _ in
+                status: .couldNotDetermine, identity: nil)
+        }, makeBackend: { persisted in
             attachments += 1
-            let connection = try await CoreCloudWorkflowService().connection()
-            return PreviewActivityBackend(connection: connection, own: CloudOwnExecutor(core: connection, transport: transport))
-        }, defaults: nil)
+            return try await NativeCollectionCloudBackend.make(workflow: CoreCloudWorkflowService(),
+                factory: PreviewAccountFactory(account: "synthetic-first-account"), ownTransport: transport,
+                mediaTransport: PreviewUnusedMediaTransport(), persisted: persisted)
+        }, defaults: nil, providerDirectory: root.appending(path: "synthetic-installation"))
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
@@ -68,17 +69,17 @@ extension ReviewCollectionStartupTests {
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
         let first = PreviewReadGate(), second = PreviewReadGate()
         let transport = PreviewReadTransport([first, second])
-        var backend: PreviewActivityBackend?
+        var backend: NativeCollectionCloudBackend?
         let sync = SyncCoordinator(bootstrap: {
             try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-ui-preview", environment: .development,
-                status: .available, identity: Data("synthetic-ui-account".utf8))
-        }, makeBackend: { _ in
-            let connection = try await CoreCloudWorkflowService().connection()
-            let value = PreviewActivityBackend(connection: connection,
-                own: CloudOwnExecutor(core: connection, transport: transport))
+                status: .couldNotDetermine, identity: nil)
+        }, makeBackend: { persisted in
+            let value = try await NativeCollectionCloudBackend.make(workflow: CoreCloudWorkflowService(),
+                factory: PreviewAccountFactory(account: "synthetic-ui-account"), ownTransport: transport,
+                mediaTransport: PreviewUnusedMediaTransport(), persisted: persisted)
             backend = value
             return value
-        }, defaults: nil)
+        }, defaults: nil, providerDirectory: root.appending(path: "synthetic-installation"))
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"))
         await owner.start()
@@ -143,14 +144,19 @@ private nonisolated final class PreviewReadTransport: CloudOwnTransport, Sendabl
         }
     }
 }
-@MainActor private final class PreviewActivityBackend: SyncCoordinatorBackend {
-    let connection: CoreCloudConnectionService?
-    let own: CloudOwnExecutor?
-    init(connection: CoreCloudConnectionService, own: CloudOwnExecutor) { self.connection = connection; self.own = own }
-    func input(_ event: CloudPolicyEvent) async throws -> CloudPolicyOutput { .commands([]) }
-    func execute(_ command: CloudPolicyCommand) async -> SyncCommandResult { .init(outputs: [], error: nil, deferred: false) }
-    func beginAccountRead(transition: Bool) async throws -> UInt64 { 1 }
-    func readAccount(_ read: UInt64) async -> SyncCommandResult { .init(outputs: [], error: nil, deferred: false) }
-    func quiesce() async throws { await own?.close() }
-    func close() async throws { await own?.close() }
+// Replace platform account resolution only; native Core proof and projection remain intact.
+private nonisolated struct PreviewAccountFactory: CloudKitEngineFactory {
+    let account: String
+    func resolveAccount() async throws -> CloudResolvedAccount? {
+        CloudResolvedAccount(status: .available, identity: Data(account.utf8))
+    }
+    func makeEngine(configuration: CloudEngineConfiguration, delegate: any CloudKitEngineDelegate) async throws -> any CloudKitEngine {
+        // Discovery/preview has no bound engine.
+        throw CloudOwnTransportFailure.unexpectedReply
+    }
+}
+private nonisolated struct PreviewUnusedMediaTransport: CloudMediaTransport {
+    func prepare(_ request: CloudMediaRequest) throws -> any CloudPreparedMediaRead {
+        throw CloudOwnTransportFailure.unexpectedReply
+    }
 }
