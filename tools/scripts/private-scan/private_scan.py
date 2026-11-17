@@ -1009,7 +1009,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/collection/changes.rs':
         '83f506e218e17d7c878c5381110c76277d3c64e767eb8a3da299d50c81a92b33',
     'tools/gate/tiers.yaml':
-        'b0d9c7cf88b554e7f2f3814b56048ac704febdac8e840861299da9662b71c9b5',
+        '9d5a1f79a08e96ac1699a4d7d1ba3ebb2c44a47d53ff1f5c1cda53c58c6c7d35',
     'tools/mg.d/sync-web.sh':
         'e96c97800779b5d2deae7b36bb0912e43cedf4e8c3b6d40b6c3f81d0206747f1',
     'server/web/upstream-records.json':
@@ -1240,6 +1240,12 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudSyncPresentationTests.swift': '11766d5d2ac1a18ba84f91fbb5753fb714ed38b1934278b785b377afbb7d8fff',
     'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': 'b48d860baaad22b85b6b77dcb6f2dc42bb77b9cf6e4edb121d527ce3c7e9ce8f',
     'core/crates/meguri-host/src/provider_bootstrap.rs': '038e6199bd9e9d63e307023e182caa3632ace08fee94c21563e61854357553bd',
+    'core/crates/meguri-host/Cargo.toml': 'ef2e5f907851eb4d19984c899516e6affe5444516b59d245f4501dde2b744a73',
+    'core/crates/meguri-host/examples/real_server_provider.rs': '3a7ee36763507368f01232fcaf7363c1d92a5e816b18170fb0088aaf76fffda4',
+    'server/tools/package-smoke.mjs': '42e99aa0006c505c73d7329f3af36748e8e30d3e7cca702abf53abb9dbcc177e',
+    'tools/mg.d/meguri-provider-test.sh': 'f12c6fad08789bd3265b776a27c19527f6a263b82e3e383e48fcd20eb8595d30',
+    'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
+    'tools/tests/meguri_provider_real_server.bats': '994836e305243dddf45cc77147ea7e10342a8b04427717b197a5822ee7a6ceb4',
 }
 
 
