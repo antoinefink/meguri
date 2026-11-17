@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'tools/scripts/private-scan/tests/test_private_scan.py':
+        'f6a486a548efb3a11731237f9d1802f9329b55532c2933ea74704158964288f1',
     'oracle/meguri-sync-server/retained_observer.py':
         'f096346a86c3bb55d2e9835cb6558c04526e2fbbfa333388e954868cfe919816',
     'tools/tests/sync_retained.bats':
@@ -883,7 +885,7 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/sync-package.sh':
         '8ae4752a6c3951f74a376ab363517fbd18a788c6fd2d098423d19fca6a177a22',
     'tools/tests/sync_package.bats':
-        '592fb1c596cb82d3592beb716163838101122fce200ee4643820154b4993c989',
+        'ad0fbcbd9e321173ccb62280951f4eeca246c863b24160036902a0ac72022a51',
     'tools/tests/sync_package_context_test.py':
         '8ab26e4e6910de0308e22390276749dd2ae23615fea1bc87f29aa19880768132',
     # Independently reviewed public Docker lifecycle tooling, exact bytes.
@@ -910,7 +912,7 @@ PUBLIC_ARTIFACTS = {
     'tools/gate/tiers.yaml':
         'a43cb5bd13f24190da0ec49a84b26eae67e9b6c88e989da342626db354368abb',
     'tools/mg.d/sync-web.sh':
-        '43bdeaf2051dafcbe0ba9c0c2f49b3ad75c54e6729e2dd0262e15f249cae85e9',
+        '4a3b7447a94259878fdc5460b6dc65891ad238a5334be5ebc2472d220f3f0756',
     'server/web/upstream-records.json':
         'e04eceba6bc281397bf6379e28e6232ac93143f1de536de20fe1c46c500e3037',
     'server/web/src/style.css':
