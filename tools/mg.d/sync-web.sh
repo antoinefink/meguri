@@ -388,7 +388,8 @@ mg_sync_web__package_verify() {
   local service name="meguri-web-package-$MG_RUN_ID" owner rc=0 directory
   mg_sync_package__receipt "$receipt" || { mg_sync_web__failure "Invalid exact package receipt"; return 1; }
   directory="$(cd "$(dirname "$receipt")" && pwd -P)" || return 1
-  mkdir "$MG_RUN_DIR/package-artifacts" "$MG_RUN_DIR/fixture" || return 1
+  mkdir "$MG_RUN_DIR/package-artifacts" || return 1
+  mkdir -m 700 "$MG_RUN_DIR/fixture" || return 1
   mg_sync_package__candidate_input "$receipt" "$MG_RUN_DIR/package-artifacts" >"$MG_RUN_DIR/package-identity.json" || return 1
   cmp -s "$directory/product/assets.json" "$MG_RUN_DIR/package-artifacts/$(jq -er .package.assets_sha256 "$MG_RUN_DIR/package-identity.json")" || return 1
   cmp -s "$frontend/prepared/assets.json" "$directory/product/assets.json" || {
@@ -412,7 +413,131 @@ mg_sync_web__package_verify() {
     --mount "type=volume,src=$(jq -er .volume "$MG_SYNC_INSTANCE/instance.json"),dst=/data,readonly" \
     "$image" package-preview >"$MG_RUN_DIR/package-proxy.cid" || rc=1
   [ "$rc" -ne 0 ] || docker exec "$name" node /opt/sync-web/ready.mjs || rc=1
-  [ "$rc" -ne 0 ] || docker cp "$name:/out/." "$MG_RUN_DIR/fixture" || rc=1
+  # docker cp cannot read the running proxy's tmpfs. Export just these two
+  # fixed files in-container; capability bytes go directly to private files.
+  if [ "$rc" -eq 0 ]; then
+    python3 - "$MG_RUN_DIR" "$name" "$owner" "$image" "$MG_RUN_ID" <<'PY' || rc=1
+import base64
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+
+try:
+    root, name, owner, image, run = sys.argv[1:]
+    if not re.fullmatch(r"[0-9a-f]{32}", owner) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
+        raise ValueError()
+    with open(root + "/package-proxy.cid", encoding="ascii") as handle:
+        cid = handle.read().strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", cid):
+        raise ValueError()
+    # No source selector comes from a receipt, environment or descriptor.
+    script = r'''
+import { constants, lstatSync, openSync, fstatSync, readFileSync, closeSync, writeSync } from "node:fs";
+try {
+  const path = process.argv[1];
+  if (path !== "/out/ready" && path !== "/out/test/fixture.json") throw 0;
+  const directories = ["/out", ...(path === "/out/ready" ? [] : ["/out/test"])];
+  const parents = directories.map(directory => {
+    const s = lstatSync(directory);
+    if (!s.isDirectory() || s.uid !== 10001 || s.gid !== 10001 || (s.mode & 0o022) ||
+        (directory === "/out" && (s.mode & 0o777) !== 0o700)) throw 0;
+    return s;
+  });
+  const before = lstatSync(path);
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const s = fstatSync(fd);
+    if (!s.isFile() || s.nlink !== 1 || s.uid !== 10001 || s.gid !== 10001 ||
+        ((s.mode & 0o7777) !== 0o600 && !(path === "/out/ready" && (s.mode & 0o7777) === 0o644)) ||
+        s.dev !== before.dev || s.ino !== before.ino || s.size < 1 || s.size > 4096) throw 0;
+    const bytes = readFileSync(fd);
+    const after = fstatSync(fd), binding = lstatSync(path);
+    if (bytes.length !== s.size || after.size !== s.size || after.mtimeMs !== s.mtimeMs ||
+        after.ctimeMs !== s.ctimeMs || binding.dev !== s.dev || binding.ino !== s.ino ||
+        binding.nlink !== 1 || after.mode !== s.mode || after.uid !== s.uid || after.gid !== s.gid) throw 0;
+    directories.forEach((directory, i) => {
+      const current = lstatSync(directory), previous = parents[i];
+      if (current.dev !== previous.dev || current.ino !== previous.ino || current.mode !== previous.mode ||
+          current.uid !== previous.uid || current.gid !== previous.gid) throw 0;
+    });
+    writeSync(1, bytes);
+  } finally { closeSync(fd); }
+} catch { process.exit(1); }
+'''
+    # Pin the private destination directories and use nofollow, exclusive files.
+    fixture = root + "/fixture"
+    if os.path.realpath(root) != root:
+        raise ValueError()
+    directory = os.lstat(fixture)
+    if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid() or stat.S_IMODE(directory.st_mode) != 0o700:
+        raise ValueError()
+    fixture_fd = os.open(fixture, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        pinned = os.fstat(fixture_fd)
+        if (pinned.st_dev, pinned.st_ino) != (directory.st_dev, directory.st_ino):
+            raise ValueError()
+        os.mkdir("test", 0o700, dir_fd=fixture_fd)
+        test_fd = os.open("test", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fixture_fd)
+        try:
+            test = os.fstat(test_fd)
+            if test.st_uid != os.getuid() or stat.S_IMODE(test.st_mode) != 0o700:
+                raise ValueError()
+            for source, destination, parent in (("/out/ready", "ready", fixture_fd),
+                                                  ("/out/test/fixture.json", "fixture.json", test_fd),
+                                                  (None, None, None)):
+                inspection = subprocess.run(["docker", "inspect", cid], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                containers = json.loads(inspection.stdout)
+                if len(containers) != 1:
+                    raise ValueError()
+                container = containers[0]
+                if (container["Id"] != cid or container["Name"] != "/" + name or
+                    container["Image"] != image or container["Config"]["Image"] != image or
+                    container["State"]["Running"] is not True or container["Config"]["User"] != "10001:10001" or
+                    container["Config"]["Cmd"] != ["package-preview"] or
+                    container["Config"]["Labels"]["meguri.mg.run-id"] != run or
+                    container["Config"]["Labels"]["meguri.sync.owner"] != owner):
+                    raise ValueError()
+                if source is None:
+                    for path, previous in ((fixture, pinned), (fixture + "/test", test)):
+                        current = os.lstat(path)
+                        if ((current.st_dev, current.st_ino, current.st_mode, current.st_uid) !=
+                            (previous.st_dev, previous.st_ino, previous.st_mode, previous.st_uid)):
+                            raise ValueError()
+                    continue
+                fd = os.open(destination, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+                with os.fdopen(fd, "w+b") as output:
+                    subprocess.run(["docker", "exec", cid, "node", "--input-type=module", "-e", script, source],
+                                   check=True, stdout=output, stderr=subprocess.DEVNULL)
+                    output.seek(0)
+                    data = output.read(4097)
+                    s = os.fstat(output.fileno())
+                    if not stat.S_ISREG(s.st_mode) or s.st_nlink != 1 or s.st_uid != os.getuid() or stat.S_IMODE(s.st_mode) != 0o600:
+                        raise ValueError()
+                    if source == "/out/ready":
+                        if data != b"ready\n":
+                            raise ValueError()
+                    else:
+                        descriptor = json.loads(data)
+                        if (len(data) > 4096 or type(descriptor) is not dict or len(json.loads(data, object_pairs_hook=list)) != 2 or
+                            set(descriptor) != {"origin", "setup_token"} or
+                            descriptor["origin"] != "https://localhost:18447" or type(descriptor["setup_token"]) is not str or
+                            not re.fullmatch(r"[A-Za-z0-9_-]{43}", descriptor["setup_token"])):
+                            raise ValueError()
+                        token = base64.urlsafe_b64decode(descriptor["setup_token"] + "=")
+                        if base64.urlsafe_b64encode(token).decode().rstrip("=") != descriptor["setup_token"]:
+                            raise ValueError()
+        finally:
+            os.close(test_fd)
+    finally:
+        os.close(fixture_fd)
+except Exception:
+    # Never include parser errors, descriptor bytes or Docker output in MG logs.
+    sys.exit(1)
+PY
+  fi
   [ "$rc" -ne 0 ] || mg_sync_web__browser "$MG_RUN_DIR/fixture" "$name" "$image" "$(id -u):$(id -g)" || rc=1
   docker inspect "$service" >"$MG_RUN_DIR/service-container-after.json" || rc=1
   jq -e --slurpfile before "$MG_RUN_DIR/service-container.json" '

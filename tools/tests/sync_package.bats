@@ -151,3 +151,147 @@ setup() {
   [ "$(head -n 9 "$MG_RUN_DIR/sequence" | cut -d ' ' -f 1 | sort -u)" = "$MG_RUN_ID" ]
   ! rg -F 'candidate_compatibility_credit=true' "$MG_RUN_DIR/details"
 }
+
+@test "sync-package: exact-image browser exports only private fixed files and fails closed" {
+  # Policy stubs only: no Docker, Node execution, HTTP or browser proof here.
+  source "$REPO_ROOT/tools/mg.d/sync-web.sh"
+  mkdir "$BATS_TEST_TMPDIR/bin" "$BATS_TEST_TMPDIR/product" "$BATS_TEST_TMPDIR/frontend" "$BATS_TEST_TMPDIR/frontend/prepared"
+  printf '[]\n' >"$BATS_TEST_TMPDIR/product/assets.json"
+  cp "$BATS_TEST_TMPDIR/product/assets.json" "$BATS_TEST_TMPDIR/frontend/prepared/assets.json"
+  printf '{"errors":[],"counts":{"total":9,"passed":9}}\n' >"$BATS_TEST_TMPDIR/frontend/test-counts.json"
+  export EXPORT_IMAGE="sha256:$(printf '%064d' 0)" MG_RUN_ID
+  export EXPORT_CID="$(printf '%064d' 1)"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+  cat >"$BATS_TEST_TMPDIR/bin/docker" <<'SH'
+#!/usr/bin/env bash
+set -eu
+case "$1" in
+  run)
+    owner=
+    for argument in "$@"; do
+      case "$argument" in meguri.sync.owner=*) owner="${argument#meguri.sync.owner=}" ;; esac
+    done
+    jq -n --arg cid "$EXPORT_CID" --arg name "/meguri-web-package-$MG_RUN_ID" \
+      --arg owner "$owner" --arg image "$EXPORT_IMAGE" --arg run "$MG_RUN_ID" '
+      [{Id:$cid,Name:$name,Image:$image,State:{Running:true},
+        Config:{Image:$image,User:"10001:10001",Cmd:["package-preview"],
+          Labels:{"meguri.mg.run-id":$run,"meguri.sync.owner":$owner}}}]' >"$EXPORT_RUN_DIR/proxy.json"
+    if [ "$EXPORT_MODE" = directory-mode ]; then chmod 755 "$EXPORT_RUN_DIR/fixture"; fi
+    if [ "$EXPORT_MODE" = directory-link ]; then
+      rmdir "$EXPORT_RUN_DIR/fixture"
+      ln -s "$EXPORT_RUN_DIR/package-artifacts" "$EXPORT_RUN_DIR/fixture"
+    fi
+    printf '%s\n' "$EXPORT_CID" ;;
+  inspect)
+    printf 'inspect\n' >>"$EXPORT_RUN_DIR/export-sequence"
+    if [ "$2" = synthetic-service ]; then cat "$EXPORT_RUN_DIR/service-container.json"; exit; fi
+    [ "$2" = "$EXPORT_CID" ] || exit 97
+    case "$EXPORT_MODE" in
+      owner) jq '.[0].Config.Labels["meguri.sync.owner"]="foreign"' "$EXPORT_RUN_DIR/proxy.json" ;;
+      run) jq '.[0].Config.Labels["meguri.mg.run-id"]="foreign"' "$EXPORT_RUN_DIR/proxy.json" ;;
+      image) jq '.[0].Image="foreign"' "$EXPORT_RUN_DIR/proxy.json" ;;
+      cid) jq '.[0].Id="foreign"' "$EXPORT_RUN_DIR/proxy.json" ;;
+      stopped) jq '.[0].State.Running=false' "$EXPORT_RUN_DIR/proxy.json" ;;
+      *) cat "$EXPORT_RUN_DIR/proxy.json" ;;
+    esac ;;
+  exec)
+    if [ "$2" = "meguri-web-package-$MG_RUN_ID" ]; then
+      [ "$3 $4" = 'node /opt/sync-web/ready.mjs' ] || exit 97
+      exit 0
+    fi
+    [ "$2" = "$EXPORT_CID" ] && [ "$3 $4 $5" = 'node --input-type=module -e' ] || exit 97
+    # Require the in-container ownership/nofollow/link checks in the supplied
+    # program. Refusal modes model those checks failing, rather than executing it.
+    [[ "$6" == *'constants.O_NOFOLLOW'* && "$6" == *'s.nlink !== 1'* &&
+       "$6" == *'s.uid !== 10001'* && "$6" == *'s.gid !== 10001'* &&
+       "$6" == *'s.isFile()'* && "$6" == *'s.isDirectory()'* ]] || exit 97
+    case "$7" in
+      /out/ready) printf 'export-ready\n' >>"$EXPORT_RUN_DIR/export-sequence"
+        if [ "$EXPORT_MODE" = missing-ready ]; then exit 1; fi
+        printf 'ready\n' ;;
+      /out/test/fixture.json)
+        printf 'export-descriptor\n' >>"$EXPORT_RUN_DIR/export-sequence"
+        case "$EXPORT_MODE" in
+          missing|link|hardlink|source-owner) exit 1 ;;
+          export-failure) printf 'private-export-sentinel\n'; printf 'private-export-sentinel\n' >&2; exit 1 ;;
+          malformed) printf '{private-export-sentinel'; exit ;;
+          origin) printf '{"origin":"https://other.invalid","setup_token":"%043d"}' 0; exit ;;
+          extra) printf '{"origin":"https://localhost:18447","setup_token":"%043d","extra":true}' 0; exit ;;
+          duplicate) printf '{"origin":"https://localhost:18447","origin":"https://localhost:18447","setup_token":"%043d"}' 0; exit ;;
+          token) printf '{"origin":"https://localhost:18447","setup_token":"private-export-sentinel"}'; exit ;;
+        esac
+        printf '{"origin":"https://localhost:18447","setup_token":"%043d"}' 0 ;;
+      *) printf 'forbidden-selector\n' >>"$EXPORT_RUN_DIR/export-sequence"; exit 97 ;;
+    esac ;;
+  *) printf 'forbidden-docker-operation\n' >>"$EXPORT_RUN_DIR/export-sequence"; exit 97 ;;
+esac
+SH
+  chmod 700 "$BATS_TEST_TMPDIR/bin/docker"
+  docker() { "$BATS_TEST_TMPDIR/bin/docker" "$@"; }
+  mg_artifact() { :; }
+  mg_failure() { printf '%s\n' "$1"; }
+  mg_status() { :; }
+  mg_detail() { :; }
+  mg_count() { :; }
+  mg_on_exit() { printf '%s\n' "$1" >>"$MG_RUN_DIR/hooks"; }
+  mg_sync_package__candidate_input() { printf '{"package":{"assets_sha256":"synthetic-assets"}}\n'; }
+  mg_sync_package__init() {
+    mkdir "$MG_SYNC_INSTANCE"
+    printf '{"volume":"synthetic-volume"}\n' >"$MG_SYNC_INSTANCE/instance.json"
+    printf '{"name":"synthetic-service"}\n' >"$MG_SYNC_INSTANCE/container.json"
+    cp "$BATS_TEST_TMPDIR/product/assets.json" "$MG_RUN_DIR/package-artifacts/synthetic-assets"
+  }
+  mg_sync_package__start() {
+    printf '[{"Id":"service-id","Image":"service-image","State":{"Running":true,"StartedAt":"same-start"},"Config":{},"Mounts":[],"HostConfig":{}}]\n' >"$MG_RUN_DIR/service-container.json"
+  }
+  mg_sync_server__remove_container() {
+    [ "$1" = "meguri-web-package-$MG_RUN_ID" ] || return 97
+    [ "$2" = "$(jq -r '.[0].Config.Labels["meguri.sync.owner"]' "$MG_RUN_DIR/proxy.json")" ] || return 97
+    printf 'proxy-cleanup\n' >>"$MG_RUN_DIR/export-sequence"
+    [ "$EXPORT_MODE" != cleanup ]
+  }
+  mg_sync_package__stop() {
+    printf 'service-cleanup\n' >>"$MG_RUN_DIR/export-sequence"
+    [ "$EXPORT_MODE" != stop ]
+  }
+  mg_sync_web__browser() {
+    [ "$1" = "$MG_RUN_DIR/fixture" ] && [ "$2" = "meguri-web-package-$MG_RUN_ID" ] &&
+      [ "$3" = "$EXPORT_IMAGE" ] && [ "$4" = "$(id -u):$(id -g)" ] || return 97
+    command python3 - "$1" <<'PY'
+import os, stat, sys
+root = sys.argv[1]
+for path, mode in ((root, 0o700), (root + "/test", 0o700), (root + "/ready", 0o600), (root + "/test/fixture.json", 0o600)):
+    s = os.lstat(path)
+    assert s.st_uid == os.getuid() and stat.S_IMODE(s.st_mode) == mode
+    assert stat.S_ISDIR(s.st_mode) if mode == 0o700 else stat.S_ISREG(s.st_mode) and s.st_nlink == 1
+with open(root + "/test/fixture.json", "rb") as handle:
+    assert handle.read() == b'{"origin":"https://localhost:18447","setup_token":"' + b"0" * 43 + b'"}'
+PY
+    [ "$?" -eq 0 ] || return 97
+    printf 'browser\n' >>"$MG_RUN_DIR/export-sequence"
+    printf '{"errors":[],"counts":{"total":1,"passed":1}}\n' >"$MG_RUN_DIR/test-counts.json"
+    mkdir "$MG_RUN_DIR/browser-artifacts"
+    local number
+    for number in 1 2 3 4 5 6 7 8 9; do : >"$MG_RUN_DIR/browser-artifacts/$number.png"; done
+  }
+  local mode
+  for mode in valid missing-ready missing link hardlink source-owner malformed origin extra duplicate token export-failure owner run image cid stopped directory-mode directory-link cleanup stop; do
+    export EXPORT_MODE="$mode" EXPORT_RUN_DIR="$BATS_TEST_TMPDIR/$mode"
+    MG_RUN_DIR="$EXPORT_RUN_DIR"
+    mkdir -m 700 "$MG_RUN_DIR"
+    run mg_sync_web__package_verify "$receipt" "$EXPORT_IMAGE" "$BATS_TEST_TMPDIR/frontend"
+    if [ "$mode" = valid ]; then [ "$status" -eq 0 ]; else [ "$status" -ne 0 ]; fi
+    [[ "$output" != *private-export-sentinel* && "$output" != *setup_token* && "$output" != *0000000000000000000000000000000000000000000* ]]
+    [ "$(tail -n 2 "$MG_RUN_DIR/export-sequence" | tr '\n' ' ')" = 'proxy-cleanup service-cleanup ' ]
+    ! rg 'forbidden-' "$MG_RUN_DIR/export-sequence"
+    rg -q 'mg_sync_package__volume_remove' "$MG_RUN_DIR/hooks"
+    rg -q 'mg_sync_package__stop' "$MG_RUN_DIR/hooks"
+    rg -q 'mg_sync_server__remove_container' "$MG_RUN_DIR/hooks"
+    case "$mode" in
+      valid|cleanup|stop)
+        [ "$(head -n 5 "$MG_RUN_DIR/export-sequence" | tr '\n' ' ')" = 'inspect export-ready inspect export-descriptor inspect ' ]
+        rg -qx browser "$MG_RUN_DIR/export-sequence" ;;
+      *) ! rg -qx browser "$MG_RUN_DIR/export-sequence" ;;
+    esac
+  done
+}
