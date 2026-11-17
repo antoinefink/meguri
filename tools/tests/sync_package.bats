@@ -278,7 +278,7 @@ PY
   }
   local mode
   for mode in valid missing-ready missing link hardlink source-owner malformed origin extra duplicate token export-failure owner run image cid stopped directory-mode directory-link cleanup stop; do
-    export EXPORT_MODE="$mode" EXPORT_RUN_DIR="$BATS_TEST_TMPDIR/$mode"
+    export EXPORT_MODE="$mode" EXPORT_RUN_DIR="$BATS_TEST_TMPDIR/browser-case-$mode"
     MG_RUN_DIR="$EXPORT_RUN_DIR"
     mkdir -m 700 "$MG_RUN_DIR"
     run mg_sync_web__package_verify "$receipt" "$EXPORT_IMAGE" "$BATS_TEST_TMPDIR/frontend"

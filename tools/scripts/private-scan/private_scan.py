@@ -885,7 +885,7 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/sync-package.sh':
         '8ae4752a6c3951f74a376ab363517fbd18a788c6fd2d098423d19fca6a177a22',
     'tools/tests/sync_package.bats':
-        '152e16993bda74d89a4006d6f6c39a335d7462b3e7a868ebf365a892b315231e',
+        '74610b07a76e2f63324db8652d9feee0ac2989dfda017156ab64589d6bc3ff78',
     'tools/tests/sync_package_context_test.py':
         '8ab26e4e6910de0308e22390276749dd2ae23615fea1bc87f29aa19880768132',
     # Independently reviewed public Docker lifecycle tooling, exact bytes.
