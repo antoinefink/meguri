@@ -437,3 +437,7 @@ Public snapshot review: non-author `provider_public_snapshot_review` read the co
 Original app gate base remains `1416a520542a8c5daa38a23bfe398da704c3d6c9`. No full-gate pass, Unit completion or sync acceptance is claimed.
 
 Source checks pass: privacy `053628-91998` scans all eleven changed paths; static `053623-90935` passes three stages; similarity `053623-90796` scans eight code files with zero flags or allowlisted entries. Root read the filtered report. Scanner regression `053626-91564` passes its one selected case. Author and reviewer exports produce identical complete source bytes. Focused runtime checks are still pending.
+
+## First affected CoreBridge run
+
+`swift-test/20261117T053750Z-93481`, clean `5712fcaa`: 47 passed, one failed, zero skipped. The diagnostic formatter, privacy and cancellation methods pass, as do selected native lifecycle and positive fixture checks. `nativePolicySetupRejectsLocalOnlyOpeningBeforeSDKCreation` fails all three retained assertions: it receives no error and observes an engine and retained SDK. The shared Swift opener currently prepares a connected prior-provider installation for this negative caller too. Its explicit local-only opening must be restored; no assertion is relaxed. The original receipt remains retained and the CPU window was released from its actual JSON. AppModel11 and the required gate remain pending.
