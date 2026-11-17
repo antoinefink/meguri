@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'oracle/meguri-sync-server/retained_observer.py':
+        'f096346a86c3bb55d2e9835cb6558c04526e2fbbfa333388e954868cfe919816',
     'tools/tests/sync_retained.bats':
         '8c0348f9c7b5b192888c05e495f9f63a869e519e2eeb045c53b3f3d92e077846',
     'tools/mg.d/sync-retained.sh':
@@ -851,11 +853,11 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/final_handshake.py':
         '9e7f889c17ebb1d9d0508d08591aa6aaf121941e76761f3655f6fa859110f823',
     'oracle/meguri-sync-server/final_desktop.py':
-        '4495f878d0507491dba1a43836cc7a82eb9ddef7c5814431b042a061d490fc89',
+        '5501ac71ed19cb7f7c99a7b8f242dd580bb688902ccf9907c612105feceacd18',
     'oracle/meguri-sync-server/final_checks.py':
         '6876d4d4e92f33f0bb081facf6173cc01392c88addd986e356e5f8e690e17c35',
     'oracle/meguri-sync-server/driver.py':
-        '1e8a474a7b5e9b5575eb10415478f9b55aca466250681277aa1cdc94ff15a5ab',
+        'd0d8b8321290b67063b8d6830dbabb6db1b19e878cd496295d6a175323447015',
     'conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json':
         'ec691e94ea6e85fcdf8e6a71ce95d453216babae78871699c29c04e6206391f6',
     'conformance/recordings/scenarios/meguri-sync-server/candidate-mobile-final-selection.json':
@@ -898,7 +900,7 @@ PUBLIC_ARTIFACTS = {
     'docs/process/review-log/meguri-sync-U6.md':
         '14fef85aa75d15af8154c274278c56744ce5040669d638378442f5e8cf4511e0',
     'oracle/meguri-sync-server/provenance.md':
-        '97c60a974555a151192eedc93a107857b04795e8dc00c62a5d5f76e6f866d731',
+        '30b781dbbeba8ffd346ec86d3224f08f33d2ac45908761b86a691e02d692d5d2',
     'server/tests/session.rs':
         '9bcc7edb13789a4abfd059bb19e03ec04544abbe441b0e2129f5f45e111d5e5d',
     'server/src/collection/graves.rs':
@@ -1116,7 +1118,7 @@ PUBLIC_ARTIFACTS = {
     'docs/process/review-log/meguri-sync-recovery-dirty-reference.md':
         'd3e7180cff9d63d1f16b5eef4fe94cb5e115d05e4b58f5baf288299a47a48d31',
     'oracle/meguri-sync-server/README.md':
-        '49860f2203ce06b67159273bb6ba684b02aac239df777563d8533653b2704a73',
+        'd7b34a4dab4a4a4f5ccf614b4cb3f2abf93201e5580790160a921882e5d222c5',
     'oracle/meguri-sync-server/tests/test_recovery_dirty.py':
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
 }
@@ -1126,6 +1128,10 @@ PUBLIC_ARTIFACTS = {
 # 071ee5ebf2138e3ad180e0aacf6940c2cab5e6d8333741d9925c7bee2b153f39.
 # Keys pin exact repository-path UTF-8 bytes; values pin complete file bytes.
 PUBLIC_VENDOR_ARTIFACTS = {
+    'f81e67fcb2e3dbe8379aead1ebe38904691e35f510169970a987710496d3ed77':
+        '568c39b3036eb885fca8c03d2c5a98775c590dd55b9a53289c294886eba8069c',
+    '1abb17517ad6c3616bc662765627c8e3419b3d81f0b8eaf3358cf4af9d316a33':
+        'de1f829e3237684f1e69ec93a4a6337e4ac1c358be0fb72047310d8b677b7821',
     '25ea9fbf9d10948d08a6ead80c9f83ec2154ae34f40f881e4659eff9349d258f': 'd08c9fb8ec612b54a95978b5411f5c91218d8ef4a4ac1ba64b1d5d0ac116e076',
     '987ec1929a5a69b01078144679a1a93b0ae01cb133c1a3eb19b18c2094e4e400': '3cf5ea37ea7bad31fe17f2650ea6ad0a7a570724a2435458d1ed1efb2dcf4715',
     '35a74f0278dd035158c7c188707978180be6dac754422f7bc506b0a6b16f626e': 'a3754a3582a6ab4247c2ace9f9686f8757f94691b01e86f340234c4c18073a1b',
