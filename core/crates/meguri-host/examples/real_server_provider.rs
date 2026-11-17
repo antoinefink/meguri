@@ -222,7 +222,7 @@ fn retained(config: &HostConfig, op: &Operation, upload: bool) -> Result<()> {
         require(op.safety_backups.len() == 1, "safety-backup")?;
         for backup in &op.safety_backups { artifact(&config.backups_directory, backup)?; }
         let copy = op.server_copy.as_ref().ok_or_else(|| failure("server-copy", "missing"))?;
-        artifact(&config.manual_transfer_directory.join(op.id.as_str()), &copy.artifact)?;
+        artifact(&config.backups_directory, &copy.artifact)?;
     } else { require(op.safety_backups.is_empty(), "initial-no-backup")?; }
     Ok(())
 }
