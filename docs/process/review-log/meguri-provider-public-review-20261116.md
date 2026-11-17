@@ -60,3 +60,16 @@ Scanner regression `selftest/20261117T011637Z-47959` passes
 The earlier failed privacy runs remain retained.
 Metadata similarity `20261117T010946Z-46041` passes its one eligible file;
 the integrator read the filtered report. No required gate is cleared.
+
+## First WIP execution
+
+On clean `eb891ba8`, `core-test/20261117T012115Z-52998` passes three
+selected tests with zero failures or skips. These cover FFI ownership and
+the original media terminal receipt during handoff. Other tests were not selected.
+
+`swift-test/20261117T012905Z-56916` fails before Swift compilation or tests.
+The ordinary FFI library cannot resolve `serde_json` at `provider.rs:47`.
+The manifest declares it only as a development dependency.
+The selected Rust test build had that dependency; the Apple library build does not.
+No Swift test ran. Keep the failed receipt and repair the manifest.
+Both coordinated CPU windows ended at their terminal receipts.
