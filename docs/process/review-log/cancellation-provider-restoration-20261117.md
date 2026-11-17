@@ -93,5 +93,35 @@ exception therefore rests on a structural no-op, not inferred consent history.
 Only an absent predecessor, absent current provider binding, iCloud selection,
 absent handoff and existing pending setup qualify. Existing operation, file,
 fence and candidate guards remain, as does refusal of actual provider-write
-failure. A filtered correction is being prepared. It must preserve every
-provider byte and keep writers closed; the original failing test stays unchanged.
+failure. The filtered correction described below preserves every provider byte
+and keeps writers closed; the original failing test stays unchanged.
+
+## Verified no-op correction
+
+Filtered author `cleanroom/20261117T125115Z-39668` adds only the guarded
+read-only provider case and one appended warm/cold Host regression. Actual
+Git export SHA-256: `9a549de7037275747ac5e19735b3637ab9dbf6c621f420f467c87645c820e2af`.
+Independent `/root/adoption_empty_decks` finds no substantive issue and
+classifies both complete final files PUBLIC, including comments, literals and
+paths. The original 319,136-byte Host test prefix is unchanged.
+
+The new test arms a sidecar-write failure after R6 restoration. Cancellation
+still reaches the deliberate final tracking boundary, then retries warm and
+cold. This proves that the no-op does not rewrite provider bytes, consume
+pending consent or admit writers. Actual write-failure and successor-refusal
+paths remain unchanged. The complete final source hashes are:
+
+- Provider: `cf9a25cf5e229bbb62147c7304143d4e347b8a4fb6da7b5826de22a9b5be25bc`.
+- Host test: `9c5b08115ee7c9969554a0f6d68628cca262a7def0aee665866f0ebab78de622`.
+
+Ordinary privacy `130105Z-55179` flags those two files. Only their exact
+reviewed public hash entries are refreshed; normal verification then passes.
+No matcher, token list, access rule or similarity exception changes.
+
+Clean source commit `44b3d527d` passes focused
+`core-test/20261117T130234Z-59561`: 27 passed, zero failed or skipped.
+The whole affected binary `130355Z-60781` then passes all 155 methods with
+zero failures or skips. The original three cancellation failures, the older
+decision-CAS returned-error failure and all seventeen added regression
+entrypoints pass. Every earlier failed receipt remains retained. This is an
+affected-binary pass, not a full integration gate or unit acceptance.
