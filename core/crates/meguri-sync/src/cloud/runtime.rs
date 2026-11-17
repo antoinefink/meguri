@@ -777,9 +777,9 @@ impl Runtime {
         self.state().provider = Some(provider);
     }
     pub fn qualify_provider_binding(&self) -> Result<(), RuntimeError> {
-        let (provider, binding) = {
+        let (provider, binding, incarnation) = {
             let state = self.state();
-            (state.provider.clone(), state.bound.as_ref().map(|b| b.binding.clone()))
+            (state.provider.clone(), state.bound.as_ref().map(|b| b.binding.clone()), state.incarnation)
         };
         let Some(provider) = provider else { return Ok(()); };
         let publication = meguri_engine::device_state::DeviceState::for_collection(
@@ -788,6 +788,24 @@ impl Runtime {
             && binding.facts.state == BindingState::Active
             && publication.decision == meguri_engine::device_state::PublicationDecision::Clear
             && publication.identity == binding.facts.publication {
+            {
+                let state = self.state();
+                if state.incarnation != incarnation
+                    || state.bound.as_ref().map(|b| &b.binding) != Some(&binding)
+                    || !state.provider.as_ref().is_some_and(|p| Arc::ptr_eq(p, &provider)) {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                let awaiting_target = with_tracking_access(|| -> Result<bool, RuntimeError> {
+                    let Some(store) = state.store.as_ref() else { return Ok(false); };
+                    Ok(store.publication_op()?.is_some_and(|op|
+                        op.step == super::publication::PublishStep::Confirmed
+                            || op.binding_after != Some(binding.id))
+                        || store.adoption_op()?.is_some_and(|op| op.binding_after != binding.id))
+                })?;
+                // Setup consent belongs to the actual operation target. Keep
+                // it pending without disturbing a predecessor's completion.
+                if awaiting_target { return Ok(()); }
+            }
             provider.qualify_legacy(&binding, &publication)?;
             provider.validate_current_binding(&binding, &publication);
         }
