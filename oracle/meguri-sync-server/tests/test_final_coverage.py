@@ -13,6 +13,121 @@ from final_desktop import author, authored_values, change, expected_values, expe
 
 
 class FinalCoverage(unittest.TestCase):
+    def test_retained_reverse_cli_uses_received_baseline_before_actual_sdk_mutation(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        import retained_companion as companion
+        from final_contract import NEUTRAL
+        from final_desktop import set_media
+        from validation import Artifacts, decode, encoded
+
+        # Only the external final-package receipt audit is outside this offline
+        # regression. Fixed CLI paths, input/CAS/owner admission, current pinned
+        # SDK, reverse mutation and closed full-state capture are exercised.
+        controls=('valid','missing','changed-card','changed-media','expected-only',
+                  'changed-cas','wrong-case','wrong-action','wrong-actor','wrong-run','wrong-owner')
+        for control in controls:
+            with self.subTest(control=control),tempfile.TemporaryDirectory() as directory:
+                root=pathlib.Path(directory);incoming=root/'in';incoming.mkdir()
+                out=root/'out';out.mkdir();state=root/'state'
+                source=Artifacts(incoming/'artifacts')
+                self.assertEqual(source.put((NEUTRAL/'final-fixture-recipes.json').read_bytes()),companion.RECIPE_SHA256)
+                self.assertEqual(source.put((NEUTRAL/'candidate-retained-final-selection.json').read_bytes()),companion.SELECTION_SHA256)
+                review=source.put(b'Offline regression only; no candidate compatibility credit.')
+                action={'case':'normal-bidirectional','action':'prepare_reverse'}
+                invocation={'source_commit':'0'*40,'batch_base':'1'*40,'source_sha256':'2'*64,
+                    'lock_sha256':'3'*64,'mg_job':'sync-server-reference','arguments':['selftest'],
+                    'executable_sha256':'4'*64,'run_id':'reverse-offline-'+control,
+                    'author_session':'offline-regression','root':'/synthetic','server_arguments':[],
+                    'data_volume':'offline-regression','owner_nonce':'5'*32}
+                expect={'format':'meguri-retained-companion-input-v1',**action,'actor':'client_b',
+                    'recipe_sha256':companion.RECIPE_SHA256,'selection_sha256':companion.SELECTION_SHA256,
+                    'review_sha256':review,'baseline_sha256':None,'expected_sha256':None}
+                companion.owner(state,action['case'],invocation,expect,new=True)
+                col,ids=author(api,state,'client_b',recipes())
+                try:
+                    set_media(col,recipes()['media_utf8_exact']['initial'])
+                    col.set_config('reverse_untouched',{'wide':9007199254740993,'unicode':'Straße'})
+                    change(col,ids,recipes(),'forward')
+                    self.assertEqual(authored_values(col,ids),expected_values(recipes(),'forward'))
+                finally:col.close(downgrade=False)
+                profile=state/'client_b';database=profile/'collection.anki2';media=profile/'collection.media'
+                original=companion.snapshot(database,media)
+                self.assertEqual(set(original['tables']),{row[0] for row in companion.TABLES})
+                self.assertEqual(original['media_sha256'],expected_media(recipes()['media_utf8_exact']['forward']))
+                baseline=copy.deepcopy(original)
+                if control == 'changed-card':baseline['tables']['cards']['rows'][0][12]={'integer':'999999'}
+                if control == 'changed-media':baseline['media_sha256']['replace.txt']='0'*64
+                baseline_hash=source.put_json(baseline);baseline_bytes=source.read(baseline_hash)
+                if control not in {'missing','expected-only'}:expect['baseline_sha256']=baseline_hash
+                if control == 'expected-only':expect['expected_sha256']=baseline_hash
+                if control == 'changed-cas':(source.root/baseline_hash).write_bytes(b'changed-authority')
+                if control == 'wrong-case':expect['case']='full-upload'
+                if control == 'wrong-action':expect['action']='receive_forward'
+                if control == 'wrong-actor':expect['actor']='client_a'
+                if control == 'wrong-owner':
+                    owned=decode((state/'owner.json').read_bytes());owned['run_id']='other-run'
+                    (state/'owner.json').write_bytes(encoded(owned))
+                for name,value in [('action.json',action),('invocation.json',invocation),
+                                   ('expectations.json',expect),('preflight.json',{'offline_receipt_audit_stub':True})]:
+                    (incoming/name).write_bytes(encoded(value))
+                paths={'/in':incoming,'/out':out,'/state':state}
+                mapped=SimpleNamespace(Path=lambda value:paths[value] if value in paths else pathlib.Path(value))
+                run_id='other-run' if control == 'wrong-run' else invocation['run_id']
+                with patch.object(companion,'pathlib',mapped),\
+                     patch.dict('os.environ',MG_RUN_ID=run_id),\
+                     patch.object(companion,'retained_dependencies',return_value=set()) as audit,\
+                     patch.object(companion,'read_credentials',side_effect=AssertionError('offline secret read')) as secrets,\
+                     patch.object(companion,'observing',side_effect=AssertionError('offline HTTP')) as network,\
+                     patch('final_desktop.change',wraps=change) as mutation:
+                    if control in {'changed-cas','wrong-case','wrong-action','wrong-actor','wrong-run'}:
+                        with self.assertRaises(ValueError):
+                            companion.main(['--input','/in','--credentials','/secret/credentials.json'])
+                        self.assertFalse((out/'observations.json').exists())
+                    else:
+                        status=companion.main(['--input','/in','--credentials','/secret/credentials.json'])
+                        observation=decode((out/'observations.json').read_bytes())
+                        store=Artifacts(out/'artifacts')
+                        self.assertEqual(status,0 if control == 'valid' else 1)
+                        self.assertFalse(observation['case_credit']);self.assertIsNone(observation['wire_sha256'])
+                        self.assertEqual(observation['case'],action['case'])
+                        self.assertEqual(observation['action'],action['action'])
+                        self.assertEqual(observation['actor'],'client_b')
+                        self.assertEqual(store.json(observation['invocation_sha256']),invocation)
+                        self.assertEqual(store.json(observation['expectations_sha256']),expect)
+                        self.assertEqual(store.json(observation['preflight_peer_sha256']),{'offline_receipt_audit_stub':True})
+                        if control != 'wrong-owner':
+                            self.assertEqual(store.json(observation['before_sha256']),original)
+                            self.assertEqual(store.json(observation['after_sha256']),companion.snapshot(database,media))
+                        if control == 'valid':
+                            self.assertIsNone(expect['expected_sha256'])
+                            self.assertTrue(observation['observed']['operation_complete'])
+                            self.assertIsNone(observation['observed']['error_kind'])
+                            self.assertEqual(observation['authority_sha256'],observation['after_sha256'])
+                            after=store.json(observation['authority_sha256'])
+                            self.assertEqual(set(after['tables']),set(original['tables']))
+                            self.assertEqual(after['media_sha256'],original['media_sha256'])
+                            self.assertEqual(len(after['tables']['revlog']['rows']),len(original['tables']['revlog']['rows'])+1)
+                            self.assertEqual(len(after['tables']['notes']['rows']),1)
+                            self.assertEqual(len(after['tables']['cards']['rows']),1)
+                            self.assertEqual(after['tables']['fields'],original['tables']['fields'])
+                            for table in ('col','config','tags','decks','deck_config','notetypes','templates','notes','cards','revlog','graves'):
+                                self.assertEqual(after['tables'][table]['columns'],original['tables'][table]['columns'])
+                            col=api.Collection(str(database))
+                            try:
+                                self.assertEqual(authored_values(col,ids),expected_values(recipes(),'reverse'))
+                                self.assertEqual(col.get_config('reverse_untouched'),{'wide':9007199254740993,'unicode':'Straße'})
+                            finally:col.close(downgrade=False)
+                            mutation.assert_called_once();audit.assert_called_once()
+                        else:
+                            self.assertFalse(observation['observed']['operation_complete'])
+                            self.assertEqual(observation['observed']['error_kind'],'preparation_refused')
+                            self.assertIsNone(observation['authority_sha256'])
+                    secrets.assert_not_called();network.assert_not_called()
+                    if control != 'valid':mutation.assert_not_called()
+                if control != 'valid':self.assertEqual(companion.snapshot(database,media),original)
+                if control != 'changed-cas':self.assertEqual(source.read(baseline_hash),baseline_bytes)
+
     def test_completed_final_payload_keeps_late_wide_values_and_frozen_hashes_exact(self):
         from normal import exact_numbers
         from validation import decode, encoded, same_value, sha

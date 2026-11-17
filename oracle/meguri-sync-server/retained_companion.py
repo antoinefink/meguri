@@ -223,7 +223,7 @@ def execute(root,out,state,credential_path):
                 stage='projection';before=snapshot(database,profile/'collection.media');result['before_sha256']=store.put_json(before)
                 stage='preparation';col=api.Collection(str(database))
             if name == 'prepare_reverse':
-                require(before is not None and expected is not None and compare(before,expected),'reverse preparation lacks unchanged forward authority')
+                require(before is not None and baseline is not None and compare(before,baseline,witness=True),'reverse preparation lacks unchanged forward authority')
                 change(col,logical_ids(col),recipes(),'reverse',with_media=False)
             elif name == 'prepare_forward_media':
                 require(before is not None and baseline is not None and compare(before,baseline,media_only=True),'media preparation lacks initial authority')
