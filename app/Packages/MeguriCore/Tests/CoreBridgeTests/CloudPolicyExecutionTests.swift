@@ -477,7 +477,7 @@ extension EventTests {
 
 extension EventTests {
     @Test func nativePolicySetupRejectsLocalOnlyOpeningBeforeSDKCreation() async throws {
-        try await withCloudKitFixture(startAdapter: false) { fixture in
+        try await withCloudKitFixture(startAdapter: false, localOnlyOpening: true) { fixture in
             await #expect(throws: (any Error).self) { _ = try await nativePolicy(fixture) }
             #expect(await fixture.factory.engines().isEmpty)
             #expect(await fixture.adapter.retainedInstanceIDs().isEmpty)

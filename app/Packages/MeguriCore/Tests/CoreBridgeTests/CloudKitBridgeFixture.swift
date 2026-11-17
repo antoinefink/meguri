@@ -150,11 +150,14 @@ struct CloudKitBridgeFixture: Sendable {
     static func open(count: UInt32 = 1, a23: Bool = true, keepAlive: Bool = false,
                      savedState: Data? = Data([0x73, 0x64, 0x6b]),
                      failInbox: Bool = false, failState: Bool = false, startAdapter: Bool = true,
+                     localOnlyOpening: Bool = false,
                      assetReadTransport: (any CloudOwnTransport)? = nil,
                      delegateWorkValidated: @escaping @Sendable () async -> Void = {},
                      connectedPolicyOpening: Bool = false, appOwnsAccountObservation: Bool = false) async throws -> Self {
         try #require(!connectedPolicyOpening || !startAdapter,
                      "Connected policy fixtures must start only through policy Start actions")
+        try #require(!localOnlyOpening || (!startAdapter && !connectedPolicyOpening),
+                     "Local-only fixtures must use an ordinary opening without SDK startup")
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let data = directory.appending(path: "collection")
         let backups = directory.appending(path: "backups")
@@ -168,26 +171,38 @@ struct CloudKitBridgeFixture: Sendable {
             // Each host clones the process-wide platform. Supply the provider
             // matching this baseline, regardless of the preceding fixture.
             try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-u114", environment: .development, status: .available, identity: Data("synthetic-account-A".utf8))
-            _ = try await CoreProviderService.migrate(directory: location.manualTransferDirectory,
-                legacyJSON: #"{"enabled":true,"paused":false,"automatic":false,"media":false}"#)
-            try await MaintenanceLane.shared.bootstrapCollection(location)
-            // The existing fixture open supplies the declared R6 binding before
-            // Host creation. It starts no SDK; each mode keeps its Start owner.
-            let clock = CollectionClockRelay(CloudFixtureClock())
-            let diskSpace = DiskSpaceRelay(CoreBridge.DiskSpaceProvider())
-            let job = try await Jobs.start(.testCloudStartNativePolicyOpen) {
-                try MeguriCoreBindings.testCloudStartNativePolicyOpen(
-                    location: location.raw, clock: clock, diskSpace: diskSpace, randomSeed: 114
-                )
+            if !localOnlyOpening {
+                _ = try await CoreProviderService.migrate(directory: location.manualTransferDirectory,
+                    legacyJSON: #"{"enabled":true,"paused":false,"automatic":false,"media":false}"#)
             }
-            try await job.value()
+            try await MaintenanceLane.shared.bootstrapCollection(location)
+            if localOnlyOpening {
+                // Use the owned installation's production LocalOnly default.
+                try await collection.open(location, randomSeed: 114)
+            } else {
+                // The existing fixture open supplies the declared R6 binding before
+                // Host creation. It starts no SDK; each mode keeps its Start owner.
+                let clock = CollectionClockRelay(CloudFixtureClock())
+                let diskSpace = DiskSpaceRelay(CoreBridge.DiskSpaceProvider())
+                let job = try await Jobs.start(.testCloudStartNativePolicyOpen) {
+                    try MeguriCoreBindings.testCloudStartNativePolicyOpen(
+                        location: location.raw, clock: clock, diskSpace: diskSpace, randomSeed: 114
+                    )
+                }
+                try await job.value()
+            }
             let baseline = try await MaintenanceLane.shared.prepareCloudAdapterBaseline(
                 count: count, savedState: savedState, failInbox: failInbox, failState: failState
             )
             let provider = try await CoreProviderService.attached()
             let providerState = try await provider.refresh()
-            try #require(providerState.selection == .iCloud && providerState.phase == .iCloud,
-                         "Prebound fixture requires its actual retained binding and settled R6 choice")
+            if localOnlyOpening {
+                try #require(providerState.selection == .localOnly && providerState.phase == .localOnly,
+                             "Ordinary opening must retain LocalOnly after shared baseline preparation")
+            } else {
+                try #require(providerState.selection == .iCloud && providerState.phase == .iCloud,
+                             "Prebound fixture requires its actual retained binding and settled R6 choice")
+            }
             let core = CoreCloudWorkflowService()
             let factory = CloudKitEngineFakeFactory(a23: a23, keepAlive: keepAlive)
             let probe = CloudPersistedEventProbe()
@@ -259,7 +274,7 @@ struct CloudKitBridgeFixture: Sendable {
 func withCloudKitFixture(
     count: UInt32 = 1, a23: Bool = true, keepAlive: Bool = false,
     savedState: Data? = Data([0x73, 0x64, 0x6b]), failInbox: Bool = false, failState: Bool = false,
-    startAdapter: Bool = true,
+    startAdapter: Bool = true, localOnlyOpening: Bool = false,
     assetReadTransport: (any CloudOwnTransport)? = nil,
     delegateWorkValidated: @escaping @Sendable () async -> Void = {},
     appOwnsAccountObservation: Bool = false,
@@ -268,6 +283,7 @@ func withCloudKitFixture(
     let fixture = try await CloudKitBridgeFixture.open(
         count: count, a23: a23, keepAlive: keepAlive, savedState: savedState,
         failInbox: failInbox, failState: failState, startAdapter: startAdapter,
+        localOnlyOpening: localOnlyOpening,
         assetReadTransport: assetReadTransport,
         delegateWorkValidated: delegateWorkValidated,
         appOwnsAccountObservation: appOwnsAccountObservation
