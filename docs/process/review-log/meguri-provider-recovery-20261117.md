@@ -411,3 +411,11 @@ All original tests remain unchanged. Actual verification is pending.
 Runtime-source privacy `20261117T044821Z-69844`, static `044732-68577`
 and similarity `044732-68855` pass. The filtered report was read.
 The prose-only failed scan `044732-68856` remains retained.
+
+## Focused Core repair passes
+
+`core-test/20261117T044952Z-70481`, clean `261d32ff`: two passed,
+zero failed, zero skipped. Healthy provider retirement reaches a fresh
+preview. The injected rollback failure still blocks preview. The earlier
+red and setup failures stay retained. The CPU window was released from
+the actual terminal JSON. AppModel and full-gate verification remain open.
