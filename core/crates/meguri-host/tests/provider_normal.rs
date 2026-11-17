@@ -6,7 +6,7 @@ use meguri_engine::{OpSource, OpSpec, media::MediaJobKind, session::{AnswerOutco
 use meguri_host::{CoreHost, MeguriBootstrapDirection, MeguriCollectionState, MeguriRoundStart};
 use meguri_model::{clock::{FixedClock, UtcOffset}, ids::DeckId, time::{EpochMillis, EpochSecs}, usn::Usn};
 use meguri_storage::{ReadRows, ReaderRole, Record, StampMode};
-use meguri_sync::{ErrorKind, Method, SyncTransport, provider::{MeguriReadiness, MeguriRoundRefusal, Selection}};
+use meguri_sync::{ErrorKind, Method, provider::{MeguriReadiness, MeguriRoundRefusal, Selection}};
 use serde_json::{Value, json};
 use std::{fs, sync::Arc, time::Duration};
 
@@ -486,7 +486,7 @@ fn handoff_cancels_only_actual_registered_round_and_waits_for_result_owner() {
     let early = handoff.as_ref().map(|handoff| host.finish_provider_handoff(handoff));
     // Release and join original workers before any assertion can panic.
     drop(release); task.wait();
-    ready.unwrap(); let handoff = handoff.unwrap(); assert!(early.unwrap().is_err());
+    ready.unwrap(); assert!(early.unwrap().is_err()); let handoff = handoff.unwrap();
     let result = host.meguri_round_result(&task).unwrap().unwrap();
     assert!(!result.media.as_ref().unwrap().complete);
     assert!(task.handle().cancel.is_cancelled());
