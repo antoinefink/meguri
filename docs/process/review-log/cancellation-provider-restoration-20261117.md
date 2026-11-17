@@ -75,4 +75,23 @@ The warm branch omitted the normal Host preparation port after reopening.
 A bounded test-only correction adds that real preparation only to the warm
 branch, before retaining the explicit reconciliation and all existing
 assertions. No consent, verification flags, SDK instance or Active proof is
-injected. Its execution remains pending.
+injected. Actual `core-test/20261117T124335Z-26078` on clean `b1ce60e01`
+then passes all 25 methods with zero failures or skips.
+
+## Whole affected binary
+
+Actual `core-test/20261117T124427Z-28746` on the same clean commit executes
+154 methods: 153 pass, one fails, zero skip. The remaining unchanged test is
+`decision_cas_io_error_keeps_inprocess_reopen_binding_consistent_for_publish_and_cancel`.
+After the returned fence-write error, its provider still has no binding and
+pending setup. Cancellation rejects that setup as if it referred to a successor.
+No whole-binary pass is claimed.
+
+Independent source audit `/root/adoption_empty_decks` confirms this product
+branch. The operation stores no historical provider document; a proposed
+exception therefore rests on a structural no-op, not inferred consent history.
+Only an absent predecessor, absent current provider binding, iCloud selection,
+absent handoff and existing pending setup qualify. Existing operation, file,
+fence and candidate guards remain, as does refusal of actual provider-write
+failure. A filtered correction is being prepared. It must preserve every
+provider byte and keep writers closed; the original failing test stays unchanged.
