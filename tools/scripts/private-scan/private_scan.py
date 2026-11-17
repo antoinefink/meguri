@@ -835,11 +835,11 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/retained_observer.py':
         'f096346a86c3bb55d2e9835cb6558c04526e2fbbfa333388e954868cfe919816',
     'tools/tests/sync_retained.bats':
-        '1318c582d9f1498ec550076c61a58c06fa93a2a7a0d66d7fd6b29b4addfa4f27',
+        'eb5ea4a210dbe1f29f5f5e9866db1bcc981089210456ff7b88349c30706f1e17',
     'tools/mg.d/sync-retained.sh':
         '1eaa29368bf416e3dc709da6fe4ab98946132fdab2ea711a09e79187c43eef30',
     'conformance/peers/retained-sync/support.py':
-        'f1d2a058ddd450360f7868a4d9ad51c22e9258948d0d0ffc33bd01dd4ef261c8',
+        'f605ec30665e9846024e7f2ff55e8a3fd67a21df9a5681fefd2911a2c66fc04e',
     'conformance/peers/retained-sync/src/main.rs':
         '44d0b8067924aebc307ffc3c5a5960c16b692e6148d3e584a55bd2ecb1d0bee7',
     'conformance/peers/retained-sync/src/fixture.rs':

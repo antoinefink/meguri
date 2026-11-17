@@ -216,7 +216,7 @@ class LifecyclePolicy:
     # The wire file below is deliberately NOT a valid runtime observation.
     running = False
     def create(self, directory, entrypoint, command, **options):
-        assert entrypoint == 'retained-observer' and command == ['--input', '/in']
+        assert entrypoint == 'python' and command == ['/opt/reference/driver.py', 'retained-observer', '--input', '/in']
         assert options['network'] == 'container:' + run.cid
         assert all('/secret' not in target and target != '/state' for source, target, ro in options['mounts'])
         assert all(ro or target == '/out' for source, target, ro in options['mounts'])

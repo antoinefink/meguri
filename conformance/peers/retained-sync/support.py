@@ -1249,7 +1249,7 @@ class RetainedRuntime:
         observer.mkdir()
         observer_out = observer / 'raw'
         observer_out.mkdir()
-        item = self.containers.create(observer, 'retained-observer', ['--input', '/in'], network='container:' + self.cid,
+        item = self.containers.create(observer, 'python', ['/opt/reference/driver.py', 'retained-observer', '--input', '/in'], network='container:' + self.cid,
             mounts=[(inputs, '/in', True), (observer_out, '/out', False)])
         observer_rc = None
         try:
@@ -1341,7 +1341,7 @@ class RetainedRuntime:
                     if not offline:
                         mounts.append((self.credentials, '/secret/credentials.json', True))
                     companion_context(inputs)
-                    rc = self.containers.run(child, 'retained-companion', ['--input', '/in', '--credentials', '/secret/credentials.json'],
+                    rc = self.containers.run(child, 'python', ['/opt/reference/driver.py', 'retained-companion', '--input', '/in', '--credentials', '/secret/credentials.json'],
                         network='none' if offline else 'container:' + self.cid, mounts=mounts)
                 else:
                     context(inputs)
