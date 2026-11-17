@@ -234,3 +234,14 @@ Both failed AppModel receipts remain retained.
 Scoped privacy `033658-24434`, static `033656-23665` and similarity
 `033655-23386` pass. The filtered similarity report was read.
 Scanner regression `20261117T033656Z-23780` passes its one case with zero skips.
+
+## First AppModel runtime result
+
+`swift-test/20261117T033804Z-25154` compiles and executes all ten selected
+methods on clean `d9d09517`: four pass, six fail and zero skip.
+Local-only study with held account IO, actual adoption replacement, retained
+credential-removal recovery and legacy upgrade pass. Publication, handoff,
+successor retries and command-error checks fail. The complete receipt retains
+every issue, including late command errors attributed to the metadata test.
+The actual JSON result released the Apple window after the process exited.
+No repeat is authorized by a focused pass elsewhere; diagnose before repair.
