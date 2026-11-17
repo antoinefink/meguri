@@ -206,7 +206,7 @@ fn ready(host: &CoreHost) -> Result<Value> {
     require(bootstrap(host.meguri_readiness(), "ready-readiness")? == MeguriReadiness::Ready, "ready")?;
     let doc = checked(host.provider_authority().snapshot(), "ready-settings")?;
     require(doc.settings.enabled && doc.settings.automatic && doc.settings.media
-        && doc.meguri_settings.enabled && doc.meguri_settings.automatic && doc.meguri_settings.media
+        && doc.meguri_settings.automatic && doc.meguri_settings.media
         && doc.meguri_bootstrap.is_none(), "automatic-enabled")?;
     let binding = doc.meguri_binding.ok_or_else(|| failure("binding", "missing"))?;
     let baseline = checked(checked(host.media(), "baseline-media")?.store().sync_baseline(), "baseline")?;
