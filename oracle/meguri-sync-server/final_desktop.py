@@ -326,7 +326,20 @@ def migration(api,root,target,case):
             aa=a.sync_login(username=target['username'],password=target['password'],endpoint=f'http://127.0.0.1:{record.server_port}/')
             decision=run.call(a,aa,'client_a',1,'decision',record)
             require(decision in {SyncOutput.FULL_UPLOAD,SyncOutput.FULL_SYNC},'migration candidate did not require upload authority')
-            run.call(a,aa,'client_a',1,'full',record,True);run.call(a,aa,'client_a',1,'media',record)
+            run.call(a,aa,'client_a',1,'full',record,True)
+            require(same_value(projection(a),authority['projection']) and media_map(a) == authority['media'],'migration collection upload changed frozen source content')
+            api.PHASE='migration-explicit-source-media-reset'
+            a.media.force_resync()
+            require(same_value(projection(a),authority['projection']) and media_map(a) == authority['media'],'migration media reset changed frozen source content')
+            media_start=len(record.observations);run.call(a,aa,'client_a',1,'media',record)
+            media_rows=record.observations[media_start:]
+            cursor=next((row['media_request']['lastUsn'] for row in media_rows if row['route'] == '/msync/mediaChanges'),None)
+            require(cursor == 0,'migration first candidate media listing did not start at zero')
+            uploads=[row['media_result'] for row in media_rows if row['route'] == '/msync/uploadChanges' and row['status'] == 200]
+            require(uploads and all(isinstance(row,list) and len(row) == 2 and type(row[0]) is int and row[0] >= 0 for row in uploads)
+                    and sum(row[0] for row in uploads) == len(authority['media'])
+                    and any(row['route'] == '/msync/mediaSanity' and row.get('media_result') == 'OK' and row['status'] == 200 for row in media_rows),'migration frozen source media publication incomplete')
+            require(same_value(projection(a),authority['projection']) and media_map(a) == authority['media'],'migration media publication changed frozen source content')
             run.call(b,ab,'client_b',2,'full',record,False);run.call(b,ab,'client_b',2,'media',record)
             b_equal=run.compare(b,ids,authority,'initial','client_b',2)
             run.call(c,ac,'fresh_client',3,'full',record,False);run.call(c,ac,'fresh_client',3,'media',record)

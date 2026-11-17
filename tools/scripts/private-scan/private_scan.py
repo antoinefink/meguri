@@ -849,11 +849,11 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/tests/test_final_package.py':
         'dc7a82769bd6aa93590cc4b03a6c96540864226b7df7c28f3359ac3566b00816',
     'oracle/meguri-sync-server/tests/test_final_coverage.py':
-        '3302195dc24cce8d0be410c7e3285b74dcf886107d7e7624b535f1e75f9921e4',
+        '5c8b97ba1909aa9990d7882af3ab2158e5c09f5c3d29d8ddedc6ba1b26a3a94b',
     'oracle/meguri-sync-server/final_handshake.py':
         '9e7f889c17ebb1d9d0508d08591aa6aaf121941e76761f3655f6fa859110f823',
     'oracle/meguri-sync-server/final_desktop.py':
-        '5501ac71ed19cb7f7c99a7b8f242dd580bb688902ccf9907c612105feceacd18',
+        '8aa683f71b7b1c7ac626a14e0056554e014f07a7871b1ef6a18f8cb8a755b853',
     'oracle/meguri-sync-server/final_checks.py':
         '6876d4d4e92f33f0bb081facf6173cc01392c88addd986e356e5f8e690e17c35',
     'oracle/meguri-sync-server/driver.py':

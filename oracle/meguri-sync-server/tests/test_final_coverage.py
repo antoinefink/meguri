@@ -87,6 +87,36 @@ class FinalCoverage(unittest.TestCase):
                 self.assertNotIn('driver_frames',captured['failure'])
                 self.assertEqual({path.name for path in root.iterdir()},{'sdk-failure.json'})
 
+    def test_migration_upload_resets_before_first_media_and_keeps_frozen_content(self):
+        from unittest.mock import patch
+        from final_desktop import migration
+        # Both services are actual owned pinned SDK references. This characterizes
+        # the fixture and HTTP ordering, never candidate31 interoperability credit.
+        case=candidate_selection('final-migration')['cases'][0]
+        recorder=api.recorder
+        with tempfile.TemporaryDirectory() as directory:
+            root=pathlib.Path(directory)
+            with api.reference_server(root/'candidate') as (port,username,password):
+                def reference_upstream(upstream):return recorder(port if upstream == 8080 else upstream)
+                target={'username':username,'password':password,'server':api.runtime()['server']}
+                with patch.object(api,'recorder',side_effect=reference_upstream):
+                    details=migration(api,root/'migration',target,case)
+        expected={row['name']:row['value'] for row in case['expected']}
+        self.assertEqual(details['values'],expected)
+        self.assertEqual(final_values({'final_details':details},case),expected)
+        switch=[row for row in details['receipts'] if row['actor'] == 'client_a' and row['action_index'] == 1]
+        self.assertEqual([row['operation'] for row in switch],['decision','full','media'])
+        self.assertTrue(any(row['route'] == '/sync/upload' and row['status'] == 200 and row['upload_result'] == 'OK' for row in switch[1]['traffic']))
+        self.assertFalse(any(row['route'].startswith('/msync/') for receipt in switch[:2] for row in receipt['traffic']))
+        rows=switch[2]['traffic']
+        self.assertEqual(next(row['media_begin']['usn'] for row in rows if row['route'] == '/msync/begin'),0)
+        self.assertEqual(next(row['media_request']['lastUsn'] for row in rows if row['route'] == '/msync/mediaChanges'),0)
+        self.assertEqual(sum(row['media_result'][0] for row in rows if row['route'] == '/msync/uploadChanges'),len(recipes()['media_utf8_exact']['initial']))
+        inputs={row['sha256']:row['value'] for row in details['inputs']};before=inputs[switch[2]['input_sha256']]
+        authority=details['frozen_authorities'][1]
+        self.assertEqual(before['projection'],authority['projection'])
+        self.assertEqual(before['media'],authority['media'])
+
     def test_final31_preserves_each_historical_case_and_order(self):
         final=candidate_selection('final')['cases']
         unchanged=sum([candidate_selection(phase)['cases'] for phase in ('full','normal','media')],[])
