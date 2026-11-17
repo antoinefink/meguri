@@ -89,7 +89,7 @@ class FinalCoverage(unittest.TestCase):
 
     def test_migration_upload_resets_before_first_media_and_keeps_frozen_content(self):
         from unittest.mock import patch
-        from final_desktop import migration
+        from final_desktop import migration, _require_migration_media_listing
         from validation import encoded
         api.MIGRATION_MEDIA_DIAGNOSTIC=None
         api.PHASE='setup'
@@ -116,8 +116,22 @@ class FinalCoverage(unittest.TestCase):
             self.assertFalse(any(row['route'].startswith('/msync/') for receipt in switch[:2] for row in receipt['traffic']))
             rows=switch[2]['traffic']
             self.assertEqual(next(row['media_begin']['usn'] for row in rows if row['route'] == '/msync/begin'),0)
-            self.assertEqual(next(row['media_request']['lastUsn'] for row in rows if row['route'] == '/msync/mediaChanges'),0)
+            _require_migration_media_listing(rows)
             self.assertEqual(sum(row['media_result'][0] for row in rows if row['route'] == '/msync/uploadChanges'),len(recipes()['media_utf8_exact']['initial']))
+            # Corrupt only guard inputs; no fabricated SDK exchange or case credit.
+            for request in ({'lastUsn':3},{'lastUsn':False},{'lastUsn':0.0},{'lastUsn':'0'},{},None):
+                with self.subTest(malformed_listing=request):
+                    listing={'route':'/msync/mediaChanges','status':200,'media_error_empty':True,'media_request':request}
+                    with self.assertRaises(ValueError):_require_migration_media_listing([listing]+copy.deepcopy(rows))
+            absent=[row for row in rows if row['route'] != '/msync/mediaChanges']
+            for change in (None,{'status':403},{'media_error_empty':False},{'media_begin':{'usn':3}},
+                           {'media_begin':{'usn':False}},{'media_begin':{'usn':0.0}},{'media_begin':{}}):
+                with self.subTest(invalid_empty_begin=change):
+                    broken=copy.deepcopy(absent)
+                    if change is None:broken=[row for row in broken if row['route'] != '/msync/begin']
+                    else:next(row for row in broken if row['route'] == '/msync/begin').update(change)
+                    with self.assertRaises(ValueError):_require_migration_media_listing(broken)
+            _require_migration_media_listing([{'route':'/msync/mediaChanges','status':200,'media_error_empty':True,'media_request':{'lastUsn':0}}]+copy.deepcopy(rows))
             api.PHASE='migration-test-input-check'
             inputs={row['sha256']:row['value'] for row in details['inputs']};before=inputs[switch[2]['input_sha256']]
             authority=details['frozen_authorities'][1]

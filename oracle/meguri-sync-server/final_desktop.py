@@ -300,6 +300,23 @@ def replacement(api,root,target,case,upload):
         return run.result(values,{'frozen_authorities':[right,left],'authority_ids':[right_ids,left_ids],'logical_ids':chosen_ids,'initial_decision':decision,'media_maps':{'after_collection':after_collection,'after_reconcile':utf8_map(receiver)},'media_observations':[first_media,final_media]})
 
 
+def _require_migration_media_listing(rows):
+    listing=next((row for row in rows if row['route'] == '/msync/mediaChanges'),None)
+    if listing is not None:
+        request=listing.get('media_request')
+        require(type(listing.get('status')) is int and listing['status'] == 200 and listing.get('media_error_empty') is True
+                and isinstance(request,dict) and type(request.get('lastUsn')) is int and request['lastUsn'] == 0,
+                'migration first candidate media listing did not start at zero')
+    else:
+        # The pinned SDK can skip listing when the server's media history is empty.
+        begin=next((row for row in rows if row['route'] == '/msync/begin'),None)
+        detail=begin.get('media_begin') if isinstance(begin,dict) else None
+        require(isinstance(begin,dict) and type(begin.get('status')) is int and begin['status'] == 200
+                and begin.get('media_error_empty') is True and isinstance(detail,dict)
+                and type(detail.get('usn')) is int and detail['usn'] == 0,
+                'migration absent listing lacks successful empty-target begin')
+
+
 def migration(api,root,target,case):
     api.MIGRATION_MEDIA_DIAGNOSTIC=None
     api.PHASE='migration-setup'
@@ -365,7 +382,7 @@ def migration(api,root,target,case):
                 'successful_upload_count':len(processed),'processed_total':sum(processed),
                 'sanity_ok':any(row['route'] == '/msync/mediaSanity' and row.get('status') == 200
                                 and row.get('media_error_empty') is True and row.get('media_result') == 'OK' for row in media_rows)}
-            require(cursor == 0,'migration first candidate media listing did not start at zero')
+            _require_migration_media_listing(media_rows)
             api.PHASE='migration-media-publication-check'
             uploads=[row['media_result'] for row in media_rows if row['route'] == '/msync/uploadChanges' and row['status'] == 200]
             require(uploads and all(isinstance(row,list) and len(row) == 2 and type(row[0]) is int and row[0] >= 0 for row in uploads)
