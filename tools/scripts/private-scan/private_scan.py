@@ -917,7 +917,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        'be4e3d95b0853e39f2b7da1e33fcf4474da829a593b30835a87704cf284b316c',
+        '6c13c33e4a64819ed7565480f95c633e7ecc0779fbe5760ab1f240d5e1de5c3e',
     # Independently reviewed first-party license scope, exact complete text.
     'LICENSING.md':
         '98c119e6dedf0192268fc328b9a8e0be58771760a4bc2156387db57ae97c7f2a',
