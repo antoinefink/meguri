@@ -370,3 +370,22 @@ Production is unchanged; focused red/green verification is pending.
 
 Regression-source privacy `043102-58322`, static `043102-58406`
 and similarity `043106-59032` pass; the filtered report was read.
+
+## Core regression fixture prerequisite
+
+`core-test/20261117T043231Z-60949` on clean `753d30da` fails both
+selected methods before their preview checks: epoch intake reports
+`IdentityUnverified`. The intended healthy-red/fault-green proof is not
+established. Both failures remain retained and the CPU window was released.
+
+The shared rig declared a connected publication and existing Cloud baseline,
+but had no explicit provider choice. Author `043556-61562` adds migration
+inside that rig's owned installation before Host open, then production
+admission refresh after actual baseline preparation and before epoch intake.
+Non-author `provider_test_delta_review` clears P0–P2. Defaults, global
+fixture options, test bodies, faults and assertions remain unchanged.
+Existing local-only, invalid and pending choices are never overwritten.
+Focused execution remains pending.
+
+Fixture-source privacy `044000-63875`, static `044000-64126` and
+similarity `044000-63888` pass. The filtered report was read.

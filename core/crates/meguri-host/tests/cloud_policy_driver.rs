@@ -97,6 +97,16 @@ fn rig_with_files_and_state(
         identity: Arc::new(Account),
         files,
     });
+    CoreHost::migrate_provider_configuration(
+        &config.manual_transfer_directory,
+        meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+            enabled: true,
+            paused: false,
+            automatic: false,
+            media: false,
+        }),
+    )
+    .unwrap();
     let host = Arc::new(CoreHost::open(config.clone()).unwrap());
     let collection = host.collection().unwrap();
     let baseline_deck = meguri_engine::decks::add(&collection, "Policy baseline deck".into())
@@ -138,6 +148,7 @@ fn rig_with_files_and_state(
             saved_state.then(|| b"synthetic-sdk-state".to_vec()),
         )
         .unwrap();
+    host.refresh_provider_admission();
     if known_epoch {
         let mut service = meguri_testkit::cloud::Service::open(
             root.path(), meguri_testkit::cloud::Config::default(), meguri_model::rng::SeededRandom::new(seed),
