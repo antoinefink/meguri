@@ -1430,7 +1430,8 @@ nonisolated struct InitialCloudFixture: Sendable {
             configureBackend?(backend)
             backends.append(backend)
             return backend
-        }, defaults: defaults, clock: .system, directory: nil, observeSignals: false)
+        }, defaults: defaults, clock: .system, directory: nil, observeSignals: false,
+            providerDirectory: scratchContainer.appending(path: "synthetic-installation"))
     }
     lazy var owner = makeOwner()
 
