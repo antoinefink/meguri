@@ -648,6 +648,7 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
     let causalTrace = ServiceAppCausalTrace()
     private let clock: AppClock
     private let cachedIdentityAvailable: Bool
+    private let meguriCredentialStore: (any MeguriProviderCredentialStore)?
     private(set) var backends: [ServiceAppBackend] = []
     var observeOwn: (@Sendable (CloudOwnObservation) -> Void)?
     var ownTransport: (any CloudOwnTransport)?
@@ -704,7 +705,8 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
             afterBackend?(backend)
             return backend
         }, defaults: defaults, clock: .system, directory: nil, observeSignals: false,
-           providerDirectory: root.appending(path: "synthetic-installation", directoryHint: .isDirectory))
+           providerDirectory: root.appending(path: "synthetic-installation", directoryHint: .isDirectory),
+           meguriCredentialStore: meguriCredentialStore)
     }
     lazy var owner: ReviewCollection = {
         var configuration = LaunchConfiguration()
@@ -718,10 +720,12 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
     }()
     init(root: URL, wire: ServiceWorkflowWire, defaults: UserDefaults? = nil,
          cachedIdentityAvailable: Bool = true,
+         meguriCredentialStore: (any MeguriProviderCredentialStore)? = nil,
          clock: AppClock = .fixed(Date(timeIntervalSince1970: 1_735_689_600))) throws {
         self.root = root; self.wire = wire
         self.clock = clock
         self.cachedIdentityAvailable = cachedIdentityAvailable
+        self.meguriCredentialStore = meguriCredentialStore
         factory = ServiceSDKFactory(wire: wire, causalTrace: causalTrace)
         if let defaults { self.defaults = defaults }
         else { self.defaults = try #require(UserDefaults(suiteName: suite)) }

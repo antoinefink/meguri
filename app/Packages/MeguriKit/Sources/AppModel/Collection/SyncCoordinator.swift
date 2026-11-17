@@ -470,6 +470,7 @@ public final class SyncCoordinator {
     var retryProviderAttachment: (@MainActor (SyncCoordinator) async throws -> Void)?
     private var providerAttachmentPending = false
     private var retryingProviderAttachment = false
+    private let meguriCredentialStore: (any MeguriProviderCredentialStore)?
     private var meguriConnectionOwner: MeguriProviderConnectionOwner?
     public private(set) var meguriPhase: MeguriProviderConnectionPhase = .unconfigured
     public private(set) var meguriEndpoint = ""
@@ -1105,7 +1106,7 @@ public final class SyncCoordinator {
         }
         let successor = SyncCoordinator(bootstrap: bootstrap, makeBackend: makeBackend,
             defaults: defaults, clock: clock, directory: directory, observeSignals: observeSignals,
-            providerDirectory: providerDirectory, recordDiagnostic: recordDiagnostic)
+            providerDirectory: providerDirectory, meguriCredentialStore: meguriCredentialStore, recordDiagnostic: recordDiagnostic)
         // The original already joined its native owners above. The successor
         // needs an attachment retry, not a strong chain of drained owners.
         successor.providerAttachmentPending = true
@@ -1164,12 +1165,13 @@ public final class SyncCoordinator {
     init(bootstrap: @escaping @MainActor () async throws -> Void,
          makeBackend: @escaping @MainActor (@escaping @Sendable () async -> Void) async throws -> any SyncCoordinatorBackend,
          defaults: UserDefaults?, clock: AppClock = .system, directory: URL? = nil, observeSignals: Bool = false,
-         providerDirectory: URL? = nil,
+         providerDirectory: URL? = nil, meguriCredentialStore: (any MeguriProviderCredentialStore)? = nil,
          recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
         self.recordDiagnostic = recordDiagnostic
         self.bootstrap = bootstrap; self.makeBackend = makeBackend; self.defaults = defaults
         self.clock = clock; self.directory = directory
         self.providerDirectory = providerDirectory
+        self.meguriCredentialStore = meguriCredentialStore
         self.observeSignals = observeSignals
         settings = (try? CoreProviderService.legacySettings(defaults?.object(forKey: Self.settingsKey)))
             ?? .init(enabled: false, paused: false, automatic: false, media: true)
@@ -1665,7 +1667,12 @@ public final class SyncCoordinator {
         guard !replacing else { throw BridgeError.busy(runningOperation: "collection replacement") }
         if let meguriConnectionOwner { return meguriConnectionOwner }
         guard let provider else { throw BridgeError.unavailable(reason: "Open the local collection first") }
-        let owner = MeguriProviderConnectionOwner(service: provider)
+        let owner: MeguriProviderConnectionOwner
+        if let store = meguriCredentialStore {
+            owner = MeguriProviderConnectionOwner(service: provider, store: store)
+        } else {
+            owner = MeguriProviderConnectionOwner(service: provider)
+        }
         meguriConnectionOwner = owner
         return owner
     }

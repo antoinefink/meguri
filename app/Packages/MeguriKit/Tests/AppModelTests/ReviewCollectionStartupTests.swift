@@ -852,7 +852,8 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
         }
     }
 
-    private func withNativeMeguriSetupOwner(_ body: (ServiceAppHarness) async throws -> Void) async throws {
+    private func withNativeMeguriSetupOwner(meguriCredentialStore: (any MeguriProviderCredentialStore)? = nil,
+                                            _ body: (ServiceAppHarness) async throws -> Void) async throws {
         let files = FileManager.default
         let temporary = try #require(realpath(files.temporaryDirectory.path, nil))
         defer { free(temporary) }
@@ -869,7 +870,8 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
         var active: ServiceAppHarness?
         do {
             let wire = try ServiceWorkflowWire(process: process, directory: root.appending(path: "transport"))
-            let app = try ServiceAppHarness(root: collection, wire: wire, cachedIdentityAvailable: false, clock: .system)
+            let app = try ServiceAppHarness(root: collection, wire: wire, cachedIdentityAvailable: false,
+                meguriCredentialStore: meguriCredentialStore, clock: .system)
             active = app
             defer { app.defaults.removePersistentDomain(forName: app.suite) }
             #expect(app.owner.configuration.collectionLocation.backupsDirectory == backups)
@@ -927,7 +929,8 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
     }
 
     @Test(.timeLimit(.minutes(1))) func meguriExplicitAddressEditSurvivesLocalReloadAndStillConfigures() async throws {
-        try await withNativeMeguriSetupOwner { app in
+        let store = NativeMeguriSetupCredentials()
+        try await withNativeMeguriSetupOwner(meguriCredentialStore: store) { app in
             try #require(await app.sync.changeProvider(to: .meguri))
             await app.sync.waitForMeguriAction()
             let core = try await CoreProviderService.attached()
@@ -975,12 +978,58 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
                 let afterBusy = app.sync.meguriBusy
                 print("nativeMeguriAddressEdit before.error=\(beforeError) before.phase=\(beforePhase) before.key=\(beforeKey) reserved=\(reserved) after.error=\(afterError) after.phase=\(afterPhase) after.key=\(afterKey) after.busy=\(afterBusy)")
                 #expect(!afterBusy)
+                let actualUsernameRefusal: Bool
+                if let failure = app.sync.meguriLastError as? MeguriProviderAuthenticationFailure, case .username = failure {
+                    actualUsernameRefusal = true
+                } else { actualUsernameRefusal = false }
+                try #require(actualUsernameRefusal, "Expected the actual no-network username refusal")
                 #expect(try await app.sync.meguriConnection() === original)
                 let current = try #require(try await core.configuredMeguri())
                 #expect(current.connection != configured.connection)
+                #expect(current.connection.revision != configured.connection.revision)
                 #expect(current.connection.endpoint == configured.connection.endpoint)
+                let deletedOriginalConnection = await store.deleteAttempts == [configured.connection]
+                #expect(deletedOriginalConnection)
+                #expect(await store.savedCount == 0)
                 #expect(calls.withLock { $0.filter { $0 == .providerConfigureMeguri }.count } == 1)
                 #expect(calls.withLock { $0.filter { $0 == .providerStartLogin }.count } == 1)
+                #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
+            }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func meguriExplicitAddressEditRetainsCredentialDeletionFailure() async throws {
+        // Simulated store failure, independent of signed device Keychain capability.
+        let deleteFailure = MeguriProviderCredentialFailure.access(-12345)
+        let store = NativeMeguriSetupCredentials(deleteFailure: deleteFailure)
+        try await withNativeMeguriSetupOwner(meguriCredentialStore: store) { app in
+            try #require(await app.sync.changeProvider(to: .meguri))
+            await app.sync.waitForMeguriAction()
+            let core = try await CoreProviderService.attached()
+            let configured = try await core.configureMeguri(endpoint: "https://native-edit.synthetic.example/")
+            app.sync.loadMeguriConnection()
+            await app.sync.waitForMeguriAction()
+            let original = try await app.sync.meguriConnection()
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                app.sync.meguriAddressEdited()
+                app.sync.loadMeguriConnection()
+                await app.sync.waitForMeguriAction()
+                app.sync.signInMeguri(endpoint: configured.connection.endpoint, username: "?", password: "synthetic-unused-password")
+                #expect(app.sync.meguriBusy)
+                await app.sync.waitForMeguriAction()
+                #expect(!app.sync.meguriBusy)
+                let retainedDeleteFailure = (app.sync.meguriLastError as? MeguriProviderCredentialFailure) == deleteFailure
+                try #require(retainedDeleteFailure)
+                #expect(try await app.sync.meguriConnection() === original)
+                let current = try #require(try await core.configuredMeguri())
+                let originalConfigurationRetained = current.connection == configured.connection
+                #expect(originalConfigurationRetained)
+                let deletedOriginalConnection = await store.deleteAttempts == [configured.connection]
+                #expect(deletedOriginalConnection)
+                #expect(await store.savedCount == 0)
+                #expect(calls.withLock { !$0.contains(.providerConfigureMeguri) })
+                #expect(calls.withLock { !$0.contains(.providerStartLogin) })
                 #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
             }
         }
@@ -1142,9 +1191,16 @@ private let nativeMeguriTransferCalls: Set<BridgeCall> = [
 ]
 private actor NativeMeguriSetupCredentials: MeguriProviderCredentialStore {
     private var value: MeguriProviderCredentials?
+    private let deleteFailure: MeguriProviderCredentialFailure?
     private(set) var savedCount = 0
+    private(set) var deleteAttempts: [MeguriProviderConnection] = []
+    init(deleteFailure: MeguriProviderCredentialFailure? = nil) { self.deleteFailure = deleteFailure }
     func load(connection: MeguriProviderConnection) -> MeguriProviderCredentials? { value }
     func save(_ credentials: MeguriProviderCredentials) { value = credentials; savedCount += 1 }
-    func delete(connection: MeguriProviderConnection) { value = nil }
+    func delete(connection: MeguriProviderConnection) throws {
+        deleteAttempts.append(connection)
+        if let deleteFailure { throw deleteFailure }
+        value = nil
+    }
 }
 #endif
