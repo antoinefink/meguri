@@ -3583,6 +3583,9 @@ fn accepted_replacement_cancel_provider_boundary(point: Option<&str>, cold: bool
     assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&predecessor));
     assert_eq!(host.provider_authority().snapshot().unwrap(), previous);
     assert_eq!(std::fs::read(&provider_path).unwrap(), previous_bytes);
+    if !cold {
+        host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
+    }
     runtime.reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30)).unwrap();
     runtime.require_provider_collection_admission().unwrap();
     assert!(runtime.require_collection_sending().is_err());

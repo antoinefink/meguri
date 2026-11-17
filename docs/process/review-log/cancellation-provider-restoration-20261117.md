@@ -23,8 +23,8 @@ Stopped, signed-out and account-changed predecessors regain metadata only.
 Their writers remain closed until a fresh Resume proves activation. Cancellation
 of an initial publication or a local-only replacement reopens discovery without
 inventing Connected consent. Sixteen additional Host regression entrypoints
-cover these boundaries, failure retry, cold recovery and contention. Execution
-is pending; source review is not test evidence.
+cover these boundaries, failure retry, cold recovery and contention. The first
+execution is recorded below; source review alone grants no test evidence.
 
 Filtered author exports `103929Z-60015`, `111436Z-50735` and
 `114904Z-84769` retain the successive repairs. Independent reviews
@@ -55,4 +55,24 @@ license concern. Root verified the exact applied bytes:
 Ordinary privacy `122742Z-86504` flagged only the provider and Host test files.
 Under the standing routine-admission delegation, only those two exact public
 hash entries were refreshed or added. Matcher behavior, tokens and access are
-unchanged. Focused verification and the required integration checks remain due.
+unchanged. The initial complete report was independently classified PUBLIC by
+`/root/provider_test_delta_review`; only its exact hash was admitted after
+ordinary privacy flagged it. The required integration checks remain due.
+
+## First execution
+
+Clean repair commit `0aa73cdbe` compiles. Focused
+`core-test/20261117T123409Z-12376` executes 25 methods: 23 pass, two fail,
+zero skip. All three original failures and the previous six consent and
+restoration methods pass. Two new warm-cancellation cases fail at the same
+explicit reconciliation after reopening. No whole-binary pass is claimed.
+
+Independent source audit `/root/adoption_empty_decks` identifies the missing
+arrangement: a fresh Runtime intentionally starts with unverified account
+identity. Direct reconciliation requires that proof but does not read it.
+The cold-cancellation branch already obtains it through actual cancellation.
+The warm branch omitted the normal Host preparation port after reopening.
+A bounded test-only correction adds that real preparation only to the warm
+branch, before retaining the explicit reconciliation and all existing
+assertions. No consent, verification flags, SDK instance or Active proof is
+injected. Its execution remains pending.

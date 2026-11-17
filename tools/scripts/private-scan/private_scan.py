@@ -832,7 +832,7 @@ PUBLIC_ARTIFACTS = {
     "docs/process/review-log/cloud-protocol-consent-fixtures-20261117.md":
         "8f37e85fa552b7eece8721914aaf2c6c48c7608308b7c3c242088599b816398a",
     "docs/process/verification-status.md":
-        "764f02e2bd3a9bbed0be59111919600d1babe04ab01fc53ce44d9bc0d6c16069",
+        "58fb16b33adec63a9f8273de2dfc85314d978f5a1f29eff4c64919c014e4e44c",
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
         'd17a17aafe357db445010b6d580ad11bac91f5d7e23496088de5f60f865b9130',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
@@ -845,9 +845,9 @@ PUBLIC_ARTIFACTS = {
     "core/crates/meguri-sync/src/provider.rs":
         "bf6c482a6af4119659204ecb1bb0b62ee6751dc7403bce920ad1fac271114358",
     "core/crates/meguri-host/tests/cloud_publication_phase.rs":
-        "3c025e50d4b1c1a36d16fb4dac845b9d4dece2b21427ff271296cbb800476992",
+        "4621cd668042aa0979fdb7ebb24b8846364819bbfec3e0d230959539461483db",
     "docs/process/review-log/cancellation-provider-restoration-20261117.md":
-        "f56fa7f39ce339ebc633dcda809f3561604323a4e42aeaecab41d6a43baa3a1d",
+        "49235b01033ce8c08ab9c05cbcf23cdd8662e0a8c488f8d50dfd473ece9d0f9a",
     'specs/sync/one-way.md':
         '8de7695fada9f38fa5d6c54c26538d025cd7e3b45b1867a1b8650417533b0812',
     'specs/sync/meguri-provider.md':
