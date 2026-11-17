@@ -493,3 +493,7 @@ Trace-source static `065324-47813` and similarity `065324-48188` pass; the filte
 Author `070810-55194` reads the existing optional connection failure before the test catch cleans up. An exhaustive switch emits only fixed tags for its 17 public cases and nil. Review `071033-55935` is clear; root verifies exact author/reviewer bytes. Inputs, both arguments, all assertions, deadlines, cleanup and rethrow remain. Actual observation is pending; no behavior repair is claimed.
 
 Typed-capture privacy `071254-61025`, static `071253-60451` and similarity `071252-60420` pass. The filtered one-file report has no flags or exemptions. Actual focused execution remains pending.
+
+## Typed Resume refusal observed
+
+`swift-test/20261117T071509Z-63089`, clean `5743501d`, still fails the one focused method, zero skipped. Reopen passes its argument case. Before cleanup, Resume records `fixture.connectionFailure.accountUnavailable` after native entry and refusal. It records no native return or account callback. Source diagnosis must distinguish identity-read refusal from provider admission during reconciliation; this observation alone proves neither cause. The actual terminal receipt released the CPU slot.
