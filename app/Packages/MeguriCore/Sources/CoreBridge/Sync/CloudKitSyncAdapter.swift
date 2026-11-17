@@ -12,7 +12,17 @@ enum CloudSDKConstructionBoundary {
 private final class CloudSDKRegistration: Sendable {
     let task: Task<CloudRegistration, any Error>
     init(_ operation: @escaping @Sendable () async throws -> CloudRegistration) {
+        #if DEBUG
+        task = Task {
+            do { return try await operation() }
+            catch {
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineSDKRegistration, error: error)
+                throw error
+            }
+        }
+        #else
         task = Task { try await operation() }
+        #endif
     }
 }
 
@@ -505,7 +515,12 @@ public actor CloudKitSyncAdapter {
     private func valid(_ origin: String) async -> Bool {
         guard let instance = owned[origin], !instance.stopping, current == origin else { return false }
         do { try await core.validateSDK(origin) }
-        catch { return false }
+        catch {
+            #if DEBUG
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEnginePublishedValidation, error: error)
+            #endif
+            return false
+        }
         return current == origin && owned[origin] === instance && !instance.stopping
     }
     public func start(automaticallySync: Bool) async throws {
@@ -520,29 +535,84 @@ public actor CloudKitSyncAdapter {
         try await startPrepared(automaticallySync: automaticallySync, readIdentity: true, intent: intent)
     }
     private func checkIntent(_ intent: UInt64) throws {
+        #if DEBUG
+        do {
+            try Task.checkCancellation()
+            guard !quiescing, requestedRunning, intentGeneration == intent else { throw CancellationError() }
+        } catch {
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineIntent, error: error)
+            throw error
+        }
+        #else
         try Task.checkCancellation()
         guard !quiescing, requestedRunning, intentGeneration == intent else { throw CancellationError() }
+        #endif
     }
     private func startPrepared(automaticallySync: Bool, readIdentity: Bool, intent: UInt64, execution: CoreCloudPolicyExecution? = nil) async throws {
         try checkIntent(intent)
-        for task in stopTasks.values { try await task.value; try checkIntent(intent) }
+        for task in stopTasks.values {
+            #if DEBUG
+            do { try await task.value }
+            catch {
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineStopJoin, error: error)
+                throw error
+            }
+            #else
+            try await task.value
+            #endif
+            try checkIntent(intent)
+        }
         // A superseded creation retains its original SDK through cleanup.
         // Join it before a replacement identity read can capture that owner.
         while creatingSDK {
             let old = version
+            #if DEBUG
+            do { try await waitForChange(after: old) }
+            catch {
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineCreationWait, error: error)
+                throw error
+            }
+            #else
             try await waitForChange(after: old)
+            #endif
             try checkIntent(intent)
         }
         guard current == nil else {
             if execution != nil { throw BridgeError.cloudPolicy(.staleCommand) }; return
         }
-        if readIdentity && !appOwnsAccountObservation { try await refreshPlatformIdentity(intent: intent) }
+        if readIdentity && !appOwnsAccountObservation {
+            #if DEBUG
+            do { try await refreshPlatformIdentity(intent: intent) }
+            catch {
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineIdentityRead, error: error)
+                throw error
+            }
+            #else
+            try await refreshPlatformIdentity(intent: intent)
+            #endif
+        }
         try checkIntent(intent)
+        #if DEBUG
+        do { try await core.prepareRuntime() }
+        catch {
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRuntimePreparation, error: error)
+            throw error
+        }
+        #else
         try await core.prepareRuntime()
+        #endif
         try checkIntent(intent)
         while creatingSDK {
             let old = version
+            #if DEBUG
+            do { try await waitForChange(after: old) }
+            catch {
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineCreationWait, error: error)
+                throw error
+            }
+            #else
             try await waitForChange(after: old)
+            #endif
             try checkIntent(intent)
         }
         guard current == nil else {
@@ -566,23 +636,38 @@ public actor CloudKitSyncAdapter {
         let delegate = CloudSDKDelegate(adapter: self, origin: registration.instanceID)
         var created: (any CloudKitEngine)?
         var published = false
+        #if DEBUG
+        var site = DebugCloudDiagnostics.SendFailureSite.startEngineNativeFactory
+        #endif
         do {
             try checkIntent(intent)
             let engine = try await factory.makeEngine(configuration: .init(instanceID: registration.instanceID, automaticallySync: automaticallySync, serialization: registration.serialization, collectionZone: registration.collectionZone), delegate: delegate)
             created = engine
             try checkIntent(intent)
+            #if DEBUG
+            site = .startEngineOriginalValidation
+            #endif
             if let execution { try await execution.validate(); try checkIntent(intent) }
             owned[registration.instanceID] = Instance(engine: engine, zone: registration.collectionZone, sdk: registration.instanceID)
             current = registration.instanceID
             published = true
             changed()
+            #if DEBUG
+            site = .startEnginePublishedValidation
+            #endif
             let live = await valid(registration.instanceID)
             try checkIntent(intent)
             guard live else {
                 throw BridgeError.unavailable(reason: "Cloud registration expired during creation")
             }
+            #if DEBUG
+            site = .startEnginePendingUpdates
+            #endif
             try await consumePendingUpdates()
             try checkIntent(intent)
+            #if DEBUG
+            site = .startEngineRootFetch
+            #endif
             if registration.needsRootFetch {
                 if let execution {
                     _ = try await fetch(zones: ["meguri-root", registration.collectionZone], origin: registration.instanceID, execution: execution)
@@ -593,6 +678,9 @@ public actor CloudKitSyncAdapter {
             try checkIntent(intent)
         } catch {
             let operationError = error
+            #if DEBUG
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(site, error: operationError)
+            #endif
             creatingSDKRegistration = nil
             if published {
                 do { try await stopInstance(registration.instanceID, reason: .registrationFailure, policyStop: false) }
@@ -900,6 +988,9 @@ public actor CloudKitSyncAdapter {
                     try await resolution.resolve(using: factory)
                 } onCancel: { Task { await self.cancelIdentityRead(id) } }
             } catch {
+                #if DEBUG
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineIdentityRead, error: error)
+                #endif
                 _ = try await finishIdentityRead(id, status: .couldNotDetermine, identity: nil)
                 try checkReadIntent(intent)
                 if originSDK != nil { lastFailure = error; return (id, false) }
@@ -913,6 +1004,9 @@ public actor CloudKitSyncAdapter {
             }
             return (id, resolved?.status == .available && resolved?.identity != nil)
         } catch {
+            #if DEBUG
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineIdentityRead, error: error)
+            #endif
             if identityReads.contains(id) { _ = try await finishIdentityRead(id, status: .couldNotDetermine, identity: nil) }
             throw error
         }
@@ -942,7 +1036,12 @@ public actor CloudKitSyncAdapter {
         if let hook = pendingUpdateValidatedHook, !hook.afterSDKMutation { await hook.action() }
         #endif
         do { updates = try await core.takePendingUpdates(sdk: origin) }
-        catch BridgeError.cloudSDKCallbackRejected { retireRejectedOriginal(origin); return }
+        catch let error as BridgeError where error == .cloudSDKCallbackRejected {
+            #if DEBUG
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEnginePendingUpdates, error: error)
+            #endif
+            retireRejectedOriginal(origin); return
+        }
         for update in updates {
             guard await valid(origin) else { return }
             var applied = update
@@ -969,7 +1068,12 @@ public actor CloudKitSyncAdapter {
             if let hook = pendingUpdateValidatedHook, hook.afterSDKMutation { await hook.action() }
             #endif
             do { try await core.updateApplied(sdk: origin, id: update.id, added: added) }
-            catch BridgeError.cloudSDKCallbackRejected { retireRejectedOriginal(origin); return }
+            catch let error as BridgeError where error == .cloudSDKCallbackRejected {
+                #if DEBUG
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEnginePendingUpdates, error: error)
+                #endif
+                retireRejectedOriginal(origin); return
+            }
         }
     }
     // Hold the SDK's original serial delivery, retaining asset lifetime and
@@ -1802,6 +1906,9 @@ public actor CloudKitSyncAdapter {
                 if let execution { try await execution.validate() }
             }
             catch {
+                #if DEBUG
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: error)
+                #endif
                 #if canImport(CloudKit)
                 let losses = try NativeCloudKitSendError.zoneLosses(error, zones: scope)
                 if !losses.isEmpty, await valid(origin) {
@@ -1843,6 +1950,9 @@ public actor CloudKitSyncAdapter {
                 drained = try await core.finishFetch(sdk: origin, id: id)
                 try await reportOperation(execution, zones: [.root, .collection], kind: .fetch, started: false)
             } catch {
+                #if DEBUG
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: error)
+                #endif
                 let proof = error as? CloudFetchProofError
                 do {
                     if await valid(origin) {
@@ -1946,6 +2056,9 @@ public actor CloudKitSyncAdapter {
                 let reply: CloudOwnTransportReply
                 do { reply = try await operation.reply() }
                 catch {
+                    #if DEBUG
+                    DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: error)
+                    #endif
                     // Only the original native reply's explicit shape refusal
                     // supplies this fact. Core still decides its acceptance.
                     if epochPreparation, let native = error as? NativeCloudKitFailure,
@@ -1956,6 +2069,9 @@ public actor CloudKitSyncAdapter {
                 return result
             } onCancel: { read.cancel(); admission.setOpen(false); operation.cancel(); worker.cancel() }
         } catch {
+            #if DEBUG
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: error)
+            #endif
             operation.cancel()
             transportError = error
             // A throwing original read is a failure, never a missing record.
@@ -1974,6 +2090,7 @@ public actor CloudKitSyncAdapter {
                 let proof = error as? CloudFetchProofError
                 let originalError = proof?.error ?? error
                 #if DEBUG
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: originalError)
                 DebugCloudDiagnostics.fetchReadFailureCapture?.record(
                     targetActive: target.name == "active", transportError: transportError != nil,
                     resultFailed: result == .failed, evidenceFailure: evidence?.failure != nil,
@@ -2013,7 +2130,12 @@ public actor CloudKitSyncAdapter {
         live = live && stillCurrent && !quiescing && !suspended && !suspending && !Task.isCancelled
         if let execution, live {
             do { try await execution.validate() }
-            catch { _ = try? await read.complete(result, discard: true, evidence: evidence, nativeFailure: nativeFailure); throw error }
+            catch {
+                #if DEBUG
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: error)
+                #endif
+                _ = try? await read.complete(result, discard: true, evidence: evidence, nativeFailure: nativeFailure); throw error
+            }
         }
         let next = try await read.complete(result, discard: !live, evidence: evidence, nativeFailure: nativeFailure)
         #if DEBUG
@@ -2248,7 +2370,12 @@ public actor CloudKitSyncAdapter {
                 // do not advance the no-state point of the retained FetchRead.
                 try await self.refreshControlIdentity(proof: proof)
                 result = .success(())
-            } catch { result = .failure(error) }
+            } catch {
+                #if DEBUG
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: error)
+                #endif
+                result = .failure(error)
+            }
             #if DEBUG
             await CloudFetchProofCompletionFault.beforeOriginalPropagation?()
             #endif
@@ -2308,7 +2435,16 @@ public actor CloudKitSyncAdapter {
     public func cancelSyncNow() { exchangeTask?.task.cancel() }
     /// True means retained work, not a completed EngineStopped transition.
     func executePolicyLifecycle(_ command: CloudPolicyCommand, execution: CoreCloudPolicyExecution, policy: CoreCloudPolicyService) async throws -> Bool {
+        #if DEBUG
+        let original: String?
+        do { original = try await execution.originalSDK() }
+        catch {
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineOriginalSDK, error: error)
+            throw error
+        }
+        #else
         let original = try await execution.originalSDK()
+        #endif
         switch command.action {
         case .stopEngine:
             try await execution.validateControl()
@@ -2372,6 +2508,9 @@ public actor CloudKitSyncAdapter {
                     })
                 }
             } catch {
+                #if DEBUG
+                DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: error)
+                #endif
                 try await parked?.revoke()
                 if let cancellation = error as? DependencyCancellation {
                     let original = cancellation.error

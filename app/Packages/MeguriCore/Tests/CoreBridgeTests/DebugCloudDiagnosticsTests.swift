@@ -8,6 +8,196 @@ import Testing
 struct DebugCloudDiagnosticsTests {
     private typealias Value = DebugCloudDiagnostics.Value
 
+    @Test func sendFailureCapturePreservesExactLegacyFormattingAndFirstTuple() {
+        let capture = DebugCloudDiagnostics.SendFailureCapture()
+        #expect(capture.firstValue == nil)
+        capture.recordStartEngine(.startEnginePendingUpdates, error: BridgeError.cloudSDKCallbackRejected)
+        #expect(capture.firstValue == nil)
+        capture.record(.enqueue, error: BridgeError.cancelled)
+        let expected = "firstSite=enqueue firstCategory=bridge.cancelled"
+        #expect(capture.firstValue == expected)
+        capture.record(.finish, error: CancellationError(), mediaSendPhase: .mediaCollectionSend)
+        capture.recordStartEngine(.startEngineRequiredRefresh, error: HostileError())
+        #expect(capture.firstValue == expected)
+
+        let media = DebugCloudDiagnostics.SendFailureCapture()
+        DebugCloudDiagnostics.$mediaSendPhase.withValue(.mediaCollectionSend) {
+            media.record(.mediaReadReply, error: CloudOwnTransportFailure.missingReply)
+        }
+        let mediaExpected = "firstSite=mediaReadReply firstCategory=own.missingReply mediaSendPhase=mediaCollectionSend"
+        #expect(media.firstValue == mediaExpected)
+        media.record(.completion, error: CancellationError(), mediaSendPhase: .mediaSend)
+        #expect(media.firstValue == mediaExpected)
+
+        let explicitMedia = DebugCloudDiagnostics.SendFailureCapture()
+        explicitMedia.record(.drain, error: BridgeError.internal(UUID().uuidString), mediaSendPhase: .mediaSend)
+        #expect(explicitMedia.firstValue == "firstSite=drain firstCategory=bridge.internal mediaSendPhase=mediaSend")
+    }
+
+    @Test func startEngineCaptureClassifiesOnlySevenExactRuntimeLiterals() {
+        let cases = [
+            ("cloud runtime tracking failed", "runtimeTrackingFailed"),
+            ("cloud runtime collection read failed", "runtimeCollectionReadFailed"),
+            ("cloud runtime incarnation is stale", "runtimeStaleIncarnation"),
+            ("cloud runtime account is unverified", "runtimeIdentityUnverified"),
+            ("cloud runtime component is incomplete", "runtimeIncomplete"),
+            ("cloud runtime file identity is unavailable", "runtimeFileIdentityUnavailable"),
+            ("cloud publication could not proceed", "runtimePublicationFailed")
+        ]
+        let sentinel = UUID().uuidString
+        for (literal, tag) in cases {
+            let inputs = [
+                (literal, tag), (sentinel, "bridge.unavailable"),
+                ("prefix" + literal, "bridge.unavailable"),
+                (literal + "suffix", "bridge.unavailable"),
+                (" " + literal, "bridge.unavailable"),
+                (literal + " ", "bridge.unavailable"),
+                ("\n" + literal + "\t", "bridge.unavailable"),
+                (literal.uppercased(), "bridge.unavailable"),
+                ("prefix " + literal + " suffix", "bridge.unavailable")
+            ]
+            for (input, expectedTag) in inputs {
+                let error = BridgeError.unavailable(reason: input)
+                let lifecycle = DebugCloudDiagnostics.SendFailureCapture()
+                lifecycle.observeStartEngine()
+                #expect(lifecycle.firstValue == nil)
+                lifecycle.recordStartEngine(.startEngineRuntimePreparation, error: error)
+                let expected = "firstSite=startEngineRuntimePreparation firstCategory=\(expectedTag) firstTaskCancelled=0"
+                #expect(lifecycle.firstValue == expected)
+                lifecycle.recordStartEngine(.startEngineRequiredRefresh, error: CancellationError())
+                #expect(lifecycle.firstValue == expected)
+                #expect(lifecycle.firstValue?.contains(sentinel) == false)
+
+                let ordinary = DebugCloudDiagnostics.SendFailureCapture()
+                ordinary.record(.prepareExecution, error: error)
+                #expect(ordinary.firstValue == "firstSite=prepareExecution firstCategory=bridge.unavailable")
+            }
+        }
+    }
+
+    @Test func startEngineCaptureFormatsEveryFixedStageWithoutChangingItsCategory() {
+        let cases: [(DebugCloudDiagnostics.SendFailureSite, String)] = [
+            (.startEnginePrepareExecution, "startEnginePrepareExecution"),
+            (.startEngineOriginalSDK, "startEngineOriginalSDK"),
+            (.startEngineAdmission, "startEngineAdmission"),
+            (.startEngineIntent, "startEngineIntent"),
+            (.startEngineStopJoin, "startEngineStopJoin"),
+            (.startEngineCreationWait, "startEngineCreationWait"),
+            (.startEngineIdentityRead, "startEngineIdentityRead"),
+            (.startEngineRuntimePreparation, "startEngineRuntimePreparation"),
+            (.startEngineSDKRegistration, "startEngineSDKRegistration"),
+            (.startEngineNativeFactory, "startEngineNativeFactory"),
+            (.startEngineOriginalValidation, "startEngineOriginalValidation"),
+            (.startEnginePublishedValidation, "startEnginePublishedValidation"),
+            (.startEnginePendingUpdates, "startEnginePendingUpdates"),
+            (.startEngineRootFetch, "startEngineRootFetch"),
+            (.startEngineRequiredRefresh, "startEngineRequiredRefresh")
+        ]
+        for (site, tag) in cases {
+            let capture = DebugCloudDiagnostics.SendFailureCapture()
+            capture.observeStartEngine()
+            capture.recordStartEngine(site, error: BridgeError.cloudSDKCallbackRejected)
+            #expect(capture.firstValue == "firstSite=\(tag) firstCategory=bridge.cloudSDKCallbackRejected firstTaskCancelled=0")
+        }
+    }
+
+    @Test func startEngineMarkerPreservesAnAlreadyLatchedDeeperTuple() {
+        let capture = DebugCloudDiagnostics.SendFailureCapture()
+        capture.record(.invocationReport, error: BridgeError.unavailable(reason: "cloud runtime tracking failed"),
+            mediaSendPhase: .mediaCollectionSend)
+        #expect(capture.firstValue == "firstSite=invocationReport firstCategory=bridge.unavailable mediaSendPhase=mediaCollectionSend")
+        capture.observeStartEngine()
+        let expected = "firstSite=invocationReport firstCategory=bridge.unavailable mediaSendPhase=mediaCollectionSend firstTaskCancelled=0"
+        #expect(capture.firstValue == expected)
+        capture.recordStartEngine(.startEngineRootFetch, error: CancellationError())
+        capture.observeStartEngine()
+        #expect(capture.firstValue == expected)
+    }
+
+    @Test func startEngineCaptureKeepsFirstThrowBeforeLaterTaskCancellation() async throws {
+        let capture = DebugCloudDiagnostics.SendFailureCapture()
+        let latched = CloudCallbackGate()
+        let running = Task {
+            await DebugCloudDiagnostics.$sendFailureCapture.withValue(capture) {
+                await DebugCloudDiagnostics.$mediaSendPhase.withValue(.mediaCollectionSend) {
+                    capture.observeStartEngine()
+                    do { throw BridgeError.unavailable(reason: "cloud runtime tracking failed") }
+                    catch { DebugCloudDiagnostics.sendFailureCapture?.record(.mediaReadReply, error: error) }
+                    await latched.enter()
+                    #expect(Task.isCancelled)
+                    do { try Task.checkCancellation() }
+                    catch { DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: error) }
+                    capture.record(.finish, error: BridgeError.cloudSDKCallbackRejected)
+                }
+            }
+        }
+        try await latched.waitForArrival()
+        let expected = "firstSite=mediaReadReply firstCategory=runtimeTrackingFailed mediaSendPhase=mediaCollectionSend firstTaskCancelled=0"
+        #expect(capture.firstValue == expected)
+        running.cancel()
+        await latched.open()
+        await running.value
+        #expect(capture.firstValue == expected)
+    }
+
+    @Test func startEngineCaptureSnapshotsAlreadyCancelledTaskIndependentlyOfErrorCategory() async throws {
+        for cancellationError in [false, true] {
+            let capture = DebugCloudDiagnostics.SendFailureCapture()
+            let beforeRecord = CloudCallbackGate()
+            let running = Task {
+                capture.observeStartEngine()
+                await beforeRecord.enter()
+                #expect(Task.isCancelled)
+                do {
+                    if cancellationError { try Task.checkCancellation() }
+                    throw BridgeError.unavailable(reason: "cloud runtime collection read failed")
+                } catch { capture.recordStartEngine(.startEngineIdentityRead, error: error) }
+                capture.recordStartEngine(.startEngineRequiredRefresh, error: HostileError())
+            }
+            try await beforeRecord.waitForArrival()
+            #expect(capture.firstValue == nil)
+            running.cancel()
+            await beforeRecord.open()
+            await running.value
+            let category = cancellationError ? "taskCancelled" : "runtimeCollectionReadFailed"
+            #expect(capture.firstValue == "firstSite=startEngineIdentityRead firstCategory=\(category) firstTaskCancelled=1")
+        }
+    }
+
+    @Test func sendFailureCapturesRemainIndependentAcrossTaskLocalScopes() {
+        let outer = DebugCloudDiagnostics.SendFailureCapture()
+        let inner = DebugCloudDiagnostics.SendFailureCapture()
+        let empty = DebugCloudDiagnostics.SendFailureCapture()
+        DebugCloudDiagnostics.$sendFailureCapture.withValue(outer) {
+            outer.observeStartEngine()
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineNativeFactory, error: BridgeError.cancelled)
+            DebugCloudDiagnostics.$sendFailureCapture.withValue(inner) {
+                DebugCloudDiagnostics.sendFailureCapture?.record(.enqueue, error: CancellationError())
+            }
+            DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRequiredRefresh, error: HostileError())
+        }
+        #expect(outer.firstValue == "firstSite=startEngineNativeFactory firstCategory=bridge.cancelled firstTaskCancelled=0")
+        #expect(inner.firstValue == "firstSite=enqueue firstCategory=taskCancelled")
+        #expect(empty.firstValue == nil)
+    }
+
+    @Test func sendFailureCaptureDoesNotAccessHostileErrorPayloads() {
+        struct Unknown: Error { let text: String }
+        let cases: [(any Error, String)] = [
+            (HostileError(), "other"), (Unknown(text: UUID().uuidString), "other"),
+            (CloudKitSDKOperationFailure(underlying: HostileError(), code: 20, retryAfterMilliseconds: .max), "sdkOperation")
+        ]
+        for (error, category) in cases {
+            for startEngine in [false, true] {
+                let capture = DebugCloudDiagnostics.SendFailureCapture()
+                if startEngine { capture.observeStartEngine() }
+                capture.record(.enqueue, error: error)
+                let cancellation = startEngine ? " firstTaskCancelled=0" : ""
+                #expect(capture.firstValue == "firstSite=enqueue firstCategory=\(category)\(cancellation)")
+            }
+        }
+    }
+
     @Test func processSentCountsRequireTheirOwnObservationsAndStaySeparateFromFetchFacts() {
         let recorder = DebugCloudDiagnostics.FetchRecorder()
         let empty = "processSent{sentC=0 sentM=0 sendFailC=0 sendFailM=0 overflow=0}"

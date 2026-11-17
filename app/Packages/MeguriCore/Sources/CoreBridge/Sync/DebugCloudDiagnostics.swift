@@ -44,6 +44,11 @@ public enum DebugCloudDiagnostics {
         case exchangeReadiness, exchangeGate, exchangePreparation, exchangeReservation
         case exchangeCapture, exchangeRun, exchangeCompletion, exchangeEndBeforeCapture, heldConfiguration
         case exchangeFetch, exchangeFetched, exchangeSend, exchangeSendDue, nativeExchangeCompletion
+        case startEnginePrepareExecution, startEngineOriginalSDK, startEngineAdmission
+        case startEngineIntent, startEngineStopJoin, startEngineCreationWait, startEngineIdentityRead
+        case startEngineRuntimePreparation, startEngineSDKRegistration, startEngineNativeFactory
+        case startEngineOriginalValidation, startEnginePublishedValidation, startEnginePendingUpdates
+        case startEngineRootFetch, startEngineRequiredRefresh
     }
 
     public final class SendFailureCapture: Sendable {
@@ -51,19 +56,39 @@ public enum DebugCloudDiagnostics {
             let site: SendFailureSite
             let category: String
             let mediaSendPhase: SendFailureSite?
-            var formatted: String {
+            let taskCancelled: Bool
+            func formatted(startEngine: Bool) -> String {
                 let phase = mediaSendPhase.map { " mediaSendPhase=\($0.rawValue)" } ?? ""
-                return "firstSite=\(site.rawValue) firstCategory=\(category)\(phase)"
+                let cancellation = startEngine ? " firstTaskCancelled=\(taskCancelled ? 1 : 0)" : ""
+                return "firstSite=\(site.rawValue) firstCategory=\(category)\(phase)\(cancellation)"
             }
         }
-        private let first = Mutex<Value?>(nil)
+        private struct State: Sendable {
+            var first: Value?
+            // Formatting only: never changes command admission or cancellation.
+            var startEngine = false
+        }
+        private let first = Mutex(State())
         public init() {}
-        public var firstValue: String? { first.withLock { $0?.formatted } }
+        public var firstValue: String? { first.withLock { $0.first?.formatted(startEngine: $0.startEngine) } }
+        func observeStartEngine() { first.withLock { $0.startEngine = true } }
+        func recordStartEngine(_ site: SendFailureSite, error: any Error) {
+            record(site, error: error, startEngineOnly: true)
+        }
         // Classify immediately; retain neither the error nor any associated payload.
+        // Every existing deeper catch retains its own cancellation snapshot, even
+        // when a later lifecycle catch observes shutdown after awaited cleanup.
         func record(_ site: SendFailureSite, error: any Error,
-                    mediaSendPhase: SendFailureSite? = DebugCloudDiagnostics.mediaSendPhase) {
-            let value = Value(site: site, category: DebugCloudDiagnostics.failureTag(error), mediaSendPhase: mediaSendPhase)
-            first.withLock { if $0 == nil { $0 = value } }
+                    mediaSendPhase: SendFailureSite? = DebugCloudDiagnostics.mediaSendPhase,
+                    startEngineOnly: Bool = false) {
+            let taskCancelled = Task.isCancelled
+            first.withLock { state in
+                guard state.first == nil, !startEngineOnly || state.startEngine else { return }
+                let category = state.startEngine ? DebugCloudDiagnostics.startEngineFailureTag(error)
+                    : DebugCloudDiagnostics.failureTag(error)
+                state.first = Value(site: site, category: category, mediaSendPhase: mediaSendPhase,
+                    taskCancelled: taskCancelled)
+            }
         }
     }
 
@@ -550,6 +575,26 @@ public enum DebugCloudDiagnostics {
         case .probeTracking: "probeTracking"
         case .statusChanged: "statusChanged"
         }
+    }
+
+    // Exact public RuntimeError Display constants only. These intentionally
+    // collapse payload detail. Unknown unavailable reasons remain generic;
+    // other error kinds keep the existing classifier.
+    private static func startEngineFailureTag(_ error: any Error) -> String {
+        if let error = error as? BridgeError, case .unavailable(let reason) = error {
+            switch reason {
+            case "cloud runtime tracking failed": return "runtimeTrackingFailed"
+            case "cloud runtime collection read failed": return "runtimeCollectionReadFailed"
+            case "cloud runtime incarnation is stale": return "runtimeStaleIncarnation"
+            case "cloud runtime account is unverified": return "runtimeIdentityUnverified"
+            case "cloud runtime component is incomplete": return "runtimeIncomplete"
+            case "cloud runtime file identity is unavailable": return "runtimeFileIdentityUnavailable"
+            case "cloud publication could not proceed": return "runtimePublicationFailed"
+            case "Cloud registration expired during creation": return failureTag(error)
+            default: return "bridge.unavailable"
+            }
+        }
+        return failureTag(error)
     }
 
     private static func failureTag(_ error: any Error) -> String {

@@ -590,6 +590,10 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
         var requiredRefreshStarted = false
         #if DEBUG
         var site = DebugCloudDiagnostics.SendFailureSite.executeAdmission
+        if case .startEngine = command.action {
+            DebugCloudDiagnostics.sendFailureCapture?.observeStartEngine()
+            site = .startEngineAdmission
+        }
         #endif
         if !mediaHookInstalled {
             mediaHookInstalled = true
@@ -628,6 +632,9 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             case .applyReady, .recordExchange, .recordQuietPoint, .probeTracking, .statusChanged:
                 outputs.append(try await policy.executeCore(command))
             case .startEngine, .stopEngine, .configureAutomatic:
+                #if DEBUG
+                if case .startEngine = command.action { site = .startEnginePrepareExecution }
+                #endif
                 guard let execution = try await policy.prepareExecution(command) else {
                     return .init(outputs: [], error: nil, deferred: false)
                 }
@@ -638,12 +645,18 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
                 if case .stopEngine = command.action, let exchange {
                     try await revokeFlushPark(joining: exchange)
                 }
+                #if DEBUG
+                if case .startEngine = command.action { site = .startEngineAdmission }
+                #endif
                 if try await adapter.executePolicyLifecycle(command, execution: execution, policy: policy) {
                     return .init(outputs: [], error: nil, deferred: true)
                 }
                 outputs.append(contentsOf: await adapter.takePolicyOperationOutputs())
                 await delivery.acknowledge(outputs)
                 requiredRefreshStarted = true
+                #if DEBUG
+                if case .startEngine = command.action { site = .startEngineRequiredRefresh }
+                #endif
                 try await delivery.appendInput(to: &outputs) { [policy] in try await policy.input(.refresh(.cloud)) }
             case .requestFetch(let zones), .requestSend(let zones):
                 #if DEBUG
@@ -885,7 +898,7 @@ public actor NativeCloudPolicyExecutor: CloudPolicyNativeExecuting {
             let refusal = attempt?.refusal
             #if DEBUG
             switch command.action {
-            case .requestSend, .updatePending, .resumeMedia:
+            case .requestSend, .updatePending, .resumeMedia, .startEngine:
                 DebugCloudDiagnostics.sendFailureCapture?.record(site, error: error)
             default: break
             }
