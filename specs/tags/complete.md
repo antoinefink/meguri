@@ -107,7 +107,7 @@ None of these differences is visible to a scenario, which calls the query direct
 
 ## C7. Scenarios
 
-Status (2026-10-27): the oracle driver has the observation kind, and the five scenarios below are recorded on the Linux oracle.
+Status (2026-11-17): the oracle driver has the observation kind, and the six scenarios below are recorded on the Linux oracle.
 
 The observation kind `tag_complete`, modeled on `fields_check` (`conformance/note-ops` N4). It reads the collection and changes nothing, and may be requested once per observe step.
 
@@ -125,3 +125,4 @@ Rows are set up through `add_note` tags, or through `db_exec` for spellings that
 | `order-limit` | C4: the `Grammar::Japan` example at each limit; rows whose `unicase` order differs from code-point order (`_x`, `A`, `b`, `ä`) with an empty input |
 | `separators` | C2: inputs `::`, `jap::`, `::aud`, `a:::b`, and rows with single colons (`ratio:a`, `a:::b`) |
 | `registry` | C1: an implicit parent (`Bar` beside the row `Bar::x`) is not suggested; a tag whose last note was deleted still is |
+| `filter-sequence` | C3, C4: inputs of two, three and four filters against tags of up to six components, and a two-filter input reversed. Components may be skipped before and between the taken ones, and further components may follow the last one taken. A tag with fewer components than filters never matches, nor one whose components hold the filters only in another order. A skipped component, or a filter found after the first character of its component (first or middle), makes an inner match, listed after the prefix matches; components after the last one taken do not. |

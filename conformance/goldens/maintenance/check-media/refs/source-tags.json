@@ -1,0 +1,68 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": ["k7.opus"],
+          "missing_notes": ["#n2"],
+          "oversize": [],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": ["k6.tiff"]
+        }
+      },
+      {
+        "media_dir": {
+          "k1.mkv": {
+            "sha1": "fe05bcdcdc4928012781a5f1a2a77cbb5398e106",
+            "size": 3
+          },
+          "k2.m4v": {
+            "sha1": "ad782ecdac770fc6eb9a62e44f90873fb97fb26b",
+            "size": 3
+          },
+          "k3.flac": {
+            "sha1": "b802f384302cb24fbab0a44997e820bf2e8507bb",
+            "size": 5
+          },
+          "k4.bmp": {
+            "sha1": "9f8f7eec5dea5ac43738721939c120318cbff1df",
+            "size": 4
+          },
+          "k5.avif": {
+            "sha1": "4db2c1df4610cd6c0da6b9197b066bfb4e9b9d00",
+            "size": 4
+          },
+          "k6.tiff": {
+            "sha1": "bec9703f7a456cd2b4ab5fb3220ae016e3e394e3",
+            "size": 3
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["<video width=\"320\"><source src=\"k1.mkv\" type=\"video/x-matroska\"><source src=k2.m4v title=alt></video>|<audio preload='none'><source lang='en' src='k3.flac'/></audio>", 1894701600],
+            ["<picture>\n<img src='k4.bmp' width=\"40\">\n\t<source sizes=\"50vw\" src=\"k5.avif\" />\n</picture>|<div><audio><source src=\"k7.opus\" lang=\"en\"></audio></div>", 1894701600]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/refs/source-tags",
+  "scenario_sha256": "41f24922839cc5188bed2b5f9464e4a2bcd12e73d8f583fd3c3427e40b7b736e",
+  "tz": "UTC"
+}

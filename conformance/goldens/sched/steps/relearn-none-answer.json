@@ -1,0 +1,129 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c2": {
+            "data": {
+              "d": 8.342,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894701600,
+              "s": 1.392
+            },
+            "did": "Steps",
+            "due": 1894702204,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 1,
+            "lapses": 2,
+            "left": 1,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 7,
+            "type": 3,
+            "usn": -1
+          }
+        }
+      },
+      {},
+      {
+        "queue": {
+          "cards": ["#c1"],
+          "counts": {
+            "learning": 0,
+            "new": 0,
+            "review": 1
+          },
+          "kinds": ["review"]
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 8.342,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894701600,
+              "s": 1.392
+            },
+            "did": "Bare",
+            "due": 1,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 1,
+            "lapses": 2,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 7,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "congrats": {
+          "have_sched_buried": false,
+          "have_user_buried": false,
+          "learn_remaining": 0,
+          "new_remaining": false,
+          "review_remaining": false,
+          "secs_until_next_learn": 86400
+        },
+        "queue": {
+          "cards": [],
+          "counts": {
+            "learning": 0,
+            "new": 0,
+            "review": 0
+          },
+          "kinds": []
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 1,
+              "factor": 916,
+              "id": 1894701600001,
+              "ivl": 1,
+              "lastIvl": 10,
+              "time": 3000,
+              "type": 1,
+              "usn": -1
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/steps/relearn-none-answer",
+  "scenario_sha256": "efc263738b8ec0c159dd04385a03e57770b20398677250290fce103399c2cd68",
+  "tz": "UTC"
+}

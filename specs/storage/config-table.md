@@ -122,5 +122,6 @@ For U107; the table behaves this way when Anki clients sync:
 | `storage/config/unknown-keys-survive` | C2, C7 through reviews, edits, additions, deletions and a day rollover | recorded |
 | `storage/config/rewrite-same-value` | C4, C5 through the config API; deviation `config-same-value-other-bytes` | recorded |
 | `storage/config/current-deck` | C4 for `curDeck` (R1474) | recorded |
+| `storage/config/remove-key` | C10 for a key written through the config API: only its row goes, no grave, `col.mod` moves, the read gives the absent-key default, and a later write makes a new row | recorded |
 
 The ops are specified in `specs/conformance/record-ops.md`. U23's Rust tests cover what no scenario shows: C3's reading rules and defaults, C5's encoding table, C6, the TEXT storage class, and the 1,000-operation survival property.

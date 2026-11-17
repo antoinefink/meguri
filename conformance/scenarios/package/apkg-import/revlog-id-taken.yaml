@@ -1,0 +1,39 @@
+# A package's review-log row whose id the target already holds is not
+# inserted, and the target's row stays as it is (specs/package/apkg-import.md
+# I11.3; specs/storage/ids-usn-mtime.md I4; package-ops.md E6). Card c1 is
+# answered twice, so the package carries two review-log rows. After the
+# export the note is deleted (its review log stays), the newer row is removed
+# and the older one is given other values (usn 7, time 4321). The import
+# brings the note and its card back under their ids: the newer row is
+# inserted again with usn -1, while the older row keeps the target's values.
+id: package/apkg-import/revlog-id-taken
+description: An imported review-log row whose id is taken is skipped; the target's row is kept.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Colors]
+  notetypes:
+    - name: Simple
+      fields: [Front, Back]
+      templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Simple, deck: Colors, fields: [red, green]}
+steps:
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good, time_ms: 5000}
+  - observe:
+      - revlog: ["#c1"]
+  - advance: 1m
+  - export: {format: apkg, name: colors.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - delete_notes: {notes: ["#n1"]}
+  - db_exec: {sql: "DELETE FROM revlog WHERE id = (SELECT max(id) FROM revlog)"}
+  - db_exec: {sql: "UPDATE revlog SET usn = 7, time = 4321"}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT count() FROM revlog)"}
+  - advance: 1m
+  - import: {format: apkg, name: colors.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - card: ["#c1"]
+      - revlog: ["#c1"]
+  - db_exec: {sql: "SELECT count() FROM revlog"}

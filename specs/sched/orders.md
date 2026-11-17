@@ -95,6 +95,7 @@ Interday learning cards and reviews are each offered in the studied deck's revie
   - orders 7 and 11: `meguri_retrievability(data, due, ivl, today, now)`;
   - order 12: `meguri_relative_retrievability(data, due, ivl, today, now)`.
   Both retrievability calls have five arguments. `next_day_at` is not an argument. Pass the build's today and now; do not duplicate arithmetic in the scheduler. The extractor contract owns exact conversions, missing-data rules, NULL results, wrapping and f32 rounding. Orders 7/11 have no relative-overdueness fallback. Only order 12 has that fallback, under X6's conditions.
+- **Order 12 without a usable memory state**: a review whose data lacks the memory state or `dr` sorts by X6 step 3. A card whose `due` minus `ivl` is below day 0 has 0 elapsed days, so it sorts after every other due review that lacks a memory state, however overdue it is; a review that has one (X6 step 2) can still sort after it (golden `sched/queue/order/relative-overdueness` (held)).
 - "Cards without one" sort as SQL NULL does: first in an ascending key, last in a descending one, then by the hash.
 - For a card in a filtered deck Anki passes `odue` in place of `due` to the retrievability functions; Meguri's studied decks hold no such card (`sched/queue-building#B2.2`).
 - Golden `sched/queue/order/review-orders` holds the thirteen orders over 28 reviews and 4 interday learning cards in three decks, on day 200, with stored memory states, missing ones, missing `decay` and `lrt`, and ties.
@@ -155,6 +156,7 @@ Within one day and with no card change, a random order is stable (goldens `sched
 |---|---|
 | `sched/queue/order/new-gather-deck`, `-deck-random-notes`, `-ascending`, `-descending`, `-random-notes`, `-random-cards` | O1, O2, O3, O7 |
 | `sched/queue/order/review-orders` | O1, O4, O7 |
+| `sched/queue/order/relative-overdueness` (held) | O4 order 12 without memory states (days overdue against interval, a tie, a negative last-review day), O6 |
 | `sched/queue/order/ties` | O6 |
 | `sched/queue/mix/new-review`, `interday-review`, `spread-sizes` | O5 |
 

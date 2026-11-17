@@ -51,3 +51,11 @@ Rechecked tag 26.09.3 for `fsrs-transitions` T2.4, T3 and T14 and `steps` L4:
 `sched/fsrs/input-boundaries` observes safe representable cases for these rules through the existing oracle adapters. It does not induce an invalid learning-fuzz range or change the overflow-only Meguri policy in `sched/fuzz` Z7.
 
 Recorded with `tools/mg oracle record sched/fsrs/input-boundaries`; subsequent Linux and Apple `oracle compare` each passed the case, with no Apple overlay.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| sched/steps/shrunk-learning-steps, sched/steps/removed-relearning-steps; proposed sched/step-remap R3.1 | `pylib/tests/test_schedv3.py` (test_newBoxes, test_norelearn) | Which behaviors rows hee69ed088c05 and hf76a58bb5a76 oblige: answering a learning card after its learning list shrank and a relearning card after its relearning steps were removed. The test's plain preset save without remap was mirrored by legacy_update; the deck options save variant was added for contrast. |

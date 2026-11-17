@@ -154,6 +154,7 @@ A **flag-only** entry is an updated card with both images present and no changed
 | `sched/queue/learn-ahead/window`, `ready-in` | B6, B8, B9 |
 | `sched/queue/limits/*` | B4 with `sched/limits` |
 | `sched/queue/order/*`, `sched/queue/mix/*` | B4, B7 with `sched/orders` |
+| `sched/queue/empty-collection` (held) | B8, B9: an empty collection presents no card, every count 0 |
 | `sched/counts/deck-page-difference` | B9 against the deck list |
 
 All of them observe the queue right after a rebuild (`specs/conformance/queue-ops.md` Q2.3). B10 and B11's damaged tree have no scenario; Meguri's required tests (`core/crates/meguri-sched/tests/queue.rs`) must check B10's table row by row and every example.

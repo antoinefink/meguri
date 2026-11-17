@@ -44,3 +44,11 @@ with no backups folder gets a periodic backup; a fresh foreign file blocks a
 periodic backup and not a forced one; with no change both flags give null in
 one opening; `backup` and `force_backup` steps mix in one opening and each
 sets the reference; retention runs within the step for both flags.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| package/backups/three-stages and package/backups/retention-daily-one-year (specs/package/backups.md B5.1, B5.2, B6.1) | `rslib/src/collection/backup.rs` | Which retention behaviors the two thinning tests prove: no deletion for today, yesterday and later dates, the daily/weekly/monthly stage selections with Monday weeks, and the default limits over a year of daily backups. The three-stages limits, dates and cases are the scenario's own. The expectations come from the oracle goldens. |

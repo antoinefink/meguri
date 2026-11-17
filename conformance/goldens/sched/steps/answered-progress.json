@@ -1,0 +1,300 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 6.413,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894701600,
+              "pos": 1,
+              "s": 0.212
+            },
+            "did": "Steps",
+            "due": 1894701655,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 3,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 6.402,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894701645,
+              "pos": 1,
+              "s": 0.2467
+            },
+            "did": "Steps",
+            "due": 1894701921,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1894701645,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 2,
+            "type": 1,
+            "usn": -1
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 6.391,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894701885,
+              "pos": 1,
+              "s": 0.2842
+            },
+            "did": "Steps",
+            "due": 1894702689,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894701885,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 3,
+            "type": 1,
+            "usn": -1
+          }
+        },
+        "next_states": {
+          "#c1": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 8.798975,
+                "stability": 0.10961078
+              },
+              "remaining_steps": 3,
+              "scheduled_secs": 45
+            },
+            "current": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.391,
+                "stability": 0.2842
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 720
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 5.1702685,
+                "stability": 0.5580429
+              },
+              "scheduled_days": 2
+            },
+            "good": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 6.379837,
+                "stability": 0.3243865
+              },
+              "scheduled_days": 1
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 7.5894055,
+                "stability": 0.2842
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 720
+            }
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 6.38,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894702605,
+              "pos": 1,
+              "s": 0.3244
+            },
+            "did": "Steps",
+            "due": 1,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 1,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894702605,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          }
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c2": {
+            "data": {
+              "d": 1.0,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894702605,
+              "pos": 2,
+              "s": 8.2956
+            },
+            "did": "Steps",
+            "due": 9,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 9,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894702605,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 1,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 1,
+              "factor": 701,
+              "id": 1894701600000,
+              "ivl": -45,
+              "lastIvl": 0,
+              "time": 2000,
+              "type": 0,
+              "usn": -1
+            },
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 700,
+              "id": 1894701645000,
+              "ivl": -240,
+              "lastIvl": -45,
+              "time": 2000,
+              "type": 0,
+              "usn": -1
+            },
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 699,
+              "id": 1894701885000,
+              "ivl": -720,
+              "lastIvl": -240,
+              "time": 2000,
+              "type": 0,
+              "usn": -1
+            },
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 698,
+              "id": 1894702605000,
+              "ivl": 1,
+              "lastIvl": -720,
+              "time": 2000,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c2": [
+            {
+              "cid": "#c2",
+              "ease": 4,
+              "factor": 100,
+              "id": 1894702605001,
+              "ivl": 9,
+              "lastIvl": 0,
+              "time": 2000,
+              "type": 0,
+              "usn": -1
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/steps/answered-progress",
+  "scenario_sha256": "537a8bff6600adb5db8fbbec14f156c90b1096b0936250b32be3a4f6af24e498",
+  "tz": "UTC"
+}

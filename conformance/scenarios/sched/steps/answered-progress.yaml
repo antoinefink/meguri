@@ -1,0 +1,40 @@
+# Learning steps with a fraction of a minute, taken through real answers
+# (R636, R638, R639, R641, R681; specs/sched/steps.md L1 to L3, L5, L6,
+# specs/sched/answering.md A3.2, A5). The preset Frac has the learning steps
+# 45s 4m 12m (stored as 0.75, 4 and 12 minutes). FSRS on, load balancer off,
+# from 10:00:00 UTC; no study queue is held.
+# #c1, new: Again puts it on the first step (45 s, three steps left); Good
+# 45 s later moves it to 4 minutes with two left; Good 4 minutes later to 12
+# minutes with one left; Good 12 minutes later graduates it to review with
+# FSRS's interval. #c2, new: Easy graduates it at once.
+# The card row after each answer shows type, queue, due and left; the
+# review-log rows show the rating, the logged delays (negative seconds for
+# steps, without learning fuzz) and the learning type of every answer.
+id: sched/steps/answered-progress
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Frac, learn_steps: [45s, 4m, 12m], relearn_steps: [10m], desired_retention: 0.9}
+  decks: [{name: Steps, preset: Frac}]
+  notetypes:
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Plain, deck: Steps, fields: [first, a]}
+    - {notetype: Plain, deck: Steps, fields: [second, b]}
+steps:
+  - answer: {card: "#c1", rating: again, time_ms: 2000}
+  - observe: ["card(#c1)"]
+  - advance: 45s
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - observe: ["card(#c1)"]
+  - advance: 4m
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - observe: ["card(#c1)", "next_states(#c1)"]
+  - advance: 12m
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - observe: ["card(#c1)"]
+  - answer: {card: "#c2", rating: easy, time_ms: 2000}
+  - observe: ["card(#c2)", "revlog(#c1, #c2)"]

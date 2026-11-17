@@ -1,0 +1,54 @@
+# K4.1 with addToCur true: when the current deck's _deck_<id>_lastNotetype
+# is missing, or names a note type that was removed later, the note type is
+# curModel's, and the deck is still the current deck (specs/editor/
+# config-keys.md K4.1; specs/notes/add-defaults.md D1). curModel names Ink,
+# which is not the first note type by name (Alpha sorts before it, and before
+# every note type of a new collection), so the name-order last resort gives
+# a different answer at each fallback step.
+# The keys are written by real adds: the first add (Zone into Sample) makes
+# Sample's last note type Zone; the second (Ink into Default) makes curModel
+# Ink. Spare never gets a key. With curDeck Sample, Sample and Zone. With
+# curDeck Spare (no key), Spare and Ink. Zone is then removed with
+# remove_notetype, which also points curModel at the first note type by name
+# (specs/notetypes/structure-changes.md S12), so a third add (Ink into
+# Default) makes curModel Ink again without touching Sample's key. Two
+# db_exec reads then show that Sample's key is still stored and names no
+# existing note type, and that curModel names Ink. With curDeck Sample
+# again, Sample and Ink; with Spare, Spare and Ink.
+# Needs add_note, set_config, set_current_deck, remove_notetype, db_exec and
+# the add_defaults observation (notes/add-defaults D7).
+id: editor/config-keys/deck-key-curmodel-fallback
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Sample, Spare]
+  notetypes:
+    - name: Alpha
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+    - name: Ink
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+    - name: Zone
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+steps:
+  - add_note: {notetype: Zone, deck: Sample, fields: [red, one]}
+  - add_note: {notetype: Ink, deck: Default, fields: [blue, two]}
+  - set_config: {key: addToCur, value: true}
+  - set_current_deck: {deck: Sample}
+  - observe: [{add_defaults: {}}]
+  - set_current_deck: {deck: Spare}
+  - observe: [{add_defaults: {}}]
+  - remove_notetype: {notetype: Zone}
+  - add_note: {notetype: Ink, deck: Default, fields: [green, three]}
+  - db_exec:
+      sql: "SELECT d.name, (SELECT count(*) FROM notetypes t WHERE t.id = CAST(CAST(c.val AS TEXT) AS INTEGER)) FROM config c JOIN decks d ON c.key = '_deck_' || d.id || '_lastNotetype' ORDER BY d.name"
+  - db_exec:
+      sql: "SELECT t.name FROM config c JOIN notetypes t ON t.id = CAST(CAST(c.val AS TEXT) AS INTEGER) WHERE c.key = 'curModel'"
+  - set_current_deck: {deck: Sample}
+  - observe: [{add_defaults: {}}]
+  - set_current_deck: {deck: Spare}
+  - observe: [{add_defaults: {}}]

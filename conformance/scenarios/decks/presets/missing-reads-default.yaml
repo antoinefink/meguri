@@ -1,0 +1,40 @@
+# A deck whose config_id names no preset reads the default preset (id 1),
+# not the built-in defaults, on the paths that resolve a deck's preset
+# (specs/decks/deck-presets.md P3; specs/sched/set-due-date.md S4.1, the
+# home preset; specs/notes/deck-placement-and-position.md P4). The default
+# preset is given a starting ease of 1.7 and random insertion order (new.order
+# 0, set through its schema-11 object), both unlike the built-in defaults
+# (2.5, in order). Orphan's config_id is 999, which no preset has; Plain uses
+# the default preset directly, for comparison.
+# c1 (Orphan) and c2 (Plain): new cards given a due date in 3 days, so each
+# takes its home preset's starting ease. c3 (Orphan) and c4 (Plain): cards of
+# notes added afterwards, so each takes a position drawn from the counter
+# (random order), not the counter's value. Orphan and Plain cards end alike,
+# and Orphan keeps config_id 999 (the fallback writes nothing).
+id: decks/presets/missing-reads-default
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - {name: Default, starting_ease: 1.7}
+  decks: [Orphan, Plain]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Orphan, fields: [one, a]}
+    - {notetype: Pair, deck: Plain, fields: [two, a]}
+steps:
+  - legacy_update: {deck: Orphan, patch: {conf: 999}}
+  - legacy_update: {preset: Default, patch: {new: {order: 0}}}
+  - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
+  - advance: 1h
+  - observe: [decks]
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE key = 'nextPos'"}
+  - set_due: {cards: ["#c1", "#c2"], days: "3"}
+  - add_note: {notetype: Pair, deck: Orphan, fields: [three, a]}
+  - add_note: {notetype: Pair, deck: Plain, fields: [four, a]}
+  - observe: ["card(#c1, #c2, #c3, #c4)", decks]
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE key = 'nextPos'"}

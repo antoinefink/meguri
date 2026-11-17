@@ -1,0 +1,100 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_media": {
+          "name": "extra.csv"
+        }
+      },
+      {
+        "add_media": {
+          "name": "shape.svg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "kept.png"
+        }
+      },
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": [],
+          "missing_notes": [],
+          "oversize": [],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": ["extra.csv", "shape.svg"]
+        }
+      },
+      {},
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": [],
+          "missing_notes": [],
+          "oversize": [],
+          "renamed": {},
+          "trash_count": 1,
+          "unused": ["shape.svg"]
+        }
+      },
+      {
+        "media_trash": [
+          {
+            "name": "extra.csv",
+            "sha1": "303b48ad199d844efd9f4dab461873835210c97a",
+            "size": 11
+          }
+        ]
+      },
+      {},
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": [],
+          "missing_notes": [],
+          "oversize": [],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": ["extra.csv", "shape.svg"]
+        }
+      },
+      {
+        "media_dir": {
+          "extra.csv": {
+            "sha1": "303b48ad199d844efd9f4dab461873835210c97a",
+            "size": 11
+          },
+          "kept.png": {
+            "sha1": "af8d8d04fd76ce89a67b9d7add92e509f0985c34",
+            "size": 10
+          },
+          "shape.svg": {
+            "sha1": "04036f418c04fdce75a93a215a850fd1b095a39f",
+            "size": 11
+          }
+        },
+        "media_trash": []
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/actions/trash-restore-check",
+  "scenario_sha256": "85f1d06fc22b351b709d222c8606dd9de574c1160d6d046259cd78710ae29464",
+  "tz": "UTC"
+}

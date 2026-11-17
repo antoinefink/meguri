@@ -114,3 +114,4 @@ F3.
 | `search/fields/names` | F1, F2, F3, F7 |
 | `search/fields/glob-runs` | F4.2, F5, F6 |
 | `search/fields/modes` | F1, F5, F6, F7 |
+| `search/notetypes/glob-escapes` | F2 steps 3 and 4: a field name with an escaped `*` is exact text, and with another wildcard a pattern in which that star stays literal |

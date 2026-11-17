@@ -1,0 +1,27 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-07-01T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "force_backup": {
+          "name": "backup-2030-07-01-10.00.00.colpkg"
+        }
+      },
+      {
+        "backup_files": ["backup-2029-07-31-12.00.00.colpkg", "backup-2029-08-31-12.00.00.colpkg", "backup-2029-09-30-12.00.00.colpkg", "backup-2029-10-31-12.00.00.colpkg", "backup-2029-11-30-12.00.00.colpkg", "backup-2029-12-31-12.00.00.colpkg", "backup-2030-01-31-12.00.00.colpkg", "backup-2030-02-28-12.00.00.colpkg", "backup-2030-03-31-12.00.00.colpkg", "backup-2030-04-14-12.00.00.colpkg", "backup-2030-04-21-12.00.00.colpkg", "backup-2030-04-28-12.00.00.colpkg", "backup-2030-05-05-12.00.00.colpkg", "backup-2030-05-12-12.00.00.colpkg", "backup-2030-05-19-12.00.00.colpkg", "backup-2030-05-26-12.00.00.colpkg", "backup-2030-06-02-12.00.00.colpkg", "backup-2030-06-09-12.00.00.colpkg", "backup-2030-06-16-12.00.00.colpkg", "backup-2030-06-18-12.00.00.colpkg", "backup-2030-06-19-12.00.00.colpkg", "backup-2030-06-20-12.00.00.colpkg", "backup-2030-06-21-12.00.00.colpkg", "backup-2030-06-22-12.00.00.colpkg", "backup-2030-06-23-12.00.00.colpkg", "backup-2030-06-24-12.00.00.colpkg", "backup-2030-06-25-12.00.00.colpkg", "backup-2030-06-26-12.00.00.colpkg", "backup-2030-06-27-12.00.00.colpkg", "backup-2030-06-28-12.00.00.colpkg", "backup-2030-06-29-12.00.00.colpkg", "backup-2030-06-30-12.00.00.colpkg", "backup-2030-07-01-10.00.00.colpkg"]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/backups/retention-daily-one-year",
+  "scenario_sha256": "eb61e220d9a089e0a696062dce344a509bed77f95813023c6803e2a4b155c7b3",
+  "tz": "UTC"
+}

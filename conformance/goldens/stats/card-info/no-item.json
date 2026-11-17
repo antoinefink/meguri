@@ -1,0 +1,191 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894762800,
+          "now": 1894698000,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "pos": 1
+            },
+            "did": "Lang",
+            "due": 5,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894702200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 0,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894698600,
+              "pos": 2
+            },
+            "did": "Lang",
+            "due": 5,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894702200,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 2,
+            "type": 2,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "card_stats": {
+          "#c1": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c1",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": 1895134200,
+            "due_position": 1,
+            "ease": 2500,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n1",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 0,
+            "revlog": [
+              {
+                "button_chosen": 0,
+                "ease": 2500,
+                "interval": 0,
+                "last_interval": 0,
+                "memory_state": null,
+                "review_kind": 4,
+                "taken_secs": 0.0,
+                "time": 1894702200
+              }
+            ],
+            "total_secs": 0.0
+          },
+          "#c2": {
+            "added": 1894698000,
+            "average_secs": 2.0,
+            "card_id": "#c2",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": 0.9,
+            "due_date": 1895134200,
+            "due_position": 2,
+            "ease": 2500,
+            "first_review": 1894698000,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 0,
+            "lapses": 0,
+            "latest_review": 1894698600,
+            "memory_state": null,
+            "note_id": "#n2",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 2,
+            "revlog": [
+              {
+                "button_chosen": 0,
+                "ease": 2500,
+                "interval": 0,
+                "last_interval": 0,
+                "memory_state": null,
+                "review_kind": 4,
+                "taken_secs": 0.0,
+                "time": 1894702200
+              },
+              {
+                "button_chosen": 0,
+                "ease": 0,
+                "interval": 0,
+                "last_interval": 172800,
+                "memory_state": null,
+                "review_kind": 4,
+                "taken_secs": 0.0,
+                "time": 1894702200
+              },
+              {
+                "button_chosen": 3,
+                "ease": 223,
+                "interval": 172800,
+                "last_interval": 600,
+                "memory_state": null,
+                "review_kind": 0,
+                "taken_secs": 2.0,
+                "time": 1894698600
+              },
+              {
+                "button_chosen": 3,
+                "ease": 224,
+                "interval": 600,
+                "last_interval": 0,
+                "memory_state": null,
+                "review_kind": 0,
+                "taken_secs": 2.0,
+                "time": 1894698000
+              }
+            ],
+            "total_secs": 4.0
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/card-info/no-item",
+  "scenario_sha256": "0455869ee174bb93ddf04225b1008823cde0103b39882388c43a2c5f29ab5468",
+  "tz": "Europe/Paris"
+}

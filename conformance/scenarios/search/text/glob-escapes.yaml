@@ -1,0 +1,44 @@
+# R1033, R1040, R1050; specs/search/text-matching.md T3.1, T10, T13.1;
+# names-and-ids.md N1, N2.2. Escaped and unescaped wildcards in three
+# conversions of the same value: plain text (`*` any run, `\*` one star, `%`
+# always literal), w: (`*` any run, `_` one character, `\*` and `\_` literal,
+# regular-expression characters literal) and tag: (`*` and `_` only over
+# characters that are not white space, `\*` literal, regular-expression
+# characters literal). The db_exec read shows the tags as stored. One card per
+# note, so #cN is the card of #nN.
+id: search/text/glob-escapes
+tags: [needs-text, needs-tag]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: ["a*b here", x], tags: ["a*b"]}
+    - {notetype: Single, fields: ["axb here", x], tags: [axb]}
+    - {notetype: Single, fields: ["a_b here", x], tags: ["[q]+"]}
+    - {notetype: Single, fields: ["a%b here", x], tags: [q]}
+    - {notetype: Single, fields: ["a.b here", x], tags: ["a.b"]}
+steps:
+  - db_exec: {sql: "SELECT sfld, tags FROM notes ORDER BY id"}
+  - observe:
+      - search:
+          - {query: 'a\*b', kind: notes}
+          - {query: 'a*b', kind: notes}
+          - {query: 'a%b', kind: notes}
+          - {query: 'a\_b', kind: notes}
+          - {query: 'w:a\*b', kind: notes}
+          - {query: 'w:a*b', kind: notes}
+          - {query: 'w:a_b', kind: notes}
+          - {query: 'w:a\_b', kind: notes}
+          - {query: 'w:a.b', kind: notes}
+          - {query: 'tag:a\*b', kind: notes}
+          - {query: 'tag:a*b', kind: notes}
+          - {query: 'tag:a_b', kind: notes}
+          - {query: 'tag:a.b', kind: notes}
+          - {query: 'tag:[q]+', kind: notes}
+          - {query: 'tag:[q]*', kind: notes}
+          - {query: 'tag:[q]_', kind: notes}
+          - {query: 'tag:q', kind: notes}

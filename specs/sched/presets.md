@@ -253,6 +253,21 @@ Reference golden `sched/data/deck-counters` (decks Parent and Parent::Child, def
 
 Meguri requires Child `lrnToday` `[1,5]` at both day-1 observations (steps 17 and 19), versus the reference `[1,0]`. Parent remains `[1,0]`; all other values in the table remain the reference values. These two scalar differences are declared in `conformance/deviations.yaml` under R322.
 
+### D4.1 Applying studied-count deltas
+
+Meguri's core operation `apply_studied_deltas` changes a deck's studied-today counters without an answer. Its input is a deck id and three signed 32-bit deltas: new, review and milliseconds. It is one op of source `UserNonUndoable` (`engine/op-model` O1): it records no undo step (`engine/undo` M2).
+
+- It updates the named deck and then each of its ancestors, found as for an answer (D4). The value of `applyAllParentLimits` does not change which decks it updates.
+- For each deck:
+  1. when `last_day_studied` is not today, `new_studied`, `review_studied` and `milliseconds_studied` become 0 and `last_day_studied` becomes today;
+  2. each of the three counters gets its delta added; a negative delta lowers it, possibly below 0;
+  3. the deck is stamped (`mtime_secs`, `usn` -1), also when every delta is 0.
+- `learning_studied` is preserved, as for an answer (D4, `sched/fsrs-policy#K1`, R322): Anki sets it to 0 when step 1 resets the counters; Meguri does not. A golden that shows a nonzero `lrnToday` across that reset needs a `conformance/deviations.yaml` entry under R322, as `sched/data/deck-counters` has.
+- A deck id that names no deck changes nothing and is not an error.
+- Later reads of the counters (D4 Reading) include the deltas, and so do the remaining limits (`sched/limits`) and the deck list's counts.
+
+Example: on day 0, deltas new 4, review −1 and milliseconds 1500 on a deck that studied nothing give `newToday` `[0,4]`, `revToday` `[0,-1]` and `timeToday` `[0,1500]`; its parent gets the same values. On day 1, deltas new 1, review 0 and milliseconds 0 on that deck give `newToday` `[1,1]`, `revToday` `[1,0]` and `timeToday` `[1,0]`.
+
 ## D5. Filtered decks
 
 A filtered deck has no preset, no limits and no desired retention. A card in one is scheduled with its home deck's preset (V1) and retention (V7), and its answers update the filtered deck's counters and its ancestors' (D4), not the home deck's.

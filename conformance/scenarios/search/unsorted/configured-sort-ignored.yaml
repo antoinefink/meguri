@@ -1,0 +1,36 @@
+# specs/search/query-model.md Q4 and specs/conformance/search-ops.md S1: a
+# search request with no order runs with no sort at all; it never falls back
+# to the sort stored for Browse (browser/config-keys K5). The collection
+# stores sortType noteFld, descending, and #c2 has lost its note row (#n2).
+# A Sort Field sort tests only cards whose note row exists
+# (specs/browser/sorting.md S9), so the sorted requests leave #c2 out in both
+# directions, while every request without an order lists it: had the stored
+# sort been applied to them, #c2 would be missing there too. The request
+# with no order is the explicit "no sort" form and the omitted-order default
+# at once: the scenario language has no other way to ask for an unsorted
+# search. Needs the state term (U82) for is:new.
+id: search/unsorted/configured-sort-ignored
+tags: [needs-state]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [red, one]}
+    - {notetype: Single, fields: [green, two]}
+    - {notetype: Single, fields: [blue, three]}
+steps:
+  - browser_config_set: {key: sortType, value: noteFld}
+  - browser_config_set: {key: sortBackwards, value: true}
+  - db_exec: {sql: "DELETE FROM notes WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - observe:
+      - browser_config
+      - search:
+          - {query: ''}
+          - {query: 'is:new'}
+          - {query: '', order: {column: noteFld}}
+          - {query: '', order: {column: noteFld, reverse: true}}
+          - {query: 'is:new', order: {column: noteFld, reverse: true}}

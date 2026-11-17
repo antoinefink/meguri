@@ -22,3 +22,13 @@ card and note searches on small collections, damaged ones included).
 | query-model Q4–Q6 | `rslib/src/search/sqlwriter.rs`, `rslib/src/search/mod.rs` | per-term table requirements and how they combine, the cards-only / notes-only / joined statements, distinct note ids |
 | query-model Q8 | `rslib/src/search/sqlwriter.rs`, `rslib/src/config/bool.rs`, `rslib/src/config/mod.rs` | which outside values each term reads; config keys and their defaults |
 | search-ops S1–S3 | `pylib/anki/collection.py`, `rslib/src/search/service/mod.rs`, `rslib/src/i18n` (Fluent isolation marks) | card and note searches without order, the browser's normalization call, how messages carry the reported texts |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| search/matrix/combined (search term families together, sorted results) | `pylib/tests/test_find.py` (test_find_cards) | only the list of term families the combined matrix must cover. The rework was built from specs/search (names-and-ids, fields, text-matching, state-and-flags, properties, history, grammar, query-model) and browser/sorting, with its own collection, probes and order; the Anki file was not reread. |
+| search/query-model Q4 unsorted searches; scenario search/unsorted/configured-sort-ignored; search/join-and-replace J3 empty-group refusal (needs-op) | `rslib/src/search/service/mod.rs`; `pylib/anki/collection.py` | that a missing sort and an explicit 'none' sort both mean no order; that building a search from an empty group is an invalid-input refusal; and, from pylib, that the oracle's find_cards/find_notes with order=False sends the explicit no-sort form and only order=True reads the stored Browse sort keys |
+| scenario search/structure/quoted-values (query-model Q9 bound parameters; properties P9/P15) | `rslib/src/search/sqlwriter.rs` (the sql test and the terms that bind user text as parameters) | which term families the SQL writer covers, and that user text (including custom-data values with apostrophes and SQL-like payloads) is bound, not spliced; expected results come from the oracle |

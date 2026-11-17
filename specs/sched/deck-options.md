@@ -141,8 +141,8 @@ Steps are stored as minutes (`f32`, `sched/presets#V5`); the editor shows and ta
 
 | Text | Steps (minutes) |
 |---|---|
-| `1m 10m 1h 2h 1d` | 1, 10, 60, 120, 1440 |
-| `1s 5s 90s 400m` | 1/60, 5/60, 1.5, 400 (each as `f32`) |
+| `2m 15m 3h 4h 2d` | 2, 15, 180, 240, 2880 |
+| `2s 20s 45s 135s 75m` | 2/60, 20/60, 0.75, 2.25, 75 (each as `f32`) |
 | `10` | 10 |
 | `  1m   10m ` | 1, 10 |
 | empty | none |
@@ -158,11 +158,19 @@ Each step becomes one token and the tokens are joined by one space, in order:
 
 | Steps (minutes, `f32`) | Text |
 |---|---|
-| 1, 10, 60, 120, 1440 | `1m 10m 1h 2h 1d` |
-| 1/60, 5/60, 1.5, 400 | `1s 5s 90s 400m` |
-| 0.16666667 (10 s) | `10s` |
+| 2, 15, 180, 240, 2880 | `2m 15m 3h 4h 2d` |
+| 2/60, 20/60, 0.75, 2.25, 75 | `2s 20s 45s 135s 75m` |
+| 0.11666667 (7/60; t = 7.00000003) | `7s` |
+| 0.6666667 (40/60; t = 40.0000012) | `40s` |
 | 2160 (1.5 days) | `36h` |
 | 525600 (365 days) | `365d` |
+| 61/60 (61 s) | `61s` |
+| 3599/60 (3,599 s) | `3599s` |
+| 3601/60 (3,601 s) | `3601s` |
+| 86401/60 (86,401 s) | `86401s` |
+| 43800 (2,628,000 s, a twelfth of 365 days) | `730h` (Anki: `30d`, O12) |
+
+A step of 2.25 minutes is 135 s. Rule 2 tries `m`, which does not divide 135, so the unit is `s` and the text is `135s`, not `2m`.
 
 - A stored step that is zero, negative, infinite or NaN (only a damaged or foreign preset holds one) is written as the token `invalid`.
 - The draft keeps a preset's stored list until the user edits that field's text. An unedited field is never read back, so showing a list as text and saving it changes nothing even where the text would read back to other `f32` values.
@@ -291,7 +299,7 @@ The screen's labels, help texts and warning wording are Meguri's (R734, U232); t
 
 ## O12. Differences from Anki
 
-- **Validation** (O4): Meguri refuses malformed, zero and negative step tokens, values outside the editor ranges and dates after today. Anki's screen drops tokens it cannot read, reads `5x` as 5 minutes and `-5` as 5 minutes, clamps spin boxes, and its save moves a future ignore date back to today.
+- **Validation** (O4, O5.1): Meguri refuses malformed, zero, negative and too-long step tokens, values outside the editor ranges and dates after today. Anki's screen splits a step text only at single U+0020 spaces and reads each piece as its first run of digits, with all the text after that run as the unit. It drops a piece that it cannot read that way, or that reads as zero. So `5x` and `-5` read as 5 minutes. A tab, a no-break space or another space character inside a piece does not separate steps: `1<TAB>2` is one step of 1 minute. A step longer than 2^31 seconds is cut to 2^31 seconds. Anki's spin boxes clamp values, and its save replaces an ignore date that comes after today's date with today's date. Today's date is the local date of the day's start (O1), so before the rollover hour it is the previous calendar day. When the replaced value equals the stored one, the preset is not written (golden `sched/options/ignore-date/future`). Both Anki and Meguri store past dates, today's date and the empty text as given (golden `sched/options/ignore-date/kept`). Anki compares the date texts as plain strings, not as dates. For the canonical `YYYY-MM-DD` form both orders agree. For other forms that `sched/fsrs-items#I1.3` reads leniently they can differ. Example: on 2030-01-15, Anki replaces `2030-1-5`, a past date, with today. Example: Anki keeps `+2031-01-01`, a future date, because it sorts below today's text. Meguri reads the text as I1.3 does (O4.2) and compares the dates it reads: it keeps `2030-1-5` as given and refuses `+2031-01-01` (`date_in_future`).
 - **Opening preset** (O2 item 2): when the deck's `config_id` names no preset, Meguri opens on the default preset; Anki's screen opens on the first preset by name.
 - **Global keys** (O7.2 step 7): Anki's save writes `newCardsIgnoreReviewLimit`, `applyAllParentLimits`, `cardStateCustomizer` and `fsrsHealthCheck` every time, adding them when missing, and `fsrs` when it was switched. Meguri writes the first two and `loadBalancerEnabled` only when they change, and never the others (R763, R702).
 - **Parameter lists**: Anki's screen copies an older FSRS list into `fsrs_params_6` for display, so its save stores it there. Meguri never writes a parameter list (R752, R1486).
@@ -308,7 +316,7 @@ The screen's labels, help texts and warning wording are Meguri's (R734, U232); t
 - **Insertion order Random**: Anki warns whenever Random is selected that, with its current scheduler, Sequential plus a New card gather order is the better way to get random new cards. No Product Contract requirement asks for this warning (R743 and R744 do not), so O4 has no code for it. The screen's R744 footer about re-sorting is a different note. Added 2026-11-10.
 - **Restore Default visibility** (O6.6, O14.7): Anki compares a number with its default after rounding both to 2 decimal places; Meguri uses O1's equality.
 
-None of these shows in a scenario's golden; scenarios avoid them (O13).
+Only the future ignore date shows in a golden (`sched/options/ignore-date/future`, with its deviation entries in `conformance/deviations.yaml`); scenarios avoid the others (O13).
 
 ## O13. Scenarios and tests
 
@@ -319,14 +327,25 @@ None of these shows in a scenario's golden; scenarios avoid them (O13).
 | `sched/options/insertion-order-switch` | O8 through preset switches: Random as a set, Sequential exactly, other decks untouched, undo | recorded |
 | `sched/options/missing-preset` | O7.2 step 3 for a deck whose preset is missing: assigned the saved preset and given the target deck's values, no remap | recorded |
 | `sched/options/live-save` | a Meguri save read back by Anki: every preset and the deck decode, legacy JSON equal (T1, R762, R765) | recorded (live) |
+| `sched/options/remove-preset-undo-rows` | O7.2 step 1 and the save's undo step: undo restores the removed preset's row unchanged (id, name, `mtime_secs`, `usn`, config bytes with `other`) and the deck that used it; `scm` back to its value before the save (here equal to `ls`); redo removes it again | recorded |
+| `sched/options/save-writes` | O7.2 steps 1 to 4: a save that changes nothing writes no row; a changed option writes only the preset; a preset switch writes only the deck; Random re-sort from cleared positions; removal with reassignment to Default, re-sort in note order and `scm` moving past `ls` (it did not before) | recorded |
+| `sched/options/ignore-date/kept` | O3/O4.2 ignore date: past, yesterday, today's date (also before the rollover hour) and empty stored as given | recorded |
+| `sched/options/ignore-date/future` | O12: Anki's save stores today's date for a later date; Meguri refuses (deviation) | recorded |
+| `sched/options/remap-floor-shortened` | O7.2 step 5: shortened steps keep at least one remaining step (`sched/step-remap#R2`) | recorded |
+| `sched/options/remap-passed-step-inserted` | O7.2 step 5: inserted steps no longer than the passed step keep the remaining count (`sched/step-remap#R2`) | recorded |
+| `sched/options/nested-deck-opening-preset` | O2 item 2 and O6: the screen for a nested deck opens on that deck's own preset, not on its parent's or Default; a save without a preset change edits only that preset and reassigns no deck | recorded |
 | `sched/options/insertion-order-option` | O8 when the option changes on a preset used by two decks | awaits the driver (`conformance/deck-options-ops#E3`) |
 | `sched/options/deck-limits` | O9: set, cleared on day 0, cleared later, a future Today-only limit, This deck | awaits the driver |
 | `sched/options/subtree` | O7.2 step 3 with "Save to all subdecks" | awaits the driver |
 | `sched/options/remove-preset` | O7.1, O7.2 steps 1 and 3: removal, reassignment with the target deck's values, `scm`, `default_preset`, undo | awaits the driver |
 | `sched/options/globals` | O7.2 step 7 for the two limit keys | awaits the driver |
 | `sched/options/prefs-rollover` | O10 | awaits the driver (`conformance/deck-options-ops#E4`) |
+| `sched/options/step-text-units` | O5.1 and O5.2 for whole units: `2m 15m 3h 4h 2d` read and written | awaits the driver (`conformance/deck-options-ops#E6`) |
+| `sched/options/step-text-seconds` | O5.1 and O5.2 for steps that are not whole minutes, below and above one minute, read back to the same `f32` | awaits the driver (E6) |
+| `sched/options/step-text-rounding` | O5.2 rules 1 to 3 for stored `f32` values just above a whole second (7/60, 40/60) | awaits the driver (E6) |
+| `sched/options/step-text-empty` | O5.1: empty text, space-only text and tab-only text read as no steps | awaits the driver (E6) |
 
-Meguri's own tests (no oracle): O2's snapshot on a collection with an out-of-range preset (V3 replacements shown), a missing preset (`preset_missing`), use counts and order; O4's every code and the "changed values only" rule; O5's two tables and round trips; O6's staging (add, clone with unsaved edits, rename, remove with `scm <= ls` committing with no confirmation input, selection after removal, use counts); the safety backup before a save that removes an existing preset, and none before one that only drops a staged preset; O7.1's refusals each writing nothing; O7's undo restoring presets, decks, cards and `scm`; O7.2 step 7 not adding missing keys; O10's ranges, its undo step and the day clock recomputing. Swift tests in CoreBridge cover the snapshot and validation API (U49 Verification).
+Meguri's own tests (no oracle): O2's snapshot on a collection with an out-of-range preset (V3 replacements shown), a missing preset (`preset_missing`), use counts and order; O4's every code and the "changed values only" rule; O5's two tables and round trips; the step-text issues of O4.2 and O5.1 (malformed, zero, negative and too-long tokens, and tokens separated by other white space) with their `index` and `token` (no golden: Anki's screen drops or reads such tokens, O12); O6's staging (add, clone with unsaved edits, rename, remove with `scm <= ls` committing with no confirmation input, selection after removal, use counts); the safety backup before a save that removes an existing preset, and none before one that only drops a staged preset; O7.1's refusals each writing nothing; O7's undo restoring presets, decks, cards and `scm`; O7.2 step 7 not adding missing keys; O10's ranges, its undo step and the day clock recomputing. Swift tests in CoreBridge cover the snapshot and validation API (U49 Verification).
 
 ## O14. Limit and retention tabs in detail (R740, R742)
 

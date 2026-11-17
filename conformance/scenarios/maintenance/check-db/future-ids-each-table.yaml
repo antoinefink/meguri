@@ -1,0 +1,28 @@
+# C10.4 of specs/maintenance/check-database.md: future_ids adds up the rows
+# above the cutoff in notes, cards and revlog. Note "two" is moved two days
+# ahead, its card three days and a review-log row of that card four days;
+# note "one" and its card stay valid. The count is 3, not 5. Each table
+# re-keys its own row to now_ms: the card's nid follows the note, the row's
+# cid follows the card, usn kept. A second run finds nothing.
+id: maintenance/check-db/future-ids-each-table
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET id = 1894960800000, nid = 1894874400000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'two')"}
+  - db_exec: {sql: "UPDATE notes SET id = 1894874400000, usn = 5 WHERE sfld = 'two'"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1895047200000, 1894960800000, 5, 3, 1, 0, 2500, 4000, 0)"}
+  - db_exec: {sql: "SELECT n.sfld, n.id, c.id FROM notes n JOIN cards c ON c.nid = n.id ORDER BY n.sfld"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT sfld, id, usn FROM notes ORDER BY sfld"}
+  - db_exec: {sql: "SELECT n.sfld, c.id, c.nid, c.usn FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT id, cid, usn FROM revlog"}
+  - check_db: {}

@@ -1,0 +1,84 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": [
+            ["a*b here", " a*b "],
+            ["axb here", " axb "],
+            ["a_b here", " [q]+ "],
+            ["a%b here", " q "],
+            ["a.b here", " a.b "]
+          ]
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4", "#n5"]
+          },
+          {
+            "ids": ["#n4"]
+          },
+          {
+            "ids": ["#n3"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4", "#n5"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n3", "#n4", "#n5"]
+          },
+          {
+            "ids": ["#n3"]
+          },
+          {
+            "ids": ["#n5"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n5"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n5"]
+          },
+          {
+            "ids": ["#n5"]
+          },
+          {
+            "ids": ["#n3"]
+          },
+          {
+            "ids": ["#n3"]
+          },
+          {
+            "ids": ["#n3"]
+          },
+          {
+            "ids": ["#n4"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/text/glob-escapes",
+  "scenario_sha256": "2707d01f4c5ae1625720d372bea22e92deb2108d75cbcedb856222eb08327dec",
+  "tz": "UTC"
+}

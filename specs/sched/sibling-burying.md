@@ -75,3 +75,4 @@ AE22: cards A (review, due today) and B (new) of one note, Bury new and Bury rev
 | `sched/bury/ae22-undo` | AE22, B4, B5: the sibling's row, the answered card, its review-log row and the deck counters after the answer, after the undo and after the redo |
 | `sched/bury/answer-kinds` | B2: answers from the review, new, interday learning, intraday learning and suspended queues, with all options on |
 | `sched/bury/sibling-states` | B3: siblings in another deck of another preset, suspended, buried by the user, in intraday learning and due in the future; options off buries nothing |
+| `sched/queue/bury/new-first-review-sibling` (held) | B2 at queue level: with new cards shown before reviews and Bury review siblings on, answering the new head buries nothing; the held queue and a fresh build each lose only the answered card |

@@ -1,0 +1,57 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_media": {
+          "name": "alpha.png"
+        }
+      },
+      {
+        "add_media": {
+          "name": "beta.png"
+        }
+      },
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": ["delta.png"],
+          "missing_notes": ["#n2"],
+          "oversize": [],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": ["beta.png", "gamma.jpg"]
+        }
+      },
+      {
+        "media_dir": {
+          "alpha.png": {
+            "sha1": "abf2f9bc2486148194e8088336e0cc6fc0dd40b0",
+            "size": 15
+          },
+          "beta.png": {
+            "sha1": "8b2ba288fd3f9400c4ff28f3a4f0d809e9c08ece",
+            "size": 15
+          },
+          "gamma.jpg": {
+            "sha1": "35e6c489f1516e8c5c944425007a4dffbc0c32eb",
+            "size": 13
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/report/store-added",
+  "scenario_sha256": "d7a627994b6130bb6c663f90104012c5d37bdf6473f1922819b403ba547149a8",
+  "tz": "UTC"
+}

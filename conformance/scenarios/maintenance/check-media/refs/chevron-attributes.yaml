@@ -1,0 +1,27 @@
+# C6 of specs/maintenance/check-media.md with text/media-references M2: a >
+# inside a quoted attribute before src does not end the tag (single quotes
+# holding two >, double quotes inside single quotes, double quotes), so
+# c1.png, c2.png, c3.png are used and gone.png, named the same way, is
+# missing; a src after a tag that already closed is plain text, so c4.png is
+# unused and not missing.
+id: maintenance/check-media/refs/chevron-attributes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img title='3 > 2 > 1' src='c1.png'>", "<img title='\"q>\"' src='c2.png'>"]}
+    - {notetype: Media, fields: ["<img title=\"r>\" src=\"c3.png\">", "<img title='s'> src='c4.png'>"]}
+    - {notetype: Media, fields: ["<img title='t>u' src='gone.png'>", ""]}
+  media_files:
+    - {name: c1.png, text: "first"}
+    - {name: c2.png, text: "second"}
+    - {name: c3.png, text: "third"}
+    - {name: c4.png, text: "fourth"}
+steps:
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir]
+  - db_exec: {sql: "SELECT replace(flds, char(31), '|'), mod FROM notes ORDER BY id"}

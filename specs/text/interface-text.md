@@ -90,6 +90,22 @@ Counts beside a name are never cut to make the name fit (R186).
 - So one screen can mix both: with the region set to Germany and the interface in English, Home shows Daily average with the locale's grouping (`1.234 cards`) and the studied-today line with Anki's digits (`Studied 1234 cards …`). The difference follows R1448 for the line and is not a lint finding.
 - The interval's spoken forms (`review/reviewer-strings` S13) put A3's amount in as text (`1.5`), so no locale writes the interval's number anywhere yet. Whether R192's formatters apply to the visible label or its spoken forms is part of I4's open row.
 
+### I6.1 Plural category of a quantity with a fraction
+
+A catalog text that shows a quantity which may have a fraction takes its plural category from the number as the text writes it: the value after rounding to the digits shown, with every fraction digit that stays visible. The locale's CLDR plural rules choose the category from that written number. A screen never takes the category from the unrounded value, and never formats the number at one precision and chooses the form at another.
+
+Examples in English, whose **one** category needs the integer 1 with no visible fraction digits:
+
+| Number | Digits shown | Text | Category |
+|---|---|---|---|
+| 0.9996 | at most two fraction digits | `1` | **one** (`1 minute`) |
+| 1.25 | at most two fraction digits | `1.25` | **other** (`1.25 minutes`) |
+| 1.4 | no fraction digits | `1` | **one** (`1 minute`) |
+
+- Other languages apply their own CLDR rules to the same written number, so a language whose **one** category includes some fractions can choose another form: French's **one** covers `1,25`.
+- A file whose plural entries vary only on an integer argument, as `review/reviewer-strings` S1's do, cannot pluralize such a quantity directly. Its text either gets an argument already rounded to an integer, or keeps one entry per plural category and picks one by applying the locale's CLDR rules to the formatted number, as S13's spoken units do for English (`.one` for the amount `1` only).
+- Core texts (I4) choose their own forms as their files say, for example `stats/studied-today` T5.4.
+
 ## I7. The word "Anki" (R156)
 
 U167's lint fails on the letters "Anki", in any case and inside a longer word (`AnkiConnect`, `AnkiWeb`), in user-visible text unless the text is on its allowlist. User-visible text is every catalog value and every Swift string literal that reaches the screen or assistive technology: a view's text, a label, a help tag, an alert, an accessibility label, value or hint, a menu or window title. Launch arguments (`-ShowAnkiServerInterface`, N12.4), identifiers, URLs, log messages, type and file names are not user-visible and are not checked.
@@ -115,3 +131,6 @@ The allowlist is Meguri's (U167) and holds plain compatibility facts. It must co
 - U167's `lint-strings` fixtures: a catalog entry without a comment fails; a Swift literal `Support older Anki versions` in a view passes and `Open in Anki` fails; `-ShowAnkiServerInterface` as a launch argument passes; a core text passed as a whole `%@` argument passes; `"Studied " + count` in Swift fails.
 - Each I3 file's own catalog test, as that file says: an I3 key missing from an existing catalog, or a value that differs from its table, fails.
 - The I4 texts are tested where their files say: the studied-today line by oracle observations (`specs/conformance/stats-ops.md` H5, H6); the answer labels' parts by the `answer_labels` observation (`sched/answer-labels` A8), and their visible text by unit tests from A6 and A7; the others by unit tests from their tables.
+- U167's catalog tests, fallback and arguments: with the device language set to one Meguri does not ship, every catalog entry resolves to its English value, with its numbered arguments substituted in order (`%1$lld`, `%2$@`). A count entry gives the **one** form for 1 and the **other** form for 0, 2 and 3.
+- U167's formatter tests, decimal separator: with the region set to Germany (de-DE) and the interface in English, an I2 text, or an I3 text whose file uses locale formatters (I6), that shows 3.25 writes `3,25`; with en-US it writes `3.25`. An I4 core text that writes the same number (I6 rows 1 and 2) writes `3.25` under both. The locale's separator in English I2 and I3 text is Meguri's choice under R192; Anki's English text always writes a full stop.
+- U167's formatter tests, I6.1 in English: 0.9996 shown with at most two fraction digits gives the **one** form with `1`; 1.25 shown the same way gives the **other** form with `1.25`; 1.4 shown with no fraction digits gives the **one** form with `1`.

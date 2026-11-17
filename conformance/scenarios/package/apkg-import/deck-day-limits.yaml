@@ -1,0 +1,47 @@
+# Today-only limits moved between the package's day and the target's
+# (specs/package/apkg-import.md I10.2 step 2, I11.2; package-ops.md E6).
+# On day 5 the deck Mixed gets a Today-only new limit through the options
+# save (its day 5, the package's today), and a Today-only review limit left
+# from day 3 is written into the record. The package is exported on day 5.
+# The deck is removed, then crt moves three days later, so the target's
+# today is 2: the active new limit's day becomes 2 and the stale review
+# limit's day becomes min(3, 2 - 1) = 1. The deck is removed again and crt
+# moves two more days, so the target is on its day 0: the active limit's day
+# becomes 0 and the stale one is removed.
+id: package/apkg-import/deck-day-limits
+description: An active Today-only limit moves to the target's today; a stale one moves into the past, or is removed on the target's day 0.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Mixed]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Mixed, fields: [one, a]}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-20T10:00:00"
+  - observe: [timing]
+  - save_deck_options: {deck: Mixed, limits: {new_today: 4}}
+  - legacy_update: {deck: Mixed, patch: {reviewLimitToday: {limit: 7, today: 3}}}
+  - observe: [{legacy_json: {decks: [Mixed]}}]
+  - advance: 1m
+  - export: {format: apkg, name: mixed.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  # Target today 2.
+  - delete_decks: {decks: [Mixed]}
+  - db_exec: {sql: "UPDATE col SET crt = crt + 259200"}
+  - reopen: {}
+  - advance: 1m
+  - observe: [timing]
+  - import: {format: apkg, name: mixed.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe: [{legacy_json: {decks: [Mixed]}}]
+  # Target today 0.
+  - delete_decks: {decks: [Mixed]}
+  - db_exec: {sql: "UPDATE col SET crt = crt + 172800"}
+  - reopen: {}
+  - advance: 1m
+  - observe: [timing]
+  - import: {format: apkg, name: mixed.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe: [{legacy_json: {decks: [Mixed]}}]

@@ -1,0 +1,92 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "One <span class=\"cloze\" data-ordinal=\"1\">Alpha</span> and <span class=\"cloze\" data-ordinal=\"1\">Beta Gamma</span> end.",
+              "blank": null,
+              "question": "One <span class=\"cloze\" data-cloze=\"Alpha\" data-ordinal=\"1\">[first]</span> and <span class=\"cloze\" data-cloze=\"Beta&#x20;Gamma\" data-ordinal=\"1\">[second & more]</span> end."
+            },
+            "review": {
+              "answer": "One <span class=\"cloze\" data-ordinal=\"1\">Alpha</span> and <span class=\"cloze\" data-ordinal=\"1\">Beta Gamma</span> end.",
+              "answer_av": [],
+              "blank": null,
+              "question": "One <span class=\"cloze\" data-cloze=\"Alpha\" data-ordinal=\"1\">[first]</span> and <span class=\"cloze\" data-cloze=\"Beta&#x20;Gamma\" data-ordinal=\"1\">[second & more]</span> end.",
+              "question_av": []
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">Delta</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Epsilon</span>",
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"Delta\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Epsilon</span>"
+            },
+            "review": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">Delta</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Epsilon</span>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"Delta\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Epsilon</span>",
+              "question_av": []
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Delta</span> <span class=\"cloze\" data-ordinal=\"2\">Epsilon</span>",
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Delta</span> <span class=\"cloze\" data-cloze=\"Epsilon\" data-ordinal=\"2\">[...]</span>"
+            },
+            "review": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Delta</span> <span class=\"cloze\" data-ordinal=\"2\">Epsilon</span>",
+              "answer_av": [],
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Delta</span> <span class=\"cloze\" data-cloze=\"Epsilon\" data-ordinal=\"2\">[...]</span>",
+              "question_av": []
+            }
+          },
+          "#c4": {
+            "browser": {
+              "answer": "One Alpha and Beta end.",
+              "blank": null,
+              "question": "One [first] and Beta end."
+            },
+            "review": {
+              "answer": "One Alpha and Beta end.",
+              "answer_av": [],
+              "blank": null,
+              "question": "One [first] and Beta end.",
+              "question_av": []
+            }
+          },
+          "#c5": {
+            "browser": {
+              "answer": "One Alpha and Beta end.",
+              "blank": null,
+              "question": "One Alpha and [...] end."
+            },
+            "review": {
+              "answer": "One Alpha and Beta end.",
+              "answer_av": [],
+              "blank": null,
+              "question": "One Alpha and [...] end.",
+              "question_av": []
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/cloze/stored-text-chain",
+  "scenario_sha256": "336c8081cb216dc7fbb8dd87e5444da52bf282effbf4fc23af6ae614fb189307",
+  "tz": "UTC"
+}

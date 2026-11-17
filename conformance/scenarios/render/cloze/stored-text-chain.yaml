@@ -1,0 +1,31 @@
+# The text filter chained under cloze: on a stored cloze note type
+# (specs/render/filters.md F1, F3; cloze.md C4, C6, C7). The filter nearest
+# the field runs first, so text: strips the markup of the whole field before
+# the clozes are rendered: the data-cloze value, the hint and the back's
+# content carry no tags and decoded entities. Two clozes of the same number
+# with their own hints both stay active. The reverse order, text: outside
+# cloze:, strips the cloze spans themselves.
+id: render/cloze/stored-text-chain
+description: "{{cloze:text:F}} and {{text:cloze:F}} on stored cloze cards"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain Gap
+      kind: cloze
+      fields: [Body, Notes]
+      templates:
+        - {name: Plain, front: "{{cloze:text:Body}}", back: "{{cloze:text:Body}}"}
+    - name: Outer Text Gap
+      kind: cloze
+      fields: [Body, Notes]
+      templates:
+        - {name: Outer, front: "{{text:cloze:Body}}", back: "{{text:cloze:Body}}"}
+  notes:
+    - notetype: Plain Gap
+      fields: ["One {{c1::<em>Alpha</em>::<u>first</u>}} and {{c1::<span style=\"color:green\">Beta Gamma</span>::<b>second</b> &amp; more}} end.", ""]
+    - notetype: Plain Gap
+      fields: ["<div>{{c1::Delta}}</div> {{c2::<i>Epsilon</i>}}", ""]
+    - notetype: Outer Text Gap
+      fields: ["One {{c1::<em>Alpha</em>::<u>first</u>}} and {{c2::<span style=\"color:green\">Beta</span>}} end.", ""]
+steps:
+  - observe: [render]

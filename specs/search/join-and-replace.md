@@ -59,9 +59,10 @@ Each built item makes one query item (`query-model.md` Q1, Q3). "E(s)" below is 
 | duplicates of text t in note type m | `dupe:` with m and t | t holding White_Space other than U+0020, or U+001C–U+001F (J3.4) |
 | whole collection | the whole-collection term | |
 | parsed text s, with a flag `field_text` | the items `grammar.md` reads from s (J2 first when `field_text` is set): one item when s has one, otherwise a group of all of them | a parse error of s |
-| group | AND or OR over 1 or more built items | no items |
+| group | AND or OR over 1 or more built items | no items (`invalid_item{reason: empty_group}`) |
 | negation of an item | J5 | |
 
+- A group with no items is refused wherever it stands: as the top item, as a member of another group, or as the child of a negation. The whole `build`, `join` or `replace` call then returns `invalid_item` and no text; `replace` refuses it too, although a group there would otherwise replace nothing (J7). Anki refuses the same input with an invalid-input error that has no typed reason; `empty_group` is Meguri's own name for it. It is not the parse error `empty_group` (`errors.md` E1), which a parsed-text item such as `()` gives.
 - A group of one item is that item, with no brackets. A group of two or more items is a group (`query-model.md` Q1) of the items joined by its joiner.
 - Days, ids and numbers are those of `grammar.md` G8 and G9; the item stores them as numbers, so `canonical-form.md` F5 and F6 write them.
 - `field_text` is set by a caller whose text comes from a search field (typed, pasted or picked from history, J2). Saved searches, AnkiConnect texts and other stored texts leave it unset. `existing` is always field text (J2).

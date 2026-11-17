@@ -1,0 +1,29 @@
+# Several filters against tags with more components (specs/tags/complete.md
+# C3, C4). The rows join direction words into tags of one to six
+# components. Each input's filters are taken in order, each taking the first
+# later component that contains it, so components may be skipped before,
+# between or after the ones taken. A tag with fewer components than filters
+# never matches, nor does one whose components hold the filters only in
+# another order. A skipped component, or a filter found after the first
+# character of its component (first or middle), makes an inner match, listed
+# after the prefix matches. Inputs: two filters, four filters, three filters,
+# and the two-filter input reversed. limit 500.
+id: tags/complete/filter-sequence
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - {name: Plain, fields: [Text], templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]}
+  notes:
+    - {notetype: Plain, fields: [one], tags: ["North::Top", "Top::North", North, "Snow::Top", "Northeast::Topmost"]}
+    - {notetype: Plain, fields: [two], tags: ["North::East::Top::West", "West::North::Upper::Top::East"]}
+    - {notetype: Plain, fields: [three], tags: ["West::North::East::Top", "West::North::East", "West::North::Lower::East::Top::Upper", "Midwest::North::East::Top", "Top::East::North::West"]}
+    - {notetype: Plain, fields: [four], tags: ["North::Northeast::Top", "North::East::Top"]}
+steps:
+  - db_exec: {sql: "SELECT tag FROM tags ORDER BY tag"}
+  - observe:
+      - tag_complete:
+          cases:
+            - {input: "no::to", limit: 500}
+            - {input: "we::no::ea::to", limit: 500}
+            - {input: "no::ea::to", limit: 500}
+            - {input: "to::no", limit: 500}

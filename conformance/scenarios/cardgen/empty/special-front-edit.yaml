@@ -1,0 +1,41 @@
+# Special names on a front edited after the notes exist (specs/notes/card-generation.md
+# G2, G3, G7; specs/notes/empty-cards.md E1, E2). Every note starts with all its
+# cards required, so the first scan is empty. Round 1: in Gate, a front inside
+# an inverted Deck section can never render (Deck is never empty), and a front
+# inside a Tags section renders only for the tagged note. In Shadowed, whose
+# field is named Deck, the same inverted section reads that field, so only the
+# note whose Deck field holds text has an empty card. Round 2: a CardFlag
+# section always renders, an inverted Subdeck section never does, and an
+# inverted Type section never does even in Shadowed (it has no Type field).
+# Template edits keep every card; only the scans change.
+id: cardgen/empty/special-front-edit
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gate
+      fields: [Front, Back]
+      templates:
+        - {name: Main, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Side, front: "{{Back}}", back: "{{Front}}"}
+    - name: Shadowed
+      fields: [Front, Deck]
+      templates:
+        - {name: Main, front: "{{Front}}", back: "{{Deck}}"}
+  notes:
+    - {notetype: Gate, fields: [one, uno], tags: [green]}
+    - {notetype: Gate, fields: [two, dos]}
+    - {notetype: Shadowed, fields: [three, ""]}
+    - {notetype: Shadowed, fields: [four, here]}
+steps:
+  - empty_cards: {}
+  - advance: 1m
+  # step 2: round 1
+  - update_notetype: {notetype: Gate, edits: [{template: {name: Main, front: "{{^Deck}}{{Front}}{{/Deck}}"}}, {template: {name: Side, front: "{{#Tags}}{{Back}}{{/Tags}}"}}]}
+  - update_notetype: {notetype: Shadowed, edits: [{template: {name: Main, front: "{{^Deck}}{{Front}}{{/Deck}}"}}]}
+  - empty_cards: {}
+  - advance: 1m
+  # step 6: round 2
+  - update_notetype: {notetype: Gate, edits: [{template: {name: Main, front: "{{#CardFlag}}{{Front}}{{/CardFlag}}"}}, {template: {name: Side, front: "{{^Subdeck}}{{Back}}{{/Subdeck}}"}}]}
+  - update_notetype: {notetype: Shadowed, edits: [{template: {name: Main, front: "{{^Type}}{{Front}}{{/Type}}"}}]}
+  - empty_cards: {}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}

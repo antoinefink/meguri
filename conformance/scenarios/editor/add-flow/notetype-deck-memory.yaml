@@ -1,0 +1,34 @@
+# Each note type remembers the deck it was last added to, and with addToCur
+# false the starting defaults read it (specs/editor/config-keys.md K4.1,
+# K4.2; specs/notes/add-defaults.md D2, D6; notes/note-records A4). Only real
+# adds write the keys here. Before any add, curModel names Paired (the last
+# note type set up) and neither note type has a last deck. An add of Plain to
+# Reading makes Plain and Reading the next defaults, a nondefault deck that
+# the next opening restores. A later add of Paired to Default leaves Plain's
+# remembered deck as it was, which is the deck a switch back to Plain selects
+# (K4.2); the memory survives a reopen. A further add of Plain to Inbox
+# replaces it: the last deck used, not the first. The card query shows each
+# add placed its cards in the deck it was given, whatever the defaults were.
+# Needs add_defaults and notetype_last_deck (add-defaults D7).
+id: editor/add-flow/notetype-deck-memory
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Inbox, Reading]
+  notetypes:
+    - {name: Plain, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: Paired, fields: [Left, Right], templates: [{name: Card, front: "{{Left}}", back: "{{Right}}"}]}
+steps:
+  - set_config: {key: addToCur, value: false}
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Plain}}]
+  - add_note: {notetype: Plain, deck: Reading, fields: [one, two]}
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Plain}}]
+  - observe: [{notetype_last_deck: {notetype: Paired}}]
+  - add_note: {notetype: Paired, deck: Default, fields: [three, four]}
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Plain}}]
+  - observe: [{notetype_last_deck: {notetype: Paired}}]
+  - reopen: {}
+  - observe: [{notetype_last_deck: {notetype: Plain}}]
+  - add_note: {notetype: Plain, deck: Inbox, fields: [five, six]}
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Plain}}]
+  - observe: [{notetype_last_deck: {notetype: Paired}}]
+  - db_exec: {sql: "SELECT n.sfld, d.name FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.sfld"}

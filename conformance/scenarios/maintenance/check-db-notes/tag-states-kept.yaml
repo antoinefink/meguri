@@ -1,0 +1,28 @@
+# N2 of specs/maintenance/check-database-notes.md for rows that notes use:
+# tags Alpha and Gamma are expanded by set_tag_collapsed, Beta and
+# Gamma::Delta stay collapsed as added; every one of them is stored on a
+# note. A row Unused (expanded, usn 5, written by db_exec) is on no note.
+# After Check Database each used tag keeps its expanded or collapsed state,
+# and Unused is gone. Rows observed before and after, and the tag tree.
+# Nothing is counted, scm stays. A second run finds nothing.
+id: maintenance/check-db-notes/tag-states-kept
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno], tags: [Alpha, Beta]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos], tags: [Gamma, "Gamma::Delta"]}
+steps:
+  - set_tag_collapsed: {tags: [Alpha, Gamma], collapsed: false}
+  - db_exec: {sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('Unused', 5, 0, NULL)"}
+  - db_exec: {sql: "SELECT tag, usn, collapsed, config FROM tags ORDER BY tag"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT tag, usn, collapsed, config FROM tags ORDER BY tag"}
+  - observe: [tag_tree]
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

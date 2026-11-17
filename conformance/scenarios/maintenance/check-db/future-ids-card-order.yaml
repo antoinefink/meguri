@@ -1,0 +1,32 @@
+# C10.4 of specs/maintenance/check-database.md: several cards above the
+# cutoff take consecutive new ids in ascending order of their old id, not of
+# their template order. Of one note's three new cards, the second is moved
+# three days ahead and the third two days; the first stays valid. The third
+# takes now_ms and the second now_ms + 1; the first keeps its id. Every other
+# column stays (nid, mod, usn, due). Each card has a review-log row with a
+# valid id: the rows keep their ids and their cid follows their card.
+# future_ids 2. A second run finds nothing.
+id: maintenance/check-db/future-ids-card-order
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Triple
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Two, front: "{{Back}}", back: "{{Front}}"}
+        - {name: Three, front: "{{Front}} {{Back}}", back: "{{Back}}"}
+  decks: [Inbox]
+  notes: [{notetype: Triple, deck: Inbox, fields: [alpha, beta]}]
+steps:
+  - db_exec: {sql: "UPDATE cards SET id = 1894960800000 WHERE ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET id = 1894874400000 WHERE ord = 2"}
+  - db_exec: {sql: "UPDATE cards SET usn = 5"}
+  - db_exec: {sql: "INSERT INTO revlog SELECT 1894701500001 + ord, id, 5, 3, 1, 0, 2500, 4000, 0 FROM cards"}
+  - db_exec: {sql: "SELECT ord, id, nid, mod, usn, type, queue, due FROM cards ORDER BY ord"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT ord, id, nid, mod, usn, type, queue, due FROM cards ORDER BY ord"}
+  - db_exec: {sql: "SELECT id FROM notes"}
+  - db_exec: {sql: "SELECT r.id, r.cid, c.ord, r.usn FROM revlog r LEFT JOIN cards c ON c.id = r.cid ORDER BY r.id"}
+  - check_db: {}

@@ -14,3 +14,11 @@ quote (decided), T3's scenario list and the executor's use of the patch form
 | field-html H3 step 4, X1 (quotes in media names) | `qt/aqt/editor_legacy.py` (the default editor's save of a field: the page's serialized text, then null bytes removed and media names unescaped), `pylib/anki/media.py` (the escape and unescape calls), `rslib/src/text.rs` (the encode and decode the calls reach) | that Anki decodes media names after the page serialized the field, so a decoded `"` lands inside a double-quoted value |
 | field-html H3 table (first row) | none | the caret's place follows from H1 step 2, Meguri's own wording |
 | field-html T3, conformance/record-ops W5 | `rslib/src/notes/mod.rs` (note update: field count check, normalization of every field) | that a patch built from the live note stores what the whole-note update stores, refusals included |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| specs/editor/field-html.md S1 Commits, proposed addition on input during a flush, and the T2 test-list addition | `ts/lib/editable/change-timer.test.ts` | The obligation that a commit scheduled while a flush is still running is kept, and that the latest pending content wins over an older pending commit. |

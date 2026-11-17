@@ -201,6 +201,9 @@ Each cloze in a text is replaced by its answer:
 |---|---|
 | `{{c1::capital}} city` | `capital city` |
 | `{{c1::one::hint}} two` | `one two` |
+| `{{c3::blue::two::parts::here}} end` | `blue end` (cut at the first `::`, however many follow) |
+| `{{c1::a:b::c}}` | `a:b` (a single colon is not a separator) |
+| `{{c4::green::}}{{c5::::empty answer}}stop` | `greenstop` (an empty hint, then an empty answer) |
 | `{{c1,2::both}} {{c3::}}end` | `both end` |
 | `a {{c2::b {{c1::c}} d}} e` | `a b {{c1 d}} e` |
 | `{{c١::arabic}}` | `arabic` |
@@ -365,8 +368,9 @@ The range of each is the whole term that failed (`errors.md` E5).
 | `search/text/no-searchable-field` | T7.2 |
 | `search/text/nc` | T8 |
 | `search/text/nc-escapes` | T3.2, T5.1, T6, T8.3, T10.1, T12.1; `fields.md` F4, F6 |
-| `search/text/sc`, `sc-no-cloze-type` | T9 |
+| `search/text/sc`, `sc-no-cloze-type`, `sc-hint-separators` | T9 |
 | `search/text/word` | T10 |
+| `search/text/glob-escapes` | T3.1, T10, T13.1; `names-and-ids.md` N2.2 |
 | `search/text/pattern-limit` | T3.3 |
 | `search/text/pattern-limit-unreached` | T3.3, T7.2, T12.3; `fields.md` F4 |
 | `search/regex/basics` | T11 |

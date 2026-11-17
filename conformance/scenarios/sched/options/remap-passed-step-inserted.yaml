@@ -1,0 +1,68 @@
+# A deck options save that inserts steps no longer than the step a card
+# last passed: the card counts as having passed them too, so its remaining
+# count stays as it was (R644; specs/sched/step-remap.md R2 rule 3, R3).
+# A step inserted after the passed one is still to do and raises the count.
+# Needs save_deck_options (specs/conformance/deck-options-ops.md E1).
+# First: learning 2m 15m, relearning 5m 30m; used by Deck A.
+# Second: learning 4m 25m; used by Deck B.
+# Cards (left before the first save):
+#  c1 Deck A learning, 1 (on step 2 of 2, passed 2m)
+#  c2 Deck A learning, 2 (on step 1, nothing passed)
+#  c3 Deck A relearning, 1 (on step 2 of 2, passed 5m)
+#  c4 Deck B learning, 1 (on step 2 of 2, passed 4m)
+#  c5 Deck B learning, 2 (on step 1, nothing passed)
+#  c6 Deck A relearning, 2 (on step 1, nothing passed)
+id: sched/options/remap-passed-step-inserted
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets:
+    - {name: First, learn_steps: [2m, 15m], relearn_steps: [5m, 30m]}
+    - {name: Second, learn_steps: [4m, 25m]}
+  decks: [{name: Deck A, preset: First}, {name: Deck B, preset: Second}]
+  notetypes:
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Card 1, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { padding: 4px; }"
+  notes:
+    - {notetype: Plain, deck: Deck A, fields: [red, x]}
+    - {notetype: Plain, deck: Deck A, fields: [green, x]}
+    - {notetype: Plain, deck: Deck A, fields: [blue, x]}
+    - {notetype: Plain, deck: Deck B, fields: [black, x]}
+    - {notetype: Plain, deck: Deck B, fields: [white, x]}
+    - {notetype: Plain, deck: Deck A, fields: [brown, x]}
+steps:
+  # Card states by row number (card ids follow creation order); every
+  # intraday card is due in ten minutes.
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, left = v.column7
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 1, 1, 1894702200, 0, 2, 1),
+          (2, 1, 1, 1894702200, 0, 1, 2),
+          (3, 3, 1, 1894702200, 4, 6, 1),
+          (4, 1, 1, 1894702200, 0, 2, 1),
+          (5, 1, 1, 1894702200, 0, 1, 2),
+          (6, 3, 1, 1894702200, 6, 4, 2)
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  # Every card stamped long ago with a server usn, so that a card a save
+  # writes shows mod = now and usn -1.
+  - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
+  - advance: 1h
+  # A. First's learning steps 2m 15m -> 1m 2m 15m: a shorter step inserted
+  # before the one c1 passed; c1 keeps 1 (unchanged), c2 gets all 3.
+  - save_deck_options: {deck: Deck A, options: {learn_steps: [1m, 2m, 15m]}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6)"]
+  - advance: 1h
+  # B. First's relearning steps 5m 30m -> 5m 5m 30m: a second step equal to
+  # the one c3 passed; c3 keeps 1. c6 had passed nothing and gets all 3.
+  - save_deck_options: {deck: Deck A, options: {relearn_steps: [5m, 5m, 30m]}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6)"]
+  - advance: 1h
+  # C. Second's learning steps 4m 25m -> 1m 2m 4m 10m 25m: two steps
+  # inserted before the one c4 passed and one after it; only the later one
+  # counts, so c4 goes from 1 to 2. c5 gets all 5.
+  - save_deck_options: {deck: Deck B, options: {learn_steps: [1m, 2m, 4m, 10m, 25m]}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6)"]

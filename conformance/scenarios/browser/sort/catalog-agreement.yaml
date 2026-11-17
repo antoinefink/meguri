@@ -1,0 +1,119 @@
+# specs/browser/sorting.md S1, specs/browser/config-keys.md K3 and
+# specs/conformance/browser-ops.md B1: every one of the 19 column keys,
+# sorted in cards mode and in notes mode, in both directions. A column the
+# catalog marks sortable in a mode returns its rows in an order; one it marks
+# unsortable there (Question and Answer in both modes; Stability, Difficulty
+# and Retrievability in notes mode) is refused as unsortable, so the
+# catalog's sortable flags and the orders the columns supply agree (R1139,
+# R1140). The rows differ in every column's key where possible, so a sorted
+# result also shows the key is used. Card ids come from the frozen clock
+# (1894701600000 + card number - 1).
+id: browser/sort/catalog-agreement
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Alpha, Beta]
+  notetypes:
+    - name: Pair
+      fields: [Word, Gloss]
+      templates:
+        - {name: Forward, front: "{{Word}}", back: "{{Gloss}}"}
+        - {name: Reverse, front: "{{Gloss}}", back: "{{Word}}"}
+      css: ".card { margin: 0; }"
+    - name: Single
+      fields: [Word, Gloss]
+      templates:
+        - {name: Forward, front: "{{Word}}", back: "{{Gloss}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Beta, fields: [maple, one], tags: [green]}
+    - {notetype: Single, deck: Alpha, fields: [birch, two], tags: [amber]}
+    - {notetype: Single, deck: Beta, fields: [cedar, three], tags: [cyan]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 5, ivl = 5, factor = 2300, reps = 3, lapses = 1, mod = 1894701700 WHERE id = 1894701600000"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 2, ivl = 9, factor = 2600, reps = 7, lapses = 0, mod = 1894701900 WHERE id = 1894701600001"}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = 0, due = 4, mod = 1894701800 WHERE id = 1894701600002"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 8, ivl = 2, factor = 2100, reps = 1, lapses = 2, mod = 1894701650 WHERE id = 1894701600003"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1894701950 WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1894701620 WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1894701880 WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - observe:
+      - search:
+          - {query: '', order: {column: noteFld}}
+          - {query: '', order: {column: noteFld, reverse: true}}
+          - {query: '', order: {column: question}}
+          - {query: '', order: {column: question, reverse: true}}
+          - {query: '', order: {column: answer}}
+          - {query: '', order: {column: answer, reverse: true}}
+          - {query: '', order: {column: template}}
+          - {query: '', order: {column: template, reverse: true}}
+          - {query: '', order: {column: deck}}
+          - {query: '', order: {column: deck, reverse: true}}
+          - {query: '', order: {column: cardDue}}
+          - {query: '', order: {column: cardDue, reverse: true}}
+          - {query: '', order: {column: cardEase}}
+          - {query: '', order: {column: cardEase, reverse: true}}
+          - {query: '', order: {column: cardIvl}}
+          - {query: '', order: {column: cardIvl, reverse: true}}
+          - {query: '', order: {column: cardReps}}
+          - {query: '', order: {column: cardReps, reverse: true}}
+          - {query: '', order: {column: cardLapses}}
+          - {query: '', order: {column: cardLapses, reverse: true}}
+          - {query: '', order: {column: noteCrt}}
+          - {query: '', order: {column: noteCrt, reverse: true}}
+          - {query: '', order: {column: cardMod}}
+          - {query: '', order: {column: cardMod, reverse: true}}
+          - {query: '', order: {column: noteMod}}
+          - {query: '', order: {column: noteMod, reverse: true}}
+          - {query: '', order: {column: note}}
+          - {query: '', order: {column: note, reverse: true}}
+          - {query: '', order: {column: noteTags}}
+          - {query: '', order: {column: noteTags, reverse: true}}
+          - {query: '', order: {column: originalPosition}}
+          - {query: '', order: {column: originalPosition, reverse: true}}
+          - {query: '', order: {column: stability}}
+          - {query: '', order: {column: stability, reverse: true}}
+          - {query: '', order: {column: difficulty}}
+          - {query: '', order: {column: difficulty, reverse: true}}
+          - {query: '', order: {column: retrievability}}
+          - {query: '', order: {column: retrievability, reverse: true}}
+  - observe:
+      - search:
+          - {query: '', kind: notes, order: {column: noteFld}}
+          - {query: '', kind: notes, order: {column: noteFld, reverse: true}}
+          - {query: '', kind: notes, order: {column: question}}
+          - {query: '', kind: notes, order: {column: question, reverse: true}}
+          - {query: '', kind: notes, order: {column: answer}}
+          - {query: '', kind: notes, order: {column: answer, reverse: true}}
+          - {query: '', kind: notes, order: {column: template}}
+          - {query: '', kind: notes, order: {column: template, reverse: true}}
+          - {query: '', kind: notes, order: {column: deck}}
+          - {query: '', kind: notes, order: {column: deck, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardDue}}
+          - {query: '', kind: notes, order: {column: cardDue, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardEase}}
+          - {query: '', kind: notes, order: {column: cardEase, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardIvl}}
+          - {query: '', kind: notes, order: {column: cardIvl, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardReps}}
+          - {query: '', kind: notes, order: {column: cardReps, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardLapses}}
+          - {query: '', kind: notes, order: {column: cardLapses, reverse: true}}
+          - {query: '', kind: notes, order: {column: noteCrt}}
+          - {query: '', kind: notes, order: {column: noteCrt, reverse: true}}
+          - {query: '', kind: notes, order: {column: cardMod}}
+          - {query: '', kind: notes, order: {column: cardMod, reverse: true}}
+          - {query: '', kind: notes, order: {column: noteMod}}
+          - {query: '', kind: notes, order: {column: noteMod, reverse: true}}
+          - {query: '', kind: notes, order: {column: note}}
+          - {query: '', kind: notes, order: {column: note, reverse: true}}
+          - {query: '', kind: notes, order: {column: noteTags}}
+          - {query: '', kind: notes, order: {column: noteTags, reverse: true}}
+          - {query: '', kind: notes, order: {column: originalPosition}}
+          - {query: '', kind: notes, order: {column: originalPosition, reverse: true}}
+          - {query: '', kind: notes, order: {column: stability}}
+          - {query: '', kind: notes, order: {column: stability, reverse: true}}
+          - {query: '', kind: notes, order: {column: difficulty}}
+          - {query: '', kind: notes, order: {column: difficulty, reverse: true}}
+          - {query: '', kind: notes, order: {column: retrievability}}
+          - {query: '', kind: notes, order: {column: retrievability, reverse: true}}

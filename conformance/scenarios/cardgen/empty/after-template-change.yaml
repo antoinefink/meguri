@@ -1,0 +1,41 @@
+# A card's life across note type and note edits (specs/notes/card-generation.md
+# G1, G7, G9; specs/notes/empty-cards.md E1, E2, E4). Each note starts with
+# one card. Adding a second template gives both notes a second card. Changing
+# that template's front to need Reply keeps both cards (an edit never removes
+# a card), but the card of the note whose Reply is empty is now empty: the
+# scan lists it alone and the delete removes it with a card grave while its
+# note, which still has a valid card, stays. Filling Reply then creates the
+# card again, and a last scan finds nothing. Cards added by the note type
+# save and the edit have no logical id, so cards are read with db_exec.
+id: cardgen/empty/after-template-change
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duo
+      fields: [Prompt, Reply, Extra]
+      templates:
+        - {name: One, front: "{{Prompt}}", back: "{{Reply}}"}
+  notes:
+    - {notetype: Duo, fields: [alpha, "", ""]}
+    - {notetype: Duo, fields: [beta, bravo, ""]}
+steps:
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - advance: 1m
+  # step 2: a second template whose front every note satisfies
+  - update_notetype: {notetype: Duo, edits: [{add_template: {name: Two, front: "{{Prompt}} (2)", back: "{{Extra}}"}}]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - advance: 1m
+  # step 5: the second front now needs Reply; no card is added or removed
+  - update_notetype: {notetype: Duo, edits: [{template: {name: Two, front: "{{Reply}} (2)"}}]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}
+  - empty_cards: {}
+  - delete_empty_cards: {keep_notes: false}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - db_exec: {sql: "SELECT type, count(*) FROM graves GROUP BY type ORDER BY type"}
+  - db_exec: {sql: "SELECT sfld FROM notes ORDER BY id"}
+  - advance: 1m
+  # step 14: filling Reply brings the second card back
+  - edit_note: {note: "#n1", fields: {Reply: answer}}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - empty_cards: {}

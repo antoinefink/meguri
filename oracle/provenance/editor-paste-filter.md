@@ -32,3 +32,13 @@ ids.
 | paste-filter X8 | `ts/routes/editor/old-editor-adapter.ts` (insertion through the editing command) | that Anki inserts through the browser's insert-HTML command |
 | paste-filter X9 | the files of X2 to X7 | the examples, derived from the rules |
 | paste-filter X10 | none | Meguri's test plan |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| Classification of the html-filter harvest rows h0fbabf88d405, h1ca43e6f5d18, h3a731837bd25, ha1793751ed20, ha86f3657ab34, hb014ea4e2147, hdf1ad6d4cdf4 and hdf20698825af as native-ui against paste-filter X4, X5, X5.1, X6, X7, X9 and X10; proposed X9 rows for empty input and nested script | `ts/lib/html-filter/index.test.ts` | Which filter behaviors each harvested test asserts (empty input in each mode, internal style removal, unknown-tag unwrap/remove, nested script removal, title removal in both modes, strip vs keep for b/a, dark-appearance span styles, strip-mode attribute removal), so each could be mapped to existing spec rules. No expected values were taken from the assertions. The proposed X9 rows use their own text and shapes. |
+| editor/paste-filter X4, X5.1, X7 checked against the background-color filtering obligation (he7d1b49afb31) | `ts/lib/html-filter/index.test.ts` | Which behavior must be proven: transparent versus visible background-color in keep mode, strip-mode unwrapping and no filtering of internal content. I confirmed the existing spec rows already state it. No new spec text. |
+| editor/paste-filter X3, X4, X9 and the proposed X10.1, and editor/paste P14.1, P15 and P16 (classification of the paste-filter harvest rows) | `ts/tests/e2e/paste-filter.spec.ts`; `ts/lib/html-filter/element.ts` | Which behaviors rows h1d03e06c9c80, h2e0dbc5abe92, h32d716cc068a and hc0e055822e0f require (nothing runs during a paste; the result holds in the shown field and in the saved note). Also a check that the page editor's filter at the pin removes script, title, iframe, object and style with their content, which matches X3 and X4, so no deviation is needed. |

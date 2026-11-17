@@ -114,6 +114,24 @@ A field the caller did not change is stored again exactly as it was, apart from 
 
 An update is one undo step, "Update Note", merged with the step before it as `engine/undo` A3 says.
 
+## U4. Refreshing notes after an outside change
+
+A bulk request that brings listed notes back in line with N2, A2 and `tags/tags#T4` after something outside the normal save path (another program, a raw edit, an add-on style tool) changed their rows. Anki's collection library offers it to such programs. Meguri's plan names no caller for it (U86's framework lists no such action); a Meguri op that offers it follows this section. It is one operation and one undo step, "Update Note".
+
+- **Input.** A list of note ids and two flags: add cards (yes/no) and stamp (yes/no).
+- **Notes visited.** Every listed id that names an existing note, once (a repeated id counts once). Ids that name no note are skipped and not counted.
+- **Refusals.** The whole request is refused as an invalid argument (`InvalidArgument`, `engine/op-model`), and nothing is written, when a visited note's note type does not exist, or when a visited note's stored field count differs from its note type's field count (at least 1).
+- **Effects on each visited note.** The row is written again whether or not it differs from what the rules would store (unlike U2, nothing is compared first):
+  - its tags are canonicalized and registered against the registry as `tags/tags#T4` stores them;
+  - every field is normalized as N2 says (NFC only when `normalize_note_text` reads true), and `sfld` and `csum` are recomputed from the normalized fields with the note type's sort field, as A2 computes them;
+  - with stamp on, `mod` becomes `now_s` and `usn` -1. With stamp off, both keep their stored values even though the row is written again, and the undo step is still recorded;
+  - with add cards on, the cards the note now requires are added as `notes/card-generation` G7 says (existing cards untouched, G6 when the note has none). They are placed by `notes/deck-placement-and-position` D3, with the note type's last deck as item 3, and positioned by P2. With add cards off, no card is added.
+- **Collection.** When at least one note is visited, `col.mod` becomes `now_ms`, whatever the stamp flag. When none is, nothing is written and `col.mod` stays.
+- **Output.** The number of notes visited.
+- **Undo.** Undo restores every visited row, removes the cards and tag registrations the request added, and restores the position counter.
+
+No scenario covers U4: the scenario DSL has no op for it.
+
 ## F1. Field count repair (R780)
 
 A shared function, used by Check Database (U128) and the importers (U120), that makes a note's field list match its note type's field count n (n is at least 1):

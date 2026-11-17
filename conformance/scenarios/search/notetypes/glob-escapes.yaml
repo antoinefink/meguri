@@ -1,0 +1,88 @@
+# R1046, R1059, R1060; specs/search/names-and-ids.md N1, N4.1, N4.2;
+# fields.md F2; text-matching.md T13. Escapes and wildcards in names that are
+# compared with glob conversion or as exact text:
+# - `\*` is a literal star: without another wildcard the name is exact text,
+#   with one it is a pattern in which the star stays literal;
+# - regular-expression characters (`[`, `]`, `+`) in a pattern are literal;
+# - a `_` after an even number of backslashes is a wildcard, after an odd
+#   number it is a literal underscore (and then the name is exact text);
+# - the same rules pick field names (fields are spaced so that no two
+#   matched fields are neighbours) and template names.
+# One card per note except the last note, whose note type has three
+# templates (#c10 to #c12 in template order).
+id: search/notetypes/glob-escapes
+tags: [needs-text, needs-notetype, needs-template]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: "Box[1*2]"
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: "Box[1x2]"
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: "Box[1*2]+"
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: 'p\q'
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: 'p\\q'
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: 'p\_'
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Spread
+      fields: [Front, "K[1*2]", Gap1, "K[1x2]", Gap2, "K[1*2]b"]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Gap1}}"}]
+      css: ".card { margin: 0; }"
+    - name: Faces
+      fields: [Front, Back]
+      templates:
+        - {name: "Face*A", front: "{{Front}}", back: "{{Back}}"}
+        - {name: "FaceXA", front: "{{Front}} two", back: "{{Back}}"}
+        - {name: "Face*A+", front: "{{Front}} three", back: "{{Back}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: "Box[1*2]", fields: [one, x]}
+    - {notetype: "Box[1x2]", fields: [two, x]}
+    - {notetype: "Box[1*2]+", fields: [three, x]}
+    - {notetype: 'p\q', fields: [four, x]}
+    - {notetype: 'p\\q', fields: [five, x]}
+    - {notetype: 'p\_', fields: [six, x]}
+    - {notetype: Spread, fields: [seven, hit, x, x, x, x]}
+    - {notetype: Spread, fields: [eight, x, x, hit, x, x]}
+    - {notetype: Spread, fields: [nine, x, x, x, x, hit]}
+    - {notetype: Faces, fields: [ten, x]}
+steps:
+  - db_exec: {sql: "SELECT n.sfld, t.name FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - observe:
+      - search:
+          - {query: 'note:box[1\*2]', kind: notes}
+          - {query: 'note:box[1*2]', kind: notes}
+          - {query: 'note:box[1\*2]*', kind: notes}
+          - {query: 'note:box[1_2]', kind: notes}
+          - {query: 'note:box[1\_2]', kind: notes}
+          - {query: 'note:box[1?2]', kind: notes}
+          - {query: 'note:p\\q', kind: notes}
+          - {query: 'note:p\\\\q', kind: notes}
+          - {query: 'note:p\\_', kind: notes}
+          - {query: 'note:p\\\\_', kind: notes}
+          - {query: 'note:p\\\_', kind: notes}
+          - {query: 'note:p\\*', kind: notes}
+          - {query: 'k[1\*2]:hit', kind: notes}
+          - {query: 'k[1*2]:hit', kind: notes}
+          - {query: 'k[1\*2]*:hit', kind: notes}
+          - {query: 'k[1_2]*:hit', kind: notes}
+          - {query: 'card:face\*a'}
+          - {query: 'card:face*a'}
+          - {query: 'card:face\*a*'}
+          - {query: 'card:face_a'}
+          - {query: 'card:face\_a'}

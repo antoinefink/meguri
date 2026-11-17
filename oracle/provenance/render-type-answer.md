@@ -47,3 +47,12 @@ because U63's branch edits neighbouring catalog lines: two `typeanswer.rs` rows
 (`haccda9311c93`, `hafc40dbe3447`), and the image-occlusion rows
 `hae0105ed752c` and `h1f6151e74934`, which `render/image-occlusion/render/divs`
 covers.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| render/type-answer A6.1.1 AV removal; scenario render/type-answer/av-removal | `rslib/src/card_rendering/mod.rs` (av_stripping test and strip_av_tags entry point), `rslib/src/typeanswer.rs` (expected-text stripping that calls AV removal before line-break and markup stripping), `rslib/src/card_rendering/service.rs` (StripAvTags backend call, located by grep only) | To learn which stripping behavior the harvest row must prove: sound removal keeps the surrounding text, a tts directive with options is removed, an unknown directive is kept. Also to confirm that the type-in expected text is the oracle-reachable place where Anki applies it. Golden values come from the oracle. |
+| render/type-answer A6.1.1 AV removal, linked to harvest row h1126a583e576 | `rslib/src/card_rendering/service.rs` (strip_av_tags backend call and its test), `rslib/src/card_rendering/mod.rs` (strip_av_tags), `rslib/src/typeanswer.rs` (the expected text is cleaned with the same helper), `pylib/anki/media.py` and `qt/aqt/legacy.py` (callers) | Confirming that the type-answer comparison runs the same standalone helper, so render/type-answer/av-removal observes it. |

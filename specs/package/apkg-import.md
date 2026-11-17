@@ -403,9 +403,11 @@ Status (2026-10-27): the oracle driver has the deck-package `import` form (`spec
 | `package/notetype-merge/no-merge-update` (merge off; kept in that directory) | I7 "Same schema" and "Update note types" `IfNewer`: an older incoming record writes nothing; once the target is older, the same import updates the note type in place under its id (name, field renamed by id, CSS, the package's `mtime_secs`, `usn` -1), with no copy, no `scm` change and no note rewritten |
 | `cards-existing-pairs` | I11.1: existing (`nid`, `ord`) pairs skipped, existing card rows unchanged; a duplicate note gains its missing card |
 | `scheduling-on` | I11.2 and I11.3: package and target days 7 apart, review, suspended review, learning and filtered cards, revlog added, card `data` kept |
+| `revlog-id-taken` | I11.3: after the export the note is deleted (its review log stays), the newer review-log row is removed and the older one is changed. The import adds the note and card back under their ids and inserts the free row. It skips the row whose id the target holds, and the target's values stay (`storage/ids-usn-mtime#I4`) |
 | `scheduling-off` | I6: new cards at the package's positions, flags 0, `leech`/`marked` removed, filtered decks normal, default deck not taken, target `nextPos` unchanged |
 | `presets` | I10.1: off none; on only absent ids; FSRS parameters emptied without scheduling |
 | `media-rules` | I12: identical content reused, a `_font.woff` present with other content kept, unreferenced entries not copied, a static entry copied unreferenced, entities in a name |
+| `media-rename-in-field` | I12.2 on one new note's field holding two colliding references (an image tag and a sound tag) and one reference whose file is identical: the first two are rewritten to hash names, the third and the text between the tags stay as written |
 | `ids` | I9: a note id equal to a target id shifted by 999 |
 | `ids-cutoff` | I3.1, with the crafted `apkg/card-ids-ahead.apkg`: card ids 3 days ahead repaired to ids from `now_ms` upward in ascending order, review-log `cid` following |
 | `legacy-1` | P17: Anki 2.1.26's legacy 1 export (`apkg/legacy-1.apkg`, all cards new, a JSON map with one file) imports with its media; its decks map by name |

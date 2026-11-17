@@ -41,7 +41,7 @@ Examples (with `addToCur` `true`, `curDeck` naming the filtered deck `Cram`, and
 A read-only query on the query lane. It writes nothing.
 
 - **Input.** A note type id.
-- **Output.** A deck id, or none. It is the deck that `_nt_<id>_lastDeck` names, when that key reads as an integer and names an existing normal deck. Otherwise it is none: the key is missing or unreadable (`storage/config-table` C3), it names a missing deck, or it names a filtered deck. The note type is not looked up. A key left for a note type id that names no note type (after a sync or a raw edit) still gives its deck, as in Anki. It is no error.
+- **Output.** A deck id, or none. It is the deck that `_nt_<id>_lastDeck` names, when that key reads as an integer and names an existing normal deck. Otherwise it is none: the key is missing or unreadable (`storage/config-table` C3), it names a missing deck, or it names a filtered deck. A deck deletion leaves the key in place (`decks/decks` D8 step 3), so D2 then reads it as none (scenario `editor/add-flow/last-deck-fallback`). The note type is not looked up. A key left for a note type id that names no note type (after a sync or a raw edit) still gives its deck, as in Anki. It is no error.
 - **Not read.** `addToCur`. The Add screen calls D2 only when `addToCur` is `false` and applies its result as K4.2 says. A none keeps the selected deck. Anki's request returns deck id 0 for none.
 - **Users.** Only a note type change in the Add screen (K4.2, R800). Create Copy and prefilled drafts set their own deck (D3).
 

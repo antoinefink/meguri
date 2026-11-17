@@ -68,6 +68,17 @@ A span of s seconds (binary64) is written in one unit:
 | 360,000 (100 hours) | short, precise, cap hours | `100h` |
 | 2,628,000 | long, precise | `1 month` |
 
+Rows that pin the unit boundaries of step 1:
+
+| s | Form | Text |
+|---|---|---|
+| 59 | long, precise | `59 seconds` |
+| 60 | long, precise | `1 minute` |
+| 3,599 | long, precise | `59.98 minutes` |
+| 3,600 | long, precise | `1 hour` |
+| 86,400 | long, precise | `1 day` |
+| 2,678,400 (31 days) | long, precise | `1.02 months` |
+
 ## P3. Day labels
 
 D(a, b) names the days of a bin from a to b. Let big = max(|a|, |b|) and small = min(|a|, |b|).

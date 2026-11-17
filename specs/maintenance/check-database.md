@@ -307,6 +307,8 @@ Each uses only existing scenario ops (`db_exec`, `check_db`, `add_note`, `advanc
 | `future-ids-cards` | a new card (type 0, so C8.7 does not read its row) and a review-log row of it, both with ids two days ahead: re-keyed to `now_ms`, the row's `cid` follows its card, `future_ids` 2 |
 | `healthy` | a collection with notes, reviews and decks, no damage: all counts 0, `scm` unchanged, `col.mod` (deviation `check-db-no-change-keeps-mod`), `undo_status` empty after the run |
 | `all-records` | every damage above except `future-ids-cards`, in one collection: one report, counts equal to the sum; no `undo_status` (C14). `future-ids-cards` stays out because N6.6 gives the cards it generates (`card-ord`, `card-text-values`) ids from `now_ms` up, which C10.4 would then need for the future card, and Anki stops on a taken id (C10.4) |
+| `card-fixes-counted` | one new card with `due` 2,300,000, `odue` 3.5 and `ivl` 6.25, and a second new card with `ivl` 2.5: C8.1 folds the first `due` to 1,300,000 (`new_positions_too_high` 1); C8.3 and C8.4 round to 4, 6 and 3 (`card_properties` 3, once per fix and card); both cards stamped, `scm` unchanged |
+| `revlog-row-counted` | review-log rows with `ivl` 2.5 and `lastIvl` 1.5, and with `ivl` 3.5, `lastIvl` -0.5 and `time` 1500.5, plus one row of integers: each damaged row rewritten once (3, 2; 4, -1, 1501), the integer row untouched, `revlog_properties` 2, `scm` set |
 
 Recorded with the rejection `failed` of `conformance/collection-check` K10 (`dsl.md` D7.2) on Anki's side, each with its deviation; they end with no second `check_db`:
 

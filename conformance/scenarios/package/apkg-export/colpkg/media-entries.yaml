@@ -1,0 +1,29 @@
+# The media entries of collection packages with media, in the latest and in
+# the legacy format (specs/package/container.md P5, P15, P17; apkg-export.md
+# A14; legacy-export.md L8; package-ops.md E9, E10). The folder holds a
+# short text file, an empty file and a 300 000-byte file. The latest-format
+# package's map records each file's true size and SHA-1, and each numbered
+# entry decodes from its zstd frame to exactly that many bytes, the empty
+# file included; the legacy package's raw entries hash and measure to the
+# same values. Both are listed as sets (E10).
+id: package/apkg-export/colpkg/media-entries
+description: Collection packages with media carry each file's exact size and SHA-1, compressed and raw.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+compare:
+  set: [/steps/5/package_media, /steps/6/package_media]
+setup:
+  config: {rollover: 4}
+  media_files:
+    - {name: word.txt, text: "short words"}
+    - {name: empty.dat, text: ""}
+    - {name: big.bin, fill: {size: 300000, byte: 7}}
+steps:
+  - observe: [timing]
+  - observe: [media_dir]
+  - advance: 1m
+  - export: {format: colpkg, name: latest.colpkg, media: true}
+  - export: {format: colpkg, name: legacy.colpkg, media: true, legacy: true}
+  - observe:
+      - package_media: {name: latest.colpkg}
+  - observe:
+      - package_media: {name: legacy.colpkg}

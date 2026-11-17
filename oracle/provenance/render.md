@@ -33,3 +33,13 @@ Implemented in `driver/observe/template.py`; the driver's own reads are in `driv
 ## Harvest links
 
 `conformance/catalog/harvest.csv` render rows classified with U60 (scenarios linked); the test names behind them are in `oracle/harvest/links.csv` only.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| conformance/scenarios/render/filters/kana-stored-edits (render/filters F4 on a stored card through edits; template-syntax T7 empty key; notetypes/validation V3) | `pylib/tests/test_collection.py` (test_furigana) | Which behavior the harvest row needs proven: kana extraction on a stored card, a sound reading left in place that becomes a play marker, and a front with a filter on an empty key that still saves and renders. Expected values come from the oracle golden only. |
+| harvest row h8057000b72f1, linked to the existing render/filters/text | `pylib/tests/test_models.py` (the text-filter test) | Read to confirm the obligation (text: strips HTML from a field in the question render). It is already proven by render/filters/text. No new scenario. |
+| Classification of the play-marker and sound-path harvest rows (display-transform D3/D6, audio-playback A5, av-tags A6) | `pylib/tests/test_sound.py`, `pylib/anki/sound.py` (marker pattern, marker removal helper, sound tag path joining), `qt/aqt/main.py` and `qt/aqt/sound.py` (grep only: where the marker removal and play-icon replacement are called for hidden play buttons) | To find that these behaviors live in the desktop display and player layers, not in a collection operation, and so are native-ui against Meguri's display-transform and audio-playback specs. |

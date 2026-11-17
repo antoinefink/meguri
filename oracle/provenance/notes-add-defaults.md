@@ -21,3 +21,12 @@ selection rules of D5 (decided) and the Add-screen model's tests.
 | add-defaults D5, D8 | `qt/aqt/addcards_legacy.py` (operation hook: the draft rebuilt in place, the last added note forgotten; a replaced note type treated as a change), `qt/aqt/browser/sidebar/tree.py` | what Anki does when another screen changes decks or note types; the differences listed in D8 |
 | add-defaults D6 | `qt/aqt/addcards_legacy.py` (add, new note after an add: sticky fields and tags carried over), `rslib/src/notes/mod.rs` (add with the update-defaults flag), `proto/anki/notes.proto` | the flag Add-screen adds send, the next draft's fields and tags, the selection kept |
 | add-defaults D7 | `pylib/anki/collection.py`, `proto/anki/notes.proto` | the backend requests the requested observation kinds would call |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| editor/config-keys K4.1 and notes/add-defaults D1/D2 (classified covered-existing) | `rslib/src/adding.rs` | The case list of the add-defaults test, used only to check that existing scenarios cover it. Nothing new was written. |
+| Harvest rows h57651ff721da and hab1f710886fe linked to the existing notes/add-defaults and editor/config-keys scenarios (D1, D2) | `rslib/src/notes/service.rs` | The harvested tests, to confirm that their obligations (fresh-collection add defaults; a note type's default deck, none and then set) are the ones the recorded add_defaults and notetype_last_deck scenarios already show. |

@@ -1,0 +1,62 @@
+# Learning steps of a day or more, taken through real answers over several
+# days (R643, R601, R626, R720; specs/sched/steps.md L5, L7, L9,
+# specs/sched/answering.md A3.2, specs/sched/review-session.md P6, P9, P10).
+# The preset Days has the learning steps 5m 15m 1d 3d and the relearning step
+# 1d. FSRS on, load balancer off, from 10:00:00 UTC (next day at 04:00).
+# Day 0: Good on new #c1 moves it to the 15-minute step (three steps left)
+#   and, inside the learn-ahead edge, it is counted as learning; Easy
+#   graduates new #c2; 20 minutes later Good puts #c1 on the 1-day step:
+#   interday learning (queue 3) due tomorrow, and the queue is empty.
+# Day 1: #c1 is counted as learning and its Good would be the 3-day step.
+#   Again sends it back to the first step in intraday learning (queue 1);
+#   undo restores the interday row; Good puts it on the 3-day step.
+# Day 4: Good on the last step graduates #c1 to review with FSRS's interval.
+#   A raw write makes it due today; Again with a 1-day relearning step puts
+#   it in interday relearning (queue 3, due tomorrow) and today's counts are
+#   all 0.
+# Needs queue (queue-ops.md Q2) held across answers (session-ops.md E2), and
+# undo (undo-ops.md V1; the first raw write empties the setup's history).
+id: sched/steps/interday-answers
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Days, learn_steps: [5m, 15m, 1d, 3d], relearn_steps: [1d], desired_retention: 0.9}
+  decks: [{name: Days, preset: Days}]
+  notetypes:
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Plain, deck: Days, fields: [early, a]}
+    - {notetype: Plain, deck: Days, fields: [later, b]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET usn = usn WHERE 0"}
+  - set_current_deck: {deck: Days}
+  - observe: [queue]
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - observe: [queue, "card(#c1)", "next_states(#c1)"]
+  - advance: 10s
+  - answer: {card: "#c2", rating: easy, time_ms: 2000}
+  - observe: [queue, "card(#c2)"]
+  - advance: 20m
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - observe: [queue, congrats, "card(#c1)"]
+  - advance: 1d
+  - observe: [timing]
+  - observe: [queue, "next_states(#c1)"]
+  - answer: {card: "#c1", rating: again, time_ms: 2000}
+  - observe: [queue, "card(#c1)"]
+  - undo: {}
+  - observe: [queue, "card(#c1)"]
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - observe: [queue, "card(#c1)"]
+  - advance: 3d
+  - observe: [timing]
+  - observe: [queue, "next_states(#c1)"]
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - observe: [queue, "card(#c1)"]
+  - db_exec: {sql: "UPDATE cards SET due = 4 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1)"}
+  - observe: [queue]
+  - answer: {card: "#c1", rating: again, time_ms: 2000}
+  - observe: [queue, deck_counts, "card(#c1)"]

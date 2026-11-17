@@ -1,0 +1,49 @@
+# The deck and note type the Add screen has selected go into the add, and
+# are the next defaults afterwards (specs/editor/add-flow.md A5 step 5;
+# specs/notes/add-defaults.md D6; specs/editor/config-keys.md K4.1).
+# The setup note (Plain in Default) makes Plain curModel, Default Plain's
+# last deck and Plain Default's last note type, so the defaults before the
+# add are Plain and Default in both modes. The add then uses the other note
+# type (Gaps, a cloze kind) and the other deck (Archive), neither of them a
+# default. Its card is read back (deck by name) and its note's note type
+# by name with db_exec. After the add, with addToCur false, the defaults are
+# Gaps and Archive (Archive from Gaps' last deck); with addToCur true and
+# curDeck still Default, Default and Plain (Default's last note type is
+# unchanged); with curDeck set to Archive, Archive and Gaps. Plain's last
+# deck stays Default.
+# Needs add_note, set_config, set_current_deck, db_exec and the add_defaults
+# and notetype_last_deck observations (notes/add-defaults D7).
+id: editor/add-flow/selected-context
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Archive]
+  notetypes:
+    - name: Plain
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+    - name: Gaps
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+  notes:
+    - {notetype: Plain, deck: Default, fields: [one, two]}
+steps:
+  - set_config: {key: addToCur, value: false}
+  - observe: [{add_defaults: {}}]
+  - set_config: {key: addToCur, value: true}
+  - observe: [{add_defaults: {}}]
+  - set_config: {key: addToCur, value: false}
+  - add_note: {notetype: Gaps, deck: Archive, fields: ["{{c1::green}} leaf", colors]}
+  - observe: ["card(#c2)"]
+  - db_exec:
+      sql: "SELECT t.name FROM cards c JOIN notes n ON n.id = c.nid JOIN notetypes t ON t.id = n.mid ORDER BY c.id"
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Gaps}}]
+  - observe: [{notetype_last_deck: {notetype: Plain}}]
+  - set_config: {key: addToCur, value: true}
+  - observe: [{add_defaults: {}}]
+  - set_current_deck: {deck: Archive}
+  - observe: [{add_defaults: {}}]
+  - set_config: {key: addToCur, value: false}
+  - observe: [{add_defaults: {}}]

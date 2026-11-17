@@ -63,7 +63,7 @@ The `style` value is split at `;`. A declaration `property: value` is kept when 
 
 ## D4. Examples
 
-Tests compare structure: element names, attributes and their values, and text, in order. Attribute order, quoting style and a final line break are not part of the contract.
+Tests compare structure: element names, attributes and their values, and text, in order. Attribute order, quoting style, a final line break and whitespace-only text between block elements (such as the line break CommonMark writes after each block) are not part of the contract.
 
 | md | Input | Output |
 |---|---|---|
@@ -81,3 +81,6 @@ Tests compare structure: element names, attributes and their values, and text, i
 | false | `<span style="color: red; position: fixed">r</span>` | `<span style="color: red">r</span>` |
 | false | `<div class="x" id="y">d</div>` | `<div>d</div>` |
 | false | `<ruby>漢<rt>かん</rt></ruby>` | `<ruby>漢<rt>かん</rt></ruby>` |
+| true | `# Heading` | `<h1>Heading</h1>` |
+| true | `kept` LF LF `<script>run()</script>` | `<p>kept</p>` (the raw HTML block passes through D2, and D3.1 removes the element with its content) |
+| true | `## Sub` LF `text` | `<h2>Sub</h2><p>text</p>` |

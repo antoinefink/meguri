@@ -74,7 +74,7 @@ The two numbers the Home "studied today" line is built from.
 The Home studied-today line (`stats/studied-today` T2).
 
 - **Request.** `studied_today_text`, with no arguments.
-- **Value.** A string: the line at the clock's current instant, for example `"Studied 3 cards in 13 seconds today (4.33s/card)"`.
+- **Value.** A string: the line at the clock's current instant, for example `"Studied 6 cards in 20 seconds today (3.33s/card)"`.
 - **Meguri.** The text of the core's Home studied-today payload, built from the resident values (`stats/counting-rules` N7) with no database query.
 - **Oracle.** Anki's studied-today line for the collection (the one its deck list shows), produced in English (`en`), with every U+2068 and U+2069 removed and each line feed replaced by one space (`stats/studied-today` T6.3).
 - **Text.** R1887 keeps localized text out of observations. This kind is the exception R1448 requires: the line itself must match Anki's, and the oracle produces it in one fixed language. No other text of Anki's is observed.

@@ -1,0 +1,616 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701600000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "config": {
+            "_deck_1894701600000_lastNotetype": {
+              "KEY": "_deck_1894701600000_lastNotetype",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "872a0a73b5c39f2bcc5d9ac47972bdea9eb75ea929333502df464728d5210252"
+              }
+            },
+            "_nt_1894701600006_lastDeck": {
+              "KEY": "_nt_1894701600006_lastDeck",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "8fef3c8a7a74fe55121f9f68213554250a40fe71acb3e8ae58a94bfbeb298f08"
+              }
+            },
+            "activeDecks": {
+              "KEY": "activeDecks",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "080a9ed428559ef602668b4c00f114f1a11c3f6b02a435f0bdc154578e4d7f22"
+              }
+            },
+            "addToCur": {
+              "KEY": "addToCur",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "collapseTime": {
+              "KEY": "collapseTime",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "15197cf7214b58e67cae565e573ffd9aa44bcb81f8ee5d7185dfe8da0a16ef43"
+              }
+            },
+            "creationOffset": {
+              "KEY": "creationOffset",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "curDeck": {
+              "KEY": "curDeck",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+              }
+            },
+            "curModel": {
+              "KEY": "curModel",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "872a0a73b5c39f2bcc5d9ac47972bdea9eb75ea929333502df464728d5210252"
+              }
+            },
+            "dayLearnFirst": {
+              "KEY": "dayLearnFirst",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "dueCounts": {
+              "KEY": "dueCounts",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "estTimes": {
+              "KEY": "estTimes",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "newSpread": {
+              "KEY": "newSpread",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "nextPos": {
+              "KEY": "nextPos",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+              }
+            },
+            "rollover": {
+              "KEY": "rollover",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+              }
+            },
+            "sched2021": {
+              "KEY": "sched2021",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "schedVer": {
+              "KEY": "schedVer",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+              }
+            },
+            "sortBackwards": {
+              "KEY": "sortBackwards",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "sortType": {
+              "KEY": "sortType",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "1c19b6eac0880ca94f71879df838392e837aef4738f4d1000e15e48e65df61dc"
+              }
+            },
+            "timeLim": {
+              "KEY": "timeLim",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            }
+          },
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "b2d3a13378af8601b372cc76113debc42f7b2c4c669788ee98c3705a7af51d94"
+              },
+              "id": 1,
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600000,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701600,
+              "name": "Lang",
+              "usn": -1
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 4261788892,
+              "data": "",
+              "flags": 0,
+              "flds": "one\u001fa",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "one",
+              "tags": "",
+              "usn": -1
+            }
+          },
+          "revlog": {},
+          "tags": {}
+        },
+        "media_dir": {
+          "kept.jpg": {
+            "sha1": "0e66b49d04a43c19bcb2e13a53aff5d174f610fc",
+            "size": 7
+          }
+        },
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "import": {
+          "error": "corrupt"
+        }
+      },
+      {
+        "import": {
+          "error": "corrupt"
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701600000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "config": {
+            "_deck_1894701600000_lastNotetype": {
+              "KEY": "_deck_1894701600000_lastNotetype",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "872a0a73b5c39f2bcc5d9ac47972bdea9eb75ea929333502df464728d5210252"
+              }
+            },
+            "_nt_1894701600006_lastDeck": {
+              "KEY": "_nt_1894701600006_lastDeck",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "8fef3c8a7a74fe55121f9f68213554250a40fe71acb3e8ae58a94bfbeb298f08"
+              }
+            },
+            "activeDecks": {
+              "KEY": "activeDecks",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "080a9ed428559ef602668b4c00f114f1a11c3f6b02a435f0bdc154578e4d7f22"
+              }
+            },
+            "addToCur": {
+              "KEY": "addToCur",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "collapseTime": {
+              "KEY": "collapseTime",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "15197cf7214b58e67cae565e573ffd9aa44bcb81f8ee5d7185dfe8da0a16ef43"
+              }
+            },
+            "creationOffset": {
+              "KEY": "creationOffset",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "curDeck": {
+              "KEY": "curDeck",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+              }
+            },
+            "curModel": {
+              "KEY": "curModel",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "872a0a73b5c39f2bcc5d9ac47972bdea9eb75ea929333502df464728d5210252"
+              }
+            },
+            "dayLearnFirst": {
+              "KEY": "dayLearnFirst",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "dueCounts": {
+              "KEY": "dueCounts",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "estTimes": {
+              "KEY": "estTimes",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "newSpread": {
+              "KEY": "newSpread",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "nextPos": {
+              "KEY": "nextPos",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+              }
+            },
+            "rollover": {
+              "KEY": "rollover",
+              "mtime_secs": 1894701600,
+              "usn": -1,
+              "val": {
+                "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+              }
+            },
+            "sched2021": {
+              "KEY": "sched2021",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "schedVer": {
+              "KEY": "schedVer",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+              }
+            },
+            "sortBackwards": {
+              "KEY": "sortBackwards",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "sortType": {
+              "KEY": "sortType",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "1c19b6eac0880ca94f71879df838392e837aef4738f4d1000e15e48e65df61dc"
+              }
+            },
+            "timeLim": {
+              "KEY": "timeLim",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            }
+          },
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "b2d3a13378af8601b372cc76113debc42f7b2c4c669788ee98c3705a7af51d94"
+              },
+              "id": 1,
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600000,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701600,
+              "name": "Lang",
+              "usn": -1
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 4261788892,
+              "data": "",
+              "flags": 0,
+              "flds": "one\u001fa",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "one",
+              "tags": "",
+              "usn": -1
+            }
+          },
+          "revlog": {},
+          "tags": {}
+        },
+        "media_dir": {
+          "kept.jpg": {
+            "sha1": "0e66b49d04a43c19bcb2e13a53aff5d174f610fc",
+            "size": 7
+          }
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 6,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["Water boils at {{c1::one hundred}} degrees.", "at sea level"],
+              "note": 1788249600344
+            },
+            {
+              "fields": ["river", "rio"],
+              "note": 1788249600347
+            },
+            {
+              "fields": ["bridge", "puente"],
+              "note": 1788249600354
+            },
+            {
+              "fields": ["{{c1::Rain}} falls and {{c2::snow}} drifts.", "weather"],
+              "note": 1788249600358
+            },
+            {
+              "fields": ["to walk", "andar"],
+              "note": 1788249600366
+            },
+            {
+              "fields": ["to read", "leer"],
+              "note": 1788249600375
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "media_dir": {
+          "kept.jpg": {
+            "sha1": "0e66b49d04a43c19bcb2e13a53aff5d174f610fc",
+            "size": 7
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Water boils at {{c1::one hundred}} degrees.", "Cram"],
+            ["bridge", "Lang"],
+            ["bridge", "Lang"],
+            ["one", "Lang"],
+            ["river", "Lang"],
+            ["river", "Lang"],
+            ["to read", "Lang\u001fVerbs"],
+            ["to read", "Lang\u001fVerbs"],
+            ["to walk", "Lang\u001fVerbs"],
+            ["to walk", "Lang\u001fVerbs"],
+            ["{{c1::Rain}} falls and {{c2::snow}} drifts.", "Lang"],
+            ["{{c1::Rain}} falls and {{c2::snow}} drifts.", "Lang"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/media-map-variants",
+  "scenario_sha256": "6c2c54cc0ddee475acf92bff7aba817058e6e0a4a9982721d49d1bd76ef7da36",
+  "tz": "UTC"
+}

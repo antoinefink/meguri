@@ -27,3 +27,11 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to write `specs/editor/mask-editor.md`
 | image-occlusion-strings S2 to S4 | `ftl/core/editing.ftl`, `ftl/core/notetypes.ftl` | the Anki column's English |
 
 The plan (U205 to U207, R995 to R1019) supplied the Meguri-side rules: native editor, device-local translucency, R1014's kept masks, R994's refusal, the deletion notice, R1013's mask editor in Browse, and U207's audio fields. The review of 2026-11-10 (findings R0 and R1 of this item) added the Meguri decisions now marked in the specs: the reference size fixed per image load, host fields, the Add-mode Draw New Masks, the mapping onto shown fields, the narrowed `A` + digits audio field rule, the renumber warning, the polygon closing radius and Close Polygon, uniform group scaling, the 5-point resize stop and the mask editor's key context.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| triage of the mask-save race row to editor/mask-editor M9 and editor/image-occlusion-notes O6.1, and the proposed IOAddEditUITests Add-mode case | `ts/tests/e2e/io-mask-save-race.spec.ts` | Triage only: a mask drawn just before typing in another field must not be lost. Classified native-ui. |

@@ -59,3 +59,12 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows and 
 |---|---|---|
 | notetypes/change/same-type-remap, notetypes/change/cloze-round-trip (spec notetypes/change-notetype M1, M2, M3, M7, M9.1-M9.3) | `pylib/tests/test_models.py`; `rslib/src/notetype/notetypechange.rs` (test module only); `ts/routes/change-notetype/lib.test.ts` | To learn which behaviors the harvested tests require: same-type field and template remaps, a template map with a none entry from one or two old templates, standard and cloze round trips, the default field map rules, the mapping sheet's picker, unused and unchanged state, and the -1/null conversion. No expectation was taken from them; the goldens come from the oracle. |
 | notes/empty-cards#E2 report label stripping (needs-op rows hd276a7ef2889, h6288de9d6fb5, h8c43ce71aafa) | `rslib/src/notetype/emptycards.rs` | Which behavior the three report tests require: markup is stripped from note type and template names in the Empty Cards report and plain names pass unchanged. Confirmed that the report string, not the scan data, is where it shows, so the existing empty_cards op cannot observe it. |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| notes/empty-cards E1/E2/E7 scenarios cardgen/empty/after-template-change and cardgen/empty/special-front-edit | `pylib/tests/test_cards.py` | Which behaviors the two tests check: cards created when a template is added, a card left empty after a front edit and removed by Empty Cards, regeneration after a field edit, and a special-name section on an edited front counted by the Empty Cards scan. Golden values come from the oracle. |
+| needs-op classification of hf580907ab941 (single note type of a selection, notetypes/change-notetype M4) | `rslib/src/notes/service.rs`, `rslib/src/notetype/mod.rs`, `pylib/anki/models.py`, `qt/aqt/changenotetype.py` | Which Anki request decides the single note type of a selection and its refusals, to show that the driver's change_notetype_info check restates it in SQL instead of calling it. |

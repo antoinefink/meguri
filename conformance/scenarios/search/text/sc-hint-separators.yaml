@@ -1,0 +1,39 @@
+# R1043; specs/search/text-matching.md T9.2: when sc: removes cloze markup,
+# each cloze keeps only its answer, cut at the first `::` after the opener's
+# `::`. Hints that themselves hold `::` (once or several times, quoted or
+# not) go entirely, several clozes in one field are each replaced in place
+# with the text around them kept, and answers with characters above U+FFFF
+# or with one colon stay whole. The queries without sc: show the
+# removed parts are in the stored field, so a miss under sc: comes from the
+# removal alone. Notes mode, one cloze note type.
+id: search/text/sc-hint-separators
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Gap, fields: ['Sky {{c1::red::first "::" second}} {{c2::🍎}} {{c3::blue::two::parts::here}} end.', x]}
+    - {notetype: Gap, fields: ["{{c1::a:b::c}} {{c2::🍎::label}} rest", x]}
+    - {notetype: Gap, fields: ["{{c4::green::}}{{c5::::empty answer}}stop", x]}
+steps:
+  - observe:
+      - search:
+          - {query: 'sc:"Sky red 🍎 blue end."', kind: notes}
+          - {query: 'sc:second', kind: notes}
+          - {query: 'second', kind: notes}
+          - {query: 'sc:parts', kind: notes}
+          - {query: 'sc:here', kind: notes}
+          - {query: 'parts', kind: notes}
+          - {query: 'sc:🍎', kind: notes}
+          - {query: 'sc:label', kind: notes}
+          - {query: 'label', kind: notes}
+          - {query: 'sc:"a_b 🍎 rest"', kind: notes}
+          - {query: 'sc:"b c"', kind: notes}
+          - {query: 'sc:greenstop', kind: notes}
+          - {query: 'sc:empty', kind: notes}
+          - {query: 'empty', kind: notes}

@@ -1,0 +1,47 @@
+# Undoing a deck options save that removed a preset puts the preset's row
+# back exactly as it was stored (specs/sched/deck-options.md O7.2 step 1 and
+# the save's single undo step; specs/decks/deck-presets.md P8): the same id,
+# name, `mtime_secs`, `usn` and config bytes, a legacy member in `other`
+# included, and the deck that used it names it again with its own stamps.
+# `scm` goes back to `ls`. Redo removes it again. Compare
+# sched/options/remove-preset, which reads names only.
+# Main is used by Words, Spare (new cards/day 9, learning 2m 20m, one
+# extra legacy member) by Extra. Before the save every preset and deck row
+# is given `usn` 3, so that a restore which stamped the row would show.
+# The collection was just synced (ls = scm).
+# Needs save_deck_options with remove (specs/conformance/deck-options-ops.md
+# E1).
+id: sched/options/remove-preset-undo-rows
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Main}
+    - {name: Spare, new_per_day: 9, learn_steps: [2m, 20m]}
+  decks: [{name: Words, preset: Main}, {name: Extra, preset: Spare}]
+steps:
+  - legacy_update: {preset: Spare, patch: {x_extra: {level: 2}}}
+  - db_exec: {sql: "UPDATE deck_config SET usn = 3"}
+  - db_exec: {sql: "UPDATE decks SET usn = 3"}
+  # Anki caches decks: read the raw writes afresh.
+  - reopen: {}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1h
+  - observe:
+      - db_dump: {tables: [deck_config, decks]}
+  - save_deck_options: {deck: Words, remove: [Spare]}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - observe:
+      - db_dump: {tables: [deck_config, decks]}
+      - undo_status
+  - advance: 1m
+  - undo: {}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - observe:
+      - db_dump: {tables: [deck_config, decks]}
+      - undo_status
+  - advance: 1m
+  - redo: {}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - observe:
+      - db_dump: {tables: [deck_config, decks]}

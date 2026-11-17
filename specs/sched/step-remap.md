@@ -3,7 +3,7 @@
 Spec: sched/step-remap
 Requirements: R644, R645
 Anki: 26.09.3
-Scenarios: conformance/scenarios/sched/options/
+Scenarios: conformance/scenarios/sched/options/, conformance/scenarios/notes/change-deck/
 
 When the steps a learning or relearning card is going through change, because its preset's steps were edited or because the card moved to a deck with another preset, the card's count of remaining steps is translated to the new list. This file gives the translation (R2), when the deck options save applies it (R3, U49), and the preset-change hook that Change Deck calls (R4, R645; U27, U87). The preset fields are `sched/presets#V2` and `#V5`; the card columns `sched/card-data#K1` and `#K4`; how a card moves through its steps is U45's (`sched/fsrs-transitions`).
 
@@ -47,6 +47,19 @@ Examples (golden `sched/options/remap-steps`; steps in minutes):
 | 1 10 | 1 5 20 | 1 (passed 1) | last new step ≤ 1 is 1, two after it: 2 | 2 |
 | 1 10 | 1 5 20 | 2 (step 1) | every new step: 3 | 3 |
 
+More examples (goldens `sched/options/remap-floor-shortened` and `sched/options/remap-passed-step-inserted`): a shortened list that leaves no step after the passed one keeps one step, and inserted steps no longer than the passed one count as passed.
+
+| `O` | `N` | `left` before | Result | `left` after |
+|---|---|---|---|---|
+| 2 15 | 2 | 1 (passed 2) | last new step ≤ 2 is 2, none after: 0, at least 1, equal | 1, not written |
+| 2 15 | 2 | 2 (nothing passed) | every new step: 1 | 1 |
+| 5 30 | 4 | 1 (passed 5) | last new step ≤ 5 is 4, none after: 0, at least 1, equal | 1, not written |
+| 3 20 40 | 1 3 | 2 (passed 3) | last new step ≤ 3 is 3, none after: 0, at least 1 | 1 |
+| 3 20 40 | 1 3 | 1 (passed 20) | last new step ≤ 20 is 3, none after: 0, at least 1, equal | 1, not written |
+| 2 15 | 1 2 15 | 1 (passed 2) | last new step ≤ 2 is 2, one after: 1, equal | 1, not written |
+| 5 30 | 5 5 30 | 1 (passed 5) | last new step ≤ 5 is the second 5, one after: 1, equal | 1, not written |
+| 4 25 | 1 2 4 10 25 | 1 (passed 4) | last new step ≤ 4 is 4, two after: 2 | 2 |
+
 The rule only compares values, so a list with repeated or decreasing values can change the count even when `O` equals `N`: with `O` = `N` = 1 1 10 and `r` 2 (passed the first 1), the last element ≤ 1 is the second one, one step follows, and the count becomes 1. R3 never applies the translation to equal lists; R4 does.
 
 ## R3. The deck options save (R644)
@@ -69,6 +82,15 @@ Steps change for `D` both when its preset's steps are edited and when `D` gets a
 | D: Lang's learning steps none → 1m 10m | nothing: the old list is empty |
 | E: Phrases moves from Other (1m 10m) to Lang, whose steps become 1m 5m 20m | Words' cards translate from Lang's old list, Phrases' from Other's |
 
+### R3.1 Other preset writes
+
+Only the deck options save (R3) and the preset-change hook (R4) translate remaining counts. Any other write of a preset's steps leaves every card's `left` as stored, even when it is now larger than the new list. Goldens `sched/steps/shrunk-learning-steps` and `sched/steps/removed-relearning-steps` show this for a schema-11 preset save (the scenario op `legacy_update`, `specs/conformance/model-ops.md` L2), next to a deck options save that remaps the same state. A preset received by sync or by a deck-package import is written the same way, but no scenario covers those paths yet.
+
+Such a card is then answered with `sched/steps#L2` to `#L5` as it stands; L2 already reads a count larger than the list as the first step:
+
+- With `left` 5 and the single learning step 4m, the current step is the first, Hard keeps `left` 5 with the single-step delay of 360 s, and Good leaves the steps (golden `sched/steps/shrunk-learning-steps`).
+- With `left` 2 and no relearning steps, Again, Hard and Good on a relearning card all leave relearning per `sched/fsrs-transitions#T9`, without another lapse (golden `sched/steps/removed-relearning-steps`).
+
 ## R4. The preset-change hook (R645)
 
 Change Deck (U27's set-deck operation, which U87, U140 and U142 call) is the only operation that moves cards between decks. For every card it moves to the normal deck `T`, before the move:
@@ -79,7 +101,7 @@ Change Deck (U27's set-deck operation, which U87, U140 and U142 call) is the onl
 
 - A card whose `did` already is `T` is not moved and not translated.
 - The hook's contract for U27: given the card's `type` and `left` and the two presets, it returns the new `left` or "unchanged", applying R1 and R2; the caller writes the card once, with the move.
-- Change Deck's scenarios (U87) cover the hook end to end, with the recompute; they need a scenario op for Change Deck, which does not exist yet. Until then Meguri's tests check the hook with R2's table and R5's cases.
+- Change Deck's scenarios cover the hook end to end through the scenario op `change_deck` (`specs/conformance/bulk-ops.md` X2; a draft op, `dsl.md` D7.2). `notes/change-deck/remaining-steps` covers the translation of learning and relearning cards, the filtered card's home preset, empty old lists and equal presets; `notes/change-deck/memory-states` and `notes/change-deck/target-state-kept` cover the recompute (item 3). Meguri's tests also check the hook with R2's table and R5's cases.
 
 ## R5. Tests
 
@@ -87,6 +109,13 @@ Change Deck (U27's set-deck operation, which U87, U140 and U142 call) is the onl
 |---|---|---|
 | `sched/options/remap-steps` | R2, R3 (learning, relearning, filtered, suspended, interday, review untouched, empty lists, a preset switch with an edit) | recorded |
 | `sched/options/undo-save` | R3 inside a save that is undone and redone | recorded |
+| `sched/options/remap-answered/learning` | R2 rule 2 and R3 on a learning card reached by answering: an added unreached learning step raises the count; an edit to relearning steps only leaves learning cards unwritten | recorded |
+| `sched/options/remap-answered/relearning` | R2 and R3 on relearning cards reached by answering: an added unreached relearning step raises the count; an edit to learning steps only leaves them unwritten; a shorter step put before the passed one keeps the count; a shortened list and an empty list each keep at least one step | recorded |
+| `sched/options/remap-floor-shortened` | R2 rule 4 with non-empty shortened lists (learning and relearning): no step left after the passed one gives 1, written only when the count changes | recorded |
+| `sched/options/remap-passed-step-inserted` | R2 rule 3 when steps no longer than the passed one are inserted (shorter or equal values, learning and relearning): the count stays; a step inserted after the passed one raises it | recorded |
+| `notes/change-deck/remaining-steps` | R4: learning 2 to 3 and 1 to 2, relearning 1 to 3; a filtered card's home preset; an empty old list for learning and relearning (count kept); the same preset on both sides (item 2: learning 7 to 3, relearning 0 to 1); a review card's `left` untouched | held: recorded, kept on branch `held/harvest-batch-2` until the testkit parses `change_deck` |
+| `notes/change-deck/memory-states` | R4 item 3: the moved cards and the target deck's cards without a state get one from the target preset; a card already in the target deck is not moved; a new card gets none | held: recorded, kept on branch `held/harvest-batch-2` until the testkit parses `change_deck` |
+| `notes/change-deck/target-state-kept` | R4 item 3: which cards of the target deck the recompute writes (`sched/memory-state#M7.2`) | held: recorded, kept on branch `held/harvest-batch-2` until the testkit parses `change_deck` |
 
 Meguri's own tests (`core/crates/meguri-sched/src/options/remap.rs` unit tests and `core/crates/meguri-engine/tests/deck_options.rs`) take their expected values from R2's table, the golden, and these hook cases (R4), each a card moved from deck A to deck B:
 

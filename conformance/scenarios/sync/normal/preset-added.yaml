@@ -1,0 +1,45 @@
+# Presets that a normal sync brings to a collection that lacks them
+# (specs/sync/normal-sync.md N5.4; specs/model/schema11-json.md S10): after
+# both parties share one collection, client_a adds a preset Alpha, clones it
+# as Beta, changes Alpha's answer time cap and moves deck Words to Alpha. The
+# Meguri actor holds neither preset; after its round at 10:04 it holds
+# both, each under the id client_a gave it at 10:03 (not one of its own
+# clock), with the incoming `mtime_secs` and `usn`, and Words names Alpha's
+# id. client_a's later round brings nothing new and all parties converge.
+# 10:03 is epoch second 1894701780.
+id: sync/normal/preset-added
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words, Other]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - observe:
+      - db_dump: {tables: [deck_config]}
+  - actor: client_a
+  - advance: 1m
+  - add_preset: {name: Alpha}
+  - clone_preset: {preset: Alpha, name: Beta}
+  - legacy_update: {preset: Alpha, patch: {maxTaken: 45}}
+  - set_deck_preset: {deck: Words, preset: Alpha}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [decks, deck_config]}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [decks, deck_config]}
+      - legacy_json: {presets: [Alpha, Beta], decks: [Words]}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [deck_config]}
+  - converge: {}

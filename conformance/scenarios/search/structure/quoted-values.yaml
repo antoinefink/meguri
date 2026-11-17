@@ -1,0 +1,88 @@
+# R1075; specs/search/query-model.md Q9 (statement: all user text in bound
+# parameters), specs/search/properties.md P9, P15; names-and-ids.md;
+# fields.md; text-matching.md. Apostrophes and text that reads like SQL are
+# plain data in every term that carries user text: plain text, field text,
+# field names, tags, decks, presets, note type and template names, regular
+# expressions, dupe text and custom data keys and values. Each search finds
+# only the row holding that exact text, never every row, never none of them
+# by a broken statement; the last observation shows nothing was dropped or
+# deleted. Card c(n) belongs to note n; card ids are pinned by the first
+# observation.
+id: search/structure/quoted-values
+tags: [needs-text, needs-tag, needs-deck, needs-notetype, needs-template, needs-dupe, needs-prop]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets:
+    - {name: "P'set"}
+  decks:
+    - {name: "D'one", preset: "P'set"}
+    - Other
+  notetypes:
+    - name: "Q'Type"
+      fields: [Front, "It's"]
+      templates: [{name: "Card'A", front: "{{Front}}", back: "{{It's}}"}]
+      css: ".card { margin: 0; }"
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: "Q'Type", deck: "D'one", fields: ["it's", "x"], tags: ["t'ag"]}
+    - {notetype: Plain, deck: Other, fields: [its, x], tags: [tag]}
+    - {notetype: Plain, deck: Other, fields: ["a';DELETE FROM notes;--", x]}
+    - {notetype: Plain, deck: Other, fields: ["' OR '1'='1", x]}
+    - {notetype: Plain, deck: Other, fields: [plain, x]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "SELECT id, name FROM notetypes WHERE name IN ('Q''Type', 'Plain') ORDER BY id"}
+  # custom data: c3 holds k = a'b, c4 holds k = SQL-like text, c5 a key
+  # with an apostrophe
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)", params: ['{"cd":"{\"k\":\"a''b\"}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)", params: ['{"cd":"{\"k\":\"n'');DELETE FROM revlog;--\"}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)", params: ['{"cd":"{\"o''k\":1}"}']}
+  - db_exec: {sql: "SELECT data FROM cards ORDER BY id"}
+  - observe:
+      - search:
+          # plain text
+          - {query: "it's"}
+          - {query: "\"it's\""}
+          - {query: "nc:it's"}
+          - {query: "w:it's"}
+          - {query: "\"a';DELETE FROM notes;--\""}
+          - {query: "\"' OR '1'='1\""}
+          - {query: "\"' OR '1'='1\"", kind: notes}
+          - {query: "'"}
+          - {query: "''"}
+          # field text and field names
+          - {query: "Front:it's"}
+          - {query: "\"Front:' OR '1'='1\""}
+          - {query: "It's:x"}
+          - {query: "\"It's:*\""}
+          - {query: "Front:re:'"}
+          - {query: "\"re:' OR\""}
+          # tags
+          - {query: "tag:t'ag"}
+          - {query: "\"tag:x' OR '1'='1\""}
+          - {query: "tag:re:'"}
+          # decks and presets
+          - {query: "deck:D'one"}
+          - {query: "\"deck:x' OR '1'='1\""}
+          - {query: "preset:P'set"}
+          - {query: "\"preset:x' OR '1'='1\""}
+          # note types and templates
+          - {query: "note:Q'Type"}
+          - {query: "note:Q'*"}
+          - {query: "\"note:x' OR '1'='1\""}
+          - {query: "card:Card'A"}
+          - {query: "\"card:x' OR '1'='1\""}
+          # dupe text (note type ids pinned above)
+          - {query: "dupe:1894701600006,it's", kind: notes}
+          - {query: "\"dupe:1894701600007,' OR '1'='1\"", kind: notes}
+          - {query: "\"dupe:1894701600007,x' OR '1'='1\"", kind: notes}
+          # custom data
+          - {query: "prop:cds:k=a'b"}
+          - {query: "\"prop:cds:k=n');DELETE FROM revlog;--\""}
+          - {query: "\"prop:cds:k=x' OR '1'='1\""}
+          - {query: "has-cd:o'k"}
+          - {query: "\"has-cd:o' OR '1'='1\""}
+  - db_exec: {sql: "SELECT (SELECT count(*) FROM notes), (SELECT count(*) FROM cards), (SELECT count(*) FROM notetypes), (SELECT count(*) FROM decks), (SELECT count(*) FROM revlog)"}

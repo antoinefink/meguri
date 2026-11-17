@@ -1,0 +1,29 @@
+# stats/card-info C14.3 no-item (C3.4, R1251): review cards with no stored
+# memory state whose history gives no memory item (sched/fsrs-items I3).
+# The first card was new and only received Set Due Date "5" (one manual
+# row); the second was answered Good twice, Reset, then given Set Due Date
+# "5" (history L L X M; the Reset keeps dr, decay and lrt in its data).
+# Expected: both are review cards with a factor, yet memory_state and
+# fsrs_retrievability are null, also for the second card's entries before
+# the Reset: Card Info computes a state only from a review history that
+# gives an item. The card stats are observed once, after the ops (C13.4).
+id: stats/card-info/no-item
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {"fsrs": true, "loadBalancerEnabled": false, "rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["moved only", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["reset then moved", "x"]}
+steps:
+  - {"observe": ["timing"]}
+  - {"answer": {"card": "#c2", "rating": "good", "time_ms": 2000}}
+  - {"advance": "10m"}
+  - {"answer": {"card": "#c2", "rating": "good", "time_ms": 2000}}
+  - {"advance": "1h"}
+  - {"forget": {"cards": ["#c2"], "restore_position": true, "reset_counts": false}}
+  - {"set_due": {"cards": ["#c1", "#c2"], "days": "5"}}
+  - {"observe": [{"card": ["#c1", "#c2"]}]}
+  - {"observe": [{"card_stats": ["#c1", "#c2"]}]}

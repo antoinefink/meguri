@@ -23,3 +23,11 @@ Anki warning is recorded in O12 instead.
 | deck-options O15.2, O12 | `qt/aqt/reviewer.py` | after an op that changes study queues, the reviewer fetches the next card (Meguri keeps the shown card first instead, by review-session C4 and P11) |
 | deck-options O15.3 | `ts/routes/deck-options/SaveButton.svelte`, `ts/lib/tslib/shortcuts.ts`, `ts/lib/tslib/keys.ts`, `ts/routes/deck-options/lib.ts` (the commit-editing helper), `qt/aqt/deckoptions.py`, `[deckId]/+page.svelte` | save on Control+Enter, shown through the platform string helper and mapped to Command on macOS by the platform modifier table; the active edit ended before the save and before the pending-changes check; close after save; the close event asking to discard pending changes |
 | deck-options O16, O12 | `ts/routes/deck-options/LapseOptions.svelte`, `AdvancedOptions.svelte`, `NewOptions.svelte` | Minimum interval and the relearning-steps-versus-minimum warning shown only without FSRS; historical retention and the ignore date shown with FSRS |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| Classification of the deck options screen-state harvest rows (start, deck list, duplicate name, saving) against sched/deck-options O2, O6.1 to O6.5, O7 and decks/deck-presets P7, and the P7 suffix-rounding proposal | `ts/routes/deck-options/lib.test.ts`; `ts/routes/deck-options/lib.ts` (the duplicate-name suffix only) | Which behaviors the screen-state tests require: the draft initialized for the requested nested deck, picker order and shown use counts, staged rename, add, select and remove with Default not removable, the duplicate-name suffix, and which presets and removals the draft's save data carries. Each was mapped to an existing spec section, covered by a scenario or classified native-ui. The screen source was read only to confirm that the suffix is the clock in seconds rounded to the nearest whole number, not truncated, for the P7 precision proposal. |

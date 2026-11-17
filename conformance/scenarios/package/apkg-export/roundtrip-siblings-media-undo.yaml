@@ -1,0 +1,82 @@
+# A deck-limited round trip with a sibling in another deck, a media name
+# clash and the import's undo, in the latest and the legacy format
+# (specs/package/apkg-export.md A3, A9; legacy-export.md L5, L7;
+# apkg-import.md I10.2, I12.2, I12.3, I14.3; package-ops.md E6, E7, E8).
+# The note of Twin has card A in Top::Main and card B, moved by a raw write,
+# in Side; Top::Main::Sub is empty. Its field names pic.png and tone.ogg, its
+# template _twin.js, and it carries the tag kept. Exporting Top::Main takes
+# both cards, Top, Top::Main and Side, but not Top::Main::Sub. Then the note
+# type, both decks and the tag go, and tone.ogg gets other bytes. Importing
+# brings back the decks, the note type, the note with its tag and both cards
+# in their decks; pic.png and _twin.js are written; the package's tone.ogg
+# goes under its hash name and the field names that file; the target's
+# tone.ogg stays. Undo removes every row the import added; the files stay.
+# The legacy package is then imported the same way after the written files
+# are removed.
+id: package/apkg-export/roundtrip-siblings-media-undo
+description: A deck export keeps a sibling card in another deck, resolves a media clash on import, and the import undoes as one step.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: ["Top::Main", "Top::Main::Sub", Side]
+  notetypes:
+    - name: Twin
+      fields: [Word]
+      templates:
+        - {name: A, front: "{{Word}}", back: "{{Word}}<script src=\"_twin.js\"></script>"}
+        - {name: B, front: "{{Word}}?", back: "{{Word}}"}
+  notes:
+    - {notetype: Twin, deck: "Top::Main", fields: ["<img src=\"pic.png\"> [sound:tone.ogg]"], tags: [kept]}
+  media_files:
+    - {name: pic.png, text: "picture bytes"}
+    - {name: tone.ogg, text: "first sound"}
+    - {name: _twin.js, text: "var t = 2;"}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'Side') WHERE ord = 1"}
+  - reopen: {}
+  - advance: 1m
+  - export: {format: apkg, name: main.apkg, limit: {deck: "Top::Main"}, scheduling: true, presets: true, media: true}
+  - export: {format: apkg, name: main-old.apkg, limit: {deck: "Top::Main"}, scheduling: true, presets: true, media: true, legacy: true}
+  - remove_notetype: {notetype: Twin}
+  - delete_decks: {decks: [Top, Side]}
+  - clear_unused_tags: {}
+  - advance: 1m
+  - media_outside:
+      - {name: pic.png, remove: true}
+      - {name: _twin.js, remove: true}
+      - {name: tone.ogg, text: "second sound"}
+  - advance: 1m
+  # A raw write: the undo history then holds only the import.
+  - db_exec: {sql: "UPDATE col SET usn = usn"}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT count() FROM tags), (SELECT count() FROM notetypes WHERE name = 'Twin'), (SELECT group_concat(name, '|') FROM decks)"}
+  - observe: [media_dir]
+  # Latest format.
+  - import: {format: apkg, name: main.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - db_exec: {sql: "SELECT name FROM decks ORDER BY name"}
+  - db_exec: {sql: "SELECT c.ord, d.name FROM cards c JOIN decks d ON d.id = c.did ORDER BY c.ord"}
+  - db_exec: {sql: "SELECT n.flds, n.tags, t.name FROM notes n JOIN notetypes t ON t.id = n.mid"}
+  - db_exec: {sql: "SELECT tag FROM tags ORDER BY tag"}
+  - observe: [media_dir]
+  - observe: [undo_status]
+  - advance: 1m
+  - undo: {}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT count() FROM tags), (SELECT count() FROM notetypes WHERE name = 'Twin'), (SELECT group_concat(name, '|') FROM decks)"}
+  - observe: [media_dir]
+  # Legacy format, after the files the first import wrote are removed.
+  - advance: 1m
+  - media_outside:
+      - {name: pic.png, remove: true}
+      - {name: _twin.js, remove: true}
+      - {name: tone-04f74224b5216521f1ce14dc9c2f69466ac8f624.ogg, remove: true}
+  - advance: 1m
+  - observe: [media_dir]
+  - import: {format: apkg, name: main-old.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - db_exec: {sql: "SELECT name FROM decks ORDER BY name"}
+  - db_exec: {sql: "SELECT c.ord, d.name FROM cards c JOIN decks d ON d.id = c.did ORDER BY c.ord"}
+  - db_exec: {sql: "SELECT n.flds, n.tags, t.name FROM notes n JOIN notetypes t ON t.id = n.mid"}
+  - db_exec: {sql: "SELECT tag FROM tags ORDER BY tag"}
+  - observe: [media_dir]
+  - advance: 1m
+  - undo: {}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT count() FROM tags), (SELECT count() FROM notetypes WHERE name = 'Twin'), (SELECT group_concat(name, '|') FROM decks)"}

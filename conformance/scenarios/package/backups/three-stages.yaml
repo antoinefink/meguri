@@ -1,0 +1,45 @@
+# specs/package/backups.md B5.1, B5.2; specs/conformance/backup-ops.md F2,
+# F3, F5. Limits daily 2, weekly 3, monthly 2 on 2031-09-17 (UTC), a midweek day.
+# Kept without a count: the file dated 2031-09-18 (later than today), the
+# 06:00 file of today and the one of yesterday 2031-09-16.
+# Daily stage (dates): 2031-09-14 keeps its 18:00 file and loses its 06:00
+# one; 2031-09-10 takes the second count although 09-11 to 09-13 hold none.
+# Weekly stage (Monday weeks): 2031-09-08 shares the week of Monday
+# 2031-09-08 with the last daily file and goes. Sunday 2031-09-07 is the
+# newest backup of the week of Monday 2031-09-01 and stays; 2031-09-02 goes.
+# No backup falls in the week of Monday 2031-08-25; 2031-08-20 keeps the week
+# of Monday 2031-08-18 and 2031-08-18 goes. Sunday 2031-08-17 is the third
+# week.
+# Monthly stage (calendar months): 2031-08-03 shares month 8 with the last
+# weekly file and goes. 2031-07-31 is in the same Monday week as 2031-08-03
+# but in month 7, and stays; 2031-07-05 goes. Month 6 holds none; 2031-05-20
+# keeps month 5. Every count is then used up: 2031-05-02 and 2030-12-25 go.
+id: package/backups/three-stages
+description: Daily, weekly and monthly limits above one keep the newest backup of each period and spare today, yesterday and later dates.
+clock: {tz: UTC, start: "2031-09-17T10:00:00"}
+setup:
+  config:
+    backups: {daily: 2, weekly: 3, monthly: 2, minimum_interval_mins: 30}
+steps:
+  - add_backup_files:
+      names:
+        - backup-2031-09-18-08.00.00.colpkg
+        - backup-2031-09-17-06.00.00.colpkg
+        - backup-2031-09-16-21.00.00.colpkg
+        - backup-2031-09-14-18.00.00.colpkg
+        - backup-2031-09-14-06.00.00.colpkg
+        - backup-2031-09-10-12.00.00.colpkg
+        - backup-2031-09-08-12.00.00.colpkg
+        - backup-2031-09-07-12.00.00.colpkg
+        - backup-2031-09-02-12.00.00.colpkg
+        - backup-2031-08-20-12.00.00.colpkg
+        - backup-2031-08-18-12.00.00.colpkg
+        - backup-2031-08-17-12.00.00.colpkg
+        - backup-2031-08-03-12.00.00.colpkg
+        - backup-2031-07-31-12.00.00.colpkg
+        - backup-2031-07-05-12.00.00.colpkg
+        - backup-2031-05-20-12.00.00.colpkg
+        - backup-2031-05-02-12.00.00.colpkg
+        - backup-2030-12-25-12.00.00.colpkg
+  - force_backup: {}
+  - observe: [backup_files]

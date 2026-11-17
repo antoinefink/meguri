@@ -1,0 +1,26 @@
+# Removing a key that set_config wrote (specs/storage/config-table.md C10).
+# Two keys are written through the config API; removing savedFilters deletes
+# its row and only that row: flagLabels keeps its value and stamps, no grave
+# is added, and col.mod moves to the instant of the removal. Anki's own read
+# of the removed key then gives the default an absent key gives
+# (browser/config-keys K1: an empty object), while the other key still reads
+# its value. Writing the key again later makes a new row stamped with that
+# later instant. Needs set_config, remove_config, db_exec and the
+# browser_config observation (specs/conformance/record-ops.md W1, W4,
+# undo-ops.md V3.2, browser-config-ops.md B2).
+id: storage/config/remove-key
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - set_config: {key: savedFilters, value: {Alpha: "deck:A", Beta: "tag:b"}}
+  - set_config: {key: flagLabels, value: {"2": Orange}}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('savedFilters', 'flagLabels') ORDER BY KEY"}
+  - observe: [browser_config]
+  - advance: 1h
+  - remove_config: {key: savedFilters}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('savedFilters', 'flagLabels') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT (SELECT count(*) FROM graves), (SELECT mod FROM col)"}
+  - observe: [browser_config]
+  - advance: 1h
+  - set_config: {key: savedFilters, value: {Gamma: "is:new"}}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('savedFilters', 'flagLabels') ORDER BY KEY"}
+  - observe: [browser_config]

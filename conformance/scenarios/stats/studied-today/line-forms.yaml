@@ -1,0 +1,20 @@
+# stats/studied-today T2, T5.1: the Home line for given counts and summed
+# times, with no review-log rows. Each pair picks one form of the sentence:
+# whole and fractional seconds with a fractional seconds-per-card average,
+# exactly 60 s as one minute, whole and fractional minutes, a whole number
+# of minutes well past an hour (still minutes, no hours), and the
+# singular card and second.
+id: stats/studied-today/line-forms
+clock: {tz: UTC, start: "2026-10-12T12:00:00"}
+steps:
+  - observe:
+      - studied_today_format:
+          inputs:
+            - [1, 2000]
+            - [5, 1000]
+            - [6, 20000]
+            - [7, 45000]
+            - [12, 60000]
+            - [9, 150000]
+            - [240, 7200000]
+            - [45, 10800000]

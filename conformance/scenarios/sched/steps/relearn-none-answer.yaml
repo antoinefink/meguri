@@ -1,0 +1,38 @@
+# Again on a review card whose preset has no relearning steps (R654, R655;
+# specs/sched/steps.md L3, L9, specs/sched/fsrs-transitions.md T9,
+# specs/sched/answering.md A3.2). FSRS on, load balancer off, from 10:00:00
+# UTC. Both cards are reviews due today, last reviewed 10 days ago with
+# stability 10, so FSRS's Again interval is at least a day.
+# #c2 (deck Steps, relearning step 10m), answered first with no queue held:
+#   Again starts relearning (type 3, queue 1).
+# #c1 (deck Bare, no relearning steps), taken from Bare's queue: Again
+#   returns it to review (type 2, queue 2), due on a later day, with
+#   one more lapse; Bare's queue then presents nothing and counts no
+#   learning card.
+id: sched/steps/relearn-none-answer
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Bare, relearn_steps: [], desired_retention: 0.9}
+    - {name: Steps, relearn_steps: [10m], desired_retention: 0.9}
+  decks:
+    - {name: Bare, preset: Bare}
+    - {name: Steps, preset: Steps}
+  notetypes:
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Plain, deck: Bare, fields: [bare, a]}
+    - {notetype: Plain, deck: Steps, fields: [stepped, b]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 10, factor = 2500, reps = 6, lapses = 1, data = ?"
+      params: ['{"s":10.0,"d":5.0,"lrt":1893837600}']
+  - answer: {card: "#c2", rating: again, time_ms: 3000}
+  - observe: ["card(#c2)"]
+  - set_current_deck: {deck: Bare}
+  - observe: [queue]
+  - answer: {card: "#c1", rating: again, time_ms: 3000}
+  - observe: [queue, congrats, "card(#c1)", "revlog(#c1)"]

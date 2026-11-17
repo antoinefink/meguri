@@ -1,0 +1,37 @@
+# C6 and C11 of specs/maintenance/check-media.md with
+# text/media-references M2 to M4: one field holding two image tags, each
+# with an alt attribute before its src, yields both names, whether the
+# values use single quotes, double quotes or one of each. Every referenced
+# file that exists is used and only the spare file is unused; the two names
+# of the last note have no file, so both are missing. The text observation
+# shows the names each field yields.
+id: maintenance/check-media/refs/several-tags
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["n1", "<img alt='first' src='p1.jpg'><img alt='second' src='p2.jpg'>"]}
+    - {notetype: Media, fields: ["n2", "<img alt=\"first\" src=\"q1.jpg\"><img alt=\"second\" src=\"q2.jpg\">"]}
+    - {notetype: Media, fields: ["n3", "<img alt='first' src='r1.jpg'><img alt=\"second\" src=\"r2.jpg\">"]}
+    - {notetype: Media, fields: ["n4", "<img alt=\"first\" src=\"s1.jpg\"><img alt='second' src='s2.jpg'>"]}
+  media_files:
+    - {name: p1.jpg, text: "image p1"}
+    - {name: p2.jpg, text: "image p2"}
+    - {name: q1.jpg, text: "image q1"}
+    - {name: q2.jpg, text: "image q2"}
+    - {name: r1.jpg, text: "image r1"}
+    - {name: r2.jpg, text: "image r2"}
+    - {name: spare.jpg, text: "image spare"}
+steps:
+  - check_media: {}
+  - observe:
+      - text:
+          fns: [media_refs]
+          inputs:
+            - "<img alt='first' src='p1.jpg'><img alt='second' src='p2.jpg'>"
+            - "<img alt=\"first\" src=\"q1.jpg\"><img alt=\"second\" src=\"q2.jpg\">"
+            - "<img alt='first' src='r1.jpg'><img alt=\"second\" src=\"r2.jpg\">"
+            - "<img alt=\"first\" src=\"s1.jpg\"><img alt='second' src='s2.jpg'>"

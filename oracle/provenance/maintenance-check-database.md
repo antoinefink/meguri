@@ -46,3 +46,13 @@ C15, C16; check-database-notes N2's write rule and N6.6's write rule.
 | check-database-notes N7 | `rslib/src/dbcheck.rs`, `rslib/src/notetype/mod.rs` (add), `rslib/src/notetype/stock.rs` | the stock Basic note type added when none is left, its stamps (deviation `check-db-basic-stamped`) |
 | check-database-notes N8 | `rslib/src/dbcheck.rs` | which notes-stage counts mark the schema modified |
 | check-database-notes N9 | the files of N2, N4, N5 and N7 | the Anki column of each deviation |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| maintenance/check-db/card-fixes-counted, maintenance/check-db/revlog-row-counted (check-database C8, C10.1 counting per fix and per row); harvest links h8bba9c90dc5d, h5b5bc3629af2, hec5bf5d4f824 | `rslib/src/dbcheck.rs` | Which behaviors the card, revlog and deck-name tests require. Expectations come from the oracle goldens. |
+| maintenance/check-db-notes/tag-states-kept (check-database-notes N2); harvest links h984772533897, h45394f1a8123, h19a3e91fc826 | `rslib/src/dbcheck.rs` | Which behaviors the tag, note-card link and field-count tests require (tag states kept for used tags, duplicate and template-less cards, field joining and padding). Expectations come from the oracle goldens. |
+| maintenance/check-database C10.4 (ids in the future) and scenarios maintenance/check-db/future-ids-each-table and future-ids-card-order | `rslib/src/storage/dbcheck/mod.rs`, `rslib/src/storage/dbcheck/invalid_ids_count.sql`, `rslib/src/storage/dbcheck/invalid_ids_create.sql`, `rslib/src/storage/dbcheck/invalid_ids_update.sql`, `rslib/src/storage/dbcheck/invalid_ids_drop.sql`, `rslib/src/dbcheck.rs` (the caller's cutoff and first new id only) | Which behavior the four harvested tests require: the count across the three tables, re-keying in ascending order of old id from the given first id, and card nid and review-log cid following the new ids. I confirmed that C10.4 already states each rule. The goldens come from the oracle. |

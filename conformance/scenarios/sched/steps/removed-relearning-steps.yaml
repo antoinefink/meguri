@@ -1,0 +1,52 @@
+# Answering a relearning card after every relearning step of its preset was
+# removed (R639, R655, R654; specs/sched/steps.md L3, L9;
+# specs/sched/fsrs-transitions.md T9; specs/sched/step-remap.md R3).
+# FSRS on, load balancer off. Keep and Keep Two both start with relearning
+# steps 10m 30m; Deck A uses Keep, Deck B uses Keep Two. Four review cards
+# (interval 20 days, due today, with a memory state): c1, c3 and c4 in
+# Deck A, c2 in Deck B. Again on each starts relearning with two steps to do.
+# Then the relearning steps become none: Keep through a plain preset save
+# (legacy_update), which leaves left 2 on its cards; Keep Two through the deck
+# options save, which remaps c2 to left 1. The next answers on the stepless
+# cards: Again on c1 and c2, Good on c3, Hard on c4; each leaves relearning.
+# Needs answer, db_exec, legacy_update (model-ops.md L2) and
+# save_deck_options (deck-options-ops.md E1).
+id: sched/steps/removed-relearning-steps
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Keep, learn_steps: [1m, 10m], relearn_steps: [10m, 30m]}
+    - {name: Keep Two, learn_steps: [1m, 10m], relearn_steps: [10m, 30m]}
+  decks: [{name: Deck A, preset: Keep}, {name: Deck B, preset: Keep Two}]
+  notetypes:
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Card 1, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { padding: 3px; }"
+  notes:
+    - {notetype: Plain, deck: Deck A, fields: [one, x]}
+    - {notetype: Plain, deck: Deck B, fields: [two, x]}
+    - {notetype: Plain, deck: Deck A, fields: [three, x]}
+    - {notetype: Plain, deck: Deck A, fields: [four, x]}
+steps:
+  # Review cards due today, last reviewed 20 days before the start.
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 20, factor = 2500, reps = 4, lapses = 0, data = '{\"s\":20.0,\"d\":5.0,\"lrt\":1892973600}'"
+  - advance: 1h
+  - answer: {card: "#c1", rating: again, time_ms: 3000}
+  - answer: {card: "#c2", rating: again, time_ms: 3000}
+  - answer: {card: "#c3", rating: again, time_ms: 3000}
+  - answer: {card: "#c4", rating: again, time_ms: 3000}
+  - observe: ["card(#c1, #c2, #c3, #c4)"]
+  - advance: 1m
+  - legacy_update: {preset: Keep, patch: {lapse: {delays: []}}}
+  - save_deck_options: {deck: Deck B, options: {relearn_steps: []}}
+  - observe: ["card(#c1, #c2, #c3, #c4)"]
+  - advance: 15m
+  - observe: ["next_states(#c1, #c2, #c3, #c4)"]
+  - answer: {card: "#c1", rating: again, time_ms: 3000}
+  - answer: {card: "#c2", rating: again, time_ms: 3000}
+  - answer: {card: "#c3", rating: good, time_ms: 3000}
+  - answer: {card: "#c4", rating: hard, time_ms: 3000}
+  - observe: ["card(#c1, #c2, #c3, #c4)", "revlog(#c1, #c2, #c3, #c4)"]

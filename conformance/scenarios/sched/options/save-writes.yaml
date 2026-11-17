@@ -1,0 +1,78 @@
+# Which rows a run of deck options saves writes (R737, R733, R744;
+# specs/sched/deck-options.md O7.2 steps 1 to 4, O8; decks/deck-presets P10):
+#  A. a save that changes nothing writes no preset, deck or card;
+#  B. a changed option writes the preset only;
+#  C. switching the deck to another preset writes the deck only;
+#  D. switching that preset's insertion order to Random re-sorts the deck's
+#     new cards from position 1 (all positions set to 0 first; read as
+#     aggregates only, deck-options-ops E5);
+#  E. removing that preset while switching back to Default reassigns the
+#     deck, re-sorts its new cards in note order, and makes the next sync
+#     one-way (scm moves past ls, which no earlier save did).
+# Needs save_deck_options (specs/conformance/deck-options-ops.md E1),
+# add_preset (specs/conformance/deck-ops.md K8) and db_exec
+# (specs/conformance/record-ops.md W1).
+id: sched/options/save-writes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  decks: [Deck A]
+  notetypes:
+    - name: Simple
+      fields: [Front, Back]
+      templates: [{name: Card 1, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { padding: 2px; }"
+  notes:
+    - {notetype: Simple, deck: Deck A, fields: [one, x]}
+    - {notetype: Simple, deck: Deck A, fields: [two, x]}
+    - {notetype: Simple, deck: Deck A, fields: [three, x]}
+    - {notetype: Simple, deck: Deck A, fields: [four, x]}
+steps:
+  # Every preset, deck and card stamped long ago with a server usn, and the
+  # collection just synced, so that each row a save writes shows it.
+  - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
+  - db_exec: {sql: "UPDATE decks SET usn = 5, mtime_secs = 1700000000"}
+  - db_exec: {sql: "UPDATE deck_config SET usn = 5, mtime_secs = 1700000000"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1h
+  # A. Save with nothing changed.
+  - save_deck_options: {deck: Deck A}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM deck_config ORDER BY id"}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM decks ORDER BY id"}
+  - db_exec: {sql: "SELECT due, mod, usn FROM cards ORDER BY id"}
+  - advance: 1m
+  # B. Default's new cards per day 20 -> 21.
+  - save_deck_options: {deck: Deck A, options: {new_per_day: 21}}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM deck_config ORDER BY id"}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM decks ORDER BY id"}
+  - db_exec: {sql: "SELECT due, mod, usn FROM cards ORDER BY id"}
+  - advance: 1m
+  - add_preset: {name: Second}
+  - advance: 1m
+  # C. Deck A switches to Second, whose options are the defaults.
+  - save_deck_options: {deck: Deck A, preset: Second}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM deck_config ORDER BY id"}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM decks ORDER BY id"}
+  - db_exec: {sql: "SELECT due, mod, usn FROM cards ORDER BY id"}
+  - observe: [{legacy_json: {decks: [Deck A]}}]
+  # Every position set to 0, so that only a re-sort can give the new cards
+  # positions 1 to 4 again (no re-sort leaves them all at 0).
+  - db_exec: {sql: "UPDATE cards SET due = 0"}
+  - advance: 1m
+  # D. Second's insertion order Sequential -> Random.
+  - save_deck_options: {deck: Deck A, options: {insertion_order: random}}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM deck_config ORDER BY id"}
+  - db_exec: {sql: "SELECT count(*), min(due), max(due), count(DISTINCT due) FROM cards WHERE type = 0"}
+  # Every position set to 0, so that the next re-sort is visible whatever
+  # the draw was.
+  - db_exec: {sql: "UPDATE cards SET due = 0"}
+  # No earlier save has asked for a one-way sync yet (expected 0), so the
+  # value read after E belongs to the removal.
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - advance: 1m
+  # E. Back to Default, removing Second in the same save.
+  - save_deck_options: {deck: Deck A, preset: Default, remove: [Second]}
+  - db_exec: {sql: "SELECT name FROM deck_config ORDER BY id"}
+  - db_exec: {sql: "SELECT due FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - observe: [{legacy_json: {decks: [Deck A]}}]

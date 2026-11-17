@@ -1,0 +1,31 @@
+# The screen opened on a nested deck starts from that deck's own preset
+# (specs/sched/deck-options.md O2 item 2, O6: the draft starts with the
+# opening preset selected). A save without `preset` keeps the deck's current
+# preset (specs/conformance/deck-options-ops.md E1), so the preset that
+# receives the edit is the one the draft opened on.
+# Deck A uses Alpha (11 new cards per day), Deck A::Sub uses Beta (13), and
+# Default keeps 20. Both decks' presets exist, so no opening falls back to
+# Default (O12).
+#  1. From the Deck A::Sub screen, new cards per day 7: only Beta changes;
+#     Alpha (the parent's) and Default keep their values, and neither deck
+#     changes preset.
+#  2. From the Deck A screen, new cards per day 9: only Alpha changes, which
+#     shows the first save did not just pick the parent's or the first
+#     preset.
+# Needs save_deck_options (specs/conformance/deck-options-ops.md E1).
+id: sched/options/nested-deck-opening-preset
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets:
+    - {name: Alpha, new_per_day: 11}
+    - {name: Beta, new_per_day: 13}
+  decks:
+    - {name: Deck A, preset: Alpha}
+    - {name: "Deck A::Sub", preset: Beta}
+steps:
+  - advance: 1h
+  - save_deck_options: {deck: "Deck A::Sub", options: {new_per_day: 7}}
+  - observe: [{legacy_json: {presets: [Default, Alpha, Beta], decks: [Deck A, "Deck A::Sub"]}}]
+  - advance: 1h
+  - save_deck_options: {deck: Deck A, options: {new_per_day: 9}}
+  - observe: [{legacy_json: {presets: [Default, Alpha, Beta], decks: [Deck A, "Deck A::Sub"]}}]

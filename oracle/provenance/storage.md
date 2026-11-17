@@ -36,3 +36,13 @@ opens of WAL and hot-journal files, `VACUUM INTO` and `query_only`).
 The deck-config reserved field numbers of `proto/anki/deck_config.proto` at
 26.09.3 were compared with `proto/backend.proto` at 2.1.33 to confirm that the
 schema-16 rewrite of a schema-15 preset drops no field.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| Classification of h69f4adbd5970 (reopen stamps; refusal to create a collection at an unwritable place) as needs-op against storage-ops P1 | `pylib/tests/test_collection.py` (test_create_open) | The obligation to classify: col.mod unchanged after reopen, and refusal of an unwritable directory or a mode-0 file. No scenario written. |
+| Classification of the per-deck studied-count rows h1586af627542, h5a31d6105048, hb30e802d8f2f as not observable | `rslib/src/storage/revlog/mod.rs`, `rslib/src/storage/revlog/studied_today_by_deck.sql`, `rslib/src/scheduler/fsrs/rescheduler.rs`, `rslib/src/scheduler/fsrs/memory_state.rs` | Whether the per-deck studied count exists at the tag and which callers use it (only the FSRS reschedule-on-change pass). |
+| storage/ids-usn-mtime I4 (review-log rows with given ids) and the schema-18 new collection (harvest rows hf7664c5a108b, h294205b39ddd) | `rslib/src/storage/revlog/mod.rs`, `rslib/src/storage/upgrades/mod.rs`, `rslib/src/storage/sqlite.rs`, `rslib/src/sync/collection/chunks.rs` | Confirming that the behavior of the main-branch tests exists at the tag: insert-or-ignore of revlog rows, and new collections created at the maximum schema version 18 |

@@ -138,7 +138,11 @@ Golden `sched/memory/recompute`: Lang's desired retention changed from Words rec
 
 ### M7.2 Change Deck (U27, U48; R645)
 
-Anki's Change Deck removes `s`, `d`, `dr` and `decay` from the cards it moves (`sched/card-data#K5`). Then, when FSRS is on and at least one card moved, it recomputes, inside the same op, the cards of the target deck (`did` or `odid`) that have no memory state, the moved ones and any that were already there without one. A moved card without review-log rows is not processed (M4.1), so it ends with none of the four keys until its next answer. So R645 holds at once, not lazily.
+Anki's Change Deck removes `s`, `d`, `dr` and `decay` from the cards it moves (`sched/card-data#K5`). Then, when FSRS is on and at least one card moved, it recomputes, inside the same op, the cards of the target deck (`did` or `odid`) whose stability, read the way `search/card-extractors#X4` reads it, is NULL: the moved ones and any that were already there without one. A moved card without review-log rows is not processed (M4.1), so it ends with none of the four keys until its next answer. So R645 holds at once, not lazily.
+
+- The stability is NULL when the data has no `s` key, when its `s` is `null` or not a number, and when the data reads as no keys (`search/card-extractors#X3`: for example empty text, text that is not valid JSON, or a number beyond the 64-bit float range). This test is narrower than M1's term. A card whose `s` reads as a number but which has no `d` is not selected and keeps its row, although M1 reads it as having no memory state. A card with a `d` whose `s` reads as NULL is recomputed like a card with neither key.
+- Cards of the target whose stability reads as a number are not part of the set: they keep their row as stored, `mod` and `usn` included, whatever `dr` they hold. Subdecks of the target are not part of it either.
+- Within the set, M4.1 applies as for every caller: new cards are never processed, even with review-log rows, and neither are cards without review-log rows. A processed card whose rows give no item gets only `dr` and `decay`.
 
 ### M7.3 Optimizer (U47, R697)
 
@@ -173,8 +177,13 @@ Check Database runs M6 on every card; it runs no M4 recompute.
 | `sched/memory/lrt-repair` | M6 | recorded |
 | `sched/memory/recompute` | M4, M7.1 | recorded (op `save_deck_options`) |
 | `sched/memory/ignore-before-count` | M5, `sched/fsrs-items#I1.3` | recorded (observation `ignored_before_count`) |
+| `notes/change-deck/memory-states` | M7.2: a move recomputes with the target preset's desired retention, stateless cards already in the target included; a new moved card skipped; the source deck's cards untouched; nothing computed when no card moved (count 0); a moved card that had a state gets it again with the new preset; no rescheduling (`due` and `ivl` kept) | held: recorded, kept on branch `held/harvest-batch-2` until the testkit parses `change_deck` |
+| `notes/change-deck/target-state-kept` | M7.2 with M4.1: target cards holding a state left as stored under a different desired retention; a subdeck's card excluded; a filtered card whose home is the target computed; an itemless card gets `dr` and `decay` only; a new card with review-log rows untouched | held: recorded, kept on branch `held/harvest-batch-2` until the testkit parses `change_deck` |
+| `notes/change-deck/fsrs-off` | M7.2 with FSRS off: the moved cards lose their memory keys, nothing computed | held: recorded, kept on branch `held/harvest-batch-2` until the testkit parses `change_deck` |
+| `search/state/memory-state-moves` | M7.2 selection (full state, `s` only, `d` only, no keys; a new card shown unchanged, where the new-card exclusion has no visible effect) | held: recorded, kept on branch `held/harvest-batch-2` until the testkit parses `change_deck` |
 
 - The scenarios observe through `next_states` (memory states compare with the 1e-5 tolerance of `conformance/observations#O7`), `card`, `db_exec` and `check_db`. Each becomes active only when its own complete set of real adapters exists. U46 can complete the eight pure resolver/count cases. `on-the-fly` remains pending for U44's answer, `lrt-repair` for U128's `check_db`, and `recompute` for U49's full `save_deck_options`. U46's direct tests use their stored rows and review logs as input and their memory states, card rows and counts as expected output; a prefix replay does not make the whole mixed scenario active.
+- The four `change_deck` scenarios are `invalid` in `tools/mg goldens-check` until Meguri's typed scenario model parses `change_deck`, then `pending` until the executor runs it (`conformance/bulk-ops#X5`).
 - Many cards come in pairs whose memory states must be equal (the scenario comments say which); the pairs pin down the start rules without depending on the crate's numbers.
 - Meguri-only tests (no oracle): a recompute cancelled half way writes nothing; a user-initiated recompute is one undo step that restores `s`, `d`, `dr`, `decay`, `mod` and `usn`; presets with `UnsupportedParams` are skipped; the op reads the review log once per preset; the R1849 bench.
 - Training items (`sched/fsrs-items#I7`) are checked by U47's optimizer scenarios.

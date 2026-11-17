@@ -43,3 +43,12 @@ split, P14.2 both modes, P16 order, P17 drags): Meguri's own design. The Anki
 facts they cite (both pre-passes run in both modes; the space-run layout puts
 no-break spaces first; the default editor's drop never moves the source) come
 from the files of S5, S10 and S12 above.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| editor/paste P2, P3, P7, P11, P13, P14.2 and editor/paste-sources S7, S8, S9, S10 checked against the page-editor data-transfer obligations (h4d2c40a0930e, h88ee1a8ec135, hbed095c14b47, hc53d1db14186, hcddb2db9708d, hd319020c121d) | `ts/routes/editor/rich-text-input/data-transfer.test.ts`, `ts/routes/editor/rich-text-input/data-transfer.ts` | Which behavior must be proven, and whether the specs agree with the pinned page editor on four points: the audio/video and image extension lists with their case-insensitive last-dot extension rule; the bare name versus `[sound:]` snippet and the playback call; the pasteImagesAsPng extension choice with the `paste-<sha1>.<ext>` name taken from the converted bytes; and decoding of `data:image/{jpg,jpeg,png,gif};base64` for text tokens and img sources. They agree, so no new spec text. |
+| triage of the attach and record toolbar rows to editor/paste P5, P20, P24 snippets, P25, and the proposed P25 Meguri-tests line | `ts/tests/e2e/media-buttons.spec.ts` | Triage only: Attach and Record insert the added media into the field that was focused when the command started. Classified native-ui. |

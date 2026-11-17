@@ -161,6 +161,9 @@ External HTML in each mode (light appearance unless the column says dark), and i
 | `<DIV CLASS="x">d</DIV>` | `<div>d</div>` | the same | the same |
 | `<ruby>漢<rp>(</rp><rt>kan</rt><rp>)</rp></ruby>` | `漢(kan)` | `<ruby>漢<rp>(</rp><rt>kan</rt><rp>)</rp></ruby>` | the same as light |
 | `<blockquote cite="u"><code>c</code></blockquote>` | `c` | `<blockquote><code>c</code></blockquote>` | the same as light |
+| `<div>q<script>n = 1;</script>r</div>` | `<div>qr</div>` | `<div>qr</div>` | the same as light |
+| `<ul><li><script>m()</script>k</li></ul>` | `k` | `<ul><li>k</li></ul>` | the same as light |
+| (the empty string) | empty: nothing is inserted | the same | the same |
 | `<style>p{}</style>` | empty: nothing is inserted | the same | the same |
 
 Internal content (X7):
@@ -177,8 +180,20 @@ Internal content (X7):
 | `<i>x</i><script>var n = 2;</script>` | `<i>x</i><script>var n = 2;</script>` (kept: internal content is the editor's own, `editor/field-html` F6) |
 | `<svg style="width:10px"><rect></rect></svg>` | `<svg style="width:10px"><rect></rect></svg>` |
 | `a<!-- c -->b` | `ab` |
+| `<span style="font-size: 9pt; font-weight: 600">w</span>` | `<span style="font-weight: 600;">w</span>` |
 | LF ` <b>x</b> ` LF | `<b>x</b>` |
+| (the empty string) | empty (the filter's output; whether the paste goes on to a later step is `editor/paste` P9) |
 
 ## X10. Oracle and tests
 
 None of this file can be observed by the conformance oracle, which runs Anki's collection library and not its editor page (`editor/paste` P1). Meguri's `PasteFilterConformanceTests` run X9's tables, in WebKit on macOS and in the iOS simulator, through the same page filter that pastes use, comparing styles as P15.4 says. The editor-page oracle records `editor/paste` P24's `strip-filter`, `keep-filter`, `keep-filter-dark`, `internal-paste` and `corpus` goldens from both Anki editors; until it exists these are not goldens, and a mismatch between X9 and such a golden is fixed in this file. Blocked until then: every filter golden, and the plan's corpus tests (Word and Google Docs in keep and strip mode "equals its golden"), which also wait for the M2 capture of `conformance/corpora/paste/`. Until both exist, X9 and `editor/paste-sources` S10 are the interim expected values, and the corpus tests are recorded as blocked, not passed.
+
+### X10.1 Paste-then-save tests (U197)
+
+`PasteFilterConformanceTests` prove only the filter's output string. U197 also has these tests, which run in the real editor page in WebKit on macOS and in the iOS simulator. Each case pastes external HTML (`editor/paste` P9 step 2) through the native paste path into the first field of an Add-screen draft of a note type with no cloze field, in strip mode and in keep mode. The payloads are X9's own rows: the `<div onmouseover=…>` row, the `<img … onload=…>` row, the `x<title>…</title><script>…</script>y<style>…</style>` row and the `<p class="MsoNormal">…` row. Each test's own copy of a payload changes the script body and each handler so that, if it ever ran, it would set a flag on the page's window object.
+
+1. **Nothing runs.** After the paste, and once the page has had a turn of its event loop, the flag is still unset. An image load can only start after insertion, so the test also waits for that point. This follows from `editor/paste` P14's inert document and from P15 removing every `on*` attribute before insertion.
+2. **The field DOM.** Read through the page after the paste, the field's content has no `script`, `style`, `title`, `iframe` or `object` element and none of their text, no attribute whose name starts with `on`, and no `p` element. The text around the removed elements is still there, each former `p` is a `div` with no attributes holding its filtered children, and each `img` keeps only `src` and `alt`. The serialized field equals the X9 cell for that mode (styles compared as P15.4 says).
+3. **The stored field.** Press Add (`editor/add-flow` A5). The stored field of the added note, read back from the collection, equals the field HTML of case 2 after U190's save pipeline (`editor/paste` P16; `editor/field-html` H3, S1). It holds no `script` element or script text, no `on*` attribute and no `p` element.
+
+Until the editor-page oracle records `editor/paste` P24's goldens, X9 gives the expected values for cases 2 and 3.

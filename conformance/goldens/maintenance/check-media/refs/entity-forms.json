@@ -1,0 +1,60 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": [],
+          "missing_notes": [],
+          "oversize": [],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": []
+        }
+      },
+      {
+        "media_dir": {
+          "Big.gif": {
+            "sha1": "2db18e1d98e7ab7f49dea56027312c2d97b1a2e0",
+            "size": 6
+          },
+          "it's.m4a": {
+            "sha1": "34fb3300b9a77bebdc988ec3edd0d4a6a42a26f9",
+            "size": 5
+          },
+          "one&two&three.png": {
+            "sha1": "352f7829a2384b001cc12b0c2613c756454a1f6a",
+            "size": 6
+          },
+          "red & blue.wav": {
+            "sha1": "e0996a37c13d44c3b06074939d43fa3759bd32c1",
+            "size": 5
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["[sound:red & blue.wav]|<img src=\"one&amp;two&amp;three.png\">", 1894701600],
+            ["<audio src=\"it&#39;s.m4a\">|<img src='&#x42;ig.gif'>", 1894701600]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/refs/entity-forms",
+  "scenario_sha256": "e3bf2b802cd2e6c6514d44457ed425b965779725813bfe8c79ed3abda0821fcf",
+  "tz": "UTC"
+}

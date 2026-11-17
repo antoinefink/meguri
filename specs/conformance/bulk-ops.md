@@ -3,9 +3,9 @@
 Spec: conformance/bulk-ops
 Requirements: R1883, R1200, R1202, R1203, R1204, R1205, R1207, R1187, R1188
 Anki: 26.09.3
-Scenarios: conformance/scenarios/browser/find-replace/, conformance/scenarios/browser/bulk/
+Scenarios: conformance/scenarios/browser/find-replace/, conformance/scenarios/notes/change-deck/, conformance/scenarios/notes/transform/
 
-The scenario ops and the observation kind that Browse's Find and Replace (`browser/find-replace`) and Change Deck (`browser/bulk-actions` B7.2) need. Every other bulk action of `browser/bulk-actions` runs on ops the language already has (`sched-ops.md`, `tag-ops.md`, `record-ops.md`, `change-notetype-ops.md`, `package-ops.md`). Both executors implement them with the meanings below. They are draft (`dsl.md` D7.2, `observations.md` O4): the oracle implements them, Meguri's executor does not yet (X5).
+The scenario ops and the observation kind that Browse's Find and Replace (`browser/find-replace`) and Change Deck (`browser/bulk-actions` B7.2) need. Every other bulk action of `browser/bulk-actions` runs on ops the language already has (`sched-ops.md`, `tag-ops.md`, `record-ops.md`, `change-notetype-ops.md`, `package-ops.md`). Both executors implement them with the meanings below. They are draft (`dsl.md` D7.2, `observations.md` O4): the oracle implements them, Meguri's typed scenario model and executor do not yet (X5).
 
 ## X1. `find_replace`
 
@@ -64,6 +64,11 @@ The scenario ops and the observation kind that Browse's Find and Replace (`brows
 
 ## X5. Status
 
-- **Oracle driver.** X1 to X3 exist (2026-11-10, `oracle/driver/ops/bulk.py`), with `dsl.md` D7.2's rows (draft: the oracle implements them), `observations.md` O4's row, both schemas and `protocol.json`. The scenarios under `conformance/scenarios/browser/find-replace/` and `conformance/scenarios/browser/bulk/` have oracle goldens; none is active.
-- **Meguri's executor.** The browser adapter (`core/crates/meguri-testkit/src/exec/`) implements X1 to X3 with U86 and U87; until then they are `pending` (`dsl.md` D10).
+- **Oracle driver.** X1 to X3 exist (2026-11-10, `oracle/driver/ops/bulk.py`), with `dsl.md` D7.2's rows (draft: the oracle implements them), `observations.md` O4's row, both schemas and `protocol.json`. The oracle records scenarios that use them. None is in the tree yet (next bullet).
+- **Meguri's typed scenario model.** The model (`core/crates/meguri-testkit/src/scenario/`) has no `find_replace`, `change_deck` or `find_replace_fields` yet. Until it parses them with the shapes of X1 to X3 (`dsl.md` D7.2), a scenario that uses one does not parse: it is `invalid` (D10's first row), not `pending`, and `tools/mg goldens-check` fails on it (`unknown variant`). Such scenarios stay out of the tree until then (U86, U87). The model change makes them load and, while the executor lacks the op, gives them D10's `pending`. Recorded with goldens and waiting for it:
+  - `browser/find-replace/`: `field-names`, `literal-dollar-replacement`, `mixed-notetypes`, `mode-counts`, `whole-collection-count`;
+  - `notes/change-deck/`: `fsrs-off`, `memory-states`, `remaining-steps`, `target-state-kept`;
+  - `notes/transform/replace-saves`, `search/state/memory-state-moves`;
+  - `tags/find-replace/`: `all-notes`, `invalid-regex`, `listed-notes`, `pattern-modes`.
+- **Meguri's executor.** The browser adapter (`core/crates/meguri-testkit/src/exec/`) implements X1 to X3 with U86 and U87; once the typed model parses them and until the adapter runs them, scenarios that use them are `pending` (`dsl.md` D10).
 - **Deviation.** `find-replace-unchanged-match` (R1204, R1207): on `browser/find-replace/unchanged-match`, the counts and the rows of the notes whose match leaves them as stored are Meguri's (not written, not counted), where Anki writes and counts them. The implementer adds the entry with its test (U86).

@@ -1,0 +1,25 @@
+# C10.1 of specs/maintenance/check-database.md: revlog_properties counts rows
+# rewritten, not values. One row has ivl 2.5 and lastIvl 1.5, another ivl
+# 3.5, lastIvl -0.5 and time 1500.5: each row is rewritten once with integer
+# ivl, lastIvl and time (halves away from zero: 3 and 2; 4, -1 and 1501),
+# usn and the other columns kept. A third row of integers is left as it is.
+# revlog_properties 2, scm set. The rows name no card, so the card stage
+# never reads them. A second run finds nothing.
+id: maintenance/check-db/revlog-row-counted
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500001, 7, 5, 3, 2.5, 1.5, 2500, 4000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500002, 7, 5, 2, 3.5, -0.5, 2500, 1500.5, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500003, 7, 5, 3, 9, 4, 2500, 6000, 1)"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT id, cid, usn, ease, typeof(ivl), ivl, typeof(lastIvl), lastIvl, factor, typeof(time), time, type FROM revlog ORDER BY id"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

@@ -30,3 +30,12 @@ matches `xzy`); a fresh collection in a zone off UTC has no `localOffset`
 until the first day computation writes it. Goldens of `stats/studied-today/`
 and `stats/today/` re-recorded 2026-10-27 at lock `2322165135…` equal the
 U97 recordings value for value.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| covered-existing link of h19b87e6f451b to stats/studied-today/format-table | `rslib/src/scheduler/service/mod.rs` (test module) | Confirming the harvested test exercises the studied-today message for supplied counts, which studied_today_format observes. |
+| Harvest row hdb3d8a73ac7b mapped to existing stats/studied-today/zero-line | `rslib/src/scheduler/service/mod.rs` | Which behavior the fresh-collection studied-today test requires (a zero line). The expectation comes from the existing golden. |

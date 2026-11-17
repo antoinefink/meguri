@@ -190,21 +190,29 @@ Anki shows neither a count nor an error before Apply. Meguri's sheet shows, whil
 
 ## F12. Scenarios
 
-Every scenario below uses the `find_replace` op (`specs/conformance/bulk-ops.md` X1) and observes the rows with `db_dump`, as U86's execution note asks, except `field-names`, which uses the `find_replace_fields` observation (X3). None is active. All have oracle goldens; Meguri's executor does not have the op and the kind yet (X5).
+Every scenario below uses the `find_replace` op (`specs/conformance/bulk-ops.md` X1) and observes the rows with `db_dump`, as U86's execution note asks, with two exceptions: `field-names` uses the `find_replace_fields` observation (X3), and `mixed-notetypes` uses it too and reads the note rows with `db_exec`. None is active. A row marked *planned* has no scenario file yet. A row marked *held* is recorded with an oracle golden but stays out of the tree until Meguri's typed scenario model parses the ops (X5, which lists every held scenario); Meguri's executor does not have the op and the kind yet.
 
-| Scenario | Covers |
-|---|---|
-| `browser/find-replace/ae47` | AE47: F5 literal `$`, F6 named field across two note types, untouched notes keep `mod` and `usn`, the count, one undo step restoring every row |
-| `browser/find-replace/regex` | F4 regex mode, case flags (U+212A KELVIN SIGN stored raw with `db_exec`, since a save would compose it to `K`), literal meta characters, F5's replacement table, the empty find text |
-| `browser/find-replace/all-fields` | F6 All Fields over two note types, field name matched under `unicase`, markup in field text, `sfld` and `csum` recomputed, controls removed by the save, stored tags re-joined with canonical spacing but neither sorted nor registered (step 4) |
-| `browser/find-replace/nfc` | F4 step 4 with `normalize_note_text` on and off |
-| `browser/find-replace/card-generation` | F6 step 5: a field filled adds the card, a field emptied deletes none |
-| `browser/find-replace/tags` | F7: per-tag matching, anchors, deduplication, spelling and registration, empty results, literal `$`, the empty find text and a note without tags, the "Update Tag" step |
-| `browser/find-replace/all-notes` | F8: the all-notes target, a deleted note in the list skipped, a field name no note type has |
-| `browser/find-replace/refusals` | F4 step 5 in both targets, F7 step 1 (U+0020 and U+3000), F6 step 7 with a damaged note matched and not matched, nothing written |
-| `browser/find-replace/no-match` | F9: count 0, no step, `col.mod` kept, the earlier step still undoable, the redo history emptied |
-| `browser/find-replace/unchanged-match` | F6 step 6 and F7 step 5 on Anki: matched notes stamped and counted although unchanged; deviation `find-replace-unchanged-match` |
-| `browser/find-replace/field-names` | F3 |
+| Scenario | State | Covers |
+|---|---|---|
+| `browser/find-replace/ae47` | planned | AE47: F5 literal `$`, F6 named field across two note types, untouched notes keep `mod` and `usn`, the count, one undo step restoring every row |
+| `browser/find-replace/regex` | planned | F4 regex mode, case flags (U+212A KELVIN SIGN stored raw with `db_exec`, since a save would compose it to `K`), literal meta characters, F5's replacement table, the empty find text |
+| `browser/find-replace/all-fields` | planned | F6 All Fields over two note types, field name matched under `unicase`, markup in field text, `sfld` and `csum` recomputed, controls removed by the save, stored tags re-joined with canonical spacing but neither sorted nor registered (step 4) |
+| `browser/find-replace/nfc` | planned | F4 step 4 with `normalize_note_text` on and off |
+| `browser/find-replace/card-generation` | planned | F6 step 5: a field filled adds the card, a field emptied deletes none |
+| `browser/find-replace/tags` | planned | F7: per-tag matching, anchors, deduplication, spelling and registration, empty results, literal `$`, the empty find text and a note without tags, the "Update Tag" step |
+| `browser/find-replace/all-notes` | planned | F8: the all-notes target, a deleted note in the list skipped, a field name no note type has |
+| `browser/find-replace/refusals` | planned | F4 step 5 in both targets, F7 step 1 (U+0020 and U+3000), F6 step 7 with a damaged note matched and not matched, nothing written |
+| `browser/find-replace/no-match` | planned | F9: count 0, no step, `col.mod` kept, the earlier step still undoable, the redo history emptied |
+| `browser/find-replace/unchanged-match` | planned | F6 step 6 and F7 step 5 on Anki: matched notes stamped and counted although unchanged; deviation `find-replace-unchanged-match` |
+| `browser/find-replace/field-names` | held | F3 |
+| `browser/find-replace/literal-dollar-replacement` | held | F5: in literal mode a replacement holding `$3`, `${1}`, `$$` and `$name` is stored as typed in every field it lands in; in regex mode a braced group reference expands, `$$` becomes `$` and a reference to a group the pattern does not have becomes nothing; untouched notes keep `mod` and `usn` |
+| `browser/find-replace/whole-collection-count` | held | F8, F9, F6 step 8: the all-notes target over two note types counts and writes only the matching notes, Ignore case on by default; a named field skips the note type without it; count 0 writes nothing and keeps `col.mod` |
+| `browser/find-replace/mixed-notetypes` | held | F3, F4 step 2, F6 steps 2, 3 and 8 over notes of three note types. A regex with its own inline case flag (Ignore case off) rewrites the matching fields of every note type, and only notes with a match are written and counted. The In list for the whole selection is the union of the note types' field names, a shared name listed once, and a smaller selection lists only its own note type's names. A replacement limited to one field skips the notes whose note type lacks that field, even when other fields hold the find text, and changes only that field in the others |
+| `notes/transform/replace-saves` | held | F6 steps 4 and 5 in field mode: a rewritten note is stamped (`mod`, `usn` -1); its stored tags are re-joined with canonical spacing, neither sorted nor given the case of a registered tag, and none is registered; a card is added when an empty field gets filled; no card is deleted when a field becomes empty; unlisted notes are untouched |
+| `tags/find-replace/listed-notes` | held | F7 steps 2 to 4 and 6, F8: a literal, case-insensitive find on listed notes (mixed-case find text, lower-case stored tag). Only the listed note with a match is written, and only its tags, `mod` and `usn` change. An unlisted note with the same tag, and a listed note with no match, are not written. The old row stays registered |
+| `tags/find-replace/all-notes` | held | F8 all notes with In Tags: every note is read. Only the matched text of a component is replaced, so a child tag keeps its later components. Untagged and unmatched notes are untouched |
+| `tags/find-replace/pattern-modes` | held | F4 steps 1 to 3 in Tags: a literal versus regex quantifier, Ignore case off missing a case difference (count 0, nothing written), an anchored alternation, and an anchored class with an empty replacement dropping two whole tags (F7 step 4) |
+| `tags/find-replace/invalid-regex` | held | F7 step 2 bringing in F4 step 5: the `invalid_regex` refusal leaves the note and the registry unchanged. The same text in literal mode is valid and matches nothing |
 
 Meguri's tests (U86, `core/crates/meguri-engine/tests/find_replace.rs`) cover what no oracle shows: F2's sheet state and history, F3's all-notes listing, F6 step 6 and F7 step 5 on Meguri's side (the deviation's test), F10's preview count, ranges (F10's two examples) and supersession, F11's `InvalidArgument` cases, `NotFound` for a note of a missing note type, both histories kept after each refusal, cancellation before commit leaving the database digest equal and no step, and R1832's budget (150k notes in at most 5 s with progress, U242).
 

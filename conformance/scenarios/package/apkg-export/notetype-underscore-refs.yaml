@@ -1,0 +1,53 @@
+# The media names a deck package takes from a note type and from the fields
+# of its notes, together (specs/package/apkg-export.md A9.1 items 1 and 3,
+# A9.4, A9.5; text/media-references M4). The CSS names _dots.svg in a
+# single-quoted background url() and gamma.webp, which does not start with
+# _. The front template names _tick.wav in a double-quoted source src and
+# intro.webm in a video src, which does not start with _. The back template
+# names _beta.opus in a sound tag. The Word field holds a sound tag for
+# word.mp3, the Meaning field an image with a single-quoted src for
+# sketch.bmp. _extra.dat is in the folder but named nowhere. The package
+# holds the three _ files of the note type and the two field files, never
+# gamma.webp, intro.webm or _extra.dat; Anki writes media in an order of
+# its own, so the list is compared as a set (A16, package-ops.md E10). The
+# text observation shows the names each field yields.
+id: package/apkg-export/notetype-underscore-refs
+description: A deck package carries the underscore files a note type's CSS and templates name, and the files its notes' fields name.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+compare:
+  set: [/steps/3/package_media]
+setup:
+  config: {rollover: 4}
+  decks: [Words]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Meaning]
+      templates:
+        - name: Recall
+          front: "<video src=\"intro.webm\"></video>{{Word}}<audio controls><source src=\"_tick.wav\" type=\"audio/wav\"></audio>"
+          back: "{{FrontSide}}<hr id=answer>{{Meaning}}[sound:_beta.opus]"
+      css: ".card { font-size: 20px; }\n.one { background-image: url('_dots.svg'); }\n.two { background-image: url('gamma.webp'); }\n"
+  notes:
+    - notetype: Vocab
+      deck: Words
+      fields: ["[sound:word.mp3]", "<b>red</b><br><img src='sketch.bmp' width=40>"]
+  media_files:
+    - {name: _dots.svg, text: "dots bytes"}
+    - {name: gamma.webp, text: "gamma bytes"}
+    - {name: _tick.wav, text: "tick bytes"}
+    - {name: intro.webm, text: "intro bytes"}
+    - {name: _beta.opus, text: "beta bytes"}
+    - {name: word.mp3, text: "word bytes"}
+    - {name: sketch.bmp, text: "sketch bytes"}
+    - {name: _extra.dat, text: "extra bytes"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: vocab.apkg, limit: {deck: Words}, scheduling: true, presets: false, media: true}
+  - observe:
+      - package_media: {name: vocab.apkg}
+      - text:
+          fns: [media_refs]
+          inputs:
+            - "[sound:word.mp3]"
+            - "<b>red</b><br><img src='sketch.bmp' width=40>"

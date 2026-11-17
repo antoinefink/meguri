@@ -1,0 +1,47 @@
+# One field's pin on the Add screen, toggled on and later off again
+# (specs/editor/add-flow.md A4): each toggle saves the note type with only
+# that field's sticky option flipped and every other option as stored
+# (specs/notetypes/records.md N3, N4). Two fields are pinned in turn; an add
+# with the pins on leaves the options as they are; turning the first pin off
+# keeps the second one on; the options survive closing and reopening the
+# collection; turning the second pin off leaves no field sticky. The values
+# the next draft keeps after the add (specs/notes/add-defaults.md D6) are the
+# Add screen's own and are Meguri's tests (add-flow A11). Needs
+# update_notetype with field_options (specs/conformance/notetype-ops.md T5),
+# add_note (specs/conformance/note-ops.md N1), reopen and notetype_structure.
+id: editor/add-flow/sticky-pin-each-way
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Triple
+      fields: [Alpha, Beta, Gamma]
+      templates:
+        - {name: Card A, front: "{{Alpha}}", back: "{{Beta}}<br>{{Gamma}}"}
+  decks: [Deck A]
+steps:
+  - observe: [{notetype_structure: {notetypes: [Triple]}}]
+  - advance: 1m
+  # step 2: first pin on
+  - update_notetype: {notetype: Triple, edits: [{field_options: {field: Alpha, sticky: true}}]}
+  - observe: [{notetype_structure: {notetypes: [Triple]}}]
+  - advance: 1m
+  # step 5: second pin on, the first stays
+  - update_notetype: {notetype: Triple, edits: [{field_options: {field: Gamma, sticky: true}}]}
+  - observe: [{notetype_structure: {notetypes: [Triple]}}]
+  - advance: 1m
+  # step 8: an add with both pins on changes no option
+  - add_note: {notetype: Triple, deck: Deck A, fields: [one, two, three]}
+  - observe: [{notetype_structure: {notetypes: [Triple]}}]
+  - advance: 1m
+  # step 11: first pin off, the second stays on
+  - update_notetype: {notetype: Triple, edits: [{field_options: {field: Alpha, sticky: false}}]}
+  - observe: [{notetype_structure: {notetypes: [Triple]}}]
+  # step 13: the options are stored
+  - reopen: {}
+  - observe: [{notetype_structure: {notetypes: [Triple]}}]
+  - advance: 1m
+  # step 16: second pin off, no field sticky
+  - update_notetype: {notetype: Triple, edits: [{field_options: {field: Gamma, sticky: false}}]}
+  - observe: [{notetype_structure: {notetypes: [Triple]}}]
+  - reopen: {}
+  - observe: [{notetype_structure: {notetypes: [Triple]}}]

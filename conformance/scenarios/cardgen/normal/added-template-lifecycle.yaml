@@ -1,0 +1,37 @@
+# One note type's life from one template to two, end to end
+# (specs/notetypes/structure-changes.md S2, S7; specs/notes/card-generation.md
+# G9; card-render-pipeline.md K4; specs/notes/field-check.md K3, K4; R785-R810).
+# A note added under a single template has one card. Adding a second template
+# whose front uses the other field gives that existing note its second card at
+# once. A note added afterwards gets a card for each template; its first card
+# renders its own first field and its second card the other field. The field
+# check then reports a fresh first field as normal, a draft repeating an
+# existing note's first field as a duplicate of that note (whatever its other
+# field holds), and a draft whose first field is only a space as empty.
+id: cardgen/normal/added-template-lifecycle
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Kind A
+      fields: [Alpha, Beta]
+      templates:
+        - {name: Ahead, front: "{{Alpha}}", back: "{{Beta}}"}
+  decks: [Deck A]
+steps:
+  - add_note: {notetype: Kind A, deck: Deck A, fields: [red, rouge]}
+  - db_exec: {sql: "SELECT count(*) FROM cards"}
+  - advance: 1m
+  - update_notetype: {notetype: Kind A, edits: [{add_template: {name: Behind, front: "{{Beta}}", back: "{{Alpha}}"}}]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - advance: 1m
+  - add_note: {notetype: Kind A, deck: Deck A, fields: [green, vert]}
+  - db_exec: {sql: "SELECT count(*) FROM cards"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - observe:
+      - "render(#c2, #c3)"
+      - fields_check:
+          cases:
+            - {note: "#n2"}
+            - {notetype: Kind A, fields: [blue, bleu]}
+            - {notetype: Kind A, fields: [red, ""]}
+            - {notetype: Kind A, fields: [" ", ""]}

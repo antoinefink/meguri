@@ -1,0 +1,40 @@
+# specs/browser/columns.md C3 (cells: one per requested column, in request
+# order), C7 and C8 for the Sort Field, Deck and Note columns. The same three
+# columns are requested in three different orders, none of them the order of
+# the column catalog, so a row whose cells came back in a fixed order would
+# put a deck name or a note type name under the wrong key. Every cell text is
+# distinct: two note types, a top-level deck, a child deck and the default
+# deck. The last step reads the same notes in notes mode.
+id: browser/columns/requested-order
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["Deck A", "Deck B::Inner"]
+  notetypes:
+    - name: Duo
+      fields: [Front, Back]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+      css: ".card { margin: 0; }"
+    - name: Trio
+      fields: [Name, Detail, Extra]
+      templates:
+        - {name: Card 1, front: "{{Name}}", back: "{{Detail}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Duo, deck: "Deck A", fields: [alpha, one]}
+    - {notetype: Trio, deck: "Deck B::Inner", fields: [beta, two, three]}
+    - {notetype: Duo, fields: [gamma, four]}
+steps:
+  - observe:
+      - browser_rows:
+          columns: [note, deck, noteFld]
+          rows: ["#c1", "#c2", "#c3"]
+  - observe:
+      - browser_rows:
+          columns: [deck, noteFld, note]
+          rows: ["#c3", "#c1", "#c2"]
+  - set_config: {key: browserTableShowNotesMode, value: true}
+  - observe:
+      - browser_rows:
+          columns: [noteFld, note, deck]
+          rows: ["#n2", "#n1", "#n3"]

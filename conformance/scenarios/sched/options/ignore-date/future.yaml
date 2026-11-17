@@ -1,0 +1,32 @@
+# The "Ignore cards reviewed before" date of a preset set to a date after
+# today's date, through the deck options save (R690, R697). The golden shows
+# what the reference save stores. Meguri refuses such a save instead
+# (specs/sched/deck-options.md O4.2 date_in_future, O7.1, O12).
+# Today's date is the local date of the day's start: at 02:00, before the
+# 04:00 rollover, it is the previous calendar day (O1).
+# Needs save_deck_options (specs/conformance/deck-options-ops.md E1) and
+# legacy_json (specs/conformance/model-ops.md L1).
+id: sched/options/ignore-date/future
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets: [{name: Main}]
+  decks: [{name: Deck A, preset: Main}]
+steps:
+  - advance: 1h
+  # A. A valid past date first, so that a refused save would leave it.
+  - save_deck_options: {deck: Deck A, options: {ignore_reviews_before: "2030-01-02"}}
+  - observe: [{legacy_json: {presets: [Main]}}]
+  - advance: 1m
+  # B. The day after today.
+  - save_deck_options: {deck: Deck A, options: {ignore_reviews_before: "2030-01-16"}}
+  - observe: [{legacy_json: {presets: [Main]}}]
+  - advance: 1m
+  # C. A date more than a year ahead.
+  - save_deck_options: {deck: Deck A, options: {ignore_reviews_before: "2031-06-20"}}
+  - observe: [{legacy_json: {presets: [Main]}}]
+  # D. 02:00 on 2030-01-17, before the rollover: today's date is 2030-01-16,
+  # so the calendar date 2030-01-17 is after it.
+  - set_clock: "2030-01-17T02:00:00"
+  - save_deck_options: {deck: Deck A, options: {ignore_reviews_before: "2030-01-17"}}
+  - observe: [{legacy_json: {presets: [Main]}}]

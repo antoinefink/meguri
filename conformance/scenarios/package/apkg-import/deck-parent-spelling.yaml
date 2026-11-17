@@ -1,0 +1,40 @@
+# Parent spelling taken from a deck of the same import, whatever the
+# package's record order (specs/package/apkg-import.md I10.2: decks sorted
+# by name depth, step 5's nearest existing ancestor; package-ops.md E6). The
+# source holds Alpha and a deck renamed by a raw write to ALPHA::leaf, a
+# child whose stored parent component is spelled otherwise; the child has
+# the lower id, so it comes first in the package's rows. Both decks are
+# removed after the export. On import the parent Alpha is placed first, so
+# the child is added as Alpha::leaf under the imported spelling; taking the
+# rows in id order would create ALPHA from the child instead.
+id: package/apkg-import/deck-parent-spelling
+description: An imported child takes the spelling of its parent imported in the same package, even when the child's row comes first.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Omega, Alpha]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Omega, fields: [one, a]}
+    - {notetype: Pair, deck: Alpha, fields: [two, b]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE decks SET name = 'ALPHA' || char(31) || 'leaf' WHERE name = 'Omega'"}
+  - reopen: {}
+  - db_exec: {sql: "SELECT id < (SELECT id FROM decks WHERE name = 'Alpha'), name FROM decks WHERE name LIKE '%leaf' ORDER BY id"}
+  - advance: 1m
+  - export: {format: apkg, name: tree.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  # The package keeps the child's own spelling.
+  - observe:
+      - package_db_dump: {name: tree.apkg, tables: [decks]}
+  - delete_decks: {decks: ["ALPHA::leaf"]}
+  - delete_decks: {decks: [Alpha]}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT group_concat(name, '|') FROM decks)"}
+  - advance: 1m
+  - import: {format: apkg, name: tree.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT name FROM decks ORDER BY name"}
+  - observe: [deck_tree]
+  - db_exec: {sql: "SELECT n.sfld, d.name FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.sfld"}

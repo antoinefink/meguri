@@ -1,0 +1,73 @@
+# A deck options save that shortens a preset's steps so that no new step is
+# left after the one a card last passed: the card keeps one remaining step
+# and stays a learning or relearning card (R644; specs/sched/step-remap.md
+# R2 rule 4, R3). Without that floor these cards would get a count of 0.
+# Here the new lists are not empty (the empty-list case is
+# sched/options/remap-steps, save C).
+# Needs save_deck_options (specs/conformance/deck-options-ops.md E1).
+# First: learning 2m 15m, relearning 5m 30m; used by Deck A.
+# Second: learning 3m 20m 40m; used by Deck B.
+# Cards (left before the first save):
+#  c1 Deck A learning, 1 (on step 2 of 2, passed 2m)
+#  c2 Deck A learning, 2 (on step 1, nothing passed)
+#  c3 Deck A relearning, 1 (on step 2 of 2, passed 5m)
+#  c4 Deck B learning, 2 (on step 2 of 3, passed 3m)
+#  c5 Deck B learning, 1 (on step 3 of 3, passed 20m)
+#  c6 Deck B learning, 3 (on step 1, nothing passed)
+#  c7 Deck A relearning, 2 (on step 1, nothing passed)
+id: sched/options/remap-floor-shortened
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets:
+    - {name: First, learn_steps: [2m, 15m], relearn_steps: [5m, 30m]}
+    - {name: Second, learn_steps: [3m, 20m, 40m]}
+  decks: [{name: Deck A, preset: First}, {name: Deck B, preset: Second}]
+  notetypes:
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Card 1, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { padding: 4px; }"
+  notes:
+    - {notetype: Plain, deck: Deck A, fields: [red, x]}
+    - {notetype: Plain, deck: Deck A, fields: [green, x]}
+    - {notetype: Plain, deck: Deck A, fields: [blue, x]}
+    - {notetype: Plain, deck: Deck B, fields: [black, x]}
+    - {notetype: Plain, deck: Deck B, fields: [white, x]}
+    - {notetype: Plain, deck: Deck B, fields: [gray, x]}
+    - {notetype: Plain, deck: Deck A, fields: [brown, x]}
+steps:
+  # Card states by row number (card ids follow creation order); every
+  # intraday card is due in ten minutes.
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, reps = v.column6, left = v.column7
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 1, 1, 1894702200, 0, 2, 1),
+          (2, 1, 1, 1894702200, 0, 1, 2),
+          (3, 3, 1, 1894702200, 4, 6, 1),
+          (4, 1, 1, 1894702200, 0, 2, 2),
+          (5, 1, 1, 1894702200, 0, 3, 1),
+          (6, 1, 1, 1894702200, 0, 1, 3),
+          (7, 3, 1, 1894702200, 6, 4, 2)
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  # Every card stamped long ago with a server usn, so that a card a save
+  # writes shows mod = now and usn -1.
+  - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
+  - advance: 1h
+  # A. First's learning steps 2m 15m -> 2m: c1 passed the only step left,
+  # so it keeps 1 (unchanged); c2 had passed nothing and gets 1.
+  - save_deck_options: {deck: Deck A, options: {learn_steps: [2m]}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7)"]
+  - advance: 1h
+  # B. First's relearning steps 5m 30m -> 4m: the only new step is shorter
+  # than the one c3 passed; c3 keeps 1. c7 had passed nothing and gets 1.
+  - save_deck_options: {deck: Deck A, options: {relearn_steps: [4m]}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7)"]
+  - advance: 1h
+  # C. Second's learning steps 3m 20m 40m -> 1m 3m: c4's passed step is the
+  # new last step, so its count goes from 2 to 1; c5 passed 20m and keeps 1;
+  # c6 had passed nothing and gets every new step.
+  - save_deck_options: {deck: Deck B, options: {learn_steps: [1m, 3m]}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7)"]

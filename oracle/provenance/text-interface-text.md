@@ -18,3 +18,11 @@ the full catalog list of `editor/editing-strings`; the value checks were
 placed with each file's own catalog test; I4's language rule was split per
 row, and the visible answer-label row was left open against R192 instead of
 being decided here; I7's scope and its Product Contract rows were added.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| Classification of h7e4c18df6974, h420d96663fe4, h74b7d2e31f18, hbcc38ba4659c as native-ui under text/interface-text I1-I8, render/display-transform D8/D10, review/reviewer-strings S1/S13; proposed I6.1 and I8 test cases | `pylib/tests/test_collection.py` (test_translate); `rslib/i18n/src/lib.rs` (test module: numbers, decimal_rounding, i18n) | What the rows require: English text for a template problem and count plurals; English fallback, argument substitution and plurals; the locale decimal separator, with English text keeping a full stop; the plural form of a rounded decimal count following the written number. Used only to name the obligations. The proposed spec text uses Meguri's own values, locale and nouns (0.9996, 1.25, 1.4, minutes, de-DE, 3.25); no value, locale pair or string from those tests is carried over. |

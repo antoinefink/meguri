@@ -1,0 +1,28 @@
+# With addToCur false, a note type whose last deck is absent or no longer
+# usable gets the current deck for adding, not the default deck
+# (specs/editor/config-keys.md K4.1; specs/notes/add-defaults.md D1, D2).
+# curDeck names Inbox, a nondefault deck, so a fallback to Default would
+# show. First, before any add, curModel names Paired, which has no last deck:
+# Inbox. Then Plain is added to Scratch, which becomes the defaults. Scratch
+# is then removed by the deck deletion operation (not a raw write), leaving
+# Plain's remembered deck pointing at nothing: the defaults fall back to
+# Inbox and Plain's last deck reads as none. The config query counts the
+# remembered-deck keys left after the removal, without reading their ids.
+# Needs add_defaults and notetype_last_deck (add-defaults D7).
+id: editor/add-flow/last-deck-fallback
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Inbox, Scratch]
+  notetypes:
+    - {name: Plain, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: Paired, fields: [Left, Right], templates: [{name: Card, front: "{{Left}}", back: "{{Right}}"}]}
+steps:
+  - set_config: {key: addToCur, value: false}
+  - set_current_deck: {deck: Inbox}
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Paired}}]
+  - add_note: {notetype: Plain, deck: Scratch, fields: [one, two]}
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Plain}}]
+  - delete_decks: {decks: [Scratch]}
+  - observe: [{add_defaults: {}}, {notetype_last_deck: {notetype: Plain}}]
+  - db_exec: {sql: "SELECT count(*) FROM config WHERE substr(KEY, 1, 4) = '_nt_' AND substr(KEY, -9) = '_lastDeck'"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) = CAST((SELECT id FROM decks WHERE name = 'Inbox') AS TEXT) FROM config WHERE KEY = 'curDeck'"}

@@ -18,3 +18,11 @@ editor and C5's colon rule (C6, decided).
 | complete C4 | `rslib/src/tags/complete.rs`, `rslib/src/storage/tag/mod.rs` and `rslib/src/storage/tag/get.sql` (rows in key order under `unicase`) | the cut at the limit before prefix matches are put first; at most the limit plus one tags |
 | complete C5, C6 | `ts/lib/tag-editor/TagEditor.svelte`, `ts/lib/tag-editor/tags.ts` (separator display, colon removal), `qt/aqt/tagedit.py` (Browse's tag prompts and their limit) | the editor's limit of 500, its removal of outer single colons and when it applies, the separator shown as `∷`, the Browse prompts sending the text unchanged |
 | complete C7 | `proto/anki/tags.proto`, `qt/aqt/tagedit.py` | the backend request the requested observation kind would call (pylib has no wrapper; Anki's prompts call the backend directly) |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| Tag completion scenario tags/complete/filter-sequence (tags/complete C3, C4); classification of the canonical-match row against tags/complete/components and registry | `rslib/src/tags/complete.rs` (test module); `rslib/src/tags/service.rs` (test module) | Which matching rules the tests require: in-order filters with component skipping, prefix vs inner match, and returning registered rows in stored spelling. Expectations come from oracle goldens only. After review, the fixture was rewritten independently (direction words, two-letter filters, different filter counts and skip positions). |

@@ -23,7 +23,8 @@ What the editor's formatting commands do to a rich-text field's HTML (U192): inl
 - Activating a toolbar control or a menu item keeps the field's keyboard focus and its selection, so a command applies to the selection the user made.
 - Before each command the host flushes the editor (`editor/field-html` S1).
 - A command that changes the content is one input and one entry in the field's history (`editor/field-html` F5), so ⌘Z undoes it as a whole. A command that leaves the serialized content as it was is no input: the field stays unchanged (`editor/field-html` H2) and nothing is saved.
-- After a command with a non-collapsed selection, the selection covers the content the command acted on.
+- After applying a format with a non-collapsed selection, the selection covers the same text it covered before, in the same order, and no more: it runs from the start of the first selected text to the end of the last selected text, inside any new wrapper. Content that a merge or an extension (F4 steps 5 to 7) brings into a wrapper is not added to the selection, and text split at the selection's edges (F4 step 1) is not reselected beyond them. This holds whether the selection's boundary points lay inside its text nodes or around them. So after Bold on `a[b]c` the selection is `a<b>[b]</b>c`, after Bold on `[a]<br><b>b</b>` the selected text is still `a`, and after Bold on `[a<br>b]` it is `ab`. Provisional until the goldens of F17's rows that probe the selection exist (F4 **Goldens**).
+- After any other command with a non-collapsed selection, removing a format included, the selection covers the content the command acted on. The selection after removing a format is settled by the goldens of F17's removal rows.
 
 ## F3. Inline formats (R834 to R837, R249)
 
@@ -49,12 +50,18 @@ What the editor's formatting commands do to a rich-text field's HTML (U192): inl
 **Applying.**
 
 1. Text nodes cut by the selection's edges are split there.
-2. Inside the selection, every element that counts as the format loses it (F3).
-3. The selected content gets one wrapper per run of adjacent inline content. A wrapper never contains or crosses a block element, so a selection over two `div`s gets one wrapper in each. Void elements such as `img` and `br` inside a run are wrapped with it.
+2. Every element within the command's scope (below) that counts as the format loses it (F3).
+3. The selected content gets one wrapper per run of adjacent inline content. A wrapper never contains or crosses a block element, so a selection over two `div`s gets one wrapper in each; block elements and lists keep their structure. Void elements (`br`, `img`, `hr`, `wbr`, `input` and the other elements HTML defines as having no content) are not text. A void element joins a wrapper only when it lies between two pieces of text that end up in the same wrapper, including text that a merge or an extension (steps 5 to 7) brings in. A void element at a run's edge, with no wrapped text on its far side, stays outside the wrapper. A run with no text gets no wrapper, whatever void elements it holds, so no empty or image-only wrapper is made. Under Bold: `[a<br>b]` gives `<b>a<br>b</b>`; `a[b<br>]c` gives `a<b>b</b><br>c`; `[a<img src="x.png">]` gives `<b>a</b><img src="x.png">`; `[<img src="x.png">]` is unchanged; `[a<br><ul><li>b</li><li>c</li></ul>]` gives `<b>a</b><br><ul><li><b>b</b></li><li><b>c</b></li></ul>`.
 4. When the selection covers the whole content of an inline element (not a block element, not the field itself), the wrapper goes around that element rather than inside it.
-5. A wrapper merges with an element of the same format that is the node right before or right after it, so adjacent bold becomes one `<b>`.
+5. **Merging.** A wrapper merges with an element of the same format that is its neighbour: the nearest node before it, or the nearest node after it, once negligible nodes between them are passed over. A **negligible node** is an empty text node, a void element, or any element, block or inline, whose children are all negligible (such as `<span></span>`, `<div></div>` or `<div><br></div>`). The passed-over nodes go into the merged element; step 3's block rule does not apply to a negligible block passed over this way. Negligible nodes with no same-format element beyond them stay outside the wrapper. Under Bold: `<b>a</b>[b]` gives `<b>ab</b>`; `[x]<br><b>y</b>` gives `<b>x<br>y</b>`; `<b>a</b><br>[b]` gives `<b>a<br>b</b>`; `[x]<div><br></div><b>y</b>` gives `<b>x<div><br></div>y</b>`; `[<b>x<b>y</b></b>]<br>` gives `<b>xy</b><br>`.
+6. **Extending over neighbours.** When the neighbour (found as in step 5) is an inline element that does not count as the format, but all of whose text lies inside elements that count as it, the wrapper extends over that neighbour, and those inner elements lose the format (F3). A neighbour that also holds text outside such elements stops the extension and keeps its inner format elements. A block element is never extended over. Under Bold: `[a]<u><b>b</b></u>` gives `<b>a<u>b</u></b>`; `<u><b>a</b></u>[b]` gives `<b><u>a</u>b</b>`; `[x]<i><b>y</b></i><i><b>z</b></i>` gives `<b>x<i>y</i><i>z</i></b>`.
+7. Steps 5 and 6 repeat on each side of the wrapper: after each merge or extension, the next neighbour on that side, past negligible nodes, is checked again. They stop on a side when that neighbour is neither a same-format element nor an element step 6 extends over.
 
-**Removing.** Every element that counts as the format and contains or overlaps the selection loses it (F3), starting from the outermost such element around the selection. Content of those elements outside the selection keeps the format, in the format's own wrapper.
+**Command scope.** A command with a selection works on its scope: the innermost element that holds the whole selection (the field itself when no element inside it does), widened to the outermost element around it that counts as the format, never beyond the field. Every element in the scope that counts as the format loses it (F3), whether it lies inside the selection, in a merged or extended neighbour or elsewhere in the scope, so no element of the format is left nested in another. Content of those elements that lies outside the selection gets the format back in the format's own wrapper, merged with adjacent formatted content where steps 5 to 7 allow; a `strong` elsewhere in the scope comes back as `b`. F3's removal rules apply to every such element, so an own-tag element with attributes keeps them in a `span` (F16, `editor-format-unwrap-own-tag-attributes`). Under Bold: `x<b>a<b>b<b>c</b></b></b>[d]` gives `x<b>abcd</b>`; `x<b>a<b>b</b>c</b>[d]` gives `x<b>abcd</b>`; `x<b>a<i>b<i>c</i></i></b>[d]` gives `x<b>a<i>b<i>c</i></i>d</b>` (the italic does not count and stays); `<b>x<b>y</b></b>z[w]` gives `<b>xy</b>z<b>w</b>`.
+
+**Removing.** Every element that counts as the format and contains or overlaps the selection loses it (F3), starting from the outermost such element around the selection. Content of those elements outside the selection keeps the format, in the format's own wrapper. That rebuilt wrapper follows step 3's rule for void elements: it holds void elements only between its own text, so a void element at its edge stays outside it. So `<b>[ab]<br>cd</b>` loses Bold as `ab<br><b>cd</b>`.
+
+**Goldens.** Steps 3 and 5 to 7, the command scope, the void-element rule for removal and F2's selection rule after applying state Anki's page at the pin, but no golden shows them yet. They are implemented now and stay provisional until the goldens of F17's inline rows that exercise them exist (from `underline-merge-nested-after` to the end of that table); a golden that contradicts one corrects it here, as F9's **Goldens** paragraph says. A harvest row that depends on them closes only with both its F17 golden and U192's native test (`conformance/harvest-followups#H1`), never with a native test checked only against the examples here.
 
 | Before | Command | After |
 |---|---|---|
@@ -71,6 +78,14 @@ What the editor's formatting commands do to a rich-text field's HTML (U192): inl
 | `<span style="font-style: oblique;">[x]</span>` | Italic, then Italic | `x`, then `<i>x</i>` |
 | `<sub>[x]</sub>` | Superscript | `<sup>x</sup>` |
 | `[x]` | Subscript, then Superscript | `<sub>x</sub>`, then `<sup>x</sup>` |
+| `[x]<br><b>y</b>` | Bold | `<b>x<br>y</b>` |
+| `[x]<div><br></div><b>y</b>` | Bold | `<b>x<div><br></div>y</b>` |
+| `[x]<i><b>y</b></i><i><b>z</b></i>` | Bold | `<b>x<i>y</i><i>z</i></b>` |
+| `x<b>y<b>z</b>w</b>[v]` | Bold | `x<b>yzwv</b>` |
+| `[<b>x<b>y</b></b>]<br>` | Bold | `<b>xy</b><br>` |
+| `[x]<u><b>y</b></u>` | Underline | `<u>x<b>y</b></u>` |
+| `<i>[x</i><b><i>y</i>z<i>w</i></b><i>v]</i>` | Bold | `<b><i>x</i><i>y</i>z<i>w</i><i>v</i></b>` |
+| `<b>[ab]<br>cd</b>` | Bold | `ab<br><b>cd</b>` |
 
 ## F5. No selection: the pending format (R842)
 
@@ -294,7 +309,7 @@ The formatting rows keep data the user did not ask to remove (data safety first)
 
 Requested in `conformance/scenarios/editor/formatting/`, with goldens in `conformance/goldens/editor/formatting/` marked `source: observed`, recorded as `editor/field-html` E2 and T1 say. None of the rows below is written or recorded: no runner step and no oracle driver op drives an editor page today. One core scenario is written there with existing ops: `options/key-writes`, the stored side of F12's option and palette writes (`editor/config-keys` K8, K9 and K11), inactive until Meguri's adapters pass it.
 
-**Setup.** `editor/field-html` T1's note type `Pair` and note. Each row gives Front's stored HTML with the selection in F1's notation; the maintainer opens Edit Current, focuses Front, sets that selection and runs the commands with Anki's own key (Ctrl on the image's platform) or, for commands without a key, its toolbar control. `type "…"` types as native key events. Last colours are set in the profile before the editor opens. Every scenario ends with blur and probe (Front's stored HTML), and Meguri's run compares the same probe.
+**Setup.** `editor/field-html` T1's note type `Pair` and note. Each row gives Front's stored HTML with the selection in F1's notation; the maintainer opens Edit Current, focuses Front, sets that selection and runs the commands with Anki's own key (Ctrl on the image's platform) or, for commands without a key, its toolbar control. `type "…"` types as native key events. A row may say where the selection's boundary points lie when F1's notation leaves it open. A row whose Commands include `probe selection` also records the text of the page's selection in Front: its string value, empty when collapsed. It is read right after the command before it, and before blur, and is stored next to the HTML probe; Meguri's run compares the same value. A row that ends with `probe, type "q"` records the selection another way: the typed character replaces exactly the selected content, so the final probe shows which content the selection held. Last colours are set in the profile before the editor opens. Every scenario ends with blur and probe (Front's stored HTML), and Meguri's run compares the same probe.
 
 Inline group (F3, F4):
 
@@ -318,6 +333,35 @@ Inline group (F3, F4):
 | `sub-over-sup-style` | `<span style="vertical-align: super">[x]</span>` | Subscript |
 | `div-weight-style` | `<div style="font-weight: bold">[x]</div>` | Bold (F16) |
 | `bold-span-lang` | `<span lang="ja" style="font-weight: bold;">[x]</span>` | Bold (F16) |
+| `underline-merge-nested-after` | `<u><b>a</b></u>[b]` | Underline |
+| `underline-merge-nested-before` | `[a]<u><b>b</b></u>` | Underline |
+| `bold-extend-before-nested` | `[a]<u><b>b</b></u>` | Bold |
+| `bold-extend-after-nested` | `<u><b>a</b></u>[b]` | Bold |
+| `bold-extend-nested-neighbours` | `[x]<i><b>y</b></i><i><b>z</b></i>` | Bold |
+| `bold-merge-flatten` | `x<b>a<b>b<b>c</b></b></b>[d]` | Bold |
+| `bold-merge-keeps-italic` | `x<b>a<i>b<i>c</i></i></b>[d]` | Bold |
+| `bold-flatten-merged-neighbour` | `x<b>y<b>z</b>w</b>[v]` | Bold |
+| `bold-flatten-scope` | `<b>x<b>y</b></b>z[w]` | Bold |
+| `bold-flatten-selected` | `[<b>x<b>y</b></b>]<br>` | Bold |
+| `bold-across-italic-runs` | `<i>[x</i><b><i>y</i>z<i>w</i></b><i>v]</i>` | Bold, probe, type `q` |
+| `bold-prefix` | `[ab]cd` | Bold, probe, type `q` |
+| `bold-text-suffix` | `ab[cd]` | Bold, probe selection |
+| `bold-whole-run-selection` | `[ab]<i>c</i>` | Bold, probe selection |
+| `bold-br-run` | `[a<br>b]` | Bold, probe selection |
+| `bold-break-at-edge` | `a[b<br>]c` | Bold |
+| `bold-br-before-list` | `[a<br><ul><li>b</li><li>c</li></ul>]` | Bold |
+| `bold-text-then-image` | `[a<img src="x.png">]` | Bold |
+| `bold-image-only` | `[<img src="x.png">]` | Bold |
+| `bold-merge-over-break` | `[x]<br><b>y</b>`, with the selection's boundary points in Front's root, around the text node | Bold, probe, type `q` |
+| `bold-merge-over-break-in-text` | `[x]<br><b>y</b>`, with the selection's boundary points inside the text node (offsets 0 and 1) | Bold, probe, type `q` |
+| `bold-merge-across-break` | `<b>a</b><br>[b]` | Bold |
+| `bold-merge-over-empty-block` | `[x]<div><br></div><b>y</b>` | Bold |
+| `unbold-between-text` | `ab<b>[cd]</b>ef` | Bold |
+| `unbold-break-at-edge` | `<b>[ab]<br>cd</b>` | Bold |
+| `unbold-list-item-in-bold` | `<b>a<ul><li>b</li><li>[c]</li></ul>d</b>` | Bold |
+| `unbold-nested-partial` | `<b><b>p</b>[q<b>r</b>]</b>s` | Bold, probe selection |
+
+From `underline-merge-nested-after` on, these rows settle F4's provisional rules (F4 **Goldens**) and F2's selection rule after applying. In every removal row (`unbold-…`), at least one selection point lies inside the bold element, so F4's toggle decision removes the format; a selection with both points outside every `<b>` applies Bold instead.
 
 Pending group (F5):
 

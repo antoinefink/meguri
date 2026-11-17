@@ -62,3 +62,13 @@ Current evidence:
 |---|---|---|
 | Product activation | PENDING | D8 / D10; both product lanes |
 | C5 | PENDING | C18 |
+
+## E5. Deck-flow scenarios (list)
+
+The scenarios under `sched/session/deck-flow/` study a deck through several answers on one held queue (E2), following the rules of E3.
+
+| Scenario | Covers |
+|---|---|
+| `sched/session/deck-flow/parent-then-children` (held) | `sched/orders#O2`: new cards gathered deck by deck across a parent and its nested subdecks in unicase name order; counts after each answer |
+| `sched/session/deck-flow/child-review-limit` (held) | `sched/limits#L3`, `sched/limits#L4` and `sched/answering#A6`: a review answered in a subdeck lowers the parent's remaining reviews in the held queue, in the deck list and in a later study of the parent |
+| `sched/session/deck-flow/new-within-review-limit` (held) | `sched/limits#L2`, `sched/limits#L4`: new cards admitted within the review limit; counts after each answer until the learning card graduates and the queue is empty |

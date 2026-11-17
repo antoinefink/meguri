@@ -57,7 +57,7 @@ Anki's deck options screen, which Meguri's preset menu (U232) follows:
 
 - **Add** and **Clone** prompt for a name (Clone pre-filled with the current preset's name). The text is trimmed of leading and trailing white space; an empty result does nothing.
 - **Rename** prompts with the current name; Anki uses the text as typed, not trimmed. A text equal to the current name does nothing.
-- When the name (after trimming, for Add and Clone) equals another preset's name exactly, byte for byte and with case, the current Unix time in whole seconds, in decimal, is appended: `Spanish` becomes `Spanish1894701600` at 2030-01-15 10:00 UTC. The check is made once; the result is not checked again.
+- When the name (after trimming, for Add and Clone) equals another preset's name exactly, byte for byte and with case, the current Unix time in seconds, rounded to the nearest whole second (a time exactly half-way rounds up), in decimal, is appended: `Spanish` becomes `Spanish1894701600` at 2030-01-15 10:00 UTC. At 10:00:00.499 the suffix is `1894701600`; at 10:00:00.500 it is `1894701601`. The check is made once; the result is not checked again.
 - The core offers this as a helper that takes the candidate name, the existing names and the clock; the preset operations store what they receive.
 
 ## P8. Remove a preset (R733, R1475)
@@ -107,5 +107,8 @@ Anki's screen saves everything in one "Deck Options" operation. Observed with th
 | `decks/presets/add-clone-rename` | P4, P5, P6: ids, stamps, the stored config (defaults with FSRS-6 parameters; a clone's bytes equal its source's) |
 | `decks/presets/assign` | P9: one deck, a subtree, filtered descendants untouched, no write when unchanged, `filtered_deck` |
 | `decks/presets/remove` | P8 after a sync (`scm <= ls`), run as accepted (Meguri asks nothing, `notetypes/schema-changes#G4`): decks of the removed preset and a deck with a missing preset move to the fallback, `scm` set past `ls`, no grave; `default_preset` |
+| `decks/presets/missing-reads-default` | P3: a deck whose `config_id` names no preset reads the default preset, not the built-in defaults: Set Due Date takes the default preset's starting ease and a new card takes the default preset's random insertion order (`notes/deck-placement-and-position#P4`); the deck's row is not written |
+| `sched/ops/set-due/missing-preset` (held) | P3 seen through Set Due Date: a deck naming a missing preset uses the default preset |
+| `sched/ops/set-due/missing-default-preset` (held) | P3 seen through Set Due Date: with the default preset missing too, the built-in defaults (P2) |
 
-Meguri's own behavior is tested in `core/crates/meguri-engine/tests/deck_config.rs`: with `scm <= ls` a removal commits at once, sets `scm` and takes no confirmation input (R1476); its safety backup is published before its first write, and a refused removal takes none (T6.1); P7's helper; P10's field-level update keeping unknown fields and the older FSRS lists (R1486); the fallback of P3.
+Meguri's own behavior is tested in `core/crates/meguri-engine/tests/deck_config.rs`: with `scm <= ls` a removal commits at once, sets `scm` and takes no confirmation input (R1476); its safety backup is published before its first write, and a refused removal takes none (T6.1); P7's helper, with the clock on each side of a half second; P10's field-level update keeping unknown fields and the older FSRS lists (R1486); the fallback of P3.

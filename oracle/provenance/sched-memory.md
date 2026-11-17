@@ -52,3 +52,12 @@ Oracle-maintainer hints for the two new driver entries (spec side only):
 - `ignored_before_count`: `GetIgnoredBeforeCount` with the preset's
   `param_search` when not empty, else `preset:"<name>" -is:suspended`, once
   per date; an invalid-input backend error is `invalid_date`.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| scenario search/state/memory-state-moves; proposed M7.2 / B7.2 step 4 amendment | `rslib/src/search/sqlwriter.rs` (has-memory-state node and its test), `rslib/src/search/parser.rs` (the node has no text syntax), `rslib/src/search/writer.rs` (writes it as empty text), `rslib/src/storage/sqlite.rs` (extract_fsrs_variable), `rslib/src/card/mod.rs` (set deck: recompute of the target deck's cards without the node) | that the predicate tests whether the extracted stability is NULL, and that its only caller is Change Deck's FSRS recompute of the target deck's cards |
+| Scenario storage/revlog/last-review-pick (specs/sched/memory-state M3: the review-log instant that stands in for a missing lrt) | `rslib/src/storage/revlog/mod.rs`, `rslib/src/storage/revlog/time_of_last_review.sql`, `rslib/src/scheduler/answering/mod.rs`, `rslib/src/stats/card.rs` | Which rows the last-review lookup selects (button 1 to 4, cram rows left out, newest first) and that the scheduler's next-states path calls it when card data has no lrt; Card Info's caller, to check where the lookup also writes. |

@@ -1,0 +1,214 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "browser_rows": [
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "12",
+                  "unit": "months"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "7",
+                  "unit": "seconds"
+                }
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "1",
+                  "unit": "years"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "47",
+                  "unit": "seconds"
+                }
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "2.5",
+                  "unit": "years"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "60",
+                  "unit": "seconds"
+                }
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "30",
+                  "unit": "days"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "2.5",
+                  "unit": "minutes"
+                }
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "1",
+                  "unit": "months"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "2.1",
+                  "unit": "minutes"
+                }
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "6",
+                  "unit": "months"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "60",
+                  "unit": "minutes"
+                }
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "2",
+                  "unit": "years"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "1.5",
+                  "unit": "hours"
+                }
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "10",
+                  "unit": "years"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "24",
+                  "unit": "hours"
+                }
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "2",
+                  "unit": "days"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "2",
+                  "unit": "days"
+                }
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "1",
+                  "unit": "days"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "12",
+                  "unit": "months"
+                }
+              }
+            },
+            "tint": "none"
+          },
+          {
+            "cells": {
+              "cardIvl": {
+                "span": {
+                  "amount": "2.5",
+                  "unit": "months"
+                }
+              },
+              "stability": {
+                "span": {
+                  "amount": "2.5",
+                  "unit": "years"
+                }
+              }
+            },
+            "tint": "none"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/columns/time-span-units",
+  "scenario_sha256": "8630794eff84921831f0dfd4c9a27e6b8b254e1ab59d45d94ddfe8206a5cf6dd",
+  "tz": "UTC"
+}

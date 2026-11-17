@@ -7,7 +7,7 @@ Scenarios: conformance/scenarios/stats/studied-today/, conformance/scenarios/sta
 
 Two texts report today's answers:
 
-- **The Home line** under the deck list: one sentence such as `Studied 3 cards in 13 seconds today (4.33s/card)`, for the whole collection (T2).
+- **The Home line** under the deck list: one sentence such as `Studied 6 cards in 20 seconds today (3.33s/card)`, for the whole collection (T2).
 - **The Today section** at the top of the Stats screen: up to four lines for the screen's scope (T3, T4).
 
 Anki builds the Home line in its core and the Today lines in its web page. The two use the same sentence for the studied count, but they read different rows (T3.1) and write numbers by different rules (T5). Meguri reproduces both exactly, so in rare cases the Home line and the first Today line differ, as they do in Anki (T4.5). Never write the two with one number writer.
@@ -66,7 +66,7 @@ Decided 2026-11-10: this is the line, not an open question. It is the default th
 
 ### T2.4 Examples
 
-Every row was checked against the oracle at the current pin. Scenario `studied-today/format-table` observes exactly these inputs, and its golden holds these lines (`specs/conformance/stats-ops.md` H8). The last column is the first Today line for the same numbers (T4.2), where it differs or helps.
+Every row was checked against the oracle at the current pin. Scenario `studied-today/format-table` observes the inputs of every row except 6 / 20000 and 240 / 7200000, which `studied-today/line-forms` observes; their goldens hold these lines (`specs/conformance/stats-ops.md` H8). The last column is the first Today line for the same numbers (T4.2), where it differs or helps.
 
 | `cards` | `time_ms` | Home line | First Today line |
 |---|---|---|---|
@@ -74,7 +74,7 @@ Every row was checked against the oracle at the current pin. Scenario `studied-t
 | 1 | 0 | `Studied 1 card in 0 seconds today (0s/card)` | same |
 | 1 | 1000 | `Studied 1 card in 1 second today (1s/card)` | same |
 | 2 | 1000 | `Studied 2 cards in 1 second today (0.5s/card)` | same |
-| 3 | 13000 | `Studied 3 cards in 13 seconds today (4.33s/card)` | same |
+| 6 | 20000 | `Studied 6 cards in 20 seconds today (3.33s/card)` | same |
 | 1 | 59000 | `Studied 1 card in 59 seconds today (59s/card)` | same |
 | 1 | 59994 | `Studied 1 card in 59.99 seconds today (59.99s/card)` | same |
 | 1 | 59995 | `Studied 1 card in 60 seconds today (60s/card)` | same |
@@ -86,7 +86,7 @@ Every row was checked against the oracle at the current pin. Scenario `studied-t
 | 1 | 119999 | `Studied 1 card in 2 minutes today (120s/card)` | same |
 | 1 | 3540000 | `Studied 1 card in 59 minutes today (3540s/card)` | `Studied 1 card in 59 minutes today (3,540s/card)` |
 | 1 | 3600000 | `Studied 1 card in 60 minutes today (3600s/card)` | `Studied 1 card in 60 minutes today (3,600s/card)` |
-| 300 | 5400000 | `Studied 300 cards in 90 minutes today (18s/card)` | same |
+| 240 | 7200000 | `Studied 240 cards in 120 minutes today (30s/card)` | same |
 | 10 | 18000000 | `Studied 10 cards in 300 minutes today (1800s/card)` | `Studied 10 cards in 300 minutes today (1,800s/card)` |
 | 1 | 900000 | `Studied 1 card in 15 minutes today (900s/card)` | same |
 | 1 | 999 | `Studied 1 card in 1 second today (1s/card)` | same |
@@ -305,7 +305,7 @@ The Today section is the Today graph of the Stats graph request (`stats/graphs-c
 ### T6.3 Text form
 
 - Lines are always English, whatever the device language (R1448; the plan's Open Questions keep these strings verbatim in every locale).
-- No line contains U+2068 or U+2069. Anki puts that pair of invisible direction marks around each number and around some of the parts of text that hold one: on the Home line also around the time span (`in 13 seconds`); on its Stats page around every inserted part, the card count's words included. The Again line has none, because Anki joins its number to the text without inserting it as a part. Meguri leaves every mark out, and the oracle's normalization (H5, H6) removes every U+2068 and U+2069 wherever it stands, not only around digits.
+- No line contains U+2068 or U+2069. Anki puts that pair of invisible direction marks around each number and around some of the parts of text that hold one: on the Home line also around the time span (`in 20 seconds`); on its Stats page around every inserted part, the card count's words included. The Again line has none, because Anki joins its number to the text without inserting it as a part. Meguri leaves every mark out, and the oracle's normalization (H5, H6) removes every U+2068 and U+2069 wherever it stands, not only around digits.
 - No line contains a line break. Anki's Studied sentence holds two line breaks, after the count and after `today`, which its pages show as spaces; Meguri writes single spaces there.
 - The Home line is a core text in the sense of `text/interface-text` I4: it has no String Catalog entry, U167's string lint does not treat it as catalog text, and its numbers keep T5.1's writing in every region (I6).
 
@@ -354,7 +354,8 @@ All rows are inserted with `db_exec` on a card id no card has, unless the scenar
 
 | Scenario | Pins | Values |
 |---|---|---|
-| `format-table` | T2.2, T5.1, T5.4 | the 36 lines of T2.4 |
+| `format-table` | T2.2, T5.1, T5.4 | 36 lines: 34 are rows of T2.4; the other two follow from T2.2 and T5.1 |
+| `line-forms` | T2.2, T5.1 | `Studied 1 card in 2 seconds today (2s/card)`, `Studied 5 cards in 1 second today (0.2s/card)`, `Studied 6 cards in 20 seconds today (3.33s/card)`, `Studied 7 cards in 45 seconds today (6.43s/card)`, `Studied 12 cards in 1 minute today (5s/card)`, `Studied 9 cards in 2.5 minutes today (16.67s/card)`, `Studied 240 cards in 120 minutes today (30s/card)`, `Studied 45 cards in 180 minutes today (240s/card)` |
 | `zero-line` | T2.3, T4.1 | `Studied 0 cards in 0 seconds today (0s/card)`; Collection all 0 |
 | `time-units` | T2.2 units, R1279 | `Studied 1 card in 59 seconds today (59s/card)`, `Studied 2 cards in 1 minute today (30s/card)`, `Studied 3 cards in 90 minutes today (1800s/card)`, `Studied 4 cards in 300 minutes today (4500s/card)` |
 | `refresh` | T7 through answers and a rollover | Home: zero line, `Studied 1 card in 4 seconds today (4s/card)`, `Studied 2 cards in 16 seconds today (8s/card)` (twice), zero line, `Studied 1 card in 30 seconds today (30s/card)`; Collection answers 0, 1, 2, 2, 0, 1 (correct 0, 1, 1, 1, 0, 1; all Learn) |

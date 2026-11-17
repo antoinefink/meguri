@@ -44,3 +44,11 @@ only on a real change; removal is an undoable op). Rows covered by existing
 scenarios are `done`; typed-read defaults are `deferred` to the areas that
 own each key's reader, key removal to U28 and U29 (key families), config undo
 to U25. Tests of the Python-only config wrappers are not applicable.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| storage/config-table C10 (removing a config key) and scenario storage/config/remove-key | `pylib/tests/test_config.py` | To learn which behavior the harvest row must prove: removing a key that was set makes it absent from the stored config, and reading it then gives the absent-key default. Golden values come from the oracle only. |

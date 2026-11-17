@@ -99,6 +99,9 @@ The **kept rows** are the graded rows from the start to the end, in order. Cram 
 | L L R ∣ R R (cutoff between the R's) | between | incomplete from the first interday graded row after the cutoff | none |
 | L L R R ∣ (all before) | after all | none | none |
 | L ∣ (a single L, before) | after it | complete from that L | none |
+| L L ∣ (both learning rows before) | after both | none | none |
+| L ∣ L (cutoff between the two learning rows, nothing after) | between | incomplete from the second L when that row is interday, otherwise none | none |
+| L ∣ L R (cutoff inside the learning run) | between the L's | incomplete from the first interday graded row after the cutoff | none: the card gives no training item although rows follow the cutoff |
 | L at exactly the cutoff, then R R | equal to the first L's id | complete from that L | complete from that L |
 | R at exactly the cutoff, then R R | equal to the first R's id | incomplete from the second R | none |
 

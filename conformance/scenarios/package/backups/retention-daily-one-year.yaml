@@ -1,0 +1,16 @@
+# R1633, R2009 retention; specs/package/backups.md B5.1, B5.2, B6.1;
+# specs/conformance/backup-ops.md F2, F3, F5.
+# One backup at noon on each of the 365 days before Monday 2030-07-01 (UTC),
+# then a forced backup at 10:00 that day, default limits (no backups key).
+# Yesterday's file stays; then the 12 older days, 10 Monday-start weeks
+# before the week of the last daily file, and 9 calendar months before the
+# month of the last weekly file each keep their newest file; all other
+# files are deleted. Today is the first of a month, so yesterday ends the
+# month before.
+id: package/backups/retention-daily-one-year
+description: Default retention over a year of daily backups keeps yesterday, 12 days, 10 weeks and 9 months.
+clock: {tz: UTC, start: "2030-07-01T10:00:00"}
+steps:
+  - add_backup_files: {series: {from: "2029-07-01T12:00:00", until: "2030-06-30T12:00:00", every: 1d}}
+  - force_backup: {}
+  - observe: [backup_files]

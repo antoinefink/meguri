@@ -1,0 +1,39 @@
+# The collection half of an Add-screen add (specs/editor/add-flow.md A5
+# steps 4 and 5; specs/notes/note-records.md A1). A draft whose fields are
+# all empty is in the field check's empty state, which the Add screen
+# refuses before any write (specs/notes/field-check.md K5). An add of a
+# filled draft stores both field values in order and puts its card in the
+# chosen deck, as one "Add Note" step, and leaves every other note and card
+# as it was: the note already in the collection keeps its fields, its
+# modification time and its synced usn. The existing rows are first set to
+# usn 4, as after a sync, and the clock moves on before the add, so any
+# write to them would show as a new mtime or usn -1. The UI half (the typed
+# text flushed into the add, the next draft) is specs/editor/add-flow.md
+# A11. Needs add_note, fields_check, db_exec and undo_status
+# (specs/conformance/note-ops.md N1, N4; specs/conformance/undo-ops.md V2,
+# V5).
+id: editor/add-flow/add-leaves-other-notes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Prompt, Reply]
+      templates:
+        - {name: Card, front: "{{Prompt}}", back: "{{Reply}}"}
+  decks: [Deck A, Deck B]
+  notes:
+    - {notetype: Pair, deck: Deck A, fields: [earlier, older]}
+steps:
+  # Statements that are not a select empty both histories (undo-ops.md V5).
+  - db_exec: {sql: "UPDATE notes SET usn = 4"}
+  - db_exec: {sql: "UPDATE cards SET usn = 4"}
+  - advance: 1h
+  - observe:
+      - fields_check:
+          cases:
+            - {notetype: Pair, fields: ["", ""]}
+            - {notetype: Pair, fields: [alpha, beta]}
+  - add_note: {notetype: Pair, deck: Deck B, fields: [alpha, beta]}
+  - observe: [undo_status]
+  - db_exec: {sql: "SELECT replace(flds, char(31), '|'), mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord"}

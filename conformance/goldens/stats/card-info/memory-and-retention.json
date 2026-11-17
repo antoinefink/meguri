@@ -1,0 +1,251 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "card_stats": {
+          "#c1": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c1",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": 1895043600,
+            "due_position": null,
+            "ease": 2500,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": 0.94805145,
+            "interval": 12,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": {
+              "difficulty": 3.25,
+              "stability": 12.5
+            },
+            "note_id": "#n1",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 3,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c2": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c2",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": 0.85,
+            "due_date": 1897290000,
+            "due_position": null,
+            "ease": 2500,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": 0.9790667,
+            "interval": 40,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": {
+              "difficulty": 8.2,
+              "stability": 40.0
+            },
+            "note_id": "#n2",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 5,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c3": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c3",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": 0.85,
+            "due_date": 1895043600,
+            "due_position": null,
+            "ease": 2500,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 10,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n3",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 3,
+            "revlog": [],
+            "total_secs": 0.0
+          },
+          "#c4": {
+            "added": 1894698000,
+            "average_secs": 0.0,
+            "card_id": "#c4",
+            "card_type": "Forward",
+            "custom_data": "",
+            "deck": "Lang",
+            "desired_retention": null,
+            "due_date": 1895043600,
+            "due_position": null,
+            "ease": 2300,
+            "first_review": null,
+            "fsrs_params": [],
+            "fsrs_retrievability": null,
+            "interval": 10,
+            "lapses": 0,
+            "latest_review": null,
+            "memory_state": null,
+            "note_id": "#n4",
+            "notetype": "Pair",
+            "original_deck": null,
+            "preset": "Default",
+            "reviews": 3,
+            "revlog": [],
+            "total_secs": 0.0
+          }
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 3.25,
+              "lrt": 1894179600,
+              "s": 12.5
+            },
+            "did": "Lang",
+            "due": 4,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 12,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894698000,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {
+              "d": 8.2,
+              "decay": 0.1542,
+              "dr": 0.85,
+              "lrt": 1894179600,
+              "s": 40.0
+            },
+            "did": "Lang",
+            "due": 30,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 40,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894698000,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 5,
+            "type": 2,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {
+              "dr": 0.85,
+              "lrt": 1894179600
+            },
+            "did": "Lang",
+            "due": 4,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 10,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894698000,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {
+              "lrt": 1894179600
+            },
+            "did": "Lang",
+            "due": 4,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 10,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894698000,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/card-info/memory-and-retention",
+  "scenario_sha256": "aaf3f6c7cb272294d88afeb1a659fd186605efcb384612d1b87d3eb226d724e3",
+  "tz": "Europe/Paris"
+}

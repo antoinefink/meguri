@@ -1,0 +1,55 @@
+# The `_` names a deck package takes from a note type, in each reference shape
+# (specs/package/apkg-export.md A9.1 rule 3, A9.4, A9.5). The CSS names
+# _red.css after an upper-case @IMPORT (form 1), _green.css in single quotes
+# (form 2), _blue.png and _lime.woff2 in unquoted url() (form 5, the second
+# followed by a format() whose quoted word does not start with _), _cyan.png
+# after an upper-case URL( (form 3) and _teal.css in a single-quoted url()
+# (form 4); plain.css and other.png are named too but do not start with _.
+# The front template names _t1.jpg, _t2 and _t3.js in double-quoted
+# attribute values (form 2); the back template names _t4.jpg and _t5
+# unquoted after src= and data= (form 4), _t6.js in single quotes (form 3),
+# and _t7.jpg unquoted after an upper-case SRC=, which the case-sensitive
+# template scan does not take. _spare.txt is in the folder but named nowhere.
+# The field names no media. Anki writes media in an order of its own, so the
+# list is compared as a set (A16, package-ops.md E10).
+id: package/apkg-export/notetype-underscore-forms
+description: A deck package carries the underscore files each CSS and template reference form names, and no other file.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+compare:
+  set: [/steps/3/package_media]
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Forms
+      fields: [Front, Back]
+      templates:
+        - name: Forward
+          front: "{{Front}}<img src=\"_t1.jpg\"><object data=\"_t2\"></object><span title=\"_t3.js\"></span>"
+          back: "{{Back}}<img src=_t4.jpg><object data=_t5></object><i class='_t6.js'></i><img SRC=_t7.jpg>"
+      css: "@IMPORT \"_red.css\";\n@import '_green.css';\n@import 'plain.css';\n.one { background: url(_blue.png); }\n.two { background: URL(\"_cyan.png\"); }\n@import url('_teal.css');\n.three { background: url('other.png'); }\n@font-face { font-family: f; src: url(_lime.woff2) format('woff2'); }\n"
+  notes:
+    - {notetype: Forms, deck: Lang, fields: [alpha, beta]}
+  media_files:
+    - {name: _red.css, text: "red bytes"}
+    - {name: _green.css, text: "green bytes"}
+    - {name: plain.css, text: "plain bytes"}
+    - {name: _blue.png, text: "blue bytes"}
+    - {name: _cyan.png, text: "cyan bytes"}
+    - {name: _teal.css, text: "teal bytes"}
+    - {name: other.png, text: "other bytes"}
+    - {name: _lime.woff2, text: "lime bytes"}
+    - {name: _t1.jpg, text: "t1 bytes"}
+    - {name: _t2, text: "t2 bytes"}
+    - {name: _t3.js, text: "t3 bytes"}
+    - {name: _t4.jpg, text: "t4 bytes"}
+    - {name: _t5, text: "t5 bytes"}
+    - {name: _t6.js, text: "t6 bytes"}
+    - {name: _t7.jpg, text: "t7 bytes"}
+    - {name: _spare.txt, text: "spare bytes"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: forms.apkg, limit: {deck: Lang}, scheduling: true, presets: false, media: true}
+  - observe:
+      - package_media: {name: forms.apkg}

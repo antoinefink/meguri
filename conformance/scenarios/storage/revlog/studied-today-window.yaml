@@ -1,0 +1,32 @@
+# The Home studied-today numbers (specs/stats/counting-rules.md N6,
+# specs/stats/studied-today.md T2.1; R1296, R1278, R1279): rows strictly after
+# the start of the current Anki day whose type is neither 4 (Manual) nor 5
+# (Rescheduled), whatever their ease; the count is the number of rows and the
+# time the sum of their stored times. Europe/Paris, rollover 4: the day of
+# 2026-10-12 starts at 04:00 local (02:00 UTC). Each row's time is a distinct
+# power of two in seconds, so the total shows exactly which rows counted. All
+# rows are on card id 1000, which no card has.
+#   03:59:59.999  type 1, ease 3, 512 s  (before the start: no)
+#   04:00:00.000  type 1, ease 3,   1 s  (exactly at the start: no)
+#   04:00:00.001  type 1, ease 3,   2 s  (yes)
+#   10:00         type 0, ease 3,   4 s  (yes)
+#   10:01         type 2, ease 1,   8 s  (yes)
+#   10:02         type 3, ease 0,  16 s  (an unrated cram row: yes)
+#   10:03         type 4, ease 0,  32 s  (Set Due Date: no)
+#   10:04         type 4, ease 3,  64 s  (a rated Manual row: no)
+#   10:05         type 5, ease 0, 128 s  (Rescheduled: no)
+#   10:06         type 1, ease 0, 256 s  (an unrated Review row: yes)
+# Expected: 5 rows and 286 s. With no row at all both numbers are 0. From
+# 04:00 on 2026-10-13 a new day starts and none of these rows counts.
+id: storage/revlog/studied-today-window
+clock: {tz: Europe/Paris, start: "2026-10-10T12:00:00"}
+steps:
+  - set_config: {key: rollover, value: 4}
+  - set_clock: "2026-10-12T20:00:00"
+  - observe: [studied_today_raw, studied_today_text]
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791770399999, 1000, -1, 3, 10, 5, 2500, 512000, 1), (1791770400000, 1000, -1, 3, 10, 5, 2500, 1000, 1), (1791770400001, 1000, -1, 3, 10, 5, 2500, 2000, 1), (1791792000000, 1000, -1, 3, 1, 0, 2500, 4000, 0), (1791792060000, 1000, -1, 1, 1, 10, 2300, 8000, 2), (1791792120000, 1000, -1, 0, 0, 0, 0, 16000, 3), (1791792180000, 1000, -1, 0, 10, 10, 2500, 32000, 4), (1791792240000, 1000, -1, 3, 10, 10, 2500, 64000, 4), (1791792300000, 1000, -1, 0, 12, 10, 2500, 128000, 5), (1791792360000, 1000, -1, 0, 10, 10, 2500, 256000, 1)"}
+  - observe: [studied_today_raw, studied_today_text]
+  - set_clock: "2026-10-13T03:59:59"
+  - observe: [studied_today_raw]
+  - set_clock: "2026-10-13T04:00:00"
+  - observe: [studied_today_raw]

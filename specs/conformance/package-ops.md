@@ -132,6 +132,10 @@ Added on 2026-11-10 by the same maker (`oracle/fixtures/package/apkg.py` and the
 | `package/apkg/media-subdir.apkg` | as `apkg/meta-version-4.apkg` with `meta` `08 03`, plus an entry `0` = zstd of the 3 bytes `abc` before `media`; `media` = zstd of a media map with one entry: name `a/b.jpg`, size 3, the SHA-1 of `abc` | `package/apkg-import/media-map-variants` |
 | `package/apkg/legacy-subdir.apkg` | as `apkg/legacy-traversal.apkg` with `media` the JSON map `{"0": "a/b.jpg"}` | the same |
 | `package/apkg/legacy-no-media-map.apkg` | as `apkg/legacy-traversal.apkg` without the entry `0` and without `media` | the same |
+| `package/variants/media-absolute.colpkg` | as `media-traversal`, name `/x.jpg` | `package/collection-package/refused-media-map` (one more import step) |
+| `package/apkg/legacy-absolute.apkg` | as `apkg/legacy-traversal.apkg` with `media` the JSON map `{"0": "/x.jpg"}` | `package/apkg-import/media-map-variants` (one more import step) |
+
+The last two rows are not built yet: the fixture maker has not made them and no scenario step imports them. Once built, the import side refuses an absolute name directly, next to the `../x.jpg` and `a/b.jpg` cases (`package/container#P6`, and P17 for the legacy map). Until then the absolute-name import proof is open, and harvest row h434af44650c7 stays `deferred`.
 
 ## E5. Scenarios and what runs them
 

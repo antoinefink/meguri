@@ -1,0 +1,102 @@
+# R1078, R1079; specs/search/join-and-replace.md J3, J4, J6;
+# specs/search/canonical-form.md F2, F3; specs/search/grammar.md G2 (AND
+# binds before OR). A built group inside another built group is written in
+# brackets whatever the two joiners: a three-item AND holding an OR group, an
+# OR of AND groups, a chain nested to the left and one nested to the right
+# (one bracket level per step), and a three-level mix of a deck term with
+# state and flag terms. One OR group of the same four items has no inner
+# brackets. A grouped text and the same terms typed flat with mixed joiners
+# mean different things, so the searches that follow, on cards in each state
+# made by the real ops, give different cards for the two; the chains and the
+# flat OR leave two cards out and give the same cards.
+id: search/builder/grouped-precedence
+tags: [needs-state, needs-tag, needs-deck]
+clock: {tz: UTC, start: "2030-02-20T09:00:00"}
+setup:
+  decks: [Box, "Box::Inner"]
+  notetypes:
+    - name: Plain
+      fields: [Prompt, Reply]
+      templates: [{name: Ask, front: "{{Prompt}}", back: "{{Reply}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Plain, deck: Box, fields: [one, first], tags: [warm]}
+    - {notetype: Plain, deck: Box, fields: [two, second], tags: [warm]}
+    - {notetype: Plain, deck: Box, fields: [three, third]}
+    - {notetype: Plain, deck: Box, fields: [four, fourth]}
+    - {notetype: Plain, deck: "Box::Inner", fields: [five, fifth], tags: [warm]}
+    - {notetype: Plain, deck: "Box::Inner", fields: [six, sixth]}
+    - {notetype: Plain, deck: "Box::Inner", fields: [seven, seventh]}
+    - {notetype: Plain, deck: "Box::Inner", fields: [last, final], tags: [warm]}
+steps:
+  - observe:
+      - search_build:
+          # AND of an OR group, a tag and another OR group
+          - {group: {joiner: and, items: [
+              {group: {joiner: or, items: [{state: learn}, {state: suspended}, {state: buried}]}},
+              {tag: warm},
+              {group: {joiner: or, items: [{flag: 5}, {flag: 6}]}}]}}
+          # OR of two AND groups
+          - {group: {joiner: or, items: [
+              {group: {joiner: and, items: [{tag: warm}, {state: new}]}},
+              {group: {joiner: and, items: [{flag: 7}, {state: review}]}}]}}
+          # chain nested to the left, three steps
+          - {group: {joiner: or, items: [
+              {group: {joiner: or, items: [
+                {group: {joiner: or, items: [{state: suspended}, {state: buried}]}},
+                {flag: 7}]}},
+              {state: learn}]}}
+          # chain nested to the right, three steps
+          - {group: {joiner: or, items: [
+              {state: learn},
+              {group: {joiner: or, items: [
+                {flag: 7},
+                {group: {joiner: or, items: [{state: suspended}, {state: buried}]}}]}}]}}
+          # the same four items as one flat OR group
+          - {group: {joiner: or, items: [{state: suspended}, {state: buried}, {flag: 7}, {state: learn}]}}
+          # three levels: a deck AND (an AND group OR a state)
+          - {group: {joiner: and, items: [
+              {deck: "Box::Inner"},
+              {group: {joiner: or, items: [
+                {group: {joiner: and, items: [{state: new}, {flag: 7}]}},
+                {state: due}]}}]}}
+          # a two-item grouping, and the same terms as one parsed flat text
+          - {group: {joiner: and, items: [
+              {group: {joiner: or, items: [{state: learn}, {flag: 5}]}},
+              {tag: warm}]}}
+          - {text: "is:learn OR flag:5 tag:warm"}
+          # parsed OR text grouped with another parsed text
+          - {group: {joiner: and, items: [{text: "is:learn OR flag:5"}, {text: "tag:warm"}]}}
+      - search_join:
+          # an existing OR search ANDed with an OR group
+          - {existing: "is:review OR is:suspended", item: {group: {joiner: or, items: [{flag: 6}, {flag: 7}]}}, joiner: and, negate: false}
+          # an existing AND search ORed with an AND group
+          - {existing: "tag:warm is:new", item: {group: {joiner: and, items: [{flag: 7}, {state: review}]}}, joiner: or, negate: false}
+  # c1 new, flag 5; c2 learning, flag 6; c3 review not due, flag 7;
+  # c4 suspended new, flag 5; c5 buried new; c6 review due today, flag 6;
+  # c7 learning; c8 new, flag 7
+  - answer: {card: "#c2", rating: good}
+  - answer: {card: "#c7", rating: good}
+  - set_due: {cards: ["#c3"], days: "4"}
+  - set_due: {cards: ["#c6"], days: "0"}
+  - suspend: {cards: ["#c4"]}
+  - bury: {cards: ["#c5"]}
+  - set_flag: {cards: ["#c1", "#c4"], flag: 5}
+  - set_flag: {cards: ["#c2", "#c6"], flag: 6}
+  - set_flag: {cards: ["#c3", "#c8"], flag: 7}
+  - observe:
+      - search:
+          # the built texts, then the same terms flat
+          - {query: '(is:learn OR is:suspended OR is:buried) tag:warm (flag:5 OR flag:6)'}
+          - {query: 'is:learn OR is:suspended OR is:buried tag:warm flag:5 OR flag:6'}
+          - {query: '(tag:warm is:new) OR (flag:7 is:review)'}
+          - {query: 'tag:warm is:new OR flag:7 is:review'}
+          - {query: '((is:suspended OR is:buried) OR flag:7) OR is:learn'}
+          - {query: 'is:learn OR (flag:7 OR (is:suspended OR is:buried))'}
+          - {query: 'is:suspended OR is:buried OR flag:7 OR is:learn'}
+          - {query: 'deck:Box::Inner ((is:new flag:7) OR is:due)'}
+          - {query: 'deck:Box::Inner is:new flag:7 OR is:due'}
+          - {query: '(is:learn OR flag:5) tag:warm'}
+          - {query: 'is:learn OR flag:5 tag:warm'}
+          - {query: '(is:review OR is:suspended) (flag:6 OR flag:7)'}
+          - {query: 'is:review OR is:suspended flag:6 OR flag:7'}

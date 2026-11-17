@@ -32,3 +32,11 @@ When they are committed, recheck the rows against the committed ids and text.
 | config-keys K10 | the files of K8 and K9, `ts/lib/tslib/profile.ts` (editor config writes), `pylib/anki/collection.py` (config set), `ts/routes/editor/editor-toolbar/ColorPicker.svelte`, `ts/routes/editor/editor-toolbar/TextColorButton.svelte`, `ts/routes/editor/editor-toolbar/HighlightColorButton.svelte` | the editor's script-value reads of the two options; its config writes marked undoable; the palette saved from the dialog's state when a picker opens or a colour is chosen; colour names accepted by the toolkit on load |
 | config-keys K11 | none (2026-11-10: the K10 files, rechecked for a collection-library read of the three keys; there is none) | scenario list and the decision to cover the stored side with `editor/formatting/options/key-writes`, Meguri's own |
 | config-keys K12 | `rslib/src/config/bool.rs` (the two keys default to true), `rslib/src/config/mod.rs` (typed read, any decode failure gives the default), `rslib/src/config/schema11.rs` (not in a new collection), `rslib/src/stats/graphs/mod.rs` (graph preferences read and write) | the two graph keys' names, boolean type and `true` defaults; absence from a new collection; Anki's write of all three graph keys together |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| conformance/scenarios/editor/config-keys/deck-key-curmodel-fallback (K4.1 true row, missing and stale deck key fall back to curModel), with notes/add-defaults/after-add and editor/config-keys/add-defaults-current-deck | `ts/tests/e2e/context-switching.spec.ts` | Which behavior to prove: with addToCur true, a missing or stale deck-to-note-type key falls back to the global note type and keeps the current deck. The expectations come from the oracle golden. |

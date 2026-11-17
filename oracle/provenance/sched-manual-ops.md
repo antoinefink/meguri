@@ -51,3 +51,13 @@ scheduler's empty of a filtered deck after checking that the named deck is
 filtered (`not_filtered` otherwise, before calling Anki). Deck names resolve
 from the collection at the step (deck-ops.md K1); repeated references are
 `invalid_scenario` before any call (J1).
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| set-due-date S4.1 home preset fallback (default preset, then built-in defaults); scenarios sched/ops/set-due/missing-preset and missing-default-preset | `rslib/src/deckconfig/mod.rs`, `rslib/src/scheduler/reviews.rs`, `rslib/src/card/mod.rs`, `rslib/src/notetype/cardgen.rs`, `rslib/src/stats/card.rs` | which behavior the harvested tests prove: the two-level fallback when a preset is read for a deck. Also a survey of the callers that read a preset with the fallback, to choose an observable scheduling path (Set Due Date's starting ease). |
+| sched/manual-ops M6.2 rule 1, sched/card-data K6, sched/set-due-date S4 (last new position); scenarios sched/ops/reset/last-position, sched/ops/set-due/last-position | `rslib/src/scheduler/new.rs` (the last-position test and the schedule-as-new helper); `rslib/src/scheduler/reviews.rs` (Set Due Date saving the last position before rescheduling) | Which cases the test covers: a new card uses its own position (its original due in a filtered deck); a graduated card uses its saved position or none. Also that Reset and Set Due Date both use it. Expected values come from the oracle. |
+| Scenario sched/ops/set-due/congrats-review-today (Set Due Date "0"/"1" seen through congrats facts) | `rslib/src/scheduler/service/mod.rs` | Which behavior the congrats-after-set-due test requires: review work due today is reported and the card is no longer counted as new. Expectations come from the recorded golden. |

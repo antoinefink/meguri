@@ -1,0 +1,43 @@
+# specs/browser/columns.md C3 and specs/conformance/browser-ops.md B3: the
+# cells of a row are those of the columns the latest row request selects,
+# and nothing of an earlier selection carries over. The collection does not
+# change between the four reads of the same cards: first Sort Field and
+# Deck, then a disjoint set (Note Type, Tags, Reviews), then Deck alone, then
+# the first set again. Every cell text differs from the others (two note
+# types, two decks, tags on one note only, a review count set with db_exec),
+# so a row built from a stale selection shows a key or a text that does not
+# belong to the request.
+id: browser/columns/switched-columns
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["Deck A", "Deck B"]
+  notetypes:
+    - name: Alpha
+      fields: [Front, Back]
+      templates: [{name: Card 1, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Beta
+      fields: [Front, Back]
+      templates: [{name: Card 1, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Alpha, deck: "Deck A", fields: [one, x], tags: [colors]}
+    - {notetype: Beta, deck: "Deck B", fields: [two, y]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET reps = 4 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - observe:
+      - browser_rows:
+          columns: [noteFld, deck]
+          rows: ["#c1", "#c2"]
+  - observe:
+      - browser_rows:
+          columns: [note, noteTags, cardReps]
+          rows: ["#c1", "#c2"]
+  - observe:
+      - browser_rows:
+          columns: [deck]
+          rows: ["#c2", "#c1"]
+  - observe:
+      - browser_rows:
+          columns: [noteFld, deck]
+          rows: ["#c1", "#c2"]

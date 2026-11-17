@@ -97,3 +97,14 @@ test wording, LRU keying, first-direction test, U81 dependency) and
 `specs/conformance/browser-ops.md` B1/B4 (pre-U85 path, filtered-deck clause,
 the `unreadable` mapping) are outside this target's files; the spec now states
 the distinctions those items need.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| Scenario browser/columns/time-span-units (C12 rounded long time span through cardIvl and stability cells; inputs are the writer's own, re-recorded after review) | `rslib/src/scheduler/timespan.rs`; `rslib/src/browser_table.rs`; `rslib/src/i18n/service.rs` | Which time-span behavior the test requires (unit choice, rounded vs precise amount, the month/year boundary). Also where the rounded span is observable (the Interval and Stability browser cells) and that the precise mode is reached only through the i18n format-timespan service. Expectations come from the recorded golden. |
+| browser/sort/catalog-agreement (browser/sorting S1, config-keys K3) | `rslib/src/search/mod.rs` (test column_default_sort_order_should_match_order_by_clause) | the obligation that each column's advertised cards/notes sortability agrees with the sort order it supplies |
+| browser/columns C3 rows following the requested column selection; scenario browser/columns/switched-columns; needs-op browser_columns catalog observation | `rslib/src/search/service/mod.rs` | that the active browser columns are per-backend state the row read uses, and that the column catalog read must not be empty |
+| browser/columns C3 cells in request order: scenario browser/columns/requested-order | `rslib/src/search/service/mod.rs` | Which behavior the harvest test proves: a Browse row built for one card returns the sort field, deck and note type cells in the order of the active column list. Expectations come from the oracle golden only. |

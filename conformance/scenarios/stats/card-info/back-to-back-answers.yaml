@@ -1,0 +1,21 @@
+# stats/card-info C3.1, C3.2, C3.6, C6.1: a new card answered Good and then
+# Hard at once, with no time passing between the two answers. Expected: the
+# card stats name the card's note and list both review-log entries, newest
+# first, each with its own button, time taken and last interval. The review
+# count and the total and average times count both entries; first and latest
+# review are both the answer instant.
+id: stats/card-info/back-to-back-answers
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {"fsrs": true, "loadBalancerEnabled": false, "rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["first", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["second", "x"]}
+steps:
+  - {"answer": {"card": "#c2", "rating": "good", "time_ms": 6000}}
+  - {"answer": {"card": "#c2", "rating": "hard", "time_ms": 1500}}
+  - {"observe": [{"card": ["#c2"]}]}
+  - {"observe": [{"card_stats": ["#c2"]}]}

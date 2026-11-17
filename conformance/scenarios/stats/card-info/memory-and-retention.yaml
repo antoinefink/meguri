@@ -1,0 +1,27 @@
+# stats/card-info C3.1, C3.4, C3.5 (inputs of C4.1 rows 7 to 9 and of the
+# omitted ease row): four review cards with no review-log rows, whose data
+# (written with db_exec, each with an lrt so that nothing is written back,
+# C13.4) holds every pairing of a stored memory state and a desired
+# retention. Expected: a stored state gives memory_state and a retrievability
+# with or without dr; dr alone gives desired_retention but no memory state
+# and no retrievability (no history, so no computed state, and no SM-2
+# conversion of ivl and factor); neither gives null for all three.
+id: stats/card-info/memory-and-retention
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {"fsrs": true, "loadBalancerEnabled": false, "rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["state only", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["state and retention", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["retention only", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["neither", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 12, due = 4, factor = 2500, reps = 3, data = '{\"s\":12.5,\"d\":3.25,\"lrt\":1894179600}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 40, due = 30, factor = 2500, reps = 5, data = '{\"s\":40.0,\"d\":8.2,\"dr\":0.85,\"decay\":0.1542,\"lrt\":1894179600}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 4, factor = 2500, reps = 3, data = '{\"dr\":0.85,\"lrt\":1894179600}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 4, factor = 2300, reps = 3, data = '{\"lrt\":1894179600}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"observe": [{"card_stats": ["#c1", "#c2", "#c3", "#c4"]}]}
+  - {"observe": [{"card": ["#c1", "#c2", "#c3", "#c4"]}]}

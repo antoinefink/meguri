@@ -212,7 +212,7 @@ The input is the field's stored text and the output keeps its HTML as written (`
 
 ## C14. Scenarios
 
-None needs collection setup. All but the last two use the `cloze` observation (`specs/conformance/cloze-ops.md`); `blank-check` and `templates` use the `template` observation's new-note cases (`specs/conformance/render-ops.md` Q1.2), so they run the filters and the blank check through the template engine.
+All but the last three rows need no collection setup. The first eleven use the `cloze` observation (`specs/conformance/cloze-ops.md`). `blank-check` and `templates` use the `template` observation's new-note cases (`specs/conformance/render-ops.md` Q1.2), so they run the filters and the blank check through the template engine. The three `stored-*` scenarios add notes to a collection and use the `render` observation (`specs/conformance/render-ops.md` Q5) on their stored cards.
 
 | Scenario | Covers |
 |---|---|
@@ -229,6 +229,9 @@ None needs collection setup. All but the last two use the `cloze` observation (`
 | `render/cloze/typing` | C10 (R977) |
 | `render/cloze/blank-check` | C15 on cloze note types: numbers in used and unused fields, empty and cloze-free question templates, nested, zero, unclosed and listed numbers, the top card number 500, special values that count, a note field that hides a special |
 | `render/cloze/templates` | C1, C6, C8, C9 inside templates: side by template, FrontSide carrying the front, card number from the ordinal, chains with `text`, `cloze`, `cloze-only` and an unknown filter (`filters.md` F1), `{{type:cloze:F}}`, the filters on other fields, sections and specials, and on a standard note type |
+| `render/cloze/stored-cards` | C2, C6 and card generation (`notes/card-generation` G4, G6, G7) on stored cards of a cloze note type, through the `render` observation (`conformance/render-ops` Q5): a note with no cloze, single and hinted clozes, inactive numbers, one number used twice, an edit that adds a number, c0 and minus-sign markers that add no card |
+| `render/cloze/stored-mathjax` | C5 and C8 on stored cards: clozes inside inline and display math make cards and render without their span, clozes outside math keep it, math inside a cloze is encoded in `data-cloze` |
+| `render/cloze/stored-text-chain` | `filters.md` F1 and F3 with C4, C6 and C7 on stored cards: `{{cloze:text:F}}` strips markup from cloze content and hints before rendering, and `{{text:cloze:F}}` strips the spans |
 
 ## C15. Blank cards of cloze note types
 

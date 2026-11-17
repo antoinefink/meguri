@@ -354,5 +354,6 @@ The U64 approach and test examples now follow A4.3: every question marker shares
 | `render/type-answer/replacement-escapes` | A4.5: valid replacement escapes, capture expansion and typed malformed-input refusals |
 | `render/type-answer/whole-side` | A3: CSS and body are transformed together, including media names, repeated markers and answer-rule relocation |
 | `render/type-answer/ae17` | AE17's comparison part: a Japanese syllabary card, typed `ka`, `kq` and nothing |
+| `render/type-answer/av-removal` (held) | A6.1 step 1 and A6.1.1 on their own: a sound tag between words leaves the spaces on both sides of it, adjacent sound tags, `tts` directives with only a non-`lang` option and with `lang`, a mixed line, and a directive with another name kept with its option (also against a typed text) |
 
 The media-name side of the same review HTML is `render/media-display`; the image-occlusion elements are `render/image-occlusion-render`.

@@ -1,0 +1,87 @@
+# R1078, R1079; specs/search/join-and-replace.md J4, J5, J6; items in the
+# neutral form of specs/conformance/search-ops.md S5. Negating a built item
+# gives its negation, and negating that negation gives the item back: the
+# text written for a twice negated item equals the text of the item itself,
+# for every state Anki's item has, for plain text, a field, a flag and a
+# tag. Three negations equal one. The same holds when the second negation
+# comes from join's negate flag. Then the texts are run on a collection with
+# one card per state, so the restored state filter selects the same cards as
+# the plain one and the single negation selects the rest. Card ids come from
+# the frozen clock (1894701600000 + note number - 1).
+id: search/builder/negation-twice
+tags: [needs-text, needs-state]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Memo
+      fields: [Front, Back]
+      templates: [{name: Recall, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Memo, fields: [one, "new"]}
+    - {notetype: Memo, fields: [two, "learning, due"]}
+    - {notetype: Memo, fields: [three, "review, due"]}
+    - {notetype: Memo, fields: [four, "review, not due"]}
+    - {notetype: Memo, fields: [five, "suspended review"]}
+    - {notetype: Memo, fields: [six, "buried new"]}
+steps:
+  - observe:
+      - search_build:
+          # each state: plain, negated once, twice, three times
+          - {state: due}
+          - {negated: {state: due}}
+          - {negated: {negated: {state: due}}}
+          - {negated: {negated: {negated: {state: due}}}}
+          - {state: new}
+          - {negated: {state: new}}
+          - {negated: {negated: {state: new}}}
+          - {state: learn}
+          - {negated: {state: learn}}
+          - {negated: {negated: {state: learn}}}
+          - {state: review}
+          - {negated: {state: review}}
+          - {negated: {negated: {state: review}}}
+          - {state: suspended}
+          - {negated: {state: suspended}}
+          - {negated: {negated: {state: suspended}}}
+          - {state: buried}
+          - {negated: {state: buried}}
+          - {negated: {negated: {state: buried}}}
+          # plain text, a field, a flag, a tag
+          - {literal: three}
+          - {negated: {literal: three}}
+          - {negated: {negated: {literal: three}}}
+          - {field: {name: Front, text: one}}
+          - {negated: {negated: {field: {name: Front, text: one}}}}
+          - {flag: 2}
+          - {negated: {negated: {flag: 2}}}
+          - {tag: blue}
+          - {negated: {negated: {tag: blue}}}
+          # a negated group, negated again
+          - {negated: {negated: {group: {joiner: or, items: [{state: due}, {state: new}]}}}}
+      - search_join:
+          # join's negate flag negates an already negated item
+          - {existing: "deck:*", item: {negated: {state: due}}, joiner: and, negate: true}
+          - {existing: "deck:*", item: {negated: {state: suspended}}, joiner: and, negate: true}
+          - {existing: "deck:*", item: {state: due}, joiner: and, negate: true}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894700000 WHERE id = 1894701600001"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 3 WHERE id = 1894701600002"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 9, ivl = 9 WHERE id = 1894701600003"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -1, due = 0, ivl = 3 WHERE id = 1894701600004"}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = -3, due = 6 WHERE id = 1894701600005"}
+  - observe:
+      - search:
+          - {query: 'is:due'}
+          - {query: '-is:due'}
+          - {query: 'is:new'}
+          - {query: '-is:new'}
+          - {query: 'is:learn'}
+          - {query: '-is:learn'}
+          - {query: 'is:review'}
+          - {query: '-is:review'}
+          - {query: 'is:suspended'}
+          - {query: '-is:suspended'}
+          - {query: 'is:buried'}
+          - {query: '-is:buried'}
+          - {query: 'deck:* is:due'}
+          - {query: 'deck:* -is:due'}

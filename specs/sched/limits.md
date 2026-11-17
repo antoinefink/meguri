@@ -66,6 +66,9 @@ Examples:
 | review limit 4; 3 interday learning, 3 reviews and 3 new cards due | 3 interday learning, 1 review, no new card; with `ignore` true the 3 new cards too (golden `sched/queue/limits/interday-first`) |
 | 20 new, 10 reviews; 6 reviews, 15 new | 6 reviews and 4 new cards; with 3 new cards studied today, 1; with `ignore` true, 15 (golden `sched/queue/limits/new-capped-by-reviews`) |
 | Lang::Kanji This-deck new 3, its child Lang::Kanji::N5 with its own limit 30, studying Lang | Kanji and N5 together give 3 new cards, in every gather order (goldens `sched/queue/order/new-gather-*`) |
+| 2 new, 50 reviews, `ignore` false; 4 reviews and 4 new due | 4 reviews and 2 new cards; with a This-deck review limit of 5, 4 reviews and 1 new card (golden `sched/queue/limits/new-limit-not-spent-by-reviews` (held)) |
+| 5 new, 0 reviews; 1 review, 1 interday learning card and 3 new due | nothing; with `ignore` true, the 3 new cards only (golden `sched/queue/limits/new-ignore-zero-review-limit` (held)) |
+| Upper (0 new a day) over Upper::Lower (20 new); 3 new and 1 review in Lower | `applyAllParentLimits` false: studying Lower gives 3 new and the review, studying Upper the review only; true: studying Lower gives the review only (golden `sched/queue/limits/ancestor-new-limit` (held)) |
 
 ## L5. Intraday learning
 
@@ -85,6 +88,9 @@ The queue result keeps, for each deck of the tree, its remaining new and review 
 | `sched/queue/limits/intraday-uncapped` | L5 |
 | `sched/queue/limits/today-only` | L2 (Today-only and This-deck limits across a day change; a negative counter) |
 | `sched/queue/limits/new-capped-by-reviews` | L2 step 2, L4 |
+| `sched/queue/limits/new-limit-not-spent-by-reviews` (held) | L2 step 2, L4 rule 2 (reviews lower the new limit only once the review limit binds) |
+| `sched/queue/limits/new-ignore-zero-review-limit` (held) | L2, L4 (review limit 0: no review or interday learning card; new cards capped at 0 unless `newCardsIgnoreReviewLimit`) |
+| `sched/queue/limits/ancestor-new-limit` (held) | L3, L4 (an ancestor's new limit of 0 with `applyAllParentLimits` off and on) |
 | `sched/queue/gather/missing-preset` | L2 (missing preset: 9999, not capped) |
 | `sched/queue/order/new-gather-*` | L4 with a This-deck limit on a subtree, in every gather order |
 

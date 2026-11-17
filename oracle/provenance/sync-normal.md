@@ -44,3 +44,11 @@ N15 and the H15 entry correction come from the current Product Contract's
 KTD26 and `sync/anki-transfers` M1, M2 and M6. The added N14 production upload
 check is U29's recorded U107 obligation. The session terminal-authority link
 uses `sched/review-session` C17.1. No new reference source was read for this intake.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| normal-sync N5.4 incoming presets added under their ids; scenario sync/normal/preset-added | `rslib/src/deckconfig/mod.rs`, `rslib/src/deckconfig/service.rs`, `pylib/anki/decks.py`, `rslib/src/sync/collection/changes.rs` (caller located only), `rslib/src/import_export/insert.rs` | which behavior the harvested tests prove: a legacy preset save with id 0 adds the preset with a fresh id, and a non-zero id is stored as given. Also which Meguri-facing paths (sync apply, package import) save presets under their existing ids. |

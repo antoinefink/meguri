@@ -92,3 +92,11 @@ these readings when recorded. Recorded on 2026-11-10: the goldens of
 | package-ops E2.2 (scan by time) | `rslib/src/media/mod.rs` (checksum getter reads the media database; changes registered by the change tracker) | why a scenario advances the clock before a change the import must see |
 | container P16.5 | `rslib/src/import_export/package/colpkg/import.rs` (media entries restored one by one in map order before the collection rename, so a failure part way leaves earlier files written; an existing file is overwritten in place, never moved aside), `rslib/src/sync/media/database/client/changetracker.rs` (the folder's modification time checked first, then each file's, in whole seconds; an equal time skips the file) | the three differences and why the scenarios avoid them |
 | package-ops E2.3 (missing member) | `oracle/driver/ops/colpkg.py` (the corrupt-kind set: protobuf, I/O and sync-other errors, plus invalid input for the collection package import only since 2026-11-10) read together with `media.rs` above and `rslib/src/media/mod.rs` (the media manager's one invalid-input error, an empty media folder path, which the driver never passes) | that invalid input in that import is the missing member, so the driver maps the kind without reading text |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| Legacy media name normalization vs latest-format refusal (classification only) | `rslib/src/import_export/package/media.rs` | Legacy entries normalized and latest entries with noncanonical names refused; used to split the row into a covered latest half and a legacy half that needs a fixture. |

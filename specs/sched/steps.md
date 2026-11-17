@@ -160,5 +160,8 @@ So a relearning card on its first step of `10m 1h`, 680 s after its due-time rec
 | `sched/steps/learning-fuzz` | L8, `sched/fuzz#Z7` |
 | `sched/steps/relearning` | L9, L10, `sched/fsrs-transitions#T9` |
 | `sched/steps/rollover-answer` | L7 and the learning-step fuzz through answers (AE30; needs the `answer` op, U44) |
+| `sched/steps/custom-steps-chain` (held) | L2 to L6, L9: previews and written rows agree step by step through custom learning steps (Again, Good, Good, Good) and relearning steps (Again, Good), and Again with no relearning step stays a review card |
+| `sched/steps/shrunk-learning-steps` | L2 with `left` above the step count after the list shrank, L4 single-step Hard keeping `left`, L5 Good leaving the steps; `sched/step-remap#R3` (the deck options save remaps) and `#R3.1` (a schema-11 save does not) for comparison |
+| `sched/steps/removed-relearning-steps` | L3, L9 with no relearning steps left: Again, Hard and Good answered on relearning cards whose steps were removed; `sched/fsrs-transitions#T9` (no second lapse), `sched/step-remap#R3.1` |
 
 All goldens are recorded. U45 activates the six pure step scenarios; `rollover-answer` remains pending until U44's answer adapter exists. Meguri's unit tests add L1's conversion table and L4's arithmetic on lists no scenario has (a sum above 4,294,967,295, NaN steps).

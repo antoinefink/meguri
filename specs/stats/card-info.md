@@ -501,7 +501,7 @@ The `card-info-no-lrt-backfill` transform covers only the added `lrt`, so card-i
 
 ### C14.1 Scenarios for the oracle-maintainer
 
-As of 2026-10-27 the oracle has the kind and every scenario below except `damaged` is in the tree with its golden recorded at the current oracle pin; the runner has no adapter yet (C13.2). `damaged`'s two cases are run errors, which a golden cannot hold (`conformance/dsl` D11): the driver's self-tests check them, and U92's unit tests check Meguri's typed errors. Each is under `conformance/scenarios/stats/card-info/` and `conformance/goldens/stats/card-info/`. All set the config key `fsrs` to true and build history with `answer` or with `db_exec` revlog inserts (`specs/conformance/stats-ops.md` H3). All follow C13.4's data rules.
+As of 2026-11-17 the oracle has the kind and every scenario below except `damaged` is in the tree with its golden recorded at the current oracle pin; the runner has no adapter yet (C13.2). `damaged`'s two cases are run errors, which a golden cannot hold (`conformance/dsl` D11): the driver's self-tests check them, and U92's unit tests check Meguri's typed errors. Each is under `conformance/scenarios/stats/card-info/` and `conformance/goldens/stats/card-info/`. All set the config key `fsrs` to true and build history with `answer` or with `db_exec` revlog inserts (`specs/conformance/stats-ops.md` H3). All follow C13.4's data rules.
 
 | Scenario | Pins |
 |---|---|
@@ -517,6 +517,9 @@ As of 2026-10-27 the oracle has the kind and every scenario below except `damage
 | `times` | rated and unrated rows with times, one of 8,855 ms: `average_secs`, `total_secs`; a card whose rows all have time 0 |
 | `custom-data` | `cd` values of C5.5 as stored text (each card's data with an `lrt`, C13.4), `{}` giving `custom_data` `{}` |
 | `cloze-type` | a cloze card with `ord` 2: `card_type` is the first template's name |
+| `memory-and-retention` | four review cards with no review-log rows whose data (each with an `lrt`) holds a stored state without `dr`, a stored state with `dr` and `decay`, `dr` alone, and neither: `memory_state` and `fsrs_retrievability` only for the stored states (decay 0.5 when the data has none), `desired_retention` exactly when the data has `dr`, no state from `ivl` and `factor`; the card rows after `card_stats` are unchanged on both sides |
+| `no-item` | a new card given Set Due Date only, and a card answered twice, Reset and then given Set Due Date (history L L X M): review cards with a factor and no `memory_state`, no `fsrs_retrievability`, and no per-entry states (C3.4, no SM-2 conversion; `sched/fsrs-items` I3) |
+| `back-to-back-answers` | a new card answered twice at the same instant: both entries in the history, newest first, each with its own button, time taken and last interval; `reviews` and the total and average times count both entries; first and latest review are both the answer instant |
 | `damaged` | a card whose deck was removed with `db_exec`: run error on both sides; and a new card with no review-log row in a deck whose preset holds an 18-value `fsrs_params_6` list: run error on both sides (`fsrs_failed`) |
 
 ### C14.2 Unit tests
@@ -538,11 +541,13 @@ The plan's U92 test asks for raw-value parity "for the fixture cards at three fr
 |---|---|
 | `corpus/*.json` from a seeded `corpora/card-info/generate.py` | 50 cards in every state of C14.1 (new, learning with an epoch-seconds due, review, relearning, filtered, reset, SM-2-era history), one scenario per zone of R1899, each observed with `card_stats` at three clocks: the start, past a DST change of that zone, and between local midnight and the rollover hour |
 | `params` | presets with 19 values (`fsrs_params_5`, `fsrs_params_6` empty) and 21 values, each on a card with history and no stored state: `fsrs_params` (V6's list choice), the computed `memory_state` and per-entry states under non-default parameters |
-| `no-item` | review cards with no stored state that give no memory item (no review-log row; only a Set Due Date row): no `memory_state` (C3.4, no SM-2 conversion) |
+| `no-item` (one more card) | a review card whose only review-log row is a Set Due Date row and whose `ivl` is above 0: no `memory_state` (C3.4) |
 | `times` (one more card) | only a Manual row of 5,000 ms: `average_secs` and `total_secs` 0 |
 | `data-no-keys` | review cards whose data is `{"pos":3,"s":10.0,"d":5.0,"lrt":0,"cd":5}` and the same with `"cd":null`: no `due_position`, computed `memory_state` (Meguri's `fsrs_retrievability` under a `card-info-computed-retrievability` transform), `custom_data` `""` (C1); the card row after `card_stats` only under a `card-info-no-lrt-backfill` transform (C13.4) |
 | `no-lrt-elapsed` (one more card) | stored state, no `lrt`, a graded row, then a later row stored with `type` 259, `factor` 0, `ease` 3: `fsrs_retrievability` from the 259 row (C3.5 step 1) |
 | `damaged` (more run errors) | a review-log row with `factor` −1, and one with `ease` 300 (`unreadable_record`); a cloze note type with no template (`missing_template`); a 21-value list holding a NaN (`fsrs_failed`), if the driver can write the blob |
+
+The other no-item cases are covered by C14.1: a review card with no review-log row by `memory-and-retention` #c3 and #c4 (ivl 10, a factor, `memory_state` null), and a card with only a Set Due Date row (ivl 0) by `no-item` #c1.
 
 ## C15. Not covered
 

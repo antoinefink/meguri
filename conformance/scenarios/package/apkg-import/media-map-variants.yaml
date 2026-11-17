@@ -1,0 +1,37 @@
+# specs/package/container.md P6, P17; specs/package/apkg-import.md I16;
+# specs/conformance/package-ops.md E4.1, E6.4 (the three media-map fixtures).
+# Two deck packages whose media map names a/b.jpg, one in the latest format
+# and one in the legacy JSON map: both are refused as corrupt before any
+# media file is written, and the collection and its media folder do not
+# change. A legacy 2 package with no media entry at all then imports its
+# notes and writes no media file. The ../x.jpg names are
+# package/apkg-import/refusals and package/collection-package/refused-media-map.
+id: package/apkg-import/media-map-variants
+description: A media map name with a path separator makes a deck package corrupt in both layouts; a legacy package without a media map imports with no media.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+  media_files:
+    - {name: kept.jpg, text: "picture"}
+steps:
+  - observe:
+      - timing
+      - db_dump: {tables: [col, notes, cards, revlog, graves, decks, deck_config, tags, config]}
+      - media_dir
+  - advance: 1m
+  - import: {format: apkg, fixture: package/apkg/media-subdir.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - import: {format: apkg, fixture: package/apkg/legacy-subdir.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - db_dump: {tables: [col, notes, cards, revlog, graves, decks, deck_config, tags, config]}
+      - media_dir
+  - advance: 1m
+  - import: {format: apkg, fixture: package/apkg/legacy-no-media-map.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe: [media_dir]
+  - db_exec: {sql: "SELECT n.sfld, d.name FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.sfld, c.ord"}

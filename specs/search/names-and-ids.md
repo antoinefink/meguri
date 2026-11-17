@@ -187,6 +187,7 @@ Meguri reads the candidates through the index on `notes.csum` (`ix_notes_csum`),
 | `search/decks/presets`, `preset-missing` | N3.6 |
 | `search/ids/lists` | N3.5, N5 |
 | `search/notetypes/names` | N4 |
+| `search/notetypes/glob-escapes` | N1 (exact text, has wildcards, glob conversion with `\*` and `\\` escapes), N4.1, N4.2; `fields.md` F2 steps 3 and 4 |
 | `search/dupe/first-field`, `entities` | N6 |
 | `search/regex/glob-size` | N2.2 step 4, N3.3, N4.1, N4.2: glob expressions over the size limit (`text-matching.md` T12.1) |
 

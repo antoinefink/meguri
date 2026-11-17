@@ -197,3 +197,15 @@ are Meguri's own design.
 The add-on's tooltip wording (M10.1) is user-visible text R1320 asks Meguri
 to reproduce; it is listed in M17 as R1320 words it. Its long date is not
 reproduced (M10.2, M18).
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| card-info C3.1, C3.2, C3.4, C3.5, C3.6, C6.1 scenarios memory-and-retention, no-item, back-to-back-answers | `pylib/tests/test_stats.py`, `rslib/src/stats/card.rs` (test module) | which behaviors the harvested tests require: the card stats report names the note and lists every answer after consecutive answers; a report is built for a stored card; a missing memory state is computed for the report and not stored on the card. Golden values come from the oracle only. |
+| card-info C4.1 row rules (harvest rows for Stability/Difficulty/Ease rows; native-ui classification) | `ts/routes/card-info/lib.test.ts` | which row-applicability behaviors are required (FSRS rows with a memory state with or without desired retention; desired retention alone gives no FSRS rows; Ease hidden whenever desired retention or a memory state is present). These were checked against the existing card-info C4.1 text; no scenario values were taken from the test. |
+| studied-today T2 Home line format (new scenario line-forms; existing time-units) | `rslib/src/stats/today.rs` (test module) | the requirement that the studied-today line formats count, total time and per-card average across seconds and minutes. The new line-forms scenario uses writer-chosen pairs only. Review found that the existing format-table scenario and the studied-today/stats-ops examples carry two of this test's input pairs and lines; the proposed replacements are in spec_gaps, and format-table itself needs the cleanup listed in concerns. format-table is no longer cited as coverage. |
+| Scenario storage/revlog/studied-today-window (specs/stats/counting-rules N6: the Home studied-today count and time) | `rslib/src/storage/revlog/mod.rs`, `rslib/src/storage/revlog/studied_today.sql` | The window start (day cutoff minus one day, strict) and the row types left out of the studied-today count and time sum. |
+| stats/graph-presentation P2.2 step 1 (native-ui row) | `ts/lib/tslib/time.test.ts`, `ts/lib/tslib/time.ts`, `ts/routes/congrats/lib.ts` | the natural-unit boundaries (month as a twelfth of 365 days) and where the rule is used outside the charts |

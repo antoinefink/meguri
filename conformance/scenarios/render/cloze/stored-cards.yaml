@@ -1,0 +1,36 @@
+# Cloze notes added to a collection and rendered from their stored cards
+# (specs/render/cloze.md C2, C6; specs/notes/card-generation.md G4-G7;
+# card-render-pipeline.md K4). A cloze note with no cloze still gets the card
+# of ordinal 0; one card per cloze number; the active cloze shows [...] or its
+# hint on the front and its content on the back, other numbers stay inactive
+# spans; one number used twice hides both. An edit that adds a new number adds
+# its card; c0 and a minus sign before the number are no clozes and add none.
+# Cards an edit adds have no logical id, so the card set is read with db_exec,
+# the note by its first field (the sort field).
+id: render/cloze/stored-cards
+description: "cloze notes rendered from stored cards, and the cards they get"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Fill In
+      kind: cloze
+      fields: [Body, Notes]
+      templates:
+        - {name: Fill, front: "{{cloze:Body}}", back: "{{cloze:Body}}<br>{{Notes}}"}
+steps:
+  - add_note: {notetype: Fill In, fields: ["plain words only", "n1"]}
+  - add_note: {notetype: Fill In, fields: ["Alpha {{c1::Beta}}", "n2"]}
+  - add_note: {notetype: Fill In, fields: ["Alpha {{c1::Beta::a letter}}", "n3"]}
+  - add_note: {notetype: Fill In, fields: ["Alpha {{c1::Beta}} {{c2::Gamma}}", "n4"]}
+  - add_note: {notetype: Fill In, fields: ["Front {{c1::Delta}} {{c1::Epsilon}}", "n5"]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - observe: [render]
+  - advance: 1h
+  # Number 2 appears: one card added, the ordinal-0 card stays.
+  - edit_note: {note: "#n5", fields: ["{{c2::Zeta}} {{c1::Eta}}"]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid WHERE n.flds LIKE '%Zeta%' ORDER BY c.ord"}
+  # c0 and minus-sign markers are not cloze numbers: no further card.
+  - edit_note: {note: "#n5", fields: ["{{c2::Zeta}} {{c1::Eta}} {{c0::Theta}} {{c-1::Iota}} {{c-2:Kappa}}"]}
+  - db_exec: {sql: "SELECT c.ord FROM cards c JOIN notes n ON n.id = c.nid WHERE n.flds LIKE '%Theta%' ORDER BY c.ord"}
+  - db_exec: {sql: "SELECT count(*) FROM cards"}
+  - observe: [render]

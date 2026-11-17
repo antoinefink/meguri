@@ -1,0 +1,84 @@
+# Relearning cards reached by answering (a new card answered Easy, then
+# Again a month later), then deck options saves that edit their presets'
+# steps (R644; specs/sched/step-remap.md R2, R3).
+# Needs answer and save_deck_options (specs/conformance/deck-options-ops.md E1).
+# Presets (learning 1m 10m in each), one deck and one card per preset:
+#  P1     relearning 10m       Deck 1, c1: on its only step
+#  P2     relearning 10m       Deck 2, c2: on its only step
+#  P3     relearning 10m 1h    Deck 3, c3: answered Good once more, on step 2
+#  P4     relearning 10m 1h    Deck 4, c4: answered Good once more, on step 2
+#  P5     relearning 10m 1h    Deck 5, c5: on step 1 of 2
+id: sched/options/remap-answered/relearning
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: P1, learn_steps: [1m, 10m], relearn_steps: [10m]}
+    - {name: P2, learn_steps: [1m, 10m], relearn_steps: [10m]}
+    - {name: P3, learn_steps: [1m, 10m], relearn_steps: [10m, 1h]}
+    - {name: P4, learn_steps: [1m, 10m], relearn_steps: [10m, 1h]}
+    - {name: P5, learn_steps: [1m, 10m], relearn_steps: [10m, 1h]}
+  decks:
+    - {name: Deck 1, preset: P1}
+    - {name: Deck 2, preset: P2}
+    - {name: Deck 3, preset: P3}
+    - {name: Deck 4, preset: P4}
+    - {name: Deck 5, preset: P5}
+  notetypes:
+    - name: Simple
+      fields: [Front, Back]
+      templates: [{name: Card 1, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { padding: 2px; }"
+  notes:
+    - {notetype: Simple, deck: Deck 1, fields: [one, x]}
+    - {notetype: Simple, deck: Deck 2, fields: [two, x]}
+    - {notetype: Simple, deck: Deck 3, fields: [three, x]}
+    - {notetype: Simple, deck: Deck 4, fields: [four, x]}
+    - {notetype: Simple, deck: Deck 5, fields: [five, x]}
+steps:
+  - advance: 1h
+  - answer: {card: "#c1", rating: easy, time_ms: 3000}
+  - answer: {card: "#c2", rating: easy, time_ms: 3000}
+  - answer: {card: "#c3", rating: easy, time_ms: 3000}
+  - answer: {card: "#c4", rating: easy, time_ms: 3000}
+  - answer: {card: "#c5", rating: easy, time_ms: 3000}
+  - advance: 30d
+  # Lapses: every card starts relearning.
+  - answer: {card: "#c1", rating: again, time_ms: 3000}
+  - answer: {card: "#c2", rating: again, time_ms: 3000}
+  - answer: {card: "#c3", rating: again, time_ms: 3000}
+  - answer: {card: "#c4", rating: again, time_ms: 3000}
+  - answer: {card: "#c5", rating: again, time_ms: 3000}
+  - advance: 10m
+  # c3 and c4 pass their first relearning step (10m).
+  - answer: {card: "#c3", rating: good, time_ms: 3000}
+  - answer: {card: "#c4", rating: good, time_ms: 3000}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5)"]
+  # Every card stamped long ago with a server usn, so that a card a save
+  # writes shows mod = now and usn -1.
+  - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
+  - advance: 1m
+  # A. P1's relearning steps 10m -> 5m 20m 1h: c1 has passed no step and
+  # now has three to do.
+  - save_deck_options: {deck: Deck 1, options: {relearn_steps: [5m, 20m, 1h]}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5)"]
+  - advance: 1m
+  # B. P2's learning steps 1m 10m -> 1m 10m 2h: c2 is relearning, so its
+  # row stays.
+  - save_deck_options: {deck: Deck 2, options: {learn_steps: [1m, 10m, 2h]}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5)"]
+  - advance: 1m
+  # C. P3's relearning steps 10m 1h -> 5m 10m 1h: the new 5m step comes
+  # before the 10m step c3 passed, so c3 still has one step to do.
+  - save_deck_options: {deck: Deck 3, options: {relearn_steps: [5m, 10m, 1h]}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5)"]
+  - advance: 1m
+  # D. P4's relearning steps 10m 1h -> 5m: no new step follows the one c4
+  # passed, yet c4 keeps one step and stays relearning.
+  - save_deck_options: {deck: Deck 4, options: {relearn_steps: [5m]}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5)"]
+  - advance: 1m
+  # E. P5's relearning steps 10m 1h -> none: c5 had two steps to do and
+  # keeps one.
+  - save_deck_options: {deck: Deck 5, options: {relearn_steps: []}}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5)"]

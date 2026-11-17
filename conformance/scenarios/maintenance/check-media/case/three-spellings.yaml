@@ -1,0 +1,27 @@
+# C5 and C6 of specs/maintenance/check-media.md on a case-sensitive volume
+# (media-ops.md F14.4): dot.png and DOT.PNG with different bytes, and one
+# note referencing Dot.png and dot.png in one field and DOT.PNG in the
+# other; no file has the spelling Dot.png exactly. Meguri keeps both files,
+# lists them as a case conflict and satisfies all three references by case
+# key; Anki renames one variant, rewrites only the reference spelled like it
+# and reports Dot.png missing (deviations check-media-case-variant-kept-three,
+# check-media-case-variant-kept-three-dir and -note; C20).
+id: maintenance/check-media/case/three-spellings
+tags: [media-case-variants]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<img src=\"Dot.png\"><img src=\"dot.png\">", "<img src=\"DOT.PNG\">"]}
+  media_files:
+    - {name: dot.png, text: "plain dot"}
+    - {name: DOT.PNG, text: "bold dot"}
+steps:
+  - observe: [media_pending]
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir, media_trash]
+  - db_exec: {sql: "SELECT replace(flds, char(31), '|'), mod, usn FROM notes"}

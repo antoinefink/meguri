@@ -1,0 +1,27 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2031-09-17T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "force_backup": {
+          "name": "backup-2031-09-17-10.00.00.colpkg"
+        }
+      },
+      {
+        "backup_files": ["backup-2031-05-20-12.00.00.colpkg", "backup-2031-07-31-12.00.00.colpkg", "backup-2031-08-17-12.00.00.colpkg", "backup-2031-08-20-12.00.00.colpkg", "backup-2031-09-07-12.00.00.colpkg", "backup-2031-09-10-12.00.00.colpkg", "backup-2031-09-14-18.00.00.colpkg", "backup-2031-09-16-21.00.00.colpkg", "backup-2031-09-17-06.00.00.colpkg", "backup-2031-09-17-10.00.00.colpkg", "backup-2031-09-18-08.00.00.colpkg"]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/backups/three-stages",
+  "scenario_sha256": "f6d8fb5aa8bbcf7d6ae28421cf410111ed122a996c72d1156c619ee9e784a641",
+  "tz": "UTC"
+}

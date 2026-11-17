@@ -1,0 +1,146 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["flagLabels", -1, 1894701600, "{\"2\":\"Orange\"}", 1894701600000],
+            ["savedFilters", -1, 1894701600, "{\"Alpha\":\"deck:A\",\"Beta\":\"tag:b\"}", 1894701600000]
+          ]
+        }
+      },
+      {
+        "browser_config": {
+          "activeCols": ["noteFld", "template", "cardDue", "deck"],
+          "activeNoteCols": ["noteFld", "note", "template", "noteTags"],
+          "browserNoteSortBackwards": false,
+          "browserTableShowNotesMode": false,
+          "collapseCardState": false,
+          "collapseDecks": false,
+          "collapseFlags": false,
+          "collapseNotetypes": false,
+          "collapseSavedSearches": false,
+          "collapseTags": false,
+          "collapseToday": false,
+          "defaultSearchText": "",
+          "flagLabels": {
+            "2": "Orange"
+          },
+          "ignoreAccentsInSearch": false,
+          "normalize_note_text": true,
+          "noteSortType": null,
+          "previewBothSides": false,
+          "resetCountsBrowser": false,
+          "restorePositionBrowser": true,
+          "savedFilters": {
+            "Alpha": "deck:A",
+            "Beta": "tag:b"
+          },
+          "setDueBrowser": "0",
+          "sortBackwards": false,
+          "sortType": "noteFld"
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["flagLabels", -1, 1894701600, "{\"2\":\"Orange\"}", 1894705200000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 1894705200000]
+          ]
+        }
+      },
+      {
+        "browser_config": {
+          "activeCols": ["noteFld", "template", "cardDue", "deck"],
+          "activeNoteCols": ["noteFld", "note", "template", "noteTags"],
+          "browserNoteSortBackwards": false,
+          "browserTableShowNotesMode": false,
+          "collapseCardState": false,
+          "collapseDecks": false,
+          "collapseFlags": false,
+          "collapseNotetypes": false,
+          "collapseSavedSearches": false,
+          "collapseTags": false,
+          "collapseToday": false,
+          "defaultSearchText": "",
+          "flagLabels": {
+            "2": "Orange"
+          },
+          "ignoreAccentsInSearch": false,
+          "normalize_note_text": true,
+          "noteSortType": null,
+          "previewBothSides": false,
+          "resetCountsBrowser": false,
+          "restorePositionBrowser": true,
+          "savedFilters": {},
+          "setDueBrowser": "0",
+          "sortBackwards": false,
+          "sortType": "noteFld"
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["flagLabels", -1, 1894701600, "{\"2\":\"Orange\"}", 1894708800000],
+            ["savedFilters", -1, 1894708800, "{\"Gamma\":\"is:new\"}", 1894708800000]
+          ]
+        }
+      },
+      {
+        "browser_config": {
+          "activeCols": ["noteFld", "template", "cardDue", "deck"],
+          "activeNoteCols": ["noteFld", "note", "template", "noteTags"],
+          "browserNoteSortBackwards": false,
+          "browserTableShowNotesMode": false,
+          "collapseCardState": false,
+          "collapseDecks": false,
+          "collapseFlags": false,
+          "collapseNotetypes": false,
+          "collapseSavedSearches": false,
+          "collapseTags": false,
+          "collapseToday": false,
+          "defaultSearchText": "",
+          "flagLabels": {
+            "2": "Orange"
+          },
+          "ignoreAccentsInSearch": false,
+          "normalize_note_text": true,
+          "noteSortType": null,
+          "previewBothSides": false,
+          "resetCountsBrowser": false,
+          "restorePositionBrowser": true,
+          "savedFilters": {
+            "Gamma": "is:new"
+          },
+          "setDueBrowser": "0",
+          "sortBackwards": false,
+          "sortType": "noteFld"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/config/remove-key",
+  "scenario_sha256": "e4c9aa2ed8c12be9c0680989a7ff66bd602a9f650f38919965b9fe0fc70bb3fa",
+  "tz": "UTC"
+}

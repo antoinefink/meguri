@@ -17,3 +17,11 @@ the bytes, invalid UTF-8 and a byte order mark included, `35.0` binds as REAL,
 `-0.0` survives the bridge, ±∞ comes back as null, and multi-argument
 `min`/`max` keep NULL, `-0.0` and finite values while turning ±∞ into
 ±f64::MAX.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| search/card-extractors X6 SM-2 fallback for relative overdueness (harvest row h4c7fe3f35b39) | `rslib/src/storage/sqlite.rs`, `rslib/src/storage/card/mod.rs` | Which behavior the test proves (relative overdueness under FSRS falls back to an SM-2 key when the memory state is missing), to match it to existing scenarios |

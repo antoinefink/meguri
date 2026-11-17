@@ -1,0 +1,25 @@
+# C11 of specs/maintenance/check-media.md with files the media store added
+# itself (add_media) next to one placed from outside: alpha.png, added
+# through the store and referenced by the first note, is used; beta.png,
+# added through the store, and gamma.jpg, written from outside, are both
+# unused; delta.png is referenced by the second note only and has no file,
+# so it is missing and only that note is listed. The third note has no
+# reference at all.
+id: maintenance/check-media/report/store-added
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["first", "<img src=\"alpha.png\">"]}
+    - {notetype: Media, fields: ["second", "<img src=\"delta.png\">"]}
+    - {notetype: Media, fields: ["third", "plain text"]}
+  media_files:
+    - {name: gamma.jpg, text: "outside bytes"}
+steps:
+  - add_media: {name: alpha.png, text: "store bytes one"}
+  - add_media: {name: beta.png, text: "store bytes two"}
+  - check_media: {}
+  - observe: [media_dir]

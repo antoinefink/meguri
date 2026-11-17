@@ -5,7 +5,7 @@ Requirements: R644, R686, R687, R690, R732, R733, R737, R740, R741, R744, R760, 
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sched/memory/, conformance/scenarios/sched/options/
 
-The scenario ops and the observation kind that the memory-state (U46) and deck options (U49) scenarios need: `save_deck_options`, the deck options screen's Save; `set_scheduling_prefs`, the scheduling settings' save; and `ignored_before_count`, the count behind "N of M cards included". Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. What a save does is `sched/deck-options` O7 to O9 (and `sched/memory-state` M4, M7.1 for memory states); the settings are `sched/deck-options` O10.
+The scenario ops and the observation kind that the memory-state (U46) and deck options (U49) scenarios need: `save_deck_options`, the deck options screen's Save; `set_scheduling_prefs`, the scheduling settings' save; and `ignored_before_count`, the count behind "N of M cards included". The draft kind `step_text` (E6) reads the step text layer. Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. What a save does is `sched/deck-options` O7 to O9 (and `sched/memory-state` M4, M7.1 for memory states); the settings are `sched/deck-options` O10.
 
 ## E1. `save_deck_options` (op)
 
@@ -26,8 +26,8 @@ The scenario ops and the observation kind that the memory-state (U46) and deck o
   5. Then what Anki's save does after them: new cards of decks whose insertion order changed are re-sorted, remaining steps of learning cards remapped (R644), memory states recomputed (`sched/memory-state` M7.1).
   6. It is one undoable step named "Deck Options" (`undo-ops.md` V4 `deck_options`).
 - **Output**: none (`{}`).
-- **Rejection** `default_preset` when `remove` names the default preset: nothing changes. Any other save Anki refuses (a parameter list its crate cannot build) is a run error; scenarios avoid it.
-- **Meguri.** The adapter builds a draft from U49's snapshot of `deck`, applies the argument and runs U49's save (`sched/deck-options#O7`) with the confirmation. The options the screen shows go through the draft. The hidden ones (`fsrs_params`, `starting_ease`, `easy_bonus`, `hard_interval`, `interval_modifier`, `lapse_new_interval`, `graduating_interval_days`, `easy_interval_days`), which the screen never writes (R752), are applied by the adapter inside the same undo step, with the preset update of `decks/deck-presets#P10` (for `fsrs_params`, the optimizer's setter followed by the recompute of `sched/memory-state#M7.3`), so that the rows equal a save that changed them; only U46's scenarios use them.
+- **Rejections** `default_preset` when `remove` names the default preset; `date_in_future` (Meguri only) when `options.ignore_reviews_before` is a date after today's date (`sched/deck-options#O1`, O4.2). In both cases nothing changes. The oracle never records `date_in_future`, because Anki's save stores today's date in its place (`sched/deck-options#O12`). A scenario that sets such a date therefore carries a deviation (`sched/options/ignore-date/future`). Any other save that Anki refuses (a parameter list its crate cannot build) is a run error; scenarios avoid it.
+- **Meguri.** The adapter builds a draft from U49's snapshot of `deck`, applies the argument and runs U49's save (`sched/deck-options#O7`) with the confirmation. It maps U49's O7.1 validation refusal to `date_in_future` when that refusal carries only `date_in_future` issues. The options the screen shows go through the draft. The hidden ones (`fsrs_params`, `starting_ease`, `easy_bonus`, `hard_interval`, `interval_modifier`, `lapse_new_interval`, `graduating_interval_days`, `easy_interval_days`), which the screen never writes (R752), are applied by the adapter inside the same undo step, with the preset update of `decks/deck-presets#P10` (for `fsrs_params`, the optimizer's setter followed by the recompute of `sched/memory-state#M7.3`), so that the rows equal a save that changed them; only U46's scenarios use them.
 
 ## E2. `ignored_before_count` (observation kind)
 
@@ -41,6 +41,7 @@ The scenario ops and the observation kind that the memory-state (U46) and deck o
 - The oracle driver implements `save_deck_options` with all E1 arguments and the rejection `default_preset`, `set_scheduling_prefs` (E4), and `ignored_before_count` (E2). A missing Today-only limit follows E1's rule.
 - The goldens of `sched/memory/recompute` and `sched/memory/ignore-before-count` are recorded on the Linux and Apple oracles. All eleven `sched/options/` scenarios are recorded and pass comparison on both oracles, including `insertion-order-option`, `deck-limits`, `subtree`, `remove-preset`, `globals` and `prefs-rollover`.
 - Meguri's executor implements `ignored_before_count` with U46's adapter, and `save_deck_options` and `set_scheduling_prefs` with U49's. Until then scenarios using them are `pending` (`dsl.md` D10).
+- Neither the oracle driver nor Meguri's executor implements `step_text` (E6). Until both do, scenarios that use it are `pending` (`dsl.md` D10).
 
 - U46's shared recompute engine operation does not by itself implement E1. Keep `save_deck_options` unavailable until the real save also performs its preset, deck, step-remapping and insertion-order effects. U46 tests its real recompute, undo and cancellation directly against the golden's input/output pairs; it must not advertise a fixture-only or partial Save adapter. The count observation is independent and can become active with its real U46 query.
 
@@ -61,3 +62,18 @@ The scenario ops and the observation kind that the memory-state (U46) and deck o
 - **Undo.** `legacy_json` and `blob_decode` reopen the collection on the oracle, which empties both histories (`undo-ops.md` V5): observe them after the undo checks. A settings change that changes the day clears Meguri's history at the rollover and not Anki's (`sched/day-clock#D9`, `#D12.4`): run a `db_exec` that changes nothing before a later undo check.
 - **Day queries.** Observe `timing` right after `set_scheduling_prefs` changes `rollover`, before the clock moves, so both executors run the day query and its unbury at the same instant (`sched/day-clock#D14.2`).
 - **Stamps.** To show which cards a save writes, set every card's `mod` and `usn` with a `db_exec` before it and `advance` the clock (`sched/memory/recompute`).
+
+## E6. `step_text` (observation kind, draft)
+
+How the deck options screen shows a stored step list as text and reads a text back (`sched/deck-options#O5`).
+
+- **Request** `{step_text: [<entry>, ...]}`, a non-empty list; each entry is `{format: [<number>, ...]}` or `{parse: <string>}`. This is the only request shape. Each `format` number is a step in minutes and is first rounded to the nearest `f32`. At most one request per observe step.
+- **Value** a list with one entry per request entry, in order. For `format`: `{text: <string>}`. For `parse`: `{steps: [<number>, ...]}`, the minutes as `f32` values, when the text is valid (`{steps: []}` for an empty or blank text). Otherwise: `{issues: [{code, index, token}, ...]}` with the step codes of `sched/deck-options#O4.2`. Steps compare as `f32` values.
+- **Meaning.** O5.1 for `parse` and O5.2 for `format`. Reading changes nothing in the collection.
+- **Oracle.** The deck options page built into the pinned Anki wheel runs offscreen in QtWebEngine, as for `stats_presentation` (`stats-ops` H14). For `format`, the page opens on a scratch preset that holds the steps, and the driver reads the learning-steps field's text. For `parse`, the driver types the text into that field, moves the focus away and reads the learning steps of the update request that the page sends. The driver intercepts that request, so nothing is written. The oracle never produces `issues`.
+- **Meguri.** The adapter calls U49's O5.1 and O5.2 functions directly.
+- **Writing scenarios.** Avoid what differs by design (`sched/deck-options#O12`), so that no `step_text` scenario needs a deviation:
+  - Format cases use positive steps only, and no step that is a multiple of 43,800 minutes and not a multiple of 525,600 (O12 Step text).
+  - Parse cases separate tokens with single plain spaces only: Anki's screen splits a text only at single spaces, and Meguri at runs of white space (O5.1).
+  - Parse cases use only tokens of digits with an optional lower-case unit that give a step from 1 second to 2^31 seconds, plus empty and blank texts. Malformed, zero, negative and too-long tokens are Meguri's own tests (O13, O12 Validation).
+- **Schemas.** Add the request member `step_text` to the observe item of `conformance/schema/scenario.schema.json`, and the value shape `step_text` (entries `{text}`, `{steps}` or `{issues}`) to `conformance/schema/observation.schema.json`. Add the kind to the observe description in `conformance/schema/protocol.json`.

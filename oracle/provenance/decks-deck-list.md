@@ -17,3 +17,11 @@ statement below comes from reading the desktop sources at the tag.
 | deck-list H7 | `qt/aqt/deckbrowser.py`, `qt/aqt/operations/deck.py` | Create pre-filled with the current deck's name and stripped with the runtime's default whitespace set, nothing for an empty name; Rename pre-filled, nothing when empty or unchanged |
 | deck-list H8 | `qt/aqt/deckbrowser.py`, `qt/aqt/__init__.py` | the Get Shared address |
 | deck-list H9 | `qt/aqt/main.py`, `qt/aqt/forms/main.ui`, `qt/aqt/overview.py`, `qt/aqt/deckbrowser.py`, `qt/aqt/reviewer.py` | global and per-screen keys created without auto-repeat; menu-action shortcuts (`/`, `F`, Ctrl+E, Ctrl+Shift+I) left at the default; `s` on the deck list and on the overview; `r` and `e` registered on every overview; Korean-layout alternatives present only in the reviewer |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| Proposed change_deck_choices observation (needs-op) and the native halves for chooser rows h34d675666d1c, h26a096646ed7, h5e505e6b3fb6 | `rslib/src/decks/service.rs` (the deck-names service read and its three tests), `rslib/src/decks/name.rs` (all and normal deck-name reads), `rslib/src/decks/mod.rs` (default deck emptiness check) | Which list each harvested test reads (empty default deck skipped or kept, filtered decks included or left out), what makes the default deck count as empty (no card has did 1), and which Meguri chooser each case matches. Nothing is copied into specs or scenarios, and the proposed observation uses no Anki request field names. |

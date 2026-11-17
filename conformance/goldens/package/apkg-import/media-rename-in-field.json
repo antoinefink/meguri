@@ -1,0 +1,85 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 1
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["one  leaf-946fd978a141c7d44548022b048b40ea4f46837f.png  two [sound:tone-07622409", "back"],
+              "note": "#n1"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "one <img src=\"leaf-946fd978a141c7d44548022b048b40ea4f46837f.png\"> two [sound:tone-0762240918a02e24d0c514fb6f5e1a99b63cccab.mp3] three <img src=\"stone.png\"> four\u001fback"]
+          ]
+        }
+      },
+      {
+        "media_dir": {
+          "leaf-946fd978a141c7d44548022b048b40ea4f46837f.png": {
+            "sha1": "946fd978a141c7d44548022b048b40ea4f46837f",
+            "size": 10
+          },
+          "leaf.png": {
+            "sha1": "d8fa5fcce9d158152b78b168bdfccc6cba712e4d",
+            "size": 10
+          },
+          "stone.png": {
+            "sha1": "bb9954fdef17b18d610318281b11772db72b0fcb",
+            "size": 10
+          },
+          "tone-0762240918a02e24d0c514fb6f5e1a99b63cccab.mp3": {
+            "sha1": "0762240918a02e24d0c514fb6f5e1a99b63cccab",
+            "size": 9
+          },
+          "tone.mp3": {
+            "sha1": "c0773e77248a192441e38aea7a519e868f70ccd8",
+            "size": 8
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/media-rename-in-field",
+  "scenario_sha256": "0e054801fa3f5be824addf1f23a61fa4d5a6e2faeae9e5aa29eb2d3761f2961b",
+  "tz": "UTC"
+}

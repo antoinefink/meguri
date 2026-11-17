@@ -10,6 +10,7 @@ The New, Learn and Due numbers of every deck in the deck list, the numbers of a 
 ## C1. The tree
 
 - The deck list shows one node per deck, filtered decks included, nested by name, siblings in `unicase` order of their full stored names (`text/unicode-primitives#U2`). So "10. y" sorts before "4. x" and "9. z", "a" before "B", and letters with accents and emoji after ASCII (R34; golden `sched/counts/tree-order`).
+- A deck that exists only because a deeper name created it is one node, holding every deck below it; names that merely begin with the same characters (`Alpha2`, `Alphabet` beside `Alpha`) are separate nodes. Each node's counts cover its subtree once (golden `sched/counts/shared-ancestors` (held)).
 - A deck whose parent is missing is left out with its descendants (`decks/decks`, the deck tree; Anki attaches it to the node before it, a difference U28 records). It is also left out of every queue (`sched/limits#L3`).
 
 ## C2. The Default deck (R39)
@@ -28,6 +29,8 @@ The Default deck (id 1) is left out of the tree when all of these hold: it is to
 | intraday learning | queue 1 with `due` < now + L, and queue 4 with `due` ≤ now + L |
 
 The intraday test is strict for queue 1: a learning card due exactly L seconds from now is in the queue (`sched/queue-building#B6`) but not yet in the deck list (golden `sched/queue/learn-ahead/ready-in`). Queue 4 counts up to and including now + L (golden `sched/queue/gather/preview-in-normal-deck`, a queue 4 card left in a normal deck, `sched/queue-building#B4`).
+
+A card whose `did` names no deck counts under no node, and the read does not fail. The deck list is the one it would be if that card did not exist: the deck that held it and that deck's ancestors no longer count it, and every other node is unchanged (golden `sched/counts/missing-deck-card` (held)).
 
 **Sums and limits.** Working up from the leaves, each node's totals are its own counts plus its children's limited totals. Then the node's limits are applied to its totals, using the node's remaining limits `R` (C4):
 
@@ -121,6 +124,10 @@ Own tests must separately cover overdue, due-now, within-learn-ahead, later-toda
 | `sched/counts/default-only`, `default-shown` | C2 |
 | `sched/counts/limits-tree` | C3, C4 at 10:00, 03:59:59 and 04:00:01 (R1897), and with `applyAllParentLimits` on |
 | `sched/counts/ae84-kathmandu` | C3 around a 04:00 rollover in Asia/Kathmandu (AE84) |
+| `sched/counts/new-studied-today` (held) | C3, C4 with `sched/limits#L2`: a parent's numbers include its child's cards; new cards studied today use up each deck's own new limit; raising only the parent's counter lowers only the parent's number; using up the child's limit leaves nothing for either |
+| `sched/counts/nested-new-limits` (held) | C3, C4: each level applies its own new limit to its own cards plus its children's limited numbers (a middle deck 7 under its limit 8, the top deck 10 under 11; that tree reads the same with `applyAllParentLimits` off and on); with the option on, a child's limit is capped by its parent's (a child with 4 new cards under a parent limit of 2 goes from 4 to 2) |
+| `sched/counts/missing-deck-card` (held) | C3 (a parent's sums with a child's own counts; a card in a missing deck) |
+| `sched/counts/shared-ancestors` (held) | C1: implicit ancestors once, prefix-sharing top-level decks apart, subtree counts |
 | `sched/counts/deck-page-difference` | C4 (no sibling subtraction), C5 |
 | `sched/counts/finished` | C7, C8 |
 | `sched/queue/learn-ahead/window`, `ready-in` | C3's strict test, C7 |

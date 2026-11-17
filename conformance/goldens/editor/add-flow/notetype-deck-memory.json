@@ -1,0 +1,103 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "add_defaults": {
+          "deck": "Default",
+          "notetype": "Paired"
+        },
+        "notetype_last_deck": {
+          "deck": null
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Reading",
+          "notetype": "Plain"
+        },
+        "notetype_last_deck": {
+          "deck": "Reading"
+        }
+      },
+      {
+        "notetype_last_deck": {
+          "deck": null
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Default",
+          "notetype": "Paired"
+        },
+        "notetype_last_deck": {
+          "deck": "Reading"
+        }
+      },
+      {
+        "notetype_last_deck": {
+          "deck": "Default"
+        }
+      },
+      {},
+      {
+        "notetype_last_deck": {
+          "deck": "Reading"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Inbox",
+          "notetype": "Plain"
+        },
+        "notetype_last_deck": {
+          "deck": "Inbox"
+        }
+      },
+      {
+        "notetype_last_deck": {
+          "deck": "Default"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["five", "Inbox"],
+            ["one", "Reading"],
+            ["three", "Default"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "editor/add-flow/notetype-deck-memory",
+  "scenario_sha256": "1eb87bd63932b41b54787e5c3f9357de5720f847eda0be19d43d5beeade614d8",
+  "tz": "UTC"
+}

@@ -1,0 +1,218 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 5,
+          "next_day_at": 1895198400,
+          "now": 1895133600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {},
+      {
+        "legacy_json": {
+          "decks": {
+            "Mixed": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1895133600,
+              "name": "Mixed",
+              "newLimit": null,
+              "newLimitToday": {
+                "limit": 4,
+                "today": 5
+              },
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": {
+                "limit": 7,
+                "today": 3
+              },
+              "timeToday": [0, 0],
+              "usn": -1
+            }
+          }
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 1
+        }
+      },
+      {
+        "delete_decks": {
+          "count": 1
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 2,
+          "next_day_at": 1895198400,
+          "now": 1895133720,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Mixed": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1895133720000,
+              "lrnToday": [0, 0],
+              "mod": 1895133720,
+              "name": "Mixed",
+              "newLimit": null,
+              "newLimitToday": {
+                "limit": 4,
+                "today": 2
+              },
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": {
+                "limit": 7,
+                "today": 1
+              },
+              "timeToday": [0, 0],
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "delete_decks": {
+          "count": 1
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1895198400,
+          "now": 1895133780,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["one", "a"],
+              "note": "#n1"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Mixed": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1895133780000,
+              "lrnToday": [0, 0],
+              "mod": 1895133780,
+              "name": "Mixed",
+              "newLimit": null,
+              "newLimitToday": {
+                "limit": 4,
+                "today": 0
+              },
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/deck-day-limits",
+  "scenario_sha256": "8b1e575c4bbecd48b2b8be0b7d3fa6c32c7665cc7a424b543ea262f9550ae836",
+  "tz": "UTC"
+}

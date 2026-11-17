@@ -53,3 +53,11 @@ type) as `render/cloze/templates`. No harvested test covers either: the
 | Spec section | Anki file | Read for |
 |---|---|---|
 | cloze C15, template-syntax T10 | `rslib/src/template.rs`, `rslib/src/notetype/render.rs` | blank check over the whole field map, specials included unless shadowed |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| render/cloze/stored-cards, render/cloze/stored-mathjax, render/cloze/stored-text-chain (harvest rows h6ebbfe4093c4, h7cd15bfd9337, he8993d36dc09) | `pylib/tests/test_models.py` (the cloze, cloze MathJax and chained-filter tests) | Read only to find which behaviors must be proven: cards of cloze notes with and without clozes, front/back/hint spans, inactive numbers, repeated numbers, an edit that adds a card, c0 and negative numbers; clozes inside MathJax; cloze:text: filter chains with HTML in content and hints. Expectations come from the oracle goldens. The specs used are the existing render/cloze C2-C8 and render/filters F1/F3. |

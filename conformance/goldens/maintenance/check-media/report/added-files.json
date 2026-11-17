@@ -1,0 +1,63 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_media": {
+          "name": "spare.txt"
+        }
+      },
+      {
+        "add_media": {
+          "name": "pic.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "pic-847548d5edd775d3a21cba6b84e14f64ede55ed4.jpg"
+        }
+      },
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": ["tone.mp3"],
+          "missing_notes": ["#n2"],
+          "oversize": [],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": ["pic-847548d5edd775d3a21cba6b84e14f64ede55ed4.jpg", "spare.txt"]
+        }
+      },
+      {
+        "media_dir": {
+          "pic-847548d5edd775d3a21cba6b84e14f64ede55ed4.jpg": {
+            "sha1": "847548d5edd775d3a21cba6b84e14f64ede55ed4",
+            "size": 19
+          },
+          "pic.jpg": {
+            "sha1": "68d5512f960c01a7522057ff02f5ad41635a91f0",
+            "size": 13
+          },
+          "spare.txt": {
+            "sha1": "19f4ba62ed8521a09cc6dca05ccbd7a933bf56a6",
+            "size": 11
+          }
+        },
+        "media_trash": []
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/report/added-files",
+  "scenario_sha256": "27f5ea2eb3e89b7bb2375069c1db168963a0eb6d989da902feaf2730c497a511",
+  "tz": "UTC"
+}

@@ -1,0 +1,22 @@
+# C11 of specs/maintenance/check-media.md on files added through the media
+# store (specs/media/media-files.md M3): spare.txt is unreferenced; Pic.jpg
+# is stored as pic.jpg, which a field references; a second pic.JPG with
+# other bytes gets a hash name that nothing references. Check Media lists
+# the hash-named file and spare.txt unused, the sound tone.mp3 missing with
+# the second note, and an empty trash.
+id: maintenance/check-media/report/added-files
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["one", "<img src=\"pic.jpg\">"]}
+    - {notetype: Media, fields: ["two", "[sound:tone.mp3]"]}
+steps:
+  - add_media: {name: spare.txt, text: "spare bytes"}
+  - add_media: {name: Pic.jpg, text: "picture bytes"}
+  - add_media: {name: pic.JPG, text: "other picture bytes"}
+  - check_media: {}
+  - observe: [media_dir, media_trash]

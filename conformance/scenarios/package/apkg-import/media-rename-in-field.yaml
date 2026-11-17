@@ -1,0 +1,38 @@
+# Rewriting some media references of one field and leaving the others
+# (specs/package/apkg-import.md I12.2, I12.3; package-ops.md E6). The package's
+# n1 has a Front holding, between plain words, an image tag for leaf.png, a
+# sound tag for tone.mp3 and an image tag for stone.png, all three exported
+# with it. Then n1 is deleted, and the target's leaf.png and tone.mp3 get
+# other bytes while stone.png keeps its bytes. The import adds n1 again as
+# new: leaf.png and tone.mp3 are written under their hash names and those two
+# references are rewritten, while the stone.png reference, whose file is
+# identical, stays as written, and so does the text around the tags.
+id: package/apkg-import/media-rename-in-field
+description: In one imported field, the image and sound references of colliding files are rewritten and the reference of an identical file is kept.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: ["one <img src=\"leaf.png\"> two [sound:tone.mp3] three <img src=\"stone.png\"> four", back]}
+  media_files:
+    - {name: leaf.png, text: "green leaf"}
+    - {name: tone.mp3, text: "high tone"}
+    - {name: stone.png, text: "grey stone"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: field.apkg, limit: collection, scheduling: true, presets: false, media: true}
+  - delete_notes: {notes: ["#n1"]}
+  - advance: 1m
+  - media_outside:
+      - {name: leaf.png, text: "brown leaf"}
+      - {name: tone.mp3, text: "low tone"}
+  - advance: 1m
+  - import: {format: apkg, name: field.apkg, merge_notetypes: false, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, flds FROM notes ORDER BY id"}
+  - observe: [media_dir]

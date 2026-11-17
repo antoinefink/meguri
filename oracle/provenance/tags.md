@@ -67,3 +67,11 @@ the goldens of `tags/canon/spelling`, `tags/collapse/set`,
 `tags/rename/rows`, `tags/rename/case-only` and `tags/rename/implicit-parent`
 record Anki's behavior, and `conformance/deviations.yaml` holds the
 differences.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| Find and Replace in Tags scenarios tags/find-replace/{listed-notes,all-notes,pattern-modes,invalid-regex} (browser/find-replace F4, F7, F8 for the Tags target; tags/tags T10 add count) | `pylib/tests/test_tags.py`; `rslib/src/tags/findreplace.rs` (test module); `rslib/src/tags/service.rs` (test module) | Which behaviors the harvested tests require: listed vs all-notes targets, literal vs regex, match case, empty replacement dropping tags, invalid regex refusal leaving state unchanged, the add-tags count. Expectations come from oracle goldens only. After review, the fixtures were reworked to use other words, other case patterns, other step order and other pattern shapes. |

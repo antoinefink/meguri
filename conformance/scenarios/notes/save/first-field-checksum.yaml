@@ -1,0 +1,29 @@
+# The stored checksum follows the first field through saves (R774;
+# specs/notes/note-records.md A1, U1-U3; text/checksum-and-sort-field.md C4).
+# Adding a note stores the checksum of its first field. Editing the first
+# field through the note save stores the new text's checksum; editing only
+# the second field leaves the checksum as it was. The text function gives the
+# expected checksums of both first-field values, so each stored value can be
+# matched against the text it was taken from.
+id: notes/save/first-field-checksum
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+  decks: [Deck A]
+steps:
+  - add_note: {notetype: Pair, deck: Deck A, fields: [Alpha, Back one]}
+  - db_exec: {sql: "SELECT sfld, csum FROM notes"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Front: Alpha two}}
+  - db_exec: {sql: "SELECT sfld, csum FROM notes"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: "Back two"}}
+  - db_exec: {sql: "SELECT sfld, csum, flds FROM notes"}
+  - observe:
+      - text:
+          fns: [checksum]
+          inputs: [Alpha, "Alpha two"]

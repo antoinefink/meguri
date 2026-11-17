@@ -1,0 +1,29 @@
+# C6 of specs/maintenance/check-media.md with text/media-references M2:
+# every source tag names a file, whatever element holds it (video, audio,
+# picture). The forms vary: open and self-closed tags, double, single and
+# no quotes around the name, other attributes before or after it, and a
+# picture over several lines whose img comes first and also counts. k6.tiff
+# is in the folder but named nowhere (unused); k7.opus is named but absent
+# (missing). No field is rewritten.
+id: maintenance/check-media/refs/source-tags
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["<video width=\"320\"><source src=\"k1.mkv\" type=\"video/x-matroska\"><source src=k2.m4v title=alt></video>", "<audio preload='none'><source lang='en' src='k3.flac'/></audio>"]}
+    - {notetype: Media, fields: ["<picture>\n<img src='k4.bmp' width=\"40\">\n\t<source sizes=\"50vw\" src=\"k5.avif\" />\n</picture>", "<div><audio><source src=\"k7.opus\" lang=\"en\"></audio></div>"]}
+  media_files:
+    - {name: k1.mkv, text: "one"}
+    - {name: k2.m4v, text: "two"}
+    - {name: k3.flac, text: "three"}
+    - {name: k4.bmp, text: "four"}
+    - {name: k5.avif, text: "five"}
+    - {name: k6.tiff, text: "six"}
+steps:
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir]
+  - db_exec: {sql: "SELECT replace(flds, char(31), '|'), mod FROM notes ORDER BY id"}

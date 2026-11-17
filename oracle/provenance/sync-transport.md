@@ -23,3 +23,11 @@ Meguri-shaped requests on 2026-10-15.
 | `rslib/src/backend/mod.rs` | HTTP/1.1-only client with library defaults (automatic redirects on, system proxy variables honored) | transport T1, T7, T10 |
 | `qt/aqt/profiles.py`, `qt/aqt/sync.py`, `qt/aqt/preferences.py`, `qt/aqt/forms/preferences.ui` | redirected endpoint stored per profile and cleared with the key on auth failure; user name trimmed; 60 s default and 30 to 99999 s range of the network timeout | transport T8; login-endpoints L4, L5 |
 | `rslib/src/sync/collection/tests.rs` (host key, redirect tests) | harvest classification of the transport rows | catalog |
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| Classification of the network-error presentation rows (proposed sync/errors E1.1) | `rslib/src/error/network.rs` | Which behavior the four message tests prove: the summary alone when the diagnostic text is blank (generic and timeout), and summary plus details when it is not blank. Used only to state Meguri's own detail rule. |

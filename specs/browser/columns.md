@@ -361,6 +361,7 @@ Observation: `browser_rows` (`specs/conformance/browser-ops.md` B3, B4). Every s
 | `browser/columns/due-dst` | C7.5 rule 4 across a daylight-saving change; local dates and date-times in a zone with an offset |
 | `browser/columns/aggregates` | C13: the 16-bit ease sum and the 32-bit interval product |
 | `browser/columns/row-errors` | C3.1 in both modes: a deleted card, a deleted note, a note without cards (notes mode `damaged`), a card whose deck is missing. `unreadable` has no case yet: the observation records Anki's undecodable row as a run error (browser-ops B4) |
+| `browser/columns/switched-columns` | C3: each row request returns exactly its own columns. Four reads of the same two cards: Sort Field and Deck, then a disjoint set (Note Type, Tags, Reviews), then Deck alone with the rows reversed, then the first set again. No read keeps a cell from an earlier selection |
 
 - The oracle driver implements `browser_rows`; Meguri's runner does not yet (browser-ops B6). `question-answer` names the cards that `edit_note` adds with `adopt` (browser-ops B5).
 - `browser/modes/rows-current` and `rows-excerpts` (`browser/result-sets` H16, no goldens yet) read `browser_rows` after edits, deletions, a deck rename and a template rename, and compare the cards-mode Question and Deck cells with `card_excerpts` (C16).

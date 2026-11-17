@@ -1,0 +1,36 @@
+# With addToCur true the deck stays the current deck and each deck remembers
+# the note type last added to it (specs/editor/config-keys.md K4.1;
+# specs/notes/add-defaults.md D1, D6; notes/note-records A4). Only real adds
+# write the keys here. Before any add, curModel names Paired (the last note
+# type set up). Plain is added to Default and then Paired to Inbox, so
+# curModel ends on Paired while Default's last note type is Plain: with
+# curDeck Default the defaults are Default and Plain, the deck's memory and
+# not curModel. With curDeck Inbox they are Inbox and Paired. Both survive a reopen. The
+# last step switches to addToCur false for contrast: the note type then comes
+# from curModel and the deck from that note type's last deck.
+# Needs add_defaults (add-defaults D7).
+id: editor/add-flow/deck-notetype-memory
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Inbox]
+  notetypes:
+    - {name: Plain, fields: [Front, Back], templates: [{name: Card, front: "{{Front}}", back: "{{Back}}"}]}
+    - {name: Paired, fields: [Left, Right], templates: [{name: Card, front: "{{Left}}", back: "{{Right}}"}]}
+steps:
+  - set_config: {key: addToCur, value: true}
+  - observe: [{add_defaults: {}}]
+  - add_note: {notetype: Plain, deck: Default, fields: [one, two]}
+  - observe: [{add_defaults: {}}]
+  - add_note: {notetype: Paired, deck: Inbox, fields: [three, four]}
+  - observe: [{add_defaults: {}}]
+  - set_current_deck: {deck: Inbox}
+  - observe: [{add_defaults: {}}]
+  - set_current_deck: {deck: Default}
+  - reopen: {}
+  - observe: [{add_defaults: {}}]
+  - set_current_deck: {deck: Inbox}
+  - reopen: {}
+  - observe: [{add_defaults: {}}]
+  - set_current_deck: {deck: Default}
+  - set_config: {key: addToCur, value: false}
+  - observe: [{add_defaults: {}}]

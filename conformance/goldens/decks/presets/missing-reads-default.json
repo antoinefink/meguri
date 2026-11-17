@@ -1,0 +1,201 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "decks": {
+          "Default": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          },
+          "Orphan": {
+            "browser_collapsed": true,
+            "config_id": 999,
+            "filtered": false,
+            "id": 1894701600000,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "Plain": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600001,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["3"]
+          ]
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4"],
+          "note": "#n4"
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "pos": 1
+            },
+            "did": "Orphan",
+            "due": 3,
+            "factor": 1700,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 0,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {
+              "pos": 2
+            },
+            "did": "Plain",
+            "due": 3,
+            "factor": 1700,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 0,
+            "type": 2,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {},
+            "did": "Orphan",
+            "due": 647,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {},
+            "did": "Plain",
+            "due": 694,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "decks": {
+          "Default": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          },
+          "Orphan": {
+            "browser_collapsed": true,
+            "config_id": 999,
+            "filtered": false,
+            "id": 1894701600000,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "Plain": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600001,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["5"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/presets/missing-reads-default",
+  "scenario_sha256": "1e5c57b543f002f08f07d251f27dae35c7ec5cb39fce6c3a60ad84f59287ff62",
+  "tz": "UTC"
+}

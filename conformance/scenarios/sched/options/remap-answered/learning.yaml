@@ -1,0 +1,42 @@
+# A learning card reached by answering, then a deck options save that edits
+# its preset's steps (R644; specs/sched/step-remap.md R2 rule 2, R3).
+# Adding a learning step the card has not reached gives it every new step;
+# editing only the relearning steps leaves a learning card's row as it is.
+# Needs answer and save_deck_options (specs/conformance/deck-options-ops.md E1).
+# Alpha and Beta: learning 1m 10m, relearning 10m.
+# Deck A uses Alpha, Deck B uses Beta; one note in each.
+# c1 and c2 are new cards answered Again once: learning, on step 1 of 2.
+id: sched/options/remap-answered/learning
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Alpha, learn_steps: [1m, 10m], relearn_steps: [10m]}
+    - {name: Beta, learn_steps: [1m, 10m], relearn_steps: [10m]}
+  decks: [{name: Deck A, preset: Alpha}, {name: Deck B, preset: Beta}]
+  notetypes:
+    - name: Simple
+      fields: [Front, Back]
+      templates: [{name: Card 1, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { padding: 2px; }"
+  notes:
+    - {notetype: Simple, deck: Deck A, fields: [orange, one]}
+    - {notetype: Simple, deck: Deck B, fields: [purple, two]}
+steps:
+  - advance: 1h
+  - answer: {card: "#c1", rating: again, time_ms: 2000}
+  - answer: {card: "#c2", rating: again, time_ms: 2000}
+  - observe: ["card(#c1, #c2)"]
+  # Both cards stamped long ago with a server usn, so that a card a save
+  # writes shows mod = now and usn -1.
+  - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
+  - advance: 1m
+  # A. Alpha's learning steps 1m 10m -> 1m 10m 2h: c1 has passed no step and
+  # now has three to do; c2 (Beta) is untouched.
+  - save_deck_options: {deck: Deck A, options: {learn_steps: [1m, 10m, 2h]}}
+  - observe: ["card(#c1, #c2)"]
+  - advance: 1m
+  # B. Beta's relearning steps 10m -> 5m 20m 1h: c2 is a learning card, so
+  # its remaining count and its stamps stay.
+  - save_deck_options: {deck: Deck B, options: {relearn_steps: [5m, 20m, 1h]}}
+  - observe: ["card(#c1, #c2)"]

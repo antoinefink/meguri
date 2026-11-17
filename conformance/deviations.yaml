@@ -1366,6 +1366,30 @@ deviations:
     scenarios: [maintenance/check-media/case/other-content]
     pointer: /steps/4/db_exec/rows
     transform: {replace: [["<img src=\"Cat.jpg\">|<img src=\"cat.jpg\">", 1894701600, -1]]}
+  - id: check-media-case-variant-kept-three
+    requirement: R1648
+    summary: Case variants dot.png and DOT.PNG with different bytes both stay (listed as a case conflict), and the references dot.png, DOT.PNG and Dot.png are all satisfied by case key, so nothing is renamed, missing or unused; Anki adds DOT.PNG's bytes under a hash name, rewrites only the reference spelled DOT.PNG and reports Dot.png missing (specs/maintenance/check-media.md C5 step 3, C11).
+    test: maintenance/check-media/case/three-spellings
+    scenarios: [maintenance/check-media/case/three-spellings]
+    pointer: /steps/2/check_media
+    transform: {replace: {"unused": [], "missing": [], "missing_notes": [], "renamed": {}, "dirs": [], "oversize": [], "extracted": 0, "trash_count": 0, "field_templates": []}}
+  - id: check-media-case-variant-kept-three-dir
+    requirement: R1648
+    summary: The folder keeps dot.png and DOT.PNG (specs/maintenance/check-media.md C5).
+    test: maintenance/check-media/case/three-spellings
+    scenarios: [maintenance/check-media/case/three-spellings]
+    pointer: /steps/3/media_dir
+    transform:
+      replace:
+        DOT.PNG: {sha1: "d28eeb334938e14e450238557bb862f1b3227eaf", size: 8}
+        dot.png: {sha1: "248955266e314b64a13bd53df715d421f0af9a84", size: 9}
+  - id: check-media-case-variant-kept-three-note
+    requirement: R1648
+    summary: The note keeps its three references and is not written (specs/maintenance/check-media.md C5, C10 step 2).
+    test: maintenance/check-media/case/three-spellings
+    scenarios: [maintenance/check-media/case/three-spellings]
+    pointer: /steps/4/db_exec/rows
+    transform: {replace: [["<img src=\"Dot.png\"><img src=\"dot.png\">|<img src=\"DOT.PNG\">", 1894701600, -1]]}
   # specs/stats/card-info.md C13.4: Card Info never writes; Anki's card stats
   # write an lrt into data that has none, and give no retrievability for a
   # computed memory state.
@@ -1383,3 +1407,40 @@ deviations:
     scenarios: [stats/card-info/ae46-no-state]
     pointer: /steps/4/card_stats/#c1/fsrs_retrievability
     transform: {replace: 0.9710832}
+  # specs/sched/deck-options.md O4.2, O7.1, O12: Meguri refuses a deck options
+  # save whose ignore date is after today's date; Anki stores today's date.
+  - id: deck-options-future-ignore-date-refused
+    requirement: R690
+    summary: A deck options save whose ignore date is after today's date is refused and changes nothing; Anki stores today's date instead (specs/sched/deck-options.md O4.2, O7.1, O12).
+    test: core/crates/meguri-sched/tests/deck_options.rs validation_uses_changed_values_only_and_reports_all_editor_ranges
+    scenarios: [sched/options/ignore-date/future]
+    pointer: /steps/4
+    transform: {replace: {save_deck_options: {error: date_in_future}}}
+  - id: deck-options-future-ignore-date-refused-2
+    requirement: R690
+    summary: As deck-options-future-ignore-date-refused, for the second future date.
+    test: core/crates/meguri-sched/tests/deck_options.rs validation_uses_changed_values_only_and_reports_all_editor_ranges
+    scenarios: [sched/options/ignore-date/future]
+    pointer: /steps/7
+    transform: {replace: {save_deck_options: {error: date_in_future}}}
+  - id: deck-options-future-ignore-date-refused-3
+    requirement: R690
+    summary: As deck-options-future-ignore-date-refused, for a calendar date after the scheduler day's date before the rollover hour.
+    test: core/crates/meguri-sched/tests/deck_options.rs validation_uses_changed_values_only_and_reports_all_editor_ranges
+    scenarios: [sched/options/ignore-date/future]
+    pointer: /steps/10
+    transform: {replace: {save_deck_options: {error: date_in_future}}}
+  - id: deck-options-future-ignore-date-kept-value
+    requirement: R690
+    summary: After the refused saves the preset still holds the first saved date.
+    test: core/crates/meguri-sched/tests/deck_options.rs validation_uses_changed_values_only_and_reports_all_editor_ranges
+    scenarios: [sched/options/ignore-date/future]
+    pointer: /steps/*/legacy_json/presets/Main/ignoreRevlogsBeforeDate
+    transform: {replace: "2030-01-02"}
+  - id: deck-options-future-ignore-date-kept-mod
+    requirement: R690
+    summary: After the refused saves the preset keeps the stamp of the first save.
+    test: core/crates/meguri-sched/tests/deck_options.rs validation_uses_changed_values_only_and_reports_all_editor_ranges
+    scenarios: [sched/options/ignore-date/future]
+    pointer: /steps/*/legacy_json/presets/Main/mod
+    transform: {replace: 1894705200}

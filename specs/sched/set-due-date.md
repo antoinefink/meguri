@@ -157,3 +157,5 @@ FSRS on, `today` 0, `next_day_at` B, text `3`, one operation on five cards:
 | `sched/ops/set-due/card-kinds` | S4: new, buried new, learning, relearning, suspended, filtered and review cards, S4.2 rules 1 and 3, the starting ease of the home preset, `pos`, `left` kept, ids in card id order whatever the listed order (S7) |
 | `sched/ops/set-due/context` | S6: both keys, the text stored as typed, no key without a context, the key restored by undo |
 | `sched/ops/set-due/range` | S3: drawn days in the range, `ivl` and the review-log row consistent with the drawn day |
+| `sched/ops/set-due/missing-preset` (held) | S4.1 `factor` and the home preset rule: a new card whose home deck names a preset that does not exist takes the default preset's starting ease (1.7 gives 1700), not the built-in 2.5 of the answer path; cards of other presets keep theirs |
+| `sched/ops/set-due/missing-default-preset` (held) | the home preset rule when the default preset (id 1) is missing too: the built-in starting ease 2.5 (factor 2500) for a deck naming a missing preset and for a deck naming id 1; a deck whose preset exists keeps its own |

@@ -1,0 +1,25 @@
+# specs/package/apkg-export.md A9.2 rule 5; specs/package/container.md P6;
+# specs/conformance/package-ops.md E7.
+# The media folder holds a file whose name contains a backslash, a path
+# separator on other platforms, and a field references it. The name is not
+# safe, so the export is refused with media_check_required and the media
+# folder is unchanged.
+id: package/apkg-export/media-backslash-name
+description: A referenced media name holding a backslash refuses the deck package export.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: ["<img src=\"a\\b.png\">", a]}
+  media_files:
+    - {name: "a\\b.png", text: "picture"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: refused.apkg, limit: {deck: Lang}, scheduling: true, presets: false, media: true}
+  - observe: [media_dir]

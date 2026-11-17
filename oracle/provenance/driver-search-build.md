@@ -16,3 +16,11 @@ meanings in `specs/conformance/search-ops.md` S5, S6 and
 
 Probed through `tools/mg oracle test test_search_build`: every example of
 join-and-replace.md J9 that J10 does not set apart gives J9's text.
+
+## Session s-20261117T152613Z-96466c16 (spec writer): deferred harvest rows, batch 2
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, write their scenarios and draft spec text; no code, test text or fixture value was copied unless a row says otherwise, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| harvest rows h8f79a3f11361, h944eb618c913, h993a80697567, hb42dc5c927d9, hc3217305a1d5, he56ed2a516b3 linked to existing search/builder/items | `rslib/src/search/service/search_node.rs` | which structured search items (dupe, field, note-id list, rated with each rating, introduced) the harvested tests convert, to check that builder/items' S5 items cover each one |

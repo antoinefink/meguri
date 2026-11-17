@@ -3,40 +3,40 @@ hf7c80804a0ae,rust,tag,browser,in-scope,"U86/U246: regex replacement across mult
 h05c549f3f6aa,rust,supplementary,deckconfig,in-scope,updating a preset,decks/presets/add-clone-rename,done
 h06c17c5eb2f4,rust,supplementary,deckconfig,not-applicable,an API error for an unknown preset id,,done
 h07c1d1d6c593,rust,supplementary,deckconfig,in-scope,the default preset cannot be removed,decks/presets/remove,done
-h0f4f7e722f1e,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import are added only when their id is free,,deferred
+h0f4f7e722f1e,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import are added only when their id is free,package/apkg-import/presets,done
 h0fa4ffa48585,rust,supplementary,deckconfig,in-scope,a new preset gets a free id,decks/presets/add-clone-rename storage/ids/all-tables,done
 h17ecc898d745,rust,supplementary,deckconfig,in-scope,saving a preset from its legacy JSON,model/schema11/preset-values,done
 h1c1a2a378925,rust,tag,deckconfig,in-scope,"U49/U246: verify no-op option saves, preset creation/removal, assignment, new-position resorting and schema-change effects together (R710-R762).",sched/options/insertion-order-switch sched/options/insertion-order-option sched/options/remove-preset,deferred
 h1df457b7a669,rust,supplementary,deckconfig,in-scope,the built-in defaults stand in when even the default preset is missing; seen through scheduling,,deferred
-h27c58d269610,rust,tag,deckconfig,in-scope,U49/U246: adding an unpassed learning step must expand the active card's remaining-step count without restarting passed work.,sched/options/remap-steps,deferred
+h27c58d269610,rust,tag,deckconfig,in-scope,U49/U246: adding an unpassed learning step must expand the active card's remaining-step count without restarting passed work.,sched/options/remap-answered/learning sched/options/remap-steps,done
 h29179d9ceae2,rust,supplementary,deckconfig,in-scope,a created preset is read back,decks/presets/add-clone-rename,done
 h2e6e22823ea4,rust,supplementary,deckconfig,in-scope,removing a preset,decks/presets/remove,done
 h2e8ed638f17b,rust,supplementary,deckconfig,in-scope,With no ignore date every card with a learning row is included,sched/memory/ignore-before-count,done
-h3219d2cb2ba0,rust,tag,deckconfig,in-scope,U49/U246: prepending an already passed relearning step must leave the current remaining count unchanged.,sched/options/remap-steps,deferred
+h3219d2cb2ba0,rust,tag,deckconfig,in-scope,U49/U246: prepending an already passed relearning step must leave the current remaining count unchanged.,sched/options/remap-answered/relearning sched/options/remap-steps,done
 h351975c45911,rust,supplementary,deckconfig,not-applicable,an API getter for one preset,,done
 h385f4aeda2a6,rust,supplementary,deckconfig,out-of-scope,"The pinned release computes costs across retention percentages, but the retention-advice simulator is excluded by R752.",,done
-h3d8240dabf39,rust,supplementary,deckconfig,in-scope,presets arriving as legacy JSON by sync or import are added,,deferred
-h3dc2e6c7647a,rust,supplementary,deckconfig,in-scope,a deck whose preset is missing uses the default preset; seen through scheduling,,deferred
+h3d8240dabf39,rust,supplementary,deckconfig,in-scope,presets arriving as legacy JSON by sync or import are added,package/apkg-import/presets sync/normal/preset-added,done
+h3dc2e6c7647a,rust,supplementary,deckconfig,in-scope,a deck whose preset is missing uses the default preset; seen through scheduling,decks/presets/missing-reads-default,done
 h402aaecf9a85,rust,supplementary,deckconfig,in-scope,updating a preset as an undoable change,decks/presets/add-clone-rename,done
 h4939abe921e2,rust,supplementary,deckconfig,out-of-scope,The pinned release includes searched existing cards in retention advice; that simulator is excluded by R752.,,done
-h4f44f64a9d78,rust,tag,deckconfig,in-scope,U49/U246: shortened lapse settings cannot graduate an unfinished card; remaining-step floor is 1.,sched/options/remap-steps,deferred
+h4f44f64a9d78,rust,tag,deckconfig,in-scope,U49/U246: shortened lapse settings cannot graduate an unfinished card; remaining-step floor is 1.,sched/options/remap-answered/relearning sched/options/remap-steps,done
 h54bd0b969d29,rust,supplementary,deckconfig,in-scope,the legacy JSON of a preset,model/schema11/preset-values,done
-h5e274df557cf,rust,tag,deckconfig,in-scope,U49/U246: changing relearning steps must not remap a card currently in learning.,sched/options/remap-steps,deferred
+h5e274df557cf,rust,tag,deckconfig,in-scope,U49/U246: changing relearning steps must not remap a card currently in learning.,sched/options/remap-answered/learning sched/options/remap-steps,done
 h65b62d476674,rust,supplementary,deckconfig,in-scope,a changed preset is stamped,decks/presets/add-clone-rename,done
-h69f9ba4c6483,rust,supplementary,deckconfig,in-scope,presets arriving as legacy JSON by sync or import are added,,deferred
+h69f9ba4c6483,rust,supplementary,deckconfig,in-scope,presets arriving as legacy JSON by sync or import are added,package/apkg-import/presets sync/normal/preset-added,done
 h6a74f5728f8c,rust,supplementary,deckconfig,in-scope,the default preset stands in for a missing one; seen through scheduling,,deferred
 h6c0d5ffc0db0,rust,supplementary,deckconfig,in-scope,adding a preset,decks/presets/add-clone-rename,done
-h70e1bda7fbd5,rust,supplementary,deckconfig,in-scope,U49/U246: the pinned options-save service persists the request's preset values; cover the real save rather than a fixture mutation.,,deferred
+h70e1bda7fbd5,rust,supplementary,deckconfig,in-scope,U49/U246: the pinned options-save service persists the request's preset values; cover the real save rather than a fixture mutation.,sched/options/insertion-order-option sched/options/live-save sched/options/undo-save,done
 h74f60c8aa789,rust,supplementary,deckconfig,in-scope,assigning a preset to a deck and its subdecks,decks/presets/assign,done
-h774fd17fd8ea,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import are added only when their id is free,,deferred
+h774fd17fd8ea,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import are added only when their id is free,package/apkg-import/presets,done
 h78189711cf81,rust,tag,deckconfig,in-scope,"reserved keys in a preset's other bytes, top level and sub-objects, never reach the legacy JSON object",model/schema11/preset-other,done
-h788f98b55f1d,rust,tag,deckconfig,in-scope,"U49/U246: verify future ignore-before dates clamp to today while past, current and empty dates survive the options save (R697).",,deferred
-h7f7645f98775,rust,tag,deckconfig,in-scope,U49/U246: changing learning steps must not alter the remaining steps of a card currently relearning.,sched/options/remap-steps,deferred
-h81d3f640e8fd,rust,tag,deckconfig,in-scope,U49/U246: adding unpassed relearning steps must increase the current card's remaining count.,sched/options/remap-steps,deferred
+h788f98b55f1d,rust,tag,deckconfig,in-scope,"U49/U246: verify future ignore-before dates clamp to today while past, current and empty dates survive the options save (R697).",sched/options/ignore-date/future sched/options/ignore-date/kept,done
+h7f7645f98775,rust,tag,deckconfig,in-scope,U49/U246: changing learning steps must not alter the remaining steps of a card currently relearning.,sched/options/remap-answered/relearning sched/options/remap-steps,done
+h81d3f640e8fd,rust,tag,deckconfig,in-scope,U49/U246: adding unpassed relearning steps must increase the current card's remaining count.,sched/options/remap-answered/relearning sched/options/remap-steps,done
 h87ef468beabc,rust,supplementary,deckconfig,in-scope,the built-in default preset values,storage/new-collection/rows,done
 habc378b0ea2b,rust,supplementary,deckconfig,in-scope,removing a preset,decks/presets/remove,done
 hac8e0ee77853,rust,supplementary,deckconfig,in-scope,A date text that does not read as a date is refused,sched/memory/ignore-before-count,done
-hae800fcda356,rust,tag,deckconfig,in-scope,U49/U246: shortened initial steps cannot graduate an unfinished card; remaining-step floor is 1.,sched/options/remap-steps,deferred
+hae800fcda356,rust,tag,deckconfig,in-scope,U49/U246: shortened initial steps cannot graduate an unfinished card; remaining-step floor is 1.,sched/options/remap-floor-shortened sched/options/remap-steps,done
 hb50a0cec5249,rust,supplementary,deckconfig,out-of-scope,"The pinned retention-advice service validates parameter vectors, but that simulator and its manual parameter interface are excluded by R752.",,done
 hba00bf856693,rust,supplementary,deckconfig,in-scope,The ignore-date count includes cards with a learning row after the date,sched/memory/ignore-before-count,done
 hbfa3b0173663,rust,supplementary,deckconfig,in-scope,an unchanged preset is not written,decks/presets/add-clone-rename,done
@@ -44,15 +44,15 @@ hc06112477870,rust,supplementary,deckconfig,in-scope,removing a preset as an und
 hc77e5ddeebb7,rust,supplementary,deckconfig,in-scope,saving a preset from its legacy JSON,model/schema11/preset-values,done
 hc9c179bfb2ef,rust,supplementary,deckconfig,in-scope,adding a preset as an undoable change,decks/presets/add-clone-rename,done
 hd2c8c7020dc2,rust,tag,deckconfig,in-scope,"legacy graduating and easy intervals: two or more elements accepted, anything else gives the defaults",model/schema11/preset-values,done
-hd3586154cc8d,rust,supplementary,deckconfig,in-scope,undoing a preset removal restores it; asserted by the core tests until deck undo scenarios exist,,deferred
+hd3586154cc8d,rust,supplementary,deckconfig,in-scope,undoing a preset removal restores it; asserted by the core tests until deck undo scenarios exist,sched/options/remove-preset sched/options/remove-preset-undo-rows,done
 hd68f57dc3fd2,rust,supplementary,deckconfig,in-scope,a new preset is stamped,decks/presets/add-clone-rename,done
-hd709478326d6,rust,supplementary,deckconfig,in-scope,a missing preset id falls back to the default preset; seen through scheduling,,deferred
-he12744628934,rust,tag,deckconfig,in-scope,U49/U246: inserting already passed learning steps must preserve the current remaining count.,sched/options/remap-steps,deferred
+hd709478326d6,rust,supplementary,deckconfig,in-scope,a missing preset id falls back to the default preset; seen through scheduling,decks/presets/missing-reads-default,done
+he12744628934,rust,tag,deckconfig,in-scope,U49/U246: inserting already passed learning steps must preserve the current remaining count.,sched/options/remap-passed-step-inserted sched/options/remap-steps,done
 he9efe2bce55c,rust,supplementary,deckconfig,not-applicable,an API option that returns nothing for a missing preset,,done
 heaf6b0314ef9,rust,supplementary,deckconfig,in-scope,U49/U246: the pinned options-read service returns the requested deck and its applicable presets; add a real read/save contract scenario.,,deferred
-hf1fc2f580d06,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import keep their ids,,deferred
+hf1fc2f580d06,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import keep their ids,package/apkg-import/presets sync/normal/preset-added,done
 hfa91e7718197,rust,supplementary,deckconfig,not-applicable,a legacy call that lists every preset as JSON,,done
-h0de8cd79d6ba,typescript,tag,deckconfig,in-scope,U232/U246: opening deck options must initialize the draft for the requested nested deck rather than a global default.,,deferred
+h0de8cd79d6ba,typescript,tag,deckconfig,in-scope,U232/U246: opening deck options must initialize the draft for the requested nested deck rather than a global default.,sched/options/nested-deck-opening-preset,done
 h1dc1c50d96e2,typescript,tag,deckconfig,in-scope,U234/U246: format near-integral fractional-minute steps as the intended whole-second value despite floating-point storage noise.,,deferred
 h1e72f458212b,typescript,tag,deckconfig,in-scope,"U234/U246: whole-minute learning steps must round-trip through seconds, minutes, hours and days in the steps editor.",,deferred
 h35f01eb07a7f,typescript,tag,deckconfig,in-scope,U234/U246: fractional-minute learning steps must round-trip through second and minute labels without dropping precision.,,deferred
@@ -100,7 +100,7 @@ hcc9150d28b7e,rust,tag,decks,not-applicable,a backend message without a deck kin
 hcd825469184c,rust,tag,decks,in-scope,the tree shows the default deck when it is the only deck,decks/tree/structure,done
 hd11fe668ff13,rust,tag,decks,not-applicable,a legacy call that adds a deck when its id is zero; Meguri has no such API,,done
 hdd45edf23247,rust,tag,decks,out-of-scope,editing filtered deck settings,,done
-hdddcc971bba4,rust,tag,decks,in-scope,deck tree counts belong to the queue area,,deferred
+hdddcc971bba4,rust,tag,decks,in-scope,deck tree counts belong to the queue area,sched/counts/default-shown,done
 he05ec989069b,rust,tag,decks,in-scope,dropping a deck onto another makes it a subdeck,decks/move/rules,done
 he09f009e572d,rust,tag,decks,in-scope,malformed legacy deck JSON is refused,model/schema11/deck-rejections,done
 he0cc1b3282f3,rust,tag,decks,in-scope,the tree nests decks by name in name order,decks/tree/structure,done
@@ -201,12 +201,12 @@ hf96ab31a2592,python,tag,desktop,not-applicable,"Anki's desktop Qt user interfac
 hfb56efb60d3f,python,tag,desktop,not-applicable,"Anki's desktop Qt user interface, installer and add-on manager; Meguri has its own app",,done
 hfec572ba9ada,python,tag,desktop,not-applicable,"Anki's desktop Qt user interface, installer and add-on manager; Meguri has its own app",,done
 hffb9852def3e,python,tag,desktop,not-applicable,"Anki's desktop Qt user interface, installer and add-on manager; Meguri has its own app",,done
-h04ca4d75662a,typescript,tag,editor,in-scope,U191/U195/U246: switching the add draft's note type must restore that type's last used deck when the selected adding mode requires it.,,deferred
-h060fcc66d2c0,typescript,tag,editor,in-scope,U195/U246: selected note type and nondefault deck must survive both a successful add and reopening the add flow.,,deferred
+h04ca4d75662a,typescript,tag,editor,in-scope,U191/U195/U246: switching the add draft's note type must restore that type's last used deck when the selected adding mode requires it.,editor/add-flow/notetype-deck-memory,done
+h060fcc66d2c0,typescript,tag,editor,in-scope,U195/U246: selected note type and nondefault deck must survive both a successful add and reopening the add flow.,editor/add-flow/notetype-deck-memory notes/add-defaults/after-add,done
 h08dfde967274,typescript,tag,editor,in-scope,U192/U246: applying bold beside a bold run must extend that run while retaining nested italic content and untouched preceding text.,,deferred
 h0af129b47980,typescript,tag,editor,in-scope,U194/U246: recorded audio must reach the intended editor field when focus returns; verify the native recording path rather than a desktop bridge.,,deferred
 h0c55254c24f2,typescript,tag,editor,in-scope,U192/U246: formatting only the trailing half of a text node must preserve the unselected prefix and selected text range.,,deferred
-h0d325c734b77,typescript,tag,editor,in-scope,U191/U195/U246: absent or unusable note-type deck history must fall back to the current deck on reopening the add draft.,,deferred
+h0d325c734b77,typescript,tag,editor,in-scope,U191/U195/U246: absent or unusable note-type deck history must fall back to the current deck on reopening the add draft.,editor/add-flow/last-deck-fallback editor/config-keys/add-defaults-by-notetype,done
 h0fbabf88d405,typescript,tag,editor,in-scope,U197/U246: internal rich-text paste must remove forbidden font sizing and image alignment while retaining allowed weight and text alignment.,,deferred
 h13b7128734ea,typescript,tag,editor,in-scope,U192/U246: formatting across a line break and list must style visible text without creating empty formatting elements or changing list structure.,,deferred
 h1b75a8055e30,typescript,tag,editor,in-scope,U190/U246: edits queued during an asynchronous save flush must not disappear; a later replacement must win over an older pending edit.,,deferred
@@ -224,7 +224,7 @@ h4d2c40a0930e,typescript,tag,editor,in-scope,U194/U197/U246: pasted clipboard im
 h5e551aa48cb4,typescript,tag,editor,in-scope,"U195/U246: the add command must use the deck currently selected in the chooser, rather than an earlier default.",,deferred
 h5fce9ef76c1f,typescript,tag,editor,in-scope,"U194/U246: Attach must accept supported image/audio files, add them through the media service and insert the local image into the focused field.",,deferred
 h601407f24351,typescript,tag,editor,in-scope,U205/U206/U246: switching from a newly drawn mask to typing in another field must not cancel or lose the pending mask save.,,deferred
-h6e8d74322421,typescript,tag,editor,in-scope,"U191/U195/U246: a nondefault deck remembered for a note type must be restored after adding and reopening, using persisted context.",,deferred
+h6e8d74322421,typescript,tag,editor,in-scope,"U191/U195/U246: a nondefault deck remembered for a note type must be restored after adding and reopening, using persisted context.",editor/add-flow/notetype-deck-memory,done
 h6f0c84dadbdb,typescript,tag,editor,in-scope,U192/U246: bold across two text runs separated by a line break must merge into one formatting span while preserving selection text.,,deferred
 h7508907b7b47,typescript,tag,editor,in-scope,U192/U246: removing bold from one list item must keep the list and unrelated bold text intact.,,deferred
 h7ab84f3f0f1b,typescript,tag,editor,in-scope,U192/U246: bold applied before nested underline/bold text must extend bold across both runs while retaining the underlined suffix.,,deferred
@@ -234,16 +234,16 @@ h88ee1a8ec135,typescript,tag,editor,in-scope,U194/U246: inserting a file with an
 h8c899c6506a2,typescript,tag,editor,in-scope,U190/U195/U246: toggling a field's sticky control must persist the note-type field setting and update its visible state in both directions.,,deferred
 h92ef3cd2c306,typescript,tag,editor,in-scope,"U190/U195/U246: choosing another note type must replace the draft's field list and labels, without leaving fields from the previous type.",,deferred
 h9de5cb7af907,typescript,tag,editor,in-scope,U194/U246: recording must add the resulting local sound reference to the focused field and offer immediate playback through native services.,,deferred
-h9f50c1c0f487,typescript,tag,editor,in-scope,U191/U195/U246: a remembered deck deleted by another operation must fall back to the current deck when reopening Add.,,deferred
+h9f50c1c0f487,typescript,tag,editor,in-scope,U191/U195/U246: a remembered deck deleted by another operation must fall back to the current deck when reopening Add.,editor/add-flow/last-deck-fallback,done
 ha1793751ed20,typescript,tag,editor,in-scope,U197/U246: pasted nested script bodies are discarded together with their containers.,,deferred
 ha59b9ffb5db2,typescript,tag,editor,in-scope,U192/U246: applying bold to text beside two separately nested bold runs must join the bold range and retain both italic spans.,,deferred
 ha80fc2c2d74d,typescript,tag,editor,in-scope,U192/U246: applying bold to the first half of a text node must leave its unselected suffix plain and maintain the selected range.,,deferred
 ha86f3657ab34,typescript,tag,editor,in-scope,U197/U246: dark-appearance paste filtering must strip background colors while retaining safe emphasis styling.,,deferred
-hacf8f68aa5db,typescript,tag,editor,in-scope,U191/U195/U246: current-deck adding mode must retain the deck while restoring its last used note type after an add and reopen.,,deferred
+hacf8f68aa5db,typescript,tag,editor,in-scope,U191/U195/U246: current-deck adding mode must retain the deck while restoring its last used note type after an add and reopen.,editor/add-flow/deck-notetype-memory,done
 hb014ea4e2147,typescript,tag,editor,in-scope,"U197/U246: basic paste unwraps rich emphasis and links, while extended paste retains allowed markup and link destinations.",,deferred
-hb4f60ade2634,typescript,tag,editor,in-scope,U195/U246: both selected deck and selected note-type identifiers must reach the added note and remain selected after the draft resets.,,deferred
+hb4f60ade2634,typescript,tag,editor,in-scope,U195/U246: both selected deck and selected note-type identifiers must reach the added note and remain selected after the draft resets.,editor/add-flow/selected-context,done
 hb640064a2bb5,typescript,tag,editor,in-scope,U192/U246: newly bold text before a line break must merge with an existing bold run beyond the break.,,deferred
-hb7dfd31a030e,typescript,tag,editor,in-scope,U191/U195/U246: missing or stale deck-to-note-type history must use the global note type while retaining the current deck.,,deferred
+hb7dfd31a030e,typescript,tag,editor,in-scope,U191/U195/U246: missing or stale deck-to-note-type history must use the global note type while retaining the current deck.,editor/config-keys/add-defaults-current-deck editor/config-keys/deck-key-curmodel-fallback notes/add-defaults/after-add,done
 hb93c4bd5833b,typescript,tag,editor,in-scope,U192/U246: applying bold to content already bold must flatten duplicate bold wrappers without consuming a trailing line break.,,deferred
 hbed095c14b47,typescript,tag,editor,in-scope,U194/U246: a recognized audio filename must insert sound-reference markup and use that same local filename for playback.,,deferred
 hc01768203874,typescript,tag,editor,in-scope,"U195/U246: after adding a note, sticky fields retain their values while ordinary fields clear, and toggling sticky off persists.",,deferred
@@ -270,7 +270,7 @@ h2e7c980ee2f6,python,tag,engine,in-scope,"U246: add a single rendering sequence 
 h2ecf4efee965,python,tag,engine,not-applicable,Removing Python extension callbacks is part of a runtime Meguri does not embed (R1879).,,done
 h4779ed3690a3,python,tag,engine,not-applicable,Exception propagation through Python extension filters is not a collection or native-app interface (R1879).,,done
 h5304b7b612e0,python,tag,engine,not-applicable,Post-call Python extension wrapping is not shipped in the native app (R1879).,,done
-h5388bc1a2b81,python,tag,engine,in-scope,"U246: cover adding a reverse template to existing notes, later sibling generation, rendered fields and duplicate/empty checks together (R785-R810).",,deferred
+h5388bc1a2b81,python,tag,engine,in-scope,"U246: cover adding a reverse template to existing notes, later sibling generation, rendered fields and duplicate/empty checks together (R785-R810).",cardgen/normal/added-template-lifecycle,done
 h5714739d928e,python,tag,engine,not-applicable,Dispatch into a registered Python extension callback has no shipped Meguri runtime (R1879).,,done
 h5d08ad2ebcf9,python,tag,engine,not-applicable,Python extension filters composing return values belong to an unshipped extension interface (R1879).,,done
 h69f4adbd5970,python,tag,engine,in-scope,U250/U246: extend reopen stamp coverage with refusal to create a collection at an unwritable file or directory; existing reopen cases omit permissions.,,deferred
@@ -281,18 +281,18 @@ h7e4c18df6974,python,tag,engine,in-scope,"U167/U246: verify English rendering-er
 h89de56ad40bd,python,tag,engine,not-applicable,Removing a failing Python extension callback is not an on-disk compatibility behavior (R1879).,,done
 h91d384fa40f0,python,tag,engine,in-scope,Many note types created at one instant get distinct ids,storage/ids/all-tables,done
 h938b8896f278,python,tag,engine,not-applicable,A Python extension callback transforming a return value is not a Meguri product interface (R1879).,,done
-hbcd13325e1bf,python,tag,engine,in-scope,"U246: edit the first field, then assert its stored digest changes; add a real save-path case (R774).",,deferred
+hbcd13325e1bf,python,tag,engine,in-scope,"U246: edit the first field, then assert its stored digest changes; add a real save-path case (R774).",notes/save/first-field-checksum,done
 hec0725d1a35e,python,tag,engine,not-applicable,Rewriting named SQL arguments for the Python database wrapper is not a file-format or native-engine interface (R1879).,,done
 hf6c2f3eacd8d,python,tag,engine,not-applicable,Passing an original Python callable into an extension wrapper has no shipped native runtime (R1879).,,done
 h025050fe6ac6,rust,tag,engine,not-applicable,"Online Python-extension metadata lookup belongs to the desktop extension manager, which Meguri does not ship (R1879).",,done
 h3338e90d7270,rust,tag,engine,in-scope,U106/U246: error presentation must suppress a detail section containing only whitespace; add a neutral formatted-error observation.,,deferred
 h420d96663fe4,rust,tag,engine,in-scope,"U167/U246: cover English fallback, substitutions and plurals using native localization; foreign message lookup internals are not required (R192,R195).",,deferred
-h434af44650c7,rust,tag,engine,in-scope,"U120/U250/U246: verify archive paths reject traversal and absolute names, including platform-specific separators, before any extraction.",,deferred
+h434af44650c7,rust,tag,engine,in-scope,"U120/U250/U246: verify archive paths reject traversal and absolute names, including platform-specific separators, before any extraction.",package/apkg-export/media-backslash-name package/apkg-export/media-unsafe-references package/apkg-import/media-map-variants package/apkg-import/refusals package/collection-package/refused-media-map,done
 h46a2e2a48929,rust,tag,engine,in-scope,U250/U246: cover atomic replacement to a relative single-component destination; the filesystem helper needs an actual durability scenario.,,deferred
 h55b5f8508781,rust,tag,engine,not-applicable,Deriving a human label from an internal Rust type name is not an interoperability contract; Meguri defines its own typed errors (R1879).,,done
 h56ce4672d339,rust,tag,engine,in-scope,U106/U246: a nonempty transport diagnostic must remain available beside its summary without losing the detail text.,,deferred
 h74b7d2e31f18,rust,tag,engine,in-scope,U167/U246: verify that decimal numbers use the user's locale rather than a fixed separator (R192).,,deferred
-h7b088f7049ca,rust,tag,engine,in-scope,"U126/U246: verify per-day, per-week and per-month retention selections plus exemptions for recent dates (R1633).",package/backups/period-boundaries package/backups/week-boundary,deferred
+h7b088f7049ca,rust,tag,engine,in-scope,"U126/U246: verify per-day, per-week and per-month retention selections plus exemptions for recent dates (R1633).",package/backups/period-boundaries package/backups/three-stages package/backups/week-boundary,done
 h85e031554808,rust,tag,engine,not-applicable,An Android JNI bridge estimating serialized database row bytes is absent from the Apple architecture (R1879).,,done
 h876dbf5f6be7,rust,tag,engine,in-scope,Undo and redo move steps between the two histories; a new op empties redo and an op without undo record empties both,undo/edit-note undo/redo-cleared,done
 h8c7ca9736257,rust,tag,engine,in-scope,Quick successive edits of one note merge into one Update Note step,undo/edit-note-merge,done
@@ -304,41 +304,41 @@ hbcc38ba4659c,rust,tag,engine,in-scope,U167/U246: plural selection for rounded d
 hc80955057f3f,rust,tag,engine,not-applicable,Custom undo steps and merging later operations into one step are the add-on interface; Meguri has no add-ons and runs a composite change as one op,,done
 hd962000e6d0c,rust,tag,engine,not-applicable,Returning an oversized first row through an Android JNI page is specific to an unshipped bridge (R1879).,,done
 hea8cbd8d6720,rust,tag,engine,in-scope,U106/U246: a generic network failure without diagnostic text must not show an empty detail section.,,deferred
-hfa50e8665fce,rust,tag,engine,in-scope,"U126/U246: verify a full year's backups thin into the configured daily/weekly/monthly buckets, including default retention (R2009).",package/backups/retention-hourly-400-days,deferred
-h19a3e91fc826,rust,tag,maintenance,in-scope,"U129/U246: Check Database must join excess note fields into the last field and pad missing fields, with accurate repair counts.",,deferred
-h45394f1a8123,rust,tag,maintenance,in-scope,"U129/U246: Check Database must remove duplicate card ordinals and cards whose template no longer exists, without removing valid siblings.",,deferred
-h5b5bc3629af2,rust,tag,maintenance,in-scope,"U128/U246: Check Database must turn fractional revlog ivl/lastIvl values into integers, with accurate repair totals.",,deferred
-h8bba9c90dc5d,rust,tag,maintenance,in-scope,"U128/U129/U246: malformed scheduling columns need numeric repair; recover missing decks, delete orphans and verify repair idempotence.",,deferred
-h984772533897,rust,tag,maintenance,in-scope,U129/U246: rebuilding tags during Check Database must preserve the user's expanded and collapsed tag states.,,deferred
-hec5bf5d4f824,rust,tag,maintenance,in-scope,U129/U246: Check Database must recreate every missing ancestor of a nested deck and count the repair correctly.,,deferred
+hfa50e8665fce,rust,tag,engine,in-scope,"U126/U246: verify a full year's backups thin into the configured daily/weekly/monthly buckets, including default retention (R2009).",package/backups/retention-daily-one-year package/backups/retention-hourly-400-days,done
+h19a3e91fc826,rust,tag,maintenance,in-scope,"U129/U246: Check Database must join excess note fields into the last field and pad missing fields, with accurate repair counts.",notes/fields/count-repair,done
+h45394f1a8123,rust,tag,maintenance,in-scope,"U129/U246: Check Database must remove duplicate card ordinals and cards whose template no longer exists, without removing valid siblings.",maintenance/check-db-notes/duplicate-ords maintenance/check-db-notes/missing-template,done
+h5b5bc3629af2,rust,tag,maintenance,in-scope,"U128/U246: Check Database must turn fractional revlog ivl/lastIvl values into integers, with accurate repair totals.",maintenance/check-db/revlog-row-counted maintenance/check-db/revlog-values,done
+h8bba9c90dc5d,rust,tag,maintenance,in-scope,"U128/U129/U246: malformed scheduling columns need numeric repair; recover missing decks, delete orphans and verify repair idempotence.",maintenance/check-db/all-records maintenance/check-db/card-due maintenance/check-db/card-fixes-counted maintenance/check-db/card-ivl maintenance/check-db/card-odue maintenance/check-db/missing-deck maintenance/check-db/orphan-cards,done
+h984772533897,rust,tag,maintenance,in-scope,U129/U246: rebuilding tags during Check Database must preserve the user's expanded and collapsed tag states.,maintenance/check-db-notes/tag-states-kept,done
+hec5bf5d4f824,rust,tag,maintenance,in-scope,U129/U246: Check Database must recreate every missing ancestor of a nested deck and count the repair correctly.,maintenance/check-db/missing-parents,done
 h563f74ccee41,python,tag,media,in-scope,"media names found in field text, the text with media tags removed, and the display encoding of local names (text area)",text/refs/extract text/refs/iri text/strip/text-line,done
 h83e771fdcf55,python,tag,media,in-scope,"adding a file: the same name and bytes are reused, other bytes get the hash name",media/add/ae36 media/add/hash-names,done
-h8a1d70115eae,python,tag,media,in-scope,Check Media's missing and unused lists (U130),,deferred
-h026e05052d5b,rust,tag,media,in-scope,Check Media (U130),,deferred
-h02ee289c8351,rust,tag,media,in-scope,Check Media's unused and missing lists (U130); the naming of its added files is U31's,media/add/ae36,deferred
-h0688e35c67d3,rust,tag,media,in-scope,Check Media (U130),,deferred
+h8a1d70115eae,python,tag,media,in-scope,Check Media's missing and unused lists (U130),maintenance/check-media/report/basic maintenance/check-media/report/store-added,done
+h026e05052d5b,rust,tag,media,in-scope,Check Media (U130),maintenance/check-media/refs/chevron-attributes maintenance/check-media/refs/html-forms text/refs/extract,done
+h02ee289c8351,rust,tag,media,in-scope,Check Media's unused and missing lists (U130); the naming of its added files is U31's,maintenance/check-media/report/added-files media/add/ae36,done
+h0688e35c67d3,rust,tag,media,in-scope,Check Media (U130),maintenance/check-media/rename/long-name,done
 h2751253863a4,rust,tag,media,in-scope,the 120-byte media file name limit,text/filenames/normalize text/corpus/filenames-01,done
 h2df882b13f13,rust,tag,media,in-scope,the media file name transform,text/filenames/normalize text/corpus/filenames-01,done
-h448a4c3e64ba,rust,tag,media,in-scope,Check Media (U130),,deferred
-h487c9a31bd1f,rust,tag,media,in-scope,restoring the trash (U31); the Check Media report around it waits for U130,media/trash/trash-restore-empty,deferred
-h4b933596f69b,rust,tag,media,in-scope,Check Media (U130),,deferred
-h5ba43605f707,rust,tag,media,in-scope,emptying the trash (U31); the Check Media report around it waits for U130,media/trash/trash-restore-empty,deferred
+h448a4c3e64ba,rust,tag,media,in-scope,Check Media (U130),maintenance/check-media/refs/entity-forms maintenance/check-media/refs/html-forms maintenance/check-media/rename/entities,done
+h487c9a31bd1f,rust,tag,media,in-scope,restoring the trash (U31); the Check Media report around it waits for U130,maintenance/check-media/actions/trash-restore-check media/trash/trash-restore-empty,done
+h4b933596f69b,rust,tag,media,in-scope,Check Media (U130),maintenance/check-media/case/other-content maintenance/check-media/case/three-spellings,done
+h5ba43605f707,rust,tag,media,in-scope,emptying the trash (U31); the Check Media report around it waits for U130,maintenance/check-media/actions/trash-empty-check media/trash/trash-restore-empty,done
 h60490d4bf757,rust,tag,media,in-scope,"restoring the trash: back under the name, identical bytes dropped, other bytes under the hash name",media/trash/restore-conflict media/trash/trash-restore-empty,done
 h77a1ba508ad3,rust,tag,media,not-applicable,a desktop helper that joins the media folder path; Meguri resolves names through its own lookup,,done
-h7937b5639094,rust,tag,media,in-scope,Check Media (U130),,deferred
-h7bc4c354c48f,rust,tag,media,in-scope,"media references of note type templates, CSS and fields, used by Check Media (U130, U60)",,deferred
+h7937b5639094,rust,tag,media,in-scope,Check Media (U130),maintenance/check-media/rename/invalid-chars maintenance/check-media/report/basic,done
+h7bc4c354c48f,rust,tag,media,in-scope,"media references of note type templates, CSS and fields, used by Check Media (U130, U60)",package/apkg-export/notetype-underscore-refs,done
 h86faf5420724,rust,tag,media,in-scope,"adding with dedupe across letter case and the hash name, then moving the files to the trash",media/add/ae36 media/add/lowercase media/trash/trash-restore-empty,done
-h9cb0084d6163,rust,tag,media,in-scope,Check Media (U130),,deferred
-hd18d3fee8949,rust,tag,media,in-scope,Check Media (U130),,deferred
-hd6632486d7a9,rust,tag,media,in-scope,Check Media (U130),,deferred
+h9cb0084d6163,rust,tag,media,in-scope,Check Media (U130),maintenance/check-media/inline/extract,done
+hd18d3fee8949,rust,tag,media,in-scope,Check Media (U130),maintenance/check-media/refs/case-insensitive,done
+hd6632486d7a9,rust,tag,media,in-scope,Check Media (U130),maintenance/check-media/refs/html-forms maintenance/check-media/refs/source-tags,done
 hec37a4cc2d38,rust,tag,media,in-scope,the hash name format,media/add/hash-names,done
-hfc5d2785b867,rust,tag,media,in-scope,Check Media (U130),,deferred
-hfe84eb8e5a8e,rust,tag,media,in-scope,Check Media (U130),,deferred
+hfc5d2785b867,rust,tag,media,in-scope,Check Media (U130),maintenance/check-media/rename/nfd,done
+hfe84eb8e5a8e,rust,tag,media,in-scope,Check Media (U130),maintenance/check-media/refs/several-tags,done
 h1617b31103f7,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
 h259a80791fb5,python,tag,model,in-scope,A missing config key reads as the reader's default; each key's reader and default are specified and tested with the area that reads it,browser/config/absent-defaults,done
 h32c56ad2dd75,python,tag,model,in-scope,"Config values keep their JSON kind through a write: integers, floats, booleans, null, strings, lists and objects",storage/config/rewrite-same-value,done
 h41cb2879dea9,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
-h7f33038d26bd,python,tag,model,in-scope,"Removing a config key deletes its row; scenarios come with deck and note type removal, which remove key families (U28, U29)",,deferred
+h7f33038d26bd,python,tag,model,in-scope,"Removing a config key deletes its row; scenarios come with deck and note type removal, which remove key families (U28, U29)",decks/delete/subtree notetypes/structure/remove-notetype storage/config/remove-key undo/config-writes,done
 h8ebcef230655,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
 h9b13d454ebdb,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
 h9f6e6bc22339,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
@@ -358,7 +358,7 @@ h1a6674d12546,python,tag,notes,in-scope,A new note's card has ordinal 0,notes/re
 h21b38b36b10e,python,tag,notes,in-scope,"New cloze cards follow the deck their siblings share, else the note type's last deck",cardgen/placement/existing-note,done
 h29bfba9891f3,python,tag,notes,in-scope,"Rendering a card of a note not yet added, first template by default (template preview, U71)",render/preview/drafts,done
 h498f28841425,python,tag,notes,in-scope,"Removing all of a note's cards removes the note too, with card and note graves (notes/note-records D2, U131)",maintenance/empty-cards/undo-redo,done
-h4fd1c300c9be,python,tag,notes,in-scope,"Empty Cards with special fields on the front (U35, U131)",,deferred
+h4fd1c300c9be,python,tag,notes,in-scope,"Empty Cards with special fields on the front (U35, U131)",cardgen/empty/scan cardgen/empty/special-front-edit,done
 h7c0167c254eb,python,tag,notes,not-applicable,The Python note object refusing to save a note not yet added,,done
 h8ec017fa8bdc,python,tag,notes,in-scope,Fields stored joined by U+001F,notes/records/add,done
 hb3be21cbb738,python,tag,notes,not-applicable,The Python note object's in-memory tag helpers,,done
@@ -367,7 +367,7 @@ hb78d6a2b0271,python,tag,notes,in-scope,"Rendering a cloze card of a note not ye
 hbc1c4bad3495,python,tag,notes,in-scope,The field check of a plain note is normal,notes/fields-check/states,done
 hc2d41d1889af,python,tag,notes,not-applicable,The Python note object raising on an unknown field name,,done
 hc8ae2d43aae9,python,tag,notes,not-applicable,The Python note constructor's argument rules,,done
-hcf98d05f053c,python,tag,notes,in-scope,"Cards from an added template (U34), Empty Cards (U35) and an edit that adds a card; the template and Empty Cards parts wait for those units",cardgen/normal/edits-only-add,deferred
+hcf98d05f053c,python,tag,notes,in-scope,"Cards from an added template (U34), Empty Cards (U35) and an edit that adds a card; the template and Empty Cards parts wait for those units",cardgen/empty/after-template-change cardgen/normal/edits-only-add notetypes/structure/add-template notetypes/structure/edit-front,done
 hf90ff3b47fc0,python,tag,notes,not-applicable,The Python note object's in-memory tag string helpers; the stored tags follow tags/tags T4,,done
 h0bc924c8e05f,rust,tag,notes,in-scope,Change Deck recomputes memory states with the target preset (U87 with U49's hook),,deferred
 h0e7337c9f130,rust,tag,notes,in-scope,Updating notes stores their new fields and adds required cards,notes/save/untouched-fields cardgen/normal/edits-only-add,done
@@ -381,13 +381,13 @@ h3bc595fa00b0,rust,tag,notes,in-scope,The field names of the selected notes for 
 h4907663a10e2,rust,tag,notes,in-scope,"Undo and redo of adding and deleting notes: an add's undo removes its rows, tags and config writes with no grave (notes/note-records A5)",notes/records/undo-add undo/delete-notes,done
 h4ee2959fd8e8,rust,tag,notes,in-scope,Saving an unchanged note keeps its stamps; a change stamps it,storage/noop/identical-note-rewrite notes/save/untouched-fields,done
 h55e8477eea21,rust,tag,notes,in-scope,Change Deck gives new cards no memory state (U87 with U49's hook),,deferred
-h57651ff721da,rust,tag,notes,in-scope,A note type's default deck for the Add screen (U191),,deferred
+h57651ff721da,rust,tag,notes,in-scope,A note type's default deck for the Add screen (U191),notes/add-defaults/after-add notes/add-defaults/last-deck,done
 h5a6b3bd92841,rust,tag,notes,in-scope,Change Deck remaps remaining learning steps to the new preset (U87 with U49's hook),,deferred
 h5eb1c8260e8c,rust,tag,notes,not-applicable,Reading a note through the protobuf interface; Meguri reads rows by model/row-records,,done
 h66f7a2aeee4f,rust,tag,notes,in-scope,Change Deck keeps remaining steps when the old preset had none (U87 with U49's hook),,deferred
 h6ce76081385b,rust,tag,notes,in-scope,Adding a note gives it an id; a request without a note is the protobuf interface's,notes/records/add,done
 h7acd0470902a,rust,tag,notes,not-applicable,Listing a note's card ids through the protobuf interface; no stored behavior,,done
-h7ba73914c295,rust,tag,notes,in-scope,"Add-screen defaults for deck and note type, current deck rules (U191)",,deferred
+h7ba73914c295,rust,tag,notes,in-scope,"Add-screen defaults for deck and note type, current deck rules (U191)",editor/config-keys/add-defaults-by-notetype editor/config-keys/add-defaults-current-deck editor/config-keys/first-notetype-fallback notes/add-defaults/review-card,done
 h7f3ad7c57016,rust,tag,notes,in-scope,"GUID text encoding (text/guid G2, G4); checked by U20's Rust tests against G4's table, since GUIDs Anki creates are random",,deferred
 h83c15fb8bf40,rust,tag,notes,in-scope,"Regenerating cards and stamps after outside changes to notes (the bulk-operation framework, U86)",,deferred
 h87ed9c949919,rust,tag,notes,in-scope,Change Deck with FSRS off computes no memory state (U87),,deferred
@@ -395,7 +395,7 @@ h8fb237008b4c,rust,tag,notes,in-scope,Change Deck recomputes memory states only 
 h97fb2906cd6a,rust,tag,notes,in-scope,Adding a note: a note requiring no card gets one; the refusals of a wrong field count or note type are Meguri tests,cardgen/normal/conditionals notes/records/add,done
 h9c660fb50a5e,rust,tag,notes,in-scope,Bulk add (notes/note-records A5); its scenarios come with the importers (U120),,deferred
 ha4fba0e6523a,rust,tag,notes,in-scope,"Updating several notes without an undo step, as the local servers do (U137)",,deferred
-hab1f710886fe,rust,tag,notes,in-scope,Add-screen defaults for deck and note type (U191),,deferred
+hab1f710886fe,rust,tag,notes,in-scope,Add-screen defaults for deck and note type (U191),editor/config-keys/add-defaults-by-notetype editor/config-keys/add-defaults-current-deck editor/config-keys/first-notetype-fallback notes/add-defaults/after-add notes/add-defaults/review-card,done
 hab3e195632ce,rust,tag,notes,in-scope,Deleting notes removes them with their cards and graves,storage/graves/delete-note,done
 haeb2e195c8b5,rust,tag,notes,in-scope,The field check through the protobuf interface,notes/fields-check/states,done
 hc981fbc25c3f,rust,tag,notes,in-scope,A note that requires no card gets ordinal 0; edits add the cards that become required; cloze numbers above 500 map to ordinal 499,cardgen/normal/conditionals cardgen/normal/edits-only-add cardgen/cloze/numbers cardgen/cloze/above-500,done
@@ -415,15 +415,15 @@ h38373cc87211,python,tag,notetypes,in-scope,"removing a note type removes its no
 h3db0bf46358b,python,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),notetypes/change/cloze notetypes/change/cloze-round-trip notetypes/change/same-type-remap notetypes/change/swap-fields notetypes/change/template-map,done
 h51425d9fe4e8,python,tag,notetypes,in-scope,"A cloze note's cards take their ordinals from its cloze numbers, whatever filters the template chains (notes/card-generation G4)",cardgen/cloze/numbers,done
 h6ace0b701063,python,tag,notetypes,not-applicable,Add-on entries in Anki's own stock note type list,,done
-h6ebbfe4093c4,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
+h6ebbfe4093c4,python,tag,notetypes,in-scope,Cloze rendering (U61),render/cloze/stored-cards,done
 h76dd5ce91b19,python,tag,notetypes,in-scope,Type-in answers on cloze cards (U64; verified stored-card review HTML),render/type-answer/cloze,done
-h7cd15bfd9337,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
-h8057000b72f1,python,tag,notetypes,in-scope,Template filters when rendering (U60),,deferred
+h7cd15bfd9337,python,tag,notetypes,in-scope,Cloze rendering (U61),render/cloze/stored-mathjax,done
+h8057000b72f1,python,tag,notetypes,in-scope,Template filters when rendering (U60),render/filters/text,done
 h93567ad3543f,python,tag,notetypes,not-applicable,Add-on entries in Anki's own stock note type list,,done
 haa6096a01726,python,tag,notetypes,in-scope,The typing stock kind asks for the Back field's answer on its front,notetypes/records/stock-structure,done
 haff749b319ca,python,tag,notetypes,in-scope,"Each stock kind's fields, templates and kind",notetypes/records/stock-new-collection notetypes/records/stock-structure,done
 hd3484a3787d3,python,tag,notetypes,not-applicable,Deprecated helpers of Anki's Python add-on API,,done
-he8993d36dc09,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
+he8993d36dc09,python,tag,notetypes,in-scope,Cloze rendering (U61),render/cloze/stored-text-chain,done
 heb9c41d43b4a,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",notetypes/structure/remove-template notetypes/structure/template-swap-replace,done
 h0477377c20e5,rust,tag,notetypes,in-scope,A note type's field names in order,notetypes/records/stock-new-collection,done
 h147c5a8d09f4,rust,tag,notetypes,in-scope,"A card's field map holds the note fields and the special fields only, each with its value",render/special-fields/cards render/special-fields/new-note render/pipeline/specials,done
@@ -512,7 +512,7 @@ h07f221b07463,rust,tag,package,out-of-scope,CSV/text import is excluded; this ca
 h0dfab78112de,rust,tag,package,out-of-scope,"CSV/text export is excluded; this case aligns metadata column numbers with identifier, type, deck, fields and tags.",,done
 h13bd2beaffe5,rust,tag,package,in-scope,U122/U246: package gathering must include valid selected notes with their original record content.,package/apkg-export/selection/whole-collection package/apkg-export/with-scheduling,done
 h189770d86c7a,rust,tag,package,out-of-scope,CSV/text export is excluded; this case strips markup when exporting rendered card text without HTML.,,done
-h1b462ab5b1f6,rust,tag,package,in-scope,U124/U246: latest and legacy collection packages must restore notes and identical media bytes into a fresh destination.,package/collection-package/export-import-roundtrip,deferred
+h1b462ab5b1f6,rust,tag,package,in-scope,U124/U246: latest and legacy collection packages must restore notes and identical media bytes into a fresh destination.,package/apkg-export/colpkg/export-with-media package/collection-package/export-import-roundtrip package/legacy-export/colpkg-oracle-import,done
 h1f2f223fd59f,rust,tag,package,in-scope,"U120/U122/U246: normalize unsafe legacy media names on import, but reject noncanonical names in the newer manifest rather than trusting them.",package/collection-package/refused-media-map,deferred
 h2071dec13b10,rust,tag,package,in-scope,U122/U246: exporting a note package to an invalid destination must return an error rather than report success.,,deferred
 h210a9935737d,rust,tag,package,out-of-scope,CSV/text import is excluded; this case builds preview rows from initial data lines and strips preview markup.,,done
@@ -521,7 +521,7 @@ h23592efff85b,rust,tag,package,out-of-scope,CSV/text import is excluded; this ca
 h2550760e6fd3,rust,tag,package,out-of-scope,CSV/text import is excluded; this case detects column counts despite quoted embedded line breaks.,,done
 h2cd0efb7e7cf,rust,tag,package,out-of-scope,CSV/text import is excluded; this case reads note-type names from a designated data column.,,done
 h2d5da75d9660,rust,tag,package,out-of-scope,CSV/text import is excluded; this case resolves a header's note type by either its name or numeric identifier.,,done
-h3154129ed251,rust,tag,package,in-scope,"U120/U246: deck import must create missing parents, avoid filtered-parent conflicts and reconcile ancestor casing independently of record order.",,deferred
+h3154129ed251,rust,tag,package,in-scope,"U120/U246: deck import must create missing parents, avoid filtered-parent conflicts and reconcile ancestor casing independently of record order.",package/apkg-import/deck-parent-spelling package/apkg-import/deck-tree package/apkg-import/decks,done
 h35a1a315775a,rust,tag,package,out-of-scope,Foreign JSON note import is excluded; this case accepts a minimal JSON document with an empty note list.,,done
 h3680103347a5,rust,tag,package,in-scope,U121/U246: repeated package imports must merge prior duplicated note types by original identity while retaining added fields and note content.,package/notetype-merge/copy-cleanup package/notetype-merge/copy-own-field,done
 h386c4ed293d8,rust,tag,package,in-scope,U120/U246: importing a package with a genuinely new note type must create its record with the incoming identity when available.,package/apkg-import/new-notetype,done
@@ -552,8 +552,8 @@ h5bf32a768a1d,rust,tag,package,out-of-scope,CSV/text import is excluded; this ca
 h5d6433926c9e,rust,tag,package,out-of-scope,CSV/text export is excluded; this case suppresses metadata-column headers when those columns are disabled.,,done
 h6acf9cf9c5c8,rust,tag,package,out-of-scope,CSV/text import is excluded; this case maps source columns into a different note-field order.,,done
 h6d941db6b0ef,rust,tag,package,in-scope,U124/U246: collection-package export must refuse noncanonical media names with a media-check error and remove its incomplete output.,,deferred
-h6ee2440b2399,rust,tag,package,in-scope,"U120/U122/U123/U246: latest/legacy package round-trips must preserve cross-deck siblings, resolve media conflicts and undo imported records atomically.",,deferred
-h6f014d7a2318,rust,tag,package,in-scope,U120/U246: importing decks must translate today's limit overrides between collection day origins and clear expired overrides.,,deferred
+h6ee2440b2399,rust,tag,package,in-scope,"U120/U122/U123/U246: latest/legacy package round-trips must preserve cross-deck siblings, resolve media conflicts and undo imported records atomically.",package/apkg-export/roundtrip-siblings-media-undo,done
+h6f014d7a2318,rust,tag,package,in-scope,U120/U246: importing decks must translate today's limit overrides between collection day origins and clear expired overrides.,package/apkg-import/deck-day-limits package/apkg-import/decks,done
 h6f73f6341530,rust,tag,package,out-of-scope,CSV/text export is excluded; this case emits a header and zero count for an empty card collection.,,done
 h7804718662be,rust,tag,package,out-of-scope,CSV/text import is excluded; this case splits a designated tag column into note tags.,,done
 h7b0f7e46e988,rust,tag,package,out-of-scope,CSV/text export is excluded; this case reports an invalid destination for rendered-card output.,,done
@@ -579,7 +579,7 @@ ha767ae2500f3,rust,tag,package,in-scope,U121/U246: note-type merge must resolve 
 ha843c024b7b9,rust,tag,package,out-of-scope,CSV/text import is excluded; this case leaves the tags column unset when all source columns are already mapped to fields.,,done
 ha93250437e8c,rust,tag,package,out-of-scope,CSV/text export is excluded; this case preserves note-field markup when HTML output is enabled.,,done
 hab7041f55c2e,rust,tag,package,in-scope,U122/U246: package gathering must refuse malformed note identifiers rather than exporting a corrupt record.,package/apkg-export/future-ids package/apkg-export/selection/invalid-ids,done
-hacfa2e72158f,rust,tag,package,in-scope,U122/U123/U246: copying package media in compressed and legacy modes must retain exact bytes and report their true size and digest.,,deferred
+hacfa2e72158f,rust,tag,package,in-scope,U122/U123/U246: copying package media in compressed and legacy modes must retain exact bytes and report their true size and digest.,package/apkg-export/colpkg/media-entries package/apkg-export/media-selection package/legacy-export/apkg-media,done
 haf97d9ad038f,rust,tag,package,in-scope,U120/U246: a GUID-matched incoming note older than the destination must be reported as a duplicate without overwriting newer fields.,package/apkg-import/update-matrix,done
 hb92931900f3e,rust,tag,package,out-of-scope,CSV/text import is excluded; this case maps unnamed data columns to note fields after reserved metadata columns.,,done
 hb92ed5858653,rust,tag,package,in-scope,U120/U246: a missing note-package input must produce a typed read error without modifying the collection.,,deferred
@@ -672,7 +672,7 @@ h90e678492b7b,rust,tag,render,in-scope,A sound tag becomes a play marker and an 
 h9580bee2a34f,rust,tag,render,not-applicable,Argument checking of a backend call Meguri does not expose,,done
 h9ecf3ff97171,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h9f15a141659a,rust,tag,render,in-scope,Type-in cloze extraction collapses answers only when all are identical,render/cloze/typing,done
-ha390fa79d2c0,rust,tag,render,in-scope,Cloze markers removed from field text for searching; specified with search text matching (U81),,deferred
+ha390fa79d2c0,rust,tag,render,in-scope,Cloze markers removed from field text for searching; specified with search text matching (U81),search/text/sc-hint-separators,done
 ha3f6f53e53e7,rust,tag,render,in-scope,"Both sides of a card, FrontSide and the blank question",render/template/blank render/special-fields/new-note,done
 haccda9311c93,rust,tag,render,in-scope,U64: typed-answer gaps must reflect deleted expected characters without inventing gaps for wholly incorrect typed text.,render/type-answer/compare,done
 hae0105ed752c,rust,tag,render,in-scope,U64: real IO cloze rendering verifies ordered shape data attributes and unknown-property handling.,render/image-occlusion/render/divs,done
@@ -716,7 +716,7 @@ hd03c2e9b5063,typescript,tag,review,out-of-scope,Deduplicating concurrent MathJa
 he1f7c4ce9bf3,typescript,tag,review,out-of-scope,R563 excludes retaining a lazily loaded MathJax library for subsequent cards.,,done
 he5cb8d3fb44b,typescript,tag,review,not-applicable,"Mutating a JavaScript scheduling-state union through generated JSON bindings is not a shipped Apple interface (R764,R1879).",,done
 hfe671bb51af8,typescript,tag,review,out-of-scope,A custom scheduling script replacing one rating's custom payload is excluded by R764; stored custom data preservation is separately required.,,done
-h07a0e8e761e3,python,tag,sched,in-scope,"U43/U44/U246: cover fractional learning steps, remaining counts, logged delays and graduation through real answers; SM-2 graduation constants are excluded by R752.",,deferred
+h07a0e8e761e3,python,tag,sched,in-scope,"U43/U44/U246: cover fractional learning steps, remaining counts, logged delays and graduation through real answers; SM-2 graduation constants are excluded by R752.",sched/steps/answered-progress,done
 h10adc68e72c5,python,tag,sched,out-of-scope,SM-2 interval spacing and the hard-factor option are excluded by the FSRS-only policy (R752).,,done
 h1b8a7b774a45,python,tag,sched,in-scope,"U41/U43/U44/U246: adding a new card must increase the new count, fetch it and move it into learning on Again with a valid due time.",,deferred
 h1f57b66e6c57,python,tag,sched,in-scope,"Bury by hand gives queue -3, the scheduler's bury -2, and each unbury mode restores only its kind",sched/ops/bury/cards-and-notes sched/ops/bury/unbury-deck,done
@@ -724,7 +724,7 @@ h2112a6880d74,python,tag,sched,in-scope,"Set Due Date turns a new card into a re
 h25bc326d314f,python,tag,sched,in-scope,"Suspend and unsuspend restore the queue from the type, and a card in a filtered deck stays there when suspended",sched/ops/suspend/cards-and-notes,done
 h381d4b819a8e,python,tag,sched,out-of-scope,Frozen by Antoine 2026-10-26; previous classification preservation-only. Learning state inside a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 h3ec3f77f5c5c,python,tag,sched,out-of-scope,Frozen by Antoine 2026-10-26; previous classification preservation-only. Previewing in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
-h5566e8764422,python,tag,sched,in-scope,U44/U246: an Again answer with no relearning steps must return directly to review instead of leaving the card in a nonexistent step.,,deferred
+h5566e8764422,python,tag,sched,in-scope,U44/U246: an Again answer with no relearning steps must return directly to review instead of leaving the card in a nonexistent step.,sched/steps/relearn-none-answer,done
 h55746f87d38f,python,tag,sched,in-scope,"Reset makes a review card new again, at the end of the new queue",sched/ops/reset/end-of-queue sched/ops/reset/restore-position,done
 h56c0cea0f0c6,python,tag,sched,in-scope,U41/U246: parent and child new limits must cap the gathered total and preserve the correct first deck's cards.,,deferred
 h660dab1d7e25,python,tag,sched,out-of-scope,Multiplying a lapsed card's interval by the SM-2 lapse multiplier is excluded by R752.,,done
@@ -732,24 +732,24 @@ h69f8e4b9fca9,python,tag,sched,in-scope,"U41/U43/U44/U246: a failed card stays b
 h6e88f0974790,python,tag,sched,in-scope,"U41/U43/U44/U246: learn-ahead must return future learning cards after other work is exhausted, then finish once both graduate.",,deferred
 h85d4fffafbab,python,tag,sched,in-scope,"U41/U43/U44/U246: new/learning/review counts must track Again, Good, Easy, graduation and a failed review across a complete answer sequence.",,deferred
 h890208756a97,python,tag,sched,out-of-scope,"Randomizing, ordering and shifting persisted new-card positions is the explicitly excluded Reposition feature.",,done
-h9ee8c470c9b4,python,tag,sched,in-scope,"U41/U43/U44/U246: multi-day learning steps must switch between timestamp/day queues, survive undo and update counts on relearning; use FSRS graduation.",,deferred
+h9ee8c470c9b4,python,tag,sched,in-scope,"U41/U43/U44/U246: multi-day learning steps must switch between timestamp/day queues, survive undo and update counts on relearning; use FSRS graduation.",sched/steps/interday-answers,done
 ha06ea8f4e666,python,tag,sched,in-scope,U41/U43/U44/U246: fetching a card must not decrement queue counts; only answering changes its count category.,,deferred
-ha3c7f933a25b,python,tag,sched,in-scope,U44/U246: first-step Hard must schedule the averaged delay and store that exact negative-seconds interval in history.,,deferred
+ha3c7f933a25b,python,tag,sched,in-scope,U44/U246: first-step Hard must schedule the averaged delay and store that exact negative-seconds interval in history.,sched/answer/new-card-ratings,done
 ha57b6191cc59,python,tag,sched,in-scope,U44/U246: preserve preview/answer consistency through custom learning and relearning steps; SM-2 review multipliers and fixed graduation intervals are excluded (R752).,,deferred
 ha8b070f64ade,python,tag,sched,in-scope,U44/U246: Again moves a review card into relearning and Easy graduates it with due equal to today plus its FSRS interval.,,deferred
 hade25a755a24,python,tag,sched,in-scope,"U41/U246: deck-tree counts must aggregate children, retain child-local counts and tolerate cards pointing to missing decks.",,deferred
-hbf8df3ee14ff,python,tag,sched,in-scope,U41/U43/U44/U246: collapsed learning must avoid immediately repeating the card just failed when another card is available.,,deferred
+hbf8df3ee14ff,python,tag,sched,in-scope,U41/U43/U44/U246: collapsed learning must avoid immediately repeating the card just failed when another card is available.,sched/session/requeue/after-next-learning sched/session/requeue/front-rules,done
 hc296a5b7e05e,python,tag,sched,in-scope,U41/U43/U246: requesting a study card from an empty collection must return no card.,,deferred
 hc4e4156f3624,python,tag,sched,in-scope,"U41/U43/U44/U246: with sibling burial disabled, a new note's card ordinals must appear in order across consecutive answers.",,deferred
 hde1130f9fb2d,python,tag,sched,preservation-only,U48/U246: Empty on an existing filtered deck must restore a negative original due day unchanged; creation/rebuild are excluded (R706).,,deferred
 hdf5598f4cd0f,python,tag,sched,in-scope,U41/U43/U44/U246: parent-deck study must traverse the parent and lexically ordered children while preserving counts and answer progression.,,deferred
 he3a4a3e5014c,python,tag,sched,in-scope,U41/U43/U44/U246: child answers decrement local and ancestor daily counters; tree and session totals must agree.,,deferred
 head34b2562fb,python,tag,sched,in-scope,U41/U246: the deck-count tree must contain each ancestor once even when several nested decks share it.,,deferred
-hee69ed088c05,python,tag,sched,in-scope,U49/U44/U246: a pending learning card accepts another Hard answer after its configured step list shrinks.,,deferred
+hee69ed088c05,python,tag,sched,in-scope,U49/U44/U246: a pending learning card accepts another Hard answer after its configured step list shrinks.,sched/steps/shrunk-learning-steps,done
 hf03d0a912671,python,tag,sched,out-of-scope,Frozen by Antoine 2026-10-26; previous classification preservation-only. Reviewing early in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 hf248f368b2b9,python,tag,sched,not-applicable,"Rejecting execution of an unfrozen test near midnight is a test-harness guard, not a product rollover behavior (R1879).",,done
 hf44d25b35e71,python,tag,sched,in-scope,"U44/U246: verify answer counters, due/interval consistency, leech handling and required Hard/Good/Easy factor writes (R587); only SM-2 interval multipliers are excluded (R752).",,deferred
-hf76a58bb5a76,python,tag,sched,in-scope,U49/U44/U246: removing lapse steps during relearning must allow the next Again answer to complete safely.,,deferred
+hf76a58bb5a76,python,tag,sched,in-scope,U49/U44/U246: removing lapse steps during relearning must allow the next Again answer to complete safely.,sched/steps/removed-relearning-steps,done
 h00a233a3c403,rust,tag,sched,in-scope,Hard repeats the current learning step,sched/steps/learning-progress sched/steps/hard-delays,done
 h010d3289404d,rust,tag,sched,in-scope,Good on a relearning step stays in relearning,sched/steps/relearning,done
 h0348591aa08e,rust,tag,sched,in-scope,A new collection is on day 0 with its next boundary in the future.,sched/day/creation-after-rollover-tokyo,done
@@ -759,11 +759,11 @@ h0875e3e791c6,rust,tag,sched,out-of-scope,SM-2 hard interval multiplier; Meguri 
 h0c5d8c72ae63,rust,tag,sched,in-scope,"The days text: N, N-M in either order, the ! suffix, and refusals",sched/ops/set-due/parse,done
 h0cc7ca135634,rust,tag,sched,in-scope,U41/U43/U44/U246: review limits must reserve capacity for new cards and counts must update correctly through learning graduation.,,deferred
 h0d55a293e421,rust,tag,sched,in-scope,A Reset row drops the history before it; the training form is checked with the optimizer (U47),sched/memory/reset sched/memory/crafted-rows,done
-h0d7374461795,rust,tag,sched,in-scope,U41/U43/U155/U246: empty-deck completion data must report no remaining work or buried cards and a valid next-learning sentinel.,,deferred
+h0d7374461795,rust,tag,sched,in-scope,U41/U43/U155/U246: empty-deck completion data must report no remaining work or buried cards and a valid next-learning sentinel.,sched/counts/finished,done
 h10961bb95b4d,rust,tag,sched,out-of-scope,The retention-advice workload simulation and its increasing-cost trend are excluded by R752.,,done
 h14c25ad44110,rust,tag,sched,in-scope,Training leaves out cards whose learning started before the ignore date; checked with the optimizer (U47),,deferred
 h151bd9c1b80b,rust,tag,sched,in-scope,"A card's last new position: its own position while it is new (the original due in a filtered deck), otherwise its saved pos; Forget and Set Due Date use it",sched/data/positions,deferred
-h19b87e6f451b,rust,tag,sched,in-scope,U97/U104: a studied-today message built from supplied count/time must include the correct total and average duration.,,deferred
+h19b87e6f451b,rust,tag,sched,in-scope,U97/U104: a studied-today message built from supplied count/time must include the correct total and average duration.,stats/studied-today/format-table,done
 h1a440165e319,rust,tag,sched,preservation-only,"U246: preserve stored random/shift defaults through unrelated work; executing Reposition or rewriting those defaults is excluded (R1266,R2017).",,deferred
 h1a6dc1b4024f,rust,tag,sched,in-scope,Set-due-date rows do not count in a card's history,sched/memory/skipped-rows,done
 h1d5bffd22663,rust,tag,sched,in-scope,U41/U246: available reviews must not consume the new-card limit until the shared review limit actually constrains the queue.,,deferred
@@ -787,7 +787,7 @@ h4037ce91c431,rust,tag,sched,in-scope,Easy leaves relearning,sched/steps/relearn
 h40a4438f58cc,rust,tag,sched,out-of-scope,Applying requested desired retention to cards in the FSRS simulator is excluded with the simulator UI (R752).,,done
 h40e3819d7877,rust,tag,sched,in-scope,"Again, Hard and Good delays of learning steps",sched/steps/hard-delays sched/steps/learning-progress,done
 h419067ffeea3,rust,tag,sched,in-scope,Day count from the creation date and offset and the current offset and rollover hour.,sched/day/matrix/europe-paris sched/day/dst-america-new-york sched/day/created-tokyo-studied-los-angeles,done
-h431af1c97841,rust,tag,sched,in-scope,"U41/U246: new-card gathering must honor nested limits across deck, increasing-position and decreasing-position orders while retaining sibling order.",,deferred
+h431af1c97841,rust,tag,sched,in-scope,"U41/U246: new-card gathering must honor nested limits across deck, increasing-position and decreasing-position orders while retaining sibling order.",sched/queue/order/new-gather-ascending sched/queue/order/new-gather-deck sched/queue/order/new-gather-descending,done
 h4705ef5c9c23,rust,tag,sched,in-scope,Bury Note buries every card of the note,sched/ops/bury/cards-and-notes,done
 h4833ddf59228,rust,tag,sched,in-scope,U41/U43/U44/U246: new-before-review order with review-sibling burial must not count or serve a sibling that the preceding answer removes.,,deferred
 h49565ba9b7dc,rust,tag,sched,in-scope,Burying never touches a suspended card,sched/ops/bury/cards-and-notes,done
@@ -836,15 +836,15 @@ ha2425ed999f7,rust,tag,sched,in-scope,Good on the last learning step graduates,s
 ha258d562e101,rust,tag,sched,in-scope,U43/U44/U246: redoing an answer after deck-selection undo/redo invalidates queues must rebuild them after restoring card state.,,deferred
 ha338afcecf02,rust,tag,sched,in-scope,Buried cards return to their queues at the first day query of a later day.,sched/unbury-on-rollover/both-kinds sched/unbury-on-rollover/last-unburied-window,done
 ha8aa8d31b248,rust,tag,sched,in-scope,A card whose history has no learning row begins from the SM-2 form of its first interday graded row,sched/memory/sm2-history,done
-hab96efc6f164,rust,tag,sched,in-scope,U97/U104: long duration labels must select seconds/minutes/months/years and preserve the declared precision and boundary rounding.,,deferred
-habaf407e202f,rust,tag,sched,in-scope,U44/U246: applying Again to a new card must persist both learning type and intraday-learning queue.,,deferred
-habc95d948b8b,rust,tag,sched,in-scope,U43/U44/U246: consecutive Good answers must advance a real card through learning and into review after the final step.,,deferred
+hab96efc6f164,rust,tag,sched,in-scope,U97/U104: long duration labels must select seconds/minutes/months/years and preserve the declared precision and boundary rounding.,browser/columns/time-span-units,done
+habaf407e202f,rust,tag,sched,in-scope,U44/U246: applying Again to a new card must persist both learning type and intraday-learning queue.,sched/answer/new-card-ratings,done
+habc95d948b8b,rust,tag,sched,in-scope,U43/U44/U246: consecutive Good answers must advance a real card through learning and into review after the final step.,sched/answer/positions-normal sched/data/positions,done
 had8092d884ac,rust,tag,sched,in-scope,U41/U43/U155/U246: completion data must report review work due today after Set Due Date and remove that card from new work.,,deferred
 hb4123149e0de,rust,tag,sched,in-scope,Legacy day count of collections without a creation offset; the v1 count it also checks is out of scope because v1 collections are refused.,sched/day/legacy-timing,done
 hb46e7a2d004c,rust,tag,sched,in-scope,"U44/U246: persist previewed learning/relearning transitions and compatible ease-factor deltas, floor and home-preset starting value (R587); SM-2 interval formulas remain excluded.",,deferred
-hb643b497ade7,rust,tag,sched,in-scope,U44/U246: applying Easy to a new card must persist review type/queue and a positive FSRS interval.,,deferred
-hb7be1ced7f3a,rust,tag,sched,in-scope,"U41/U246: queue mixing must distribute shorter and longer streams evenly, retain per-stream order and handle an empty stream.",,deferred
-hb8dcf303d0e0,rust,tag,sched,in-scope,"U44/U246: first-step Hard and Again both enter learning, but Hard must use the longer averaged delay when two steps exist.",,deferred
+hb643b497ade7,rust,tag,sched,in-scope,U44/U246: applying Easy to a new card must persist review type/queue and a positive FSRS interval.,sched/answer/new-card-ratings sched/steps/new-card-buttons,done
+hb7be1ced7f3a,rust,tag,sched,in-scope,"U41/U246: queue mixing must distribute shorter and longer streams evenly, retain per-stream order and handle an empty stream.",sched/queue/mix/spread-sizes,done
+hb8dcf303d0e0,rust,tag,sched,in-scope,"U44/U246: first-step Hard and Again both enter learning, but Hard must use the longer averaged delay when two steps exist.",sched/answer/new-card-ratings sched/steps/hard-delays,done
 hbafc4dc77cce,rust,tag,sched,in-scope,A single learning row gives a memory item but no training item; the training form is checked with the optimizer (U47),sched/memory/on-the-fly sched/memory/ignore-before,done
 hbc3d71afcb34,rust,tag,sched,in-scope,A card without a usable history gets its memory state from its own interval and ease,sched/memory/no-history sched/memory/sm2-history,done
 hc05411e145f1,rust,tag,sched,out-of-scope,Frozen by Antoine 2026-10-26; previous classification preservation-only. Preview states in a filtered deck are out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
@@ -853,13 +853,13 @@ hc67d7d3b1875,rust,tag,sched,in-scope,Easy leaving relearning uses the FSRS inte
 hc96dda7dd94f,rust,tag,sched,in-scope,Again in learning returns to the first step,sched/steps/learning-progress,done
 hcbe165cda562,rust,tag,sched,in-scope,Grade Now answers cards by id outside the study queue,sched/ops/grade-now/four-cards,done
 hccc87afa9021,rust,tag,sched,in-scope,Training items are sorted by review time with their card ids aligned; checked with the optimizer (U47),,deferred
-hceea58e626d5,rust,tag,sched,in-scope,"U120/U246: package inspection converts v1 learning/relearning and filtered-card states, caps steps and restores reviews (R1614); direct collection open still refuses v1.",,deferred
+hceea58e626d5,rust,tag,sched,in-scope,"U120/U246: package inspection converts v1 learning/relearning and filtered-card states, caps steps and restores reviews (R1614); direct collection open still refuses v1.",package/apkg-import/v1-scheduler storage/open/v1-scheduler,done
 hcf4081192234,rust,tag,sched,in-scope,Good on a learning step moves to the next step,sched/steps/learning-progress,done
 hd5745d5de78c,rust,tag,sched,in-scope,A card without a memory state gets one from its history when its states are computed,sched/memory/on-the-fly,done
 hd79744504c35,rust,tag,sched,in-scope,Offsets stored as minutes west of UTC in the timing config keys.,sched/day/creation-after-rollover-tokyo sched/day/config-values,done
 hda7aa551feeb,rust,tag,sched,in-scope,"Answer button labels (seconds, minutes, months)",sched/labels/units,done
 hda9e7531d7db,rust,tag,sched,in-scope,A new card exposes its current state plus previews for all four buttons through the real FSRS engine (R642).,sched/steps/new-card-buttons,done
-hdb3d8a73ac7b,rust,tag,sched,in-scope,"U97/U104: a fresh collection's studied-today message must show zero count, zero duration and a zero average.",,deferred
+hdb3d8a73ac7b,rust,tag,sched,in-scope,"U97/U104: a fresh collection's studied-today message must show zero count, zero duration and a zero average.",stats/studied-today/zero-line,done
 hdbe181187e8a,rust,tag,sched,out-of-scope,Overriding stored card retention with a simulator request is part of excluded simulation and retention-advice tools (R752).,,done
 hdd2d2f703388,rust,tag,sched,in-scope,Reset turns a graduated card back into a new card,sched/ops/reset/restore-position sched/ops/reset/end-of-queue,done
 hdeb239c0cf40,rust,tag,sched,in-scope,A new collection starts its day 0 at the 04:00 boundary at or before its creation.,sched/day/creation-before-rollover sched/day/creation-at-rollover-utc sched/day/creation-after-rollover-tokyo,done
@@ -882,80 +882,80 @@ hf8783ee88750,rust,tag,sched,in-scope,Set Due Date makes the card a review card 
 hf87bc805c0cf,rust,tag,sched,in-scope,Good on a relearning step lowers the remaining count,sched/steps/relearning,done
 hfa3da761639b,rust,tag,sched,in-scope,Hard keeps the remaining count of two relearning steps,sched/steps/relearning,done
 hfb93da3c2901,rust,tag,sched,in-scope,Short-term Hard keeps a card in relearning,sched/fsrs/short-term,done
-hfea722b04230,rust,tag,sched,in-scope,U41/U246: concatenated queue sources must preserve each source's internal card order and place the second stream after the first.,,deferred
+hfea722b04230,rust,tag,sched,in-scope,U41/U246: concatenated queue sources must preserve each source's internal card order and place the second stream after the first.,sched/queue/mix/interday-review sched/queue/mix/new-review,done
 h6d2b664432d7,python,tag,search,in-scope,"U86/U246: replacement must support no-match, all-field, field-scoped and regex modes with correct changed-note counts.",,deferred
 hce3457dc5c85,python,tag,search,out-of-scope,A collection-wide duplicate-group report with optional search restriction is the explicitly excluded Find Duplicates feature; per-note warnings and dupe: search remain required.,,done
-hefdc4581f106,python,tag,search,in-scope,"U81/U82/U84/U91: cover the combined search matrix for wildcards, tags, states, ids, fields, names, properties, rated/added dates and sorting; parser cases alone are insufficient.",,deferred
+hefdc4581f106,python,tag,search,in-scope,"U81/U82/U84/U91: cover the combined search matrix for wildcards, tags, states, ids, fields, names, properties, rated/added dates and sorting; parser cases alone are insufficient.",search/matrix/combined,done
 h0218dc5d4063,rust,tag,search,in-scope,"built state items for new, learning, review, due, suspended and buried give their search terms (U88)",browser/sidebar/item-searches,done
 h04f566130b07,rust,tag,search,in-scope,U88/U246: building a search from an empty explicit group must return a typed invalid-input error.,,deferred
 h0d07ce6ed51b,rust,tag,search,in-scope,U84/U246: the Browser column catalog must expose a nonempty supported column set.,,deferred
 h1147e041f6aa,rust,tag,search,in-scope,a tag search returns the tagged cards and not the untagged ones (U82),browser/sidebar/item-searches,done
-h1814f80ec140,rust,tag,search,in-scope,U88/U246: a generated single-note search must retain its full numeric note identifier.,,deferred
+h1814f80ec140,rust,tag,search,in-scope,U88/U246: a generated single-note search must retain its full numeric note identifier.,search/builder/items,done
 h1e2bc38446e3,rust,tag,search,in-scope,joining a search with an item under AND (U88),browser/sidebar/combine,done
 h1e765459935f,rust,tag,search,in-scope,a built AND group of two items keeps both (U88),browser/sidebar/combine,done
-h1f546a2494d6,rust,tag,search,in-scope,U88/U246: a generated recently-edited predicate must preserve the requested day count.,,deferred
+h1f546a2494d6,rust,tag,search,in-scope,U88/U246: a generated recently-edited predicate must preserve the requested day count.,search/builder/items,done
 h239bcdef1181,rust,tag,search,in-scope,the built any-flag item searches for a nonzero flag (U88),browser/sidebar/item-searches,done
 h2e49ab2ea87a,rust,tag,search,in-scope,U88/U246: converting an empty explicit search group must refuse it rather than silently treating it as the whole collection.,,deferred
 h3007a5ce27b9,rust,tag,search,in-scope,"search text read into items, terms, keys and values: whitespace, quoting, escapes, negation and groups",search/lexing/whitespace search/lexing/terms search/lexing/escapes search/lexing/colons search/lexing/keys search/lexing/hyphens search/structure/groups search/structure/negation search/canonical/leaves,done
 h39a4ffc60079,rust,tag,search,in-scope,joining a search with an item under OR keeps both sides (U88),browser/sidebar/combine,done
-h3b56f50b724c,rust,tag,search,in-scope,"U82/U91: executing a note-type predicate must exclude cards of another note type, including cloze cards.",,deferred
+h3b56f50b724c,rust,tag,search,in-scope,"U82/U91: executing a note-type predicate must exclude cards of another note type, including cloze cards.",search/notetypes/names,done
 h3cb2e631185c,rust,tag,search,not-applicable,Defaulting an unknown enum in the foreign search RPC is generated-binding behavior; Meguri's typed API does not expose that RPC enum (R1879).,,done
 h438f4d8ed7d7,rust,tag,search,in-scope,"a Browser sort by a column, ascending and descending, orders the results (U84, U85)",browser/modes/sorted-both-modes,done
 h4506a7c0ae63,rust,tag,search,in-scope,a built note type item gives a note type term with its name (U88),browser/sidebar/item-searches,done
-h4bf38055f427,rust,tag,search,in-scope,U84/U246: each column's advertised card/note sorting availability must agree with the executable order it supplies.,,deferred
+h4bf38055f427,rust,tag,search,in-scope,U84/U246: each column's advertised card/note sorting availability must agree with the executable order it supplies.,browser/sort/catalog-agreement,done
 h555785228ea2,rust,tag,search,in-scope,the built no-flag item searches for flag 0 (U88),browser/sidebar/item-searches,done
-h565039430e2d,rust,tag,search,in-scope,"U81/U82/U91: prove wildcard escaping, field/history/deck/property/custom-data predicates and injection-safe parameters through result equivalence; internal SQL text need not match.",,deferred
-h5b05256eb14d,rust,tag,search,in-scope,U88/U246: constructing a recently-added search must retain its requested number of days.,,deferred
-h5cdce206bbe1,rust,tag,search,in-scope,U88/U246: a generated due-within-days search must use an inclusive upper bound.,,deferred
+h565039430e2d,rust,tag,search,in-scope,"U81/U82/U91: prove wildcard escaping, field/history/deck/property/custom-data predicates and injection-safe parameters through result equivalence; internal SQL text need not match.",search/decks/names search/decks/presets search/dupe/first-field search/fields/glob-runs search/fields/modes search/fields/names search/history/added-edited search/history/answers search/ids/lists search/notetypes/names search/props/custom-data search/props/scheduling search/regex/basics search/state/flags search/state/is search/structure/quoted-values search/tags/hierarchy search/tags/regex-and-nc search/text/nc search/text/plain-substring search/text/sc search/text/word,done
+h5b05256eb14d,rust,tag,search,in-scope,U88/U246: constructing a recently-added search must retain its requested number of days.,search/builder/items,done
+h5cdce206bbe1,rust,tag,search,in-scope,U88/U246: a generated due-within-days search must use an inclusive upper bound.,search/builder/items,done
 h63a23874d7e3,rust,tag,search,in-scope,"canonical search text: redundant quotes and escapes dropped, needed ones added, OR in capitals, numbers normalized",search/canonical/quoting search/canonical/leaves search/canonical/numbers search/canonical/round-trips search/structure/operators,done
 h66aebcbc4027,rust,tag,search,in-scope,a deck search returns that deck's cards and not those of other decks (U82),browser/sidebar/item-searches,done
-h66d9a93ef6e9,rust,tag,search,in-scope,U84/U85/U246: selecting Browser columns must update the active row-projection state.,,deferred
+h66d9a93ef6e9,rust,tag,search,in-scope,U84/U85/U246: selecting Browser columns must update the active row-projection state.,browser/columns/switched-columns,done
 h6b3ffb448b14,rust,tag,search,in-scope,"U86/U246: literal replacement text containing a dollar and digits must be stored verbatim, without capture expansion.",,deferred
 h6becb38c0590,rust,tag,search,in-scope,a built tag item gives a tag term with its name (U88),browser/sidebar/item-searches,done
-h7594406238d4,rust,tag,search,in-scope,U88/U246: literal query generation must quote wildcard metacharacters and the escape character.,,deferred
-h75a546f3b68f,rust,tag,search,in-scope,U88/U246: replacing a filter kind must update matching nodes inside nested searches while preserving unrelated kinds and negation.,,deferred
+h7594406238d4,rust,tag,search,in-scope,U88/U246: literal query generation must quote wildcard metacharacters and the escape character.,search/builder/items,done
+h75a546f3b68f,rust,tag,search,in-scope,U88/U246: replacing a filter kind must update matching nodes inside nested searches while preserving unrelated kinds and negation.,search/join-replace/replace,done
 h75c01d18f14a,rust,tag,search,not-applicable,Passing an arbitrary SQL order clause through the foreign RPC is not a supported native Browser sort API or persisted format (R1879).,,done
 h765dd9e980ae,rust,tag,search,in-scope,a built negated item negates its child (U88),browser/sidebar/combine,done
 h7669cd3519d0,rust,tag,search,in-scope,"a built group of one item is that item, without a group (U88)",browser/sidebar/combine,done
 h79e4ec8d2c86,rust,tag,search,in-scope,a committed search of several items keeps its items and loses only an outer group's brackets,search/canonical/top-level search/structure/groups,done
-h7c1c920002b6,rust,tag,search,in-scope,U88/U246: all seven flag-color choices must generate their corresponding stored flag numbers.,,deferred
+h7c1c920002b6,rust,tag,search,in-scope,U88/U246: all seven flag-color choices must generate their corresponding stored flag numbers.,search/builder/items,done
 h855ecd06d4e6,rust,tag,search,in-scope,replacing an item's kind inside a group leaves terms of other kinds (U88),browser/sidebar/combine,done
-h88ad03350510,rust,tag,search,in-scope,U88/U246: an absent generated filter must represent an unrestricted collection search.,,deferred
+h88ad03350510,rust,tag,search,in-scope,U88/U246: an absent generated filter must represent an unrestricted collection search.,search/builder/items,done
 h8b9aff97d516,rust,tag,search,in-scope,U86/U246: Find and Replace must report the number of changed notes when the request selects the full collection.,,deferred
-h8f79a3f11361,rust,tag,search,in-scope,U88/U246: constructing a duplicate predicate must preserve both note-type identity and first-field text.,,deferred
-h944eb618c913,rust,tag,search,in-scope,U88/U246: a generated field-text filter must retain both the field name and its search text.,,deferred
-h993a80697567,rust,tag,search,in-scope,U88/U246: a generated multi-note filter must preserve the complete identifier list in valid search syntax.,,deferred
+h8f79a3f11361,rust,tag,search,in-scope,U88/U246: constructing a duplicate predicate must preserve both note-type identity and first-field text.,search/builder/items,done
+h944eb618c913,rust,tag,search,in-scope,U88/U246: a generated field-text filter must retain both the field name and its search text.,search/builder/items,done
+h993a80697567,rust,tag,search,in-scope,U88/U246: a generated multi-note filter must preserve the complete identifier list in valid search syntax.,search/builder/items search/ids/lists,done
 h9d1214dbd878,rust,tag,search,in-scope,a card search returns the matching card ids,search/structure/precedence-results search/structure/card-note-modes,done
-ha95e1702a2fa,rust,tag,search,in-scope,"U88/U246: negating a generated predicate twice must restore its original meaning, including state filters.",,deferred
+ha95e1702a2fa,rust,tag,search,in-scope,"U88/U246: negating a generated predicate twice must restore its original meaning, including state filters.",search/builder/items search/builder/negation-twice,done
 haaeb313b212e,rust,tag,search,in-scope,a built template item keeps its ordinal (U88),browser/sidebar/item-searches,done
-habf4018f4772,rust,tag,search,in-scope,U85/U246: an explicitly unordered search must avoid imposing a Browser sort.,,deferred
+habf4018f4772,rust,tag,search,in-scope,U85/U246: an explicitly unordered search must avoid imposing a Browser sort.,search/unsorted/configured-sort-ignored,done
 had58959b0fc6,rust,tag,search,in-scope,a built field-present item matches notes whose named field is not empty (U88),browser/sidebar/item-searches,done
-hb32e7c6fa35a,rust,tag,search,in-scope,U85/U246: an omitted sort request must preserve the unordered-search default.,,deferred
-hb42dc5c927d9,rust,tag,search,in-scope,"U88/U246: generated rated-history filters must distinguish the four buttons, any rated answer and manual rescheduling.",,deferred
+hb32e7c6fa35a,rust,tag,search,in-scope,U85/U246: an omitted sort request must preserve the unordered-search default.,search/unsorted/configured-sort-ignored,done
+hb42dc5c927d9,rust,tag,search,in-scope,"U88/U246: generated rated-history filters must distinguish the four buttons, any rated answer and manual rescheduling.",search/builder/items,done
 hba8e30116b92,rust,tag,search,in-scope,committing an invalid search text is a parse error,search/errors/kinds,done
 hc2037626ba58,rust,tag,search,in-scope,a committed search of one item is written without extra brackets,search/canonical/top-level,done
-hc3217305a1d5,rust,tag,search,in-scope,U88/U246: a generated introduced-within-days filter must retain the supplied day count.,,deferred
+hc3217305a1d5,rust,tag,search,in-scope,U88/U246: a generated introduced-within-days filter must retain the supplied day count.,search/builder/items,done
 hc518b95b631b,rust,tag,search,in-scope,a built OR group of two items keeps both under OR (U88),browser/sidebar/combine,done
 hc6331517314c,rust,tag,search,in-scope,building a tag item gives canonical tag search text (U88),browser/sidebar/item-searches,done
 hc98944e6bdef,rust,tag,search,in-scope,"which rows a search tests in cards and notes mode, from the scopes of its terms",search/structure/damaged-rows search/structure/whole-collection search/structure/card-note-modes,done
 hcd65bea8e67f,rust,tag,search,in-scope,a built due-on-day item gives an equality due term (U88),browser/sidebar/item-searches,done
-hcf4fefe3e9ef,rust,tag,search,in-scope,U88/U246: replacing a standalone filter with another of the same kind must discard the old value.,,deferred
+hcf4fefe3e9ef,rust,tag,search,in-scope,U88/U246: replacing a standalone filter with another of the same kind must discard the old value.,search/join-replace/replace,done
 hd007ebca9ed4,rust,tag,search,not-applicable,Combining adjacent integer ranges is an internal SQL-planning optimization; exact helper output is not a persisted or native-app interface (R1879).,,done
 hdff0242575ab,rust,tag,search,in-scope,the empty search returns every card,search/structure/whole-collection,done
 he244355f799a,rust,tag,search,in-scope,U82/U91: a memory-state predicate must find cards with stored FSRS stability and exclude new cards lacking it; SQL spelling is implementation-specific.,,deferred
-he2a0ba83d1b8,rust,tag,search,in-scope,"U84/U85/U246: Browser row projection must return the requested card's sort field, deck and note type in the requested column order.",,deferred
-he56ed2a516b3,rust,tag,search,in-scope,U88/U246: a generated rated-history filter must retain both its time window and chosen answer button.,,deferred
+he2a0ba83d1b8,rust,tag,search,in-scope,"U84/U85/U246: Browser row projection must return the requested card's sort field, deck and note type in the requested column order.",browser/columns/requested-order,done
+he56ed2a516b3,rust,tag,search,in-scope,U88/U246: a generated rated-history filter must retain both its time window and chosen answer button.,search/builder/items,done
 he8cfded7f1d7,rust,tag,search,not-applicable,Unknown flag-enum fallback in a foreign generated search RPC is not Meguri's typed filter contract (R1879).,,done
 he8f1b333539e,rust,tag,search,in-scope,search parse error kinds and the texts each reports,search/errors/kinds search/errors/order search/errors/escapes search/errors/arguments,done
 he93785c73a0f,rust,tag,search,in-scope,a built deck item gives a deck term with its name (U88),browser/sidebar/item-searches,done
-hfa4a20b50574,rust,tag,search,in-scope,U88/U246: preserve grouped precedence when composing search expressions; explicitly flat composition has different semantics.,,deferred
+hfa4a20b50574,rust,tag,search,in-scope,U88/U246: preserve grouped precedence when composing search expressions; explicitly flat composition has different semantics.,search/builder/grouped-precedence search/builder/items,done
 hfd43294d32a2,rust,tag,search,in-scope,a note search returns the notes with a matching card,search/structure/precedence-results search/structure/card-note-modes,done
 h36e914747858,python,tag,stats,out-of-scope,Producing the legacy HTML statistics report for an empty collection belongs to the explicitly excluded legacy Stats screen.,,done
-ha2f22cc588c8,python,tag,stats,in-scope,U92/U104: Card Info must identify its note and include both recorded answers after consecutive reviews.,,deferred
+ha2f22cc588c8,python,tag,stats,in-scope,U92/U104: Card Info must identify its note and include both recorded answers after consecutive reviews.,stats/card-info/back-to-back-answers stats/card-info/review-card,done
 haf31e8129655,python,tag,stats,not-applicable,Writing a desktop HTML statistics document to a temporary file is not Meguri's native charts or native PDF export interface (R1879).,,done
-h05cbe1cb9526,rust,tag,stats,in-scope,"U97/U104: the studied-today line must format review count, total time and per-card average correctly across seconds and minutes.",,deferred
-h67bebd174839,rust,tag,stats,in-scope,U92/U104: Card Info must produce a valid report for a real stored card and its scheduling/history records.,,deferred
-h6cb0e154dd0f,rust,tag,stats,in-scope,U92/U104: compute missing FSRS memory for Card Info without persisting it; assert the FSRS-only policy instead of offering SM-2 (R1251).,,deferred
+h05cbe1cb9526,rust,tag,stats,in-scope,"U97/U104: the studied-today line must format review count, total time and per-card average correctly across seconds and minutes.",stats/studied-today/line-forms stats/studied-today/time-units,done
+h67bebd174839,rust,tag,stats,in-scope,U92/U104: Card Info must produce a valid report for a real stored card and its scheduling/history records.,stats/card-info/new-card stats/card-info/review-card,done
+h6cb0e154dd0f,rust,tag,stats,in-scope,U92/U104: compute missing FSRS memory for Card Info without persisting it; assert the FSRS-only policy instead of offering SM-2 (R1251).,stats/card-info/ae46-no-state stats/card-info/memory-and-retention stats/card-info/no-item,done
 he7473958b8cf,rust,tag,stats,out-of-scope,"The five-percentage-point ease histogram, including its top bin, is excluded because Meguri does not show the Card Ease graph (R1360).",,done
 h0f55ed16e296,typescript,tag,stats,out-of-scope,Displaying SM-2 ease when FSRS metadata is absent is deliberately excluded from Card Info (R1250).,,done
 h33a369b7b2d4,typescript,tag,stats,in-scope,"U92/U222/U104: available memory must show stability and normalized difficulty even without stored desired retention, while hiding ease (R1249-R1250).",,deferred
@@ -966,20 +966,20 @@ ha75aa66eb13f,typescript,supplementary,stats,not-applicable,"The pinned Card Inf
 hf27c621cefe8,typescript,tag,stats,in-scope,"U92/U222/U104: memory plus retention must show stability and difficulty converted from 1-10 to a percentage, with no ease row (R1249-R1250).",,deferred
 h0c40b44b59b9,rust,supplementary,storage,in-scope,schemas below 11 are refused,storage/open/refuse-versions,done
 h0ee1aefb70dc,rust,supplementary,storage,in-scope,schemas 12 and 13 are refused as made by a newer or unclean client,storage/open/refuse-versions,done
-h0f974b774542,rust,tag,storage,in-scope,Check Database repair of invalid note ids and their cards; specified with Check Database (U128),,deferred
+h0f974b774542,rust,tag,storage,in-scope,Check Database repair of invalid note ids and their cards; specified with Check Database (U128),maintenance/check-db/future-ids,done
 h1586af627542,rust,supplementary,storage,in-scope,U95/U104: pinned per-deck studied counts require a rating and either ordinary review kind or a nonzero factor; add mixed-history aggregate coverage.,,deferred
 h16db5ee73722,rust,supplementary,storage,in-scope,A review-log row whose id is taken gets the largest id plus one when the caller asks for a new id,storage/ids/revlog-same-instant,done
-h1dc4ce816f33,rust,supplementary,storage,in-scope,"U92/U104: pinned Card Info history lookup must return only the requested card's rows, even when other cards share nearby timestamps.",,deferred
+h1dc4ce816f33,rust,supplementary,storage,in-scope,"U92/U104: pinned Card Info history lookup must return only the requested card's rows, even when other cards share nearby timestamps.",stats/card-info/times,done
 h209248bdfb33,rust,supplementary,storage,out-of-scope,"The pinned filtered-deck builder compares timestamp and day-number due values, but building/studying filtered decks is excluded by R706.",,done
 h26a287aeabf4,rust,supplementary,storage,in-scope,"the downgrade to schema 11 leaves ver 11 in the copy (the schema-11 writer, U33)",storage/downgrade/contents storage/downgrade/oracle-opens,done
 h286ef51887e7,rust,supplementary,storage,in-scope,a refused file keeps its version and data; Meguri also keeps its bytes (Meguri test),storage/open/refuse-versions,done
-h294205b39ddd,rust,supplementary,storage,in-scope,new collections are created at schema 18; specified with the new-collection bootstrap (U28),,deferred
-h2dc788fb8e1b,rust,supplementary,storage,in-scope,U246: add a direct last-review lookup case proving newest qualifying rated history wins; existing missing-memory cases do not isolate every selection branch (R650).,,deferred
+h294205b39ddd,rust,supplementary,storage,in-scope,new collections are created at schema 18; specified with the new-collection bootstrap (U28),storage/new-collection/dump storage/new-collection/rows,done
+h2dc788fb8e1b,rust,supplementary,storage,in-scope,U246: add a direct last-review lookup case proving newest qualifying rated history wins; existing missing-memory cases do not isolate every selection branch (R650).,stats/card-info/no-lrt-elapsed storage/revlog/last-review-pick,done
 h37999c439a16,rust,supplementary,storage,out-of-scope,"The pinned filtered-deck builder sorts by FSRS retrievability, but Meguri does not build or study filtered decks (R706).",,done
 h4293e426bb44,rust,supplementary,storage,in-scope,schemas above 18 are refused,storage/open/refuse-versions,done
 h4442659ae131,rust,supplementary,storage,out-of-scope,"The pinned search-result cap is applied when populating a filtered deck, a feature excluded by R706.",,done
 h4556ee55f37f,rust,tag,storage,in-scope,a card ease below 2000 survives the downgrade to 11 and the upgrade back when its preset is not reset,storage/upgrade/from-11 storage/upgrade/initial-ease storage/downgrade/roundtrip,done
-h47132fac7656,rust,tag,storage,in-scope,Check Database repair of invalid card ids; specified with Check Database (U128),,deferred
+h47132fac7656,rust,tag,storage,in-scope,Check Database repair of invalid card ids; specified with Check Database (U128),maintenance/check-db/future-ids-card-order,done
 h493cbb0fdf6b,rust,supplementary,storage,preservation-only,U246: the pin rejects invalid numeric history kinds at the typed decoder; verify Meguri's safe interpretation while preserving the stored row unchanged (R2017).,,deferred
 h4c7fe3f35b39,rust,tag,storage,in-scope,review-order SQL ordering when FSRS data is missing; specified with queue building (U41),,deferred
 h51930b326444,rust,supplementary,storage,out-of-scope,"The pinned filtered-deck gatherer orders by note creation and sibling ordinal, but filtered-deck creation is excluded by R706.",,done
@@ -992,19 +992,19 @@ h802f402a566b,rust,supplementary,storage,out-of-scope,The pinned filtered-deck g
 h8deea0884574,rust,tag,storage,in-scope,card data numbers rounded per key and written in shortest form,model/card-data/rewrite,done
 h945f75ebb7a8,rust,tag,storage,not-applicable,internal helper that formats id lists into SQL text; no observable behavior,,done
 h94c7daf74c2e,rust,supplementary,storage,out-of-scope,"The pinned filtered-deck gatherer falls back from retrievability when FSRS is disabled; filtered-deck creation and SM-2 scheduling are excluded (R706,R752).",,done
-ha74ff67e3c1f,rust,tag,storage,in-scope,Check Database detection of invalid ids; specified with Check Database (U128),,deferred
+ha74ff67e3c1f,rust,tag,storage,in-scope,Check Database detection of invalid ids; specified with Check Database (U128),maintenance/check-db/future-ids maintenance/check-db/future-ids-cards maintenance/check-db/future-ids-each-table,done
 hb30e802d8f2f,rust,supplementary,storage,in-scope,U95/U104: pinned per-deck studied counts exclude entries at or before the day boundary; add exact-boundary aggregate cases.,,deferred
-hc0fc7c23426d,rust,supplementary,storage,in-scope,U97/U104: pinned studied-today totals exclude manual and rescheduled entries and use the day-start boundary for count and elapsed time.,,deferred
+hc0fc7c23426d,rust,supplementary,storage,in-scope,U97/U104: pinned studied-today totals exclude manual and rescheduled entries and use the day-start boundary for count and elapsed time.,stats/today/day-start-utc stats/today/empty storage/revlog/studied-today-window,done
 hc4d781660d05,rust,supplementary,storage,in-scope,Adding a review-log row with a free id keeps that id,storage/ids/revlog-same-instant,done
 hc4e797f560a0,rust,supplementary,storage,out-of-scope,"Descending lapse count is a pinned filtered-deck gather option, whose creation/study interface is excluded by R706.",,done
 he559261b12d3,rust,tag,storage,out-of-scope,custom scheduling data limits apply only when custom scheduler code sets the data; Meguri never sets it,,done
-he69093b72b82,rust,supplementary,storage,in-scope,U97/U104: an empty review log must produce zero studied count and zero duration rather than a missing or invalid aggregate.,,deferred
+he69093b72b82,rust,supplementary,storage,in-scope,U97/U104: an empty review log must produce zero studied count and zero duration rather than a missing or invalid aggregate.,stats/studied-today/zero-line storage/revlog/studied-today-window,done
 he9f3ecd2d21f,rust,supplementary,storage,preservation-only,U246: the pinned row reader tolerates unknown history kinds by a display default; verify tolerant reading without rewriting the original kind (R2017).,,deferred
 heba033e5deec,rust,supplementary,storage,in-scope,closing without a downgrade keeps schema 18,storage/open/oracle-made-reopen,done
-hebd3170b0ca5,rust,tag,storage,in-scope,Check Database keeps review logs with repaired card ids; specified with Check Database (U128),,deferred
+hebd3170b0ca5,rust,tag,storage,in-scope,Check Database keeps review logs with repaired card ids; specified with Check Database (U128),maintenance/check-db/future-ids-card-order maintenance/check-db/future-ids-cards,done
 hf00ddf9dbca8,rust,supplementary,storage,in-scope,"notes, cards, decks, presets and note types survive the downgrade to 11 and the upgrade back",storage/upgrade/from-11 storage/downgrade/roundtrip storage/downgrade/oracle-opens,done
-hf613c9b636bd,rust,supplementary,storage,in-scope,"U246: verify the pinned last-review fallback ignores unrated entries even when newer than every answer, while keeping card data unwritten (R650,R1252).",,deferred
-hf7664c5a108b,rust,supplementary,storage,in-scope,"A review-log row arriving with a taken id is not inserted; for undo, Meguri refuses the redo instead (deviation); sync and import scenarios come with those ops (U107, U122)",undo/revlog-taken-id,deferred
+hf613c9b636bd,rust,supplementary,storage,in-scope,"U246: verify the pinned last-review fallback ignores unrated entries even when newer than every answer, while keeping card data unwritten (R650,R1252).",sched/memory/reset stats/card-info/ae46-no-state storage/revlog/last-review-pick,done
+hf7664c5a108b,rust,supplementary,storage,in-scope,"A review-log row arriving with a taken id is not inserted; for undo, Meguri refuses the redo instead (deviation); sync and import scenarios come with those ops (U107, U122)",package/apkg-import/revlog-id-taken sync/conflicts/revlog-id-taken undo/revlog-taken-id,done
 hfb0061ec0b9b,rust,supplementary,storage,out-of-scope,The pinned filtered-deck random gather returns all matching cards within its cap; populating filtered decks is excluded by R706.,,done
 h39fa0055ea4c,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its certificate store; Meguri has no such helper and verifies TLS with the platform,,done
 h51a52fc54a83,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its certificate store; Meguri has no such helper and verifies TLS with the platform,,done
@@ -1069,14 +1069,14 @@ h0e99ed421e1d,rust,tag,tags,in-scope,collapsed state reflected in the tag tree,t
 h102f0046f2fd,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
 h4068299df64b,rust,tag,tags,in-scope,"matching a tag and its descendants case-insensitively, literal names",tags/rename/basic tags/rename/refused tags/bulk/remove,done
 h423183febc3e,rust,tag,tags,in-scope,"tag names normalized, existing spelling adopted, duplicates dropped and items split on save",tags/canon/normalize tags/canon/spelling,done
-h4bf8df530930,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),,deferred
+h4bf8df530930,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),tags/complete/components tags/complete/filter-sequence,done
 h657d1b2b3255,rust,tag,tags,in-scope,deleting a tag from every note and the registry,tags/delete/children,done
 h6d9e5bc856c0,rust,tag,tags,in-scope,added tags take the registered spelling and are stored,tags/bulk/add,done
 h719a952d33d5,rust,tag,tags,in-scope,registered names listed,tags/canon/spelling,done
 h762285c157a4,rust,tag,tags,in-scope,clearing unused tags keeps their collapsed state; deleting a tag removes its descendants,tags/clear-unused/parents tags/delete/children,done
 h8838c90310d2,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
 h8a531508a003,rust,tag,tags,in-scope,renaming a tag and its descendants,tags/rename/basic,done
-h9f3686b61815,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),,deferred
+h9f3686b61815,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),tags/complete/components tags/complete/registry,done
 h9f452a4faaf3,rust,tag,tags,in-scope,"tag tree with implicit parents, case and order",tags/tree/structure tags/canon/spelling,done
 hab1bc9fa2604,rust,tag,tags,in-scope,"reparenting rules, merges and moves to the top level",tags/reparent/rules,done
 hac48d18d7071,rust,tag,tags,in-scope,a blank new name is refused and nothing changes,tags/rename/refused,done
@@ -1088,13 +1088,13 @@ he58668dea421,rust,tag,tags,in-scope,moving a tag under another tag,tags/reparen
 h26e80efa4ec6,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
 ha04d63efb2f8,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
 hf0908a412138,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
-h1865ada81cd2,rust,tag,text,in-scope,renaming media references in imported notes; specified with package import (U120),,deferred
+h1865ada81cd2,rust,tag,text,in-scope,renaming media references in imported notes; specified with package import (U120),package/apkg-import/media-rename-in-field,done
 h4b8f37d073df,rust,tag,text,in-scope,plain stripping and stripping that keeps media names,text/strip/markup text/strip/keep-media,done
 h627109a11e69,rust,tag,text,in-scope,display percent-encoding of local media names,text/refs/iri,done
-h795f93e05e42,rust,tag,text,in-scope,accent folding for nc: searches; specified with search text matching (U81),,deferred
-h951f9a33c9e8,rust,tag,text,in-scope,underscore-prefixed files named by note type templates and CSS; specified with package export (U122),,deferred
+h795f93e05e42,rust,tag,text,in-scope,accent folding for nc: searches; specified with search text matching (U81),search/folding/umlaut search/text/ignore-accents search/text/nc,done
+h951f9a33c9e8,rust,tag,text,in-scope,underscore-prefixed files named by note type templates and CSS; specified with package export (U122),package/apkg-export/media-selection package/apkg-export/notetype-underscore-forms package/apkg-export/notetype-underscore-refs,done
 h9928c48fa7e7,rust,tag,text,in-scope,byte-length cuts on a character boundary; covered through the media file name limit,text/filenames/normalize,done
-hc107d6243a3c,rust,tag,text,in-scope,"wildcard and escape handling of search text; specified with search (U80, U81)",,deferred
+hc107d6243a3c,rust,tag,text,in-scope,"wildcard and escape handling of search text; specified with search (U80, U81)",search/lexing/escapes search/notetypes/glob-escapes search/text/glob-escapes search/text/plain-substring,done
 h2c27a9391685,typescript,tag,text,not-applicable,question-mark direction in the desktop web UI translation helper; Meguri strings come from its own catalog,,done
 h7d47d968bfb6,typescript,tag,text,in-scope,unit choice for time spans shown in charts and options; decided with the stats chart labels (U226),,deferred
 hd903a0575683,typescript,tag,text,in-scope,unit choice for time spans shown in charts and options; decided with the stats chart labels (U226),,deferred

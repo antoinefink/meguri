@@ -1,0 +1,89 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "media_dir": {
+          "big.bin": {
+            "sha1": "1169cd990266c9306f7d0f165382afe927b89b8d",
+            "size": 300000
+          },
+          "empty.dat": {
+            "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            "size": 0
+          },
+          "word.txt": {
+            "sha1": "d2b8e542619d3745709e4f508efd40e265f1cefd",
+            "size": 11
+          }
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "package_media": [
+          {
+            "entry_size": 300000,
+            "name": "big.bin",
+            "sha1": "1169cd990266c9306f7d0f165382afe927b89b8d",
+            "size": 300000
+          },
+          {
+            "entry_size": 0,
+            "name": "empty.dat",
+            "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            "size": 0
+          },
+          {
+            "entry_size": 11,
+            "name": "word.txt",
+            "sha1": "d2b8e542619d3745709e4f508efd40e265f1cefd",
+            "size": 11
+          }
+        ]
+      },
+      {
+        "package_media": [
+          {
+            "entry_size": 300000,
+            "name": "big.bin",
+            "sha1": "1169cd990266c9306f7d0f165382afe927b89b8d",
+            "size": 300000
+          },
+          {
+            "entry_size": 0,
+            "name": "empty.dat",
+            "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            "size": 0
+          },
+          {
+            "entry_size": 11,
+            "name": "word.txt",
+            "sha1": "d2b8e542619d3745709e4f508efd40e265f1cefd",
+            "size": 11
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-export/colpkg/media-entries",
+  "scenario_sha256": "74dd37623d67dbe446de8560af8f243a2cf82eccad956b9685bcd6541d623a35",
+  "tz": "UTC"
+}

@@ -1,0 +1,191 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search_build": [
+          {
+            "text": "is:due"
+          },
+          {
+            "text": "-is:due"
+          },
+          {
+            "text": "is:due"
+          },
+          {
+            "text": "-is:due"
+          },
+          {
+            "text": "is:new"
+          },
+          {
+            "text": "-is:new"
+          },
+          {
+            "text": "is:new"
+          },
+          {
+            "text": "is:learn"
+          },
+          {
+            "text": "-is:learn"
+          },
+          {
+            "text": "is:learn"
+          },
+          {
+            "text": "is:review"
+          },
+          {
+            "text": "-is:review"
+          },
+          {
+            "text": "is:review"
+          },
+          {
+            "text": "is:suspended"
+          },
+          {
+            "text": "-is:suspended"
+          },
+          {
+            "text": "is:suspended"
+          },
+          {
+            "text": "is:buried"
+          },
+          {
+            "text": "-is:buried"
+          },
+          {
+            "text": "is:buried"
+          },
+          {
+            "text": "three"
+          },
+          {
+            "text": "-three"
+          },
+          {
+            "text": "three"
+          },
+          {
+            "text": "Front:one"
+          },
+          {
+            "text": "Front:one"
+          },
+          {
+            "text": "flag:2"
+          },
+          {
+            "text": "flag:2"
+          },
+          {
+            "text": "tag:blue"
+          },
+          {
+            "text": "tag:blue"
+          },
+          {
+            "text": "is:due OR is:new"
+          }
+        ],
+        "search_join": [
+          {
+            "text": "deck:* is:due"
+          },
+          {
+            "text": "deck:* is:suspended"
+          },
+          {
+            "text": "deck:* -is:due"
+          }
+        ]
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c2", "#c3"]
+          },
+          {
+            "ids": ["#c1", "#c4", "#c5", "#c6"]
+          },
+          {
+            "ids": ["#c1", "#c6"]
+          },
+          {
+            "ids": ["#c2", "#c3", "#c4", "#c5"]
+          },
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#c1", "#c3", "#c4", "#c5", "#c6"]
+          },
+          {
+            "ids": ["#c3", "#c4", "#c5"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c6"]
+          },
+          {
+            "ids": ["#c5"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4", "#c6"]
+          },
+          {
+            "ids": ["#c6"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4", "#c5"]
+          },
+          {
+            "ids": ["#c2", "#c3"]
+          },
+          {
+            "ids": ["#c1", "#c4", "#c5", "#c6"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/builder/negation-twice",
+  "scenario_sha256": "89695c731827b69d1bfba144ff54946d3c0db5f0415ff9ff527e5e7953f23f4c",
+  "tz": "UTC"
+}

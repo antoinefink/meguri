@@ -1,0 +1,52 @@
+# Answering a learning card after its preset's learning steps were cut from
+# five to one (R638, R640, R641; specs/sched/steps.md L2, L4, L5;
+# specs/sched/step-remap.md R3). FSRS on, load balancer off.
+# Wide and Wide Two both start with learning steps 1m 5m 10m 20m 30m; Deck A
+# uses Wide, Deck B uses Wide Two. c1 and c3 sit in Deck A, c2 in Deck B.
+# Hard on a new card keeps all five steps to do (left 5).
+# Then the steps become a single 4m step: Wide through a plain preset save
+# (legacy_update), which leaves left 5 on c1 and c3, more than the one step;
+# Wide Two through the deck options save, which remaps c2 to left 1.
+# The next answers must still work: Hard on c1 (left 5 read against one step:
+# the first step, the single-step Hard delay, left kept as stored), Hard on c2
+# (left 1) and Good on c3 (no next step: it leaves the steps).
+# Needs answer, legacy_update (model-ops.md L2) and save_deck_options
+# (deck-options-ops.md E1).
+id: sched/steps/shrunk-learning-steps
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Wide, learn_steps: [1m, 5m, 10m, 20m, 30m], relearn_steps: [10m]}
+    - {name: Wide Two, learn_steps: [1m, 5m, 10m, 20m, 30m], relearn_steps: [10m]}
+  decks: [{name: Deck A, preset: Wide}, {name: Deck B, preset: Wide Two}]
+  notetypes:
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Card 1, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { padding: 3px; }"
+  notes:
+    - {notetype: Plain, deck: Deck A, fields: [red, x]}
+    - {notetype: Plain, deck: Deck B, fields: [green, x]}
+    - {notetype: Plain, deck: Deck A, fields: [blue, x]}
+steps:
+  - advance: 1h
+  - answer: {card: "#c1", rating: hard, time_ms: 2000}
+  - answer: {card: "#c2", rating: hard, time_ms: 2000}
+  - answer: {card: "#c3", rating: hard, time_ms: 2000}
+  - observe: ["card(#c1, #c2, #c3)"]
+  - advance: 1m
+  - legacy_update: {preset: Wide, patch: {new: {delays: [4.0]}}}
+  - save_deck_options: {deck: Deck B, options: {learn_steps: [4m]}}
+  - observe: ["card(#c1, #c2, #c3)"]
+  - advance: 10m
+  - observe: ["next_states(#c1, #c2, #c3)"]
+  - answer: {card: "#c1", rating: hard, time_ms: 2000}
+  - answer: {card: "#c2", rating: hard, time_ms: 2000}
+  - answer: {card: "#c3", rating: good, time_ms: 2000}
+  - observe: ["card(#c1, #c2, #c3)", "revlog(#c1, #c2, #c3)"]
+  # A further Hard on c1, still holding more steps than its list.
+  - advance: 10m
+  - observe: ["next_states(#c1)"]
+  - answer: {card: "#c1", rating: hard, time_ms: 2000}
+  - observe: ["card(#c1)", "revlog(#c1)"]

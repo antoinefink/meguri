@@ -1,0 +1,26 @@
+# Clozes next to, inside and around MathJax on stored cards (specs/render/
+# cloze.md C5, C8; notes/card-generation.md G4). Cloze numbers ignore MathJax,
+# so a cloze written inside \(...\) or \[...\] still makes its card. On the
+# card output, markup inside a MathJax match is removed, so a cloze inside math
+# keeps only its text ([...] on the front, its content on the back) while a
+# cloze outside math keeps its span, and a cloze whose content holds math keeps
+# its span with the math encoded in data-cloze.
+id: render/cloze/stored-mathjax
+description: "cloze cards with MathJax, rendered from stored cards"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Formula Gap
+      kind: cloze
+      fields: [Body, Notes]
+      templates:
+        - {name: Gap, front: "{{cloze:Body}}", back: "{{cloze:Body}}<br>{{Notes}}"}
+steps:
+  - add_note:
+      notetype: Formula Gap
+      fields: ["{{c1::Red}} then \\(y = {{c2::7}}\\) and \\(k\\) then {{c3::area \\(r^2\\) grows}} and \\[ {{c4::m}} + n \\] {{c5::Blue}}", "first"]
+  - add_note:
+      notetype: Formula Gap
+      fields: ["{{c1::Green}} beside \\[ w + {{c1::Orange}} \\] and \\(z\\)", "second"]
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - observe: [render]

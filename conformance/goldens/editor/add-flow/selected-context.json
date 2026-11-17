@@ -1,0 +1,106 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "add_defaults": {
+          "deck": "Default",
+          "notetype": "Plain"
+        }
+      },
+      {},
+      {
+        "add_defaults": {
+          "deck": "Default",
+          "notetype": "Plain"
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "card": {
+          "#c2": {
+            "data": {},
+            "did": "Archive",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Plain"],
+            ["Gaps"]
+          ]
+        }
+      },
+      {
+        "add_defaults": {
+          "deck": "Archive",
+          "notetype": "Gaps"
+        },
+        "notetype_last_deck": {
+          "deck": "Archive"
+        }
+      },
+      {
+        "notetype_last_deck": {
+          "deck": "Default"
+        }
+      },
+      {},
+      {
+        "add_defaults": {
+          "deck": "Default",
+          "notetype": "Plain"
+        }
+      },
+      {},
+      {
+        "add_defaults": {
+          "deck": "Archive",
+          "notetype": "Gaps"
+        }
+      },
+      {},
+      {
+        "add_defaults": {
+          "deck": "Archive",
+          "notetype": "Gaps"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "editor/add-flow/selected-context",
+  "scenario_sha256": "2bc65384539896e8bf0c90c8743828e8019456669e44c33cebdbc31f7a81c2a2",
+  "tz": "UTC"
+}

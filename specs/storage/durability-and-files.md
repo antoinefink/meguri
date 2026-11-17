@@ -35,6 +35,10 @@ The engine refuses to invoke a collection-swap callback if the preceding collect
 
 Launch cleanup runs under the collection lock in the supplied collection/backups directories and in collection.media. Media cleanup removes only top-level reserved regular files; it never follows a symlink used as the media directory or descends into media subdirectories. It removes regular files (never follows symlinks) whose names use that exact temp namespace, plus their SQLite -wal/-shm/-journal siblings, and the named legacy sync-stage, partial-export and partial-backup patterns. The reserved `.meguri-stage-*` directories created by `staging_directory` are recursively removed without following symlinks; other directories are preserved. Unrecognized files, complete backups and pre-upgrade copies survive. These names are reserved for unpublished work; higher units use AtomicFile for new staging/backup/export files.
 
+### F4.1 Destination directory
+
+`AtomicFile` takes the destination's file path and derives its directory from it. That directory is the path's parent; an empty parent, as for a bare relative name, means the current directory. The temp file is created in that directory, the rename publishes within it, and the directory sync after the rename targets it. Test: a meguri-storage Rust test makes a temp directory the current directory, publishes to a bare file name, and checks that the file exists in that directory under its name and that the post-rename directory sync targeted it.
+
 ## F5. Space and integrity
 
 `SpaceProvider` supplies available bytes for a directory; engine's `DiskSpaceProvider` is this port re-exported at the engine layer for Swift composition. The default uses statvfs available blocks, with checked multiplication. A check compares the caller's complete required budget against available bytes, returning InsufficientSpace without starting work. Each consumer owns its size estimate. Real I/O failures still map disk exhaustion to the same error.

@@ -1,0 +1,110 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Alpha", -1, 0, null],
+            ["Beta", -1, 1, null],
+            ["Gamma", -1, 0, null],
+            ["Gamma::Delta", -1, 1, null],
+            ["Unused", 5, 0, null]
+          ]
+        }
+      },
+      {},
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Alpha", -1, 0, null],
+            ["Beta", -1, 1, null],
+            ["Gamma", -1, 0, null],
+            ["Gamma::Delta", -1, 1, null]
+          ]
+        }
+      },
+      {
+        "tag_tree": [
+          {
+            "children": [],
+            "collapsed": false,
+            "name": "Alpha"
+          },
+          {
+            "children": [],
+            "collapsed": true,
+            "name": "Beta"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "collapsed": true,
+                "name": "Delta"
+              }
+            ],
+            "collapsed": false,
+            "name": "Gamma"
+          }
+        ]
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000, 1894701600000]
+          ]
+        }
+      },
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-db-notes/tag-states-kept",
+  "scenario_sha256": "8a1bbda94f5ef74402247e87b14b87eb05bb2ca5eaa04216a0f1159bb31fb859",
+  "tz": "UTC"
+}

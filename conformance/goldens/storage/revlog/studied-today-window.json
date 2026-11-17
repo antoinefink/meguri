@@ -1,0 +1,53 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-10T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "studied_today_raw": {
+          "cards": 0,
+          "time_ms": 0
+        },
+        "studied_today_text": "Studied 0 cards in 0 seconds today (0s/card)"
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "studied_today_raw": {
+          "cards": 5,
+          "time_ms": 286000
+        },
+        "studied_today_text": "Studied 5 cards in 4.77 minutes today (57.2s/card)"
+      },
+      {},
+      {
+        "studied_today_raw": {
+          "cards": 5,
+          "time_ms": 286000
+        }
+      },
+      {},
+      {
+        "studied_today_raw": {
+          "cards": 0,
+          "time_ms": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/revlog/studied-today-window",
+  "scenario_sha256": "11469246d1898a8d67bf2e21293c25dc5a2c3c47658b5f79a153d1dd35695e49",
+  "tz": "Europe/Paris"
+}

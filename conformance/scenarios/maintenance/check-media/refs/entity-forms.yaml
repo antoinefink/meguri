@@ -1,0 +1,26 @@
+# C6 step 1 of specs/maintenance/check-media.md with text/media-references
+# M4 and text/strip-html H3: a name is decoded before it is matched to a
+# file. A sound tag whose name holds a bare & keeps it as written; an img
+# name with two &amp; entities, an audio name with a decimal entity and an
+# img name with a hex entity are decoded. Every file is used, nothing is
+# missing, and no field is rewritten.
+id: maintenance/check-media/refs/entity-forms
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["[sound:red & blue.wav]", "<img src=\"one&amp;two&amp;three.png\">"]}
+    - {notetype: Media, fields: ["<audio src=\"it&#39;s.m4a\">", "<img src='&#x42;ig.gif'>"]}
+  media_files:
+    - {name: "red & blue.wav", text: "first"}
+    - {name: "one&two&three.png", text: "second"}
+    - {name: "it's.m4a", text: "third"}
+    - {name: "Big.gif", text: "fourth"}
+steps:
+  - advance: 1h
+  - check_media: {}
+  - observe: [media_dir]
+  - db_exec: {sql: "SELECT replace(flds, char(31), '|'), mod FROM notes ORDER BY id"}

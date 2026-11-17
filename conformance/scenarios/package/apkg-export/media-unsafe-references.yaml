@@ -1,0 +1,36 @@
+# specs/package/apkg-export.md A9.2 rule 2; specs/package/container.md P6;
+# specs/conformance/package-ops.md E7, E10.
+# A note references ok.jpg, which is in the media folder, and three names
+# that are not one plain file name: sub/../ok.jpg (through an existing
+# subdirectory back to ok.jpg), ../first.apkg (the package the first export
+# wrote next to the collection, outside the media folder) and the absolute
+# /etc/hosts. Each of the three would reach an existing file if it were
+# followed as a path. Both packages carry ok.jpg alone.
+id: package/apkg-export/media-unsafe-references
+description: Media references with path separators, parent steps or an absolute path are left out of a deck package.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - notetype: Pair
+      deck: Lang
+      fields:
+        - "<img src=\"ok.jpg\"> <img src=\"sub/../ok.jpg\">"
+        - "<img src=\"../first.apkg\"> <img src=\"/etc/hosts\">"
+  media_files:
+    - {name: ok.jpg, text: "picture"}
+    - {name: sub, dir: true}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: first.apkg, limit: {deck: Lang}, scheduling: true, presets: false, media: true}
+  - observe:
+      - package_media: {name: first.apkg}
+  - export: {format: apkg, name: second.apkg, limit: {deck: Lang}, scheduling: true, presets: false, media: true}
+  - observe:
+      - package_media: {name: second.apkg}

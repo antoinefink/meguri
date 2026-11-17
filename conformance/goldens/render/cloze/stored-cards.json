@@ -1,0 +1,262 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4", "#c5"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c6"],
+          "note": "#n5"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["plain words only", 0],
+            ["Alpha {{c1::Beta}}", 0],
+            ["Alpha {{c1::Beta::a letter}}", 0],
+            ["Alpha {{c1::Beta}} {{c2::Gamma}}", 0],
+            ["Alpha {{c1::Beta}} {{c2::Gamma}}", 1],
+            ["Front {{c1::Delta}} {{c1::Epsilon}}", 0]
+          ]
+        }
+      },
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": null,
+              "blank": "missing_cloze",
+              "question": ""
+            },
+            "review": {
+              "answer": null,
+              "answer_av": [],
+              "blank": "missing_cloze",
+              "question": "",
+              "question_av": []
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span><br>n2",
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[...]</span>"
+            },
+            "review": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span><br>n2",
+              "answer_av": [],
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[...]</span>",
+              "question_av": []
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span><br>n3",
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[a letter]</span>"
+            },
+            "review": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span><br>n3",
+              "answer_av": [],
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[a letter]</span>",
+              "question_av": []
+            }
+          },
+          "#c4": {
+            "browser": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Gamma</span><br>n4",
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Gamma</span>"
+            },
+            "review": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Gamma</span><br>n4",
+              "answer_av": [],
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Gamma</span>",
+              "question_av": []
+            }
+          },
+          "#c5": {
+            "browser": {
+              "answer": "Alpha <span class=\"cloze-inactive\" data-ordinal=\"1\">Beta</span> <span class=\"cloze\" data-ordinal=\"2\">Gamma</span><br>n4",
+              "blank": null,
+              "question": "Alpha <span class=\"cloze-inactive\" data-ordinal=\"1\">Beta</span> <span class=\"cloze\" data-cloze=\"Gamma\" data-ordinal=\"2\">[...]</span>"
+            },
+            "review": {
+              "answer": "Alpha <span class=\"cloze-inactive\" data-ordinal=\"1\">Beta</span> <span class=\"cloze\" data-ordinal=\"2\">Gamma</span><br>n4",
+              "answer_av": [],
+              "blank": null,
+              "question": "Alpha <span class=\"cloze-inactive\" data-ordinal=\"1\">Beta</span> <span class=\"cloze\" data-cloze=\"Gamma\" data-ordinal=\"2\">[...]</span>",
+              "question_av": []
+            }
+          },
+          "#c6": {
+            "browser": {
+              "answer": "Front <span class=\"cloze\" data-ordinal=\"1\">Delta</span> <span class=\"cloze\" data-ordinal=\"1\">Epsilon</span><br>n5",
+              "blank": null,
+              "question": "Front <span class=\"cloze\" data-cloze=\"Delta\" data-ordinal=\"1\">[...]</span> <span class=\"cloze\" data-cloze=\"Epsilon\" data-ordinal=\"1\">[...]</span>"
+            },
+            "review": {
+              "answer": "Front <span class=\"cloze\" data-ordinal=\"1\">Delta</span> <span class=\"cloze\" data-ordinal=\"1\">Epsilon</span><br>n5",
+              "answer_av": [],
+              "blank": null,
+              "question": "Front <span class=\"cloze\" data-cloze=\"Delta\" data-ordinal=\"1\">[...]</span> <span class=\"cloze\" data-cloze=\"Epsilon\" data-ordinal=\"1\">[...]</span>",
+              "question_av": []
+            }
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{{c2::Zeta}} {{c1::Eta}}", 0],
+            ["{{c2::Zeta}} {{c1::Eta}}", 1]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [0],
+            [1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [7]
+          ]
+        }
+      },
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": null,
+              "blank": "missing_cloze",
+              "question": ""
+            },
+            "review": {
+              "answer": null,
+              "answer_av": [],
+              "blank": "missing_cloze",
+              "question": "",
+              "question_av": []
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span><br>n2",
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[...]</span>"
+            },
+            "review": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span><br>n2",
+              "answer_av": [],
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[...]</span>",
+              "question_av": []
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span><br>n3",
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[a letter]</span>"
+            },
+            "review": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span><br>n3",
+              "answer_av": [],
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[a letter]</span>",
+              "question_av": []
+            }
+          },
+          "#c4": {
+            "browser": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Gamma</span><br>n4",
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Gamma</span>"
+            },
+            "review": {
+              "answer": "Alpha <span class=\"cloze\" data-ordinal=\"1\">Beta</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Gamma</span><br>n4",
+              "answer_av": [],
+              "blank": null,
+              "question": "Alpha <span class=\"cloze\" data-cloze=\"Beta\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">Gamma</span>",
+              "question_av": []
+            }
+          },
+          "#c5": {
+            "browser": {
+              "answer": "Alpha <span class=\"cloze-inactive\" data-ordinal=\"1\">Beta</span> <span class=\"cloze\" data-ordinal=\"2\">Gamma</span><br>n4",
+              "blank": null,
+              "question": "Alpha <span class=\"cloze-inactive\" data-ordinal=\"1\">Beta</span> <span class=\"cloze\" data-cloze=\"Gamma\" data-ordinal=\"2\">[...]</span>"
+            },
+            "review": {
+              "answer": "Alpha <span class=\"cloze-inactive\" data-ordinal=\"1\">Beta</span> <span class=\"cloze\" data-ordinal=\"2\">Gamma</span><br>n4",
+              "answer_av": [],
+              "blank": null,
+              "question": "Alpha <span class=\"cloze-inactive\" data-ordinal=\"1\">Beta</span> <span class=\"cloze\" data-cloze=\"Gamma\" data-ordinal=\"2\">[...]</span>",
+              "question_av": []
+            }
+          },
+          "#c6": {
+            "browser": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"2\">Zeta</span> <span class=\"cloze\" data-ordinal=\"1\">Eta</span> <span class=\"cloze-inactive\" data-ordinal=\"0\">Theta</span> {{c-1::Iota}} {{c-2:Kappa}}<br>n5",
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"2\">Zeta</span> <span class=\"cloze\" data-cloze=\"Eta\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"0\">Theta</span> {{c-1::Iota}} {{c-2:Kappa}}"
+            },
+            "review": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"2\">Zeta</span> <span class=\"cloze\" data-ordinal=\"1\">Eta</span> <span class=\"cloze-inactive\" data-ordinal=\"0\">Theta</span> {{c-1::Iota}} {{c-2:Kappa}}<br>n5",
+              "answer_av": [],
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"2\">Zeta</span> <span class=\"cloze\" data-cloze=\"Eta\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"0\">Theta</span> {{c-1::Iota}} {{c-2:Kappa}}",
+              "question_av": []
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/cloze/stored-cards",
+  "scenario_sha256": "214e70e335697dd2b47232d182c2698cff8c4a5a347e197638e0f2b5a23bfc59",
+  "tz": "UTC"
+}

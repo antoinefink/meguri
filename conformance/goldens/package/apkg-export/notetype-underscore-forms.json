@@ -1,0 +1,108 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 1
+        }
+      },
+      {
+        "package_media": [
+          {
+            "entry_size": 10,
+            "name": "_teal.css",
+            "sha1": "bb3272715d6d788f4772626bf75b143068923915",
+            "size": 10
+          },
+          {
+            "entry_size": 9,
+            "name": "_red.css",
+            "sha1": "92ec73cac6938943d220afde12511a3e305dbff5",
+            "size": 9
+          },
+          {
+            "entry_size": 10,
+            "name": "_cyan.png",
+            "sha1": "bd8f738501f81b98ec9c57542b8bbe3e135ddd72",
+            "size": 10
+          },
+          {
+            "entry_size": 11,
+            "name": "_green.css",
+            "sha1": "2f31460001fe0edfcfb832445c3cfb2f45687355",
+            "size": 11
+          },
+          {
+            "entry_size": 8,
+            "name": "_t4.jpg",
+            "sha1": "306d8bac03d581cb7916399e817c295acfd9a541",
+            "size": 8
+          },
+          {
+            "entry_size": 10,
+            "name": "_blue.png",
+            "sha1": "6379e5bd29ea3860d5e46f9f6e623639a21ed3fa",
+            "size": 10
+          },
+          {
+            "entry_size": 10,
+            "name": "_lime.woff2",
+            "sha1": "7b3080bb842dc9f24f261fe4dca4be34c3fcded3",
+            "size": 10
+          },
+          {
+            "entry_size": 8,
+            "name": "_t1.jpg",
+            "sha1": "f4b992eb3650308896234afe9b2a10191bf2e1c6",
+            "size": 8
+          },
+          {
+            "entry_size": 8,
+            "name": "_t3.js",
+            "sha1": "2499d1536bb6d8859182edca378f3aa793c431b3",
+            "size": 8
+          },
+          {
+            "entry_size": 8,
+            "name": "_t5",
+            "sha1": "65a63adc86fce3f3e26d309e32f2bc0087cdc00b",
+            "size": 8
+          },
+          {
+            "entry_size": 8,
+            "name": "_t2",
+            "sha1": "24053efda532f71b2423ae78cbed75e2d546a106",
+            "size": 8
+          },
+          {
+            "entry_size": 8,
+            "name": "_t6.js",
+            "sha1": "e070339b2d52d66dbc16b9b514b645764e5e9207",
+            "size": 8
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-export/notetype-underscore-forms",
+  "scenario_sha256": "fcd61b950b7afca897d6c8cd7554de45e34dc8300d658bb57ab2609cd3a2d3d2",
+  "tz": "UTC"
+}

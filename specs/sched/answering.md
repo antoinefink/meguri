@@ -182,6 +182,9 @@ Meguri never answers with FSRS off. For reading goldens recorded with `fsrs: fal
 |---|---|
 | `sched/answer/new-card-ratings` | A2 to A7 for new cards: one rating each at one instant (review-log ids bumped), the card rows, the review-log rows, the deck counters and stamps, `col.mod` |
 | `sched/answer/state-kinds` | A3.2, A5: learning delays intraday and in days, a learning card graduating, a review card lapsing into relearning and one answered Hard, `lastIvl` and `type` by current state |
+| `sched/answer/lapse-then-easy` (held) | A3.2, A5: Again on a review card writes a relearning row in the intraday queue, and Easy right away writes a review row due today plus the previewed interval (day 200, so the due day differs from the interval) |
+| `sched/answer/review-ratings` (held) | A3.1, A3.2, A5 for one overdue review card per rating: `reps`, `lapses`, `due` = today + `ivl`, the ease deltas of `sched/fsrs-transitions#T11`, and a leech Again (suspend and tag, `sched/leeches#L1`-L3) |
+| `sched/answer/previewed-states` (held) | A3.2: across a card's life (new, learning, graduation with the home preset's starting ease, review, lapse, relearning, re-graduation) the written row and the next current state equal the state `next_states` previewed for the rating; the 1.3 ease floor |
 | `sched/answer/deck-counters` | A6: a nested deck and its ancestors, a missing parent, the time cap, the queue before the answer (new, review, interday and intraday learning), the reset on a later day |
 | `sched/answer/unchanged-counters` | A6: a deck stamped by an answer that changes none of its counters |
 | `sched/answer/custom-data` | A4, A15: `cd` kept byte for byte after the rewritten keys, on a new and a review card, unchecked even beyond the custom-data limits |

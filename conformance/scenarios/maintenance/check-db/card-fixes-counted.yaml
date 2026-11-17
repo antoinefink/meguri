@@ -1,0 +1,25 @@
+# C8 of specs/maintenance/check-database.md: a card changed by several fixes
+# is counted once per fix. One new card has due 2,300,000, odue 3.5 and ivl
+# 6.25: C8.1 folds due to 1,300,000 (new_positions_too_high 1), C8.3 rounds
+# odue to 4 and C8.4 rounds ivl to 6 (two card_properties). A second new card
+# has only ivl 2.5, rounded to 3 (one more card_properties): card_properties
+# 3 in all, both cards stamped, scm unchanged. A second run finds nothing.
+id: maintenance/check-db/card-fixes-counted
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET due = 2300000, odue = 3.5, ivl = 6.25, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'one')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = 2.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'two')"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT n.sfld, c.type, c.queue, typeof(c.due), c.due, typeof(c.odue), c.odue, typeof(c.ivl), c.ivl, c.odid, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

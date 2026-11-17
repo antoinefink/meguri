@@ -1,0 +1,26 @@
+# C11 and C16 of specs/maintenance/check-media.md with
+# specs/media/media-files.md M10: extra.csv and shape.svg, added through
+# the store and named by no note, are unused (kept.png is referenced and
+# stays used throughout); after extra.csv is trashed, Check Media lists only
+# shape.svg unused and counts one trash entry; after Restore Deleted,
+# both are unused again and the trash is empty.
+id: maintenance/check-media/actions/trash-restore-check
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Media
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Media, fields: ["one", "<img src=\"kept.png\">"]}
+steps:
+  - add_media: {name: extra.csv, text: "extra bytes"}
+  - add_media: {name: shape.svg, text: "shape bytes"}
+  - add_media: {name: kept.png, text: "kept bytes"}
+  - check_media: {}
+  - trash_media: {names: [extra.csv]}
+  - check_media: {}
+  - observe: [media_trash]
+  - restore_media_trash: {}
+  - check_media: {}
+  - observe: [media_trash, media_dir]

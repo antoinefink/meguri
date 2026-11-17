@@ -1,0 +1,121 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-02-20T09:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "search_build": [
+          {
+            "text": "(is:learn OR is:suspended OR is:buried) tag:warm (flag:5 OR flag:6)"
+          },
+          {
+            "text": "(tag:warm is:new) OR (flag:7 is:review)"
+          },
+          {
+            "text": "((is:suspended OR is:buried) OR flag:7) OR is:learn"
+          },
+          {
+            "text": "is:learn OR (flag:7 OR (is:suspended OR is:buried))"
+          },
+          {
+            "text": "is:suspended OR is:buried OR flag:7 OR is:learn"
+          },
+          {
+            "text": "deck:Box::Inner ((is:new flag:7) OR is:due)"
+          },
+          {
+            "text": "(is:learn OR flag:5) tag:warm"
+          },
+          {
+            "text": "is:learn OR flag:5 tag:warm"
+          },
+          {
+            "text": "(is:learn OR flag:5) tag:warm"
+          }
+        ],
+        "search_join": [
+          {
+            "text": "(is:review OR is:suspended) (flag:6 OR flag:7)"
+          },
+          {
+            "text": "(tag:warm is:new) OR (flag:7 is:review)"
+          }
+        ]
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "set_flag": {
+          "count": 2
+        }
+      },
+      {
+        "set_flag": {
+          "count": 2
+        }
+      },
+      {
+        "set_flag": {
+          "count": 2
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#c2", "#c4", "#c6", "#c7"]
+          },
+          {
+            "ids": ["#c1", "#c3", "#c5", "#c8"]
+          },
+          {
+            "ids": ["#c1", "#c3", "#c5", "#c8"]
+          },
+          {
+            "ids": ["#c2", "#c3", "#c4", "#c5", "#c7", "#c8"]
+          },
+          {
+            "ids": ["#c2", "#c3", "#c4", "#c5", "#c7", "#c8"]
+          },
+          {
+            "ids": ["#c2", "#c3", "#c4", "#c5", "#c7", "#c8"]
+          },
+          {
+            "ids": ["#c6", "#c7", "#c8"]
+          },
+          {
+            "ids": ["#c2", "#c6", "#c7", "#c8"]
+          },
+          {
+            "ids": ["#c1", "#c2"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c7"]
+          },
+          {
+            "ids": ["#c3", "#c6"]
+          },
+          {
+            "ids": ["#c3", "#c6", "#c8"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/builder/grouped-precedence",
+  "scenario_sha256": "fdd80687f3d736360d45f027f3e6b1eb81ff7939f866557ad68fd4ee69865a56",
+  "tz": "UTC"
+}
