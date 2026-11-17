@@ -1,0 +1,30 @@
+# A deck limit takes the deck and all of its descendants
+# (specs/package/apkg-export.md A2, A3, A6; decks/decks D3; package-ops.md
+# E7, E11). Exporting P::A takes the notes of P::A, its child and
+# its child's child. Its parent P comes in as an ancestor deck row only,
+# without P's own note. The siblings P::AB and P::A2, whose
+# names start with the same text, are not descendants and stay out, as does
+# the empty child P::A::E.
+id: package/apkg-export/selection/deck-children
+description: A deck export includes every descendant deck's notes but not siblings sharing a name prefix.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [P, "P::A", "P::A::B", "P::A::B::C", "P::A::E", "P::AB", "P::A2"]
+  notetypes:
+    - name: Duo
+      fields: [Prompt, Reply]
+      templates: [{name: Ask, front: "{{Prompt}}", back: "{{Reply}}"}]
+  notes:
+    - {notetype: Duo, deck: P, fields: [one, a]}
+    - {notetype: Duo, deck: "P::A", fields: [two, b]}
+    - {notetype: Duo, deck: "P::A::B", fields: [three, c]}
+    - {notetype: Duo, deck: "P::A::B::C", fields: [four, d]}
+    - {notetype: Duo, deck: "P::AB", fields: [five, e]}
+    - {notetype: Duo, deck: "P::A2", fields: [six, f]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: pa.apkg, limit: {deck: "P::A"}, scheduling: false, presets: false, media: false}
+  - observe:
+      - package_db_dump: {name: pa.apkg, tables: [notes, cards, decks]}

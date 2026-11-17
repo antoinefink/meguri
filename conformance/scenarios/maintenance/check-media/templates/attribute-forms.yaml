@@ -1,0 +1,28 @@
+# C9 of specs/maintenance/check-media.md, beyond the quoted forms of
+# field-refs: a field reference in an unquoted or single-quoted src, in a
+# sound tag, and inside a LaTeX run each list their template side; a side
+# whose media tag names a file literally, and a LaTeX run whose braces are
+# split by a line feed, list nothing. Entries follow note type names under
+# unicase ("alpha" before "Beta", the reverse of byte order), then template
+# ordinal, front before back. No media file exists, so nothing is unused or
+# missing.
+id: maintenance/check-media/templates/attribute-forms
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Beta Sides
+      fields: [Word, Pic]
+      templates:
+        - {name: Plain, front: "<img src=lit-one.jpg>{{Word}}", back: "<img src={{Pic}}>"}
+        - {name: Math, front: "{{Word}}[$]{{Pic}}[/$]", back: "{{Word}}[$]{{\nPic}}[/$]"}
+        - {name: Quote, front: "{{Word}}", back: "<img src='{{Pic}}'>"}
+    - name: alpha Sound
+      fields: [Word, Clip]
+      templates:
+        - {name: First, front: "{{Word}}", back: "{{Word}}[sound:{{Clip}}]"}
+        - {name: Second, front: "[sound:{{Clip}}]", back: "{{Word}}"}
+  notes:
+    - {notetype: Beta Sides, fields: [w1x, pq7]}
+    - {notetype: alpha Sound, fields: [w2y, pq8]}
+steps:
+  - check_media: {}

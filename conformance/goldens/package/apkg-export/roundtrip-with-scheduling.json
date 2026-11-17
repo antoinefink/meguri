@@ -1,0 +1,317 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "lrt": 1894702200,
+              "pos": 1
+            },
+            "did": "Rivers",
+            "due": 1,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 1,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894702200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 2,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Rivers",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 2
+        }
+      },
+      {
+        "export": {
+          "notes": 2
+        }
+      },
+      {},
+      {
+        "delete_decks": {
+          "count": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 0, 0]
+          ]
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["Rhine", "North"],
+              "note": "#n1"
+            },
+            {
+              "fields": ["Rhone", "Mediterranean"],
+              "note": "#n2"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "lrt": 1894702200,
+              "pos": 1
+            },
+            "did": "Rivers",
+            "due": 1,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 1,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894702200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 2,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Rivers",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 0,
+              "id": 1894701600000,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            },
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 2500,
+              "id": 1894702200000,
+              "ivl": 1,
+              "lastIvl": -600,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c2": []
+        }
+      },
+      {},
+      {
+        "delete_decks": {
+          "count": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 0, 0]
+          ]
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["Rhine", "North"],
+              "note": "#n1"
+            },
+            {
+              "fields": ["Rhone", "Mediterranean"],
+              "note": "#n2"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "lrt": 1894702200,
+              "pos": 1
+            },
+            "did": "Rivers",
+            "due": 1,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 1,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894702200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 2,
+            "type": 2,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Rivers",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 0,
+              "id": 1894701600000,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            },
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 2500,
+              "id": 1894702200000,
+              "ivl": 1,
+              "lastIvl": -600,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c2": []
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-export/roundtrip-with-scheduling",
+  "scenario_sha256": "4aef355559a5a5c214f3d4e07606f6b1b207c759b3b996340b848f4f14984257",
+  "tz": "UTC"
+}

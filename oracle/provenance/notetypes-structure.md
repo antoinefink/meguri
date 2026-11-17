@@ -59,3 +59,13 @@ structure report are Meguri's own design and have no Anki source.
 ## Harvest
 
 The U34 rows of `conformance/catalog/harvest.csv` stay `deferred` until the scenarios of S16 and D8 land with their goldens. When they are classified, tests of the name format of per-template config keys (`_nt_<id>_<key>_<ordinal>`) fit preservation-only: Meguri never writes such keys, keeps them, and removes them with their note type (S12 step 3).
+
+## Session s-20261117T144450Z-f49841c9 (spec writer): deferred harvest rows, batch 1
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows and write their scenarios; no code, test text or fixture value was copied, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| notetypes/structure-changes S2, S4.1-S4.3, S5; scenarios notetypes/structure/field-sequence, field-ord-changes, rename-then-remove, remove-crucial-fields | `pylib/tests/test_models.py` (test_fields), `rslib/src/notetype/schemachange.rs` (tests fields, field_renaming_and_deleting, ord_changes), `rslib/src/notetype/mod.rs` (tests update_templates_after_removing_crucial_fields, renaming_field_in_cloze_conditional_does_not_duplicate_replacement), `rslib/src/notetype/service.rs` (test update_notetype_field_name_persists), `pylib/anki/models.py` (scmhash helper only, to confirm it is a pylib-only helper) | Which behaviors the harvest rows oblige: field add, remove, move and rename effects on notes; ordinal-change classification; template reference rewrite on rename and removal, including the cloze append rule. Expectations come from the oracle goldens, not from these assertions. |
+| notetypes/structure-changes S2, S6, S7; scenarios notetypes/structure/template-swap-replace, template-draft-mix | `pylib/tests/test_models.py` (test_templates), `rslib/src/notetype/schemachange.rs` (test template_changes) | Which template move, removal and add combinations must be proven (swap, removal with renumbering, same-count replacement, mixed draft with removals, moves and additions). Expectations come from the oracle goldens. |
+| notetypes/restore-to-default D2-D5; scenario notetypes/structure/restore-field-count | `rslib/src/notetype/restore.rs` (test adding_and_removing_fields_and_templates) | Which restore sequence must be proven (forced kinds that add and then remove fields and templates, and a standard-to-cloze change). Expectations come from the oracle goldens. |

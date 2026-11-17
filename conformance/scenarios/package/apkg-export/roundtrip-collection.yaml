@@ -1,0 +1,46 @@
+# A whole-collection export read back by the importer (specs/package/
+# apkg-export.md A2, A3, A4, A6, A13; legacy-export.md L7, L12;
+# apkg-import.md I9, I10.2, I11.1; package-ops.md E6, E7, E8). Notes sit in
+# the default deck, in Quay, in Quay::Pier and in Crest, which holds
+# two. The whole collection goes out without scheduling in the latest and in
+# the legacy format; then every note and every other deck is removed. Each
+# package is imported in turn, with the target emptied again in between: all
+# five notes come back, each in the deck it was in, Quay, Quay::Pier and
+# Crest added again and the default deck's note in the target's default
+# deck.
+id: package/apkg-export/roundtrip-collection
+description: A whole-collection package imports every note into the deck it came from.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Quay, "Quay::Pier", Crest]
+  notetypes:
+    - name: Item
+      fields: [Kind, Size]
+      templates: [{name: Card, front: "{{Kind}}", back: "{{Size}}"}]
+  notes:
+    - {notetype: Item, fields: [canoe, small]}
+    - {notetype: Item, deck: Quay, fields: [skiff, large]}
+    - {notetype: Item, deck: "Quay::Pier", fields: [tug, medium]}
+    - {notetype: Item, deck: Crest, fields: [buoy, tiny]}
+    - {notetype: Item, deck: Crest, fields: [lamp, round]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: all.apkg, limit: collection, scheduling: false, presets: false, media: false}
+  - export: {format: apkg, name: all-old.apkg, limit: collection, scheduling: false, presets: false, media: false, legacy: true}
+  - delete_notes: {notes: ["#n1", "#n2", "#n3", "#n4", "#n5"]}
+  - delete_decks: {decks: [Quay, Crest]}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT group_concat(name, '|') FROM decks)"}
+  - advance: 1m
+  - import: {format: apkg, name: all.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - db_exec: {sql: "SELECT n.sfld, d.name FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT name FROM decks ORDER BY name"}
+  # Empty the target again.
+  - delete_notes: {notes: ["#n1", "#n2", "#n3", "#n4", "#n5"]}
+  - delete_decks: {decks: [Quay, Crest]}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT group_concat(name, '|') FROM decks)"}
+  - advance: 1m
+  - import: {format: apkg, name: all-old.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - db_exec: {sql: "SELECT n.sfld, d.name FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT name FROM decks ORDER BY name"}

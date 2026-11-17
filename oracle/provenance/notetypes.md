@@ -47,3 +47,11 @@ Rows of the `notetypes` area that this unit covers are classified in
 later units (card generation U27, structure changes and Restore to Default
 U34, Change Note Type U35, Empty Cards U131, merging on import U121, the
 render pipeline U62) are `deferred` with that unit in the reason.
+
+## Session s-20261117T144450Z-f49841c9 (spec writer): deferred harvest rows, batch 1
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows and write their scenarios; no code, test text or fixture value was copied, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| notetypes/records/incoming-stamps; notetypes/records#N3.5 and the N4 closing paragraph; conformance/model-ops#L2 first sentence | `rslib/src/notetype/service.rs`, `rslib/src/notetype/mod.rs`, `pylib/anki/models.py` | Which behavior the two add-or-update tests require (existing id updated, name changed, with and without keeping usn/mtime). In the fix pass: how the keep-stamps branch of the add-or-update service differs from the non-preserving branch; that the existing-id save runs the full save preparation, makes the name unique stamping a rename as a local change (usn -1, the current second), updates notes and cards for changed fields and templates when a record with that id exists, inserts the record when none exists, and runs without undo. Golden values come only from the oracle. |

@@ -1,0 +1,34 @@
+# A whole schema-11 note type saved over its record with its own usn and mod
+# kept (the keep-stamps save of specs/conformance/model-ops.md L2, proposed
+# notetypes/records N3.5) is written under the id it already has, with the usn
+# and mod the object carries, not a local stamp: the row was synced (usn 5) at
+# an older second, the saved object renames it and brings usn 12 and a mod
+# between the two. No row is added and the note keeps its note type. (A normal
+# sync's accepted note type, sync/normal-sync N5.2 step 3, ends with the same
+# stamps for a rename like this one, but through its own direct row write.)
+# The same record then saved as a local edit (notetypes/records N3.2) is
+# stamped usn -1 at the clock's second, whatever stamps it held.
+id: notetypes/records/incoming-stamps
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Lexeme
+      fields: [Word, Gloss]
+      templates: [{name: Recall, front: "{{Word}}", back: "{{Gloss}}"}]
+  notes:
+    - {notetype: Lexeme, fields: [arbre, tree]}
+steps:
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1800000000, usn = 5 WHERE name = 'Lexeme'"}
+  - db_exec: {sql: "SELECT count(*) FROM notetypes"}
+  - advance: 2h
+  - legacy_update: {notetype: Lexeme, patch: {name: "Lexeme Remote", usn: 12, mod: 1850000000}}
+  - db_exec:
+      sql: >-
+        SELECT n.name, n.mtime_secs, n.usn, (SELECT count(*) FROM notes WHERE mid = n.id),
+        (SELECT count(*) FROM notetypes) FROM notetypes n WHERE n.name LIKE 'Lexeme%'
+  - advance: 1h
+  - update_notetype: {notetype: "Lexeme Remote", edits: [{rename: "Lexeme Local"}]}
+  - db_exec:
+      sql: >-
+        SELECT n.name, n.mtime_secs, n.usn, (SELECT count(*) FROM notes WHERE mid = n.id),
+        (SELECT count(*) FROM notetypes) FROM notetypes n WHERE n.name LIKE 'Lexeme%'

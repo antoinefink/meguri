@@ -1,0 +1,89 @@
+# A note type grown in both merge stages (specs/package/notetype-merge.md
+# J5, J6, J7, J8; apkg-import.md I8, I9; package-ops.md E6). The package's
+# Pair is Front, Added, Back (ids 1001, 1003, 1002), newer than the
+# target's Front, Back. In the target, n1 was moved by Change Note Type to
+# Old (Front 1001, Back 1002, Local 1004; no original id, so it is no copy of
+# Pair) and n2 deleted. With Merge note types:
+# - stage 1, by id: Pair becomes Front, Back, Added (stage 1 map 0, 2, 1);
+# - stage 2, by note: the package's n1 is under Pair and its target note
+#   under Old, so Pair gains Local and n1 moves to Pair; Old, left without
+#   notes, is removed;
+# - the moved n1 keeps its own values through stage 2's map 0, 1, none, 2
+#   (Added empty, Local kept), seen with Update notes never;
+# - the incoming notes' map is the two stages composed: 0, 2, 1, none. n2 is
+#   new with Added and Back in their final columns and Local empty.
+# A second import with Update notes Always, Old now gone, updates n1 through
+# Pair's map 0, 2, 1, none: the incoming values land and Local is emptied.
+id: package/notetype-merge/stage-two-composed
+description: A note type merged by id and then through a note GUID composes both field maps and removes the emptied note type.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Old
+      fields: [Front, Back, Local]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 5px; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - legacy_update:
+      notetype: Old
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+          - {name: Local, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, id: 1004}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Added}, {move_field: {field: Added, to: 1}}]}
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Added, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1003}
+          - {name: Back, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+  - edit_note: {note: "#n1", fields: {Added: added one}}
+  - edit_note: {note: "#n2", fields: {Added: added two}}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{remove_field: Added}]}
+  - change_notetype_info: {notes: ["#n1"], notetype: Old}
+  - change_notetype: {}
+  - edit_note: {note: "#n1", fields: {Local: mine}}
+  - delete_notes: {notes: ["#n2"]}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1894701600 WHERE name = 'Pair'"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - reopen: {}
+  - db_exec: {sql: "SELECT t.name, n.flds FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT name FROM notetypes WHERE name IN ('Pair', 'Old') ORDER BY name"}
+  - db_exec: {sql: "SELECT f.ord, f.name FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT t.name, n.flds, n.sfld FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT c.ord, n.sfld FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT f.ord, f.name FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT t.name, n.flds, n.sfld FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}

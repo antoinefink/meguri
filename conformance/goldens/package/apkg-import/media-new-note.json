@@ -1,0 +1,81 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 1
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": [" leaf-946fd978a141c7d44548022b048b40ea4f46837f.png  x", "[sound:chime-86fdc5e0b9b68778f80e231d971690ae681b4dc0.mp3] y"],
+              "note": "#n1"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "<img src=\"leaf-946fd978a141c7d44548022b048b40ea4f46837f.png\"> x\u001f[sound:chime-86fdc5e0b9b68778f80e231d971690ae681b4dc0.mp3] y"]
+          ]
+        }
+      },
+      {
+        "media_dir": {
+          "chime-86fdc5e0b9b68778f80e231d971690ae681b4dc0.mp3": {
+            "sha1": "86fdc5e0b9b68778f80e231d971690ae681b4dc0",
+            "size": 10
+          },
+          "chime.mp3": {
+            "sha1": "cab4d40d19c61d6569d8ff2c02515859acb058e9",
+            "size": 9
+          },
+          "leaf-946fd978a141c7d44548022b048b40ea4f46837f.png": {
+            "sha1": "946fd978a141c7d44548022b048b40ea4f46837f",
+            "size": 10
+          },
+          "leaf.png": {
+            "sha1": "d8fa5fcce9d158152b78b168bdfccc6cba712e4d",
+            "size": 10
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/media-new-note",
+  "scenario_sha256": "3e403f6cc89fec9318d153566ac5967069a4368dfb1e9576324d9c8bfe826147",
+  "tz": "UTC"
+}

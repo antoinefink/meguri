@@ -407,12 +407,12 @@ hf306bec628a4,rust,tag,notes,in-scope,First-field checksum,text/fields/checksum,
 hf580907ab941,rust,tag,notes,in-scope,"The single note type of selected notes, for Change Note Type (U35)",,deferred
 hfc559c975ab6,rust,tag,notes,in-scope,NFC on save follows normalize_note_text; the search half is U81's,notes/save/normalize-off,done
 h14ea0a8ef304,python,tag,notetypes,in-scope,Stock note types are offered and created in a fixed order,notetypes/records/stock-new-collection notetypes/records/stock-structure,done
-h1d25e53134b6,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h1d25e53134b6,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",notetypes/structure/field-sequence notetypes/structure/rename-field,done
 h29e9a6801163,python,tag,notetypes,not-applicable,Deprecated helpers of Anki's Python add-on API,,done
 h29fa8d30a069,python,tag,notetypes,in-scope,Each template's stored list of fields its card needs,notetypes/records/stock-structure,done
 h2ef9d9aa9a2d,python,tag,notetypes,in-scope,A copied note type keeps its fields and templates under a new id and name,notetypes/records/clone,done
 h38373cc87211,python,tag,notetypes,in-scope,"removing a note type removes its notes and cards, with graves (U34)",notetypes/structure/undo-removals,done
-h3db0bf46358b,python,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h3db0bf46358b,python,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),notetypes/change/cloze notetypes/change/cloze-round-trip notetypes/change/same-type-remap notetypes/change/swap-fields notetypes/change/template-map,done
 h51425d9fe4e8,python,tag,notetypes,in-scope,"A cloze note's cards take their ordinals from its cloze numbers, whatever filters the template chains (notes/card-generation G4)",cardgen/cloze/numbers,done
 h6ace0b701063,python,tag,notetypes,not-applicable,Add-on entries in Anki's own stock note type list,,done
 h6ebbfe4093c4,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
@@ -424,46 +424,46 @@ haa6096a01726,python,tag,notetypes,in-scope,The typing stock kind asks for the B
 haff749b319ca,python,tag,notetypes,in-scope,"Each stock kind's fields, templates and kind",notetypes/records/stock-new-collection notetypes/records/stock-structure,done
 hd3484a3787d3,python,tag,notetypes,not-applicable,Deprecated helpers of Anki's Python add-on API,,done
 he8993d36dc09,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
-heb9c41d43b4a,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+heb9c41d43b4a,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",notetypes/structure/remove-template notetypes/structure/template-swap-replace,done
 h0477377c20e5,rust,tag,notetypes,in-scope,A note type's field names in order,notetypes/records/stock-new-collection,done
 h147c5a8d09f4,rust,tag,notetypes,in-scope,"A card's field map holds the note fields and the special fields only, each with its value",render/special-fields/cards render/special-fields/new-note render/pipeline/specials,done
 h16006d8f10dd,rust,tag,notetypes,in-scope,"Per-note-type config key names, as the note type's last deck _nt_<id>_lastDeck uses them (notes/note-records A4)",notes/records/add cardgen/placement/new-note,done
-h166c2f8e68af,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h166c2f8e68af,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",notetypes/structure/combined-draft notetypes/structure/rename-field,done
 h1bd8d77a66bd,rust,tag,notetypes,in-scope,Renaming a note type is saved,notetypes/records/names,done
 h1dcc09aa4435,rust,tag,notetypes,in-scope,A note field named like a special name replaces it in card generation (notes/card-generation G2),cardgen/normal/conditionals cardgen/normal/specials-and-emptiness,done
 h1eb30503b690,rust,tag,notetypes,in-scope,A standard note whose front names a non-empty field gets that template's card (notes/card-generation G3),cardgen/normal/specials-and-emptiness,done
-h1fa35be82523,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h1fa35be82523,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),notetypes/change/default-maps,done
 h224d46dc7428,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done
 h2443a4d809ec,rust,tag,notetypes,not-applicable,Conversions between Anki's internal id types,,done
-h28dfe5355334,rust,tag,notetypes,in-scope,Check Media's report of templates that reference media fields (U130),,deferred
-h2a20e219bd99,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h28dfe5355334,rust,tag,notetypes,in-scope,Check Media's report of templates that reference media fields (U130),maintenance/check-media/templates/attribute-forms maintenance/check-media/templates/field-refs,done
+h2a20e219bd99,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),notetypes/change/cloze notetypes/change/cloze-round-trip,done
 h41a12a3b4594,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
 h4503178aea0c,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done
 h4a0f14238e91,rust,tag,notetypes,in-scope,"FrontSide counts as empty on the front in card generation (notes/card-generation G2, G3)",cardgen/normal/specials-and-emptiness,done
 h4a6d6847cdd7,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
 h4bc311c17611,rust,tag,notetypes,in-scope,Every stock kind can be added to a collection,notetypes/records/stock-structure,done
-h538b6bc82ab1,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+h538b6bc82ab1,rust,tag,notetypes,in-scope,Merging note types on package import (U121),package/notetype-merge/align/repeated-field-id package/notetype-merge/align/repeated-field-id-always,done
 h5c2b22e2f617,rust,tag,notetypes,in-scope,"Several cloze numbers give one card each, ordinal number minus 1 (notes/card-generation G4)",cardgen/cloze/numbers,done
-h5d402c6f2c03,rust,tag,notetypes,in-scope,"Saving a note type that arrives with its id and stamps, as sync and import do (U107, U120)",,deferred
+h5d402c6f2c03,rust,tag,notetypes,in-scope,"Saving a note type that arrives with its id and stamps, as sync and import do (U107, U120)",notetypes/records/incoming-stamps notetypes/records/stamps,done
 h5dab017523ab,rust,tag,notetypes,not-applicable,Errors of Anki's backend lookups by unknown name or id; Meguri has its own errors,,done
-h5f775d295960,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
-h5fa3b00a8f49,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+h5f775d295960,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",notetypes/structure/cloze-fields,done
+h5fa3b00a8f49,rust,tag,notetypes,in-scope,Merging note types on package import (U121),package/notetype-merge/align/field-renamed,done
 h6288de9d6fb5,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
 h675f93f3e234,rust,tag,notetypes,in-scope,"A card renders in full on both sides, FrontSide on the answer, and unknown filters do not stop it",render/pipeline/basic render/pipeline/read-only render/special-fields/new-note,done
 h68d09bf06f67,rust,tag,notetypes,in-scope,"Note type list with note counts for the Note Types screen (U37, U200)",,deferred
 h6ac9613310a8,rust,tag,notetypes,in-scope,a removed note type leaves the note type list (U34),notetypes/manage/list-order,done
-h6df8b626e405,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+h6df8b626e405,rust,tag,notetypes,in-scope,Merging note types on package import (U121),package/notetype-merge/template-renamed,done
 h706cf39b03b8,rust,tag,notetypes,in-scope,"Note type list with note counts for the Note Types screen (U37, U200)",,deferred
-h74bea2ac61c6,rust,tag,notetypes,in-scope,"Saving a note type that arrives with its id and stamps, as sync and import do (U107, U120)",,deferred
-h82e783a37a13,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+h74bea2ac61c6,rust,tag,notetypes,in-scope,"Saving a note type that arrives with its id and stamps, as sync and import do (U107, U120)",notetypes/records/incoming-stamps,done
+h82e783a37a13,rust,tag,notetypes,in-scope,Merging note types on package import (U121),package/notetype-merge/align/template-order,done
 h862557d9421e,rust,supplementary,notetypes,in-scope,"Main-branch test of the deck fallback chain (override or siblings, then the given deck, then Default), which R791 and R792 ask for; at 26.09.3 Anki goes to Default at once, so Meguri's behavior is a deviation (deck-placement-chain)",cardgen/placement/new-note cardgen/placement/existing-note,done
-h87642d5d640c,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h87642d5d640c,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",notetypes/structure/remove-field notetypes/structure/rename-field notetypes/structure/rename-then-remove,done
 h8c43ce71aafa,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
 h8fe1bf6272d1,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
 h9032dd80f5a7,rust,tag,notetypes,in-scope,A new collection lists the stock note types,notetypes/records/stock-new-collection,done
 h919a58a1a82a,rust,tag,notetypes,in-scope,One cloze number gives one card (notes/card-generation G4),cardgen/cloze/numbers,done
-h91e61b0cbd90,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
-h95ef12a29223,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h91e61b0cbd90,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",notetypes/structure/combined-draft notetypes/structure/field-ord-changes notetypes/structure/rename-field notetypes/structure/reorder-fields notetypes/structure/template-swap-replace,done
+h95ef12a29223,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),notetypes/change/template-map,done
 h9836b2bac499,rust,tag,notetypes,not-applicable,"The backend's key name for per-template add-on settings in the config table (ordinal 0 on cloze note types); Anki's own screens write no such key, and Meguri keeps such keys untouched and removes them with their note type (storage/config-table C7, C10)",,done
 h9c3d56d899d8,rust,tag,notetypes,in-scope,"A Tags section on the front requires no card for an untagged note, which still gets ordinal 0 (notes/card-generation G3, G6)",cardgen/normal/conditionals,done
 h9e510243ea25,rust,tag,notetypes,in-scope,Random insertion positions are a seeded draw from the counter value (notes/deck-placement-and-position P4),cardgen/position/random,done
@@ -471,46 +471,46 @@ ha1bb31fa12da,rust,tag,notetypes,in-scope,"Change Note Type between note types w
 ha2b5da04d17c,rust,tag,notetypes,not-applicable,"The backend's key name for per-template add-on settings in the config table (ordinal 0 on cloze note types); Anki's own screens write no such key, and Meguri keeps such keys untouched and removes them with their note type (storage/config-table C7, C10)",,done
 ha5a622e9741a,rust,tag,notetypes,in-scope,Saving a note type without an id adds it,notetypes/records/names,done
 ha8d3154d3f27,rust,tag,notetypes,in-scope,reserved keys in a note type's other bytes never reach the legacy JSON object,model/schema11/notetype-other-reserved,done
-haa4b9cb7903d,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+haa4b9cb7903d,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",notetypes/structure/template-draft-mix,done
 haf0842771063,rust,tag,notetypes,in-scope,"A Tags section on the front requires a card for a tagged note (notes/card-generation G2, G3)",cardgen/normal/conditionals,done
-hb543398f1a4c,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
-hb560a619968b,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
-hb8d4e91cec36,rust,tag,notetypes,in-scope,Restore to Default (U34),,deferred
+hb543398f1a4c,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",notetypes/structure/combined-draft notetypes/structure/field-sequence,done
+hb560a619968b,rust,tag,notetypes,in-scope,Merging note types on package import (U121),package/notetype-merge/align/new-templates,done
+hb8d4e91cec36,rust,tag,notetypes,in-scope,Restore to Default (U34),notetypes/structure/restore-field-count notetypes/structure/restore-forced-kind,done
 hbf1cae9dbfec,rust,tag,notetypes,in-scope,Field names lose forbidden characters and leading markers when saved,notetypes/records/names,done
-hc08963e31ad1,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hc08963e31ad1,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",notetypes/structure/cloze-fields notetypes/structure/remove-crucial-fields notetypes/structure/remove-field,done
 hc107f1d1cc3e,rust,tag,notetypes,in-scope,A note type's legacy JSON object carries its stored name,model/schema11/notetype-values,done
 hd276a7ef2889,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
-hd70ff7b8b5c8,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+hd70ff7b8b5c8,rust,tag,notetypes,in-scope,Merging note types on package import (U121),package/notetype-merge/align/new-fields,done
 hdaeb4b410d26,rust,tag,notetypes,not-applicable,"The backend's key name for per-template add-on settings in the config table (ordinal 0 on cloze note types); Anki's own screens write no such key, and Meguri keeps such keys untouched and removes them with their note type (storage/config-table C7, C10)",,done
 hdeaee1c610b2,rust,tag,notetypes,in-scope,adding a template gives existing notes the card it now requires (U34),notetypes/structure/undo-add-template,done
-hdf581e6e5983,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+hdf581e6e5983,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),notetypes/change/same-type-remap notetypes/change/template-map,done
 he9ab9d659d6c,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done
 hebcc44832da5,rust,tag,notetypes,in-scope,An added note type can be found by its name,notetypes/records/names,done
 heee51bc192e5,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
 hf0e8584063a7,rust,tag,notetypes,in-scope,Generation skips the ordinals the note's cards already have (notes/card-generation G7),cardgen/normal/edits-only-add,done
-hf53f4d36434a,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+hf53f4d36434a,rust,tag,notetypes,in-scope,Merging note types on package import (U121),package/notetype-merge/align/repeated-template-id package/notetype-merge/align/repeated-template-id-always,done
 hf6670629d7af,rust,tag,notetypes,in-scope,saving a note type with an added template generates the new cards (U34),notetypes/structure/undo-add-template,done
-hf8bc5a7dc25e,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+hf8bc5a7dc25e,rust,tag,notetypes,in-scope,Merging note types on package import (U121),package/notetype-merge/align/field-order,done
 hf96cb48a0ba8,rust,tag,notetypes,not-applicable,Conversions between Anki's internal id types,,done
 hfa6f221eb91d,rust,tag,notetypes,not-applicable,Errors of Anki's backend lookups by unknown name or id; Meguri has its own errors,,done
-h12f7b83a0cdb,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h12f7b83a0cdb,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),notetypes/change/default-maps,done
 hcd2cb9d07eec,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 he3cfa1e1e429,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
-hfe06705a799b,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
-h543bc62a3163,python,tag,package,in-scope,U120/U122/U123/U246: package export with scheduling followed by import must retain reviewed state and repetition count.,,deferred
+hfe06705a799b,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),notetypes/change/default-maps notetypes/change/to-reversed,done
+h543bc62a3163,python,tag,package,in-scope,U120/U122/U123/U246: package export with scheduling followed by import must retain reviewed state and repetition count.,package/apkg-export/roundtrip-with-scheduling,done
 h686eb06786f4,python,tag,package,not-applicable,Deprecation warnings and aliases for Python importer/exporter classes are not a shipped Apple interface (R1879).,,done
-h6bd4a40af394,python,tag,package,in-scope,U120/U122/U123/U246: whole-collection note-package export/import must retain notes and their nondefault deck placement.,,deferred
-hb8a40db6f911,python,tag,package,in-scope,U120/U122/U123/U246: deck-limited package export must omit unrelated notes and retain the selected deck on import.,,deferred
-hf844f0b31fa4,python,tag,package,in-scope,U120/U122/U123/U246: exporting without scheduling must reset imported cards to new with zero repetitions.,,deferred
-hffc0559fcb06,python,tag,package,in-scope,U120/U122/U123/U246: referenced image bytes must survive note-package export and import into another collection.,,deferred
+h6bd4a40af394,python,tag,package,in-scope,U120/U122/U123/U246: whole-collection note-package export/import must retain notes and their nondefault deck placement.,package/apkg-export/roundtrip-collection,done
+hb8a40db6f911,python,tag,package,in-scope,U120/U122/U123/U246: deck-limited package export must omit unrelated notes and retain the selected deck on import.,package/apkg-export/roundtrip-deck-limit,done
+hf844f0b31fa4,python,tag,package,in-scope,U120/U122/U123/U246: exporting without scheduling must reset imported cards to new with zero repetitions.,package/apkg-export/roundtrip-without-scheduling,done
+hffc0559fcb06,python,tag,package,in-scope,U120/U122/U123/U246: referenced image bytes must survive note-package export and import into another collection.,package/apkg-export/roundtrip-media,done
 h0027cf15abc1,rust,tag,package,preservation-only,"U120/U122/U246: scheduled package round-trips retain parameter lists of lengths 17, 19 and 21, including inactive generations (R762).",,deferred
-h0333a2ef3878,rust,tag,package,in-scope,U120/U246: package media collision remapping must rewrite imported note references to the chosen destination filename.,,deferred
+h0333a2ef3878,rust,tag,package,in-scope,U120/U246: package media collision remapping must rewrite imported note references to the chosen destination filename.,package/apkg-import/ae67 package/apkg-import/media-new-note,done
 h041056a28ba5,rust,tag,package,out-of-scope,CSV/foreign note import is excluded; this case retains old field content when an imported update omits a column.,,done
 h04d7eb3084a8,rust,tag,package,out-of-scope,CSV/text import is excluded; this case parses a selected pipe separator while retaining commas inside fields.,,done
-h054c99c6afa0,rust,tag,package,in-scope,U122/U246: exporting a selected note-id list must gather only notes identified by that list.,,deferred
+h054c99c6afa0,rust,tag,package,in-scope,U122/U246: exporting a selected note-id list must gather only notes identified by that list.,package/apkg-export/note-selection package/apkg-export/selection/note-ids,done
 h07f221b07463,rust,tag,package,out-of-scope,CSV/text import is excluded; this case accepts a valid delimited file and returns its import report.,,done
 h0dfab78112de,rust,tag,package,out-of-scope,"CSV/text export is excluded; this case aligns metadata column numbers with identifier, type, deck, fields and tags.",,done
-h13bd2beaffe5,rust,tag,package,in-scope,U122/U246: package gathering must include valid selected notes with their original record content.,,deferred
+h13bd2beaffe5,rust,tag,package,in-scope,U122/U246: package gathering must include valid selected notes with their original record content.,package/apkg-export/selection/whole-collection package/apkg-export/with-scheduling,done
 h189770d86c7a,rust,tag,package,out-of-scope,CSV/text export is excluded; this case strips markup when exporting rendered card text without HTML.,,done
 h1b462ab5b1f6,rust,tag,package,in-scope,U124/U246: latest and legacy collection packages must restore notes and identical media bytes into a fresh destination.,package/collection-package/export-import-roundtrip,deferred
 h1f2f223fd59f,rust,tag,package,in-scope,"U120/U122/U246: normalize unsafe legacy media names on import, but reject noncanonical names in the newer manifest rather than trusting them.",package/collection-package/refused-media-map,deferred
@@ -523,27 +523,27 @@ h2cd0efb7e7cf,rust,tag,package,out-of-scope,CSV/text import is excluded; this ca
 h2d5da75d9660,rust,tag,package,out-of-scope,CSV/text import is excluded; this case resolves a header's note type by either its name or numeric identifier.,,done
 h3154129ed251,rust,tag,package,in-scope,"U120/U246: deck import must create missing parents, avoid filtered-parent conflicts and reconcile ancestor casing independently of record order.",,deferred
 h35a1a315775a,rust,tag,package,out-of-scope,Foreign JSON note import is excluded; this case accepts a minimal JSON document with an empty note list.,,done
-h3680103347a5,rust,tag,package,in-scope,U121/U246: repeated package imports must merge prior duplicated note types by original identity while retaining added fields and note content.,,deferred
-h386c4ed293d8,rust,tag,package,in-scope,U120/U246: importing a package with a genuinely new note type must create its record with the incoming identity when available.,,deferred
-h3a5a5f091ca7,rust,tag,package,in-scope,U121/U246: composing two field-remapping generations must retain the original field values in the correct final columns and leave genuinely new fields blank.,,deferred
+h3680103347a5,rust,tag,package,in-scope,U121/U246: repeated package imports must merge prior duplicated note types by original identity while retaining added fields and note content.,package/notetype-merge/copy-cleanup package/notetype-merge/copy-own-field,done
+h386c4ed293d8,rust,tag,package,in-scope,U120/U246: importing a package with a genuinely new note type must create its record with the incoming identity when available.,package/apkg-import/new-notetype,done
+h3a5a5f091ca7,rust,tag,package,in-scope,U121/U246: composing two field-remapping generations must retain the original field values in the correct final columns and leave genuinely new fields blank.,package/notetype-merge/stage-two-composed,done
 h3abdc470143c,rust,tag,package,preservation-only,"U122/U246: gathering scheduled package data must keep all stored FSRS parameter lists, not only the currently supported one (R762).",,deferred
 h3e6565cbd5bd,rust,tag,package,out-of-scope,CSV/text import is excluded; this case recognizes legacy and current tag-header syntax only in their permitted header positions.,,done
 h4188879b097f,rust,tag,package,out-of-scope,Foreign note import is excluded; this case combines note-specific and global import tags on the created note.,,done
 h421b073e2a4d,rust,tag,package,out-of-scope,CSV/text import is excluded; this case permits rows with missing field columns.,,done
-h4545a8f89d8a,rust,tag,package,in-scope,U120/U121/U246: a matching GUID with a conflicting remapped note type must be logged as a conflict without overwriting the existing note.,,deferred
+h4545a8f89d8a,rust,tag,package,in-scope,U120/U121/U246: a matching GUID with a conflicting remapped note type must be logged as a conflict without overwriting the existing note.,package/apkg-import/conflicting-copy package/apkg-import/notetypes,done
 h47699fddba50,rust,tag,package,out-of-scope,CSV/text import is excluded; this case treats a legacy first-line tag header as metadata rather than a note row.,,done
-h498ea23c7daa,rust,tag,package,in-scope,U122/U246: an omitted package-export selection must gather the whole collection.,,deferred
+h498ea23c7daa,rust,tag,package,in-scope,U122/U246: an omitted package-export selection must gather the whole collection.,package/apkg-export/no-scheduling package/apkg-export/selection/whole-collection package/apkg-export/with-scheduling,done
 h49da24bc1cea,rust,tag,package,out-of-scope,CSV/text export is excluded; this case limits rendered-card rows to a selected deck.,,done
 h4b3ba12ee1a3,rust,tag,package,out-of-scope,CSV/text export is excluded; this case writes rendered front and back text into their respective columns.,,done
 h4b7cb8d2e4a8,rust,tag,package,out-of-scope,CSV/text export is excluded; this case exposes the exported note count through its foreign service reply.,,done
-h4cebf655a477,rust,tag,package,in-scope,U122/U246: exporting an empty collection as a note package must create a valid package rather than fail or omit the file.,,deferred
+h4cebf655a477,rust,tag,package,in-scope,U122/U246: exporting an empty collection as a note package must create a valid package rather than fail or omit the file.,package/apkg-export/selection/empty-collection,done
 h4d39d9345011,rust,tag,package,out-of-scope,CSV/text import is excluded; this case permits a Unicode BOM before separator or tag metadata.,,done
 h4d841a7c9c8d,rust,tag,package,out-of-scope,CSV/text import is excluded; this case matches canonically equivalent input only while NFC folding is enabled.,,done
 h4ece49a2de4b,rust,tag,package,out-of-scope,CSV/text import is excluded; this case ignores a leading BOM and metadata-only lines when reading note rows.,,done
-h514ddcb4bec7,rust,tag,package,in-scope,U122/U246: exporting without scheduling must remove FSRS parameter lists from the gathered preset data instead of leaking scheduling state.,,deferred
+h514ddcb4bec7,rust,tag,package,in-scope,U122/U246: exporting without scheduling must remove FSRS parameter lists from the gathered preset data instead of leaking scheduling state.,package/apkg-export/fsrs-params-gathered,done
 h522f5887f377,rust,tag,package,in-scope,U120/U246: a successful package import response must include both its operation changes and its import summary.,,deferred
-h5535b141d283,rust,tag,package,in-scope,U122/U246: exporting selected card identifiers must constrain package gathering to those cards and their required note data.,,deferred
-h55ee1aa36e5f,rust,tag,package,in-scope,U120/U121/U246: an older incoming note type with a matching schema must not overwrite the destination's newer values.,,deferred
+h5535b141d283,rust,tag,package,in-scope,U122/U246: exporting selected card identifiers must constrain package gathering to those cards and their required note data.,package/apkg-export/card-selection package/apkg-export/selection/card-ids,done
+h55ee1aa36e5f,rust,tag,package,in-scope,U120/U121/U246: an older incoming note type with a matching schema must not overwrite the destination's newer values.,package/notetype-merge/no-merge-update,done
 h563cc1097e30,rust,tag,package,out-of-scope,CSV/text export is excluded; this case returns the exported card count for one note.,,done
 h579c4d299fc7,rust,tag,package,out-of-scope,CSV/text export is excluded; this case returns the number of exported notes.,,done
 h5a29dea977b6,rust,tag,package,out-of-scope,CSV/text export is excluded; this case writes separator and HTML-mode headers before card rows.,,done
@@ -562,45 +562,45 @@ h7e4e3e3dd8d6,rust,tag,package,out-of-scope,Foreign/text note import is excluded
 h7ee03d076a12,rust,tag,package,out-of-scope,CSV/text import is excluded; this case assigns tags to the next unused source column.,,done
 h8119e88ae78c,rust,tag,package,out-of-scope,CSV/text export is excluded; this case returns the rendered-card count through its foreign service reply.,,done
 h8279b9f1799c,rust,tag,package,out-of-scope,Foreign/text note import is excluded; this case merges global import tags with per-note tags.,,done
-h82acec02ac76,rust,tag,package,in-scope,U120/U246: an imported unique GUID with a colliding numeric note id must allocate another id and add the note.,,deferred
-h850b05eec6f3,rust,tag,package,in-scope,U120/U246: a newer incoming note matching an existing GUID must update that note even when its numeric id differs.,,deferred
-h8672411fcc3d,rust,tag,package,in-scope,U120/U246: the real package import service must accept a valid note package and return an import summary.,,deferred
+h82acec02ac76,rust,tag,package,in-scope,U120/U246: an imported unique GUID with a colliding numeric note id must allocate another id and add the note.,package/apkg-import/ids,done
+h850b05eec6f3,rust,tag,package,in-scope,U120/U246: a newer incoming note matching an existing GUID must update that note even when its numeric id differs.,package/apkg-import/guid-other-id,done
+h8672411fcc3d,rust,tag,package,in-scope,U120/U246: the real package import service must accept a valid note package and return an import summary.,package/apkg-import/legacy-1 package/apkg-import/v1-scheduler,done
 h878944447c76,rust,tag,package,out-of-scope,CSV/text import is excluded; this case infers HTML mode from the first parsed field unless an explicit header overrides it.,,done
 h8b0f0f6b526c,rust,tag,package,out-of-scope,CSV/text import is excluded; this case reads destination deck names from a designated source column.,,done
 h8b46fbe450ad,rust,tag,package,out-of-scope,CSV/text export is excluded; this case marks card output as plain rather than HTML in its header.,,done
-h8d3d51e33cd4,rust,tag,package,in-scope,"U121/U246: merge fields by identity, preserve destination-only fields and map incoming values into their final ordinals.",,deferred
-h8d4e99e0e2ad,rust,tag,package,in-scope,U122/U246: a deck-scoped package export must include that deck's descendants in its selection.,,deferred
+h8d3d51e33cd4,rust,tag,package,in-scope,"U121/U246: merge fields by identity, preserve destination-only fields and map incoming values into their final ordinals.",package/notetype-merge/field-identity,done
+h8d4e99e0e2ad,rust,tag,package,in-scope,U122/U246: a deck-scoped package export must include that deck's descendants in its selection.,package/apkg-export/deck-with-subdecks package/apkg-export/selection/deck-children,done
 h8ee8470f9917,rust,tag,package,in-scope,"U120/U246: fresh package-import preferences must use the declared defaults for note-type merge, scheduling and preset import.",,deferred
-h93b19bbf7327,rust,tag,package,in-scope,U120/U121/U246: matching stable field identities permit a newer imported field rename without treating it as an incompatible schema.,,deferred
+h93b19bbf7327,rust,tag,package,in-scope,U120/U121/U246: matching stable field identities permit a newer imported field rename without treating it as an incompatible schema.,package/notetype-merge/no-merge-update,done
 h971a1befdcd3,rust,tag,package,out-of-scope,"CSV/text export is excluded; this case positions note GUID and field values correctly, including CSV quoting.",,done
 h9cb3f01bf91e,rust,tag,package,out-of-scope,"CSV/text import is excluded; this case resolves numeric deck headers by id first, then falls back to a deck name.",,done
-ha2937b5878ea,rust,tag,package,in-scope,"U121/U246: template merging must retain destination templates, rename matched incoming templates and remap imported card ordinals.",,deferred
-ha767ae2500f3,rust,tag,package,in-scope,U121/U246: note-type merge must resolve older duplicated schemas lacking original-id metadata and delete the now-unused duplicate without losing fields.,,deferred
+ha2937b5878ea,rust,tag,package,in-scope,"U121/U246: template merging must retain destination templates, rename matched incoming templates and remap imported card ordinals.",package/notetype-merge/align/template-order package/notetype-merge/template-renamed package/notetype-merge/template-shift,done
+ha767ae2500f3,rust,tag,package,in-scope,U121/U246: note-type merge must resolve older duplicated schemas lacking original-id metadata and delete the now-unused duplicate without losing fields.,package/notetype-merge/guid-conflict package/notetype-merge/stage-two-composed,done
 ha843c024b7b9,rust,tag,package,out-of-scope,CSV/text import is excluded; this case leaves the tags column unset when all source columns are already mapped to fields.,,done
 ha93250437e8c,rust,tag,package,out-of-scope,CSV/text export is excluded; this case preserves note-field markup when HTML output is enabled.,,done
-hab7041f55c2e,rust,tag,package,in-scope,U122/U246: package gathering must refuse malformed note identifiers rather than exporting a corrupt record.,,deferred
+hab7041f55c2e,rust,tag,package,in-scope,U122/U246: package gathering must refuse malformed note identifiers rather than exporting a corrupt record.,package/apkg-export/future-ids package/apkg-export/selection/invalid-ids,done
 hacfa2e72158f,rust,tag,package,in-scope,U122/U123/U246: copying package media in compressed and legacy modes must retain exact bytes and report their true size and digest.,,deferred
-haf97d9ad038f,rust,tag,package,in-scope,U120/U246: a GUID-matched incoming note older than the destination must be reported as a duplicate without overwriting newer fields.,,deferred
+haf97d9ad038f,rust,tag,package,in-scope,U120/U246: a GUID-matched incoming note older than the destination must be reported as a duplicate without overwriting newer fields.,package/apkg-import/update-matrix,done
 hb92931900f3e,rust,tag,package,out-of-scope,CSV/text import is excluded; this case maps unnamed data columns to note fields after reserved metadata columns.,,done
 hb92ed5858653,rust,tag,package,in-scope,U120/U246: a missing note-package input must produce a typed read error without modifying the collection.,,deferred
 hba7d0082f2e4,rust,tag,package,out-of-scope,CSV/text export is excluded; this case omits GUID values when identifier export is disabled while retaining note fields.,,done
 hbb3384a70458,rust,tag,package,out-of-scope,CSV/text import is excluded; the exercised behavior computes data-column labels and widths using separator hints or explicit metadata.,,done
 hbbb0c4aeb3f7,rust,tag,package,out-of-scope,CSV/text import is excluded; this case resolves deck metadata by name/id and falls back to the default deck for blank metadata.,,done
-hbf210d17bac5,rust,tag,package,in-scope,"U121/U246: reimport a changed schema twice, compare refusal with merging disabled against consolidation with merging enabled.",,deferred
+hbf210d17bac5,rust,tag,package,in-scope,"U121/U246: reimport a changed schema twice, compare refusal with merging disabled against consolidation with merging enabled.",package/notetype-merge/copy-cleanup,done
 hbfce523210a9,rust,tag,package,out-of-scope,CSV/text import is excluded; this case escapes field markup in plain mode and retains it when HTML input is declared.,,done
-hc8af83acb892,rust,tag,package,in-scope,U120/U121/U246: a GUID collision with another note type must report a conflict and retain the destination note unchanged.,,deferred
+hc8af83acb892,rust,tag,package,in-scope,U120/U121/U246: a GUID collision with another note type must report a conflict and retain the destination note unchanged.,package/apkg-import/conflicting,done
 hc9b88c959c3c,rust,tag,package,out-of-scope,Foreign JSON import is excluded; this case reports a missing JSON input file.,,done
 hcb2f77ca961e,rust,tag,package,out-of-scope,CSV/text export is excluded; this case reports an invalid destination for note output.,,done
 hce3535999ac4,rust,tag,package,out-of-scope,CSV/text export is excluded; this case strips markup from note fields when HTML output is disabled.,,done
 hd565ba5684ec,rust,tag,package,out-of-scope,CSV/text import is excluded; this case skips comment lines before and between data rows.,,done
-hd679e0bfa181,rust,tag,package,in-scope,U120/U121/U246: a newer incoming note type with matching schema must update the destination values.,,deferred
-hd9088b506c61,rust,tag,package,in-scope,U120/U121/U246: imported notes must use the resolved destination note type when an incoming id was remapped.,,deferred
+hd679e0bfa181,rust,tag,package,in-scope,U120/U121/U246: a newer incoming note type with matching schema must update the destination values.,package/notetype-merge/no-merge-update,done
+hd9088b506c61,rust,tag,package,in-scope,U120/U121/U246: imported notes must use the resolved destination note type when an incoming id was remapped.,package/apkg-import/notetypes package/notetype-merge/copy-reuse-update,done
 hdedee146c6c0,rust,tag,package,out-of-scope,CSV/text import is excluded; this case accepts valid case-insensitive HTML flags and leaves malformed flags unspecified.,,done
 he137c434afe0,rust,tag,package,out-of-scope,CSV/text export is excluded; this case returns a rendered-card row count for multiple notes.,,done
 he15c9ac00fb6,rust,tag,package,out-of-scope,CSV/text export is excluded; this case retains markup in rendered card output when HTML mode is enabled.,,done
-he94bfe933315,rust,tag,package,in-scope,"U120/U121/U246: incompatible imported note types need a new identity, which later compatible imports must reuse and update instead of duplicating again.",,deferred
+he94bfe933315,rust,tag,package,in-scope,"U120/U121/U246: incompatible imported note types need a new identity, which later compatible imports must reuse and update instead of duplicating again.",package/notetype-merge/copy-reuse-update,done
 he9d62061aee3,rust,tag,package,out-of-scope,CSV/text export is excluded; this case returns the note-row count for multiple notes.,,done
-hee3738c37da3,rust,tag,package,in-scope,U120/U122/U246: a package exported without scheduling must reimport without any of the stored FSRS parameter lists.,,deferred
+hee3738c37da3,rust,tag,package,in-scope,U120/U122/U246: a package exported without scheduling must reimport without any of the stored FSRS parameter lists.,package/apkg-export/roundtrip-fsrs-params,done
 hf37a3578ec3e,rust,tag,package,out-of-scope,CSV/text import is excluded; this case maps source columns to note fields by supplied column names.,,done
 hf98264ff82e2,rust,tag,package,out-of-scope,Foreign/text note import is excluded; this case updates a matching note's supplied fields rather than duplicating it.,,done
 hfaaf3e4a2202,rust,tag,package,out-of-scope,Foreign JSON import is excluded; this case refuses malformed JSON text.,,done

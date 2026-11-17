@@ -1,0 +1,50 @@
+# Media bytes through an export and an import (specs/package/apkg-export.md
+# A9, A10, A13; legacy-export.md L5, L12; apkg-import.md I12;
+# package-ops.md E6, E7, E8). A note shows owl.jpg, added through the media
+# store; the folder also holds bat.jpg, which no note uses. The whole
+# collection goes out with media in the latest and in the legacy format. Then
+# the note is removed and both files leave the folder. Each package is
+# imported in turn, with the target emptied again in between: owl.jpg comes
+# back with its exact bytes (size and SHA-1) and the note still names it;
+# bat.jpg, never in a package, does not come back.
+id: package/apkg-export/roundtrip-media
+description: A referenced media file's bytes survive an export with media and an import into an empty folder.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Night]
+  notetypes:
+    - name: Animal
+      fields: [Picture, Name]
+      templates: [{name: Card, front: "{{Picture}}", back: "{{Name}}"}]
+  notes:
+    - {notetype: Animal, deck: Night, fields: ["<img src=\"owl.jpg\">", owl]}
+  media_files:
+    - {name: bat.jpg, text: "unused wing bytes"}
+steps:
+  - observe: [timing]
+  - add_media: {name: owl.jpg, text: "quill and ink"}
+  - observe: [media_dir]
+  - advance: 1m
+  - export: {format: apkg, name: night.apkg, limit: collection, scheduling: false, presets: false, media: true}
+  - export: {format: apkg, name: night-old.apkg, limit: collection, scheduling: false, presets: false, media: true, legacy: true}
+  - delete_notes: {notes: ["#n1"]}
+  - advance: 1m
+  - media_outside:
+      - {name: owl.jpg, remove: true}
+      - {name: bat.jpg, remove: true}
+  - advance: 1m
+  - observe: [media_dir]
+  - import: {format: apkg, name: night.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  - observe: [media_dir]
+  # Empty the target again.
+  - delete_notes: {notes: ["#n1"]}
+  - advance: 1m
+  - media_outside:
+      - {name: owl.jpg, remove: true}
+  - advance: 1m
+  - observe: [media_dir]
+  - import: {format: apkg, name: night-old.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  - observe: [media_dir]

@@ -215,6 +215,8 @@ Scenarios to record (`conformance/scenarios/package/legacy-export/`):
 
 Goldens are recorded with `tools/mg oracle record package/legacy-export` at the pin of `conformance/oracle.json`. A scenario that observes the collection after a legacy `.colpkg` export observes nothing but the package (L13), or carries the deviation, until a successful collection-package import replaces the collection with the package's; the `package/colpkg/` scenarios import such a package on both executors (`conformance/package-ops#E2.2`, `#E9`).
 
+The round-trip scenarios of `package/apkg-export#A17` (`package/apkg-export/roundtrip-deck-limit`, `roundtrip-collection`, `roundtrip-media`, `roundtrip-with-scheduling`, `roundtrip-without-scheduling`, `roundtrip-fsrs-params` and `fsrs-params-gathered`, all recorded) also export each case with Support older Anki versions on (`conformance/package-ops#E8`). All but `fsrs-params-gathered` import the legacy package, which checks the legacy deck path through the importer for a deck limit, whole-collection placement, media bytes, scheduling kept or removed and the FSRS lists emptied (L12); they need the capabilities `export.apkg`, `export.apkg.legacy` and `import.apkg`. `fsrs-params-gathered` reads the legacy packages' `dconf` with `package_col` instead (`export.apkg` and `export.apkg.legacy` only).
+
 Meguri's own tests (`core/crates/meguri-package/tests/legacy_export.rs`, U123; the `.colpkg` legs in `tests/colpkg.rs`, U124):
 
 - The live collection file's SHA-256, `col.ver`, journal mode, `-wal` size and `data_version` are unchanged after a legacy `.apkg` and a legacy `.colpkg` export with no other op running; a legacy `.colpkg` taken while answers commit holds every answer committed before its snapshot, and no answer waits on it.

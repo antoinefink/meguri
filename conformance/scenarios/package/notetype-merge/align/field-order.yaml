@@ -1,0 +1,58 @@
+# The same fields in another order (specs/package/notetype-merge.md J3,
+# J4.1, J7, J9; package-ops.md E6). The package's Pair lists Back (id 1002)
+# before Front (1001) and sorts by Back, so its sort index is 0; the
+# target's Pair lists Front, Back and sorts by Front. The incoming record
+# is newer and governs. Matched by id, the merged list keeps the target's
+# order: no field is added, col.scm does not move, and the updated note's
+# values follow the field map (1, 0), so the package's Back text lands in
+# the target's Back. Both sides store sort index 0, so the kept index 0
+# only rules out following the incoming sort field by name (insert-field
+# covers J4.4).
+id: package/notetype-merge/align/field-order
+description: Fields matched by id keep the target's order when the incoming note type lists them in another order.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [sun, star]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  # The package's layout: Back first, sorted by Back.
+  - update_notetype: {notetype: Pair, edits: [{move_field: {field: Back, to: 0}}, {sort_field: Back}]}
+  - edit_note: {note: "#n1", fields: {Back: comet}}
+  - db_exec: {sql: "SELECT f.name, f.ord FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  # The target's layout back to Front, Back sorted by Front, with an older
+  # mtime than the package's.
+  - update_notetype: {notetype: Pair, edits: [{move_field: {field: Back, to: 1}}, {sort_field: Front}]}
+  - edit_note: {note: "#n1", fields: {Back: star}}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1894701600 WHERE name = 'Pair'"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - reopen: {}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT f.name, f.ord FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}

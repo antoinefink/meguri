@@ -1,0 +1,41 @@
+# A note type the target lacks (specs/package/apkg-import.md I7 first row,
+# I9 step 3; package-ops.md E6). The package holds Pair and Solo with one
+# note each. After the export the target removes Solo (its note and card go
+# with it), so curModel names another note type. The import adds Solo under
+# the package's own id, with original_id that same id, usn -1 and the
+# package's mtime_secs, without touching curModel; Solo's note comes back as
+# new under its package id and Pair's note is a duplicate.
+id: package/apkg-import/new-notetype
+description: A package note type whose id the target lacks is added under that id and curModel stays.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Solo
+      fields: [Word, Meaning, Usage]
+      templates:
+        - {name: Recall, front: "{{Word}}", back: "{{Meaning}}"}
+        - {name: Produce, front: "{{Meaning}}", back: "{{Word}}<br>{{Usage}}"}
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [first, a]}
+    - {notetype: Solo, deck: Lang, fields: [second, b, c]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: solo.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - db_exec: {sql: "SELECT id, name, mtime_secs FROM notetypes WHERE name IN ('Pair', 'Solo') ORDER BY id"}
+  - remove_notetype: {notetype: Solo}
+  - db_exec: {sql: "SELECT t.name FROM config c JOIN notetypes t ON CAST(t.id AS TEXT) = CAST(c.val AS TEXT) WHERE c.KEY = 'curModel'"}
+  - db_exec: {sql: "SELECT count(*) FROM notetypes WHERE name = 'Solo'"}
+  - advance: 1m
+  - import: {format: apkg, name: solo.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn FROM notetypes WHERE name IN ('Pair', 'Solo') OR name LIKE 'Solo%' ORDER BY id"}
+  - db_exec: {sql: "SELECT t.name FROM config c JOIN notetypes t ON CAST(t.id AS TEXT) = CAST(c.val AS TEXT) WHERE c.KEY = 'curModel'"}
+  - db_exec: {sql: "SELECT n.id, n.sfld, t.name FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT c.id, c.nid, c.ord FROM cards c ORDER BY c.id"}
+  - observe:
+      - notetype_structure: {notetypes: [Solo]}

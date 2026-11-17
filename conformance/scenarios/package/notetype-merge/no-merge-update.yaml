@@ -1,0 +1,60 @@
+# Same schema without a merge: the modification times decide (specs/package/
+# apkg-import.md I7 "Same schema", "Update note types", "Writing"; package-
+# ops.md E6). The package's note type is Pair renamed Tandem, its field Back
+# renamed Answer (same id 1002) and other CSS. The target reverts the three
+# edits afterwards, so its Pair is newer:
+# - first import, if newer: the incoming record is older and nothing of it is
+#   written (the target keeps its name, field name and CSS);
+# - the target's mtime_secs is then set below the package's, and the same
+#   import updates Pair in place: name Tandem, field Answer, the CSS; the
+#   field ids match, so the rename is no schema change (no copy, col.scm
+#   unchanged) and the note is not rewritten.
+id: package/notetype-merge/no-merge-update
+description: Without a merge, a matching schema updates the target note type only when the incoming one is newer.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the schema check compares ids).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{rename: Tandem}, {rename_field: {from: Back, to: Answer}}, {css: ".card { margin: 4px; }"}]}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Tandem, edits: [{rename: Pair}, {rename_field: {from: Answer, to: Back}}, {css: ".card { margin: 0; }"}]}
+  - db_exec: {sql: "SELECT name, mtime_secs FROM notetypes WHERE name IN ('Pair', 'Tandem') ORDER BY id"}
+  - db_exec: {sql: "SELECT id, flds, mod, usn FROM notes ORDER BY id"}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM notetypes WHERE name LIKE 'Pair%' OR name = 'Tandem' ORDER BY id"}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1894701600 WHERE name = 'Pair'"}
+  - reopen: {}
+  - advance: 1m
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM notetypes WHERE name LIKE 'Pair%' OR name = 'Tandem' ORDER BY id"}
+  - observe:
+      - legacy_json: {notetypes: [Tandem]}
+      - notetype_structure: {notetypes: [Tandem]}
+  - db_exec: {sql: "SELECT f.ord, f.name FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Tandem' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT id, flds, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}

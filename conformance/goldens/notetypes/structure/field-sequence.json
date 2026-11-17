@@ -1,0 +1,210 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {
+        "notetype_templates": {
+          "Duo": [
+            {
+              "back": "{{Tail}}",
+              "browser_back": "~{{Tail}}",
+              "browser_front": "{{Top}}~",
+              "front": "{{Top}}",
+              "name": "Show"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["pine\u001fquartz", 1700000000, 5],
+            ["oak\u001f", 1700000000, 5]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["pine\u001fquartz\u001f", 1894701720, -1],
+            ["oak\u001f\u001f", 1894701720, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["pine\u001fquartz\u001f"],
+            ["oak\u001f\u001f"]
+          ]
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["pine\u001f"],
+            ["oak\u001f"]
+          ]
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["\u001fpine"],
+            ["\u001foak"]
+          ]
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["pine\u001f"],
+            ["oak\u001f"]
+          ]
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["pine\u001f\u001freed"],
+            ["oak\u001f\u001f"]
+          ]
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["pine\u001freed\u001f"],
+            ["oak\u001f\u001f"]
+          ]
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["reed\u001f\u001fpine"],
+            ["\u001f\u001foak"]
+          ]
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["\u001freed\u001fpine", "pine"],
+            ["\u001f\u001foak", "oak"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Slot"],
+            [1, "Third"],
+            [2, "Top"]
+          ]
+        }
+      },
+      {
+        "notetype_templates": {
+          "Duo": [
+            {
+              "back": "",
+              "browser_back": "~",
+              "browser_front": "{{Top}}~",
+              "front": "{{Top}}",
+              "name": "Show"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/field-sequence",
+  "scenario_sha256": "bfa6a67f9fc5491f1386291e836c32d625d28031c7204c17b355145cc34236da",
+  "tz": "UTC"
+}

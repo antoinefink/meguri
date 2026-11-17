@@ -134,3 +134,9 @@ x-anki
 x-ankiaddon
 x-apkg
 x-colpkg
+# Schema-11 note type and preset JSON keys and the fields/templates foreign key, used by the round-trip and merge scenarios
+fsrsWeights
+qfmt
+afmt
+tmpls
+ntid

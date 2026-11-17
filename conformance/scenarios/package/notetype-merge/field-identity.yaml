@@ -1,0 +1,77 @@
+# Fields merged by identity (specs/package/notetype-merge.md J3, J4.1, J4.3,
+# J5 step 3, J7, J11; apkg-import.md I8, I9; package-ops.md E6). The
+# package's Pair lost its first field Lead (id 1001), renamed Word (1002) to
+# Term and gained Gloss (1003); the target restores Lead under its old id,
+# the name Word and an older mtime, fills Lead in n1 and deletes n2. With
+# Merge note types, if newer:
+# - Lead, which only the target has, keeps position 0 and n1's value; Term
+#   matches Word by id (the incoming name governs, no second field); Gloss is
+#   appended. Field map: none, 0, 1.
+# - n2 is new, its values placed by that map: Lead empty, Term, Gloss.
+# - n1 is rewritten by the layout change and, with Update notes never, keeps
+#   its Lead; a second import with Always updates it through the same map.
+id: package/notetype-merge/field-identity
+description: Merged fields match by id across a rename; target-only fields keep their place and incoming values follow the map.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Lead, Word]
+      templates: [{name: Forward, front: "{{Word}}", back: "{{Word}}<br>{{Lead}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [lead one, word one]}
+    - {notetype: Pair, deck: Lang, fields: [lead two, word two]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Lead, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Word, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Word}}", afmt: "{{Word}}<br>{{Lead}}", id: 2001}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{remove_field: Lead}, {rename_field: {from: Word, to: Term}}, {add_field: Gloss}]}
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Term, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+          - {name: Gloss, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1003}
+  - edit_note: {note: "#n1", fields: {Gloss: gloss one}}
+  - edit_note: {note: "#n2", fields: {Gloss: gloss two}}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  # The target's layout back: Lead first under id 1001, Word, sort field Lead.
+  - update_notetype: {notetype: Pair, edits: [{add_field: Lead}, {move_field: {field: Lead, to: 0}}, {rename_field: {from: Term, to: Word}}, {remove_field: Gloss}]}
+  - update_notetype: {notetype: Pair, edits: [{sort_field: Lead}]}
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Lead, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Word, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+  - edit_note: {note: "#n1", fields: {Lead: local lead}}
+  - delete_notes: {notes: ["#n2"]}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1894701600 WHERE name = 'Pair'"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - reopen: {}
+  - db_exec: {sql: "SELECT f.ord, f.name FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT f.ord, f.name FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT f.ord, f.name FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}

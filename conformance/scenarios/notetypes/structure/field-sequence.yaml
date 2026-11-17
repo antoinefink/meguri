@@ -1,0 +1,68 @@
+# A chain of single-edit field saves on one note type with notes
+# (specs/notetypes/structure-changes.md S2, S4, S5; notetypes/field-rename F3,
+# F4; notetypes/schema-changes G2, G5). Each save is its own update and each
+# is read back from the stored rows: a rename rewrites the template and leaves
+# the notes and col.scm alone; an added field gives every note an empty value
+# and is a schema change; renaming the added field keeps that empty value;
+# removing the second field drops its values; moves (down, back up, a field
+# added and filled by a note edit, then three more moves) carry every value
+# with its field, so each note's flds follow the field order step by step.
+# The browser texts are not empty, so no executor adds a field to them
+# (deviation template-rewrite-keeps-text is not involved).
+id: notetypes/structure/field-sequence
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duo
+      fields: [Head, Tail]
+      templates:
+        - {name: Show, front: "{{Head}}", back: "{{Tail}}", browser_front: "{{Head}}~", browser_back: "~{{Tail}}"}
+  notes:
+    - {notetype: Duo, fields: [pine, quartz]}
+    - {notetype: Duo, fields: [oak, ""]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 3: a rename only
+  - update_notetype: {notetype: Duo, edits: [{rename_field: {from: Head, to: Top}}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Duo]}}
+  - db_exec: {sql: "SELECT flds, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - advance: 1m
+  # step 7: a field added
+  - update_notetype: {notetype: Duo, edits: [{add_field: Spare}], skip_checks: true}
+  - db_exec: {sql: "SELECT flds, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  # step 10: the added field renamed
+  - update_notetype: {notetype: Duo, edits: [{rename_field: {from: Spare, to: Slot}}], skip_checks: true}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  # step 12: the second field removed
+  - update_notetype: {notetype: Duo, edits: [{remove_field: Tail}], skip_checks: true}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  # step 14: position 0 to 1
+  - update_notetype: {notetype: Duo, edits: [{move_field: {field: Top, to: 1}}], skip_checks: true}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  # step 16: position 1 back to 0
+  - update_notetype: {notetype: Duo, edits: [{move_field: {field: Top, to: 0}}], skip_checks: true}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  # step 18: a third field, filled in the first note
+  - update_notetype: {notetype: Duo, edits: [{add_field: Third}], skip_checks: true}
+  - edit_note: {note: "#n1", fields: {Third: reed}}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  # step 21: position 2 to 1
+  - update_notetype: {notetype: Duo, edits: [{move_field: {field: Third, to: 1}}], skip_checks: true}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  # step 23: position 0 to 2
+  - update_notetype: {notetype: Duo, edits: [{move_field: {field: Top, to: 2}}], skip_checks: true}
+  - db_exec: {sql: "SELECT flds FROM notes ORDER BY id"}
+  # step 25: position 0 to 1
+  - update_notetype: {notetype: Duo, edits: [{move_field: {field: Third, to: 1}}], skip_checks: true}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}
+  - db_exec:
+      sql: >-
+        SELECT f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid
+        WHERE n.name = 'Duo' ORDER BY f.ord
+  - observe:
+      - {notetype_templates: {notetypes: [Duo]}}

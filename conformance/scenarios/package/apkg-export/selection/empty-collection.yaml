@@ -1,0 +1,23 @@
+# A whole-collection export of a collection with no note
+# (specs/package/apkg-export.md A3, A4, A10; package-ops.md E3, E6, E7,
+# E11). The export succeeds with {notes: 0}, both without and with every
+# option, and writes a latest-format package whose collection holds no note,
+# card or review-log row. The deck-package import then reads the first
+# package back and finds no note.
+id: package/apkg-export/selection/empty-collection
+description: Exporting a collection with no note writes a valid package with no note.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: bare.apkg, limit: collection, scheduling: false, presets: false, media: false}
+  - observe:
+      - package_listing: {name: bare.apkg}
+  - observe:
+      - package_db_dump: {name: bare.apkg, tables: [notes, cards, revlog, decks]}
+  - export: {format: apkg, name: bare-all.apkg, limit: collection, scheduling: true, presets: true, media: true}
+  - observe:
+      - package_listing: {name: bare-all.apkg}
+  - observe:
+      - package_db_dump: {name: bare-all.apkg, tables: [notes, cards, revlog, decks]}
+  - import: {format: apkg, name: bare.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: false, with_deck_configs: false}

@@ -25,3 +25,13 @@ confirmation: the merged field order with two or more inserted fields
 | notetype-merge J12 | `rslib/src/import_export/package/apkg/import/mod.rs`, `rslib/src/notetype/undo.rs` | the merge inside the one undoable "Import" op |
 | notetype-merge J13 | `rslib/src/import_export/package/apkg/import/notes.rs` | the kind conflict as the merge's only error |
 | notetype-merge J14 | the files above | each listed difference, read from the behaviors above |
+
+## Session s-20261117T144450Z-f49841c9 (spec writer): deferred harvest rows, batch 1
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows and write their scenarios; no code, test text or fixture value was copied, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| package/notetype-merge/field-identity, package/notetype-merge/stage-two-composed, package/notetype-merge/copy-own-field, package/notetype-merge/template-shift (notetype-merge J1, J3, J4.1, J5, J6, J7, J8) | `rslib/src/import_export/package/apkg/import/notes.rs` | Which merge behaviors the harvested tests target: matching fields by identity while keeping a target-only field; keeping a target-only template while renaming a matched one and shifting the template map; merging earlier copies by original id; the GUID-driven second stage on a note type with no original id; how the field maps of the two stages chain. Used only to choose what to observe; expectations come from oracle goldens. |
+| package/notetype-merge/align/field-order, template-order, new-fields, new-templates, field-renamed (J3, J4.1, J4.3, J7) | `rslib/src/notetype/merge.rs`; `rslib/src/import_export/package/apkg/import/notes.rs` | Which matching behaviors the harvested merge tests cover: matching by id or by name, aligning order, appending new entries with or without ids, keeping a renamed entry by its id. Also which direction the import merges in and which record it writes, so the scenarios exercise the import path. Expected values come only from the oracle goldens. |
+| package/notetype-merge/align/repeated-field-id, repeated-template-id, repeated-field-id-always, repeated-template-id-always (J3, J4.3, J14 repeated ids) | `rslib/src/notetype/merge.rs`; `rslib/src/import_export/package/apkg/import/notes.rs`; `rslib/src/notetype/mod.rs` | The robustness obligation for an incoming record that repeats an id past the end of the target's list. Which record the import writes when T governs and when the incoming governs, which is why both variants are recorded. That a note type save does not reject repeated field ids, so a scenario can build such a package with legacy_update. The outcomes themselves come only from the four goldens. |

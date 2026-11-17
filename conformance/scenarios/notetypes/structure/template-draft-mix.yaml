@@ -1,0 +1,65 @@
+# One draft that removes, moves and adds templates together
+# (specs/notetypes/structure-changes.md S1.1, S2, S6, S7). Templates are
+# matched by origin. First save, base A B C D E: A, B and D are removed and
+# two new templates are placed at positions 0 and 2, so C (2) becomes 1 and E
+# (4) becomes 3: the cards of A, B and D are removed with graves, C's and E's
+# cards are renumbered and stamped, and the new templates generate cards for
+# the notes whose fields they need. Second save, base N C M E: C and E are
+# removed, M moves to 0, a new template takes position 1 and N moves to 2, so
+# ordinals 2 and 0 swap, 1 and 3 are removed with graves and position 1 gets
+# new cards. Cards and notes are reset to a synced state and the schema to
+# unmodified before each save.
+id: notetypes/structure/template-draft-mix
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Penta
+      fields: [Stem, Leaf]
+      templates:
+        - {name: A, front: "{{Stem}}-a", back: "a"}
+        - {name: B, front: "{{Stem}}-b", back: "b"}
+        - {name: C, front: "{{Stem}}-c", back: "c"}
+        - {name: D, front: "{{Stem}}-d", back: "d"}
+        - {name: E, front: "{{Stem}}-e", back: "e"}
+  notes:
+    - {notetype: Penta, fields: [ash, elm]}
+    - {notetype: Penta, fields: [yew, ""]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 4: origins none, 2, none, 4
+  - update_notetype:
+      notetype: Penta
+      edits:
+        - {remove_template: A}
+        - {remove_template: B}
+        - {remove_template: D}
+        - {add_template: {name: N, front: "{{Leaf}}-n", back: "n"}}
+        - {add_template: {name: M, front: "{{Stem}}{{Leaf}}-m", back: "m"}}
+        - {move_template: {template: N, to: 0}}
+        - {move_template: {template: M, to: 2}}
+  - observe:
+      - {db_dump: {tables: [notes, cards, graves]}}
+      - {notetype_structure: {notetypes: [Penta]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "SELECT c.ord, n.sfld FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - db_exec: {sql: "DELETE FROM graves"}
+  - advance: 1m
+  # step 12: origins 2, none, 0
+  - update_notetype:
+      notetype: Penta
+      edits:
+        - {remove_template: C}
+        - {remove_template: E}
+        - {add_template: {name: X, front: "{{Stem}}-x", back: "x"}}
+        - {move_template: {template: M, to: 0}}
+        - {move_template: {template: X, to: 1}}
+  - observe:
+      - {db_dump: {tables: [cards, graves]}}
+      - {notetype_structure: {notetypes: [Penta]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "SELECT c.ord, n.sfld FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}

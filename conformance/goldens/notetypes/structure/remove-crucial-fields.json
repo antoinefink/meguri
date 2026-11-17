@@ -1,0 +1,115 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Std"
+        }
+      },
+      {
+        "notetype_templates": {
+          "Std": [
+            {
+              "back": "say ",
+              "browser_back": "{{Keep}}",
+              "browser_front": "|{{Keep}}",
+              "front": "ask  / {{Keep}}",
+              "name": "Only"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["k1", "k1"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Gaps"
+        }
+      },
+      {
+        "notetype_templates": {
+          "Gaps": [
+            {
+              "back": "<hr>{{Lead}}{{cloze:Lead}}",
+              "browser_back": "(){{cloze:Lead}}",
+              "browser_front": "[{{cloze:Clause}}]",
+              "front": "{{Lead}}: {{cloze:Clause}}",
+              "name": "Cloze"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["topic\u001f{{c1::alpha}} rest", "topic"]
+          ]
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Gaps"
+        }
+      },
+      {
+        "notetype_templates": {
+          "Gaps": [
+            {
+              "back": "<hr>{{Lead}}{{cloze:Lead}}",
+              "browser_back": "(){{cloze:Lead}}",
+              "browser_front": "[]{{cloze:Lead}}",
+              "front": "{{Lead}}: {{cloze:Lead}}",
+              "name": "Cloze"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["topic", "topic"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 1894701600]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/remove-crucial-fields",
+  "scenario_sha256": "46fe69c1886c7338223bdca6d2cbf5500f902093ddbd383e4aba630fa666399a",
+  "tz": "UTC"
+}

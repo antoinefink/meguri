@@ -1,0 +1,227 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "export": {
+          "notes": 2
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 4261788892,
+              "data": "",
+              "flags": 0,
+              "flds": "one\u001flocal",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701500,
+              "sfld": "one",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 2910334669,
+              "data": "",
+              "flags": 0,
+              "flds": "two\u001flocal",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701900,
+              "sfld": "two",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [
+            {
+              "fields": ["one", "a", ""],
+              "note": 1894701600000
+            },
+            {
+              "fields": ["two", "b", ""],
+              "note": 1894701600001
+            }
+          ],
+          "duplicate": [],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 4261788892,
+              "data": "",
+              "flags": 0,
+              "flds": "one\u001flocal",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701500,
+              "sfld": "one",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 2910334669,
+              "data": "",
+              "flags": 0,
+              "flds": "two\u001flocal",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701900,
+              "sfld": "two",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Pair"],
+            ["Pair+"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/conflicting-copy",
+  "scenario_sha256": "21b24012934cab91692d3775b51e576a4c9226200a3cfe43da8df80d197c0f1a",
+  "tz": "UTC"
+}

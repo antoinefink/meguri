@@ -1,0 +1,33 @@
+# A card limit gathers the notes of the listed cards
+# (specs/package/apkg-export.md A2, A3; package-ops.md E7, E11). The list
+# names both cards of a two-card note in A, the card of a note in C,
+# and the card of a note deleted before the export, which is passed by its
+# real id and ignored. The package holds two notes, each once, with all of
+# their cards; the note in B and its deck stay out.
+id: package/apkg-export/selection/card-ids
+description: A card-id limit exports the notes of the listed cards that still exist, and nothing else.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [A, B, C]
+  notetypes:
+    - name: Twin
+      fields: [Left, Right]
+      templates:
+        - {name: Out, front: "{{Left}}", back: "{{Right}}"}
+        - {name: Back, front: "{{Right}}", back: "{{Left}}"}
+    - name: Duo
+      fields: [Prompt, Reply]
+      templates: [{name: Ask, front: "{{Prompt}}", back: "{{Reply}}"}]
+  notes:
+    - {notetype: Twin, deck: A, fields: [one, a]}
+    - {notetype: Duo, deck: B, fields: [two, b]}
+    - {notetype: Duo, deck: C, fields: [three, c]}
+    - {notetype: Duo, deck: C, fields: [four, d]}
+steps:
+  - observe: [timing]
+  - delete_notes: {notes: ["#n4"]}
+  - advance: 1m
+  - export: {format: apkg, name: picked.apkg, limit: {cards: ["#c2", "#c1", "#c4", "#c5"]}, scheduling: true, presets: false, media: false}
+  - observe:
+      - package_db_dump: {name: picked.apkg, tables: [notes, cards, decks]}

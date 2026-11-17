@@ -3,7 +3,7 @@
 Spec: package/apkg-export
 Requirements: R1617 (core limits), R1618 (core options; remembering them is U160), R1619 (latest format; legacy part U123), R1620, R1621, R1622, R1623, R1624 (atomic output; native handoff U133/U160), R1625 (the collection package options), R2004, R2015
 Anki: 26.09.3
-Scenarios: conformance/scenarios/package/apkg-export/ (none recorded yet; A17 lists them)
+Scenarios: conformance/scenarios/package/apkg-export/ (A17 lists them)
 
 How Meguri writes a deck package (`.apkg`, U122): which rows go in for a deck, a note or card selection, or the whole collection; how scheduling is removed when it is not included; which media files go in; the latest-format container; and Meguri's export operation (input, output, progress, cancellation, errors, temporary files, atomic output). A14 states the two collection package options of U124 (R1625). The container, its limits and the writer reused here are `package/container` (P1–P11, P15). The job, owned artifact, native destination and cancel rules are `package/file-export` E2–E5. The legacy format ("Support older Anki versions") is U123's: the schema-11 copy is `storage/schema11-downgrade`, the legacy container `package/legacy-export` (U123); A13 only says where it plugs in. Importing a deck package is U120's (`package/apkg-import`).
 
@@ -383,6 +383,19 @@ Scenarios to record (`conformance/scenarios/package/apkg-export/`):
 | `media-unnormalized` | a field references an existing `con.jpg`: both refuse, `media_check_required` |
 | `future-ids` | a note id three days ahead: both refuse, `invalid_ids`; an export of another deck succeeds. That a refused export writes no file is not observable with the current kinds: Meguri's own A8 test checks it |
 | `empty-selection` | a deck whose notes all moved away: `{notes: 0}`, package listing equal |
+| `selection/invalid-ids` | A8 rule 1 across the selection: a note id at microsecond scale refuses a whole-collection export with `invalid_ids`, and an export of another deck passes. A note id equal to the export instant plus 86,400,000 passes (the package holds it) and one millisecond more refuses. A card id past the bound refuses without scheduling. A review-log id past it refuses only with scheduling; without scheduling the export passes with an empty package `revlog` |
+| `selection/whole-collection` | a `Collection` limit takes every note, a card-less one included, with its stored row (`mod` and `usn` as stored), every card, and the decks and ancestors the cards name (A2, A3) |
+| `selection/note-ids` | a `Notes` limit takes exactly the listed notes that exist, a card-less one included, and ignores a deleted note's id (A3) |
+| `selection/card-ids` | a `Cards` limit takes each listed card's note once with all its cards and only their decks, and ignores a deleted card's id (A3) |
+| `selection/deck-children` | a `Deck` limit takes the deck's descendants, not the sibling decks whose names share its prefix, and adds the parent as an ancestor row without its notes; an empty subdeck stays out (A2, A3) |
+| `selection/empty-collection` | a collection with no note exports `{notes: 0}` with every option off and with every option on: the latest layout, no note, card or review-log row, only the default deck; the deck-package import reads the package back with no note (A3, A10) |
+| `roundtrip-deck-limit` | a deck export, latest and legacy, of `Plot` with a subdeck; the target emptied and each package imported with progress and presets: only the deck's notes return, the deck and subdeck are recreated, an unrelated deck's note and the default deck's note stay out (A2, A3) |
+| `roundtrip-collection` | the whole collection without scheduling, both formats: every note returns to its deck, the default deck's note to the target's default deck (A3, A4, A6) |
+| `roundtrip-media` | a referenced file exported with media, both formats, imported into an emptied media folder: the same bytes (size and SHA-1); an unreferenced file in the folder never travels (A9) |
+| `roundtrip-with-scheduling` | a reviewed card imported with progress on keeps its type, queue, interval and repetitions, and its review log returns; its `due` is unchanged here only because source and target are the same collection (no day shift, `package/apkg-import#I11.2`); a new card stays new (A5) |
+| `roundtrip-without-scheduling` | the same reviewed cards from a package without scheduling, imported with progress on: new, with no repetitions, lapses, interval or factor, and no review log (A6) |
+| `roundtrip-fsrs-params` | a preset holding all three FSRS lists (`fsrsWeights`, `fsrsParams5`, `fsrsParams6` in its legacy JSON), exported with presets, both formats: without scheduling it imports with all three lists empty and its other options kept; with scheduling they are kept (A7) |
+| `fsrs-params-gathered` | the same preset in the packages themselves: `package_col` `dconf` of the legacy packages shows the three lists empty without scheduling (other options kept) and as stored with scheduling; in the latest format the preset's `deck_config` row differs between the two packages, while a preset without FSRS lists is identical (A7) |
 | `colpkg/export-with-media` (live, T1, U124) | Meguri's `.colpkg` with media from the standard collection and two files; Anki removes the files and imports it; collection dump and media folder equal the source's (`col.scm` and `col.mod` the import instant), and `package_listing` shows the latest layout with two numbered entries |
 
 Goldens are recorded with `tools/mg oracle record package/apkg-export` at the pin of `conformance/oracle.json`.

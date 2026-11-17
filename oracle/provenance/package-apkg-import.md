@@ -25,3 +25,13 @@ decks (Anki sorts unstably; Meguri fixes package id order).
 | apkg-import I13 | `rslib/src/import_export/mod.rs` (log note reduction), `proto/anki/import_export.proto` (log members) | log members and the 80-byte field reduction |
 | container P17 | `rslib/src/import_export/package/meta.rs`, `rslib/src/import_export/package/media.rs` | legacy entry names, raw collection and media, JSON map keyed by member number, legacy names normalized after a safety check, missing map read as `{}` |
 | container P18 | `qt/aqt/import_export/importing.py` | lowercased file name routing: `.colpkg`, `collection.apkg`, `backup-*.apkg` to the collection import; `.apkg` and `.zip` to the deck import |
+
+## Session s-20261117T144450Z-f49841c9 (spec writer): deferred harvest rows, batch 1
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows and write their scenarios; no code, test text or fixture value was copied, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| package/apkg-import/new-notetype, guid-other-id, conflicting-copy, media-new-note (apkg-import I7, I9, I11.1, I12.2, I12.3) | `rslib/src/import_export/package/apkg/import/notes.rs` (tests module only) | Which behaviors the harvested tests require: new id for a unique GUID with a taken id, an older incoming note kept as duplicate, a GUID match with another id updated, a GUID match under another or remapped note type kept as conflicting, a media reference rewritten to the media map's destination name, and a note type the target lacks added under its own id. The golden values come from oracle runs only. |
+| harvest rows h8ee8470f9917, hb92ed5858653, h8672411fcc3d, h522f5887f377 (apkg-import I5, I13, I14.5, I16; package-ops E6.3, E6.4) | `rslib/src/import_export/service.rs` (the import service, the presets read and the response conversion, plus its tests) | What the service tests require: presets read on a fresh collection gives the defaults, a missing package path is an error, a valid package returns a log, and the import response carries both its changes and its log. Used to classify the rows as covered-existing, needs-op or (the response's change flags, h522f5887f377) not-observable. |
+| package/notetype-merge/copy-reuse-update, package/notetype-merge/no-merge-update (apkg-import I7, I9) | `rslib/src/import_export/package/apkg/import/notes.rs` | Which no-merge note type rules the harvested tests target: a copy added for a schema mismatch, then found again by original id and schema and updated; the IfNewer update and no-update cases for a matching schema; a field rename with matching ids that is not a schema change; a remapped note type used for new notes. |

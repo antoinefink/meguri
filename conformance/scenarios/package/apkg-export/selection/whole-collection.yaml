@@ -1,0 +1,36 @@
+# A collection limit gathers every note (specs/package/apkg-export.md A2,
+# A3, A4, A5; package-ops.md E7, E11). Notes of two note types sit in the
+# default deck, in a top-level deck, in a subdeck and in a second top-level
+# deck; one note has lost its only card. With scheduling, the package holds
+# every note with its stored content, every card, and every deck a card
+# names with its ancestors. The source notes are dumped after the export,
+# so the golden also shows the export changed none of them.
+id: package/apkg-export/selection/whole-collection
+description: A collection export gathers every note, card-less ones included, with its stored content.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [A, "A::B", C]
+  notetypes:
+    - name: Duo
+      fields: [Prompt, Reply]
+      templates: [{name: Ask, front: "{{Prompt}}", back: "{{Reply}}"}]
+    - name: Twin
+      fields: [Left, Right]
+      templates:
+        - {name: Out, front: "{{Left}}", back: "{{Right}}"}
+        - {name: Back, front: "{{Right}}", back: "{{Left}}"}
+  notes:
+    - {notetype: Duo, fields: [one, a]}
+    - {notetype: Duo, deck: "A::B", fields: [two, b], tags: [x, "x::y"]}
+    - {notetype: Twin, deck: C, fields: [three, c]}
+    - {notetype: Duo, deck: A, fields: [four, d]}
+    - {notetype: Duo, deck: C, fields: [five, e], tags: [z]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "DELETE FROM cards WHERE nid = (SELECT id FROM notes WHERE sfld = 'five')"}
+  - advance: 1m
+  - export: {format: apkg, name: whole.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - observe:
+      - package_db_dump: {name: whole.apkg, tables: [notes, cards, decks]}
+      - db_dump: {tables: [notes]}

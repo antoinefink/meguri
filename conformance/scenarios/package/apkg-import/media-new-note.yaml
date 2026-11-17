@@ -1,0 +1,35 @@
+# A new note's media references (specs/package/apkg-import.md I9 step 3,
+# I12.2, I12.3; package-ops.md E6). The package's n1 names leaf.png in an
+# image tag and chime.mp3 in a sound tag, both exported with it. Then n1 is
+# deleted and the target's two files get other bytes. The import adds n1
+# again as new; each package file is written under its hash name, both
+# references in the new note are rewritten to those names, and the target's
+# own leaf.png and chime.mp3 stay.
+id: package/apkg-import/media-new-note
+description: A new note's image and sound references are rewritten to the hash names of colliding package files.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: ["<img src=\"leaf.png\"> x", "[sound:chime.mp3] y"]}
+  media_files:
+    - {name: leaf.png, text: "green leaf"}
+    - {name: chime.mp3, text: "high chime"}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: leaf.apkg, limit: collection, scheduling: true, presets: false, media: true}
+  - delete_notes: {notes: ["#n1"]}
+  - advance: 1m
+  - media_outside:
+      - {name: leaf.png, text: "brown leaf"}
+      - {name: chime.mp3, text: "low chime"}
+  - advance: 1m
+  - import: {format: apkg, name: leaf.apkg, merge_notetypes: false, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, flds FROM notes ORDER BY id"}
+  - observe: [media_dir]

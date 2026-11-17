@@ -1,0 +1,51 @@
+# A field renamed on one side (specs/package/notetype-merge.md J3, J4.2,
+# J4.3, J4.5, J9; package-ops.md E6). After the export the target renames
+# Back to Answer (same id 1002, so the target is newer). The merge matches
+# the fields by id and adds no field: with Update note types never the
+# target's name Answer stays; with Always the incoming record governs and
+# the field is named Back again. Neither import changes the field count,
+# the note's values or col.scm.
+id: package/notetype-merge/align/field-renamed
+description: Fields match by id across a rename; no field is added and the governing record gives the name.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [sun, star]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{rename_field: {from: Back, to: Answer}}]}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - reopen: {}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: never, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT f.name, f.ord FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: always, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT f.name, f.ord FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}

@@ -1,0 +1,46 @@
+# Remapping the templates and fields of a note type onto itself
+# (specs/notetypes/change-notetype.md M1, M9.1, M9 step 3). Every card starts
+# as a review card whose reps, ivl and due grow with its ordinal, so a card's
+# history shows where it ended up.
+# - Swap (1, 0): both cards keep their ids and scheduling and exchange
+#   ordinals, both stamped; no card is deleted or created.
+# - (none, 0): the old ordinal 1 card is dropped with a grave before the old
+#   ordinal 0 card takes ordinal 1, so the card left at ordinal 1 keeps the
+#   ordinal 0 history; ordinal 0 is then generated again as a new card.
+# - (none, 1): the ordinal 0 card is dropped with a grave and generated again
+#   as a new card; the ordinal 1 card is untouched.
+# - Field map (none, 1): the first field is emptied (sfld and csum follow) and
+#   no card is touched.
+# The change runs as accepted: the oracle answers no schema question and
+# Meguri's change takes no confirmation input (change-notetype-ops.md H2,
+# notetypes/schema-changes.md G4).
+id: notetypes/change/same-type-remap
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duo
+      fields: [Head, Tail]
+      templates:
+        - {name: Ask, front: "{{Head}}", back: "{{Tail}}"}
+        - {name: Echo, front: "{{Tail}}", back: "{{Head}}"}
+  decks: [Quembra]
+  notes:
+    - {notetype: Duo, deck: Quembra, fields: [mivo, rasp]}
+    - {notetype: Duo, deck: Quembra, fields: [kelt, vurn]}
+    - {notetype: Duo, deck: Quembra, fields: [plom, quill]}
+    - {notetype: Duo, deck: Quembra, fields: [tarn, zelk]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 20 + ord, ivl = 3 + 4 * ord, reps = 2 + 5 * ord"}
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n1"], notetype: Duo}
+  - change_notetype: {templates: [1, 0]}
+  - change_notetype_info: {notes: ["#n2"], notetype: Duo}
+  - change_notetype: {templates: [null, 0]}
+  - change_notetype_info: {notes: ["#n3"], notetype: Duo}
+  - change_notetype: {templates: [null, 1]}
+  - change_notetype_info: {notes: ["#n4"], notetype: Duo}
+  - change_notetype: {fields: [null, 1]}
+  - observe: [card]
+  - db_exec: {sql: "SELECT replace(n.flds, char(31), '|'), c.ord, replace(d.name, char(31), '::'), c.type, c.queue, c.due, c.ivl, c.reps, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT replace(n.flds, char(31), '|'), n.sfld, n.csum, n.mod, n.usn FROM notes n ORDER BY n.id"}
+  - db_exec: {sql: "SELECT type, usn, count(*) FROM graves GROUP BY type, usn ORDER BY type"}

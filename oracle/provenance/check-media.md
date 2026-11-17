@@ -18,3 +18,11 @@ statements await the C22 scenarios.
 | C12, C13 | `qt/aqt/mediacheck.py`, `ftl/core/media-check.ftl`, `rslib/src/tags/bulkadd.rs` | which buttons the report offers, the `missing-media` tag and its "Update Tag" undo op |
 | C14 | `qt/aqt/mediacheck.py`, `rslib/src/media/mod.rs`, `rslib/src/media/files.rs` | confirmation, trashing in chunks of 25, deletions recorded pending in the media database |
 | C16, C17 | `rslib/src/media/check.rs`, `qt/aqt/mediacheck.py` | restore by rename or by add when the name exists; empty trash without confirmation; trash count and size |
+
+## Session s-20261117T144450Z-f49841c9 (spec writer): deferred harvest rows, batch 1
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows and write their scenarios; no code, test text or fixture value was copied, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| maintenance/check-media/templates/attribute-forms; maintenance/check-media#C9 (as relied on) | `rslib/src/notetype/checks.rs` | Which behavior the template-report test requires (a side whose media tag holds a field reference is listed, a side naming a file literally is not, with unquoted attributes). That the check covers media tags, sound tags and LaTeX runs, and that a field reference must sit on one line. Golden values come only from the oracle. |

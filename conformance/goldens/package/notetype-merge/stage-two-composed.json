@@ -1,0 +1,273 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "export": {
+          "notes": 2
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 1]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [],
+          "field_content": [1, 1],
+          "fields": [0, 1, null],
+          "new_fields": ["Front", "Back", "Local"],
+          "new_notetype": "Old",
+          "new_templates": ["Forward"],
+          "old_fields": ["Front", "Back"],
+          "old_notetype": "Pair",
+          "old_templates": ["Forward"],
+          "removed_cards": 0,
+          "schema": 1894701720000,
+          "templates": [0]
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 1
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["Old", "one\u001fa\u001fmine"]
+          ]
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["one", "a", "added one", ""],
+              "note": "#n1"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["two", "b", "added two", ""],
+              "note": "#n2"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Pair"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Front"],
+            [1, "Back"],
+            [2, "Added"],
+            [3, "Local"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Pair", "one\u001fa\u001f\u001fmine", "one"],
+            ["Pair", "two\u001fb\u001fadded two\u001f", "two"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "one"],
+            [0, "two"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      },
+      {
+        "notetype_structure": {
+          "Pair": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Added",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Local",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": 1894701600006,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Forward",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["two", "b", "added two", ""],
+              "note": "#n2"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": [
+            {
+              "fields": ["one", "a", "added one", ""],
+              "note": "#n1"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Front"],
+            [1, "Back"],
+            [2, "Added"],
+            [3, "Local"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Pair", "one\u001fa\u001fadded one\u001f", "one"],
+            ["Pair", "two\u001fb\u001fadded two\u001f", "two"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/notetype-merge/stage-two-composed",
+  "scenario_sha256": "0ed0ed5818c6fd799ccef4ebf1fcf79d75b77f731aa672d3ca095d965eaa6471",
+  "tz": "UTC"
+}

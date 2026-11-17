@@ -1,0 +1,44 @@
+# A deck-limited export read back by the importer (specs/package/apkg-export.md
+# A2, A3, A13; legacy-export.md L7, L12; apkg-import.md I9, I10.2;
+# package-ops.md E6, E7, E8). Plot holds two notes, Plot::Patch one, Bin
+# one and the default deck one. Plot goes out in the latest and in the
+# legacy format, then every note and both top-level decks are removed, so the
+# target holds no note and only the default deck. Each package is imported in
+# turn, with the target emptied again in between: only Plot's three notes
+# come back, in Plot and Plot::Patch, and neither Bin nor its note nor
+# the default deck's note does.
+id: package/apkg-export/roundtrip-deck-limit
+description: A deck-limited package imports only the selected deck's notes and recreates that deck.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Plot, "Plot::Patch", Bin]
+  notetypes:
+    - name: Plant
+      fields: [Name, Care]
+      templates: [{name: Card, front: "{{Name}}", back: "{{Care}}"}]
+  notes:
+    - {notetype: Plant, deck: Plot, fields: [fern, shade]}
+    - {notetype: Plant, deck: Plot, fields: [cedar, sun]}
+    - {notetype: Plant, deck: "Plot::Patch", fields: [birch, water]}
+    - {notetype: Plant, deck: Bin, fields: [lid, dry]}
+    - {notetype: Plant, fields: [moss, reed]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: plot.apkg, limit: {deck: Plot}, scheduling: false, presets: false, media: false}
+  - export: {format: apkg, name: plot-old.apkg, limit: {deck: Plot}, scheduling: false, presets: false, media: false, legacy: true}
+  - delete_notes: {notes: ["#n1", "#n2", "#n3", "#n4", "#n5"]}
+  - delete_decks: {decks: [Plot, Bin]}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT group_concat(name, '|') FROM decks)"}
+  - advance: 1m
+  - import: {format: apkg, name: plot.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - db_exec: {sql: "SELECT n.sfld, d.name FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT name FROM decks ORDER BY name"}
+  # Empty the target again: the imported notes and both decks go.
+  - delete_decks: {decks: [Plot]}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT group_concat(name, '|') FROM decks)"}
+  - advance: 1m
+  - import: {format: apkg, name: plot-old.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - db_exec: {sql: "SELECT n.sfld, d.name FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT name FROM decks ORDER BY name"}

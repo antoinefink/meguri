@@ -1,0 +1,54 @@
+# A standard note with two cards and no cloze markup travels between kinds
+# (specs/notetypes/change-notetype.md M1, M5, M9.2, M9.3, M9 step 3). To the
+# cloze note type: both cards stay, untouched, although the text holds no
+# cloze number, and none is created; the first field becomes Text. Back to a
+# standard note type with two templates: both cards stay untouched again. To
+# cloze once more and then to a standard note type with one template: the
+# ordinal 1 card is deleted with a grave and the ordinal 0 card is the only
+# one left. No template map is offered on any of these changes. The clock
+# moves between changes so that a card's mod shows whether it was touched.
+# The change runs as accepted: the oracle answers no schema question and
+# Meguri's change takes no confirmation input (change-notetype-ops.md H2,
+# notetypes/schema-changes.md G4).
+id: notetypes/change/cloze-round-trip
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duo
+      fields: [Head, Tail]
+      templates:
+        - {name: Ask, front: "{{Head}}", back: "{{Tail}}"}
+        - {name: Echo, front: "{{Tail}}", back: "{{Head}}"}
+    - name: Solo
+      fields: [Head, Tail]
+      templates:
+        - {name: Ask, front: "{{Head}}", back: "{{Tail}}"}
+    - name: Gap Text
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+  decks: [Quembra]
+  notes:
+    - {notetype: Duo, deck: Quembra, fields: [hollen, brask]}
+steps:
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n1"], notetype: Gap Text}
+  - change_notetype: {}
+  - observe: [card]
+  - db_exec: {sql: "SELECT t.name, replace(n.flds, char(31), '|'), n.mod, n.usn FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n1"], notetype: Duo}
+  - change_notetype: {}
+  - observe: [card]
+  - db_exec: {sql: "SELECT t.name, replace(n.flds, char(31), '|'), n.mod, n.usn FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n1"], notetype: Gap Text}
+  - change_notetype: {}
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n1"], notetype: Solo}
+  - change_notetype: {}
+  - observe: [card]
+  - db_exec: {sql: "SELECT t.name, replace(n.flds, char(31), '|'), n.mod, n.usn FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT c.ord, c.mod, c.usn FROM cards c ORDER BY c.ord, c.id"}
+  - db_exec: {sql: "SELECT type, usn, count(*) FROM graves GROUP BY type, usn ORDER BY type"}

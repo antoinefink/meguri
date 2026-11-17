@@ -1,0 +1,90 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 2
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [4242, "one\u001flocal", 1894701500],
+            [1894701600001, "two\u001fb", 1894701600]
+          ]
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["two", "b"],
+              "note": "#n2"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": [
+            {
+              "fields": ["one", "a"],
+              "note": 4242
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [4242, "one\u001fa", 1894701600, -1],
+            [1894701600001, "two\u001fb", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 4242, 0],
+            [1894701600001, 1894701600001, 0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/guid-other-id",
+  "scenario_sha256": "c6ba00010117687648147d358a03a0a1cbd761a8f942e9bf74338a9f04727b6c",
+  "tz": "UTC"
+}

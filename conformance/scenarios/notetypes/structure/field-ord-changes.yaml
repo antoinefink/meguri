@@ -1,0 +1,59 @@
+# Which field lists count as changed (specs/notetypes/structure-changes.md
+# S1.1, S2, S5; notetypes/schema-changes G2, G3, G5). A save that keeps every
+# field at its position (a rename and an option change) is not a schema
+# change and rewrites no note. A save that removes the first field and adds a
+# new one at that position keeps the count but changes the fields: col.scm is
+# set and every note is rewritten and stamped, with an empty first value and
+# csum from it. A save that removes only the last field shortens every note.
+# Notes are reset to a synced state and the schema to unmodified before each
+# save, and the clock moves, so the stamps show.
+id: notetypes/structure/field-ord-changes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Ledger
+      fields: [Entry, Amount, Memo]
+      templates:
+        - {name: Line, front: "{{Entry}}{{Amount}}", back: "{{Memo}}"}
+  notes:
+    - {notetype: Ledger, fields: [tea, "40", settled]}
+    - {notetype: Ledger, fields: [ink, "", late]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 3: same positions, a rename and an option
+  - update_notetype:
+      notetype: Ledger
+      edits:
+        - {rename_field: {from: Memo, to: Aside}}
+        - {field_options: {field: Amount, sticky: true}}
+      skip_checks: true
+  - observe:
+      - {db_dump: {tables: [notes]}}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - advance: 1m
+  # step 7: the first field replaced by a new one at the same position
+  - update_notetype:
+      notetype: Ledger
+      edits:
+        - {remove_field: Entry}
+        - {add_field: Payee}
+        - {move_field: {field: Payee, to: 0}}
+      skip_checks: true
+  - observe:
+      - {db_dump: {tables: [notes]}}
+      - {notetype_structure: {notetypes: [Ledger]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 14: the last field removed
+  - update_notetype: {notetype: Ledger, edits: [{remove_field: Aside}], skip_checks: true}
+  - observe:
+      - {db_dump: {tables: [notes]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec:
+      sql: >-
+        SELECT f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid
+        WHERE n.name = 'Ledger' ORDER BY f.ord

@@ -1,0 +1,240 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Ledger"
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 1967722290,
+              "data": "",
+              "flags": 0,
+              "flds": "tea\u001f40\u001fsettled",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "tea",
+              "tags": "",
+              "usn": 5
+            },
+            "1894701600001": {
+              "csum": 3963845302,
+              "data": "",
+              "flags": 0,
+              "flds": "ink\u001f\u001flate",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1700000000,
+              "sfld": "ink",
+              "tags": "",
+              "usn": 5
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Ledger"
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 3661210606,
+              "data": "",
+              "flags": 0,
+              "flds": "\u001f40\u001fsettled",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701720,
+              "sfld": "",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 3661210606,
+              "data": "",
+              "flags": 0,
+              "flds": "\u001f\u001flate",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701720,
+              "sfld": "",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        },
+        "notetype_structure": {
+          "Ledger": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Payee",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Amount",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": true,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Aside",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Line",
+                "requirement": {
+                  "fields": [1],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Ledger"
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 3661210606,
+              "data": "",
+              "flags": 0,
+              "flds": "\u001f40",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701780,
+              "sfld": "",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 3661210606,
+              "data": "",
+              "flags": 0,
+              "flds": "\u001f",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701780,
+              "sfld": "",
+              "tags": "",
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Payee"],
+            [1, "Amount"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/field-ord-changes",
+  "scenario_sha256": "06353944ccbe4695e36f9c60e1e0ec6c6d4c556b942253f9341f3ca7e913acdf",
+  "tz": "UTC"
+}

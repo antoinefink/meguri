@@ -49,3 +49,11 @@ U34's `remove_notetype` adapter lands. Record it with
 expected first list is `_under` 0, `alpha` 1, `Straße` 1, `Strasse2` 0, `Zeta` 2,
 `Äbc` 3; the second `_under` 0, `ALPHA` 1, `Straße` 1, `Strasse2` 0, `Äbc` 3; the last
 step 0.
+
+## Session s-20261117T144450Z-f49841c9 (spec writer): deferred harvest rows, batch 1
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows and write their scenarios; no code, test text or fixture value was copied, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| notetypes/editor-actions#A2 note counts (needs-op rows h68d09bf06f67, h706cf39b03b8) | `rslib/src/notetype/service.rs` | Which behavior the names-and-counts tests require: an unused note type has count 0, and a note added to one makes it 1. Confirmed that no existing observation reads this list. |

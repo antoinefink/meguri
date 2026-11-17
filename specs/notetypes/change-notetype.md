@@ -147,6 +147,7 @@ The change is one undo step, "Change Note Type" (R948): undo restores the cards,
 | Standard with two templates, fields holding c1 and c3, to cloze (`notetypes/change/cloze`) | ordinals 0 and 1 untouched, ordinal 2 created for c3 |
 | Pair to Pair Reverse with template map none, 0 (`notetypes/change/template-map`) | the old card becomes ordinal 1 (same id, stamped), a new ordinal 0 card at its position |
 | Pair Reverse to itself with template map 0, none (`notetypes/change/template-map`) | card 2 deleted with a grave, then created again as a new card: its scheduling is lost (its review-log rows stay); the note stamped although its fields stay |
+| Duo (two templates) to itself with template map none, 0 (`notetypes/change/same-type-remap`) | old card 2 deleted with a grave, old card 1 becomes ordinal 1 with its scheduling, a new ordinal 0 card created |
 | every template dropped, nothing required (`notetypes/change/placement`) | all cards deleted, then a new card of ordinal 0 (G6) in the new note type's last deck |
 | cards split over two decks, a third template now required (`notetypes/change/placement`) | the new card goes to the new note type's last deck |
 
@@ -179,6 +180,8 @@ Anki 26.09.3's backend takes any mapping its screen sends. Given other inputs (n
 | `notetypes/change/swap-fields` | M9 note rewrite on the same note type, cards untouched | recorded |
 | `notetypes/change/cloze` | M9.2, M9.3, cloze generation after the change | recorded |
 | `notetypes/change/template-map` | M9.1 renumbering, dropping, regeneration of a dropped template | recorded |
+| `notetypes/change/same-type-remap` | M9.1 on the same note type: a template swap (1, 0) keeps both cards and their scheduling and exchanges their ordinals; with (none, 0) the dropped ordinal 1 card is deleted before the ordinal 0 card takes ordinal 1, and ordinal 0 is generated again; (none, 1) drops and regenerates ordinal 0; a field map entry of none empties that field (`sfld` and `csum` follow) without touching cards | recorded |
+| `notetypes/change/cloze-round-trip` | M9.2, M9.3: a two-card standard note with no cloze markup keeps both cards untouched going to cloze and back to two templates; from cloze to a one-template note type its ordinal 1 card is deleted with a grave | recorded |
 | `notetypes/change/placement` | M9 step 3 placement: the new note type's last deck, G6 after every card was dropped, P2 counter for a reviewed note | recorded |
 | `notetypes/change/refusals` | M8 checks 3 and 4: `schema_changed` and `not_found` write nothing; a fresh info query then succeeds | recorded |
 | `notetypes/change/undo` | M9's undo step: undo of a change that created a card (deleted without a grave, notes back with their note type, fields and stamps, `col.scm` back), redo, and undo of a change that dropped a card (the card back with its scheduling, the grave gone) | recorded (Meguri also needs `undo`, `redo` and `undo_status`) |

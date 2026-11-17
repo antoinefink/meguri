@@ -1,0 +1,54 @@
+# Restore to Default with given kinds that add and remove fields and
+# templates (specs/notetypes/restore-to-default.md D2 to D5, D4.1). Slim is
+# made from scratch with two fields and one template. Restored as Basic
+# (optional reversed card): a third field is added, so every note gets an
+# empty third value, and a second template whose cards need that field, so
+# no card is added. Restored as Basic (and reversed card): the third field
+# goes, every note is back to two values, and the second template's front
+# now needs only the second field, so the note with one there gets its card.
+# Restored as Cloze: two fields stay, the values stay by position, and the
+# second template's cards are removed with graves. Each restore changes a
+# count and so sets col.scm. Only notetype_structure, notes, cards and graves
+# are observed: stock template text and CSS are each executor's own (R908,
+# R1959).
+id: notetypes/structure/restore-field-count
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Slim
+      fields: [Term, Sense]
+      templates:
+        - {name: Recall, front: "{{Term}}", back: "{{Sense}}"}
+  notes:
+    - {notetype: Slim, fields: [lumen, light]}
+    - {notetype: Slim, fields: [nox, ""]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 4
+  - restore_notetype: {notetype: Slim, kind: basic_optional_reversed}
+  - observe:
+      - {notetype_structure: {notetypes: [Slim]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 10
+  - restore_notetype: {notetype: Slim, kind: basic_and_reversed}
+  - observe:
+      - {notetype_structure: {notetypes: [Slim]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "UPDATE notes SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 16
+  - restore_notetype: {notetype: Slim, kind: cloze}
+  - observe:
+      - {notetype_structure: {notetypes: [Slim]}}
+      - {db_dump: {tables: [notes, cards, graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "SELECT count(*) FROM cards"}

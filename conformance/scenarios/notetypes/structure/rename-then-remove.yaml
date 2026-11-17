@@ -1,0 +1,35 @@
+# A field renamed in one save and removed in the next
+# (specs/notetypes/structure-changes.md S4.1, S4.2, S4.3; notetypes/field-rename
+# F3). The rename rewrites the plain, conditional, filtered and closing
+# references of the front. The removal then deletes the plain and filtered
+# replacements of the removed field, drops its section's opening and closing
+# tags and keeps the section's contents in place; a replacement of the other
+# field remains, so nothing is appended. The browser back follows the same
+# rules and, being a back, gets nothing appended. The notes keep the other
+# field's values. No browser text is empty, so deviation
+# template-rewrite-keeps-text is not involved.
+id: notetypes/structure/rename-then-remove
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duet
+      fields: [Cue, Answer]
+      templates:
+        - name: Ask
+          front: "{{Cue}}<br>{{#Cue}}[{{hint:Cue}}] {{Answer}}{{/Cue}}"
+          back: "{{FrontSide}}<hr>{{Answer}}"
+          browser_front: "({{Answer}})"
+          browser_back: "{{Cue}}:"
+  notes:
+    - {notetype: Duet, fields: [left, right]}
+steps:
+  # step 0
+  - update_notetype: {notetype: Duet, edits: [{rename_field: {from: Cue, to: Prompt}}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Duet]}}
+  - advance: 1m
+  # step 3
+  - update_notetype: {notetype: Duet, edits: [{remove_field: Prompt}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Duet]}}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}

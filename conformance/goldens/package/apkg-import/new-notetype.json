@@ -1,0 +1,180 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "export": {
+          "notes": 2
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600006, "Pair", 1894701600],
+            [1894701600007, "Solo", 1894701600]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["Basic"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["first", "a"],
+              "note": "#n1"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 2,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [
+            {
+              "fields": ["second", "b", "c"],
+              "note": "#n2"
+            }
+          ],
+          "updated": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600006, "Pair", 1894701600, -1],
+            [1894701600007, "Solo", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Basic"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "first", "Pair"],
+            [1894701600001, "second", "Solo"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 1894701600000, 0],
+            [1894701600001, 1894701600001, 0],
+            [1894701600002, 1894701600001, 1]
+          ]
+        }
+      },
+      {
+        "notetype_structure": {
+          "Solo": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Word",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Meaning",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Usage",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": 1894701600007,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Recall",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              },
+              {
+                "deck": null,
+                "name": "Produce",
+                "requirement": {
+                  "fields": [1],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/apkg-import/new-notetype",
+  "scenario_sha256": "18fc2c03913f63ae8426d1182310a4716e35d6ea782dd935c78caf29458c10c6",
+  "tz": "UTC"
+}

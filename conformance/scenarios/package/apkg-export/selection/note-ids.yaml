@@ -1,0 +1,29 @@
+# A note limit gathers only the listed notes (specs/package/apkg-export.md
+# A2, A3, A6; package-ops.md E7, E11). The list names a note of each deck,
+# a note that has lost its only card, and a note deleted before the export,
+# which is passed by its real id and ignored. The unlisted note of the first
+# deck stays out, so its card does too.
+id: package/apkg-export/selection/note-ids
+description: A note-id limit exports exactly the listed notes that still exist, card-less ones included.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [A, B]
+  notetypes:
+    - name: Duo
+      fields: [Prompt, Reply]
+      templates: [{name: Ask, front: "{{Prompt}}", back: "{{Reply}}"}]
+  notes:
+    - {notetype: Duo, deck: A, fields: [one, a]}
+    - {notetype: Duo, deck: A, fields: [two, b]}
+    - {notetype: Duo, deck: B, fields: [three, c]}
+    - {notetype: Duo, deck: B, fields: [four, d]}
+    - {notetype: Duo, deck: B, fields: [five, e]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "DELETE FROM cards WHERE nid = (SELECT id FROM notes WHERE sfld = 'four')"}
+  - delete_notes: {notes: ["#n5"]}
+  - advance: 1m
+  - export: {format: apkg, name: listed.apkg, limit: {notes: ["#n1", "#n3", "#n4", "#n5"]}, scheduling: false, presets: false, media: false}
+  - observe:
+      - package_db_dump: {name: listed.apkg, tables: [notes, cards, decks]}

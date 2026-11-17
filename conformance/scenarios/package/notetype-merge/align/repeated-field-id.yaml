@@ -1,0 +1,62 @@
+# A damaged incoming note type that repeats a field id (specs/package/
+# notetype-merge.md J3, J4.1, J14; package-ops.md E6). The package's Pair
+# is Front (id 1001), Back (1002), Hint (1004), Source (1005) and Mirror,
+# which repeats Front's id 1001; the target's Pair is Front, Back. With
+# Update note types never the target governs, and with Update notes never
+# the note is a duplicate (with the target governing, Anki 26.9.3 fails the
+# whole import when it would update that note through the field map). Anki
+# matches Mirror with Front a second time and drops it from the target's
+# record: the merged list is Front, Back, Hint, Source. Meguri matches one
+# to one (J3), so Mirror is new and appended (proposed deviation
+# apkg-merge-repeated-id). repeated-field-id-always shows the incoming
+# record governing.
+id: package/notetype-merge/align/repeated-field-id
+description: An incoming field that repeats another field's id, past the end of the target's list.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [sun, star]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Hint}, {add_field: Source}, {add_field: Mirror}]}
+  # Mirror stored with Front's id.
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+          - {name: Hint, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, id: 1004}
+          - {name: Source, ord: 3, sticky: false, rtl: false, font: Arial, size: 20, id: 1005}
+          - {name: Mirror, ord: 4, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+  - edit_note: {note: "#n1", fields: {Hint: bright, Source: sky, Mirror: glass}}
+  - db_exec: {sql: "SELECT f.name, f.ord FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{remove_field: Hint}, {remove_field: Source}, {remove_field: Mirror}]}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - reopen: {}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: never, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT f.name, f.ord FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}

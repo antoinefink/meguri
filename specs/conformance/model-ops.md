@@ -19,7 +19,7 @@ The schema-11 JSON objects of note types, decks and presets, as converted from w
 
 ## L2. `legacy_update` (op)
 
-Saves a schema-11 object over an existing record, the way records arriving by sync or in a legacy package are saved.
+Saves a schema-11 object over an existing record; for note types this is the keep-stamps save of `notetypes/records#N3.5`, which neither a normal sync nor a package import uses.
 
 - **Argument** `{notetype: <name>, patch: <object>}`, `{deck: <name>, patch: <object>}` or `{preset: <name>, patch: <object>}`: exactly one of `notetype`, `deck` and `preset`, named as in L1.
 - **Effect.**

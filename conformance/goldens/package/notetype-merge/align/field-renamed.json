@@ -1,0 +1,223 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {},
+      {
+        "export": {
+          "notes": 1
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["sun", "star"],
+              "note": "#n1"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "notetype_structure": {
+          "Pair": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Answer",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Forward",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Front", 0],
+            ["Answer", 1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["sun\u001fstar", "sun"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {},
+      {
+        "import": {
+          "conflicting": [],
+          "duplicate": [
+            {
+              "fields": ["sun", "star"],
+              "note": "#n1"
+            }
+          ],
+          "empty_first_field": [],
+          "first_field_match": [],
+          "found_notes": 1,
+          "missing_deck": [],
+          "missing_notetype": [],
+          "new": [],
+          "updated": []
+        }
+      },
+      {
+        "notetype_structure": {
+          "Pair": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": 1894701600006,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Forward",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Front", 0],
+            ["Back", 1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["sun\u001fstar", "sun"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "package/notetype-merge/align/field-renamed",
+  "scenario_sha256": "4386d1df86d980f1a801bb24e376695d1974836226e1183a2f161d622a5ba409",
+  "tz": "UTC"
+}

@@ -1,0 +1,31 @@
+# A GUID match whose note id differs (specs/package/apkg-import.md I9 step 5,
+# I11.1; package-ops.md E6). After the export the target's note gets another
+# id (4242, its card following), an older mod and another back. The import
+# (if newer) finds it by GUID, not by id: the target note 4242 is updated
+# with the package's fields and mod and keeps its id, no note is added under
+# the package's id, and the package's card is skipped since the pair
+# (4242, 0) exists. The second note, untouched, is a duplicate.
+id: package/apkg-import/guid-other-id
+description: A newer package note updates the target note with its GUID even when the ids differ.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - export: {format: apkg, name: moved.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - db_exec: {sql: "UPDATE notes SET id = 4242, mod = 1894701500, flds = 'one' || char(31) || 'local' WHERE sfld = 'one'"}
+  - db_exec: {sql: "UPDATE cards SET nid = 4242 WHERE nid NOT IN (SELECT id FROM notes)"}
+  - db_exec: {sql: "SELECT id, flds, mod FROM notes ORDER BY id"}
+  - advance: 1m
+  - import: {format: apkg, name: moved.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, flds, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT id, nid, ord FROM cards ORDER BY id"}

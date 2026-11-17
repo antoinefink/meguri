@@ -1,0 +1,52 @@
+# An export without scheduling read back with scheduling on (specs/package/
+# apkg-export.md A3, A6, A13; legacy-export.md L12; apkg-import.md I11.1,
+# I11.3; package-ops.md E6, E7, E8). Of two cards in Peaks, one is answered
+# Good twice, the other is answered Easy and becomes a review card. The whole
+# collection goes out without scheduling in the latest and in the legacy
+# format. Then the notes and Peaks are removed and the review log emptied.
+# Each package is imported with "Import any learning progress" on, the
+# target emptied again in between: the package carries no progress, so both
+# cards arrive new (type and queue 0), with no repetitions, lapses, interval
+# or ease, and no review-log row comes in.
+id: package/apkg-export/roundtrip-without-scheduling
+description: A package without scheduling imports its reviewed cards as new cards with no repetitions.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Peaks]
+  notetypes:
+    - name: Crest
+      fields: [Mountain, Range]
+      templates: [{name: Card, front: "{{Mountain}}", back: "{{Range}}"}]
+  notes:
+    - {notetype: Crest, deck: Peaks, fields: [Eiger, Alps]}
+    - {notetype: Crest, deck: Peaks, fields: [Aneto, Pyrenees]}
+steps:
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good}
+  - answer: {card: "#c2", rating: easy}
+  - observe:
+      - card: ["#c1", "#c2"]
+  - advance: 1m
+  - export: {format: apkg, name: peaks.apkg, limit: collection, scheduling: false, presets: false, media: false}
+  - export: {format: apkg, name: peaks-old.apkg, limit: collection, scheduling: false, presets: false, media: false, legacy: true}
+  - delete_notes: {notes: ["#n1", "#n2"]}
+  - delete_decks: {decks: [Peaks]}
+  - db_exec: {sql: "DELETE FROM revlog"}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT count() FROM revlog)"}
+  - advance: 1m
+  - import: {format: apkg, name: peaks.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - observe:
+      - card: ["#c1", "#c2"]
+  - db_exec: {sql: "SELECT count() FROM revlog"}
+  # Empty the target again.
+  - delete_notes: {notes: ["#n1", "#n2"]}
+  - delete_decks: {decks: [Peaks]}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT count() FROM revlog)"}
+  - advance: 1m
+  - import: {format: apkg, name: peaks-old.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - observe:
+      - card: ["#c1", "#c2"]
+  - db_exec: {sql: "SELECT count() FROM revlog"}

@@ -1,0 +1,58 @@
+# Removing the fields a template depends on (specs/notetypes/structure-changes.md
+# S4.2, S4.3, S5). Standard note type Std: one save removes both fields its
+# front names, so the front keeps only its text and gets the first remaining
+# field (Keep, at position 0 after the save) appended; the back loses its
+# reference and gets nothing. Cloze note type Gaps: removing Hint, which only
+# the back and browser back use, appends {{cloze:Lead}} (the first field,
+# not the remaining cloze field Clause) to those two texts and leaves the
+# front and browser front, which still hold a cloze replacement, as they
+# were. Removing Clause next appends {{cloze:Lead}} to the front and browser
+# front; the back already holds one and stays. Each save rewrites the notes.
+# The cloze note's single card is read with db_exec.
+id: notetypes/structure/remove-crucial-fields
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Std
+      fields: [Ask, Say, Keep]
+      templates:
+        - {name: Only, front: "ask {{Ask}} / {{Say}}", back: "say {{Say}}", browser_front: "{{Ask}}|", browser_back: "{{Keep}}"}
+    - name: Gaps
+      kind: cloze
+      fields: [Lead, Clause, Hint]
+      templates:
+        - name: Cloze
+          front: "{{Lead}}: {{cloze:Clause}}"
+          back: "{{cloze:Hint}}<hr>{{Lead}}"
+          browser_front: "[{{cloze:Clause}}]"
+          browser_back: "({{cloze:Hint}})"
+  notes:
+    - {notetype: Std, fields: [q1, s1, k1]}
+    - {notetype: Gaps, fields: [topic, "{{c1::alpha}} rest", plain]}
+steps:
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 2
+  - update_notetype:
+      notetype: Std
+      edits:
+        - {remove_field: Ask}
+        - {remove_field: Say}
+      skip_checks: true
+  - observe:
+      - {notetype_templates: {notetypes: [Std]}}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes WHERE mid = (SELECT id FROM notetypes WHERE name = 'Std')"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - advance: 1m
+  # step 7
+  - update_notetype: {notetype: Gaps, edits: [{remove_field: Hint}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Gaps]}}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes WHERE mid = (SELECT id FROM notetypes WHERE name = 'Gaps')"}
+  - advance: 1m
+  # step 11
+  - update_notetype: {notetype: Gaps, edits: [{remove_field: Clause}], skip_checks: true}
+  - observe:
+      - {notetype_templates: {notetypes: [Gaps]}}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes WHERE mid = (SELECT id FROM notetypes WHERE name = 'Gaps')"}
+  - db_exec: {sql: "SELECT c.ord, c.mod FROM cards c JOIN notes n ON n.id = c.nid WHERE n.mid = (SELECT id FROM notetypes WHERE name = 'Gaps') ORDER BY c.ord"}

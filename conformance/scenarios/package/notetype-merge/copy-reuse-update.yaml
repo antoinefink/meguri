@@ -1,0 +1,67 @@
+# An earlier copy reused and updated, without a merge (specs/package/
+# apkg-import.md I7 rows "copy added" and "earlier copy", I9; package-ops.md
+# E6). Two packages come from the same source state: wide.apkg holds the note
+# type as "Pair wide" with a third field Extra (id 1003); later, rename.apkg
+# holds the same layout renamed "Tandem" with other CSS, so it is newer. The
+# target then drops Extra and gets its first name and CSS back, and loses n2.
+# - wide.apkg: the target's Pair has another schema and no copy exists, so a
+#   copy "Pair wide" is added under a new id (original id Pair's); n1 is
+#   conflicting (its target note is under Pair), n2 new under the copy.
+# - rename.apkg: the copy has Pair's id as original id and the same schema,
+#   so it is reused (no third note type) and, being older, updated: it takes
+#   the name Tandem and the new CSS; n2 now matches its own note.
+id: package/notetype-merge/copy-reuse-update
+description: A copy added for a different schema is found again by a later import and updated in place.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the schema check compares ids).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Extra}, {rename: Pair wide}]}
+  - legacy_update:
+      notetype: Pair wide
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+          - {name: Extra, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, id: 1003}
+  - edit_note: {note: "#n2", fields: {Extra: wide two}}
+  - export: {format: apkg, name: wide.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair wide, edits: [{rename: Tandem}, {css: ".card { margin: 3px; }"}]}
+  - export: {format: apkg, name: rename.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Tandem, edits: [{remove_field: Extra}, {rename: Pair}, {css: ".card { margin: 0; }"}]}
+  - delete_notes: {notes: ["#n2"]}
+  - db_exec: {sql: "SELECT id, name, mtime_secs FROM notetypes WHERE name IN ('Pair', 'Pair wide', 'Tandem') ORDER BY id"}
+  - advance: 1m
+  - import: {format: apkg, name: wide.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn FROM notetypes WHERE name IN ('Pair', 'Pair wide', 'Tandem') ORDER BY id"}
+  - db_exec: {sql: "SELECT n.sfld, t.name, n.flds FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - observe:
+      - notetype_structure: {notetypes: [Pair wide]}
+  - advance: 1m
+  - import: {format: apkg, name: rename.apkg, merge_notetypes: false, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn FROM notetypes WHERE name IN ('Pair', 'Pair wide', 'Tandem') ORDER BY id"}
+  - db_exec: {sql: "SELECT n.sfld, t.name, n.flds FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - observe:
+      - legacy_json: {notetypes: [Pair, Tandem]}

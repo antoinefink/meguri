@@ -1,0 +1,63 @@
+# Templates shifted by a template only the target has (specs/package/
+# notetype-merge.md J3, J4.1, J5 step 4, J7; apkg-import.md I8, I11;
+# package-ops.md E6). The package's Pair lists Turn (id 2002) and Spare
+# (2003). The target's lists Lead (2001, its own) and Reverse (2002, the
+# package's Turn under another name), with an older mtime. Merged: Lead,
+# then Turn (matched by id, the newer incoming record naming it), then Spare
+# (appended); template map 0 -> 1, 1 -> 2. Note two is only in the package,
+# its Spare card suspended: its cards arrive at the target's ordinals 1 and
+# 2, the suspended one at 2, which an unmapped import would put at 0 and 1.
+id: package/notetype-merge/template-shift
+description: A merge keeps a target-only template, takes the incoming name of a matched one and places incoming cards at the mapped ordinals.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Turn, front: "{{Back}}", back: "{{Front}}"}
+        - {name: Spare, front: "{{Front}} / {{Back}}", back: "{{Back}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [sun, star]}
+    - {notetype: Pair, deck: Lang, fields: [river, delta]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Turn, ord: 0, qfmt: "{{Back}}", afmt: "{{Front}}", id: 2002}
+          - {name: Spare, ord: 1, qfmt: "{{Front}} / {{Back}}", afmt: "{{Back}}", id: 2003}
+  # Note two's Spare card.
+  - suspend: {cards: ["#c4"]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.queue FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - advance: 1m
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  # The target: its own Lead first, Turn named Reverse, no Spare, note two
+  # gone, an mtime older than the package's.
+  - update_notetype: {notetype: Pair, edits: [{add_template: {name: Lead, front: "{{Front}}", back: "{{Back}}"}}, {move_template: {template: Lead, to: 0}}, {remove_template: Spare}]}
+  - legacy_update:
+      notetype: Pair
+      patch:
+        tmpls:
+          - {name: Lead, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+          - {name: Reverse, ord: 1, qfmt: "{{Back}}", afmt: "{{Front}}", id: 2002}
+  - delete_notes: {notes: ["#n2"]}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1894701000 WHERE name = 'Pair'"}
+  - reopen: {}
+  - db_exec: {sql: "SELECT m.name, m.ord FROM templates m JOIN notetypes t ON t.id = m.ntid WHERE t.name = 'Pair' ORDER BY m.ord"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.queue FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT m.name, m.ord FROM templates m JOIN notetypes t ON t.id = m.ntid WHERE t.name = 'Pair' ORDER BY m.ord"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.queue FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}

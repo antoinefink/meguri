@@ -1,0 +1,57 @@
+# Moving a template down, removing one, then replacing the only template in
+# one save (specs/notetypes/structure-changes.md S2, S6, S7). Moving Ahead
+# from position 0 to 1 swaps the ordinals of both cards of the first note.
+# Removing Behind (now at 0) removes its card with a grave and renumbers
+# Ahead's cards to 0; the kept card still renders from Ahead's texts. A
+# single save that adds Fresh and removes Ahead keeps one template, so the
+# count is unchanged but the templates changed: every Ahead card is removed
+# with a grave and every note is left with no card; a note with no card is
+# not visited by generation, so Fresh adds none. No card is left without its
+# note. Cards are reset to a synced state and the schema to unmodified before
+# each save.
+id: notetypes/structure/template-swap-replace
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pairing
+      fields: [Word, Gloss]
+      templates:
+        - {name: Ahead, front: "<i>{{Word}}</i>", back: "{{Gloss}}"}
+        - {name: Behind, front: "{{Gloss}}?", back: "{{Word}}"}
+  notes:
+    - {notetype: Pairing, fields: [sol, sun]}
+    - {notetype: Pairing, fields: [mar, ""]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 3
+  - update_notetype: {notetype: Pairing, edits: [{move_template: {template: Ahead, to: 1}}]}
+  - observe: [card]
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 9
+  - update_notetype: {notetype: Pairing, edits: [{remove_template: Behind}]}
+  - observe:
+      - card
+      - render
+      - {db_dump: {tables: [graves]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1700000000, usn = 5"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  # step 15
+  - update_notetype:
+      notetype: Pairing
+      edits:
+        - {add_template: {name: Fresh, front: "{{Word}}!", back: "{{Gloss}}"}}
+        - {remove_template: Ahead}
+  - observe:
+      - card
+      - {db_dump: {tables: [notes, cards, graves]}}
+      - {notetype_structure: {notetypes: [Pairing]}}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "SELECT count(*) FROM cards WHERE nid NOT IN (SELECT id FROM notes)"}
+  - db_exec: {sql: "SELECT n.sfld, count(c.id) FROM notes n LEFT JOIN cards c ON c.nid = n.id GROUP BY n.id ORDER BY n.id"}

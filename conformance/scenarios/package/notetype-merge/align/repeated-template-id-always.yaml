@@ -1,0 +1,62 @@
+# The same damaged package as repeated-template-id, imported with Update
+# note types always, so the incoming record governs (specs/package/
+# notetype-merge.md J3, J4.1, J4.2, J4.3, J7, J14; package-ops.md E6). The
+# package's Pair has Forward (id 2001), Reverse (2002), Both (2004), Hint
+# side (2005) and Echo, which repeats Forward's id 2001; the target's Pair
+# has Forward and Reverse. This run shows which templates the written
+# record keeps, which ids they carry, and where the incoming Echo card
+# lands.
+id: package/notetype-merge/align/repeated-template-id-always
+description: An incoming template that repeats another template's id, with the incoming record governing.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [sun, star]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+          - {name: Reverse, ord: 1, qfmt: "{{Back}}", afmt: "{{Front}}", id: 2002}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_template: {name: Both, front: "{{Front}} {{Back}}", back: "{{Front}}"}}, {add_template: {name: Hint side, front: "{{Back}} {{Front}}", back: "{{Back}}"}}, {add_template: {name: Echo, front: "{{Front}}<br>", back: "{{Back}}"}}]}
+  # Echo stored with Forward's id.
+  - legacy_update:
+      notetype: Pair
+      patch:
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+          - {name: Reverse, ord: 1, qfmt: "{{Back}}", afmt: "{{Front}}", id: 2002}
+          - {name: Both, ord: 2, qfmt: "{{Front}} {{Back}}", afmt: "{{Front}}", id: 2004}
+          - {name: Hint side, ord: 3, qfmt: "{{Back}} {{Front}}", afmt: "{{Back}}", id: 2005}
+          - {name: Echo, ord: 4, qfmt: "{{Front}}<br>", afmt: "{{Back}}", id: 2001}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{remove_template: Both}, {remove_template: Hint side}, {remove_template: Echo}]}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - reopen: {}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: never, update_notetypes: always, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - notetype_structure: {notetypes: [Pair]}
+  - db_exec: {sql: "SELECT m.name, m.ord FROM templates m JOIN notetypes t ON t.id = m.ntid WHERE t.name = 'Pair' ORDER BY m.ord"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld, c.ord"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}

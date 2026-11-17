@@ -1,0 +1,52 @@
+# Scheduling through an export and an import (specs/package/apkg-export.md
+# A3, A5, A7, A13; legacy-export.md L12; apkg-import.md I10, I11.1, I11.3;
+# package-ops.md E6, E7, E8). Of two cards in Rivers, one is answered Good
+# twice (two review-log rows), the other stays new. The whole collection goes
+# out with scheduling and presets in the latest and in the legacy format.
+# Then the notes and Rivers are removed and the review log emptied, so the
+# target holds none of it. Each package is imported with scheduling, the
+# target emptied again in between: the answered card keeps its type, queue,
+# due, interval and repetition count and its two review-log rows come back;
+# the new card stays new.
+id: package/apkg-export/roundtrip-with-scheduling
+description: A package with scheduling imports the reviewed card's state, repetitions and review log.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Rivers]
+  notetypes:
+    - name: Stream
+      fields: [River, Sea]
+      templates: [{name: Card, front: "{{River}}", back: "{{Sea}}"}]
+  notes:
+    - {notetype: Stream, deck: Rivers, fields: [Rhine, North]}
+    - {notetype: Stream, deck: Rivers, fields: [Rhone, Mediterranean]}
+steps:
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good}
+  - observe:
+      - card: ["#c1", "#c2"]
+  - advance: 1m
+  - export: {format: apkg, name: rivers.apkg, limit: collection, scheduling: true, presets: true, media: false}
+  - export: {format: apkg, name: rivers-old.apkg, limit: collection, scheduling: true, presets: true, media: false, legacy: true}
+  - delete_notes: {notes: ["#n1", "#n2"]}
+  - delete_decks: {decks: [Rivers]}
+  - db_exec: {sql: "DELETE FROM revlog"}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT count() FROM revlog)"}
+  - advance: 1m
+  - import: {format: apkg, name: rivers.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - observe:
+      - card: ["#c1", "#c2"]
+      - revlog: ["#c1", "#c2"]
+  # Empty the target again.
+  - delete_notes: {notes: ["#n1", "#n2"]}
+  - delete_decks: {decks: [Rivers]}
+  - db_exec: {sql: "DELETE FROM revlog"}
+  - db_exec: {sql: "SELECT (SELECT count() FROM notes), (SELECT count() FROM cards), (SELECT count() FROM revlog)"}
+  - advance: 1m
+  - import: {format: apkg, name: rivers-old.apkg, merge_notetypes: true, update_notes: if_newer, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: true}
+  - observe:
+      - card: ["#c1", "#c2"]
+      - revlog: ["#c1", "#c2"]

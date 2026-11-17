@@ -1,0 +1,37 @@
+# A GUID match whose package note type was copied (specs/package/apkg-import.md
+# I7 last row, I9 step 5; package-ops.md E6). Pair gains a field Extra
+# before the export and loses it again after, so the package's Pair has
+# another schema: the import adds a copy Pair+ and maps the package's notes
+# to it. Both target notes then get another back, n1 an older mod and n2 a
+# newer one, so Update notes Always would rewrite them both. Their target
+# notes are under Pair, not the copy: both are logged conflicting with the
+# package note's id and keep their exact rows.
+id: package/apkg-import/conflicting-copy
+description: A GUID match whose package note type became a copy is conflicting and leaves the target note as it was.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, a]}
+    - {notetype: Pair, deck: Lang, fields: [two, b]}
+steps:
+  - observe: [timing]
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Extra}]}
+  - export: {format: apkg, name: copy.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - update_notetype: {notetype: Pair, edits: [{remove_field: Extra}]}
+  - advance: 1m
+  - db_exec:
+      sql: "UPDATE notes SET flds = sfld || char(31) || 'local', mod = CASE sfld WHEN 'one' THEN 1894701500 ELSE 1894701900 END"
+  - observe:
+      - db_dump: {tables: [notes, cards]}
+  - advance: 1m
+  - import: {format: apkg, name: copy.apkg, merge_notetypes: false, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - observe:
+      - db_dump: {tables: [notes, cards]}
+  - db_exec: {sql: "SELECT name FROM notetypes WHERE name LIKE 'Pair%' ORDER BY id"}

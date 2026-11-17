@@ -914,6 +914,61 @@ deviations:
     scenarios: [package/notetype-merge/template-moved]
     pointer: /steps/14/db_exec/rows
     transform: {replace: [[one, 0], [one, 1], [one, 2], [two, 1], [two, 2]]}
+  # notetype-merge.md J3, J4.3, J14 (apkg-merge-repeated-id): with the
+  # target governing, Meguri matches one to one, so an incoming field that
+  # repeats another field's id is new and appended; Anki 26.9.3 matches it a
+  # second time and leaves it out of the target's record.
+  - id: apkg-merge-repeated-id
+    requirement: R1605
+    summary: With the target governing, Meguri appends the repeated-id field Mirror as a fifth field; Anki leaves it out.
+    test: package/notetype-merge/align/repeated-field-id
+    scenarios: [package/notetype-merge/align/repeated-field-id]
+    pointer: /steps/14/notetype_structure/Pair/fields
+    transform:
+      replace:
+          - {"collapsed": false, "description": "", "exclude_from_search": false, "font_name": "Arial", "font_size": 20, "name": "Front", "plain_text": false, "prevent_deletion": false, "rtl": false, "sticky": false, "tag": null}
+          - {"collapsed": false, "description": "", "exclude_from_search": false, "font_name": "Arial", "font_size": 20, "name": "Back", "plain_text": false, "prevent_deletion": false, "rtl": false, "sticky": false, "tag": null}
+          - {"collapsed": false, "description": "", "exclude_from_search": false, "font_name": "Arial", "font_size": 20, "name": "Hint", "plain_text": false, "prevent_deletion": false, "rtl": false, "sticky": false, "tag": null}
+          - {"collapsed": false, "description": "", "exclude_from_search": false, "font_name": "Arial", "font_size": 20, "name": "Source", "plain_text": false, "prevent_deletion": false, "rtl": false, "sticky": false, "tag": null}
+          - {"collapsed": false, "description": "", "exclude_from_search": false, "font_name": "Arial", "font_size": 20, "name": "Mirror", "plain_text": false, "prevent_deletion": false, "rtl": false, "sticky": false, "tag": null}
+  - id: apkg-merge-repeated-id-rows
+    requirement: R1605
+    summary: The fields rows of apkg-merge-repeated-id end with Mirror at 4.
+    test: package/notetype-merge/align/repeated-field-id
+    scenarios: [package/notetype-merge/align/repeated-field-id]
+    pointer: /steps/15/db_exec/rows
+    transform: {replace: [[Front, 0], [Back, 1], [Hint, 2], [Source, 3], [Mirror, 4]]}
+  - id: apkg-merge-repeated-id-notes
+    requirement: R1605
+    summary: The target's note is rewritten with five values, Mirror's empty, under apkg-merge-repeated-id.
+    test: package/notetype-merge/align/repeated-field-id
+    scenarios: [package/notetype-merge/align/repeated-field-id]
+    pointer: /steps/16/db_exec/rows
+    transform: {replace: [["sun\x1fstar\x1f\x1f\x1f", sun]]}
+  # notetype-merge.md J3, J4.3, J14 (apkg-merge-repeated-id-templates): the
+  # same for a template; Anki 26.9.3 leaves the repeat out of the target's
+  # record but still adds its incoming card at ordinal 4, which then has no
+  # template; Meguri appends it at 4, so the cards are the same.
+  - id: apkg-merge-repeated-id-templates
+    requirement: R1605
+    summary: With the target governing, Meguri appends the repeated-id template Echo at ordinal 4; Anki leaves it out but keeps the card at 4.
+    test: package/notetype-merge/align/repeated-template-id
+    scenarios: [package/notetype-merge/align/repeated-template-id]
+    pointer: /steps/13/notetype_structure/Pair/templates
+    transform:
+      replace:
+          - {"deck": null, "name": "Forward", "requirement": {"fields": [0], "kind": "any"}}
+          - {"deck": null, "name": "Reverse", "requirement": {"fields": [1], "kind": "any"}}
+          - {"deck": null, "name": "Both", "requirement": {"fields": [0, 1], "kind": "any"}}
+          - {"deck": null, "name": "Hint side", "requirement": {"fields": [0, 1], "kind": "any"}}
+          - {"deck": null, "name": "Echo", "requirement": {"fields": [0], "kind": "any"}}
+  - id: apkg-merge-repeated-id-templates-rows
+    requirement: R1605
+    summary: The templates rows of apkg-merge-repeated-id-templates end with Echo at 4.
+    test: package/notetype-merge/align/repeated-template-id
+    scenarios: [package/notetype-merge/align/repeated-template-id]
+    pointer: /steps/14/db_exec/rows
+    transform: {replace: [[Forward, 0], [Reverse, 1], [Both, 2], [Hint side, 3], [Echo, 4]]}
   # fields, a year of any length or sign, a space before a number, second 60)
   # and thins such files; Meguri recognises only the exact names a writer
   # produces, so they are foreign files and stay.

@@ -74,6 +74,24 @@ These columns are data, never stamps (`storage/ids-usn-mtime` S1). A template ke
 
 A local save that wrote something is one undo step (U25) unless its op says otherwise. Undo restores every row of the aggregate from its before-image, the `notetypes` row's `mtime_secs` and `usn` included, as Anki does; redo restores the after-images.
 
+### N3.5 Saving a whole note type with its own stamps
+
+Some callers hand over a complete note type record that carries its own id, `usn` and `mod` and ask for it to be saved with those stamps kept: the schema-11 save of `conformance/model-ops#L2` (in Anki, the add-or-update of a legacy object with stamp preservation on). This save differs from a local save (N3) only as follows.
+
+- Stamps. The `notetypes` row keeps the `usn` and `mtime_secs` the record carries, as given, even when `mtime_secs` is older than the clock or older than the stored row. The one exception is N4 step 7: when the save makes the name unique, the record is stamped as a local change (`usn` -1, `mtime_secs` = `now_s`), not with a server USN.
+- Normalization and checks. N4 and N6 apply as for a local save. The template checks of `notetypes/validation` V3 run or are skipped as the caller says; `legacy_update` skips them.
+- Existing id. When the collection holds a note type with that id, the record replaces it under the same id: the `notetypes` row and its `fields` and `templates` rows are rewritten (N3.3 for the template rows' columns), no row is added, and the notes keep pointing to it. A structure change has the consequences it has for a local save of the same change: notes are updated for added, removed or moved fields and the sort field (`notetypes/schema-changes`), and cards for added, removed or moved templates.
+- No such id. When no note type has that id, the record is inserted under its own id with its stamps; nothing else changes.
+- Undo. The save takes no undo step and leaves the undo queue as it was.
+
+Whether an incoming object should be saved at all (for example an `mtime_secs` comparison or a field and template count check) is the caller's rule, not this save's.
+
+A save of the same record through any editor or op without the keep-stamps option is a local save: N3.2 stamps it `mtime_secs` = `now_s`, `usn` = -1, whatever stamps the record held before.
+
+Other arriving note types are not written this way. A normal sync's accepted note type is written by `sync/normal-sync#N5.2` step 3 and N5.9: the name is made unique (stamped with the server USN when renamed) and the rows are written directly, with no N4 normalization, no N6 recomputation and no note or card change. Package import is not this save either: `package/apkg-import#I7` and `package/notetype-merge#J4.5` apply there (`usn` -1).
+
+Scenario: `notetypes/records/incoming-stamps` (stamps kept on an existing id, then a local save of the same record).
+
 ## N4. Save normalization
 
 Every local save, add and clone applies these steps in this order. A step that refuses makes the whole save fail with `invalid_notetype` and write nothing.
@@ -96,7 +114,7 @@ Every local save, add and clone applies these steps in this order. A step that r
 
 Anki's Python layer has a rename of its own for note types added or saved through its legacy API (a hyphen and five characters of a checksum); Meguri follows the core rule of step 7 (R907). Anki's desktop Add sheet and Rename save through that layer, so a typed name that collides under unicase gets the hyphen suffix there and `+` only when the collision comes from step 1 or 2 (`notetypes/editor-actions` A3, A4, A17).
 
-Saves of rows arriving by sync or import go through the same normalization in Anki; whether and how Meguri applies it to sync is U107's, and an `.apkg` import without a merge applies steps 1 to 8 as an unchecked save (`package/apkg-import#I7`, U120); with a merge, the merged note type follows `package/notetype-merge#J4.5` (steps 1 to 5, 7 and 8 as an unchecked save, J4.4 standing in for step 6; U121).
+Note types accepted by a normal sync do not go through this normalization: `sync/normal-sync#N5.2` writes their rows directly after only making the name unique (N5.9). A whole note type saved with its own stamps (N3.5) does go through steps 1 to 8. An `.apkg` import without a merge applies steps 1 to 8 as an unchecked save (`package/apkg-import#I7`, U120); with a merge, the merged note type follows `package/notetype-merge#J4.5` (steps 1 to 5, 7 and 8 as an unchecked save, J4.4 standing in for step 6; U121).
 
 ## N5. Adding a note type
 
@@ -219,6 +237,7 @@ Every scenario below has its golden. Each runs on Meguri with U29's adapters and
 | `notetypes/records/stock-structure` | `notetypes/stock-kinds` K1, K3, K4, K8 | |
 | `notetypes/records/stamps` | N3.1, N3.2, N8; deviation `notetype-unchanged-save` | `setup.decks` (U28) |
 | `notetypes/records/clone` | N7 | `legacy_update` (U36) |
+| `notetypes/records/incoming-stamps` | N3.5 (stamps kept under an existing id, no row added), then N3.2 for a local save of the same record | `legacy_update` (U36) |
 | `notetypes/records/preserve-on-edit` | N1, N3.2; deviation `notetype-unknown-fields-kept` | `legacy_update`, `blob_decode`, `legacy_json` (U36) |
 | `notetypes/records/stock-render-handoff` (live, T1) | `notetypes/stock-kinds` K2, K4, K5, K7, K9: Anki adds notes of every stock kind on the note types Meguri wrote and renders their cards without errors | (Meguri's segment is empty: it needs `handoff` and the new collection of T10.2, which holds the default deck the oracle adds the notes to) |
 | `notetypes/records/stock-handoff` (live, T1) | `notetypes/stock-kinds` K2, K4, K9, with the notes Meguri adds | `add_note` (U27) |

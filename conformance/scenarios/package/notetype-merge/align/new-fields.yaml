@@ -1,0 +1,58 @@
+# Two new fields at the end, one without an id (specs/package/
+# notetype-merge.md J3, J4.1, J4.3, J7, J9, J11; package-ops.md E6). The
+# package's Pair is Front, Back, Hint (id 1004), Source (no id); the
+# target's is Front, Back with an older mtime. The merge appends Hint and
+# Source in the incoming order; Source matches nothing by name and keeps
+# having no id. T's notes are rewritten and col.scm set; with Always the
+# GUID-matched note is updated with both new values.
+id: package/notetype-merge/align/new-fields
+description: New incoming fields are appended in order, an id-less one keeping no id.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {rollover: 4}
+  decks: [Lang]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [sun, star]}
+steps:
+  - observe: [timing]
+  # Field and template ids pinned (the merge matches by id).
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Hint}, {add_field: Source}]}
+  # Hint pinned to 1004; Source stored without an id.
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+          - {name: Hint, ord: 2, sticky: false, rtl: false, font: Arial, size: 20, id: 1004}
+          - {name: Source, ord: 3, sticky: false, rtl: false, font: Arial, size: 20, id: null}
+  - edit_note: {note: "#n1", fields: {Hint: bright, Source: sky}}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}
+  - export: {format: apkg, name: pair.apkg, limit: collection, scheduling: true, presets: false, media: false}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{remove_field: Hint}, {remove_field: Source}]}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1894701600 WHERE name = 'Pair'"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - reopen: {}
+  - advance: 1m
+  - import: {format: apkg, name: pair.apkg, merge_notetypes: true, update_notes: always, update_notetypes: if_newer, with_scheduling: true, with_deck_configs: false}
+  - db_exec: {sql: "SELECT f.name, f.ord FROM fields f JOIN notetypes t ON t.id = f.ntid WHERE t.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT flds, sfld FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm = ls FROM col"}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}

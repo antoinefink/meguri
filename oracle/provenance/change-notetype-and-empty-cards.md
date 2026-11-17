@@ -50,3 +50,12 @@ no Anki source. So are the delete's second look (E4 steps 1 and 2, E5) and the
 ## Harvest
 
 The U35 rows of `conformance/catalog/harvest.csv` (the single note type of selected notes, the field and template mapping tests, Empty Cards with special fields, removal of cards with the notes they leave empty) stay `deferred` until the scenarios of M12 and E7 land with their goldens. The change screen's request-message conversion test fits not-applicable, like the Rust library's conversion tests U29 classified; the empty-cards report tests about markup in names belong to U131's report (E2 strips names).
+
+## Session s-20261117T144450Z-f49841c9 (spec writer): deferred harvest rows, batch 1
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows and write their scenarios; no code, test text or fixture value was copied, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| notetypes/change/same-type-remap, notetypes/change/cloze-round-trip (spec notetypes/change-notetype M1, M2, M3, M7, M9.1-M9.3) | `pylib/tests/test_models.py`; `rslib/src/notetype/notetypechange.rs` (test module only); `ts/routes/change-notetype/lib.test.ts` | To learn which behaviors the harvested tests require: same-type field and template remaps, a template map with a none entry from one or two old templates, standard and cloze round trips, the default field map rules, the mapping sheet's picker, unused and unchanged state, and the -1/null conversion. No expectation was taken from them; the goldens come from the oracle. |
+| notes/empty-cards#E2 report label stripping (needs-op rows hd276a7ef2889, h6288de9d6fb5, h8c43ce71aafa) | `rslib/src/notetype/emptycards.rs` | Which behavior the three report tests require: markup is stripped from note type and template names in the Empty Cards report and plain names pass unchanged. Confirmed that the report string, not the scan data, is where it shows, so the existing empty_cards op cannot observe it. |

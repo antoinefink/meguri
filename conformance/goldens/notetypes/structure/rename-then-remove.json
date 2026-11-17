@@ -1,0 +1,62 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "update_notetype": {
+          "name": "Duet"
+        }
+      },
+      {
+        "notetype_templates": {
+          "Duet": [
+            {
+              "back": "{{FrontSide}}<hr>{{Answer}}",
+              "browser_back": "{{Prompt}}:",
+              "browser_front": "({{Answer}})",
+              "front": "{{Prompt}}<br>{{#Prompt}}[{{hint:Prompt}}] {{Answer}}{{/Prompt}}",
+              "name": "Ask"
+            }
+          ]
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Duet"
+        }
+      },
+      {
+        "notetype_templates": {
+          "Duet": [
+            {
+              "back": "{{FrontSide}}<hr>{{Answer}}",
+              "browser_back": ":",
+              "browser_front": "({{Answer}})",
+              "front": "<br>[] {{Answer}}",
+              "name": "Ask"
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["right", "right"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/structure/rename-then-remove",
+  "scenario_sha256": "d831893e4cab52694a0cd7239f02999533a620002d690923121a300cc70eba15",
+  "tz": "UTC"
+}

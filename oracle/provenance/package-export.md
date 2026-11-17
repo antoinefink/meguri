@@ -39,3 +39,13 @@ remembered options (A2), and the snapshot source of a legacy `.colpkg` (L4, L8).
 | legacy-export L6 | `rslib/src/import_export/package/colpkg/export.rs` | the zip writer's 4 GiB limit per entry |
 | legacy-export L12 | `rslib/src/import_export/package/apkg/import/mod.rs`, `rslib/src/import_export/package/colpkg/import.rs`, `rslib/src/storage/upgrades/mod.rs` | what Anki's importers do with a legacy 2 package (upgrade on the staging copy) |
 | legacy-export L13 | the files of L4 and L5 | the Anki column of each difference (map member order, live downgrade, generic error) |
+
+## Session s-20261117T144450Z-f49841c9 (spec writer): deferred harvest rows, batch 1
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows and write their scenarios; no code, test text or fixture value was copied, and every expected value comes from the recorded oracle goldens.
+
+| Spec section and scenarios | Anki file | Read for |
+|---|---|---|
+| package/apkg-export#A8; scenario package/apkg-export/selection/invalid-ids | `rslib/src/import_export/gather.rs` (id check after gathering, its tests) | Which ids the export checks: selected cards, notes and the review log only when scheduling gathers it. The comparison against now plus one day, and that a microsecond-scale note id is the malformed case to prove. |
+| package/apkg-export#A2, #A3; scenarios package/apkg-export/selection/whole-collection, note-ids, card-ids, deck-children | `rslib/src/import_export/service.rs` (export limit to search mapping, its tests); `rslib/src/import_export/gather.rs` (gathering of notes then the cards of those notes, its tests) | Which behaviors the four limit kinds must prove: an absent limit is the whole collection, note ids and card ids become id searches, and a deck id includes its children. Also that gathering returns the stored notes. Expected values come from the oracle goldens. |
+| package/apkg-export#A3, #A10, #A12; scenario package/apkg-export/selection/empty-collection; needs-op for invalid destination | `rslib/src/import_export/service.rs` (deck package export service tests for an empty collection and for an unwritable output path) | The obligations: an empty collection exports a package file without error, and an output path in a missing directory must fail rather than succeed. The second has no scenario form (E7 names are plain session file names). |
