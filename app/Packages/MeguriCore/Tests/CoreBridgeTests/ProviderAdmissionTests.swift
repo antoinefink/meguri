@@ -74,6 +74,7 @@ extension EventTests {
             let current = try await CoreProviderService.attached()
             let file = location.manualTransferDirectory.appending(path: "provider.json")
             let before = try Data(contentsOf: file)
+            #expect(before == Data(metadata.utf8))
             await #expect(throws: (any Error).self) { _ = try await current.recoverHandoffToLocalOnly() }
             await #expect(throws: (any Error).self) { _ = try await current.retryFailedPublication() }
             #expect(try await current.refresh().phase == .blocked)
@@ -94,8 +95,13 @@ extension EventTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
     defer { try? FileManager.default.removeItem(at: root) }
-    if let metadata { try metadata.write(to: location.manualTransferDirectory.appending(path: "provider.json")) }
-    _ = try await CoreProviderService.migrate(directory: location.manualTransferDirectory, legacyJSON: nil)
+    if let metadata {
+        // An existing damaged installation reaches ordinary Host open, which
+        // retains the invalid document and blocks provider admission.
+        try metadata.write(to: location.manualTransferDirectory.appending(path: "provider.json"))
+    } else {
+        _ = try await CoreProviderService.migrate(directory: location.manualTransferDirectory, legacyJSON: nil)
+    }
     try await MaintenanceLane.shared.bootstrapCollection(location)
     let collection = CoreCollectionService()
     do {

@@ -149,3 +149,25 @@ Combined test-repair guards pass: normal privacy `022417-89782` covers
 `022416-89626` passes all 23 root-fixture files; `021735-85889` covers the
 unchanged two Rust repairs and digest metadata. Both filtered reports were read.
 Scanner regression `021736-86546` passes one case with zero skips.
+
+## Original path authority
+
+Author `022601-91405` changes three files. Independent review
+`023521-97183` clears P0–P2 and verifies exact scope; its seed is unchanged.
+CoreHost retains the canonical collection path from original composition.
+Metadata identity, publication reads and NoCollection file checks use it.
+Locks, generation checks and refusal of another collection stay intact.
+The negative Swift fixture opens intentionally damaged metadata directly
+and checks its bytes; absent metadata still uses ordinary migration.
+
+Normal privacy `024012-98490` and similarity `024009-98091` pass all
+three files. Static policy `024012-98441` passes three checks.
+The filtered similarity report was read.
+
+`core-test/20261117T024020Z-99212` passes 31 of 32 methods, zero skips.
+All 29 earlier methods pass. Two new path tests also pass.
+The foreign-collection test reaches every ownership assertion,
+then fails at final Host close: its raw-engine fixture omitted a real thread
+participant. Keep successful cleanup required; repair that fixture next.
+The failed receipt remains, and the CPU window was released immediately.
+Mac bridge verification of this production fix is pending.

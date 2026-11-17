@@ -33,6 +33,182 @@ fn fixture(root: &std::path::Path, account: Arc<Account>) -> HostConfig {
     config
 }
 
+#[cfg(unix)]
+#[test]
+fn aliased_ordinary_host_metadata_configure_save_and_retry_preserve_original_collection() {
+    use meguri_model::faultpoint::{self, Fault};
+    use std::os::unix::{fs::MetadataExt, fs::symlink};
+    for configure in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let account = Arc::new(Account(AtomicUsize::new(0)));
+        let mut config = fixture(&root.path().join("original"), account.clone());
+        let alias = root.path().join("collection-alias");
+        symlink(&config.collection_directory, &alias).unwrap();
+        config.collection_directory = alias;
+        let host = CoreHost::open(config.clone()).unwrap();
+        let collection = host.collection().unwrap();
+        let path = collection.path().to_owned();
+        assert_ne!(path, config.collection_directory.join("collection.anki2"));
+        assert_eq!(path, config.collection_directory.canonicalize().unwrap().join("collection.anki2"));
+        assert!(host.derived().wait_idle(std::time::Duration::from_secs(5)));
+        let file = std::fs::metadata(&path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let sidecar = path.parent().unwrap().join("meguri-sidecar.json");
+        let sidecar_bytes = std::fs::read(&sidecar).unwrap();
+        let state = meguri_engine::device_state::DeviceState::for_collection(&path);
+        let publication = state.settled_publication().unwrap().unwrap();
+        let generation = host.cloud_connection_generation().unwrap();
+        let connection = host.configure_meguri_connection("https://initial-alias.synthetic.example/").unwrap();
+        let mut settings = host.provider_authority().snapshot().unwrap().settings;
+        settings.automatic = false;
+        host.save_provider_settings(settings).unwrap();
+        let metadata_path = config.manual_transfer_directory.join("provider.json");
+        let before = std::fs::read(&metadata_path).unwrap();
+        settings.paused = true;
+        faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::PermissionDenied));
+        let failure = if configure {
+            host.configure_meguri_connection("https://retry-alias.synthetic.example/").unwrap_err()
+        } else { host.save_provider_settings(settings).unwrap_err() };
+        faultpoint::disarm("storage.sidecar.before_save");
+        let retained_error = host.provider_authority().snapshot().unwrap_err();
+        host.refresh_provider_admission();
+        assert_eq!(host.provider_authority().snapshot().unwrap_err(), retained_error);
+        assert!(host.provider_authority().network_blocked());
+        assert_eq!(host.save_provider_settings(settings).unwrap_err(), failure);
+        assert_eq!(std::fs::read(&metadata_path).unwrap(), before);
+        host.retry_provider_publication().unwrap();
+        let document = host.provider_authority().snapshot().unwrap();
+        assert_eq!(meguri_sync::provider::Authority::load(&config.manual_transfer_directory).snapshot().unwrap(), document);
+        if configure {
+            assert_eq!(document.meguri.as_ref().unwrap().endpoint, "https://retry-alias.synthetic.example/");
+        } else {
+            assert_eq!(document.meguri.as_ref(), Some(&connection));
+            assert_eq!(document.settings, settings);
+        }
+        assert_eq!(document.selection, meguri_sync::provider::Selection::LocalOnly);
+        assert!(document.binding.is_none() && document.handoff.is_none());
+        assert!(!document.permits_meguri_transfer());
+        assert!(!host.provider_authority().permits_icloud_account_read());
+        let runtime = host.cloud_runtime().unwrap();
+        let status = runtime.status().unwrap();
+        assert!(status.binding.is_none() && !status.stored_usable && !status.identity_verified);
+        assert!(runtime.require_provider_collection_admission().is_err());
+        assert!(runtime.register_sdk(false).is_err());
+        assert_eq!(account.0.load(Ordering::SeqCst), 0);
+        assert_eq!(host.cloud_connection_generation().unwrap(), generation);
+        assert_eq!(host.collection().unwrap().path(), path);
+        assert_eq!(state.settled_publication().unwrap(), Some(publication));
+        let after = std::fs::metadata(&path).unwrap();
+        assert_eq!((after.dev(), after.ino()), (file.dev(), file.ino()));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(std::fs::read(&sidecar).unwrap(), sidecar_bytes);
+        host.close().unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn retargeted_alias_cannot_rebind_original_host_metadata_to_a_foreign_open_collection() {
+    use meguri_model::faultpoint::{self, Fault};
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir().unwrap();
+    let account = Arc::new(Account(AtomicUsize::new(0)));
+    let mut config = fixture(&root.path().join("original"), account.clone());
+    let foreign = fixture(&root.path().join("foreign"), account.clone());
+    let alias = root.path().join("collection-alias");
+    symlink(&config.collection_directory, &alias).unwrap();
+    config.collection_directory = alias.clone();
+    let host = CoreHost::open(config.clone()).unwrap();
+    let original_path = host.collection().unwrap().path().to_owned();
+    let original_state = meguri_engine::device_state::DeviceState::for_collection(&original_path);
+    let publication = original_state.settled_publication().unwrap();
+    let generation = host.cloud_connection_generation().unwrap();
+    let mut settings = host.provider_authority().snapshot().unwrap().settings;
+    settings.paused = true;
+    faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::PermissionDenied));
+    assert!(host.save_provider_settings(settings).is_err());
+    faultpoint::disarm("storage.sidecar.before_save");
+    let retained_error = host.provider_authority().snapshot().unwrap_err();
+    let metadata_path = config.manual_transfer_directory.join("provider.json");
+    let before = std::fs::read(&metadata_path).unwrap();
+    // Replace the actual engine owner, while keeping the original Host alive.
+    host.engine().close().unwrap();
+    std::fs::remove_file(&alias).unwrap();
+    symlink(&foreign.collection_directory, &alias).unwrap();
+    let foreign_path = foreign.collection_directory.canonicalize().unwrap().join("collection.anki2");
+    let replacement = host.engine().open_raw(&foreign_path,
+        meguri_engine::OpenConfig::new(foreign.clock.clone(), foreign.random.clone())).unwrap();
+    let current_generation = replacement.generation();
+    assert_ne!(current_generation, generation);
+    assert_eq!(config.collection_directory.canonicalize().unwrap().join("collection.anki2"), replacement.path());
+    let foreign_state = meguri_engine::device_state::DeviceState::for_collection(&foreign_path);
+    let foreign_publication = foreign_state.settled_publication().unwrap();
+    // Even the current generation plus an alias resolving to that actual open
+    // path cannot grant the original Host ownership of the foreign collection.
+    assert!(matches!(host.configure_meguri_connection_for_generation(current_generation, "https://foreign.synthetic.example/"),
+        Err(meguri_engine::EngineError::CollectionUnavailable { reason }) if reason == "provider metadata collection owner changed"));
+    assert!(host.save_provider_settings_for_generation(current_generation, settings).is_err());
+    assert!(host.retry_provider_publication_for_generation(current_generation).is_err());
+    assert!(host.configure_meguri_connection_for_generation(generation, "https://stale.synthetic.example/").is_err());
+    assert!(host.save_provider_settings_for_generation(generation, settings).is_err());
+    assert!(host.retry_provider_publication_for_generation(generation).is_err());
+    assert_eq!(host.provider_authority().snapshot().unwrap_err(), retained_error);
+    assert_eq!(std::fs::read(&metadata_path).unwrap(), before);
+    assert_eq!(original_state.settled_publication().unwrap(), publication);
+    assert_eq!(foreign_state.settled_publication().unwrap(), foreign_publication);
+    assert_eq!(account.0.load(Ordering::SeqCst), 0);
+    drop(replacement);
+    host.close().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn prepared_aliased_host_detects_a_database_in_original_directory_after_alias_retargeting() {
+    use meguri_model::faultpoint::{self, Fault};
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir().unwrap();
+    let account = Arc::new(Account(AtomicUsize::new(0)));
+    let mut config = unopened_fixture(&root.path().join("original"), account.clone());
+    let original_directory = config.collection_directory.canonicalize().unwrap();
+    let alias = root.path().join("collection-alias");
+    symlink(&original_directory, &alias).unwrap();
+    config.collection_directory = alias.clone();
+    let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+    let host = process.prepare_cloud_connection(config.clone()).unwrap();
+    let generation = host.cloud_connection_generation().unwrap();
+    let mut settings = host.provider_authority().snapshot().unwrap().settings;
+    settings.paused = true;
+    faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::PermissionDenied));
+    assert!(host.save_provider_settings(settings).is_err());
+    faultpoint::disarm("storage.sidecar.before_save");
+    let retained_error = host.provider_authority().snapshot().unwrap_err();
+    let metadata_path = config.manual_transfer_directory.join("provider.json");
+    let before = std::fs::read(&metadata_path).unwrap();
+    let empty = root.path().join("empty");
+    std::fs::create_dir(&empty).unwrap();
+    std::fs::remove_file(&alias).unwrap();
+    symlink(&empty, &alias).unwrap();
+    let path = original_directory.join("collection.anki2");
+    meguri_engine::bootstrap::create(&path, config.clock.as_ref(), config.random.as_ref()).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    assert!(matches!(host.configure_meguri_connection("https://appeared.synthetic.example/"),
+        Err(meguri_engine::EngineError::CollectionUnavailable { reason }) if reason == "existing collection requires open"));
+    assert!(host.save_provider_settings(settings).is_err());
+    assert!(host.retry_provider_publication().is_err());
+    assert_eq!(host.provider_authority().snapshot().unwrap_err(), retained_error);
+    assert_eq!(std::fs::read(&metadata_path).unwrap(), before);
+    assert_eq!(host.cloud_connection_generation().unwrap(), generation);
+    assert_eq!(host.engine().state(), meguri_engine::LifecycleState::NoCollection);
+    assert!(host.collection().is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert!(!original_directory.join("meguri-sidecar.json").exists());
+    assert!(!empty.join("collection.anki2").exists());
+    assert!(!empty.join("meguri-sidecar.json").exists());
+    assert_eq!(meguri_engine::device_state::DeviceState::for_collection(&path).settled_publication().unwrap(), None);
+    assert_eq!(account.0.load(Ordering::SeqCst), 0);
+    host.close().unwrap();
+}
+
 fn assert_unconfigured_without_collection(host: &CoreHost, config: &HostConfig, account: &Account) {
     assert_eq!(host.engine().state(), meguri_engine::LifecycleState::NoCollection);
     assert!(host.collection().is_err());

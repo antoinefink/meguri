@@ -1,4 +1,5 @@
 use std::{
+    path::PathBuf,
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
@@ -263,6 +264,9 @@ pub struct CoreHost {
     clock: Arc<dyn Clock>,
     backup: Arc<dyn BackupService>,
     backup_inputs: meguri_package::entry::EntryInputs,
+    // The same composition-time authority used by ordinary engine open.
+    // Metadata publication must not resolve the caller's directory again.
+    provider_collection_path: PathBuf,
     initial_open: OpenConfig,
     queues: Arc<meguri_engine::sched::queue::QueueProvider>,
     review: Arc<meguri_engine::session::ReviewService>,
@@ -319,7 +323,7 @@ impl CoreHost {
             return Err(EngineError::CollectionUnavailable { reason: "provider metadata original host closed".into() });
         }
         self.engine.with_provider_metadata_publication(generation, |open_path| {
-            let path = self.backup_inputs.collection_directory.join("collection.anki2");
+            let path = &self.provider_collection_path;
             if let Some(open_path) = open_path {
                 if open_path != path {
                     return Err(EngineError::CollectionUnavailable { reason: "provider metadata collection owner changed".into() });
@@ -333,7 +337,7 @@ impl CoreHost {
                     Ok(_) => return Err(EngineError::CollectionUnavailable { reason: "existing collection requires open".into() }),
                 }
             }
-            let publication = meguri_engine::device_state::DeviceState::for_collection(&path).settled_publication()?;
+            let publication = meguri_engine::device_state::DeviceState::for_collection(path).settled_publication()?;
             publish(publication)
         })
     }
@@ -501,6 +505,7 @@ impl CoreHost {
             cloud,
             manual_transfers,
             backup_inputs,
+            provider_collection_path: paths.collection(),
             initial_open: options.clone(),
             export,
             process: process.clone(),
