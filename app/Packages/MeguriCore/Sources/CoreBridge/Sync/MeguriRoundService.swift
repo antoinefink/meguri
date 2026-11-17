@@ -123,29 +123,47 @@ public struct MeguriRoundReport: Sendable {
         return media.complete
     }
 }
+public enum MeguriRoundAdmissionFailure: Error, Sendable {
+    case connectionUnavailable, retired, busy, credentialsMissing
+}
 /// Direct caller-owned collection then media. No wake source or UI state lives
 /// here. Cancellation joins the same native jobs before returning their results.
 public actor CoreMeguriRoundService {
-    private let connection: MeguriCoreBindings.ProviderConnection
+    private let raw: MeguriCoreBindings.ProviderConnection
+    public let connection: MeguriProviderConnection
+    private let credentials: @Sendable () async throws -> MeguriProviderCredentials
+    private var retired = false
     private var attempt: (id: UInt64, task: Task<MeguriRoundReport, any Error>)?
     private var nextID: UInt64 = 0
-    private init(_ connection: MeguriCoreBindings.ProviderConnection) { self.connection = connection }
-    public static func attached() async throws -> CoreMeguriRoundService {
-        let owner = try await MaintenanceLane.shared.call(.providerOwner) { try providerOwner() }
-        let connection = try await MaintenanceLane.shared.call(.providerConfiguredMeguri) { try owner.configuredMeguri() }
-        guard let connection else { throw BridgeError.unavailable(reason: "Meguri connection requires setup") }
-        return CoreMeguriRoundService(connection)
+    init(raw: MeguriCoreBindings.ProviderConnection, connection: MeguriProviderConnection,
+         credentials: @escaping @Sendable () async throws -> MeguriProviderCredentials) {
+        self.raw = raw; self.connection = connection; self.credentials = credentials
     }
-    public func fullRound(credentials: MeguriProviderCredentials) async throws -> MeguriRoundReport {
-        guard attempt == nil else { throw BridgeError.unavailable(reason: "Meguri round is busy") }
+    private func current() throws {
+        guard !retired else { throw MeguriRoundAdmissionFailure.retired }
+        try Task.checkCancellation()
+    }
+    public func fullRound() async throws -> MeguriRoundReport {
+        guard !retired else { throw MeguriRoundAdmissionFailure.retired }
+        guard attempt == nil else { throw MeguriRoundAdmissionFailure.busy }
         nextID &+= 1
-        let id = nextID, connection = connection
-        let raw = MeguriCoreBindings.ProviderCredentials(connection: .init(reference: credentials.connection.reference,
-            revision: credentials.connection.revision, endpoint: credentials.connection.endpoint),
-            username: credentials.username, hostkey: credentials.hostKey)
-        let task = Task { try await Self.perform(connection, credentials: raw) }
+        let id = nextID
+        // The original task owns the secure read as well as both native phases.
+        // Reserve its slot before the task can enter the credential closure.
+        let task = Task {
+            try current()
+            let value = try await self.credentials()
+            try current()
+            guard value.connection == connection else { throw MeguriProviderCredentialFailure.wrongConnection }
+            let credentials = MeguriCoreBindings.ProviderCredentials(connection: .init(reference: connection.reference,
+                revision: connection.revision, endpoint: connection.endpoint), username: value.username, hostkey: value.hostKey)
+            return try await Self.perform(raw, credentials: credentials)
+        }
         attempt = (id, task)
-        let result = await withTaskCancellationHandler { await task.result } onCancel: { task.cancel() }
+        let result = await withTaskCancellationHandler {
+            if Task.isCancelled { task.cancel() }
+            return await task.result
+        } onCancel: { task.cancel() }
         if attempt?.id == id { attempt = nil }
         return try result.get()
     }
@@ -154,6 +172,12 @@ public actor CoreMeguriRoundService {
         original?.task.cancel()
         _ = await original?.task.result
         if let original, attempt?.id == original.id { attempt = nil }
+    }
+    /// Permanent revocation; ordinary cancellation never reopens this facade.
+    /// Joining the original task includes an uncancellable held secure read.
+    func retireAndDrain() async {
+        retired = true
+        await cancelAndDrain()
     }
     private static func perform(_ connection: MeguriCoreBindings.ProviderConnection,
         credentials: MeguriCoreBindings.ProviderCredentials) async throws -> MeguriRoundReport {
@@ -177,16 +201,24 @@ public actor CoreMeguriRoundService {
             return .init(outcome: .refused(MeguriRoundRefusal(refusal)), finalization: nil, trackingFailure: nil)
         case .started(let handle, let result):
             var trackingFailure: BridgeError?
+            let terminal: JobOutcome
             switch await Jobs.trackRetainingDrain(handle) {
             case .tracked(let job):
-                _ = await withTaskCancellationHandler { await job.outcome() } onCancel: {
+                terminal = await withTaskCancellationHandler { await job.outcome() } onCancel: {
                     Task { try? await job.cancel() }
                 }
-            case .drained(let error, _): trackingFailure = error
+            case .drained(let error, let outcome): trackingFailure = error; terminal = outcome
             }
             // Real terminal results outrank a Swift cancellation and retain
             // partial effects even when listener setup itself failed.
             let outcome = try await MaintenanceLane.shared.call(.providerRoundOutcome) { try result.outcome() }
+            if case .pending = outcome {
+                switch terminal {
+                case .failed(let error): throw error
+                case .cancelled: throw BridgeError.cancelled
+                default: throw BridgeError.internal("Meguri round worker returned no terminal result")
+                }
+            }
             return .init(outcome: MeguriRoundPhaseOutcome(outcome), finalization: MeguriRoundFinalization(result), trackingFailure: trackingFailure)
         }
     }
