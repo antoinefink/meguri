@@ -912,7 +912,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/collection/changes.rs':
         '83f506e218e17d7c878c5381110c76277d3c64e767eb8a3da299d50c81a92b33',
     'tools/gate/tiers.yaml':
-        'a43cb5bd13f24190da0ec49a84b26eae67e9b6c88e989da342626db354368abb',
+        'b0d9c7cf88b554e7f2f3814b56048ac704febdac8e840861299da9662b71c9b5',
     'tools/mg.d/sync-web.sh':
         '4a3b7447a94259878fdc5460b6dc65891ad238a5334be5ebc2472d220f3f0756',
     'server/web/upstream-records.json':
@@ -1132,6 +1132,9 @@ PUBLIC_ARTIFACTS = {
 # 071ee5ebf2138e3ad180e0aacf6940c2cab5e6d8333741d9925c7bee2b153f39.
 # Keys pin exact repository-path UTF-8 bytes; values pin complete file bytes.
 PUBLIC_VENDOR_ARTIFACTS = {
+    '6a9d04ca41587836af459446bdc65bf4d7255154cbe98aabcce66a19b4c66043': 'b50f52439bf256305950aa34d31508368b3d3300b796cdc6604b0deaab732e9c',
+    'be7929cd9f7a1698bea4f000aa3d1f236c8b440d58361b5dd177b9697badc26d': '96fd55b7cdda1c8718f233bc6dd13caa581cf3bf21bb43d81480cef3bc1463d1',
+    'ebe7db15d768840d3f5bcd115f2345a19c31c0d20f5435c23ebbdca9c07e4c21': 'd1d7f78ad34c3fad64889ce65d5e245c6e2dc9b3a9c07104414b8748099f0ebb',
     'f81e67fcb2e3dbe8379aead1ebe38904691e35f510169970a987710496d3ed77':
         '2737bb166428505bf82c9c83402380005c80e722de64e5ab0501454cdedcc396',
     '1abb17517ad6c3616bc662765627c8e3419b3d81f0b8eaf3358cf4af9d316a33':
