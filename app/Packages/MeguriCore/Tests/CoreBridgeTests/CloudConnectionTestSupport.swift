@@ -3,6 +3,10 @@ import Synchronization
 import Testing
 @testable import CoreBridge
 
+private final class CloudConnectionDiscovery: Sendable {
+    let ownership = Mutex<ProviderDiscoveryOwnership?>(nil)
+}
+
 /// Synthetic inputs only; no private account or container configuration. Uses
 /// the existing collection bootstrap and process-wide EventTests serialization.
 struct CloudConnectionFixture: Sendable {
@@ -10,38 +14,71 @@ struct CloudConnectionFixture: Sendable {
     let collection: CoreCollectionService
     let workflow: CoreCloudWorkflowService
     let connection: CoreCloudConnectionService
+    let provider: CoreProviderService
+    private let discovery: CloudConnectionDiscovery
     static func open(status: CloudAccountStatus = .available, identity: Data? = Data("synthetic-account-A".utf8)) async throws -> Self {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let data = directory.appending(path: "collection")
         let backups = directory.appending(path: "backups")
         try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
-        let location = CollectionLocation(collectionDirectory: data, backupsDirectory: backups, appGroupSnapshot: directory.appending(path: "widget"))
+        let location = CollectionLocation(collectionDirectory: data, backupsDirectory: backups,
+            appGroupSnapshot: directory.appending(path: "widget"),
+            manualTransferDirectory: directory.appending(path: "synthetic-provider-installation"))
         let collection = CoreCollectionService()
         do {
             try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-u114", environment: .development, status: status, identity: identity)
             try await MaintenanceLane.shared.bootstrapCollection(location)
             try await collection.open(location, randomSeed: 114)
             let workflow = CoreCloudWorkflowService()
-            return Self(directory: directory, collection: collection, workflow: workflow, connection: try await workflow.connection())
+            let provider = try await CoreProviderService.attached()
+            let state = try await provider.state()
+            try #require(state.selection == .localOnly && state.phase == .localOnly)
+            return Self(directory: directory, collection: collection, workflow: workflow,
+                        connection: try await workflow.connection(), provider: provider,
+                        discovery: CloudConnectionDiscovery())
         } catch {
             try? await collection.close()
             try? FileManager.default.removeItem(at: directory)
             throw error
         }
     }
+    func beginDiscovery() async throws {
+        let ownership = try await provider.beginICloudDiscovery()
+        discovery.ownership.withLock { $0 = ownership }
+    }
+    func endDiscovery() {
+        discovery.ownership.withLock { $0 = nil }
+    }
+    func acceptConnection() async throws {
+        defer { endDiscovery() }
+        // Only the actual successfully confirmed operation can pass this call.
+        _ = try await provider.acceptICloudConnection()
+    }
     func ready() async throws -> CloudConnectionPreview {
-        guard case .readActive(let preview, let target) = try await connection.beginConnectionPreview() else { throw CloudOwnTransportFailure.unexpectedReply }
-        #expect(target == .init(zone: "meguri-root", name: "active", recordType: "MGActive"))
-        guard case .ready(let confirmation, let summary) = try await connection.connectionActiveRead(preview, read: .zoneMissing) else { throw CloudOwnTransportFailure.unexpectedReply }
-        #expect(summary.manifestCounts == nil && summary.publishedAtMilliseconds == nil)
-        #expect(summary.decision == .confirmUpload)
-        return confirmation
+        try await beginDiscovery()
+        do {
+            // Preview reads the configured production identity provider while
+            // this original discovery owner remains retained for confirmation.
+            guard case .readActive(let preview, let target) = try await connection.beginConnectionPreview() else { throw CloudOwnTransportFailure.unexpectedReply }
+            #expect(target == .init(zone: "meguri-root", name: "active", recordType: "MGActive"))
+            guard case .ready(let confirmation, let summary) = try await connection.connectionActiveRead(preview, read: .zoneMissing) else { throw CloudOwnTransportFailure.unexpectedReply }
+            #expect(summary.manifestCounts == nil && summary.publishedAtMilliseconds == nil)
+            #expect(summary.decision == .confirmUpload)
+            return confirmation
+        } catch {
+            endDiscovery()
+            throw error
+        }
     }
     func own() async throws -> (CloudPublicationRequest, CloudOwnOperation, CloudRecoveryOperation) {
+        // Core checks the real confirmed operation. Preview alone cannot pass.
+        try await acceptConnection()
         for _ in 0..<8 {
             switch try await connection.nextPublicationWork() {
-            case .local(let h, _, _): try await connection.performLocal(h)
+            case .local(let h, _, _):
+                try await connection.performLocal(h)
+                _ = try await provider.refresh()
             case .own(let r, let c, let o, _): return (r, c, o)
             default: throw CloudOwnTransportFailure.unexpectedReply
             }
@@ -50,6 +87,7 @@ struct CloudConnectionFixture: Sendable {
     }
     func close() async {
         try? await collection.close()
+        endDiscovery()
         try? FileManager.default.removeItem(at: directory)
     }
 }

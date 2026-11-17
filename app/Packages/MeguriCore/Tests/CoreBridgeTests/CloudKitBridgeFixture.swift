@@ -161,28 +161,33 @@ struct CloudKitBridgeFixture: Sendable {
         try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
         let location = CoreBridge.CollectionLocation(collectionDirectory: data, backupsDirectory: backups,
-                                                     appGroupSnapshot: directory.appending(path: "widget.snapshot"))
+                                                     appGroupSnapshot: directory.appending(path: "widget.snapshot"),
+                                                     manualTransferDirectory: directory.appending(path: "synthetic-provider-installation"))
         let collection = CoreCollectionService(clock: CloudFixtureClock())
         do {
             // Each host clones the process-wide platform. Supply the provider
             // matching this baseline, regardless of the preceding fixture.
             try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-u114", environment: .development, status: .available, identity: Data("synthetic-account-A".utf8))
+            _ = try await CoreProviderService.migrate(directory: location.manualTransferDirectory,
+                legacyJSON: #"{"enabled":true,"paused":false,"automatic":false,"media":false}"#)
             try await MaintenanceLane.shared.bootstrapCollection(location)
-            if connectedPolicyOpening {
-                let clock = CollectionClockRelay(CloudFixtureClock())
-                let diskSpace = DiskSpaceRelay(CoreBridge.DiskSpaceProvider())
-                let job = try await Jobs.start(.testCloudStartNativePolicyOpen) {
-                    try MeguriCoreBindings.testCloudStartNativePolicyOpen(
-                        location: location.raw, clock: clock, diskSpace: diskSpace, randomSeed: 114
-                    )
-                }
-                try await job.value()
-            } else {
-                try await collection.open(location, randomSeed: 114)
+            // The existing fixture open supplies the declared R6 binding before
+            // Host creation. It starts no SDK; each mode keeps its Start owner.
+            let clock = CollectionClockRelay(CloudFixtureClock())
+            let diskSpace = DiskSpaceRelay(CoreBridge.DiskSpaceProvider())
+            let job = try await Jobs.start(.testCloudStartNativePolicyOpen) {
+                try MeguriCoreBindings.testCloudStartNativePolicyOpen(
+                    location: location.raw, clock: clock, diskSpace: diskSpace, randomSeed: 114
+                )
             }
+            try await job.value()
             let baseline = try await MaintenanceLane.shared.prepareCloudAdapterBaseline(
                 count: count, savedState: savedState, failInbox: failInbox, failState: failState
             )
+            let provider = try await CoreProviderService.attached()
+            let providerState = try await provider.refresh()
+            try #require(providerState.selection == .iCloud && providerState.phase == .iCloud,
+                         "Prebound fixture requires its actual retained binding and settled R6 choice")
             let core = CoreCloudWorkflowService()
             let factory = CloudKitEngineFakeFactory(a23: a23, keepAlive: keepAlive)
             let probe = CloudPersistedEventProbe()

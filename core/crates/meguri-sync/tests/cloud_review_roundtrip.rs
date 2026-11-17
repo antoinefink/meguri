@@ -120,7 +120,7 @@ decks:
     let manifest = generate_recipe(&recipe, SEED, &collection).unwrap();
     assert_eq!(manifest.counts.notes, 2);
     assert!(manifest.counts.revlog > 0);
-    PreboundDevice::select_review_deck(&collection, NOW_MS, SEED).unwrap();
+    PreboundDevice::select_prebound_review_deck(&collection, NOW_MS, SEED).unwrap();
     let mut service = Service::open(run.path(), Config::default(), SeededRandom::new(SEED)).unwrap();
     let files = PreboundDevice::arrange(&collection, &mut service, SEED).unwrap();
     let before_payloads = files.read_collection_payloads().unwrap();

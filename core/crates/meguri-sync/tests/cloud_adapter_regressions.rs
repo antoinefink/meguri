@@ -61,7 +61,7 @@ fn fixture_with_deck_selection(
     let manifest = generate_recipe(&recipe, SEED, &collection).unwrap();
     assert_eq!(manifest.counts.notes, notes as u64);
     if select {
-        PreboundDevice::select_review_deck(&collection, NOW_MS, SEED).unwrap();
+        PreboundDevice::select_prebound_review_deck(&collection, NOW_MS, SEED).unwrap();
     }
     let mut service = Service::open(run.path(), Config::default(), SeededRandom::new(SEED)).unwrap();
     let files = PreboundDevice::arrange(&collection, &mut service, SEED).unwrap();

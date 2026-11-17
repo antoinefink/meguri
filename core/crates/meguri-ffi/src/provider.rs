@@ -159,8 +159,7 @@ impl ProviderOwner {
     }
     pub fn save_settings(&self, settings: ProviderSettings) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.save_settings"); self.validate()?;
-        self.host.provider_authority().save_settings(settings.into())?;
-        self.host.refresh_provider_admission();
+        self.host.save_provider_settings_for_generation(self.generation, settings.into())?;
         Ok(owner_snapshot(self.host.provider_authority()))
     }
     pub fn begin_icloud_discovery(&self) -> Result<Arc<ProviderDiscovery>, CoreError> {
@@ -179,13 +178,23 @@ impl ProviderOwner {
     }
     pub fn configure_meguri(self: Arc<Self>, endpoint: String) -> Result<Arc<ProviderConnection>, CoreError> {
         callback::enter("ProviderOwner.configure_meguri"); self.validate()?;
-        let inner = self.host.configure_meguri_connection(&endpoint)?;
+        let inner = self.host.configure_meguri_connection_for_generation(self.generation, &endpoint)?;
         Ok(Arc::new(ProviderConnection { owner: self, inner }))
     }
     pub fn begin_handoff(self: Arc<Self>, destination: ProviderSelection, remove_credentials: bool) -> Result<Arc<ProviderHandoff>, CoreError> {
         callback::enter("ProviderOwner.begin_handoff"); self.validate()?;
         let inner = self.host.begin_provider_handoff_with_removal(destination.into(), remove_credentials)?;
         Ok(Arc::new(ProviderHandoff { owner: self, inner: Mutex::new(Some(inner)) }))
+    }
+    pub fn recover_handoff_to_local_only(&self) -> Result<ProviderSnapshot, CoreError> {
+        callback::enter("ProviderOwner.recover_handoff_to_local_only"); self.validate()?;
+        self.host.recover_provider_handoff_to_local_only()?;
+        Ok(owner_snapshot(self.host.provider_authority()))
+    }
+    pub fn retry_failed_publication(&self) -> Result<ProviderSnapshot, CoreError> {
+        callback::enter("ProviderOwner.retry_failed_publication"); self.validate()?;
+        self.host.retry_provider_publication_for_generation(self.generation)?;
+        Ok(owner_snapshot(self.host.provider_authority()))
     }
     pub fn finish_handoff(self: Arc<Self>, handoff: Arc<ProviderHandoff>) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.finish_handoff"); self.validate()?;

@@ -937,7 +937,8 @@ private nonisolated final class SelectedConflictOperation: CloudPreparedOwnOpera
 @MainActor func selectedBootstrapSource(root: URL) async throws -> (bytes: Data, noteID: Int64) {
     let source = root.appending(path: "source")
     let location = CoreBridge.CollectionLocation(collectionDirectory: source, backupsDirectory: root.appending(path: "source-backups"),
-                              appGroupSnapshot: root.appending(path: "widget"))
+                              appGroupSnapshot: root.appending(path: "widget"),
+                              manualTransferDirectory: root.appending(path: "source-provider-installation"))
     try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false)
     try FileManager.default.createDirectory(at: location.backupsDirectory, withIntermediateDirectories: false)
     let schema = try #require(Bundle.module.url(forResource: "schema-18", withExtension: "anki2"))

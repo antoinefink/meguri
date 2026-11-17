@@ -54,10 +54,6 @@ import Testing
 
     @Test func bridgeCallsAreSignpostedUnderTheirExportNamesOnly() {
         let mediaExports = [
-            "migrate_provider", "provider_owner", "ProviderOwner.snapshot", "ProviderOwner.refresh", "ProviderOwner.save_settings",
-            "ProviderOwner.begin_icloud_discovery", "ProviderOwner.accept_icloud_connection", "ProviderOwner.begin_handoff",
-            "ProviderOwner.finish_handoff", "ProviderOwner.configure_meguri", "ProviderOwner.configured_meguri", "ProviderConnection.information",
-            "ProviderConnection.start_login", "ProviderLoginResult.result",
             "ManualTransferSession.start_media_preview",
             "ManualTransferSession.start_media",
             "ManualTransferSession.start_cancel_prepared_media",
@@ -67,6 +63,10 @@ import Testing
             "ManualTransferResult.request_stop",
         ]
         #expect(BridgeCall.all.map(\.name) == [
+            "migrate_provider", "provider_owner", "ProviderOwner.snapshot", "ProviderOwner.refresh", "ProviderOwner.save_settings",
+            "ProviderOwner.begin_icloud_discovery", "ProviderOwner.accept_icloud_connection", "ProviderOwner.begin_handoff", "ProviderOwner.finish_handoff",
+            "ProviderOwner.recover_handoff_to_local_only", "ProviderOwner.retry_failed_publication",
+            "ProviderOwner.configure_meguri", "ProviderOwner.configured_meguri", "ProviderConnection.information", "ProviderConnection.start_login", "ProviderLoginResult.result",
             "test_cloud_zone_deletion_fixture", "test_cloud_zone_deletion_rows",
             "CloudPolicyExecution.begin_cleanup_pass", "CloudCleanupPass.submit_inventory", "CloudCleanupPass.complete_inventory", "CloudCleanupPass.finish",
             "CloudPolicyExecution.begin_zone_deletion_pass", "CloudZoneDeletionPass.active_target", "CloudZoneDeletionPass.submit_read", "CloudZoneDeletionPass.complete_read", "CloudZoneDeletionPass.submit_deletion", "CloudZoneDeletionPass.complete_deletion", "CloudZoneDeletionPass.finish",

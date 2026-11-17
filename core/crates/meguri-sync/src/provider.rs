@@ -133,7 +133,15 @@ pub struct Authority {
     discovery: Mutex<(u64, usize)>,
     original_completion: AtomicBool,
     completion: Mutex<Option<CloudBinding>>,
+    // Serializes reload/publication, including the failed desired mutation.
+    publication_failure: Mutex<Option<PublicationFailure>>,
+    restart_intent: Option<HandoffIntent>,
 }
+struct PendingPublication {
+    before: Map<String, Value>, desired: Map<String, Value>, document: ProviderDocument,
+    facts: Option<(u64, Option<Publication>)>, retryable: bool,
+}
+struct PublicationFailure { error: StorageError, pending: Option<PendingPublication> }
 /// Process-only discovery ownership. It can never authorize collection writers.
 pub struct Discovery { owner: Arc<Authority>, revision: u64 }
 impl Drop for Discovery {
@@ -158,8 +166,10 @@ impl Authority {
     pub fn load(root: &Path) -> Arc<Self> {
         let path = root.join("provider.json");
         let state = sidecar::read_document(&path, decode).and_then(|document| document.ok_or_else(invalid));
+        let restart_intent = state.as_ref().ok().and_then(|doc| doc.handoff.clone());
         Arc::new(Self { path, state: Mutex::new(state), open: AtomicBool::new(true), writers: AtomicBool::new(false), discovery: Mutex::new((0, 0)),
-            original_completion: AtomicBool::new(false), completion: Mutex::new(None) })
+            original_completion: AtomicBool::new(false), completion: Mutex::new(None),
+            publication_failure: Mutex::new(None), restart_intent })
     }
     /// Before Host composition. Valid existing metadata is never reimported.
     pub fn migrate(root: &Path, legacy: Option<&Value>) -> Result<(), StorageError> {
@@ -190,7 +200,9 @@ impl Authority {
     pub fn close_admission(&self) { self.open.store(false, Ordering::SeqCst); self.writers.store(false, Ordering::SeqCst); }
     pub fn network_blocked(&self) -> bool { !self.open.load(Ordering::SeqCst) }
     pub fn reload(&self) -> Result<(), StorageError> {
+        let failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
         self.close_admission();
+        if let Some(failure) = failure.as_ref() { return Err(failure.error.clone()); }
         let value = sidecar::read_document(&self.path, decode).and_then(|doc| doc.ok_or_else(invalid));
         *self.state.lock().unwrap_or_else(PoisonError::into_inner) = value.clone();
         value?;
@@ -235,7 +247,14 @@ impl Authority {
         Ok(Discovery { owner: self.clone(), revision: doc.revision })
     }
     pub fn save_settings(&self, settings: LegacySettings) -> Result<ProviderDocument, StorageError> {
-        self.update(|doc| {
+        self.save_settings_with_facts(settings, None)
+    }
+    /// Host captures these current collection facts before attempting publication.
+    pub fn save_settings_for_owner(&self, settings: LegacySettings, generation: u64, publication: Option<Publication>) -> Result<ProviderDocument, StorageError> {
+        self.save_settings_with_facts(settings, Some((generation, publication)))
+    }
+    fn save_settings_with_facts(&self, settings: LegacySettings, facts: Option<(u64, Option<Publication>)>) -> Result<ProviderDocument, StorageError> {
+        self.update_publication(facts, true, |_, doc| {
             if doc.handoff.is_some() || (doc.selection == Selection::Meguri && (settings.automatic || !settings.media)) { return Err(invalid()); }
             // Enable never chooses a service or manufactures a binding.
             doc.settings = settings;
@@ -245,8 +264,14 @@ impl Authority {
         })
     }
     pub fn configure_meguri(&self, endpoint: &str, reference: String) -> Result<MeguriConnection, StorageError> {
+        self.configure_meguri_with_facts(endpoint, reference, None)
+    }
+    pub fn configure_meguri_for_owner(&self, endpoint: &str, reference: String, generation: u64, publication: Option<Publication>) -> Result<MeguriConnection, StorageError> {
+        self.configure_meguri_with_facts(endpoint, reference, Some((generation, publication)))
+    }
+    fn configure_meguri_with_facts(&self, endpoint: &str, reference: String, facts: Option<(u64, Option<Publication>)>) -> Result<MeguriConnection, StorageError> {
         let endpoint = native_endpoint(endpoint)?.as_str().to_owned();
-        let doc = self.update(|doc| {
+        let doc = self.update_publication(facts, true, |_, doc| {
             if doc.handoff.is_some() { return Err(invalid()); }
             doc.revision = doc.revision.checked_add(1).ok_or_else(invalid)?;
             doc.meguri = Some(MeguriConnection { reference, revision: doc.revision, endpoint });
@@ -277,7 +302,7 @@ impl Authority {
     /// Called only after the production owner joined its original native work.
     /// No serialized drain flag can produce this original intent handle.
     pub fn commit_handoff(&self, handoff: &Handoff) -> Result<ProviderDocument, StorageError> {
-        if !std::ptr::eq(self, Arc::as_ptr(&handoff.owner)) { return Err(invalid()); }
+        self.validate_handoff(handoff)?;
         let result = self.update(|doc| {
             if doc.handoff.as_ref() != Some(&handoff.intent) { return Err(invalid()); }
             doc.selection = handoff.intent.destination;
@@ -295,6 +320,100 @@ impl Authority {
         }
         result
     }
+    pub fn validate_handoff(&self, handoff: &Handoff) -> Result<(), StorageError> {
+        if !std::ptr::eq(self, Arc::as_ptr(&handoff.owner))
+            || self.snapshot()?.handoff.as_ref() != Some(&handoff.intent) { return Err(invalid()); }
+        Ok(())
+    }
+    /// Recovery never recreates Handoff or its original owner's drain claim.
+    /// Host must hold current collection ownership and exclude current work.
+    pub fn recover_handoff_to_local_only(&self, generation: u64, publication: &Publication) -> Result<ProviderDocument, StorageError> {
+        self.close_admission();
+        self.validate_handoff_recovery(publication)?;
+        let intent = self.restart_intent.as_ref().ok_or_else(invalid)?;
+        let result = self.update_publication(Some((generation, Some(publication.clone()))), true, |raw, doc| {
+            if doc.handoff.as_ref() != Some(intent) { return Err(invalid()); }
+            // Retain the complete original intent, including future members.
+            // This additive local evidence does not change the provider record
+            // or the R6/tracking/manual-operation documents.
+            let evidence = serde_json::json!({
+                "intent": raw.get("handoff").ok_or_else(invalid)?,
+                "outcome": "localOnlySetupRequired",
+                "currentGeneration": generation, "currentPublication": publication,
+            });
+            let records = raw.entry("handoffRecoveries").or_insert_with(|| Value::Array(Vec::new()))
+                .as_array_mut().ok_or_else(invalid)?;
+            records.push(evidence);
+            doc.selection = Selection::LocalOnly;
+            doc.settings.enabled = false;
+            doc.binding = None;
+            doc.legacy_binding_pending = false;
+            doc.handoff = None;
+            doc.revision = doc.revision.checked_add(1).ok_or_else(invalid)?;
+            Ok(())
+        });
+        if result.is_ok() { self.retire_original_completions(); }
+        result
+    }
+    pub fn validate_handoff_recovery(&self, publication: &Publication) -> Result<(), StorageError> {
+        let intent = self.restart_intent.as_ref().ok_or_else(invalid)?;
+        // Credential-removal completion belongs to its retained removal owner;
+        // do not report that operation completed from publication facts alone.
+        if intent.remove_credentials || intent.publication.as_ref() != Some(publication)
+            || self.snapshot()?.handoff.as_ref() != Some(intent) { return Err(invalid()); }
+        Ok(())
+    }
+    fn retire_original_completions(&self) {
+        self.original_completion.store(false, Ordering::SeqCst);
+        *self.completion.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+    /// Host selects exclusions from the retained mutation, never a caller's
+    /// description of recovery or native drain completion.
+    pub fn failed_publication_requires_handoff_recovery(&self) -> Result<bool, StorageError> {
+        let failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
+        let failed = failure.as_ref().ok_or_else(invalid)?;
+        let pending = failed.pending.as_ref().filter(|pending| pending.retryable).ok_or_else(|| failed.error.clone())?;
+        Ok(decode(Some(&pending.before))?.ok_or_else(invalid)?.handoff.is_some())
+    }
+    /// Explicit retry of the actual failed mutation, never a force reload. A
+    /// handoff destination commit cannot be retried without its original owner.
+    pub fn retry_failed_publication(&self, generation: u64, publication: Option<&Publication>) -> Result<ProviderDocument, StorageError> {
+        let mut failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
+        self.close_admission();
+        let failed = failure.as_ref().ok_or_else(invalid)?;
+        let pending = failed.pending.as_ref().filter(|pending| pending.retryable).ok_or_else(|| failed.error.clone())?;
+        if let Some((expected_generation, expected_publication)) = &pending.facts {
+            if generation != *expected_generation || publication != expected_publication.as_ref() { return Err(invalid()); }
+        } else {
+            let prior = decode(Some(&pending.before))?.ok_or_else(invalid)?;
+            if let Some(expected) = prior.binding.as_ref().map(|binding| &binding.publication) {
+                if publication != Some(expected) { return Err(invalid()); }
+            }
+        }
+        let result = sidecar::update_document(&self.path, |raw| {
+            // A rename may have succeeded before directory durability failed.
+            // Re-publish that same desired state, but reject any successor edit.
+            if raw != &pending.before && raw != &pending.desired { return Err(invalid()); }
+            decode(Some(raw))?.ok_or_else(invalid)?;
+            *raw = pending.desired.clone();
+            Ok(pending.document.clone())
+        });
+        match result {
+            Ok(doc) => {
+                *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Ok(doc.clone());
+                *failure = None;
+                if doc.handoff.is_none() { self.retire_original_completions(); }
+                self.open.store(true, Ordering::SeqCst);
+                Ok(doc)
+            }
+            Err(error) => {
+                // Preserve the original publication failure category and the
+                // retained desired mutation even when retry also fails.
+                *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Err(failed.error.clone());
+                Err(error)
+            }
+        }
+    }
     pub(crate) fn accept_icloud_setup(&self) -> Result<(), StorageError> {
         self.update(|doc| {
             if doc.handoff.is_some() || doc.selection == Selection::Meguri { return Err(invalid()); }
@@ -305,15 +424,30 @@ impl Authority {
         Ok(())
     }
     fn update(&self, change: impl FnOnce(&mut ProviderDocument) -> Result<(), StorageError>) -> Result<ProviderDocument, StorageError> {
+        self.update_publication(None, false, |_, doc| change(doc))
+    }
+    fn update_publication(&self, facts: Option<(u64, Option<Publication>)>, retryable: bool,
+        change: impl FnOnce(&mut Map<String, Value>, &mut ProviderDocument) -> Result<(), StorageError>,
+    ) -> Result<ProviderDocument, StorageError> {
+        let mut failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
         self.close_admission();
+        if let Some(failure) = failure.as_ref() { return Err(failure.error.clone()); }
+        let mut pending = None;
+        let mut entered = false;
         let result = sidecar::update_document(&self.path, |raw| {
+            entered = true;
             let mut doc = decode(Some(raw))?.ok_or_else(invalid)?;
-            change(&mut doc)?;
+            let before = raw.clone();
+            change(raw, &mut doc)?;
             put(raw, &doc)?;
+            pending = Some(PendingPublication { before, desired: raw.clone(), document: doc.clone(), facts, retryable });
             Ok(doc)
         });
         *self.state.lock().unwrap_or_else(PoisonError::into_inner) = result.clone();
         if result.is_ok() { self.open.store(true, Ordering::SeqCst); }
+        else if (pending.is_some() || !entered) && let Err(error) = &result {
+            *failure = Some(PublicationFailure { error: error.clone(), pending });
+        }
         result
     }
     /// Runtime supplies the real retained binding and settled R6 state. Credentials

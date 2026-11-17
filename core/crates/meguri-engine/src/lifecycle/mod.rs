@@ -657,6 +657,40 @@ impl Engine {
         self.acquire_slot(LongOp::CollectionExportHandoff)
     }
 
+    /// Device-local provider metadata only: serialize its actual publication
+    /// with lifecycle controls and slot/replacement transitions. This grants no
+    /// collection, account, join or writer authority. The Host additionally
+    /// holds its original close/prepared-owner lease. No callbacks, lifecycle
+    /// reentry, collection operations or network work may run in `publish`.
+    pub fn with_provider_metadata_publication<T>(
+        &self,
+        generation: Generation,
+        publish: impl FnOnce(Option<&Path>) -> Result<T, EngineError>,
+    ) -> Result<T, EngineError> {
+        // Host ownership precedes this lane; never wait on a control call
+        // whose cleanup may need that same Host lease.
+        let _control = self.job_control_lane()?;
+        let state = self.lock_state();
+        let current_generation = self.generation();
+        if current_generation != generation {
+            return Err(EngineError::StaleGeneration { planned: generation, current: current_generation });
+        }
+        if state.suspended || state.slot.is_some() || state.recovery_ownership.is_some() {
+            return Err(EngineError::unavailable("provider metadata lifecycle ownership unavailable"));
+        }
+        let path = match (&state.state, &state.current) {
+            (LifecycleState::Ready { generation: ready }, Some(current)) if *ready == generation => {
+                current.core.exec.require_admission(None)?;
+                Some(current.core.exec.path.as_path())
+            }
+            (LifecycleState::NoCollection, None) => None,
+            _ => return Err(EngineError::unavailable("provider metadata requires a healthy owner")),
+        };
+        // Keep state as well as the control lane through the local sidecar
+        // write: direct slot acquisition and corruption also take state.
+        publish(path)
+    }
+
     pub fn close(&self) -> Result<(), EngineError> {
         self.close_inner(None::<fn(Option<Collection>) -> Result<(), EngineError>>)
     }

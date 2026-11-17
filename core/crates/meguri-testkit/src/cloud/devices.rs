@@ -98,14 +98,16 @@ pub fn options(dir: &Path, now: i64, seed: u64) -> meguri_host::HostConfig {
     let mut backup_name = dir.file_name().expect("owned collection directory").to_os_string();
     backup_name.push("-backups");
     let backups = dir.with_file_name(backup_name);
-    meguri_host::HostConfig::new(
+    let mut config = meguri_host::HostConfig::new(
         dir.to_owned(),
         backups,
         dir.join("widget"),
         Arc::new(FixedClock::new(now, UtcOffset::UTC)),
         Arc::new(SeededRandom::new(seed)),
         Arc::new(meguri_storage::space::StatvfsSpace),
-    )
+    );
+    config.manual_transfer_directory = dir.join("synthetic-provider-installation");
+    config
 }
 pub(crate) fn collect<T: ReadRows + ?Sized>(
     rows: &T,
@@ -163,10 +165,48 @@ pub(crate) fn open_store(files: &PreboundDevice) -> Result<production::TrackingS
     }
 }
 impl PreboundDevice {
+    fn prior_scope() -> Scope {
+        Scope {
+            container: "test.meguri.cloud".into(),
+            environment: "development".into(),
+            account: "synthetic-account-a".into(),
+        }
+    }
+    fn prior_options(directory: &Path, now: i64, seed: u64) -> Result<meguri_host::HostConfig> {
+        let scope = Self::prior_scope();
+        let mut config = options(directory, now, seed);
+        config.publication_binding = meguri_engine::device_state::AccountBinding::Connected {
+            account: scope.account,
+            configuration: scope.container,
+            environment: scope.environment,
+        };
+        // Production migration imports only an absent prior choice. Existing
+        // invalid, Pending and local-only decisions are never overwritten.
+        meguri_host::CoreHost::migrate_provider_configuration(
+            &config.manual_transfer_directory,
+            meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+                enabled: true,
+                paused: false,
+                automatic: false,
+                media: true,
+            }),
+        )?;
+        Ok(config)
+    }
     /// Select the fixture's real review deck through the engine before the
     /// healthy server baseline is recorded. No config/tracking facts are seeded.
+    /// Unbound publication fixtures also use this helper, so this open remains
+    /// local-only. Configured callers must prepare their prior choice first.
     pub fn select_review_deck(directory: &Path, now: i64, seed: u64) -> Result<()> {
-        let host = meguri_host::CoreHost::open(options(directory, now, seed))?;
+        Self::select_review_deck_with_options(options(directory, now, seed))
+    }
+    /// Only stable, previously configured baselines use this first open.
+    /// Unbound publication/adoption fixtures keep select_review_deck instead.
+    pub fn select_prebound_review_deck(directory: &Path, now: i64, seed: u64) -> Result<()> {
+        Self::select_review_deck_with_options(Self::prior_options(directory, now, seed)?)
+    }
+    fn select_review_deck_with_options(config: meguri_host::HostConfig) -> Result<()> {
+        let host = meguri_host::CoreHost::open(config)?;
         let collection = host.collection()?;
         let deck = {
             let lease = collection.reader(ReaderRole::Query)?;
@@ -179,7 +219,8 @@ impl PreboundDevice {
     }
     pub fn arrange(directory: &Path, service: &mut Service<SeededRandom>, seed: u64) -> Result<Self> {
         const NOW: i64 = 1_735_689_600_000;
-        let host = meguri_host::CoreHost::open(options(directory, NOW, seed))?;
+        let scope = Self::prior_scope();
+        let host = meguri_host::CoreHost::open(Self::prior_options(directory, NOW, seed)?)?;
         let c = host.collection()?;
         let media = host.media()?;
         media.store().register_full(|_, _| true).map_err(|_| failure())?;
@@ -229,11 +270,6 @@ impl PreboundDevice {
         drop(host);
         drop(c);
         let (record_key, payloads) = payloads;
-        let scope = Scope {
-            container: "test.meguri.cloud".into(),
-            environment: "development".into(),
-            account: "synthetic-account-a".into(),
-        };
         let rng = SeededRandom::new(seed ^ 0x411);
         let mut epoch = [0; 16];
         epoch[..8].copy_from_slice(&rng.next_u64().to_le_bytes());

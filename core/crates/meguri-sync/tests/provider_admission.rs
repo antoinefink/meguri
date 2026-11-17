@@ -70,8 +70,119 @@ fn a_failed_sidecar_publication_does_not_report_an_in_memory_configuration_succe
     faultpoint::disarm("storage.sidecar.before_save");
     assert!(result.is_err());
     assert!(authority.snapshot().is_err());
+    assert!(authority.reload().is_err());
+    assert!(authority.network_blocked());
+    assert!(!authority.failed_publication_requires_handoff_recovery().unwrap());
+    assert!(authority.save_settings(LegacySettings::decode(None).unwrap()).is_err());
     assert_eq!(std::fs::read(root.path().join("provider.json")).unwrap(), bytes);
     assert!(Authority::load(root.path()).snapshot().unwrap().meguri.is_none());
+    authority.retry_failed_publication(0, None).unwrap();
+    assert_eq!(authority.snapshot().unwrap().meguri.unwrap().reference, "synthetic-reference");
+}
+
+#[test]
+fn failed_pause_keeps_its_error_and_desired_state_until_explicit_publication_retry() {
+    use meguri_sync::provider::Authority;
+    use meguri_model::faultpoint::{self, Fault};
+    let root = tempfile::tempdir().unwrap();
+    Authority::migrate(root.path(), Some(&json!({"enabled":true,"paused":false,"automatic":true,"media":true}))).unwrap();
+    let authority = Authority::load(root.path());
+    let mut settings = authority.snapshot().unwrap().settings;
+    settings.paused = true;
+    let before = std::fs::read(root.path().join("provider.json")).unwrap();
+    faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::PermissionDenied));
+    let error = authority.save_settings(settings).unwrap_err();
+    faultpoint::disarm("storage.sidecar.before_save");
+    assert_eq!(authority.reload().unwrap_err(), error);
+    assert_eq!(authority.snapshot().unwrap_err(), error);
+    assert!(!authority.failed_publication_requires_handoff_recovery().unwrap());
+    assert!(authority.network_blocked());
+    assert!(!authority.permits_icloud_account_read());
+    assert_eq!(std::fs::read(root.path().join("provider.json")).unwrap(), before);
+    assert!(authority.configure_meguri("https://unrelated.synthetic.example/", "unrelated".into()).is_err());
+    authority.retry_failed_publication(0, None).unwrap();
+    assert!(authority.snapshot().unwrap().settings.paused);
+    assert!(!authority.permits_icloud_account_read());
+    authority.reload().unwrap();
+    std::fs::write(root.path().join("provider.json"), b"{}").unwrap();
+    assert!(authority.reload().is_err());
+    assert!(authority.retry_failed_publication(0, None).is_err());
+    assert_eq!(std::fs::read(root.path().join("provider.json")).unwrap(), b"{}");
+}
+
+#[test]
+fn failed_metadata_retry_keeps_the_captured_owner_generation_and_publication_fences() {
+    use meguri_engine::device_state::{AccountBinding, Publication, PublicationDecision, PublicationId};
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_sync::provider::Authority;
+    let root = tempfile::tempdir().unwrap();
+    Authority::migrate(root.path(), None).unwrap();
+    let authority = Authority::load(root.path());
+    let mut settings = authority.snapshot().unwrap().settings;
+    settings.paused = true;
+    let publication = Publication { identity: PublicationId::from_bytes([1; 16]),
+        binding: AccountBinding::LocalOnly, decision: PublicationDecision::Clear };
+    let before = std::fs::read(root.path().join("provider.json")).unwrap();
+    faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::PermissionDenied));
+    let error = authority.save_settings_for_owner(settings, 7, Some(publication.clone())).unwrap_err();
+    faultpoint::disarm("storage.sidecar.before_save");
+    assert!(!authority.failed_publication_requires_handoff_recovery().unwrap());
+    let mut changed = publication.clone();
+    changed.identity = PublicationId::from_bytes([2; 16]);
+    let mut changed_account = publication.clone();
+    changed_account.binding = AccountBinding::Unknown;
+    let mut pending = publication.clone();
+    pending.decision = PublicationDecision::Pending;
+    for (generation, current) in [(8, Some(&publication)), (7, None), (7, Some(&changed)),
+        (7, Some(&changed_account)), (7, Some(&pending))] {
+        assert!(authority.retry_failed_publication(generation, current).is_err());
+        assert_eq!(authority.snapshot().unwrap_err(), error);
+        assert_eq!(authority.reload().unwrap_err(), error);
+        assert!(authority.network_blocked());
+        assert_eq!(std::fs::read(root.path().join("provider.json")).unwrap(), before);
+    }
+    authority.retry_failed_publication(7, Some(&publication)).unwrap();
+    assert!(authority.snapshot().unwrap().settings.paused);
+    assert!(!authority.permits_icloud_account_read());
+    assert!(!authority.snapshot().unwrap().permits_meguri_transfer());
+    assert!(authority.failed_publication_requires_handoff_recovery().is_err());
+    assert!(authority.retry_failed_publication(7, Some(&publication)).is_err());
+}
+
+#[test]
+fn failed_first_setup_retry_keeps_absent_publication_and_original_error_until_exact_retry() {
+    use meguri_engine::device_state::{AccountBinding, Publication, PublicationDecision, PublicationId};
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_sync::provider::Authority;
+    let root = tempfile::tempdir().unwrap();
+    Authority::migrate(root.path(), None).unwrap();
+    let authority = Authority::load(root.path());
+    let before = std::fs::read(root.path().join("provider.json")).unwrap();
+    faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::PermissionDenied));
+    let error = authority.configure_meguri_for_owner("https://first-setup.synthetic.example/", "retained-first-setup".into(), 0, None).unwrap_err();
+    faultpoint::disarm("storage.sidecar.before_save");
+    let unrelated = Publication { identity: PublicationId::from_bytes([3; 16]),
+        binding: AccountBinding::LocalOnly, decision: PublicationDecision::Clear };
+    for (generation, publication) in [(1, None), (0, Some(&unrelated))] {
+        assert!(authority.retry_failed_publication(generation, publication).is_err());
+        assert_eq!(authority.snapshot().unwrap_err(), error);
+        assert_eq!(authority.reload().unwrap_err(), error);
+        assert!(authority.network_blocked());
+        assert_eq!(std::fs::read(root.path().join("provider.json")).unwrap(), before);
+    }
+    faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::Other));
+    assert!(authority.retry_failed_publication(0, None).is_err());
+    faultpoint::disarm("storage.sidecar.before_save");
+    assert_eq!(authority.snapshot().unwrap_err(), error);
+    assert_eq!(authority.reload().unwrap_err(), error);
+    assert_eq!(std::fs::read(root.path().join("provider.json")).unwrap(), before);
+    authority.retry_failed_publication(0, None).unwrap();
+    let doc = authority.snapshot().unwrap();
+    assert_eq!(doc.meguri.unwrap().reference, "retained-first-setup");
+    assert_eq!(doc.selection, Selection::LocalOnly);
+    assert!(doc.binding.is_none() && doc.handoff.is_none());
+    assert!(!authority.permits_icloud_account_read());
+    assert!(!authority.snapshot().unwrap().permits_meguri_transfer());
 }
 
 #[test]

@@ -295,6 +295,49 @@ impl CoreHost {
         body()
     }
 
+    /// Only local provider metadata runs under these original-owner gates.
+    /// Match close's identity-owner -> close-state order, then try the engine
+    /// lane; never wait for lifecycle cleanup while retaining Host ownership.
+    /// The body must not reenter Host/engine controls or invoke host callbacks.
+    pub(crate) fn publish_provider_metadata<T>(
+        &self,
+        generation: meguri_engine::Generation,
+        publish: impl FnOnce(Option<meguri_engine::device_state::Publication>) -> Result<T, EngineError>,
+    ) -> Result<T, EngineError> {
+        fn lease<T>(lock: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, EngineError> {
+            match lock.try_lock() {
+                Ok(guard) => Ok(guard),
+                Err(std::sync::TryLockError::Poisoned(error)) => Ok(error.into_inner()),
+                Err(std::sync::TryLockError::WouldBlock) => Err(EngineError::Busy {
+                    running_op: "provider metadata original host owner".into(),
+                }),
+            }
+        }
+        let identity_owner = self.no_collection_identity_owner.as_ref().map(|live| lease(live)).transpose()?;
+        let closed = lease(&self.closed)?;
+        if !matches!(*closed, CloseState::Active) || identity_owner.as_ref().is_some_and(|live| !**live) {
+            return Err(EngineError::CollectionUnavailable { reason: "provider metadata original host closed".into() });
+        }
+        self.engine.with_provider_metadata_publication(generation, |open_path| {
+            let path = self.backup_inputs.collection_directory.join("collection.anki2");
+            if let Some(open_path) = open_path {
+                if open_path != path {
+                    return Err(EngineError::CollectionUnavailable { reason: "provider metadata collection owner changed".into() });
+                }
+            } else {
+                // NoCollection is not permission to bootstrap or ignore a file
+                // that appeared after preparation. Ordinary open owns it.
+                match path.symlink_metadata() {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(meguri_storage::StorageError::from(error).into()),
+                    Ok(_) => return Err(EngineError::CollectionUnavailable { reason: "existing collection requires open".into() }),
+                }
+            }
+            let publication = meguri_engine::device_state::DeviceState::for_collection(&path).settled_publication()?;
+            publish(publication)
+        })
+    }
+
     pub(crate) fn media_space_provider(&self) -> &dyn meguri_storage::space::SpaceProvider {
         self.backup_inputs.space.as_ref()
     }

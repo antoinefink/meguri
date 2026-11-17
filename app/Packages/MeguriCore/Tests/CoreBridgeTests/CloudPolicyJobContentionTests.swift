@@ -36,7 +36,8 @@ private func withPolicyProjectionClock(_ clock: PolicyProjectionClock,
     try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let location = CoreBridge.CollectionLocation(collectionDirectory: data, backupsDirectory: backups,
-                                                 appGroupSnapshot: directory.appending(path: "widget"))
+                                                 appGroupSnapshot: directory.appending(path: "widget"),
+                                                 manualTransferDirectory: directory.appending(path: "synthetic-provider-installation"))
     let collection = CoreCollectionService(clock: clock)
     do {
         try await CoreCloudWorkflowService.configurePlatform(container: "synthetic-u114", environment: .development,

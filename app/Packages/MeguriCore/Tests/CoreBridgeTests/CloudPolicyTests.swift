@@ -10,6 +10,8 @@ extension EventTests {
         try await withCloudConnection { fixture in
             let policy = try await fixture.workflow.policy()
             _ = try await policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false)))
+            try await fixture.beginDiscovery()
+            defer { fixture.endDiscovery() }
             _ = try await policy.refreshAccount()
             _ = try await policy.input(.network(reachable: true))
             let status = try await policy.status()
@@ -32,6 +34,8 @@ extension EventTests {
         try await withCloudConnection { fixture in
             let raw = try await MaintenanceLane.shared.call(.cloudWorkflowNew) { try MeguriCoreBindings.CloudWorkflow() }
             let policy = try await MaintenanceLane.shared.call(.cloudWorkflowPolicy) { [raw] in try raw.policy() }
+            try await fixture.beginDiscovery()
+            defer { fixture.endDiscovery() }
             _ = try await MaintenanceLane.shared.call(.cloudPolicyRefreshAccount) { [policy] in try policy.refreshAccount() }
             let status = try await MaintenanceLane.shared.call(.cloudPolicyStatus) { [policy] in try policy.status() }
             #expect(status.accountStatus == .available)

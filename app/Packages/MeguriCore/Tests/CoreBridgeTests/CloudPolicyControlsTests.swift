@@ -6,6 +6,8 @@ extension EventTests {
     @Test func actualStatusQueryCarriesUnboundControlFactsWithoutMakingUpMetadata() async throws {
         try await withCloudConnection { fixture in
             let policy = try await fixture.workflow.policy()
+            try await fixture.beginDiscovery()
+            defer { fixture.endDiscovery() }
             _ = try await policy.refreshAccount()
             let status = try await policy.status()
             #expect(status.controls.enable == .connect)

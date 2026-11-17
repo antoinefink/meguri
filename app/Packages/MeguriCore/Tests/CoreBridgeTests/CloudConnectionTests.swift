@@ -19,6 +19,8 @@ extension EventTests {
             #expect(information.lastChangeMilliseconds != nil)
             #expect(information.localCounts.count == 9 && information.localCounts[.note] == 0)
             #expect(try await f.connection.recoveryStatus() == nil)
+            try await f.beginDiscovery()
+            defer { f.endDiscovery() }
             await #expect(throws: BridgeError.cloudConnection(.accountUnavailable)) { _ = try await f.connection.beginConnectionPreview() }
             await #expect(throws: BridgeError.cloudConnection(.authorityChanged)) {
                 _ = try await f.collection.localPublicationInformation(generation: generation + 1)
@@ -54,6 +56,8 @@ extension EventTests {
     }
     @Test func cloudFixturesSupplyTheirOwnPlatformAcrossHostLifetimes() async throws {
         try await withCloudConnection(status: .temporarilyUnavailable, identity: nil) { f in
+            try await f.beginDiscovery()
+            defer { f.endDiscovery() }
             await #expect(throws: BridgeError.cloudConnection(.accountUnavailable)) { try await f.connection.beginConnectionPreview() }
         }
         try await withCloudKitFixture { f in
@@ -76,7 +80,21 @@ extension EventTests {
     @Test(arguments: [CloudAccountStatus.noAccount, .temporarilyUnavailable, .restricted, .couldNotDetermine, .available])
     func connectionPreviewRejectsUnavailableOrUnverifiedPlatform(status: CloudAccountStatus) async throws {
         try await withCloudConnection(status: status, identity: nil) { f in
+            try await f.beginDiscovery()
+            defer { f.endDiscovery() }
             await #expect(throws: BridgeError.cloudConnection(.accountUnavailable)) { try await f.connection.beginConnectionPreview() }
+            // Observe the same retained platform through its real account read.
+            // Admission denial alone would project temporary for every input.
+            let policy = try await f.workflow.policy()
+            _ = try await policy.refreshAccount()
+            let expected: CloudPolicyAccountStatus = switch status {
+            case .noAccount: .noAccount
+            case .temporarilyUnavailable: .temporary
+            case .restricted: .restricted
+            case .couldNotDetermine, .available: .undetermined
+            default: throw CloudOwnTransportFailure.unexpectedReply
+            }
+            #expect(try await policy.status().accountStatus == expected)
             let recovery = try await f.connection.recoveryStatus()
             #expect(recovery == nil)
         }
@@ -146,6 +164,8 @@ extension EventTests {
     }
     @Test func connectionReadsFoundWithoutEAndMissingAsDifferentActualCoreDecisions() async throws {
         try await withCloudConnection { f in
+            try await f.beginDiscovery()
+            defer { f.endDiscovery() }
             guard case .readActive(let preview, _) = try await f.connection.beginConnectionPreview() else { throw CloudOwnTransportFailure.unexpectedReply }
             guard case .ready(_, let summary) = try await f.connection.connectionActiveRead(preview, read: .found(.init(encrypted: nil, systemFields: Data([8])))) else { throw CloudOwnTransportFailure.unexpectedReply }
             #expect(summary.decision == .cloudUnreadable)
@@ -156,6 +176,7 @@ extension EventTests {
         try await withCloudConnection { f in
             let preview = try await f.ready()
             _ = try await f.connection.confirmPublication(preview)
+            try await f.acceptConnection()
             let held = HeldOwnOperation()
             let executor = CloudOwnExecutor(core: f.connection, transport: HeldOwnTransport(operation: held))
             // Drive however many real local transitions Rust requires. A
@@ -197,6 +218,8 @@ private final class PreviewReadSequence: CloudOwnTransport, Sendable {
 extension EventTests {
     @Test func previewCancellationJoinsOriginalReplyAndTheSameExecutorCanPreviewAgain() async throws {
         try await withCloudConnection { f in
+            try await f.beginDiscovery()
+            defer { f.endDiscovery() }
             let first = HeldOwnOperation(), second = HeldOwnOperation()
             let executor = CloudOwnExecutor(core: f.connection, transport: PreviewReadSequence([first, second]))
             let pending = Task { try await executor.preview() }
@@ -207,6 +230,8 @@ extension EventTests {
             first.finish(.read(.zoneMissing))
             do { _ = try await pending.value; Issue.record("Cancelled original preview returned authority") } catch { }
             await cancellation.value
+            f.endDiscovery()
+            try await f.beginDiscovery()
             let next = Task { try await executor.preview() }
             try await second.waitUntilQueued()
             second.finish(.read(.zoneMissing))

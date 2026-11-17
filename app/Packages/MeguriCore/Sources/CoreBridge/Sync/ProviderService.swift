@@ -113,6 +113,17 @@ public actor CoreProviderService: MeguriProviderConnectionService {
         let raw = raw
         return SyncProviderState(try await MaintenanceLane.shared.call(.providerFinishHandoff) { try raw.finishHandoff(handoff: handoff.raw) })
     }
+    /// Explicit restart recovery after this process's current native owners
+    /// have joined. Core validates current ownership and retains the original
+    /// intent; this never asserts that a previous process drained.
+    public func recoverHandoffToLocalOnly() async throws -> SyncProviderState {
+        let raw = raw
+        return SyncProviderState(try await MaintenanceLane.shared.call(.providerRecoverHandoffToLocalOnly) { try raw.recoverHandoffToLocalOnly() })
+    }
+    public func retryFailedPublication() async throws -> SyncProviderState {
+        let raw = raw
+        return SyncProviderState(try await MaintenanceLane.shared.call(.providerRetryFailedPublication) { try raw.retryFailedPublication() })
+    }
     public func configureMeguri(endpoint: String) async throws -> MeguriProviderConnectionOwnership {
         let raw = raw
         let connection = try await MaintenanceLane.shared.call(.providerConfigureMeguri) { try raw.configureMeguri(endpoint: endpoint) }

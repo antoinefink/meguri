@@ -28,7 +28,9 @@ private func releaseConnectionPool(_ jobs: [CoreJob]) async {
     for job in jobs { try? await job.cancel() }
     for job in jobs { _ = await job.outcome() }
 }
-private func connectionAdoption(_ connection: CoreCloudConnectionService) async throws -> CoreBridge.CloudAdoptionWork {
+private func connectionAdoption(_ connection: CoreCloudConnectionService, fixture: CloudConnectionFixture) async throws -> CoreBridge.CloudAdoptionWork {
+    try await fixture.beginDiscovery()
+    defer { fixture.endDiscovery() }
     // Canonical K5.2 control records with synthetic ids, zero default times,
     // complete schema 18 epoch and no entity counts. No transport is involved.
     let id = Data(repeating: 8, count: 16)
@@ -40,6 +42,7 @@ private func connectionAdoption(_ connection: CoreCloudConnectionService) async 
         throw CloudOwnTransportFailure.unexpectedReply
     }
     _ = try await connection.confirmAdoption(preview)
+    try await fixture.acceptConnection()
     let status = try #require(try await connection.recoveryStatus())
     #expect(!status.adoptionRecoveredCancelOnly)
     #expect(!status.adoptionAfterReview)
@@ -114,7 +117,7 @@ extension EventTests {
                 }
                 return try Jobs.track(admitted)
             })
-            let handle = try await connectionAdoption(original)
+            let handle = try await connectionAdoption(original, fixture: fixture)
             armed.withLock { $0 = true }
             let pool = try await holdConnectionPool()
             let source = fixture.directory.appending(path: "native-payload")
@@ -153,11 +156,11 @@ extension EventTests {
 
 extension EventTests {
     @Test func connectionPostClaimReplyOrdersNextWorkAndRetainsFollowupAfterTaskCancellation() async throws {
-        try await withCloudConnection { _ in
+        try await withCloudConnection { fixture in
             let raw = try await rawJobConnection()
             let (queued, didQueue) = AsyncStream.makeStream(of: Void.self)
             let connection = CoreCloudConnectionService(raw, onJobQueued: { didQueue.yield(()) })
-            let handle = try await connectionAdoption(connection)
+            let handle = try await connectionAdoption(connection, fixture: fixture)
             let gate = try await MaintenanceLane.shared.call("test.holdAdoptionReply") { try testCloudHoldAdoptionReply() }
             let id = Data(repeating: 8, count: 16)
             let active = CoreBridge.CloudControlRecord(encrypted: Data([8, 1, 18, 16]) + id, systemFields: Data([1]))
@@ -208,11 +211,11 @@ extension EventTests {
 
 extension EventTests {
     @Test func explicitAdoptionResumeWaitsForOriginalResultJobDrain() async throws {
-        try await withCloudConnection { _ in
+        try await withCloudConnection { fixture in
             let raw = try await rawJobConnection()
             let queued = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
             let connection = CoreCloudConnectionService(raw, onJobQueued: { queued.continuation.yield(()) })
-            var handle = try await connectionAdoption(connection)
+            var handle = try await connectionAdoption(connection, fixture: fixture)
             let id = Data(repeating: 8, count: 16)
             let reads: [CoreBridge.CloudControlRecord] = [
                 .init(encrypted: Data([8, 1, 18, 16]) + id, systemFields: Data([1])),

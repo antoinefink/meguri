@@ -162,6 +162,144 @@ import Testing
             #expect(!app.sync.operationFailed && app.sync.connectionFailure == nil)
         }
     }
+
+    @Test func actualAdoptionReplacementRejectsOriginalProviderRecoveryAndPublicationRetry() async throws {
+        try await withFreshProviderSetup { app in
+            try await app.wire.seed(try InitialCloudFixture.load())
+            await app.owner.start()
+            try #require(app.owner.state == .ready)
+            let original = try await CoreProviderService.attached()
+            try await app.owner.prepareCloudConnectionPreview()
+            await app.sync.waitForConnectionPreview()
+            guard case .ready(_, let summary) = app.sync.preview else {
+                Issue.record("Expected a real adoption choice"); return
+            }
+            try #require(SyncStatusPresentation.permits(.adoption, decision: summary.decision))
+            await app.sync.confirmAdoption()
+            await app.owner.waitForCloudActivation()
+            await app.sync.waitForReplacement()
+            await app.sync.prepareConnectionAuthority()
+            let current = try await CoreProviderService.attached()
+            let file = app.root.appending(path: "synthetic-installation/provider.json")
+            let committed = try Data(contentsOf: file)
+            await #expect(throws: (any Error).self) { _ = try await original.recoverHandoffToLocalOnly() }
+            await #expect(throws: (any Error).self) { _ = try await original.retryFailedPublication() }
+            #expect(try Data(contentsOf: file) == committed)
+            #expect(try await current.state().selection == .iCloud)
+            #expect(!(await app.sync.recoverProviderHandoffToLocalOnly()))
+            #expect(app.owner.state == .ready && app.sync.setupState == .attached)
+        }
+    }
+
+    @Test func relaunchedHandoffRecoversOnlyAfterExplicitCurrentOwnerJoin() async throws {
+        try await withFreshProviderSetup { app in
+            await app.owner.start()
+            try #require(app.owner.state == .ready)
+            let originalCoordinator = app.sync
+            let originalProvider = try await CoreProviderService.attached()
+            _ = try await originalProvider.beginHandoff(to: .meguri)
+            let file = app.root.appending(path: "synthetic-installation/provider.json")
+            let intent = try Data(contentsOf: file)
+            try #require(await app.owner.close())
+            let reopened = try ServiceAppHarness(root: app.root, wire: app.wire, defaults: app.defaults, cachedIdentityAvailable: false)
+            do {
+                await reopened.owner.start()
+                try #require(reopened.owner.state == .ready)
+                let current = reopened.sync
+                let backend = try reopened.backend
+                try #require(current.providerState?.phase == .handoffRecovery)
+                await current.retryProviderAuthority()
+                #expect(current.providerState?.phase == .handoffRecovery)
+                #expect(try Data(contentsOf: file) == intent)
+                #expect(await reopened.factory.engines.isEmpty)
+                #expect(!(await originalCoordinator.recoverProviderHandoffToLocalOnly()))
+                #expect(!(await originalCoordinator.retryFailedProviderPublication()))
+                await originalCoordinator.retryProviderAuthority()
+                await #expect(throws: (any Error).self) { _ = try await originalProvider.recoverHandoffToLocalOnly() }
+
+                // Review remains local and usable. The concrete recovery action
+                // honors the real collection owner's active-review guard.
+                if reopened.owner.policy != .ok { await reopened.owner.enableFsrs() }
+                let deck = try await CoreDeckService().addDeck(name: "Synthetic handoff recovery study")
+                let type = try await CoreNotetypeService().addNotetype(.init(name: "Synthetic recovery QA", cloze: false,
+                    fields: ["Q", "A"], templates: [.init(name: "Face", front: "{{Q}}", back: "{{A}}", browserFront: "", browserBack: "")], css: nil))
+                _ = try await CoreNoteService().addNote(.init(notetypeId: type.id, fields: ["Question", "Answer"],
+                    tags: [], deckId: deck.id, guid: nil, updateAddDefaults: false))
+                await reopened.owner.startStudy(deckID: deck.id)
+                let review = try #require(reopened.owner.review)
+                try #require(review.phase == .question)
+                #expect(!(await current.recoverProviderHandoffToLocalOnly()))
+                #expect(!backend.closed && current.providerState?.phase == .handoffRecovery)
+                review.reveal(); await review.settled()
+                review.rate(.easy); await review.settled()
+                #expect(review.record.answers.count == 1)
+                await reopened.owner.finishReview()
+
+                let gate = SyncOwnerGate()
+                let held = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                backend.beforeQuiesce = { held.continuation.yield(true); await gate.hold() }
+                defer { backend.beforeQuiesce = nil; gate.release(); held.continuation.finish() }
+                let recovering = Task { await current.recoverProviderHandoffToLocalOnly() }
+                do {
+                    try #require(try await serviceAppSignal(held.stream, stage: "current provider recovery shutdown"))
+                    #expect(!backend.closed && reopened.sync === current)
+                    #expect(try Data(contentsOf: file) == intent)
+                    #expect(!(await current.recoverProviderHandoffToLocalOnly()))
+                    #expect(!(await current.retryFailedProviderPublication()))
+                    #expect(!(await current.changeProvider(to: .meguri)))
+                    await current.retryProviderAuthority()
+                    #expect(try Data(contentsOf: file) == intent)
+                    gate.release()
+                    try #require(await recovering.value)
+                    #expect(backend.closed && backend.closeReturned == 1)
+                    #expect(reopened.sync !== current && reopened.sync.setupState == .attached)
+                    #expect(reopened.sync.providerState?.selection == .localOnly)
+                    #expect(reopened.sync.providerState?.phase == .localOnly)
+                    #expect(await reopened.factory.engines.isEmpty)
+                    let committed = try Data(contentsOf: file)
+                    #expect(!(await current.recoverProviderHandoffToLocalOnly()))
+                    #expect(!(await current.retryFailedProviderPublication()))
+                    await current.retryProviderAuthority()
+                    #expect(try Data(contentsOf: file) == committed)
+                    weak var successorLifetime = reopened.sync
+                    try #require(await reopened.sync.changeProvider(to: .meguri))
+                    #expect(successorLifetime == nil, "Repeated recovery/handoff must release drained predecessors")
+                    try #require(await reopened.sync.changeProvider(to: .localOnly))
+                    #expect(reopened.sync.setupState == .attached && reopened.owner.state == .ready)
+                } catch { gate.release(); _ = await recovering.value; throw error }
+                try #require(await reopened.owner.close())
+            } catch { _ = await reopened.owner.close(); throw error }
+        }
+    }
+
+    @Test func relaunchedCredentialRemovalRecoveryStaysStoppedAndRetainsIntent() async throws {
+        try await withFreshProviderSetup { app in
+            await app.owner.start()
+            try #require(app.owner.state == .ready)
+            let original = try await CoreProviderService.attached()
+            _ = try await original.beginHandoff(to: .localOnly, removeCredentials: true)
+            let file = app.root.appending(path: "synthetic-installation/provider.json")
+            let intent = try Data(contentsOf: file)
+            try #require(await app.owner.close())
+            let reopened = try ServiceAppHarness(root: app.root, wire: app.wire, defaults: app.defaults, cachedIdentityAvailable: false)
+            do {
+                await reopened.owner.start()
+                try #require(reopened.owner.state == .ready)
+                let stopped = reopened.sync
+                let backend = try reopened.backend
+                #expect(stopped.providerState?.removalPending == true)
+                #expect(!(await stopped.recoverProviderHandoffToLocalOnly()))
+                #expect(backend.closed && backend.closeReturned == 1 && reopened.sync === stopped)
+                #expect(stopped.operationFailed && stopped.providerState?.removalPending == true)
+                await stopped.retryProviderAuthority()
+                #expect(!(await stopped.recoverProviderHandoffToLocalOnly()))
+                #expect(backend.closeReturned == 1 && reopened.sync === stopped)
+                #expect(try Data(contentsOf: file) == intent)
+                #expect(await reopened.factory.engines.isEmpty)
+                try #require(await reopened.owner.close())
+            } catch { _ = await reopened.owner.close(); throw error }
+        }
+    }
 }
 
 // Uses the ordinary app composition with an unknown cached identity, a real

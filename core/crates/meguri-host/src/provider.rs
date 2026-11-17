@@ -33,6 +33,104 @@ impl CoreHost {
             if runtime.qualify_provider_binding().is_err() { self.provider.close_admission(); }
         }
     }
+    pub fn save_provider_settings(&self, settings: meguri_sync::provider::LegacySettings) -> Result<(), EngineError> {
+        self.save_provider_settings_for_generation(self.cloud_connection_generation()?, settings)
+    }
+    /// The retained facade supplies its original generation for comparison
+    /// inside the actual metadata publication, not as publication authority.
+    pub fn save_provider_settings_for_generation(&self, generation: meguri_engine::Generation, settings: meguri_sync::provider::LegacySettings) -> Result<(), EngineError> {
+        self.provider.close_admission();
+        self.publish_provider_metadata(generation, |publication| {
+            self.provider.save_settings_for_owner(settings, generation.0, publication)?;
+            Ok(())
+        })?;
+        self.refresh_provider_admission();
+        Ok(())
+    }
+    /// Handoff recovery facts never certify that an earlier process joined.
+    fn provider_publication_facts(&self) -> Result<(meguri_engine::Generation, Publication), EngineError> {
+        let generation = self.cloud_connection_generation()?;
+        let collection = self.cloud_connection_collection()?;
+        if collection.generation() != generation || !self.original_resource_authority(&collection).is_live()
+            || !self.manual_transfer_history().active().is_ok_and(|active| active.is_none())
+            || !self.engine().jobs().running().is_empty() {
+            return Err(EngineError::Busy { running_op: "provider current owner recovery".into() });
+        }
+        let publication = DeviceState::for_collection(collection.path()).settled_publication()?
+            .ok_or_else(|| EngineError::CollectionUnavailable { reason: "provider recovery publication missing".into() })?;
+        Ok((generation, publication))
+    }
+    fn provider_recovery_facts(&self) -> Result<(meguri_engine::Generation, Publication), EngineError> {
+        if self.review().active_session().is_some() {
+            return Err(EngineError::Busy { running_op: "provider current owner recovery".into() });
+        }
+        self.provider_publication_facts()
+    }
+    pub fn recover_provider_handoff_to_local_only(&self) -> Result<(), EngineError> {
+        self.cloud_connection_generation()?;
+        self.provider.close_admission();
+        let _exclusive = self.engine().reserve_collection_export_handoff()?;
+        let facts = self.provider_recovery_facts()?;
+        self.provider.validate_handoff_recovery(&facts.1)?;
+        if let Some(runtime) = self.cloud_runtime() {
+            // Refuse an SDK/identity/incoming owner, rather than pretending
+            // that its disappearance or a serialized intent proves a join.
+            runtime.provider_after_native_join().map_err(|_| EngineError::Busy { running_op: "provider current native owner".into() })?;
+            let status = runtime.status().map_err(|_| EngineError::Busy { running_op: "provider current iCloud facts".into() })?;
+            if status.stored_usable {
+                self.stop_using_icloud().map_err(|_| EngineError::Busy { running_op: "provider recovery iCloud stop".into() })?;
+            }
+        }
+        if self.provider_recovery_facts()? != facts { return Err(EngineError::Busy { running_op: "provider recovery facts changed".into() }); }
+        self.provider.recover_handoff_to_local_only(facts.0.0, &facts.1)?;
+        Ok(())
+    }
+    pub fn retry_provider_publication(&self) -> Result<(), EngineError> {
+        self.retry_provider_publication_for_generation(self.cloud_connection_generation()?)
+    }
+    pub fn retry_provider_publication_for_generation(&self, generation: meguri_engine::Generation) -> Result<(), EngineError> {
+        if self.cloud_connection_generation()? != generation {
+            return Err(EngineError::Busy { running_op: "provider original host changed".into() });
+        }
+        self.provider.close_admission();
+        if self.provider.failed_publication_requires_handoff_recovery()? {
+            // Retain the collection-only recovery protocol, including review
+            // and native exclusions. Metadata setup does not weaken it.
+            let _exclusive = self.engine().reserve_collection_export_handoff()?;
+            let facts = self.provider_recovery_facts()?;
+            if facts.0 != generation { return Err(EngineError::Busy { running_op: "provider original host changed".into() }); }
+            if let Some(runtime) = self.cloud_runtime() {
+                runtime.provider_after_native_join().map_err(|_| EngineError::Busy { running_op: "provider publication native owner".into() })?;
+            }
+            if self.provider_recovery_facts()? != facts { return Err(EngineError::Busy { running_op: "provider publication facts changed".into() }); }
+            self.provider.retry_failed_publication(facts.0.0, Some(&facts.1))?;
+        } else {
+            let facts = self.publish_provider_metadata(generation, |publication| {
+                self.provider_metadata_retry_available()?;
+                Ok(publication)
+            })?;
+            // This observation adds the existing native exclusion; it is no
+            // join proof. Never call Runtime under Host/lifecycle write gates.
+            if let Some(runtime) = self.cloud_runtime() {
+                runtime.provider_after_native_join().map_err(|_| EngineError::Busy { running_op: "provider publication native owner".into() })?;
+            }
+            self.publish_provider_metadata(generation, |publication| {
+                self.provider_metadata_retry_available()?;
+                if publication != facts { return Err(EngineError::Busy { running_op: "provider publication facts changed".into() }); }
+                self.provider.retry_failed_publication(generation.0, publication.as_ref())?;
+                Ok(())
+            })?;
+        }
+        self.refresh_provider_admission();
+        Ok(())
+    }
+    fn provider_metadata_retry_available(&self) -> Result<(), EngineError> {
+        if !self.manual_transfer_history().active().is_ok_and(|active| active.is_none())
+            || !self.engine().jobs().running().is_empty() {
+            return Err(EngineError::Busy { running_op: "provider current owner recovery".into() });
+        }
+        Ok(())
+    }
     pub fn begin_provider_handoff(&self, destination: Selection) -> Result<ProviderHandoff, EngineError> {
         self.begin_provider_handoff_with_removal(destination, false)
     }
@@ -55,6 +153,10 @@ impl CoreHost {
     /// returned from the original backend's actual native joins. The Core checks
     /// here add exclusions; none substitutes for that join.
     pub fn finish_provider_handoff(&self, handoff: &ProviderHandoff) -> Result<(), EngineError> {
+        if self.cloud_connection_generation()? != handoff.generation {
+            return Err(EngineError::Busy { running_op: "provider original host changed".into() });
+        }
+        self.provider.validate_handoff(&handoff.intent)?;
         let _exclusive = self.engine().reserve_collection_export_handoff()?;
         if self.review().active_session().is_some() || self.cloud_connection_generation()? != handoff.generation
             || !self.manual_transfer_history().active().is_ok_and(|active| active.is_none())
@@ -71,9 +173,15 @@ impl CoreHost {
         Ok(())
     }
     pub fn configure_meguri_connection(&self, endpoint: &str) -> Result<meguri_sync::provider::MeguriConnection, EngineError> {
+        self.configure_meguri_connection_for_generation(self.cloud_connection_generation()?, endpoint)
+    }
+    pub fn configure_meguri_connection_for_generation(&self, generation: meguri_engine::Generation, endpoint: &str) -> Result<meguri_sync::provider::MeguriConnection, EngineError> {
+        // RandomSource is a Host input, so sample before any ownership locks.
         let random = self.provider_random();
         let reference = format!("{:016x}{:016x}", random.next_u64(), random.next_u64());
-        let connection = self.provider.configure_meguri(endpoint, reference)?;
+        let connection = self.publish_provider_metadata(generation, |publication| {
+            Ok(self.provider.configure_meguri_for_owner(endpoint, reference, generation.0, publication)?)
+        })?;
         self.refresh_provider_admission();
         Ok(connection)
     }

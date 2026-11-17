@@ -801,6 +801,8 @@ extension EventTests {
     @Test func debugPreviewOriginalReplyEvidenceAndThrownAwait() async throws {
         for throwing in [false, true] {
             try await withCloudConnection { f in
+                try await f.beginDiscovery()
+                defer { f.endDiscovery() }
                 let sentinel = UUID().uuidString
                 let operation = DebugPreparedPreviewRead(error: throwing ? BridgeError.internal(sentinel) : nil)
                 let executor = CloudOwnExecutor(core: f.connection, transport: operation)
@@ -832,6 +834,8 @@ extension EventTests {
 
     @Test func debugPreviewOldResultTaskCannotUpdateNewBusyAttempt() async throws {
         try await withCloudConnection { f in
+            try await f.beginDiscovery()
+            defer { f.endDiscovery() }
             let operation = DebugPreparedPreviewRead()
             let executor = CloudOwnExecutor(core: f.connection, transport: operation)
             let pending = Task { try await executor.preview() }

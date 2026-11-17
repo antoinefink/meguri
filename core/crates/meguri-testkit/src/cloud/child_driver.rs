@@ -1888,6 +1888,7 @@ struct Device {
     account: Arc<Account>,
     clock: Arc<StepClock>,
     stable: Option<(i64, core::BindingId)>,
+    discovery: Option<meguri_sync::provider::Discovery>,
     deletion: Option<core::publication::ZoneDeletionGuard>,
     zone_listing: Option<core::runtime::ZoneListingRequest>,
     session_started: BTreeMap<u64, i64>,
@@ -1941,6 +1942,7 @@ impl Device {
             account,
             clock,
             stable: b.stable,
+            discovery: None,
             deletion: None,
             zone_listing: None,
             session_started: BTreeMap::new(),
@@ -2419,12 +2421,14 @@ impl Device {
             }
             Input::Reopen => {
                 self.host.close()?;
+                self.discovery = None;
                 self.host = meguri_host::CoreHost::open(self.options.clone())?;
                 self.incoming_events = self.host.engine().stream().subscribe();
                 let latches = self.incoming_latches.clone();
                 self.runtime()?
                     .set_incoming_stage_hook_for_testing(move |stage| latches.hit(stage));
                 self.runtime()?.refresh_identity()?;
+                self.host.refresh_provider_admission();
                 value(self.runtime()?.instance()?)
             }
             Input::StoredState => value(self.runtime()?.stored_state_for_testing()?),
@@ -2444,6 +2448,7 @@ impl Device {
                     media.store().register_full(|_, _| true).map_err(|_| failure())?;
                 }
                 self.runtime()?.reconcile_binding(&c, &media, IPC_TIMEOUT)?;
+                self.host.refresh_provider_admission();
                 value(())
             }
             Input::StartSDK(i) => {
@@ -3087,21 +3092,47 @@ impl Device {
                 self.clock.step_ms(ms);
                 value(())
             }
+            Input::PreviewBegin => {
+                // The explicit preview owns discovery across the real injected
+                // account reads, including later preview/confirmation commands.
+                self.discovery = Some(self.host.provider_authority().begin_discovery()?);
+                let result = publication_driver::handle(self, Input::PreviewBegin);
+                if result.is_err() {
+                    self.discovery = None;
+                }
+                result
+            }
+            Input::PreviewCancel => {
+                let result = publication_driver::handle(self, Input::PreviewCancel);
+                if result.is_ok() {
+                    self.discovery = None;
+                }
+                result
+            }
+            input @ (Input::PublicationConfirm(..) | Input::AdoptionConfirm(..)) => {
+                let result = publication_driver::handle(self, input)?;
+                // Only the original successful confirmation can admit setup.
+                self.runtime()?.provider_accept_icloud_connection()?;
+                self.host.refresh_provider_admission();
+                self.discovery = None;
+                Ok(result)
+            }
+            input @ (Input::PublicationLocal(..) | Input::AdoptionLocal(..) | Input::AdoptionReply(..)) => {
+                let result = publication_driver::handle(self, input)?;
+                self.host.refresh_provider_admission();
+                Ok(result)
+            }
+            input @ Input::RegisterSDK(..) => {
+                self.host.refresh_provider_admission();
+                publication_driver::handle(self, input)
+            }
             input @ (Input::BackupPath(..)
             | Input::BackupNotices
-            | Input::RegisterSDK(..)
             | Input::RootConfirmed
-            | Input::PreviewBegin
             | Input::PreviewActive(..)
             | Input::PreviewEpoch(..)
-            | Input::PreviewCancel
-            | Input::PublicationConfirm(..)
-            | Input::AdoptionConfirm(..)
-            | Input::AdoptionReply(..)
-            | Input::AdoptionLocal(..)
             | Input::PadAdoptionCandidate
             | Input::PublicationNext
-            | Input::PublicationLocal(..)
             | Input::PublicationCancel(..)
             | Input::PublicationTrigger
             | Input::PublicationFacts
@@ -3123,6 +3154,7 @@ impl Device {
             | Input::DeletionCheck(..)) => publication_driver::handle(self, input),
             Input::Close => {
                 self.host.close()?;
+                self.discovery = None;
                 self.closed = true;
                 value(())
             }
@@ -3266,6 +3298,7 @@ fn handle_transport_command(device: &mut Device, input: Input, stream: &mut Unix
                 complete_loss_identity_read(&runtime, &inputs)?;
             }
             runtime.publication_result(&request, result, &collection)?;
+            device.host.refresh_provider_admission();
             Ok(serde_json::to_value(responses)?)
         }
         Input::DeleteZone(zone) => {
