@@ -5,7 +5,7 @@ pub(super) fn setup() -> (tempfile::TempDir, std::path::PathBuf, CoreHost, Servi
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     host.media().unwrap().store().register_full(|_, _| true).unwrap();
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
     let p = preview(&host, &mut service);
@@ -39,7 +39,7 @@ fn epoch_crt_publication_requires_actual_epoch_ack_and_survives_reopen() {
     assert!(epoch_acked && reached_scan);
     host.close().unwrap();
     drop(host);
-    let reopened = open_host(&dir, keys());
+    let reopened = open_prior_icloud_host(&dir, keys());
     assert_eq!(reopened.cloud_runtime().unwrap().epoch_crt_for_testing().unwrap(), Some(crt));
     reopened.close().unwrap();
 }
@@ -90,7 +90,7 @@ fn epoch_crt_fetched_complete_updates_both_runtime_intakes_and_survives_reopen()
     assert_eq!(runtime.epoch_crt_for_testing().unwrap(), Some(published_crt));
     host.close().unwrap();
     drop(host);
-    let reopened = open_host(&dir, keys());
+    let reopened = open_prior_icloud_host(&dir, keys());
     assert_eq!(reopened.cloud_runtime().unwrap().epoch_crt_for_testing().unwrap(), Some(published_crt));
     reopened.close().unwrap();
 }

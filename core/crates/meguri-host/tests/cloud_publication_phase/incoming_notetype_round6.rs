@@ -7,7 +7,7 @@ fn ordinary_native_save_failure_case(failure: &str) {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated_legacy_reversed(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(461)).unwrap();
     publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -95,7 +95,7 @@ fn ordinary_notetype_native_add_and_clone_after_publication_bootstrap_and_reopen
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(462)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let collection = host.collection().unwrap();
@@ -128,7 +128,7 @@ fn ordinary_notetype_native_add_and_clone_after_publication_bootstrap_and_reopen
     host.close().unwrap();
     drop(collection);
     drop(host);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     prove_reopened_binding(&host, &binding);
     host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
     for entity in retained {

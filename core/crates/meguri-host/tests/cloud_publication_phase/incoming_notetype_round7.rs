@@ -28,7 +28,7 @@ fn native_notetype_add_clone_undo_redo_unsent_handed_and_accepted_reopen() {
             let temp = tempfile::tempdir().unwrap();
             let dir = temp.path().join("device");
             generated(&dir);
-            let host = open_host(&dir, keys());
+            let host = open_prior_icloud_host(&dir, keys());
             let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(471)).unwrap();
             let binding = publish_actual_collection(&host, &mut service);
             let collection = host.collection().unwrap();
@@ -75,7 +75,7 @@ fn native_notetype_add_clone_undo_redo_unsent_handed_and_accepted_reopen() {
             let retained = runtime.entity_facts(&name).unwrap().unwrap();
             collection.flush_wal(Duration::from_secs(30)).unwrap();
             host.close().unwrap(); drop(collection); drop(host);
-            let host = open_host(&dir, keys());
+            let host = open_prior_icloud_host(&dir, keys());
             prove_reopened_binding(&host, &binding);
             host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
             let reopened = host.cloud_runtime().unwrap().entity_facts(&name).unwrap().unwrap();
@@ -96,7 +96,7 @@ fn stopped_reconnect_preview_250_large_notes_valid_and_refused_layouts_bounded_h
         let dir = temp.path().join("device");
         let recipe = Recipe::parse("recipe: preview-memory\ndescription: Public large preview\nnow: \"2025-01-01T00:00:00Z\"\ndecks:\n  - name: Generic\n    notetype: reversed\n    new: 500\n    fields: [\"prompt {n}\", \"reply {n}\"]\n").unwrap();
         generate_recipe(&recipe, 471, &dir).unwrap();
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(472)).unwrap();
         let binding = publish_actual_collection(&host, &mut service);
         let source = source_type(&host);
@@ -124,7 +124,7 @@ fn stopped_reconnect_preview_250_large_notes_valid_and_refused_layouts_bounded_h
             db.execute("UPDATE templates SET ord=ord+2 WHERE ntid=?1", &[RawValue::Integer(nt(&source).id)]).unwrap();
         }
         db.close().unwrap();
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let before = cloud::testing::entity_body_reads();
         PeakAlloc::reset_peak();
         let preview = actual_preview(&host, &mut service, &scope());
@@ -149,7 +149,7 @@ fn replacement_blocked_ordinary_worker() {
     let root = std::path::PathBuf::from(root);
     let dir = root.join("device");
     generated_legacy_reversed(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(&root, Config::default(), SeededRandom::new(473)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let source = source_type(&host);
@@ -175,7 +175,7 @@ fn blocked_replacement_with_random(root: &Path, random: Option<Arc<dyn RandomSou
     let db = PlainDatabase::open(&dir.join("collection.anki2")).unwrap();
     db.execute_batch("BEGIN IMMEDIATE; UPDATE templates SET ord=-ord-1 WHERE ntid IN (SELECT ntid FROM templates GROUP BY ntid HAVING count(*)=2); UPDATE templates SET ord=ord+2 WHERE ord<0; COMMIT").unwrap();
     db.close().unwrap();
-    let host = open_host_with_random(&dir, keys(), Arc::new(Account), scope(), random);
+    let host = open_prior_icloud_host_with_random(&dir, keys(), Arc::new(Account), scope(), random);
     let binding = host.cloud_runtime().unwrap().status().unwrap().binding.unwrap();
     prove_reopened_binding(&host, &binding);
     host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
@@ -239,7 +239,7 @@ fn publication_retains_blocked_work_until_switch_acceptance() {
     assert_eq!(runtime.apply_intents(binding.id).unwrap(), intents);
     assert!(runtime.register_sdk(true).is_err());
     host.close().unwrap(); drop(collection); drop(host);
-    let host = open_host_with_random(&temp.path().join("device"), keys(), Arc::new(Account), scope(), Some(random.clone()));
+    let host = open_prior_icloud_host_with_random(&temp.path().join("device"), keys(), Arc::new(Account), scope(), Some(random.clone()));
     prove_reopened_binding(&host, &binding);
     host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
     let runtime = host.cloud_runtime().unwrap();
@@ -283,7 +283,7 @@ fn publication_retains_blocked_work_until_switch_acceptance() {
     let accepted_type = runtime.entity_facts(&codec::entity_name(&new_binding.facts.record_key.0,
         codec::Kind::Notetype, &codec::id_key(local_type.0)).unwrap()).unwrap().unwrap();
     host.close().unwrap(); drop(collection); drop(host);
-    let host = open_host_with_random(&temp.path().join("device"), keys(), Arc::new(Account), scope(), Some(random));
+    let host = open_prior_icloud_host_with_random(&temp.path().join("device"), keys(), Arc::new(Account), scope(), Some(random));
     prove_reopened_binding(&host, &new_binding);
     let runtime = host.cloud_runtime().unwrap();
     assert!(runtime.publication_op().unwrap().is_none());
@@ -410,7 +410,7 @@ fn settled_competing_root_cancel_restores_refusal_then_local_only_reopen() {
     host.keep_cloud_local_only(host.cloud_connection_generation().unwrap(), None).unwrap();
     assert_eq!(runtime.apply_intents(binding.id).unwrap(), intents);
     host.close().unwrap(); drop(collection); drop(host);
-    let host = open_host(&temp.path().join("device"), keys());
+    let host = open_prior_icloud_host(&temp.path().join("device"), keys());
     let preview = actual_preview(&host, &mut service, &scope());
     assert!(preview.decision == ConnectDecision::ChooseCollection && !preview.unsent_counts_exact);
     assert_eq!(host.cloud_runtime().unwrap().apply_intents(binding.id).unwrap(), intents);
@@ -424,7 +424,7 @@ fn published_native_notetype_local_edit_undo_redo_send_accept_and_reopen() {
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("device");
         generated(&dir);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(474)).unwrap();
         let binding = publish_actual_collection(&host, &mut service);
         let id = add_type(&host, clone);
@@ -463,7 +463,7 @@ fn published_native_notetype_local_edit_undo_redo_send_accept_and_reopen() {
         assert!(accepted.mark.is_none() && accepted.in_flight.is_empty());
         collection.flush_wal(Duration::from_secs(30)).unwrap();
         host.close().unwrap(); drop(collection); drop(host);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         prove_reopened_binding(&host, &binding);
         host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
         let reopened = host.cloud_runtime().unwrap().entity_facts(&name).unwrap().unwrap();
@@ -482,7 +482,7 @@ fn large_notetype_part_pages_projection_and_raw_traversal_bounded_heap() {
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("device");
         generated(&dir);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(475)).unwrap();
         publish_actual_collection(&host, &mut service);
         let source = nt(&source_type(&host));
@@ -546,7 +546,7 @@ fn published_note_deletion_unsent_undo_redo_then_tombstone_send_accept_reopen() 
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(476)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -566,7 +566,7 @@ fn published_note_deletion_unsent_undo_redo_then_tombstone_send_accept_reopen() 
     assert!(removed.tombstone_at.is_some() && removed.mark.is_some());
     collection.flush_wal(Duration::from_secs(30)).unwrap();
     host.close().unwrap(); drop(collection); drop(host);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     prove_reopened_binding(&host, &binding);
     host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
     confirm_current_service_active(&host, &mut service);
@@ -614,7 +614,7 @@ fn blocked_publication_lost_active_reply_cancel_retains_zone_and_reopened_old_in
     assert_eq!(store.apply_intents(binding.id).unwrap(), intents);
     assert!(!store.retained_zones(binding.id).unwrap().get(&zone).is_some_and(|z| z.deletion_due));
     drop(store);
-    let host = open_host(&temp.path().join("device"), keys());
+    let host = open_prior_icloud_host(&temp.path().join("device"), keys());
     prove_reopened_binding(&host, &binding);
     host.prepare_cloud_runtime(Duration::from_secs(30)).unwrap();
     let preview = actual_preview(&host, &mut service, &scope());

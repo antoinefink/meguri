@@ -14,7 +14,7 @@ fn setup() -> (tempfile::TempDir, CoreHost, Service<SeededRandom>, String) {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("r2-media");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(1193)).unwrap();
     publish_actual_collection(&host, &mut service);
     host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {

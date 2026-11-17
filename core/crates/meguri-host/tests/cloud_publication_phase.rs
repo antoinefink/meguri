@@ -105,6 +105,27 @@ fn host_config_with_random(dir: &Path, keys: Arc<Keys>, identity: Arc<dyn Identi
     config.cloud_key_bytes = Some(keys);
     config
 }
+// Protocol fixtures represent installations that already opted in to iCloud.
+// Production migration imports settings only when provider metadata is absent;
+// reopening must retain the actual service choice, handoff and binding.
+fn prepare_prior_icloud_fixture_configuration(config: &meguri_host::HostConfig) {
+    CoreHost::migrate_provider_configuration(&config.manual_transfer_directory,
+        meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+            enabled: true, paused: false, automatic: true, media: true,
+        })).unwrap();
+}
+fn open_prior_icloud_host(dir: &Path, keys: Arc<Keys>) -> CoreHost {
+    open_prior_icloud_host_with(dir, keys, Arc::new(Account), scope())
+}
+fn open_prior_icloud_host_with(dir: &Path, keys: Arc<Keys>, identity: Arc<dyn IdentityProvider>, scope: Scope) -> CoreHost {
+    open_prior_icloud_host_with_random(dir, keys, identity, scope, None)
+}
+fn open_prior_icloud_host_with_random(dir: &Path, keys: Arc<Keys>, identity: Arc<dyn IdentityProvider>, scope: Scope,
+    random: Option<Arc<dyn RandomSource>>) -> CoreHost {
+    let config = host_config_with_random(dir, keys, identity, scope, random);
+    prepare_prior_icloud_fixture_configuration(&config);
+    CoreHost::open(config).unwrap()
+}
 fn generated(dir: &Path) {
     let recipe = Recipe::parse("recipe: publication-phase\ndescription: Public synthetic rows\nnow: \"2025-01-01T00:00:00Z\"\ndecks:\n  - name: Generic::Publication\n    notetype: basic\n    new: 1\n    due: 1\n    tags: [generic]\n    fields: [\"generic {n}\", \"back {n}\"]\n").unwrap();
     generate_recipe(&recipe, 91, dir).unwrap();
@@ -346,7 +367,7 @@ fn local_information_qualifies_isolated_work_without_claiming_a_retained_backup(
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(616)).unwrap();
     publish_actual_collection(&host, &mut service);
     let collection = host.collection().unwrap();
@@ -392,7 +413,7 @@ fn local_information_counts_isolated_revision_after_dirty_mark_loss_without_muta
     let dir = temp.path().join("device");
     generated(&dir);
     let keys = keys();
-    let host = open_host(&dir, keys.clone());
+    let host = open_prior_icloud_host(&dir, keys.clone());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(617)).unwrap();
     publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -491,7 +512,7 @@ fn local_information_foreign_copies(salvage: bool) {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(618)).unwrap();
     publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -647,7 +668,7 @@ fn secure_key_failure_has_no_confirmation_or_binding_and_preview_draws_nothing()
             calls: Mutex::new(0),
             fail: Some(failed),
         });
-        let host = open_host(&dir, keys.clone());
+        let host = open_prior_icloud_host(&dir, keys.clone());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
         let before = meguri_engine::device_state::DeviceState::for_collection(host.collection().unwrap().path())
             .publication_decision()
@@ -682,7 +703,7 @@ fn initial_rows_are_unacknowledged_until_actual_sdk_saves_and_own_switch_is_last
         calls: Mutex::new(0),
         fail: None,
     });
-    let host = open_host(&dir, keys.clone());
+    let host = open_prior_icloud_host(&dir, keys.clone());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     host.media().unwrap().store().register_full(|_, _| true).unwrap();
@@ -805,7 +826,7 @@ fn initial_rows_are_unacknowledged_until_actual_sdk_saves_and_own_switch_is_last
     host.close().unwrap();
     drop(collection);
     drop(host);
-    let reopened = open_host(&dir, keys.clone());
+    let reopened = open_prior_icloud_host(&dir, keys.clone());
     assert_eq!(
         reopened.cloud_runtime().unwrap().status().unwrap().binding.unwrap(),
         binding
@@ -902,7 +923,7 @@ fn unfinished_adoption_restart_uses_actual_host_account_and_real_staging_proofs(
                 } else {
                     IdentityStatus::Available(cloud::OpaqueBytes(b"changed-account".to_vec()))
                 })));
-                let host = open_host_with(&dir, keys(), identity, scope());
+                let host = open_prior_icloud_host_with(&dir, keys(), identity, scope());
                 let state = decision(&host);
                 assert_eq!(state.publication.identity, candidate.identity);
                 assert_eq!(state.publication.binding, candidate.binding);
@@ -931,7 +952,7 @@ fn cloud_publication_crash_worker() {
     let dir = std::path::PathBuf::from(dir);
     let mode = std::env::var("MEGURI_PUBLICATION_CRASH_MODE").unwrap();
     let point = std::env::var("MEGURI_PUBLICATION_CRASH_POINT").unwrap();
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     if mode == "adopt" {
         use meguri_engine::{
             LongOp,
@@ -996,7 +1017,7 @@ fn decision_write_kill_restart_reopens_durable_binding_and_preserves_new_restore
     let dir = temp.path().join("device");
     generated(&dir);
     crash_worker(&dir, "decision", "cloud.publish.after_fence_clear");
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let op = runtime.publication_op().unwrap().unwrap();
     assert_eq!(op.step, PublishStep::Bound);
@@ -1028,7 +1049,7 @@ fn decision_write_kill_restart_reopens_durable_binding_and_preserves_new_restore
     drop(host);
     let mut other_scope = scope();
     other_scope.container.push_str(".other");
-    let other = open_host_with(&dir, keys(), Arc::new(Account), other_scope);
+    let other = open_prior_icloud_host_with(&dir, keys(), Arc::new(Account), other_scope);
     assert!(
         other
             .collection()
@@ -1073,7 +1094,7 @@ fn held_publication_request_revalidates_account_file_decision_and_restart_before
         let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
             cloud::OpaqueBytes(scope().account.into_bytes()),
         ))));
-        let host = open_host_with(&dir, keys(), account.clone(), scope());
+        let host = open_prior_icloud_host_with(&dir, keys(), account.clone(), scope());
         let runtime = host.cloud_runtime().unwrap();
         let collection = host.collection().unwrap();
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
@@ -1102,7 +1123,7 @@ fn held_publication_request_revalidates_account_file_decision_and_restart_before
             }
             "restart" => {
                 host.close().unwrap();
-                let reopened = open_host(&dir, keys());
+                let reopened = open_prior_icloud_host(&dir, keys());
                 assert!(
                     execute_publication_request(
                         &mut service,
@@ -1237,7 +1258,7 @@ fn non_atomic_parent_failure_never_submits_children_before_persisted_parent_ackn
     let dir = temp.path().join("device");
     generated(&dir);
     // Fixed public key vector: draw 19 puts this Notetype before its new Note.
-    let host = open_host(
+    let host = open_prior_icloud_host(
         &dir,
         Arc::new(Keys {
             calls: Mutex::new(19),
@@ -1411,7 +1432,7 @@ fn publication_driver_tracking_failure(no_space: bool) {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("publication-policy-failure");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     host.media().unwrap().store().register_full(|_, _| true).unwrap();
@@ -1534,7 +1555,7 @@ fn publication_driver_automatic_terminal(observe_sent: bool, observe_complete: b
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("publication-policy");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     host.media().unwrap().store().register_full(|_, _| true).unwrap();
@@ -1725,7 +1746,7 @@ fn held_active_is_not_sent_and_actual_lost_reply_retains_submission_evidence_on_
         let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
             cloud::OpaqueBytes(scope().account.into_bytes()),
         ))));
-        let host = open_host_with(&dir, keys(), account.clone(), scope());
+        let host = open_prior_icloud_host_with(&dir, keys(), account.clone(), scope());
         host.media().unwrap().store().register_full(|_, _| true).unwrap();
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
         let p = preview(&host, &mut service);
@@ -1755,7 +1776,7 @@ fn held_active_is_not_sent_and_actual_lost_reply_retains_submission_evidence_on_
         }
         host.close().unwrap();
         drop(host);
-        let reopened = open_host(&dir, keys());
+        let reopened = open_prior_icloud_host(&dir, keys());
         let durable = reopened.cloud_runtime().unwrap().publication_op().unwrap().unwrap();
         assert_eq!(durable.switch_sent, submit);
         assert_eq!(durable.active_attempt.is_some(), submit);
@@ -1776,7 +1797,7 @@ fn accepted_original_active_delivery_survives_live_identity_invalidation_without
         let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
             cloud::OpaqueBytes(scope().account.into_bytes()),
         ))));
-        let host = open_host_with(&dir, keys(), account.clone(), scope());
+        let host = open_prior_icloud_host_with(&dir, keys(), account.clone(), scope());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(479)).unwrap();
         let before_binding = publish_actual_collection(&host, &mut service);
         let runtime = host.cloud_runtime().unwrap();
@@ -1956,7 +1977,7 @@ fn policy_work_retained_resume_provider_cancellation_preserves_offer_until_inval
             identity: Mutex::new(available.clone()),
             after_sample: Mutex::new(None),
         });
-        let host = open_host_with(&dir, keys(), account.clone(), scope());
+        let host = open_prior_icloud_host_with(&dir, keys(), account.clone(), scope());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(707)).unwrap();
         let binding = publish_actual_collection(&host, &mut service);
         let runtime = host.cloud_runtime().unwrap();
@@ -2117,7 +2138,7 @@ fn publication_work_uses_sent_step_when_last_entity_result_lands_during_selectio
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     let media = host.media().unwrap();
@@ -2182,7 +2203,7 @@ fn duplicate_media_feed_does_not_invalidate_prepared_root_read() {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     let media = host.media().unwrap();
@@ -2248,6 +2269,7 @@ fn publication_bind_held_final_providers_refuse_reopen_and_replacement_without_s
                     files: Arc::new(NativeFiles),
                 });
                 config.cloud_key_bytes = Some(keys());
+                prepare_prior_icloud_fixture_configuration(&config);
                 let host = CoreHost::open(config).unwrap();
                 let runtime = host.cloud_runtime().unwrap();
                 let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(711)).unwrap();
@@ -2358,7 +2380,7 @@ fn durable_identity_device_only_reopen_preserves_pending_and_ack_then_reconciles
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("durable-reopen");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(707)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -2475,7 +2497,7 @@ fn durable_identity_device_only_reopen_preserves_pending_and_ack_then_reconciles
         assert_eq!(store.stored_runtime_state(binding.id).unwrap().unwrap(), historical);
         assert!(store.entity_facts(binding.id, &pending.name).unwrap().as_ref() == Some(&pending));
     });
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     runtime.refresh_identity().unwrap();
@@ -2660,7 +2682,7 @@ fn stopped_binding_committed_incoming_transition(resume: bool) {
     let dir = temp.path().join("device");
     generated(&dir);
     let keys = keys();
-    let host = open_host(&dir, keys.clone());
+    let host = open_prior_icloud_host(&dir, keys.clone());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
     let old = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -2861,7 +2883,7 @@ fn stopped_binding_committed_incoming_transition(resume: bool) {
     host.close().unwrap();
     drop(collection);
     drop(host);
-    let reopened = open_host(&dir, keys);
+    let reopened = open_prior_icloud_host(&dir, keys);
     let runtime = reopened.cloud_runtime().unwrap();
     assert_eq!(runtime.status().unwrap().binding.unwrap(), new);
     assert!(runtime.publication_op().unwrap().is_none());
@@ -2911,7 +2933,7 @@ fn queued_ready_incoming_is_not_applied_by_republication_and_is_discarded_only_a
     let dir = temp.path().join("device");
     generated(&dir);
     let keys = keys();
-    let host = open_host(&dir, keys.clone());
+    let host = open_prior_icloud_host(&dir, keys.clone());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
     let old = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -3036,7 +3058,7 @@ fn queued_ready_incoming_is_not_applied_by_republication_and_is_discarded_only_a
     host.close().unwrap();
     drop(collection);
     drop(host);
-    let reopened = open_host(&dir, keys);
+    let reopened = open_prior_icloud_host(&dir, keys);
     let runtime = reopened.cloud_runtime().unwrap();
     assert_eq!(runtime.status().unwrap().binding.unwrap(), new);
     assert!(runtime.publication_op().unwrap().is_none());
@@ -3235,7 +3257,7 @@ fn cancel_with_account_status(status: IdentityStatus) {
     let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
         cloud::OpaqueBytes(scope().account.into_bytes()),
     ))));
-    let host = open_host_with(&dir, keys(), account.clone(), scope());
+    let host = open_prior_icloud_host_with(&dir, keys(), account.clone(), scope());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
     let old = publish_actual_collection(&host, &mut service);
     restore_collection(&host, &dir);
@@ -3292,7 +3314,7 @@ fn cancellation_after_native_file_mismatch_restores_fence_and_keeps_old_binding_
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("device");
         generated(&dir);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
         let old = publish_actual_collection(&host, &mut service);
         if restore {
@@ -3322,7 +3344,7 @@ fn cancellation_after_native_file_mismatch_restores_fence_and_keeps_old_binding_
         assert!(host.review().active_session().is_none());
         host.close().unwrap();
         drop(host);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         assert_eq!(decision(&host), written);
         assert_eq!(
             host.collection().unwrap().open_evidence().unwrap().native_file,
@@ -3360,7 +3382,7 @@ fn cancellation_leaves_intervening_restore_or_other_build_decision_and_row_uncha
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("device");
         generated(&dir);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
         restore_collection(&host, &dir);
         let op = bind_and_write(&host, &mut service, &scope());
@@ -3368,7 +3390,7 @@ fn cancellation_leaves_intervening_restore_or_other_build_decision_and_row_uncha
         other_scope.container.push_str(".other");
         let other_op = if other_build {
             host.close().unwrap();
-            let other = open_host_with(&dir, keys(), Arc::new(Account), other_scope.clone());
+            let other = open_prior_icloud_host_with(&dir, keys(), Arc::new(Account), other_scope.clone());
             let row = bind_and_write(&other, &mut service, &other_scope);
             other.close().unwrap();
             Some(row)
@@ -3378,7 +3400,7 @@ fn cancellation_leaves_intervening_restore_or_other_build_decision_and_row_uncha
             None
         };
         drop(host);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let intervening = decision(&host);
         let calls = service.request_log().unwrap().len();
         let runtime = host.cloud_runtime().unwrap();
@@ -3391,7 +3413,7 @@ fn cancellation_leaves_intervening_restore_or_other_build_decision_and_row_uncha
         host.close().unwrap();
         drop(host);
         if let Some(row) = other_op {
-            let other = open_host_with(&dir, keys(), Arc::new(Account), other_scope);
+            let other = open_prior_icloud_host_with(&dir, keys(), Arc::new(Account), other_scope);
             assert_eq!(other.cloud_runtime().unwrap().publication_op().unwrap(), Some(row));
             assert_eq!(decision(&other), intervening);
             other.close().unwrap();
@@ -3406,7 +3428,7 @@ fn decision_cas_io_error_keeps_inprocess_reopen_binding_consistent_for_publish_a
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("device");
         generated(&dir);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         restore_collection(&host, &dir);
         let before = decision(&host);
         let runtime = host.cloud_runtime().unwrap();
@@ -3465,7 +3487,7 @@ fn cancel_fence_kill_restart_finishes_cancel_without_account_and_preserves_prior
     let dir = temp.path().join("device");
     generated(&dir);
     crash_worker(&dir, "cancel", "cloud.publish.after_cancel_fence");
-    let host = open_host_with(
+    let host = open_prior_icloud_host_with(
         &dir,
         keys(),
         Arc::new(MutableAccount(Mutex::new(IdentityStatus::ReadFailed))),
@@ -3549,7 +3571,7 @@ fn actual_field_conflict_retains_isolated_owner_once_after_republication_and_cle
     let dir = temp.path().join("device");
     generated(&dir);
     let keys = keys();
-    let host = open_host(&dir, keys.clone());
+    let host = open_prior_icloud_host(&dir, keys.clone());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
     let old = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -3684,7 +3706,7 @@ fn actual_field_conflict_retains_isolated_owner_once_after_republication_and_cle
     assert_eq!(retained.copy.note_deck, Some(deck));
     assert!(retained.copy.resolved_at_ms.is_none() && retained.copy.staged_path.is_none());
 
-    let host = open_host(&dir, keys.clone());
+    let host = open_prior_icloud_host(&dir, keys.clone());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     assert_eq!(runtime.status().unwrap().binding.unwrap(), old);
@@ -3738,7 +3760,7 @@ fn actual_field_conflict_retains_isolated_owner_once_after_republication_and_cle
     drop(host);
     assert_eq!(retained_copies_without_work(&dir, &isolated), copies);
 
-    let reopened = open_host(&dir, keys);
+    let reopened = open_prior_icloud_host(&dir, keys);
     let runtime = reopened.cloud_runtime().unwrap();
     assert_eq!(runtime.status().unwrap().binding.unwrap(), new);
     assert!(runtime.publication_op().unwrap().is_none());
@@ -3782,7 +3804,7 @@ fn partial_cloud_ack_keeps_a_multi_note_step_pending_until_every_named_key_is_sa
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("partial-ack");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(614)).unwrap();
     publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -3878,7 +3900,7 @@ fn republish_pending_native_note(stop_at_capture: bool) {
     let dir = temp.path().join("pending-republication");
     generated(&dir);
     let keys = keys();
-    let host = open_host(&dir, keys.clone());
+    let host = open_prior_icloud_host(&dir, keys.clone());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(615)).unwrap();
     let old = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -4034,7 +4056,7 @@ fn republish_pending_native_note(stop_at_capture: bool) {
     host.close().unwrap();
     drop(collection);
     drop(host);
-    let reopened = open_host(&dir, keys);
+    let reopened = open_prior_icloud_host(&dir, keys);
     let runtime = reopened.cloud_runtime().unwrap();
     assert_eq!(runtime.status().unwrap().binding.unwrap(), new);
     assert!(runtime.publication_op().unwrap().is_none());
@@ -4104,7 +4126,7 @@ fn explicit_resume_after_real_isolated_edit_and_review_is_cursorless_and_require
     let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
         cloud::OpaqueBytes(scope().account.into_bytes()),
     ))));
-    let host = open_host_with(&dir, keys(), account.clone(), scope());
+    let host = open_prior_icloud_host_with(&dir, keys(), account.clone(), scope());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(706)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -4293,7 +4315,7 @@ fn disabled_settings_resume_with_empty_media_intents_finishes_scan_before_enable
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("resume-empty-media");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(710)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -4329,7 +4351,7 @@ fn resume_media_fixture(disabled: bool, ready_only: bool) {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("resume-media");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(709)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -4896,7 +4918,7 @@ fn stopped_resume_retains_original_preview_across_accepted_matching_account_read
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("resume-reaffirmation");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(711)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -4943,7 +4965,7 @@ fn stopped_resume_reaffirmation_requires_accepted_read_and_current_original_auth
         let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
             cloud::OpaqueBytes(scope().account.into_bytes()),
         ))));
-        let host = open_host_with(&dir, keys(), account.clone(), scope());
+        let host = open_prior_icloud_host_with(&dir, keys(), account.clone(), scope());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(712)).unwrap();
         let binding = publish_actual_collection(&host, &mut service);
         let runtime = host.cloud_runtime().unwrap();
@@ -5000,7 +5022,7 @@ fn resume_proof_refuses_changed_account_file_fence_operation_and_replaced_previe
         let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
             cloud::OpaqueBytes(scope().account.into_bytes()),
         ))));
-        let host = open_host_with(&dir, keys(), account.clone(), scope());
+        let host = open_prior_icloud_host_with(&dir, keys(), account.clone(), scope());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(707)).unwrap();
         let binding = publish_actual_collection(&host, &mut service);
         let runtime = host.cloud_runtime().unwrap();
@@ -5068,7 +5090,7 @@ fn resume_is_not_offered_for_actual_missing_zone_or_changed_epoch_manifest() {
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("resume-zone");
         generated(&dir);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(708)).unwrap();
         let binding = publish_actual_collection(&host, &mut service);
         let runtime = host.cloud_runtime().unwrap();
@@ -5184,7 +5206,7 @@ fn prior_open_observation_does_not_block_reopened_batch_or_sync_now_selection() 
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("observation-restart");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(616)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let collection = host.collection().unwrap();
@@ -5204,7 +5226,7 @@ fn prior_open_observation_does_not_block_reopened_batch_or_sync_now_selection() 
     drop(collection);
     drop(host);
 
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let collection = host.collection().unwrap();
     let runtime = host.cloud_runtime().unwrap();
     runtime.refresh_identity().unwrap();
@@ -5311,7 +5333,7 @@ fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("acknowledged-scan-provenance");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(618)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -5345,7 +5367,7 @@ fn whole_scan_after_actual_reopen_refreshes_acknowledged_row_provenance_without_
     drop(collection);
     drop(host);
 
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     runtime.refresh_identity().unwrap();
@@ -5466,7 +5488,7 @@ fn same_open_observation_after_cloud_capture_defers_the_old_batch_and_preserves_
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("observation-capture");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(617)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let collection = host.collection().unwrap();
@@ -5522,7 +5544,7 @@ fn publisher_committed_loss_revokes_native_authority_before_readback_error_or_pa
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("device");
         generated(&dir);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         host.media().unwrap().store().register_full(|_, _| true).unwrap();
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(44)).unwrap();
         let p = preview(&host, &mut service);
@@ -5638,7 +5660,7 @@ fn exchange_incomplete_publication_creates_known_empty_history_atomically() {
     let fixture = tempfile::tempdir().unwrap();
     let collection_path = fixture.path().join("publication-ledger");
     generated(&collection_path);
-    let app = open_host(&collection_path, keys());
+    let app = open_prior_icloud_host(&collection_path, keys());
     let mut server = Service::open(fixture.path(), Config::default(), SeededRandom::new(812)).unwrap();
     let published = publish_actual_collection(&app, &mut server);
     app.close().unwrap();
@@ -5649,7 +5671,7 @@ fn exchange_incomplete_publication_creates_known_empty_history_atomically() {
     };
     for install_runtime in [false, true] {
         if install_runtime {
-            let app = open_host(&collection_path, keys());
+            let app = open_prior_icloud_host(&collection_path, keys());
             let facts = app.cloud_runtime().unwrap().policy_projection(
                 cloud::policy::Lifecycle::Ready, app.engine().generation().0).unwrap().facts;
             assert!(!facts.summary.attention_known);

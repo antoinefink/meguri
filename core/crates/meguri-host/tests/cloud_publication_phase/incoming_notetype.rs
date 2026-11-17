@@ -97,7 +97,7 @@ fn ordinary_notetype_free_id_and_dependent_rows_use_server_counter_after_real_wa
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(449)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -183,7 +183,7 @@ fn ordinary_notetype_free_id_and_dependent_rows_use_server_counter_after_real_wa
     host.close().unwrap();
     drop(collection);
     drop(host);
-    let reopened = open_host(&dir, keys());
+    let reopened = open_prior_icloud_host(&dir, keys());
     for (saved, payload) in saved.iter().zip(&payloads) {
         ack(&reopened, &binding, saved, payload);
         assert_eq!(row(&reopened, payload, &received), *payload);
@@ -196,7 +196,7 @@ fn ordinary_notetype_disjoint_parts_merge_raw_blobs_and_name_lists() {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(450)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -254,7 +254,7 @@ fn ordinary_notetype_conflict_uses_actual_stamp_digest_order_and_one_full_copy()
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("device");
         generated(&dir);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(451)).unwrap();
         let binding = publish_actual_collection(&host, &mut service);
         let runtime = host.cloud_runtime().unwrap();
@@ -309,7 +309,7 @@ fn ordinary_notetype_name_uniqueness_protects_larger_existing_type_and_its_base(
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(452)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -353,7 +353,7 @@ fn ordinary_notetype_structural_generation_and_malformed_shapes_stay_queued_with
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(453)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -409,7 +409,7 @@ fn ordinary_notetype_crash_worker() {
     let root = std::path::PathBuf::from(root);
     let point = std::env::var("MEGURI_ORDINARY_TYPE_CRASH_POINT").unwrap();
     let dir = root.join("device");
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(&root, Config::default(), SeededRandom::new(454)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -434,7 +434,7 @@ fn ordinary_notetype_crash_reopen_replays_intent_or_settles_actual_rows_before_s
             .env("MEGURI_ORDINARY_TYPE_CRASH_POINT", point).status().unwrap();
         assert_eq!(status.signal(), Some(6));
         let service = Service::open(temp.path(), Config::default(), SeededRandom::new(454)).unwrap();
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let runtime = host.cloud_runtime().unwrap();
         let binding = runtime.status().unwrap().binding.unwrap();
         let database = service.inspect(&scope()).unwrap().unwrap();
@@ -469,7 +469,7 @@ fn ordinary_notetype_free_id_later_native_edit_keeps_base_proof_and_dependent_ro
 fn edit_during_received_type_commit(root: &Path, crash: bool) {
     let dir = root.join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(root, Config::default(), SeededRandom::new(449)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -589,7 +589,7 @@ fn edit_during_received_type_commit(root: &Path, crash: bool) {
     host.close().unwrap();
     drop(collection);
     drop(host);
-    let reopened = open_host(&dir, keys());
+    let reopened = open_prior_icloud_host(&dir, keys());
     for (saved, payload) in saved.iter().zip(&payloads) {
         ack(&reopened, &binding, saved, payload);
         let actual = nt(&reopened.cloud_runtime().unwrap().entity_facts(&saved_type_name(&binding, &received)).unwrap().unwrap());
@@ -616,7 +616,7 @@ fn ordinary_notetype_later_edit_crash_reopen_settles_original_intent_and_remote_
     assert_eq!(status.signal(), Some(6));
     let dir = temp.path().join("device");
     let service = Service::open(temp.path(), Config::default(), SeededRandom::new(449)).unwrap();
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let binding = runtime.status().unwrap().binding.unwrap();
     let local_type = runtime.entity_facts_page(codec::Kind::Notetype, None).unwrap().into_iter()
@@ -647,7 +647,7 @@ fn ordinary_notetype_later_edit_crash_reopen_settles_original_intent_and_remote_
     assert_eq!(checked, 3);
     host.close().unwrap();
     drop(host);
-    let reopened = open_host(&dir, keys());
+    let reopened = open_prior_icloud_host(&dir, keys());
     let retained = reopened.cloud_runtime().unwrap().entity_facts(&local_type.name).unwrap().unwrap();
     assert_eq!(retained.payload, local_type.payload);
     assert_eq!(row(&reopened, &retained.payload, &native), retained.payload);
@@ -719,7 +719,7 @@ fn validated_layout_choice_case(empty: bool) {
         db.execute_batch("DELETE FROM revlog; DELETE FROM cards; DELETE FROM notes; DELETE FROM decks WHERE id<>1").unwrap();
         db.close().unwrap();
     }
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(455)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let source = if empty {
@@ -742,7 +742,7 @@ fn validated_layout_choice_case(empty: bool) {
     db.execute("UPDATE col SET mod=mod+99", &[]).unwrap();
     db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     prove_reopened_binding(&host, &binding);
@@ -801,7 +801,7 @@ fn validated_layout_choice_case(empty: bool) {
     host.close().unwrap();
     drop(collection);
     drop(host);
-    let reopened = open_host(&dir, keys());
+    let reopened = open_prior_icloud_host(&dir, keys());
     prove_reopened_binding(&reopened, &binding);
     assert_eq!(bookkeeping(&reopened), before);
     // Preview itself reconstructs the decision before a preparation/scan call.
@@ -835,7 +835,7 @@ fn ordinary_notetype_native_legacy_field_and_template_name_swaps_keep_layout_and
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated_legacy_reversed(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(456)).unwrap();
     publish_actual_collection(&host, &mut service);
     let runtime = host.cloud_runtime().unwrap();
@@ -881,7 +881,7 @@ fn ordinary_notetype_native_legacy_field_and_template_name_swaps_keep_layout_and
     host.close().unwrap();
     drop(collection);
     drop(host);
-    let reopened = open_host(&dir, keys());
+    let reopened = open_prior_icloud_host(&dir, keys());
     let retained = reopened.cloud_runtime().unwrap().entity_facts(&source.name).unwrap().unwrap();
     assert_eq!(retained.payload, changed.payload);
     assert_eq!(retained.base_payload, changed.base_payload);
@@ -1048,7 +1048,7 @@ fn published_type_restore_case(swaps: bool) {
         let temp = tempfile::tempdir().unwrap();
         let dir = temp.path().join("device");
         generated_legacy_reversed(&dir);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(459)).unwrap();
         let binding = publish_actual_collection(&host, &mut service);
         let source = source_type(&host);
@@ -1075,7 +1075,7 @@ fn published_type_restore_case(swaps: bool) {
         assert!(host.cloud_runtime().unwrap().apply_intents(binding.id).unwrap().is_empty());
         host.close().unwrap();
         drop(host);
-        let reopened = open_host(&dir, keys());
+        let reopened = open_prior_icloud_host(&dir, keys());
         let runtime = reopened.cloud_runtime().unwrap();
         let facts = assert_restored_type(&reopened, &source, &changed, &dependents);
         assert_eq!(facts.base_payload, retained.base_payload);
@@ -1104,7 +1104,7 @@ fn multipage_restore_case(swaps: bool) {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let added = notetypes::add(&host.collection().unwrap(), NewNotetype {
         name: "Paged editable type".into(),
         fields: (0..501).map(|i| format!("Column{i}")).collect(),
@@ -1124,7 +1124,7 @@ fn multipage_restore_case(swaps: bool) {
     assert_restored_type(&host, &source, &changed, &dependents);
     host.close().unwrap();
     drop(host);
-    let reopened = open_host(&dir, keys());
+    let reopened = open_prior_icloud_host(&dir, keys());
     assert_restored_type(&reopened, &source, &changed, &dependents);
     reopened.close().unwrap();
 }

@@ -7,7 +7,7 @@ fn setup() -> (tempfile::TempDir, std::path::PathBuf, CoreHost, Service<SeededRa
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("root-attention");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(1937)).unwrap();
     publish_actual_collection(&host, &mut service);
     policy(&host);
@@ -79,7 +79,7 @@ fn root_unreadable_owned_active_survives_reopen_and_real_incremental_no_change_f
     assert_attention(&host, true);
     host.close().unwrap();
     drop(host);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     policy(&host);
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
@@ -222,7 +222,7 @@ fn root_unreadable_clear_failure_rolls_back_epoch_and_survives_reopen() {
     assert_eq!(runtime.root_unreadable_for_testing().unwrap(), mark);
     assert_eq!(runtime.epoch_crt_for_testing().unwrap(), crt);
     host.close().unwrap(); drop(host);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     assert_eq!(host.cloud_runtime().unwrap().root_unreadable_for_testing().unwrap(), mark);
     assert_eq!(host.cloud_runtime().unwrap().epoch_crt_for_testing().unwrap(), crt);
     host.close().unwrap();
@@ -325,7 +325,7 @@ fn root_unreadable_known_bound_zone_loss_retains_mark_after_owned_readable_activ
     drop(collection);
     host.close().unwrap();
     drop(host);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     assert_eq!(runtime.status().unwrap().binding.unwrap().id, binding.id);
     assert_eq!(runtime.status().unwrap().binding.unwrap().facts.state, cloud::BindingState::Isolated(cloud::IsolationReason::ZoneMissing));
@@ -456,7 +456,7 @@ fn root_unreadable_combined_root_and_bound_zone_loss_preserves_immediate_active_
         drop(collection);
         host.close().unwrap();
         drop(host);
-        let host = open_host(&dir, keys());
+        let host = open_prior_icloud_host(&dir, keys());
         let runtime = host.cloud_runtime().unwrap();
         let status = runtime.status().unwrap();
         assert_eq!(status.binding.as_ref().unwrap().id, binding.id);

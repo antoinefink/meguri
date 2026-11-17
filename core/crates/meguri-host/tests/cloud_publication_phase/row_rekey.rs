@@ -88,7 +88,7 @@ fn k14_type_collision_preserves_tracking_until_paired_intents_settle() {
     let temporary = tempfile::tempdir().unwrap();
     let directory = temporary.path().join("device");
     generated(&directory);
-    let host = open_host(&directory, keys());
+    let host = open_prior_icloud_host(&directory, keys());
     let collection = host.collection().unwrap();
     let runtime = host.cloud_runtime().unwrap();
     let media = host.media().unwrap();

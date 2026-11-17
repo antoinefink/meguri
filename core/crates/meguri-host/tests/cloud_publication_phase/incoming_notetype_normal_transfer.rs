@@ -277,7 +277,7 @@ fn unproved_case(observation: Observation, change: Replacement) {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated_legacy_reversed(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(481)).unwrap();
     let other = if matches!(observation, Observation::JournalFailure | Observation::WalFailure) {
         let collection = host.collection().unwrap();
@@ -367,7 +367,7 @@ fn unproved_case(observation: Observation, change: Replacement) {
         validate_choice(&host, &mut service, &binding, &source, &sdk, &before);
     }
     host.close().unwrap(); drop(collection); drop(host);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     prove_reopened_binding(&host, &binding);
     let collection = host.collection().unwrap();
     cover_current_open(&host, collection.last_seq());
@@ -435,7 +435,7 @@ fn accepted_sync_exact_admitted_layout_live_covers_wal_before_admission() {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated_legacy_reversed(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(482)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let source = source_type(&host);
@@ -497,7 +497,7 @@ fn accepted_sync_exact_admitted_layout_survives_whole_callback_loss_and_reopen()
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("device");
     generated_legacy_reversed(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(485)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let source = source_type(&host);
@@ -542,7 +542,7 @@ fn accepted_sync_exact_admitted_layout_survives_whole_callback_loss_and_reopen()
     assert_reconciled_source(&host, &source);
     let rows = collection_rows(&host);
     host.close().unwrap(); drop(collection); drop(host);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     prove_reopened_binding(&host, &binding);
     cover_current_open(&host, host.collection().unwrap().last_seq());
     host.prepare_cloud_runtime(TIMEOUT).unwrap();
@@ -568,7 +568,7 @@ fn accepted_sync_incoming_intent_worker() {
     let root = std::path::PathBuf::from(root);
     let dir = root.join("device");
     generated_legacy_reversed(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(&root, Config::default(), SeededRandom::new(483)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let source = hand_pending_type(&host);
@@ -593,7 +593,7 @@ fn accepted_sync_refusal_preserves_actual_intent_inbox_base_ack_and_flights() {
         .env("MEGURI_NORMAL_AGGREGATE_INTENT_ROOT", temp.path()).status().unwrap();
     assert_eq!(status.signal(), Some(6));
     let dir = temp.path().join("device");
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let binding = runtime.status().unwrap().binding.unwrap();
     prove_reopened_binding(&host, &binding);
@@ -629,7 +629,7 @@ fn accepted_sync_refusal_preserves_actual_intent_inbox_base_ack_and_flights() {
     validate_choice(&host, &mut service, &binding, &source, &runtime.instance().unwrap(), &before);
     let rows = collection_rows(&host);
     host.close().unwrap(); drop(host);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     prove_reopened_binding(&host, &binding);
     cover_current_open(&host, host.collection().unwrap().last_seq());
     validate_choice(&host, &mut service, &binding, &source,
@@ -645,7 +645,7 @@ fn accepted_sync_callback_loss_account_error_is_not_validated_ambiguity() {
     generated_legacy_reversed(&dir);
     let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
         cloud::OpaqueBytes(scope().account.into_bytes())))));
-    let host = open_host_with(&dir, keys(), account.clone(), scope());
+    let host = open_prior_icloud_host_with(&dir, keys(), account.clone(), scope());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(484)).unwrap();
     let binding = publish_actual_collection(&host, &mut service);
     let source = source_type(&host);

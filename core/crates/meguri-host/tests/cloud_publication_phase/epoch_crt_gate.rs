@@ -156,7 +156,7 @@ fn epoch_crt_gate_legacy_unknown_blocks_send_until_actual_complete_epoch_is_acce
         let db = PlainDatabase::open(&dir.join(cloud::TRACKING_FILE)).unwrap();
         db.execute_batch("DROP TABLE cloud_root_readability; DROP TABLE cloud_epoch_crt; UPDATE cloud_publication_schema SET version=2;").unwrap();
     });
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     connect_policy(&host, &scope().account);
@@ -264,7 +264,7 @@ fn epoch_crt_gate_scan_and_reopen_rederive_mismatch_from_durable_values() {
     assert!(!runtime.status().unwrap().tracking_stopped);
     host.close().unwrap();
     drop(host);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     connect_policy(&host, &scope().account);
     let state = refresh(&host);
     assert!(state.facts.summary.crt_mismatch, "open must compare before the scan");
@@ -360,7 +360,7 @@ fn complete_publication() -> (tempfile::TempDir, CoreHost, Service<SeededRandom>
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("p6-repair");
     generated(&dir);
-    let host = open_host(&dir, keys());
+    let host = open_prior_icloud_host(&dir, keys());
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(1147)).unwrap();
     publish_actual_collection(&host, &mut service);
     connect_policy(&host, &scope().account);
@@ -454,7 +454,7 @@ fn epoch_crt_gate_existence_only_reads_leave_unknown_authority_and_writer_closed
     let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(1148)).unwrap();
     let files = PreboundDevice::arrange(&dir, &mut service, 1148).unwrap();
     let identity = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(files.binding.facts.account.clone()))));
-    let host = open_host_with(&dir, keys(), identity, files.scope.clone());
+    let host = open_prior_icloud_host_with(&dir, keys(), identity, files.scope.clone());
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     runtime.refresh_identity().unwrap();
