@@ -91,6 +91,7 @@ class FinalCoverage(unittest.TestCase):
         from unittest.mock import patch
         from final_desktop import migration
         from validation import encoded
+        api.MIGRATION_MEDIA_DIAGNOSTIC=None
         api.PHASE='setup'
         try:
             # Both services are actual owned pinned SDK references. This characterizes
@@ -140,6 +141,14 @@ class FinalCoverage(unittest.TestCase):
                 'case':'P-F03:desktop.candidate.migration-explicit-authority',
                 'phase':phase if type(phase) is str and phase in phases else 'setup',
                 'error_class':kind if kind in errors else 'other','case_credit':False}
+            state=getattr(api,'MIGRATION_MEDIA_DIAGNOSTIC',None);media=None
+            if type(state) is dict:
+                names=('begin_usn','listing_count','first_cursor','successful_upload_count','processed_total')
+                media={name:state.get(name) if type(state.get(name)) is int and 0 <= state[name] <= 9007199254740991 else None for name in names}
+                order=state.get('route_order');routes={'begin','mediaChanges','uploadChanges','downloadFiles','mediaSanity','other'}
+                media['route_order']=[item if type(item) is str and item in routes else 'other' for item in order] if type(order) is list and len(order) <= 64 else None
+                media['sanity_ok']=state.get('sanity_ok') if type(state.get('sanity_ok')) is bool else None
+            diagnostic['media']=media
             pathlib.Path('/out/migration-reference-diagnostic.json').write_bytes(encoded(diagnostic))
             raise
 

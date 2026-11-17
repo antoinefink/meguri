@@ -301,6 +301,7 @@ def replacement(api,root,target,case,upload):
 
 
 def migration(api,root,target,case):
+    api.MIGRATION_MEDIA_DIAGNOSTIC=None
     api.PHASE='migration-setup'
     recipe=recipes();source={}
     with environment(api,root,target,case) as (run,record,client):
@@ -348,6 +349,22 @@ def migration(api,root,target,case):
             media_rows=record.observations[media_start:]
             api.PHASE='migration-media-cursor-check'
             cursor=next((row['media_request']['lastUsn'] for row in media_rows if row['route'] == '/msync/mediaChanges'),None)
+            begin=next((row.get('media_begin') for row in media_rows if row['route'] == '/msync/begin'),None)
+            begin_usn=begin.get('usn') if isinstance(begin,dict) else None
+            accepted=[row.get('media_result') for row in media_rows if row['route'] == '/msync/uploadChanges'
+                      and row.get('status') == 200 and row.get('media_error_empty') is True]
+            processed=[row[0] for row in accepted if isinstance(row,list) and len(row) == 2
+                       and all(type(item) is int and item >= 0 for item in row)]
+            routes={'/msync/begin':'begin','/msync/mediaChanges':'mediaChanges','/msync/uploadChanges':'uploadChanges',
+                    '/msync/downloadFiles':'downloadFiles','/msync/mediaSanity':'mediaSanity'}
+            api.MIGRATION_MEDIA_DIAGNOSTIC={
+                'begin_usn':begin_usn if type(begin_usn) is int and 0 <= begin_usn <= 9007199254740991 else None,
+                'listing_count':sum(row['route'] == '/msync/mediaChanges' for row in media_rows),
+                'first_cursor':cursor if type(cursor) is int and 0 <= cursor <= 9007199254740991 else None,
+                'route_order':[routes.get(row['route'],'other') if type(row['route']) is str else 'other' for row in media_rows] if len(media_rows) <= 64 else None,
+                'successful_upload_count':len(processed),'processed_total':sum(processed),
+                'sanity_ok':any(row['route'] == '/msync/mediaSanity' and row.get('status') == 200
+                                and row.get('media_error_empty') is True and row.get('media_result') == 'OK' for row in media_rows)}
             require(cursor == 0,'migration first candidate media listing did not start at zero')
             api.PHASE='migration-media-publication-check'
             uploads=[row['media_result'] for row in media_rows if row['route'] == '/msync/uploadChanges' and row['status'] == 200]
