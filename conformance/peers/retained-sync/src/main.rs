@@ -86,12 +86,12 @@ fn manual(host: &CoreHost, credentials: &contract::Credentials, key: &HostKey, d
         Ok(preview) => preview,
         Err(e) => return Ok(json!({"operation_complete":false,"stage":"prepare","transfer_error":format!("{e:?}")})),
     };
-    let persisted = host.manual_transfer_history().get(&preview.operation.id)?;
+    let persisted = host.manual_transfer_history().get(&preview.operation.id).map_err(TransferError::from)?;
     need(persisted == preview.operation && persisted.phase == Phase::Preview, "persisted-preview-mismatch")?;
     let id = persisted.id.clone();
     let events = host.engine().stream().subscribe();
     let result = finish(events, host.confirm_manual_transfer(access(credentials, key, uncertain)?, preview.confirmation)?);
-    let done = host.manual_transfer_history().get(&id)?;
+    let done = host.manual_transfer_history().get(&id).map_err(TransferError::from)?;
     let accepted = result.as_ref().is_ok_and(|op| op.phase == Phase::Complete && op.collection_complete
         && op.acceptance == if download { Acceptance::NotSent } else { Acceptance::ExactOk });
     let error = result.as_ref().err().map(|e| format!("{e:?}"));
@@ -104,7 +104,7 @@ fn manual(host: &CoreHost, credentials: &contract::Credentials, key: &HostKey, d
         let recovery = finish(events, host.prepare_manual_transfer_recovery(id.clone())?);
         let fenced = matches!(recovery, Err(TransferError::NeedsDecision(Boundary::RemoteCompletionUnknown)));
         observed["recovery"] = json!({"blind_upload_replay_prevented":fenced,
-            "explicit_recovery_boundary":fenced,"operation":host.manual_transfer_history().get(&id)?,
+            "explicit_recovery_boundary":fenced,"operation":host.manual_transfer_history().get(&id).map_err(TransferError::from)?,
             "error":recovery.as_ref().err().map(|e| format!("{e:?}"))});
         observed["operation_complete"] = json!(!accepted && fenced && done.acceptance == Acceptance::PossiblyAccepted);
     }

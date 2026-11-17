@@ -835,7 +835,7 @@ PUBLIC_ARTIFACTS = {
     'conformance/peers/retained-sync/support.py':
         'a3cd45851b256d4e67818336be871f7d2888d91607b4bf0b9c429c6159a594f9',
     'conformance/peers/retained-sync/src/main.rs':
-        'df7a04a6c8394b6b8cadd4031f9582d8ae193fd6f4261dab2de2d3c166bc2152',
+        '96ee38a91af6995240770ef5e746724ef963c4651ccda1fe465e36eae6064c86',
     'conformance/peers/retained-sync/src/fixture.rs':
         'ec557ca25da094639920884f790a39f1e183f7a1bd744b76c241932f7e84e546',
     'conformance/peers/retained-sync/README.md':
