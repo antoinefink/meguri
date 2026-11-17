@@ -137,11 +137,19 @@ pub struct Authority {
     publication_failure: Mutex<Option<PublicationFailure>>,
     #[cfg(feature = "test-hooks")]
     setup_contention: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    #[cfg(feature = "test-hooks")]
+    cancellation_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     restart_intent: Option<HandoffIntent>,
 }
 struct PendingPublication {
     before: Map<String, Value>, desired: Map<String, Value>, document: ProviderDocument,
     facts: Option<(u64, Option<Publication>)>, retryable: bool,
+    cancel: Option<CancelRestoration>,
+}
+#[derive(Clone, PartialEq)]
+struct CancelRestoration {
+    operation: crate::cloud::publication::PublishOp, before: Option<Binding>, after: Binding,
+    replacement: Publication,
 }
 struct PublicationFailure { error: StorageError, pending: Option<PendingPublication> }
 /// Process-only discovery ownership. It can never authorize collection writers.
@@ -174,6 +182,8 @@ impl Authority {
             publication_failure: Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             setup_contention: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            cancellation_hook: Mutex::new(None),
             restart_intent })
     }
     /// Before Host composition. Valid existing metadata is never reimported.
@@ -419,13 +429,19 @@ impl Authority {
             }
         }
     }
-    pub(crate) fn accept_icloud_setup(&self) -> Result<(), StorageError> {
+    pub(crate) fn accept_icloud_setup<E: From<StorageError>>(&self,
+        current: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
         #[cfg(feature = "test-hooks")]
         if let Err(std::sync::TryLockError::WouldBlock) = self.publication_failure.try_lock()
             && let Some(sender) = self.setup_contention.lock().unwrap_or_else(PoisonError::into_inner).take() {
             let _ = sender.send(());
         }
-        self.update(|doc| {
+        let mut failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
+        // Check the exact Runtime target while setup owns publication, then
+        // release State/tracking before touching the provider document.
+        current()?;
+        self.update_publication_locked(&mut failure, None, false, |_, doc| {
             if doc.handoff.is_some() || doc.selection == Selection::Meguri { return Err(invalid()); }
             doc.selection = Selection::ICloud; doc.settings.enabled = true;
             doc.legacy_binding_pending = true;
@@ -461,12 +477,150 @@ impl Authority {
             let before = raw.clone();
             change(raw, &mut doc)?;
             put(raw, &doc)?;
-            pending = Some(PendingPublication { before, desired: raw.clone(), document: doc.clone(), facts, retryable });
+            pending = Some(PendingPublication { before, desired: raw.clone(), document: doc.clone(), facts, retryable, cancel: None });
             Ok(doc)
         });
         *self.state.lock().unwrap_or_else(PoisonError::into_inner) = result.clone();
         if result.is_ok() { self.open.store(true, Ordering::SeqCst); }
         else if (pending.is_some() || !entered) && let Err(error) = &result {
+            *failure = Some(PublicationFailure { error: error.clone(), pending });
+        }
+        result
+    }
+    /// Runtime's local tracking transitions share qualification/setup ownership.
+    /// The closure performs no provider I/O and releases State/tracking on return.
+    pub(crate) fn with_publication_ownership<T>(&self, change: impl FnOnce() -> T) -> T {
+        let _failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
+        change()
+    }
+    /// Cancelling remains durable until both this exact mapping restoration and
+    /// the final tracking transaction finish. Neither step admits writers or
+    /// retires an original completion. Only Runtime can retry with the same op
+    /// and actual retained rows; the general settings retry cannot do so.
+    pub(crate) fn finish_publication_cancellation<E: From<StorageError>>(&self,
+        operation: &crate::cloud::publication::PublishOp, replacement: &Publication, retained: Option<(Option<&Binding>, &Binding)>,
+        current: impl FnOnce() -> Result<(), E>, finish: impl FnOnce(bool) -> Result<(), E>,
+    ) -> Result<bool, E> {
+        let mut failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
+        self.close_admission();
+        current()?;
+        #[cfg(feature = "test-hooks")]
+        {
+            let hook = self.cancellation_hook.lock().unwrap_or_else(PoisonError::into_inner).take();
+            if let Some(hook) = hook { hook(); }
+        }
+        let restored = if let Some((before, after)) = retained {
+            self.restore_cancelled_binding_locked(&mut failure, &CancelRestoration {
+                operation: operation.clone(), before: before.cloned(), after: after.clone(),
+                replacement: replacement.clone(),
+            })?
+        } else {
+            if let Some(failed) = failure.as_ref() { return Err(failed.error.clone().into()); }
+            let doc = sidecar::read_document(&self.path, decode)?.ok_or_else(invalid)?;
+            // Even when no predecessor can be restored, a public handoff can
+            // retain this candidate. Its evidence must survive cancellation.
+            if doc.handoff.is_some() { return Err(invalid().into()); }
+            false
+        };
+        // Keep setup and qualifiers excluded through removal of the op. There
+        // is no provider I/O while this closure holds State/tracking.
+        finish(restored)?;
+        if restored { self.open.store(true, Ordering::SeqCst); }
+        Ok(restored)
+    }
+    /// Pauses with publication ownership only, after the actual current check.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_cancellation_hook_for_testing(&self, hook: impl FnOnce() + Send + 'static) {
+        *self.cancellation_hook.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
+    }
+    fn restore_cancelled_binding_locked(&self, failure: &mut Option<PublicationFailure>,
+        cancel: &CancelRestoration,
+    ) -> Result<bool, StorageError> {
+        if let Some(failed) = failure.as_ref() {
+            let error = failed.error.clone();
+            let pending = failed.pending.as_ref().filter(|pending| pending.cancel.as_ref() == Some(cancel))
+                .ok_or_else(|| error.clone())?;
+            let result = sidecar::update_document(&self.path, |raw| {
+                if raw != &pending.before && raw != &pending.desired { return Err(invalid()); }
+                decode(Some(raw))?.ok_or_else(invalid)?;
+                *raw = pending.desired.clone();
+                Ok(pending.document.clone())
+            });
+            return match result {
+                Ok(doc) => {
+                    *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Ok(doc);
+                    *failure = None;
+                    Ok(true)
+                }
+                Err(_) => {
+                    *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Err(error.clone());
+                    Err(error)
+                }
+            };
+        }
+        let mut pending = None;
+        let result = (|| {
+            let before = sidecar::read_document(&self.path, |raw| Ok(raw.cloned()))?.ok_or_else(invalid)?;
+            let mut doc = decode(Some(&before))?.ok_or_else(invalid)?;
+            let mapping = |binding: &Binding, publication: &Publication| -> Result<CloudBinding, StorageError> {
+                use meguri_engine::device_state::AccountBinding;
+                if publication.identity != binding.facts.publication || publication.decision != PublicationDecision::Clear
+                    || !matches!(&publication.binding, AccountBinding::Connected { account, configuration, environment }
+                        if account.as_bytes() == binding.facts.account.0.as_slice()
+                            && configuration == binding.scope.container.as_str()
+                            && environment == match binding.scope.environment {
+                                crate::cloud::Environment::Development => "development",
+                                crate::cloud::Environment::Production => "production",
+                            }) { return Err(invalid()); }
+                Ok(CloudBinding { binding: binding.id.0, account: binding.facts.account.0.clone(),
+                    publication: publication.clone(), container: binding.scope.container.as_str().into(),
+                    environment: binding.scope.environment })
+            };
+            let prior = &cancel.operation.fence_before.publication;
+            let previous = match &cancel.before {
+                // Keep Local Only left a stopped row, not Connected consent.
+                // Its exact R6 authority is restored by Runtime; remove only
+                // this operation's candidate association, never invent a prior
+                // provider document or turn account stamps into permission.
+                Some(binding) if prior.binding == meguri_engine::device_state::AccountBinding::LocalOnly
+                    && prior.decision == PublicationDecision::Clear
+                    && prior.identity == binding.facts.publication
+                    && binding.facts.state == BindingState::Isolated(crate::cloud::IsolationReason::Stopped) => None,
+                Some(binding) => Some(mapping(binding, prior)?),
+                // No predecessor has no mapping to reconstruct. Runtime has
+                // checked the exact before fence, file and candidate row.
+                None => None,
+            };
+            let replacement = mapping(&cancel.after, &cancel.replacement)?;
+            // Successor setup is not the cancelled operation's mapping. Keep
+            // Cancelling rather than erase its target evidence and let an
+            // ordinary qualifier consume that consent for the predecessor.
+            if doc.selection == Selection::ICloud && doc.handoff.is_none() && doc.legacy_binding_pending {
+                return Err(invalid());
+            }
+            if doc.selection != Selection::ICloud || doc.handoff.is_some() || doc.legacy_binding_pending
+                || (doc.binding.as_ref() != Some(&replacement) && doc.binding != previous) {
+                // A handoff or successor may still need the candidate and op.
+                // Refuse without rewriting or poisoning that original authority.
+                return Err(invalid());
+            }
+            doc.binding = previous;
+            let mut desired = before.clone();
+            put(&mut desired, &doc)?;
+            pending = Some(PendingPublication { before: before.clone(), desired: desired.clone(), document: doc.clone(),
+                facts: None, retryable: false, cancel: Some(cancel.clone()) });
+            // Even an already-restored mapping is republished: after a crash,
+            // visible rename bytes alone do not prove directory durability (F4).
+            sidecar::update_document(&self.path, |raw| {
+                if raw != &before { return Err(invalid()); }
+                *raw = desired;
+                Ok(())
+            })?;
+            *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Ok(doc);
+            Ok(true)
+        })();
+        if pending.is_some() && let Err(error) = &result {
+            *self.state.lock().unwrap_or_else(PoisonError::into_inner) = Err(error.clone());
             *failure = Some(PublicationFailure { error: error.clone(), pending });
         }
         result

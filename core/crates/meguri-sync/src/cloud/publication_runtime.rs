@@ -1506,6 +1506,11 @@ impl Runtime {
         }
         Ok(())
     }
+    /// Pauses after Cancelling commits, before R6/provider I/O, with no locks.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_publication_cancel_hook_for_testing(&self, hook: impl FnOnce() + Send + 'static) {
+        *self.publication_cancel_hook.lock().unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
+    }
     pub fn publication_cancellable(&self, id: [u8; 16]) -> Result<bool, RuntimeError> {
         let s = self.state();
         with_tracking_access(|| -> Result<bool, RuntimeError> {
@@ -1531,8 +1536,12 @@ impl Runtime {
         let Some(mut op) = self.publication_op()?.filter(|o| o.id == id) else {
             return Err(PublicationError::NotOffered.into());
         };
-        {
+        let provider = self.state().provider.clone();
+        let mut begin = || -> Result<bool, RuntimeError> {
             let mut s = self.state();
+            if s.provider.as_ref().map(Arc::as_ptr) != provider.as_ref().map(Arc::as_ptr) {
+                return Err(RuntimeError::StaleIncarnation);
+            }
             if with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.publication_op())?.as_ref() != Some(&op) {
                 return Err(PublicationError::AuthorityChanged.into());
             }
@@ -1547,24 +1556,49 @@ impl Runtime {
                         .ok_or(Error::Database)?
                         .discard_confirmed_publication(&op)
                 })?;
-                return Ok(());
+                return Ok(false);
             }
             op.step = PublishStep::Cancelling;
             with_tracking_access(|| s.store.as_mut().ok_or(Error::Database)?.write_publication_op(&op))?;
+            if let Some(provider) = &provider { provider.close_admission(); }
             s.publication.running = None;
             Self::adapter_close_exchange_locked(&mut s);
             s.root_confirmed = false;
+            Ok(true)
+        };
+        let cancelling = match &provider {
+            Some(provider) => provider.with_publication_ownership(begin),
+            None => begin(),
+        }?;
+        if !cancelling {
+            // Confirmed cancellation changes only the op row. Restore admission
+            // for the unchanged original binding using its actual settled R6;
+            // native TrackingChanged need not perform an extra Host refresh.
+            self.qualify_provider_binding()?;
+            return Ok(());
         }
         let file = self.inputs.files.identity(collection.path())?;
         let decision = self.publication_decision()?;
         let desired = op.decision_written(&self.inputs.scope)?;
-        if op.fence_before != desired && decision == desired {
-            // A concurrent decision wins. Never restore a fence over it.
-            if collection.resolve_cloud_publication_decision(op.id, &desired)? {
-                meguri_model::faultpoint!("cloud.publish.after_cancel_fence").map_err(Error::from)?;
+        #[cfg(feature = "test-hooks")]
+        {
+            let hook = self.publication_cancel_hook.lock().unwrap_or_else(PoisonError::into_inner).take();
+            if let Some(hook) = hook { hook(); }
+        }
+        let owns_decision = decision == desired || decision == op.fence_before;
+        if op.fence_before != desired && owns_decision {
+            // Re-publish an exact already-visible before as well: a failed
+            // post-rename write did not prove R6 directory durability. The
+            // retained Cancelling row and current CAS refuse any successor.
+            if !collection.resolve_cloud_publication_decision(op.id, &decision)? {
+                return Err(PublicationError::AuthorityChanged.into());
             }
+            meguri_model::faultpoint!("cloud.publish.after_cancel_fence").map_err(Error::from)?;
         }
         let decision = self.publication_decision()?;
+        if owns_decision && decision != op.fence_before {
+            return Err(PublicationError::AuthorityChanged.into());
+        }
         let restored = match op.binding_before.as_ref().map(|b| b.state) {
             Some(BindingState::Active) if decision.publication.identity != op.confirmed_publication => {
                 BindingState::Isolated(IsolationReason::ReplacedLocally)
@@ -1575,8 +1609,76 @@ impl Runtime {
             Some(state) => state,
             None => BindingState::Isolated(IsolationReason::Republished),
         };
-        {
+        let evidence = collection.open_evidence()?;
+        let (incarnation, retained) = {
+            let s = self.state();
+            // V9.2's complete resumable-state set (resume_runtime::resumable)
+            // restores metadata only. A fresh Resume still owns activation.
+            let eligible = op.binding_before.is_none() || matches!(restored,
+                BindingState::Active | BindingState::Isolated(
+                    IsolationReason::SignedOut | IsolationReason::AccountChanged | IsolationReason::Stopped));
+            let retained = if provider.is_some() && eligible && decision == op.fence_before && file == op.confirmed_file {
+                with_tracking_access(|| -> Result<_, RuntimeError> {
+                    let store = s.store.as_ref().ok_or(Error::Database)?;
+                    let before = op.binding_before.as_ref()
+                        .map(|binding| store.binding(binding.id)?.ok_or(Error::BindingNotFound)).transpose()?;
+                    let after = store.binding(op.binding_after.ok_or(Error::InvalidData)?)?
+                        .ok_or(Error::BindingNotFound)?;
+                    let expected_before_state = if restored == BindingState::Active {
+                        BindingState::Isolated(IsolationReason::Republished)
+                    } else { restored };
+                    if before.as_ref().is_some_and(|before|
+                        before.id == after.id || before.scope != self.inputs.scope
+                            || before.facts.state != expected_before_state || before.facts.account != op.account
+                            || before.facts.publication != op.confirmed_publication)
+                        || after.scope != self.inputs.scope || after.facts.account != op.account
+                        || after.facts.publication != op.confirmed_publication
+                        || after.facts.epoch != op.epoch || after.facts.record_key != op.record_key {
+                        return Err(PublicationError::AuthorityChanged.into());
+                    }
+                    Ok(Some((before, after)))
+                })?
+            } else { None };
+            (s.incarnation, retained)
+        };
+        // Provider ownership precedes State and tracking. These checks use only
+        // captured local facts; no current-account read is needed to cancel.
+        let current_inputs = || -> Result<(), RuntimeError> {
+            // Providers and R6 read outside State/tracking, including the check
+            // after provider rollback I/O and before proof can be deleted.
+            if self.inputs.files.identity(collection.path())? != file || self.publication_decision()? != decision {
+                return Err(PublicationError::AuthorityChanged.into());
+            }
+            Ok(())
+        };
+        let current = |s: &State| -> Result<(), RuntimeError> {
+            if s.incarnation != incarnation || !collection.is_current()
+                || evidence.generation != collection.generation() || evidence.native_file != file.pair()
+                || s.provider.as_ref().map(Arc::as_ptr) != provider.as_ref().map(Arc::as_ptr) {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            with_tracking_access(|| -> Result<(), RuntimeError> {
+                let store = s.store.as_ref().ok_or(Error::Database)?;
+                if store.publication_op()?.as_ref() != Some(&op)
+                    || s.incoming.running || s.publication.running.is_some() {
+                    return Err(PublicationError::AuthorityChanged.into());
+                }
+                if let Some((before, after)) = &retained
+                    && (before.as_ref().map(|before| store.binding(before.id).map(|actual| actual.as_ref() == Some(before)))
+                        .transpose()?.is_some_and(|matches| !matches)
+                        || store.binding(after.id)?.as_ref() != Some(after)) {
+                    return Err(PublicationError::AuthorityChanged.into());
+                }
+                Ok(())
+            })
+        };
+        let finish = |provider_restored| -> Result<(), RuntimeError> {
+            if provider_restored {
+                meguri_model::faultpoint!("cloud.publish.after_cancel_provider").map_err(Error::from)?;
+            }
+            current_inputs()?;
             let mut s = self.state();
+            current(&s)?;
             with_tracking_access(|| {
                 s.store
                     .as_mut()
@@ -1584,11 +1686,40 @@ impl Runtime {
                     .cancel_publication(&op, restored)
             })?;
             s.publication = ProcessState::default();
-        }
+            Ok(())
+        };
+        let provider_restored = match &provider {
+            Some(provider) => provider.finish_publication_cancellation(&op, &desired.publication,
+                retained.as_ref().map(|(before, after)| (before.as_ref(), after)),
+                || { current_inputs()?; current(&self.state()) }, finish)?,
+            None => { finish(false)?; true },
+        };
         self.bind(collection)?;
-        self.refresh_identity()?;
         if restored == BindingState::Active {
-            self.qualify_provider_binding()?;
+            self.refresh_identity()?;
+            if provider_restored { self.qualify_provider_binding()?; }
+            // Local cancellation is complete. A real identity read above or
+            // current disabled/paused provider settings can defer the scan;
+            // later reconciliation errors retain their normal error paths.
+            let defer_scan = {
+                let s = self.state();
+                let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+                // bind reset verification, then refresh_identity performed the
+                // actual account read. An unusable file/layout is not such a
+                // cause and must still take the ordinary reconciliation path.
+                let identity_unavailable = !b.verified && (b.usable || matches!(b.binding.facts.state,
+                    BindingState::Isolated(IsolationReason::SignedOut | IsolationReason::AccountChanged)));
+                let provider_unavailable = match &s.provider {
+                    Some(provider) => {
+                        let doc = provider.snapshot()?;
+                        doc.selection != crate::provider::Selection::ICloud || !doc.settings.enabled
+                            || doc.settings.paused || doc.handoff.is_some()
+                    }
+                    None => false,
+                };
+                identity_unavailable || provider_unavailable
+            };
+            if defer_scan { return Ok(()); }
             match self.reconcile_binding(collection, &self.media_service(collection)?, Duration::from_secs(30)) {
                 Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => {},
                 Err(error) => return Err(error),
@@ -1977,7 +2108,7 @@ impl meguri_engine::ports::CloudPublicationAuthority for Runtime {
                 // Cancel grants no new publication authority. Current native
                 // evidence and the exact scoped row/CAS suffice even after an
                 // account event or a file change since confirmation (V15.3).
-                PublishStep::Cancelling if expected == &desired => op.fence_before,
+                PublishStep::Cancelling if expected == &desired || expected == &op.fence_before => op.fence_before,
                 _ => return Err(engine_error("decision authority refused")),
             };
             // Serialize the actual durable row through the sidecar CAS. No

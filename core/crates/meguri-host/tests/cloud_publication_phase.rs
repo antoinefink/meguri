@@ -3432,6 +3432,168 @@ fn cancel_replacement_requalifies_restored_provider_before_reconciliation() {
     host.close().unwrap();
 }
 
+#[test]
+fn accepted_replacement_cancel_restores_provider_mapping_and_cold_reconciliation() {
+    accepted_replacement_cancel_provider_boundary(None, false);
+}
+
+#[test]
+fn accepted_replacement_cancel_provider_write_failure_retains_op_for_guarded_retry() {
+    accepted_replacement_cancel_provider_boundary(Some("storage.sidecar.before_save"), false);
+}
+
+#[test]
+fn accepted_replacement_cancel_provider_write_failure_recovers_from_durable_op_on_reopen() {
+    accepted_replacement_cancel_provider_boundary(Some("storage.sidecar.before_save"), true);
+}
+
+#[test]
+fn accepted_replacement_cancel_restored_provider_before_tracking_commit_recovers_on_reopen() {
+    accepted_replacement_cancel_provider_boundary(Some("cloud.publish.after_cancel_provider"), true);
+}
+
+fn accepted_replacement_cancel_provider_boundary(point: Option<&str>, cold: bool) {
+    use cloud::runtime::RuntimeError;
+    use meguri_engine::EngineError;
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_storage::StorageError;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("accepted-cancel-provider");
+    generated(&dir);
+    let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
+        cloud::OpaqueBytes(scope().account.into_bytes()),
+    ))));
+    let config = host_config_with_random(&dir, keys(), account.clone(), scope(), None);
+    prepare_prior_icloud_fixture_configuration(&config);
+    let host = CoreHost::open(config.clone()).unwrap();
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(718)).unwrap();
+    let predecessor = publish_cold_resume_pending(&host, &mut service);
+    let mut settings = host.provider_authority().snapshot().unwrap().settings;
+    settings.automatic = false;
+    host.provider_authority().save_settings(settings).unwrap();
+    host.refresh_provider_admission();
+    let previous = host.provider_authority().snapshot().unwrap();
+    let provider_path = config.manual_transfer_directory.join("provider.json");
+    let previous_bytes = std::fs::read(&provider_path).unwrap();
+    let before = decision(&host);
+    let rows = cold_resume_rows(&host);
+    let history = cold_resume_entities(&host);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let preview = actual_preview(&host, &mut service, &scope());
+    let id = runtime.confirm_connection_publication(&preview, &collection).unwrap();
+    // This is the accepted replacement seam, unlike the earlier cancellation
+    // fixture whose provider document continues to name its predecessor.
+    runtime.provider_accept_icloud_connection().unwrap();
+    runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+    runtime.perform_publication_local(id, LocalWork::WriteDecision, &collection).unwrap();
+    let replacement = runtime.status().unwrap().binding.unwrap();
+    let candidate = host.provider_authority().snapshot().unwrap();
+    let candidate_bytes = std::fs::read(&provider_path).unwrap();
+    assert_ne!(replacement.id, predecessor.id);
+    assert_ne!(candidate.binding, previous.binding);
+    assert!(!candidate.legacy_binding_pending && candidate.handoff.is_none());
+    assert!(host.provider_authority().permits_icloud_binding(&replacement));
+    let op = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(op.binding_before.as_ref().unwrap().id, predecessor.id);
+    assert_eq!(op.binding_after, Some(replacement.id));
+    assert_eq!(op.fence_before, before);
+    assert_eq!(decision(&host), before);
+    assert!(!op.switch_sent && op.active_attempt.is_none());
+    let requests = service.request_log().unwrap().len();
+
+    if let Some(point) = point {
+        if point == "cloud.publish.after_cancel_provider" {
+            // Exact local metadata restoration must reach its durable boundary
+            // even when there is no current account to authorize new work.
+            *account.0.lock().unwrap() = IdentityStatus::SignedOut;
+        }
+        faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
+    }
+    let cancelled = runtime.cancel_publication(id, &collection);
+    if let Some(point) = point {
+        faultpoint::disarm(point);
+        let error = cancelled.expect_err("the actual cancellation boundary must fail");
+        let cancelling = runtime.publication_op().unwrap().unwrap();
+        let mut expected = op.clone();
+        expected.step = PublishStep::Cancelling;
+        assert_eq!(cancelling, expected);
+        assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&replacement));
+        assert_eq!(decision(&host), before);
+        assert!(host.provider_authority().network_blocked());
+        assert!(!host.provider_authority().permits_icloud_binding(&predecessor));
+        assert!(!host.provider_authority().permits_icloud_binding(&replacement));
+        assert!(runtime.require_collection_sending().is_err());
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        for entity in &history {
+            assert_eq!(runtime.binding_entity(predecessor.id, &entity.name).unwrap().as_ref(), Some(entity));
+        }
+        if point == "storage.sidecar.before_save" {
+            let RuntimeError::Engine(EngineError::Storage(original)) = error else { panic!("original provider storage error"); };
+            assert!(matches!(&original, StorageError::Io { .. }));
+            assert_eq!(std::fs::read(&provider_path).unwrap(), candidate_bytes);
+            // Neither raw reload nor general settings retry can clear this
+            // uncertain cancellation or retire its original completions.
+            for result in [host.provider_authority().reload(),
+                host.provider_authority().retry_failed_publication(collection.generation().0, Some(&before.publication)).map(|_| ())] {
+                let error = result.unwrap_err();
+                assert!(matches!(&error, StorageError::Io { .. }));
+                assert_eq!(error.to_string(), original.to_string());
+            }
+            assert!(host.provider_authority().snapshot().is_err());
+        } else {
+            assert!(matches!(error, RuntimeError::Tracking(cloud::Error::Io(_))));
+            assert_eq!(host.provider_authority().snapshot().unwrap(), previous);
+            assert_eq!(std::fs::read(&provider_path).unwrap(), previous_bytes);
+        }
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        if !cold {
+            runtime.cancel_publication(id, &collection).unwrap();
+        }
+    } else {
+        cancelled.expect("actual accepted replacement must restore its predecessor provider");
+    }
+    if !cold {
+        assert!(runtime.publication_op().unwrap().is_none());
+        assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&predecessor));
+        assert_eq!(host.provider_authority().snapshot().unwrap(), previous);
+        assert_eq!(std::fs::read(&provider_path).unwrap(), previous_bytes);
+        runtime.require_provider_collection_admission().unwrap();
+        assert!(runtime.require_collection_sending().is_err(), "metadata restoration grants no new Active proof");
+        assert_cold_resume_history(&host, &history);
+    }
+    host.close().unwrap();
+    drop(collection);
+    drop(host);
+    *account.0.lock().unwrap() = IdentityStatus::Available(cloud::OpaqueBytes(scope().account.into_bytes()));
+
+    let host = CoreHost::open(config).unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    if cold {
+        assert_eq!(runtime.publication_op().unwrap().unwrap().step, PublishStep::Cancelling);
+        assert!(runtime.require_collection_sending().is_err());
+        assert!(matches!(runtime.next_publication_work(&collection).unwrap(),
+            PublicationWork::Local { op, work: LocalWork::Cancel } if op == id));
+        runtime.perform_publication_local(id, LocalWork::Cancel, &collection).unwrap();
+    }
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&predecessor));
+    assert_eq!(host.provider_authority().snapshot().unwrap(), previous);
+    assert_eq!(std::fs::read(&provider_path).unwrap(), previous_bytes);
+    runtime.reconcile_binding(&collection, &host.media().unwrap(), Duration::from_secs(30)).unwrap();
+    runtime.require_provider_collection_admission().unwrap();
+    assert!(runtime.require_collection_sending().is_err());
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    assert_eq!(cold_resume_rows(&host), rows);
+    assert_cold_resume_history(&host, &history);
+    assert_eq!(decision(&host), before);
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    host.close().unwrap();
+}
+
 fn cancel_with_account_status(status: IdentityStatus) {
     use meguri_engine::device_state::{PendingDecisionReason, PublicationDecision};
     let temp = tempfile::tempdir().unwrap();
@@ -5866,4 +6028,677 @@ fn exchange_incomplete_publication_creates_known_empty_history_atomically() {
         assert_eq!(database.incomplete_history_for_testing(published.id).unwrap(), Some(true));
         assert!(!database.incomplete_pending_for_testing(published.id).unwrap());
     }
+}
+
+// R1: exercise the R6 AtomicFile boundary itself, with a genuinely different
+// before/desired decision. Provider publication uses another directory and
+// cannot supply this missing directory-sync proof.
+#[test]
+fn cancellation_reasserts_prior_r6_after_rename_failure_inprocess_and_cold() {
+    use cloud::runtime::RuntimeError;
+    use meguri_engine::{EngineError, device_state::{PendingDecisionReason, PublicationDecision}};
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_storage::StorageError;
+
+    for cold in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("cancel-r6-postrename");
+        generated(&dir);
+        let config = host_config_with_random(&dir, keys(), Arc::new(Account), scope(), None);
+        prepare_prior_icloud_fixture_configuration(&config);
+        let host = CoreHost::open(config.clone()).unwrap();
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(719)).unwrap();
+        let old = publish_actual_collection(&host, &mut service);
+        restore_collection(&host, &dir);
+        let before = decision(&host);
+        assert_eq!(before.publication.decision, PublicationDecision::Pending);
+        assert_eq!(before.pending_reason, Some(PendingDecisionReason::Restore));
+        let before_bytes = std::fs::read(dir.join("meguri-sidecar.json")).unwrap();
+        let op = bind_and_write(&host, &mut service, &scope());
+        assert_ne!(decision(&host), before);
+        let rows = cold_resume_rows(&host);
+        let provider = host.provider_authority().snapshot().unwrap();
+        let provider_path = config.manual_transfer_directory.join("provider.json");
+        let provider_bytes = std::fs::read(&provider_path).unwrap();
+        let requests = service.request_log().unwrap().len();
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let candidate = runtime.status().unwrap().binding.unwrap();
+        // Arm only after the tracking Cancelling commit, immediately before
+        // the actual R6 CAS. No earlier provider/tracking write can take it.
+        runtime.set_publication_cancel_hook_for_testing(|| {
+            faultpoint::arm("storage.atomic.after_rename", Fault::IoError(std::io::ErrorKind::Other));
+        });
+        let failed = runtime.cancel_publication(op.id, &collection);
+        faultpoint::disarm("storage.atomic.after_rename");
+        let error = failed.unwrap_err();
+        let RuntimeError::Engine(EngineError::Storage(StorageError::Io { detail })) = error else {
+            panic!("R6 must retain the original typed AtomicFile storage error");
+        };
+        assert!(detail.contains("storage.atomic.after_rename"));
+        assert_eq!(decision(&host), before);
+        assert_eq!(std::fs::read(dir.join("meguri-sidecar.json")).unwrap(), before_bytes);
+        let mut cancelling = op.clone();
+        cancelling.step = PublishStep::Cancelling;
+        assert!(runtime.publication_op().unwrap().as_ref() == Some(&cancelling));
+        assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&candidate));
+        assert_eq!(host.provider_authority().snapshot().unwrap(), provider);
+        assert_eq!(std::fs::read(&provider_path).unwrap(), provider_bytes);
+        assert!(runtime.require_collection_sending().is_err());
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        if cold {
+            host.close().unwrap();
+            drop(collection);
+            drop(host);
+            let host = CoreHost::open(config).unwrap();
+            assert_cancel_r6_reassertion(&host, &cancelling, &before, old.id);
+            assert_eq!(cold_resume_rows(&host), rows);
+            assert_eq!(std::fs::read(&provider_path).unwrap(), provider_bytes);
+            host.close().unwrap();
+        } else {
+            assert_cancel_r6_reassertion(&host, &cancelling, &before, old.id);
+            assert_eq!(cold_resume_rows(&host), rows);
+            assert_eq!(std::fs::read(&provider_path).unwrap(), provider_bytes);
+            host.close().unwrap();
+        }
+        assert_eq!(service.request_log().unwrap().len(), requests);
+    }
+}
+fn assert_cancel_r6_reassertion(host: &CoreHost, op: &PublishOp, before: &DecisionSnapshot, old: cloud::BindingId) {
+    use cloud::runtime::RuntimeError;
+    use meguri_engine::EngineError;
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_storage::StorageError;
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    assert_eq!(&decision(host), before);
+    // A second R6-only failure proves retry actually re-publishes matching
+    // visible bytes, including after a cold reopen, instead of skipping them.
+    runtime.set_publication_cancel_hook_for_testing(|| {
+        faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::Other));
+    });
+    let failed = runtime.cancel_publication(op.id, &collection);
+    faultpoint::disarm("storage.sidecar.before_save");
+    assert!(matches!(failed, Err(RuntimeError::Engine(EngineError::Storage(StorageError::Io { .. })))));
+    assert!(runtime.publication_op().unwrap().as_ref() == Some(op));
+    assert_eq!(&decision(host), before);
+    assert!(runtime.require_collection_sending().is_err());
+    runtime.cancel_publication(op.id, &collection).unwrap();
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert_eq!(&decision(host), before);
+    let binding = runtime.status().unwrap().binding.unwrap();
+    assert_eq!(binding.id, old);
+    assert_eq!(binding.facts.state, cloud::BindingState::Isolated(cloud::IsolationReason::ReplacedLocally));
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+}
+
+// R2: both public calls run while cancellation retains its exact operation.
+// The test observes the actual provider mutex contention before releasing it.
+#[test]
+fn cancellation_rejects_setup_contending_on_its_provider_publication() {
+    use cloud::runtime::RuntimeError;
+    use meguri_model::faultpoint::{self, Fault};
+    use std::sync::mpsc;
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("cancel-contended-setup");
+    generated(&dir);
+    let host = open_prior_icloud_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(720)).unwrap();
+    let predecessor = publish_cold_resume_pending(&host, &mut service);
+    let previous = host.provider_authority().snapshot().unwrap();
+    let rows = cold_resume_rows(&host);
+    let history = cold_resume_entities(&host);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let p = actual_preview(&host, &mut service, &scope());
+    let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+    runtime.provider_accept_icloud_connection().unwrap();
+    runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+    runtime.perform_publication_local(id, LocalWork::WriteDecision, &collection).unwrap();
+    let candidate = runtime.status().unwrap().binding.unwrap();
+    let mut cancelling = runtime.publication_op().unwrap().unwrap();
+    cancelling.step = PublishStep::Cancelling;
+    let requests = service.request_log().unwrap().len();
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let (waiting, contended) = mpsc::channel();
+    let (completed, completion) = mpsc::channel();
+    host.provider_authority().set_cancellation_hook_for_testing(move || {
+        entered.send(()).unwrap();
+        resume.recv_timeout(Duration::from_secs(30)).expect("release cancellation publication");
+    });
+    host.provider_authority().observe_setup_contention_for_testing(waiting);
+    // Leave the op retained after provider durability so setup must still
+    // reject Cancelling once it acquires publication ownership.
+    faultpoint::arm("cloud.publish.after_cancel_provider", Fault::IoError(std::io::ErrorKind::Other));
+    let (held, contention, before_release, cancelled, accepted) = std::thread::scope(|threads| {
+        let cancel = threads.spawn(|| runtime.cancel_publication(id, &collection));
+        let held = reached.recv_timeout(Duration::from_secs(30));
+        let setup = threads.spawn(|| {
+            let result = runtime.provider_accept_icloud_connection();
+            let _ = completed.send(());
+            result
+        });
+        let contention = contended.recv_timeout(Duration::from_secs(30));
+        let before_release = completion.try_recv();
+        let _ = release.send(());
+        (held, contention, before_release, cancel.join(), setup.join())
+    });
+    faultpoint::disarm("cloud.publish.after_cancel_provider");
+    held.expect("cancellation reached provider ownership with State/tracking released");
+    contention.expect("setup contended on actual provider ownership");
+    assert!(matches!(before_release, Err(mpsc::TryRecvError::Empty)));
+    assert!(matches!(cancelled.unwrap(), Err(RuntimeError::Tracking(cloud::Error::Io(_)))));
+    assert!(matches!(accepted.unwrap(), Err(RuntimeError::Publication(PublicationError::AuthorityChanged))));
+    assert!(runtime.publication_op().unwrap().as_ref() == Some(&cancelling));
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&candidate));
+    assert_eq!(host.provider_authority().snapshot().unwrap(), previous);
+    assert!(!host.provider_authority().snapshot().unwrap().legacy_binding_pending);
+    assert!(host.provider_authority().network_blocked());
+    assert_eq!(cold_resume_rows(&host), rows);
+    for entity in &history {
+        assert_eq!(runtime.binding_entity(predecessor.id, &entity.name).unwrap().as_ref(), Some(entity));
+    }
+    runtime.cancel_publication(id, &collection).unwrap();
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&predecessor));
+    assert_eq!(host.provider_authority().snapshot().unwrap(), previous);
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    host.close().unwrap();
+}
+
+// R3: begin_handoff is public Authority API. Do not substitute a Host refusal
+// or invent a drain receipt; retain and validate the actual original handle.
+#[test]
+fn cancellation_retains_candidate_and_op_when_public_handoff_wins_between_phases() {
+    use cloud::runtime::RuntimeError;
+    use meguri_engine::EngineError;
+    use meguri_storage::StorageError;
+    use meguri_sync::provider::Selection;
+    use std::sync::mpsc;
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("cancel-public-handoff");
+    generated(&dir);
+    let config = host_config_with_random(&dir, keys(), Arc::new(Account), scope(), None);
+    prepare_prior_icloud_fixture_configuration(&config);
+    let host = CoreHost::open(config.clone()).unwrap();
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(721)).unwrap();
+    let predecessor = publish_cold_resume_pending(&host, &mut service);
+    let rows = cold_resume_rows(&host);
+    let history = cold_resume_entities(&host);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let p = actual_preview(&host, &mut service, &scope());
+    let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+    runtime.provider_accept_icloud_connection().unwrap();
+    runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+    runtime.perform_publication_local(id, LocalWork::WriteDecision, &collection).unwrap();
+    let candidate = runtime.status().unwrap().binding.unwrap();
+    let mut cancelling = runtime.publication_op().unwrap().unwrap();
+    cancelling.step = PublishStep::Cancelling;
+    let before = decision(&host);
+    let requests = service.request_log().unwrap().len();
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    runtime.set_publication_cancel_hook_for_testing(move || {
+        entered.send(()).unwrap();
+        resume.recv_timeout(Duration::from_secs(30)).expect("release cancellation after public handoff");
+    });
+    let (held, handoff, document, bytes, result) = std::thread::scope(|threads| {
+        let cancel = threads.spawn(|| runtime.cancel_publication(id, &collection));
+        let held = reached.recv_timeout(Duration::from_secs(30));
+        let handoff = host.provider_authority().begin_handoff(Selection::LocalOnly,
+            Some(before.publication.clone()), collection.generation().0);
+        let document = host.provider_authority().snapshot();
+        let bytes = std::fs::read(config.manual_transfer_directory.join("provider.json"));
+        let _ = release.send(());
+        (held, handoff, document, bytes, cancel.join())
+    });
+    held.expect("cancellation committed its phase with no provider/State/tracking guard held");
+    let handoff = handoff.unwrap();
+    let document = document.unwrap();
+    let bytes = bytes.unwrap();
+    assert!(document.handoff.is_some() && document.binding.is_some());
+    assert!(matches!(result.unwrap(), Err(RuntimeError::Engine(EngineError::Storage(StorageError::Io { .. })))));
+    assert!(runtime.publication_op().unwrap().as_ref() == Some(&cancelling));
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&candidate));
+    assert_eq!(host.provider_authority().snapshot().unwrap(), document);
+    assert_eq!(std::fs::read(config.manual_transfer_directory.join("provider.json")).unwrap(), bytes);
+    host.provider_authority().validate_handoff(&handoff).unwrap();
+    // Refusal must not install an un-retryable provider publication failure or
+    // erase the original handoff's authority on a second Cancel.
+    assert!(runtime.cancel_publication(id, &collection).is_err());
+    host.provider_authority().validate_handoff(&handoff).unwrap();
+    assert_eq!(host.provider_authority().snapshot().unwrap(), document);
+    assert!(runtime.publication_op().unwrap().as_ref() == Some(&cancelling));
+    assert_eq!(cold_resume_rows(&host), rows);
+    for entity in &history {
+        assert_eq!(runtime.binding_entity(predecessor.id, &entity.name).unwrap().as_ref(), Some(entity));
+    }
+    assert!(runtime.require_collection_sending().is_err());
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    assert_eq!(decision(&host), before);
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    host.close().unwrap();
+}
+
+// R4: exercise the successful final tail, without a fault before tracking and
+// without restoring account availability until all cancellation claims hold.
+#[test]
+fn accepted_replacement_cancel_completes_locally_with_actual_identity_or_settings_deferral() {
+    for case in 0..5 {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("cancel-local-completion");
+        generated(&dir);
+        let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
+            cloud::OpaqueBytes(scope().account.into_bytes())))));
+        let config = host_config_with_random(&dir, keys(), account.clone(), scope(), None);
+        prepare_prior_icloud_fixture_configuration(&config);
+        let host = CoreHost::open(config.clone()).unwrap();
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(722)).unwrap();
+        let predecessor = publish_cold_resume_pending(&host, &mut service);
+        let previous = host.provider_authority().snapshot().unwrap();
+        let rows = cold_resume_rows(&host);
+        let history = cold_resume_entities(&host);
+        let before = decision(&host);
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let p = actual_preview(&host, &mut service, &scope());
+        let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+        runtime.provider_accept_icloud_connection().unwrap();
+        runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+        runtime.perform_publication_local(id, LocalWork::WriteDecision, &collection).unwrap();
+        match case {
+            0 => *account.0.lock().unwrap() = IdentityStatus::SignedOut,
+            1 => *account.0.lock().unwrap() = IdentityStatus::TemporarilyUnavailable,
+            2 => *account.0.lock().unwrap() = IdentityStatus::ReadFailed,
+            3 | 4 => {
+                let mut settings = host.provider_authority().snapshot().unwrap().settings;
+                if case == 3 { settings.enabled = false; } else { settings.paused = true; }
+                host.provider_authority().save_settings(settings).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let mut expected_provider = host.provider_authority().snapshot().unwrap();
+        expected_provider.binding = previous.binding;
+        let requests = service.request_log().unwrap().len();
+        runtime.cancel_publication(id, &collection)
+            .expect("durable local cancellation completes while the real scan admission is unavailable");
+        assert!(runtime.publication_op().unwrap().is_none());
+        assert_eq!(decision(&host), before);
+        let mut expected_binding = predecessor.clone();
+        if case == 0 { expected_binding.facts.state = cloud::BindingState::Isolated(cloud::IsolationReason::SignedOut); }
+        assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&expected_binding));
+        assert_eq!(host.provider_authority().snapshot().unwrap(), expected_provider);
+        assert!(!host.provider_authority().snapshot().unwrap().legacy_binding_pending);
+        assert!(runtime.status().unwrap().scan_required);
+        assert!(!runtime.status().unwrap().scan_completed_this_open);
+        assert!(!runtime.status().unwrap().identity_verified);
+        assert!(runtime.require_collection_sending().is_err());
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_cold_resume_history(&host, &history);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        host.close().unwrap();
+    }
+}
+
+// R5: a Stopped predecessor is a real V15.2 binding-before. Restore only its
+// metadata ownership; activation still needs the new V9.2 preview and Resume.
+#[test]
+fn accepted_replacement_cancel_preserves_stopped_provider_for_fresh_resume_inprocess_and_cold() {
+    accepted_resumable_predecessor_cancel(cloud::IsolationReason::Stopped);
+}
+
+#[test]
+fn accepted_replacement_cancel_preserves_signed_out_provider_for_fresh_resume_inprocess_and_cold() {
+    accepted_resumable_predecessor_cancel(cloud::IsolationReason::SignedOut);
+}
+
+#[test]
+fn accepted_replacement_cancel_preserves_account_changed_provider_for_fresh_resume_inprocess_and_cold() {
+    accepted_resumable_predecessor_cancel(cloud::IsolationReason::AccountChanged);
+}
+
+fn accepted_resumable_predecessor_cancel(reason: cloud::IsolationReason) {
+    for cold in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("cancel-stopped-predecessor");
+        generated(&dir);
+        let account = Arc::new(MutableAccount(Mutex::new(IdentityStatus::Available(
+            cloud::OpaqueBytes(scope().account.into_bytes()),
+        ))));
+        let config = host_config_with_random(&dir, keys(), account.clone(), scope(), None);
+        prepare_prior_icloud_fixture_configuration(&config);
+        let host = CoreHost::open(config.clone()).unwrap();
+        let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(723)).unwrap();
+        let predecessor = publish_cold_resume_pending(&host, &mut service);
+        let previous = host.provider_authority().snapshot().unwrap();
+        let provider_path = config.manual_transfer_directory.join("provider.json");
+        let previous_bytes = std::fs::read(&provider_path).unwrap();
+        let rows = cold_resume_rows(&host);
+        let history = cold_resume_entities(&host);
+        let before = decision(&host);
+        match reason {
+            cloud::IsolationReason::Stopped => host.stop_using_icloud().unwrap(),
+            cloud::IsolationReason::SignedOut | cloud::IsolationReason::AccountChanged => {
+                // Real V9.1 identity transitions isolate the retained row.
+                // Returning to the original account cannot reactivate it.
+                *account.0.lock().unwrap() = if reason == cloud::IsolationReason::SignedOut {
+                    IdentityStatus::SignedOut
+                } else { IdentityStatus::Available(cloud::OpaqueBytes(b"other-public-account".to_vec())) };
+                host.cloud_runtime().unwrap().refresh_identity().unwrap();
+                *account.0.lock().unwrap() = IdentityStatus::Available(predecessor.facts.account.clone());
+                host.cloud_runtime().unwrap().refresh_identity().unwrap();
+            }
+            _ => unreachable!(),
+        }
+        host.refresh_provider_admission();
+        assert_cancelled_isolation_closed(&host, &predecessor, reason);
+        let runtime = host.cloud_runtime().unwrap();
+        let collection = host.collection().unwrap();
+        let p = actual_preview(&host, &mut service, &scope());
+        assert_eq!(p.decision, ConnectDecision::ConfirmResume);
+        assert_eq!(p.resume_binding, Some(predecessor.id));
+        let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+        let confirmed = runtime.publication_op().unwrap().unwrap();
+        assert_eq!(confirmed.binding_before.as_ref().unwrap().id, predecessor.id);
+        assert_eq!(confirmed.binding_before.as_ref().unwrap().state,
+            cloud::BindingState::Isolated(reason));
+        runtime.provider_accept_icloud_connection().unwrap();
+        host.refresh_provider_admission();
+        runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+        runtime.perform_publication_local(id, LocalWork::WriteDecision, &collection).unwrap();
+        let candidate = runtime.status().unwrap().binding.unwrap();
+        assert_ne!(candidate.id, predecessor.id);
+        assert_ne!(host.provider_authority().snapshot().unwrap().binding, previous.binding);
+        assert!(!host.provider_authority().snapshot().unwrap().legacy_binding_pending);
+        let requests = service.request_log().unwrap().len();
+        runtime.cancel_publication(id, &collection).unwrap();
+        assert!(runtime.publication_op().unwrap().is_none());
+        assert_eq!(decision(&host), before);
+        assert_eq!(host.provider_authority().snapshot().unwrap(), previous);
+        assert_eq!(std::fs::read(&provider_path).unwrap(), previous_bytes);
+        assert_cancelled_isolation_closed(&host, &predecessor, reason);
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_cold_resume_history(&host, &history);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        drop(collection);
+        let host = if cold {
+            host.close().unwrap();
+            drop(host);
+            CoreHost::open(config).unwrap()
+        } else { host };
+        assert_cancelled_isolation_closed(&host, &predecessor, reason);
+        // Read the service's actual Active/Epoch afresh; the cancelled preview
+        // is not reused and restored provider metadata is no Active proof.
+        let p = actual_preview(&host, &mut service, &scope());
+        assert_eq!(p.decision, ConnectDecision::ConfirmResume);
+        assert_eq!(p.resume_binding, Some(predecessor.id));
+        assert_cancelled_isolation_closed(&host, &predecessor, reason);
+        let requests = service.request_log().unwrap().len();
+        host.resume_cloud_binding(&p, host.cloud_connection_generation().unwrap()).unwrap();
+        let runtime = host.cloud_runtime().unwrap();
+        assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&predecessor));
+        assert!(runtime.status().unwrap().identity_verified);
+        assert!(runtime.status().unwrap().scan_completed_this_open);
+        assert!(!runtime.status().unwrap().scan_required);
+        runtime.require_provider_collection_admission().unwrap();
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_cold_resume_history(&host, &history);
+        assert_cold_resume_scan(&host, host.cloud_connection_generation().unwrap());
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        host.close().unwrap();
+    }
+}
+
+fn assert_cancelled_isolation_closed(host: &CoreHost, predecessor: &cloud::Binding, reason: cloud::IsolationReason) {
+    let runtime = host.cloud_runtime().unwrap();
+    let status = runtime.status().unwrap();
+    let mut expected = predecessor.clone();
+    expected.facts.state = cloud::BindingState::Isolated(reason);
+    assert_eq!(status.binding.as_ref(), Some(&expected));
+    assert!(!status.stored_usable && !status.identity_verified);
+    assert!(!host.provider_authority().permits_icloud_binding(predecessor));
+    assert!(runtime.require_provider_collection_admission().is_err());
+    assert!(runtime.require_collection_sending().is_err());
+    assert!(runtime.register_sdk(false).is_err());
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+}
+
+// R6: mirror the actual native acceptance/Host refresh sequence, then cancel
+// before Bind. The cancellation call itself must restore admission; no caller
+// Host refresh, new consent or extra user action follows it.
+#[test]
+fn accepted_confirmed_cancel_restores_unchanged_original_admission_without_host_refresh() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("cancel-confirmed-admission");
+    generated(&dir);
+    let host = open_prior_icloud_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(724)).unwrap();
+    let predecessor = publish_cold_resume_pending(&host, &mut service);
+    let previous = host.provider_authority().snapshot().unwrap();
+    let rows = cold_resume_rows(&host);
+    let history = cold_resume_entities(&host);
+    let before = decision(&host);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let p = actual_preview(&host, &mut service, &scope());
+    let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+    runtime.provider_accept_icloud_connection().unwrap();
+    host.refresh_provider_admission();
+    let guard = runtime.adapter_guard();
+    let stored = runtime.stored_state_for_testing().unwrap();
+    let confirmed = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(confirmed.step, PublishStep::Confirmed);
+    assert!(confirmed.binding_after.is_none());
+    assert!(host.provider_authority().snapshot().unwrap().legacy_binding_pending);
+    assert!(!host.provider_authority().permits_icloud_binding(&predecessor));
+    assert!(runtime.require_provider_collection_admission().is_err());
+    let requests = service.request_log().unwrap().len();
+    runtime.cancel_publication(id, &collection).unwrap();
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&predecessor));
+    assert_eq!(decision(&host), before);
+    assert_eq!(host.provider_authority().snapshot().unwrap(), previous);
+    assert!(host.provider_authority().permits_icloud_binding(&predecessor));
+    runtime.require_provider_collection_admission().unwrap();
+    assert_eq!(runtime.adapter_guard(), guard);
+    assert_eq!(runtime.stored_state_for_testing().unwrap(), stored);
+    assert_eq!(cold_resume_rows(&host), rows);
+    for entity in &history {
+        assert_eq!(runtime.binding_entity(predecessor.id, &entity.name).unwrap().as_ref(), Some(entity));
+    }
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    host.close().unwrap();
+}
+
+#[test]
+fn accepted_keep_local_only_replacement_cancel_reopens_discovery_without_connected_consent() {
+    accepted_unbound_cancel_discovery(true, None, false);
+}
+
+#[test]
+fn accepted_initial_publication_cancel_reopens_discovery_without_host_refresh() {
+    accepted_unbound_cancel_discovery(false, None, false);
+}
+
+#[test]
+fn cancelled_candidate_removal_preserves_before_bytes_and_owned_failure_on_warm_retry() {
+    for local_only in [false, true] {
+        accepted_unbound_cancel_discovery(local_only, Some("storage.sidecar.before_save"), false);
+    }
+}
+
+#[test]
+fn cancelled_candidate_removal_republishes_unbound_provider_after_rename_failure_on_cold_retry() {
+    for local_only in [false, true] {
+        accepted_unbound_cancel_discovery(local_only, Some("storage.atomic.after_rename"), true);
+    }
+}
+
+// Both paths have an actual accepted candidate mapping, but no prior Connected
+// authority to restore. Keep R6, provider choice/settings and future members;
+// permit a new discovery without granting writers or fabricating Active proof.
+fn accepted_unbound_cancel_discovery(local_only: bool, point: Option<&'static str>, cold: bool) {
+    use meguri_engine::{EngineError, device_state::{AccountBinding, PublicationDecision}};
+    use meguri_model::faultpoint::{self, Fault};
+    use meguri_storage::{StorageError, sidecar};
+    use cloud::runtime::RuntimeError;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("cancel-unbound-discovery");
+    generated(&dir);
+    let config = host_config_with_random(&dir, keys(), Arc::new(Account), scope(), None);
+    if local_only { prepare_prior_icloud_fixture_configuration(&config); }
+    let host = CoreHost::open(config.clone()).unwrap();
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(725)).unwrap();
+    let predecessor = if local_only {
+        let predecessor = publish_cold_resume_pending(&host, &mut service);
+        let p = actual_preview(&host, &mut service, &scope());
+        host.keep_cloud_local_only(host.cloud_connection_generation().unwrap(), Some(&p)).unwrap();
+        host.refresh_provider_admission();
+        assert_cold_resume_closed(&host, &predecessor);
+        let fence = decision(&host);
+        assert_eq!(fence.publication.binding, AccountBinding::LocalOnly);
+        assert_eq!(fence.publication.decision, PublicationDecision::Clear);
+        assert!(fence.pending_reason.is_none());
+        Some(predecessor)
+    } else {
+        assert!(host.cloud_runtime().unwrap().status().unwrap().binding.is_none());
+        None
+    };
+    let before = decision(&host);
+    let before_bytes = std::fs::read(dir.join("meguri-sidecar.json")).unwrap();
+    let rows = cold_resume_rows(&host);
+    let history = if predecessor.is_some() { cold_resume_entities(&host) } else { Vec::new() };
+    let provider_path = config.manual_transfer_directory.join("provider.json");
+    sidecar::update_document(&provider_path, |raw| {
+        raw.insert("futureCancellation".into(), serde_json::json!({"retained": [1, 2, 3]}));
+        raw.get_mut("icloud_settings").unwrap().as_object_mut().unwrap()
+            .insert("futureSetting".into(), serde_json::json!("preserve"));
+        Ok(())
+    }).unwrap();
+    let discovery = host.provider_authority().begin_discovery().unwrap();
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let p = actual_preview(&host, &mut service, &scope());
+    let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+    runtime.provider_accept_icloud_connection().unwrap();
+    host.refresh_provider_admission();
+    runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+    runtime.perform_publication_local(id, LocalWork::WriteDecision, &collection).unwrap();
+    drop(discovery);
+    let candidate = runtime.status().unwrap().binding.unwrap();
+    let op = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(op.binding_before.as_ref().map(|b| b.id), predecessor.as_ref().map(|b| b.id));
+    assert_eq!(op.binding_after, Some(candidate.id));
+    assert_eq!(op.fence_before, before);
+    let mut expected = host.provider_authority().snapshot().unwrap();
+    assert!(expected.binding.is_some() && !expected.legacy_binding_pending && expected.handoff.is_none());
+    expected.binding = None;
+    let candidate_bytes = std::fs::read(&provider_path).unwrap();
+    let mut expected_raw: serde_json::Value = serde_json::from_slice(&candidate_bytes).unwrap();
+    expected_raw["binding"] = serde_json::Value::Null;
+    let requests = service.request_log().unwrap().len();
+    if let Some(point) = point {
+        // R6 restores before provider ownership is acquired. Arm here so the
+        // actual provider write, rather than R6's AtomicFile, takes the fault.
+        host.provider_authority().set_cancellation_hook_for_testing(move || {
+            faultpoint::arm(point, Fault::IoError(std::io::ErrorKind::Other));
+        });
+    }
+    let cancelled = runtime.cancel_publication(id, &collection);
+    if let Some(point) = point {
+        faultpoint::disarm(point);
+        let error = cancelled.unwrap_err();
+        let RuntimeError::Engine(EngineError::Storage(original)) = error else { panic!("original provider write failure"); };
+        assert!(matches!(&original, StorageError::Io { .. }));
+        let mut cancelling = op.clone();
+        cancelling.step = PublishStep::Cancelling;
+        assert!(runtime.publication_op().unwrap().as_ref() == Some(&cancelling));
+        assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&candidate));
+        assert_eq!(decision(&host), before);
+        assert_eq!(std::fs::read(dir.join("meguri-sidecar.json")).unwrap(), before_bytes);
+        assert!(host.provider_authority().network_blocked());
+        assert!(host.provider_authority().begin_discovery().is_err());
+        assert!(!host.provider_authority().permits_icloud_binding(&candidate));
+        assert!(runtime.require_collection_sending().is_err());
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        let failed_bytes = std::fs::read(&provider_path).unwrap();
+        if point == "storage.sidecar.before_save" {
+            assert_eq!(failed_bytes, candidate_bytes);
+        } else {
+            assert_eq!(serde_json::from_slice::<serde_json::Value>(&failed_bytes).unwrap(), expected_raw);
+        }
+        for result in [host.provider_authority().reload(),
+            host.provider_authority().retry_failed_publication(collection.generation().0, Some(&before.publication)).map(|_| ())] {
+            assert_eq!(result.unwrap_err().to_string(), original.to_string());
+        }
+        assert_eq!(std::fs::read(&provider_path).unwrap(), failed_bytes);
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+    } else { cancelled.unwrap(); }
+    drop(collection);
+    let host = if cold {
+        host.close().unwrap();
+        drop(host);
+        CoreHost::open(config).unwrap()
+    } else { host };
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    if point.is_some() {
+        if cold {
+            // Already-visible null association still needs a durable provider
+            // republish (F4). A second actual write fault proves it is not skipped.
+            let bytes = std::fs::read(&provider_path).unwrap();
+            host.provider_authority().set_cancellation_hook_for_testing(|| {
+                faultpoint::arm("storage.sidecar.before_save", Fault::IoError(std::io::ErrorKind::Other));
+            });
+            let failed = runtime.cancel_publication(id, &collection);
+            faultpoint::disarm("storage.sidecar.before_save");
+            assert!(matches!(failed, Err(RuntimeError::Engine(EngineError::Storage(StorageError::Io { .. })))));
+            assert_eq!(std::fs::read(&provider_path).unwrap(), bytes);
+            assert_eq!(runtime.publication_op().unwrap().unwrap().step, PublishStep::Cancelling);
+            assert!(host.provider_authority().begin_discovery().is_err());
+            assert!(runtime.require_collection_sending().is_err());
+        }
+        runtime.cancel_publication(id, &collection).unwrap();
+    }
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert_eq!(decision(&host), before);
+    assert_eq!(std::fs::read(dir.join("meguri-sidecar.json")).unwrap(), before_bytes);
+    assert_eq!(host.provider_authority().snapshot().unwrap(), expected);
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&std::fs::read(&provider_path).unwrap()).unwrap(), expected_raw);
+    assert!(!host.provider_authority().network_blocked());
+    assert!(!host.provider_authority().permits_icloud_binding(&candidate));
+    if let Some(predecessor) = &predecessor {
+        assert_cold_resume_closed(&host, predecessor);
+        for entity in &history {
+            assert_eq!(runtime.binding_entity(predecessor.id, &entity.name).unwrap().as_ref(), Some(entity));
+        }
+    } else { assert!(runtime.status().unwrap().binding.is_none()); }
+    assert!(runtime.require_provider_collection_admission().is_err());
+    assert!(runtime.require_collection_sending().is_err());
+    assert!(runtime.register_sdk(false).is_err());
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    assert_eq!(cold_resume_rows(&host), rows);
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    // The native Cancel tail performs no Host refresh. The successful call
+    // itself must reopen ordinary discovery, with collection writers closed.
+    let discovery = host.provider_authority().begin_discovery().unwrap();
+    assert!(discovery.is_current());
+    let work = runtime.begin_connection_preview(&collection, &host.media().unwrap()).unwrap();
+    let PreviewWork::ReadActive { id: preview } = work else { panic!("fresh discovery must request Active"); };
+    runtime.cancel_connection_preview_id(preview).unwrap();
+    assert!(runtime.require_provider_collection_admission().is_err());
+    assert!(runtime.require_collection_sending().is_err());
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    drop(discovery);
+    host.close().unwrap();
 }

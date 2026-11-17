@@ -721,6 +721,8 @@ pub struct Runtime {
     cloud_capture_hook: Mutex<Option<CloudCaptureHook>>,
     #[cfg(feature = "test-hooks")]
     provider_qualification_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(feature = "test-hooks")]
+    publication_cancel_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct ScanGuard {
@@ -800,8 +802,12 @@ impl Runtime {
                     }
                     let awaiting_target = with_tracking_access(|| -> Result<bool, RuntimeError> {
                         let Some(store) = state.store.as_ref() else { return Ok(false); };
-                        Ok(store.publication_op()?.is_some_and(|op|
-                            op.step == super::publication::PublishStep::Confirmed
+                        let publication = store.publication_op()?;
+                        if publication.as_ref().is_some_and(|op| op.step == super::publication::PublishStep::Cancelling) {
+                            provider.close_admission();
+                        }
+                        Ok(publication.is_some_and(|op|
+                            matches!(op.step, super::publication::PublishStep::Confirmed | super::publication::PublishStep::Cancelling)
                                 || op.binding_after != Some(binding.id))
                             || store.adoption_op()?.is_some_and(|op| op.binding_after != binding.id))
                     })?;
@@ -827,17 +833,39 @@ impl Runtime {
         Ok(())
     }
     pub fn provider_accept_icloud_connection(&self) -> Result<(), RuntimeError> {
-        let provider = {
+        let (provider, incarnation, publication, adoption, binding) = {
             let state = self.state();
-            let accepted = with_tracking_access(|| -> Result<bool, RuntimeError> {
-                let Some(store) = state.store.as_ref() else { return Ok(false); };
-                Ok(store.publication_op()?.is_some() || store.adoption_op()?.is_some()
-                    || state.bound.as_ref().is_some_and(|b| b.verified && b.usable && b.binding.facts.state == BindingState::Active))
+            let (publication, adoption) = with_tracking_access(|| -> Result<_, RuntimeError> {
+                let store = state.store.as_ref().ok_or(Error::Database)?;
+                Ok((store.publication_op()?, store.adoption_op()?))
             })?;
-            if !accepted { return Err(RuntimeError::IdentityUnverified); }
-            state.provider.clone()
+            (state.provider.clone(), state.incarnation, publication, adoption,
+                state.bound.as_ref().map(|b| b.binding.clone()))
         };
-        if let Some(provider) = provider { provider.accept_icloud_setup()?; }
+        let current = || -> Result<(), RuntimeError> {
+            let state = self.state();
+            if state.incarnation != incarnation
+                || state.provider.as_ref().map(Arc::as_ptr) != provider.as_ref().map(Arc::as_ptr)
+                || state.bound.as_ref().map(|b| &b.binding) != binding.as_ref() {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            with_tracking_access(|| -> Result<(), RuntimeError> {
+                let store = state.store.as_ref().ok_or(Error::Database)?;
+                if store.publication_op()? != publication || store.adoption_op()? != adoption
+                    || publication.as_ref().is_some_and(|op| op.step == super::publication::PublishStep::Cancelling) {
+                    return Err(super::publication::PublicationError::AuthorityChanged.into());
+                }
+                if publication.is_none() && adoption.is_none()
+                    && !state.bound.as_ref().is_some_and(|b| b.verified && b.usable && b.binding.facts.state == BindingState::Active) {
+                    return Err(RuntimeError::IdentityUnverified);
+                }
+                Ok(())
+            })
+        };
+        match &provider {
+            Some(provider) => provider.accept_icloud_setup(current)?,
+            None => current()?,
+        }
         self.qualify_provider_binding()
     }
     pub fn provider_transition_available(&self) -> Result<(), RuntimeError> {
@@ -901,6 +929,8 @@ impl Runtime {
             cloud_capture_hook: Mutex::new(None),
             #[cfg(feature = "test-hooks")]
             provider_qualification_hook: Mutex::new(None),
+            #[cfg(feature = "test-hooks")]
+            publication_cancel_hook: Mutex::new(None),
         }
     }
     /// Change external test inputs immediately before the fresh account read.
