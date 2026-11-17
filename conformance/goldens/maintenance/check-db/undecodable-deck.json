@@ -1,0 +1,67 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 1894701600000]
+          ]
+        }
+      },
+      {},
+      {
+        "check_db": {
+          "error": "failed"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Spare", "FF", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["real", 1.5, 1894701600, 5]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 1894701600000]
+          ]
+        }
+      },
+      {
+        "check_db": {
+          "error": "failed"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-db/undecodable-deck",
+  "scenario_sha256": "8caaa2b136ee721177317fedd37f28e493a0655cc82d9842181b7314efeee145",
+  "tz": "UTC"
+}

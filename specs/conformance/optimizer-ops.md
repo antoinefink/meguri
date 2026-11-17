@@ -3,9 +3,9 @@
 Spec: conformance/optimizer-ops
 Requirements: R692, R694, R695, R696, R697, R700, R1904
 Anki: 26.09.3
-Scenarios: conformance/scenarios/sched/optimizer/
+Scenarios: conformance/scenarios/sched/optimizer/ (planned, not yet on disk: `sched/optimizer#O17`)
 
-Three scenario ops (`dsl.md` D7.2) and one observation kind (`observations.md` O4) for the FSRS optimizer (`sched/optimizer`): `compute_fsrs_params` runs one preset's computation and writes nothing, `optimize_all_presets` is Anki's all-preset save (oracle only), `optimizer_run` is Meguri's optimizer run in a live chain, and `fsrs_model_check` asks whether a model builds from a preset's parameters. The oracle implements all four; Meguri's executor and typed scenario model do not yet, so the rows are draft and the scenarios are `pending` on Meguri (`dsl.md` D10). `conformance/schema/scenario.schema.json` holds their shapes and `protocol.json` lists them for oracle workers.
+Three scenario ops (`dsl.md` D7.2) and one observation kind (`observations.md` O4) for the FSRS optimizer (`sched/optimizer`): `compute_fsrs_params` runs one preset's computation and writes nothing, `optimize_all_presets` is Anki's all-preset save (oracle only), `optimizer_run` is Meguri's optimizer run in a live chain, and `fsrs_model_check` asks whether a model builds from a preset's parameters. The oracle implements all four; Meguri's typed scenario model and executor do not yet, so the rows are draft. A scenario with an op the typed model does not parse is `invalid` (`dsl.md` D10), so the scenarios of `sched/optimizer#O17.3` are held and not yet on disk until the typed model parses these ops; from then on they are `pending` on Meguri until its executor runs them. `conformance/schema/scenario.schema.json` holds their shapes and `protocol.json` lists them for oracle workers.
 
 ## P1. `compute_fsrs_params`
 
@@ -48,7 +48,7 @@ One `ComputeFsrsParams` request with the search of P1.2, the parameter list in u
 | `eval` | `{log_loss}`: the f32 `log_loss` of `EvaluateParamsLegacy` for the returned list with the same search and cutoff, or `null` when `items` is 0 |
 
 - `eval` carries no `rmse_bins`: the crate sums its RMSE bins in hash-map order, so the last bits of that value differ between two calls on the same items, and a golden must repeat exactly. `log_loss` is summed in item order and repeats.
-- The legacy evaluation reads the rows of the cards the search finds. With a search that finds the whole collection (white space alone, `one_preset`), training also reads the rows of cards that no longer exist and the evaluation does not, so `eval` is then not on the training items; `sched/optimizer/weight-search` covers that step with deviation `optimizer-blank-search-default` (`sched/optimizer#O16`).
+- The legacy evaluation reads the rows of the cards the search finds. With a search that finds the whole collection (white space alone, `one_preset`), training also reads the rows of cards that no longer exist and the evaluation does not, so `eval` is then not on the training items; the planned `sched/optimizer/weight-search` covers that step with deviation `optimizer-blank-search-default` (`sched/optimizer#O16`).
 - The op writes nothing. Its first day query on a collection that has none writes `rollover`, as any day query does.
 
 ### P1.5 Meguri
@@ -69,7 +69,7 @@ Anki's "Save and optimize all presets" on the deck options screen of `deck` (`sc
 |---|---|---|
 | `{}` | none (`{}`) | none |
 
-- **Meguri:** one Optimize now run of U47 in local-only mode, committed to its end, as `sched/optimizer#O17.1` describes; any end other than `Done`, and any refusal, is a run error.
+- **Meguri:** one run of U47 in local-only mode, committed to its end, as `sched/optimizer#O17.1` describes: the adapter first passes the policy `Lifecycle{Ready}` and the `OptimizerCadence` the core reports at `Ready`, then `OptimizeNowRequested` only when those inputs started no run (a due cadence starts `StartOptimizer{automatic}` at once, `sched/optimizer#O12` rules 2 and 3); any end other than `Done`, and any refusal, is a run error.
 - **Oracle:** P2 on the default deck (id 1). The golden of a live chain is the oracle running every segment (`dsl.md` D9.2), so it holds Anki's save in Meguri's place, and a chain observes only what both runs give (no parameter value, memory state or card stamp).
 
 ## P4. `fsrs_model_check` (observation)
@@ -87,5 +87,5 @@ Whether an FSRS model builds from the preset's parameter list in use now (`sched
 
 - `items`, `reviews`, `kept` and `health` compare exactly; `eval`'s `log_loss` within 0.002 absolute (`observations.md` O7). Raw parameter values never reach a golden.
 - `kept` decides on a strict loss comparison, and the op reports only the returned list's loss, so a scenario keeps every call away from a tie: either fewer than 20 first items per first rating, so that the crate returns its defaults and an empty list in use has the same loss, or a history whose every item trains (`sched/optimizer#O3`, `#O17.2`).
-- `health` compares exactly, so a scenario's adjusted values (`sched/optimizer#O6`) keep at least 0.01 from 1.11 and 1.53; `sched/optimizer/health-check` records its margins in its comments.
+- `health` compares exactly, so a scenario's adjusted values (`sched/optimizer#O6`) keep at least 0.01 from 1.11 and 1.53; the planned `sched/optimizer/health-check` records its margins in its comments.
 - `lastFsrsOptimize` holds the day number, which is 0 on the day the collection was made: a scenario that reads it advances the clock by whole days first, so the value it observes differs from 0.

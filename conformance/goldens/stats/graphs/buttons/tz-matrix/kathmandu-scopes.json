@@ -1,0 +1,1245 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "buttons": {
+              "one_month": {
+                "learning": [4, 1, 6, 1],
+                "mature": [1, 0, 2, 1],
+                "young": [1, 1, 1, 0]
+              },
+              "one_year": {
+                "learning": [4, 1, 6, 1],
+                "mature": [1, 0, 6, 1],
+                "young": [1, 1, 1, 0]
+              },
+              "three_months": {
+                "learning": [4, 1, 6, 1],
+                "mature": [1, 0, 4, 1],
+                "young": [1, 1, 1, 0]
+              }
+            },
+            "hours": {
+              "one_month": [
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 11,
+                  "total": 18
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_year": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 11,
+                  "total": 18
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "three_months": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 11,
+                  "total": 18
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "reviews": {
+              "count": {
+                "-30": {
+                  "mature": 2
+                },
+                "-365": {
+                  "mature": 2
+                },
+                "-90": {
+                  "mature": 2
+                },
+                "0": {
+                  "filtered": 3,
+                  "learn": 6,
+                  "mature": 6,
+                  "relearn": 3,
+                  "young": 4
+                }
+              },
+              "time": {
+                "-30": {},
+                "-365": {},
+                "-90": {},
+                "0": {}
+              }
+            },
+            "true_retention": {
+              "month": {
+                "mature_failed": 3,
+                "mature_passed": 9,
+                "young_failed": 2,
+                "young_passed": 5
+              },
+              "today": {
+                "mature_failed": 3,
+                "mature_passed": 8,
+                "young_failed": 2,
+                "young_passed": 5
+              },
+              "week": {
+                "mature_failed": 3,
+                "mature_passed": 8,
+                "young_failed": 2,
+                "young_passed": 5
+              },
+              "year": {
+                "mature_failed": 3,
+                "mature_passed": 13,
+                "young_failed": 2,
+                "young_passed": 5
+              },
+              "yesterday": {}
+            }
+          },
+          {
+            "buttons": {
+              "all_time": {
+                "learning": [4, 1, 6, 1],
+                "mature": [1, 0, 7, 1],
+                "young": [1, 1, 1, 0]
+              },
+              "one_month": {
+                "learning": [4, 1, 6, 1],
+                "mature": [1, 0, 2, 1],
+                "young": [1, 1, 1, 0]
+              },
+              "one_year": {
+                "learning": [4, 1, 6, 1],
+                "mature": [1, 0, 6, 1],
+                "young": [1, 1, 1, 0]
+              },
+              "three_months": {
+                "learning": [4, 1, 6, 1],
+                "mature": [1, 0, 4, 1],
+                "young": [1, 1, 1, 0]
+              }
+            },
+            "hours": {
+              "all_time": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 11,
+                  "total": 18
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_month": [
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 11,
+                  "total": 18
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_year": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 11,
+                  "total": 18
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "three_months": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 11,
+                  "total": 18
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "reviews": {
+              "count": {
+                "-30": {
+                  "mature": 2
+                },
+                "-365": {
+                  "mature": 2
+                },
+                "-90": {
+                  "mature": 2
+                },
+                "0": {
+                  "filtered": 3,
+                  "learn": 6,
+                  "mature": 6,
+                  "relearn": 3,
+                  "young": 4
+                }
+              },
+              "time": {
+                "-30": {},
+                "-365": {},
+                "-90": {},
+                "0": {}
+              }
+            },
+            "true_retention": {
+              "all_time": {
+                "mature_failed": 3,
+                "mature_passed": 14,
+                "young_failed": 2,
+                "young_passed": 5
+              },
+              "month": {
+                "mature_failed": 3,
+                "mature_passed": 9,
+                "young_failed": 2,
+                "young_passed": 5
+              },
+              "today": {
+                "mature_failed": 3,
+                "mature_passed": 8,
+                "young_failed": 2,
+                "young_passed": 5
+              },
+              "week": {
+                "mature_failed": 3,
+                "mature_passed": 8,
+                "young_failed": 2,
+                "young_passed": 5
+              },
+              "year": {
+                "mature_failed": 3,
+                "mature_passed": 13,
+                "young_failed": 2,
+                "young_passed": 5
+              },
+              "yesterday": {}
+            }
+          },
+          {
+            "buttons": {
+              "one_month": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 2, 1],
+                "young": [0, 1, 0, 0]
+              },
+              "one_year": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 6, 1],
+                "young": [0, 1, 0, 0]
+              },
+              "three_months": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 4, 1],
+                "young": [0, 1, 0, 0]
+              }
+            },
+            "hours": {
+              "one_month": [
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_year": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "three_months": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "reviews": {
+              "count": {
+                "-30": {
+                  "mature": 2
+                },
+                "-365": {
+                  "mature": 2
+                },
+                "-90": {
+                  "mature": 2
+                },
+                "0": {
+                  "filtered": 1,
+                  "learn": 3,
+                  "mature": 4,
+                  "relearn": 2,
+                  "young": 1
+                }
+              },
+              "time": {
+                "-30": {},
+                "-365": {},
+                "-90": {},
+                "0": {}
+              }
+            },
+            "true_retention": {
+              "month": {
+                "mature_failed": 3,
+                "mature_passed": 5,
+                "young_passed": 3
+              },
+              "today": {
+                "mature_failed": 3,
+                "mature_passed": 4,
+                "young_passed": 3
+              },
+              "week": {
+                "mature_failed": 3,
+                "mature_passed": 4,
+                "young_passed": 3
+              },
+              "year": {
+                "mature_failed": 3,
+                "mature_passed": 9,
+                "young_passed": 3
+              },
+              "yesterday": {}
+            }
+          },
+          {
+            "buttons": {
+              "all_time": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 7, 1],
+                "young": [0, 1, 0, 0]
+              },
+              "one_month": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 2, 1],
+                "young": [0, 1, 0, 0]
+              },
+              "one_year": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 6, 1],
+                "young": [0, 1, 0, 0]
+              },
+              "three_months": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 4, 1],
+                "young": [0, 1, 0, 0]
+              }
+            },
+            "hours": {
+              "all_time": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_month": [
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_year": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "three_months": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "reviews": {
+              "count": {
+                "-30": {
+                  "mature": 2
+                },
+                "-365": {
+                  "mature": 2
+                },
+                "-90": {
+                  "mature": 2
+                },
+                "0": {
+                  "filtered": 1,
+                  "learn": 3,
+                  "mature": 4,
+                  "relearn": 2,
+                  "young": 1
+                }
+              },
+              "time": {
+                "-30": {},
+                "-365": {},
+                "-90": {},
+                "0": {}
+              }
+            },
+            "true_retention": {
+              "all_time": {
+                "mature_failed": 3,
+                "mature_passed": 10,
+                "young_passed": 3
+              },
+              "month": {
+                "mature_failed": 3,
+                "mature_passed": 5,
+                "young_passed": 3
+              },
+              "today": {
+                "mature_failed": 3,
+                "mature_passed": 4,
+                "young_passed": 3
+              },
+              "week": {
+                "mature_failed": 3,
+                "mature_passed": 4,
+                "young_passed": 3
+              },
+              "year": {
+                "mature_failed": 3,
+                "mature_passed": 9,
+                "young_passed": 3
+              },
+              "yesterday": {}
+            }
+          },
+          {
+            "buttons": {
+              "one_month": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 2, 1],
+                "young": [0, 1, 0, 0]
+              },
+              "one_year": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 6, 1],
+                "young": [0, 1, 0, 0]
+              },
+              "three_months": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 4, 1],
+                "young": [0, 1, 0, 0]
+              }
+            },
+            "hours": {
+              "one_month": [
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_year": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "three_months": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "reviews": {
+              "count": {
+                "-30": {
+                  "mature": 2
+                },
+                "-365": {
+                  "mature": 2
+                },
+                "-90": {
+                  "mature": 2
+                },
+                "0": {
+                  "filtered": 1,
+                  "learn": 3,
+                  "mature": 4,
+                  "relearn": 2,
+                  "young": 1
+                }
+              },
+              "time": {
+                "-30": {},
+                "-365": {},
+                "-90": {},
+                "0": {}
+              }
+            },
+            "true_retention": {
+              "month": {
+                "mature_failed": 3,
+                "mature_passed": 5,
+                "young_passed": 3
+              },
+              "today": {
+                "mature_failed": 3,
+                "mature_passed": 4,
+                "young_passed": 3
+              },
+              "week": {
+                "mature_failed": 3,
+                "mature_passed": 4,
+                "young_passed": 3
+              },
+              "year": {
+                "mature_failed": 3,
+                "mature_passed": 9,
+                "young_passed": 3
+              },
+              "yesterday": {}
+            }
+          },
+          {
+            "buttons": {
+              "all_time": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 7, 1],
+                "young": [0, 1, 0, 0]
+              },
+              "one_month": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 2, 1],
+                "young": [0, 1, 0, 0]
+              },
+              "one_year": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 6, 1],
+                "young": [0, 1, 0, 0]
+              },
+              "three_months": {
+                "learning": [3, 0, 3, 0],
+                "mature": [1, 0, 4, 1],
+                "young": [0, 1, 0, 0]
+              }
+            },
+            "hours": {
+              "all_time": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_month": [
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "one_year": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "correct": 3,
+                  "total": 3
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ],
+              "three_months": [
+                {},
+                {},
+                {},
+                {
+                  "correct": 1,
+                  "total": 1
+                },
+                {
+                  "correct": 2,
+                  "total": 2
+                },
+                {
+                  "total": 1
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {
+                  "correct": 6,
+                  "total": 9
+                },
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {},
+                {}
+              ]
+            },
+            "reviews": {
+              "count": {
+                "-30": {
+                  "mature": 2
+                },
+                "-365": {
+                  "mature": 2
+                },
+                "-90": {
+                  "mature": 2
+                },
+                "0": {
+                  "filtered": 1,
+                  "learn": 3,
+                  "mature": 4,
+                  "relearn": 2,
+                  "young": 1
+                }
+              },
+              "time": {
+                "-30": {},
+                "-365": {},
+                "-90": {},
+                "0": {}
+              }
+            },
+            "true_retention": {
+              "all_time": {
+                "mature_failed": 3,
+                "mature_passed": 10,
+                "young_passed": 3
+              },
+              "month": {
+                "mature_failed": 3,
+                "mature_passed": 5,
+                "young_passed": 3
+              },
+              "today": {
+                "mature_failed": 3,
+                "mature_passed": 4,
+                "young_passed": 3
+              },
+              "week": {
+                "mature_failed": 3,
+                "mature_passed": 4,
+                "young_passed": 3
+              },
+              "year": {
+                "mature_failed": 3,
+                "mature_passed": 9,
+                "young_passed": 3
+              },
+              "yesterday": {}
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/buttons/tz-matrix/kathmandu-scopes",
+  "scenario_sha256": "4452bccd3ee87d8870956ee997b582b36353d0e62da492c1163b42428bc36c6e",
+  "tz": "Asia/Kathmandu"
+}

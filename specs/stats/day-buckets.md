@@ -84,7 +84,7 @@ The offset is the one at the moved instant, not at the review instant. When the 
 | America/St_Johns | 2026-03-08 04:30 −02:30 | 03-08 03:00 | −03:30 | **2026-03-07** | 2026-03-08 |
 | America/St_Johns | 2026-03-08 05:30 −02:30 | 03-08 04:00 | −03:30 | 2026-03-08 | 2026-03-08 |
 
-The scenarios of B7 that cross an offset change tell this reading apart from the review-instant reading. The add-on oracle's recordings of these scenarios confirm it; their goldens of 2026-11-10 hold it (`specs/conformance/stats-ops.md` H4).
+The scenarios of B7 that cross an offset change tell this reading apart from the review-instant reading. A one-off probe of them on the add-on oracle image on 2026-11-10 agreed with it; they have no goldens yet (B7). The plan's R1270 and R292 say "the DST rules at the review instant"; this section governs: the offset is read at the moved instant (decided 2026-10-27).
 
 Without an offset change in the window, the heatmap day is the local date of the review time minus `R` hours. With `R` = 4, a review at 03:59:59 falls on the previous date and one at 04:00:00 on the same date. With `R` = 0 the heatmap day is the plain local date.
 
@@ -125,9 +125,9 @@ This needs an offset change between local midnight and 00:00 UTC of the same dat
 | Pacific/Auckland | 2026-09-27 | 2026-09-26 |
 | Asia/Beirut | 2026-03-29 | 2026-03-28 |
 
-Europe/Paris, America/New_York, America/St_Johns and Asia/Kathmandu have no such date. Only the Lord Howe row has scenarios: `lord-howe-dst-start` here (oracle value 2026-10-03: 2) and `stats/streaks/lord-howe-dst-start`; their goldens of 2026-11-10 show the shift in the counts and history, and that scenario's streaks are on B4.1 dates (`specs/conformance/stats-ops.md` H4). The calendar runs only in the add-on's web view, which the oracle does not run, so the headless oracle applies this placement itself to the dates the add-on's computation keys its counts by (`specs/conformance/stats-ops.md` H1, drawn date). The rule above is the placement the oracle-maintainer saw in that web view; if a later reading of it shows no shift, this section, H1's rule and the `heatmap-drawn-day-shift` entry change together.
+Europe/Paris, America/New_York, America/St_Johns and Asia/Kathmandu have no such date. Only the Lord Howe row has scenarios: `lord-howe-dst-start` here (oracle value 2026-10-03: 2) and `stats/streaks/lord-howe-dst-start`. Neither has a golden yet (B7, `stats/heatmap-addon` A16). The 2026-11-10 probe of both on the add-on image showed the shift in the counts and the history, and showed that scenario's streaks on B4.1 dates. The calendar runs only in the add-on's web view, which the oracle does not run, so the headless oracle applies this placement itself to the dates the add-on's computation keys its counts by (`specs/conformance/stats-ops.md` H1, drawn date). The rule above is the placement the oracle-maintainer saw in that web view; if a later reading of it shows no shift, this section, H1's rule and the `heatmap-drawn-day-shift` entry change together.
 
-Meguri does not reproduce this. Every count stays on its B4.1 date, in every heatmap, streak and widget value (R1270: a review belongs to the local date of the review time minus the rollover hours). This is the deviation `heatmap-drawn-day-shift` (its `conformance/deviations.yaml` entry is added with scenario `lord-howe-dst-start`, `specs/conformance/stats-ops.md` H4). The add-on's own counts agree with Meguri. Only the cell the add-on draws them in differs.
+Meguri does not reproduce this. Every count stays on its B4.1 date, in every heatmap, streak and widget value (R1270: a review belongs to the local date of the review time minus the rollover hours). This is the deviation `heatmap-drawn-day-shift` (its `conformance/deviations.yaml` entry is added with the golden of scenario `lord-howe-dst-start`, `specs/conformance/stats-ops.md` H4). The add-on's own counts agree with Meguri. Only the cell the add-on draws them in differs.
 
 ## B5. Time zone data
 
@@ -146,7 +146,9 @@ Meguri does not reproduce this. Every count stays on its B4.1 date, in every hea
 
 ## B7. Scenarios
 
-All scenarios in `conformance/scenarios/stats/day-buckets/` write review-log rows with `db_exec`. The rows belong to a card id no card has (counted as a deleted card's reviews, `stats/counting-rules` N1), so the scenarios need no notes. The values below are Meguri's, from B2 and B4. As of 2026-11-10 every scenario below is in the tree, inactive, with a golden recorded on the add-on image on 2026-11-10 (`specs/conformance/stats-ops.md` H4); the goldens are authoritative. Each golden equals the table except where a deviation is named: `future-row` (B4.3) and `lord-howe-dst-start` (B4.6).
+All scenarios in `conformance/scenarios/stats/day-buckets/` write review-log rows with `db_exec`. The rows belong to a card id no card has (counted as a deleted card's reviews, `stats/counting-rules` N1), so the scenarios need no notes. The values below are Meguri's, from B2 and B4.
+
+Status (2026-11-17): none of these scenarios is in the tree, and none has a golden. They were prepared and are held, not committed, until the testkit parses `heatmap_totals` (`specs/conformance/stats-ops.md` H4), since `tools/mg goldens-check` reports a scenario of an unknown kind as invalid. No commit holds the current set. The unmerged branch `spec/U95` has older copies of 15 of them, without `rollover-23` and `rollover-change`, whose goldens came from an older driver: never use them as goldens. On 2026-11-10 the prepared set ran once on the add-on image as a probe, with its outputs discarded; it agreed with every row of the table, the oracle values named for `future-row` (B4.3) and `lord-howe-dst-start` (B4.6) included. Until the goldens are recorded with `tools/mg oracle record` on the add-on image, this table, with each named deviation's oracle value, is U95's reference for its test-first tests, and the activation of these scenarios (H4) waits for the goldens. Once recorded, the goldens are authoritative; each is expected to equal the table except where a deviation is named.
 
 | Scenario | Pins | `heatmap_totals.home` | `studied_today_raw` |
 |---|---|---|---|
@@ -169,4 +171,11 @@ All scenarios in `conformance/scenarios/stats/day-buckets/` write review-log row
 
 (Dates are in 2026. `n rows, m ms` is `{cards: n, time_ms: m}`. `then` separates the successive observations of one scenario, `(three times)` marks one value observed at three steps, and `/` separates the two scenarios of the `travel-*` row. Each column has one value per observation step.)
 
-B4.2 and B6's move of T at another instant than Anki's day is pinned by `stats/heatmap/today-dst-shift` (`stats/heatmap-addon` A16), which observes `heatmap_report` and `studied_today_raw`.
+B4.2 and B6's move of T at another instant than Anki's day is pinned by `stats/heatmap/today-dst-shift` (`stats/heatmap-addon` A16), which observes `heatmap_report` and `studied_today_raw`. That scenario lands with U96's kind, so no scenario observes T or `today_changes_at` at U95 (`heatmap_totals` returns day counts only). U95's unit tests pin both, with `R` 4:
+
+| Zone | now | T | `today_changes_at` |
+|---|---|---|---|
+| Europe/Paris | 2026-03-29T02:30:00Z | 2026-03-28 | 2026-03-29T03:00:00Z (1774753200000) |
+| Australia/Lord_Howe | 2026-10-03T17:15:00Z | 2026-10-03 | 2026-10-03T17:30:00Z (1791048600000) |
+
+Both are pure functions of now, the zone and `R` (B4.2, B6). A fresh day-clock computation moves `N` at 02:00Z and 17:00Z there, before T moves.

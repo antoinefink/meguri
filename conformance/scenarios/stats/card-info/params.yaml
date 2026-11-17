@@ -1,0 +1,42 @@
+# stats/card-info C14.1 (C3.1 parameters, C3.4, C6.3; sched/presets V6): four
+# review cards with the same history (two Learn rows, two Review rows) and no
+# stored memory state (data {"lrt":...} only, so nothing is written back,
+# C13.4), each in a deck whose preset holds a non-default parameter list:
+#   Five19: 19 values in fsrsParams5, fsrs_params_6 empty (decay 0.5);
+#   Six21: 21 values ending in 0.2;
+#   Low21: 21 values ending in 0.05 (the model clamps the decay to 0.1);
+#   Four17: 17 values in fsrsWeights (decay 0.5).
+# Expected: fsrs_params is the list V6 chooses; the computed memory_state and
+# the per-entry states come from that preset's model. Anki gives no
+# retrievability for a computed state (deviation
+# card-info-computed-retrievability, C13.4).
+id: stats/card-info/params
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {"fsrs": true, "loadBalancerEnabled": false, "rollover": 4}
+  presets:
+    - {"name": "Five19"}
+    - {"name": "Six21", "fsrs_params": [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.2]}
+    - {"name": "Low21", "fsrs_params": [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.05]}
+    - {"name": "Four17"}
+  decks:
+    - {"name": "Five19", "preset": "Five19"}
+    - {"name": "Six21", "preset": "Six21"}
+    - {"name": "Low21", "preset": "Low21"}
+    - {"name": "Four17", "preset": "Four17"}
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Five19", "fields": ["p1", "x"]}
+    - {"notetype": "Pair", "deck": "Six21", "fields": ["p2", "x"]}
+    - {"notetype": "Pair", "deck": "Low21", "fields": ["p3", "x"]}
+    - {"notetype": "Pair", "deck": "Four17", "fields": ["p4", "x"]}
+steps:
+  - {"legacy_update": {"preset": "Five19", "patch": {"fsrsParams5": [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621]}}}
+  - {"legacy_update": {"preset": "Four17", "patch": {"fsrsWeights": [0.4872, 1.4003, 3.7145, 13.8206, 5.1618, 1.2298, 0.8975, 0.031, 1.6474, 0.1367, 1.0461, 2.1072, 0.0793, 0.3246, 1.587, 0.2272, 2.8755]}}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 11, factor = 2500, reps = 4, data = '{\"lrt\":1893920400}'"}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT 1892970000000 + c.n, c.id, -1, 3, -600, 0, 0, 4000, 0 FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM cards) AS c"}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT 1892970600000 + c.n, c.id, -1, 3, 3, -600, 2500, 3000, 0 FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM cards) AS c"}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT 1893229200000 + c.n, c.id, -1, 3, 8, 3, 2500, 5000, 1 FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM cards) AS c"}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT 1893920400000 + c.n, c.id, -1, 3, 20, 8, 2500, 6000, 1 FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n FROM cards) AS c"}}
+  - {"observe": [{"card_stats": ["#c1", "#c2", "#c3", "#c4"]}]}

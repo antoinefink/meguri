@@ -242,7 +242,7 @@ External HTML (P9 step 2) is parsed as an HTML fragment into an inert document (
 
 ### P14.1 Elements
 
-In both modes: `script`, `iframe`, `object` and `style` elements are removed with their content, and each `p` element becomes a `div` (P15 then drops its attributes).
+In both modes: `script`, `iframe`, `object` and `style` elements are removed with their content in every namespace (HTML, SVG and MathML), as in the host editor's pre-pass (`editor/paste-filter` X3), and each HTML `p` element becomes a `div` (P15 then drops its attributes). Example: `<svg><style>p{}</style></svg>x` gives `x`.
 
 ### P14.2 Image sources
 
@@ -306,7 +306,7 @@ Style values are written as the CSS object model serializes them (`name: value;`
 - An empty filter result inserts nothing: the field is unchanged and nothing is an input.
 - P3's src encoding is applied, once, by the host, to each `img` `src` that holds a name Meguri itself wrote: a P3 snippet (P10 to P13), a P14.2 rewrite to a stored name, and every local (`text/media-references` M5) `src` of internal content (P9 step 1, P17's drags from a field), which holds storage-form names. The host builds P3 snippets already encoded, and passes the other two as `pasteFilter`'s rewrites (P25), so the encoding happens before the filter: strip mode's whitespace collapse (P15.1) never meets a raw stored name, and a fetch stored as `a  b.png` is inserted as `src="a%20%20b.png"`. The save decodes it again.
 - Any other `src` of external HTML (a relative name the source wrote, such as `x%20y.png`, or one P14.2 left unchanged) is inserted as parsed, with no encoding. The save then decodes it like any name (M7), so `<img src="x%20y.png">` is stored as `<img src="x y.png">`, as in Anki.
-- A non-empty result replaces the focused field's selection at its caret as one field-history entry, and is an input of the field (`editor/field-html` E1). The host sends it with P25's `insert`, under P25's target rule, since fetches and alerts can outlast the field's focus. Meguri's page inserts the parsed nodes itself, never through WebKit's own paste or insert commands, and must produce the field HTML the goldens record, starting from an empty field and from a field with text and the caret at its end.
+- A non-empty result replaces the focused field's selection at its caret as one field-history entry, and is an input of the field (`editor/field-html` E1). The host sends it with P25's `insert`, under P25's target rule, since fetches and alerts can outlast the field's focus. Meguri's page inserts the filtered nodes as they are (`editor/paste-filter` X8), never through WebKit's own paste or insert commands. The field HTML must equal the goldens recorded from an empty field and from a field with text and the caret at its end, except where a golden differs only by the changes of Anki's insert-HTML command, which deviation `editor-paste-insert-command` covers (P23).
 - The note is saved by U190's pipeline (`editor/field-html` H3, S1): snippets as P3 says, names raw (decoded by `text/media-references` M7), `data-meguri-editor` removed, `<br>` or `<div><br></div>` alone stored as empty.
 - Media files were already written (P4). The note's media references are whatever the stored field names (`text/media-references` M4).
 
@@ -393,6 +393,8 @@ Proposed `conformance/deviations.yaml` ids, to be entered with the goldens that 
 | `Content-Type` with parameters | no extension appended | the media type before `;` decides | `editor-paste-mime-params` |
 | `data:image/webp;base64,…` or other types; base64 with inner whitespace or bad data | `src` emptied; a text token dropped; bad data fails the paste with an error | left unchanged; whitespace ignored | `editor-paste-data-url-kept` |
 | Unclosed elements in external HTML (`<p>a<p>b`) | an extra parse with a non-HTML5 parser can nest them before the page parses | one HTML5 parse | `editor-paste-html-parser` |
+| SVG or MathML `style` or `script` in external HTML (`<svg><style>p{}</style></svg>x`) | removed with its content, as Meguri (`x`); the experimental editor unwraps it and keeps its text (`p{}x`) | removed with its content (P14.1) | `editor-paste-foreign-style` (experimental editor) |
+| Inserting the filtered HTML | both editors insert it with the browser's insert-HTML command, which parses it again in the field: inherited inline style on inserted text, an added `tbody`, merged or split blocks, a `<br>` added or dropped | the filtered nodes, unchanged (P16) | `editor-paste-insert-command` |
 | `href="javascript:…"` in keep mode | kept | removed | `editor-paste-script-href` |
 | `"` in a link's URL | written into `href` unescaped | escaped | `editor-paste-href-escaping` |
 | A stored name with `%` and two hex digits written into `src` by a P14.2 fetch (`a%2541.png` fetched as `a%41.png`) | written raw, so the save decodes it and the field names another file (`aA.png`) | encoded at insertion (P16), so the field names the stored file | `editor-paste-src-encoding` |

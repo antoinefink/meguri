@@ -14,6 +14,8 @@ Unless a table says otherwise, a column is read as follows, as Anki does:
 - An integer column must hold an SQLite INTEGER that fits the declared type (N1 of `model/json-numbers` gives the ranges); a value of another storage class, or out of range, makes the row unreadable (an error naming the table, column and row id).
 - A text column must hold TEXT.
 - Exceptions are listed with each table: some columns read a misfit value as a default instead.
+- `usn` is an exception in `notes`, `cards`, `revlog`, `notetypes`, `templates`, `decks`, `deck_config` and `tags`: any SQLite INTEGER is accepted and only its low 32 bits are kept, as a two's-complement `i32` (4294967297 reads as 1, 2147483648 as -2147483648, 4294967295 as -1). Only a value of another storage class makes the row unreadable. `col.usn` must fit `i32` under the rule above. Anki never reads `graves.usn` as a value. It only compares it in SQL (pending graves have `usn` -1, and a server selects graves with `usn` at or above a given number) and overwrites it in place. So no stored `usn` makes a grave unreadable: Meguri selects graves by the same comparisons and never refuses one for its `usn`. Anki reads the `config` value of a key without its `usn`, so a `config.usn` never stops a key from being read. Anki reads `config.usn` whenever it sets or removes an existing key, to keep the old entry for undo. It reads it before comparing values, so this includes a set whose new value equals the stored one, which then writes nothing (`storage/config-table` C4 step 1). There it follows the wrapping rule of this bullet, and a value of another storage class makes that set or removal fail, even when nothing would be written. Its other comparisons and resets (setting every non-zero `usn` to 0 when sending) are in SQL. R9 covers the other `config` columns. The schema-11 downgrade copy refuses such a `usn` instead (`storage/schema11-downgrade` D3.1, its difference `downgrade-usn-range`); this exception is for every other read.
+- Changed 2026-11-17: an earlier text made an out-of-range `usn` refuse the row, and read only an out-of-range integer `csum` as 0 (R3). The same day's revision stated that `graves.usn` is never refused, and that `config.usn` never stops a key from being read and wraps when an existing key is set or removed, and a `usn` of another storage class makes that set or removal fail. Implemented code must be checked against the `usn` rule above and the `csum` row of R3: U21's record types, the U22 and U23 row readers, the grave selection used by sync, and the config-table writer (`specs/storage/config-table`).
 - Meguri writes each value with the storage class above: integers as INTEGER, text as TEXT, blobs as BLOB (`model/protobuf-records` P1).
 
 ## R2. `col`
@@ -44,7 +46,7 @@ One row, `id` = 1.
 | `tags` | text | space-separated, with a leading and a trailing space, or the empty string |
 | `flds` | text | field values joined by U+001F |
 | `sfld` | text or integer | sort field (`specs/text/checksum-and-sort-field`); read as text |
-| `csum` | i64 | checksum, an unsigned 32-bit value; a value outside 0 to 4294967295 reads as 0 |
+| `csum` | i64 | checksum, an unsigned 32-bit value; a value that is not an INTEGER from 0 to 4294967295 reads as 0, whatever its storage class (TEXT, REAL or NULL included), and never makes the row unreadable |
 | `flags` | i64 | unused: a new note gets 0, and updates leave the stored value |
 | `data` | text | unused: a new note gets the empty string, and updates leave the stored value |
 
@@ -80,7 +82,7 @@ One row, `id` = 1.
 | 2 review, 3 interday learning | day number, days since the day of `col.crt` |
 | -1, -2, -3 | the `due` of the queue the card would be in when restored (by its `type`) |
 
-Read tolerances (oracle): `type` and `queue` take the low 8 bits of the stored integer first (two's complement for `queue`), so a stored 258 reads as type 2; a value that is then not in the list above makes the row unreadable (type 7, queue 9). `due` and `odue` read as 0 when the stored value is not an INTEGER within the `i32` range (a `due` of 2^40 reads as 0). `ivl` of -1 makes the row unreadable. `data` that is not TEXT reads as empty.
+Read tolerances (oracle): `type` and `queue` take the low 8 bits of the stored integer first (two's complement for `queue`), so a stored 258 reads as type 2; a value that is then not in the list above makes the row unreadable (type 7, queue 9). `due` and `odue` read as 0 when the stored value is not an INTEGER within the `i32` range (a `due` of 2^40 reads as 0). `mod` and `ivl` are read after conversion to an integer, so SQLite truncates a REAL value (a `mod` of 1.5 reads as 1), as for `revlog` in R5. The converted `ivl` is then checked: -1 makes the row unreadable. `data` that is not TEXT reads as empty.
 
 Meguri keeps `odue`, `odid` and filtered-deck membership intact although it never creates filtered decks (R1483), and keeps `factor` and the other SM-2 columns although it schedules with FSRS only (R1484).
 

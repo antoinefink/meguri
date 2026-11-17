@@ -16,8 +16,14 @@ What a deck is, how its name is stored, matched and made unique, and what the de
   2. In each component, remove every ASCII control character (U+0000 to U+001F and U+007F), then normalize to Unicode NFC, then remove leading and trailing characters that are Unicode White_Space or `:`. A component left empty becomes `blank`.
   3. Join the components with U+001F.
 
-  Anki normalizes to NFC before it removes control characters, and then normalizes every stored deck name again before it writes it (below), so the stored component is NFC even when removing a control character lets a combining mark compose: `e` U+0001 U+0301 is stored as `é` (U+00E9). The order above gives that result in one pass.
-- **Stored-name normalization.** Whenever an operation writes a deck record (any op of this spec, the preset assignment of `decks/deck-presets`, and every other deck update), it first applies step 2 to each component of the stored native name (split at U+001F). A name that changes is written normalized and the deck is stamped. So a deck that arrived from another client as `Zed ` U+001F `kid ` is stored as `Zed` U+001F `kid` after it is collapsed (oracle).
+  Anki normalizes to NFC before it removes control characters, and then normalizes the stored name again on the writes listed below (not on the three that keep it), so the stored component is NFC even when removing a control character lets a combining mark compose: `e` U+0001 U+0301 is stored as `é` (U+00E9). The order above gives that result in one pass.
+- **Stored-name normalization.** These deck writes first apply step 2 to each component of the record's stored native name (split at U+001F): create (D5, the deck and each missing ancestor), the renamed deck itself (D6 step 7), collapse (D10), set description (D14), the preset assignment of `decks/deck-presets` and the other deck-options writes, filtered-deck and custom-study writes, the reset of the default deck (D8), and decks written by import (`package/apkg-import`). A name that changes is written normalized and the deck is stamped. So a deck that arrived from another client as `Zed ` U+001F `kid ` is stored as `Zed` U+001F `kid` after it is collapsed (oracle). A deck that a normal sync accepts takes its name through `model/schema11-json#S11` and keeps its incoming `usn` and `mod` (`sync/normal-sync#N5.3`); it is not stamped for that conversion.
+- **Writes that keep the stored name.** Three deck writes do not normalize; they write the stored components byte for byte:
+  1. the deck that a move gives a new parent (D7): its new name is the target's stored name, U+001F and its own stored last component (only its own stored last component for a drop at the top level); only the unique-name rule (D2) applies to it;
+  2. each descendant that a rename or a move rewrites (D6 step 6, D7): it gets the new name of the renamed or moved deck in place of the old one, and its remaining stored components unchanged;
+  3. the studied-today counter writes (`sched/answering#A6`, `sched/presets#D4` and D4.1): the name is written as read, and the unique-name rule does not apply either.
+
+  Example (Anki, no golden yet): decks `x`, `x` U+001F `kid ` (trailing space), `a`, `Zed` and `Zed` U+001F `k ` U+0007. Moving `x` onto `a` stores `a␟x` and `a␟x␟kid `, with the space kept. Renaming `Zed` to `Q` stores `Q` and `Q␟k ` U+0007. A deck whose stored last component is `y ` moved onto `a` is stored as `a␟y `. Changed 2026-11-17: the earlier text normalized on every deck write. Implemented move, rename and studied-counter code must be checked against this list.
 - Emoji, mixed scripts and every other character the rule keeps round-trip byte for byte (R1465): `Café::日本語::😀 Emoji` is stored as the UTF-8 bytes of `Café`, U+001F, `日本語`, U+001F, `😀 Emoji`.
 - Only these name changes happen: Meguri never trims the whole name, changes case, folds width or replaces characters.
 
@@ -93,7 +99,7 @@ Input: a deck and a typed full name (the UI pre-fills the current full name, R60
    - the new name's parent path (all its components but the last) begins with all the components of one of the deck's current descendants, compared component by component under `unicase`, so that the deck would land inside its own subtree: `under_descendant` (Meguri only, D15.1). Renaming `A` to `A::B::A` or `a::b::z::A` while `A::B` exists is refused; renaming `A` to `A::X` or `A::Z::A` is not (the new parent path starts with the deck itself, which is not its own descendant, and `A::Z` does not exist yet);
    - `filtered_parent` and `too_deep` (D3), for the nearest existing ancestor of the new name found while the deck still has its old name (that ancestor can be the deck itself).
 5. Case adoption (D3) from that nearest existing ancestor, then creation of the missing ancestors, nearest first.
-6. Every descendant of the deck by its old name, found after step 5 (so an ancestor that step 5 created under the old name is one of them), gets the deck's new name in place of the old one at the start of its name, the rest unchanged; each is stamped. The unique-name rule is not applied to them.
+6. Every descendant of the deck by its old name, found after step 5 (so an ancestor that step 5 created under the old name is one of them), gets the deck's new name in place of the old one at the start of its name, the rest unchanged byte for byte; each is stamped. Neither D1's stored-name normalization nor the unique-name rule is applied to them.
 7. The deck gets its new name and is stamped.
 8. Every ancestor of the new name that names no deck after steps 6 and 7 is created, nearest first. This happens when a deck moves under its own old name: renaming `A` to `A::X` creates a new, empty `A`.
 9. The operation is one undoable step named "Rename Deck" and returns the stored name.
@@ -119,7 +125,7 @@ Input: a list of decks, in order, and a target: a deck, or the top level (a drop
    2. It is skipped, unchanged and not counted, when the target is the deck itself or one of its descendants (D3), and when the new name equals its stored name byte for byte (it is already there).
    3. Otherwise the unique-name rule (D2) applies, its descendants are renamed as D6 step 6, and the deck gets its new name; all are stamped.
 
-   No conversion (D1), case adoption or ancestor creation happens: the target exists and the moved names are stored names.
+   No conversion (D1), stored-name normalization (D1), case adoption or ancestor creation happens: the target exists and the moved names are stored names, written byte for byte.
 3. The operation is one undoable step named "Rename Deck" (Anki's name for moving) and returns the number of listed decks that moved; their descendants are not counted (R64's toast "N decks moved").
 
 | Decks before | Move | Decks after (oracle) | Count |
@@ -139,7 +145,7 @@ Input: a list of decks.
    - **Normal deck.** Every card whose `did` is the deck, and every card whose `odid` is the deck (a card of this deck sitting in a filtered deck), is removed with the card removal of the notes area that also removes the notes it leaves empty (`notes/note-records` D2, U27): a type 0 grave per card, and every note left without cards removed with its type 1 grave (`storage/graves` G3). Deleting a deck writes no line to the deleted-notes log (`notes/deleted-notes-log`; only a note deletion does).
    - **Filtered deck.** Its cards return to their home decks (D9); none is removed.
    - Every config key whose name starts with `_deck_<id>_` (the deck's id in decimal) and has at least one more character is removed, with no grave (`storage/config-table` C10). A key named exactly `_deck_<id>_` stays (oracle).
-   - **The default deck** (id 1) is never removed (R68): it gets the name `Default` (with the unique-name rule, so `Default+` when another deck has the name `Default`), becomes top-level if it was nested, and is stamped, even when its name was already `Default`. Its cards and its key family go as for any normal deck.
+   - **The default deck** (id 1) is never removed (R68): it gets the name `Default` (with the unique-name rule, so `Default+` when another deck has the name `Default`), becomes top-level if it was nested, and is stamped, even when its name was already `Default`. Its cards and its key family go as for any normal deck. Meguri always uses `Default`, in every interface language (`text/interface-text#I5`: stock names stay English); Anki uses its default-deck name in the interface language, `Default` in English (D15.5).
    - **Any other deck**: its row is removed and a type 2 grave is added (`usn` -1).
 2. The operation is one undoable step named "Delete Deck". It returns the number of cards removed (cards returned home are not counted) and, for Meguri's UI, the number of decks processed. R66's toast is "Deleted <deck> (N cards)".
 3. Nothing else changes. `curDeck`, `_nt_<id>_lastDeck` keys and template deck overrides that name a deleted deck keep their values; their readers fall back (D11).
@@ -161,13 +167,13 @@ Example: `Default` with the subdeck `Default::Kid` and no cards: deleting `Defau
 
 ## D10. Collapse and expand (R36, R37, R38, R69)
 
-Input: a list of decks, a scope and a state. The study scope sets `study_collapsed` (Home's tree and the sidebar's deck tree, R36), the browser scope `browser_collapsed` (the browser sidebar, R37); Home never changes `browser_collapsed`.
+Input: a scope and a list of entries, each a deck and a state (collapsed or expanded). The study scope sets `study_collapsed` (Home's tree and the main window's sidebar deck list, R36, R37), the browser scope `browser_collapsed` (Browse's filter sidebar, `browser/sidebar` S5); Home and the main window's sidebar never change `browser_collapsed`, and Browse's filter sidebar never changes `study_collapsed`.
 
-- Each listed deck that exists gets the flag; nothing else in its record changes, apart from D1's stored-name normalization and the unique-name rule that every deck write applies.
-- A deck already in that state is not written.
+- Each listed deck that exists gets the state of its entry; nothing else in its record changes, apart from D1's stored-name normalization and the unique-name rule that this write applies (D13). A deck listed more than once gets the state of its last entry.
+- A deck already in its entry's state is not written.
 - A written deck is stamped, so the change syncs (R69).
-- ⌥-click (R38) passes the deck and all its descendants.
-- Meguri records the whole list as one undoable step named "Expand/Collapse". Anki records no step and keeps its undo history (D15.3).
+- One disclosure toggle passes one entry. ⌥-click (R38) passes the deck and all its descendants, every entry with the same state. Browse's Expand Children and Collapse Children (`browser/sidebar` S5) pass one entry per deck they change, and the states can differ within the list: Collapse Children on a collapsed `A` whose child `A::B` is expanded and has children passes `A` expanded and `A::B` collapsed.
+- Meguri records the whole list as one undoable step named "Expand/Collapse", whatever states it mixes; undo restores every flag it changed. Anki writes each deck on its own, records no step and keeps its undo history (D15.3).
 
 ## D11. The current deck (R40, R41, R42, R1474)
 
@@ -191,7 +197,7 @@ The tree that Home and the sidebars show (counts are U41's):
 ## D13. Other deck writes and what they keep (R322, R69)
 
 - Every deck write, here and in other areas (description, deck limits, preset assignment), edits only the decoded fields it means to change. Everything else comes from what was read: `browser_collapsed`, `extend_new`, `extend_review`, `learning_studied` and the day counters, the description, `other` (legacy JSON keys, such as a shared deck's `sharedFrom`), and unknown protobuf fields (`model/protobuf-records` P4, P5, P8).
-- The write path of every deck write: D1's stored-name normalization, D2's unique-name rule, then the write is skipped when the record equals the stored one (`storage/ids-usn-mtime` S4); otherwise the deck is stamped. When the write changes the name, D6 steps 5 to 8 apply.
+- The write path of the deck writes that D1's stored-name normalization lists: D1's stored-name normalization, D2's unique-name rule, then the write is skipped when the record equals the stored one (`storage/ids-usn-mtime` S4); otherwise the deck is stamped. When the write changes the name, D6 steps 5 to 8 apply. The three writes that D1 says keep the stored name skip the normalization: a moved deck takes only D2's rule (D7), a rewritten descendant takes neither (D6 step 6), and a studied-counter write takes neither (`sched/answering#A6`).
 - Example: renaming a deck that carries `browser_collapsed` true, `extend_new` 5, `extend_review` 7, a `sharedFrom` key and an unknown key in `other` keeps all of them; only `name`, `mtime_secs` and `usn` change.
 
 ## D14. Operations
@@ -223,7 +229,7 @@ Anki decides whether a drop is onto the dragged deck or its subtree by comparing
 
 ### D15.3 Collapse is an undo step
 
-Anki's collapse records no undo step and keeps the history; Meguri's is an undoable "Expand/Collapse" step (plan, Open Questions). No scenario observes undo after a collapse; `core/crates/meguri-engine/tests/decks.rs` asserts Meguri's step.
+Anki's collapse records no undo step and keeps the history; Meguri's is an undoable "Expand/Collapse" step (plan, Open Questions), one for the whole list of D10 even when the list mixes collapsed and expanded entries. No scenario observes undo after a collapse; `core/crates/meguri-engine/tests/decks.rs` asserts Meguri's step; its case for a mixed list (one step, undo restores both flags) is still to be written (U216).
 
 ### D15.4 Selecting a deck
 
@@ -232,6 +238,8 @@ Anki records "Select Deck"; Meguri records nothing and keeps the history (R42, `
 ### D15.5 Not observable through the oracle
 
 Refusing a missing move target (D7) or an unknown current deck id (D11), and leaving decks with a missing parent out of the tree (D12), differ from Anki only for ids or collections no UI path or consistent collection produces. No scenario shows them.
+
+The name the default deck gets when it is deleted (D8) is `Default` in Meguri in every interface language; Anki uses the default-deck name of its interface language. The oracle runs in English, where both give `Default`, so no scenario can show the difference.
 
 ## D16. Scenarios
 

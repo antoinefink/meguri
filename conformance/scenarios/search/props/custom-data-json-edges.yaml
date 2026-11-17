@@ -1,0 +1,162 @@
+# specs/search/properties.md P12 (R1071): where the custom data text
+# stops parsing as JSON (a number beyond the 64-bit float range, a lone
+# surrogate escape, nesting deeper than 127 arrays and objects, text after
+# the value), and the text C gives for numbers that are not plain
+# integers (exponents, minus zero, integers beyond 64 bits). Notes e31 to
+# e42 pick numbers where the reader's one-step scaling and dropped digits
+# give a different float from the correctly rounded one. Each case puts
+# the key k beside the edge so that has-cd:k shows whether the whole text
+# parsed. Card ids come from the frozen clock (1894701600000 + note
+# number - 1).
+id: search/props/custom-data-json-edges
+tags: [needs-prop]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Ledger
+      fields: [Alpha, Beta]
+      templates: [{name: Card A, front: "{{Alpha}}", back: "{{Beta}}"}]
+      css: ".card { padding: 2px; }"
+  notes:
+    - {notetype: Ledger, fields: [e1, "overflowing number elsewhere"]}
+    - {notetype: Ledger, fields: [e2, "minus zero integer"]}
+    - {notetype: Ledger, fields: [e3, "exponent 1e2"]}
+    - {notetype: Ledger, fields: [e4, "exponent 1e15"]}
+    - {notetype: Ledger, fields: [e5, "exponent 1e16"]}
+    - {notetype: Ledger, fields: [e6, "lone surrogate elsewhere"]}
+    - {notetype: Ledger, fields: [e7, "surrogate pair"]}
+    - {notetype: Ledger, fields: [e8, "depth 127"]}
+    - {notetype: Ledger, fields: [e9, "depth 128"]}
+    - {notetype: Ledger, fields: [e10, "largest unsigned 64-bit"]}
+    - {notetype: Ledger, fields: [e11, "one past unsigned 64-bit"]}
+    - {notetype: Ledger, fields: [e12, "smallest signed 64-bit"]}
+    - {notetype: Ledger, fields: [e13, "one below signed 64-bit"]}
+    - {notetype: Ledger, fields: [e14, "exponent 1e-7"]}
+    - {notetype: Ledger, fields: [e15, "fraction 0.0001"]}
+    - {notetype: Ledger, fields: [e16, "seventeen digits"]}
+    - {notetype: Ledger, fields: [e17, "nested arrays with spaces"]}
+    - {notetype: Ledger, fields: [e18, "trailing text"]}
+    - {notetype: Ledger, fields: [e19, "minus zero fraction"]}
+    - {notetype: Ledger, fields: [e20, "smallest subnormal"]}
+    - {notetype: Ledger, fields: [e21, "largest finite"]}
+    - {notetype: Ledger, fields: [e22, "thirty digit integer"]}
+    - {notetype: Ledger, fields: [e23, "upper case exponent with plus"]}
+    - {notetype: Ledger, fields: [e24, "white space around tokens"]}
+    - {notetype: Ledger, fields: [e25, "exponent 1e-5"]}
+    - {notetype: Ledger, fields: [e26, "exponent 1e-6"]}
+    - {notetype: Ledger, fields: [e27, "two digits 1.5e-6"]}
+    - {notetype: Ledger, fields: [e28, "eighteen integer digits as fraction"]}
+    - {notetype: Ledger, fields: [e29, "sixteen integer digits and a fraction"]}
+    - {notetype: Ledger, fields: [e30, "exponent 1.5e300"]}
+    - {notetype: Ledger, fields: [e31, "exponent 8e-28"]}
+    - {notetype: Ledger, fields: [e32, "exponent 2.62e-21"]}
+    - {notetype: Ledger, fields: [e33, "seventeen digits and a zero fraction"]}
+    - {notetype: Ledger, fields: [e34, "product beyond the largest finite elsewhere"]}
+    - {notetype: Ledger, fields: [e35, "twenty one digit integer"]}
+    - {notetype: Ledger, fields: [e36, "exact halfway text"]}
+    - {notetype: Ledger, fields: [e37, "exponent below -308"]}
+    - {notetype: Ledger, fields: [e38, "zero with exponent 400"]}
+    - {notetype: Ledger, fields: [e39, "exponent -400"]}
+    - {notetype: Ledger, fields: [e40, "negative with a huge negative exponent"]}
+    - {notetype: Ledger, fields: [e41, "huge positive exponent elsewhere"]}
+    - {notetype: Ledger, fields: [e42, "just under a halfway point"]}
+steps:
+  - observe: [ids]
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600000", params: ['{"cd":"{\"k\":1,\"z\":1e400}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600001", params: ['{"cd":"{\"k\":-0}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600002", params: ['{"cd":"{\"k\":1e2}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600003", params: ['{"cd":"{\"k\":1e15}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600004", params: ['{"cd":"{\"k\":1e16}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600005", params: ['{"cd":"{\"k\":1,\"z\":\"\\ud800\"}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600006", params: ['{"cd":"{\"k\":\"\\ud83d\\ude00\"}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600007", params: ['{"cd":"{\"k\":1,\"z\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600008", params: ['{"cd":"{\"k\":2,\"z\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600009", params: ['{"cd":"{\"k\":18446744073709551615}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600010", params: ['{"cd":"{\"k\":18446744073709551616}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600011", params: ['{"cd":"{\"k\":-9223372036854775808}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600012", params: ['{"cd":"{\"k\":-9223372036854775809}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600013", params: ['{"cd":"{\"k\":1e-7}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600014", params: ['{"cd":"{\"k\":0.0001}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600015", params: ['{"cd":"{\"k\":0.30000000000000004}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600016", params: ['{"cd":"{\"k\":[1, 2, [3]]}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600017", params: ['{"cd":"{\"k\":1} x"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600018", params: ['{"cd":"{\"k\":-0.0}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600019", params: ['{"cd":"{\"k\":5e-324}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600020", params: ['{"cd":"{\"k\":1.7976931348623157e308}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600021", params: ['{"cd":"{\"k\":123456789012345678901234567890}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600022", params: ['{"cd":"{\"k\":2.5E+3}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600023", params: ['{"cd":"{ \"k\" : 7 } "}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600024", params: ['{"cd":"{\"k\":1e-5}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600025", params: ['{"cd":"{\"k\":1e-6}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600026", params: ['{"cd":"{\"k\":1.5e-6}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600027", params: ['{"cd":"{\"k\":123456789012345680.0}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600028", params: ['{"cd":"{\"k\":1234567890123456.7}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600029", params: ['{"cd":"{\"k\":1.5e300}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600030", params: ['{"cd":"{\"k\":8e-28}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600031", params: ['{"cd":"{\"k\":2.62e-21}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600032", params: ['{"cd":"{\"k\":9007199254740993.0}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600033", params: ['{"cd":"{\"k\":1,\"z\":1.7976931348623158e308}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600034", params: ['{"cd":"{\"k\":123456789012345678901}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600035", params: ['{"cd":"{\"k\":1.00000000000000011102230246251565404236316680908203125}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600036", params: ['{"cd":"{\"k\":573e-309}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600037", params: ['{"cd":"{\"k\":0e400}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600038", params: ['{"cd":"{\"k\":1e-400}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600039", params: ['{"cd":"{\"k\":-1e-9999999999}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600040", params: ['{"cd":"{\"k\":1,\"z\":1e9999999999}"}']}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 1, data = ? WHERE id = 1894701600041", params: ['{"cd":"{\"k\":9007199254740992.99999999999}"}']}
+  - observe:
+      - search:
+          - {query: 'has-cd:k'}
+          - {query: '-has-cd:k'}
+          - {query: 'has-cd:z'}
+          - {query: 'prop:cds:k=-0.0'}
+          - {query: 'prop:cds:k=-0'}
+          - {query: 'prop:cds:k=100.0'}
+          - {query: 'prop:cds:k=100'}
+          - {query: 'prop:cds:k=1000000000000000.0'}
+          - {query: 'prop:cds:k=1e15'}
+          - {query: 'prop:cds:k=1e16'}
+          - {query: 'prop:cds:k=10000000000000000.0'}
+          - {query: 'prop:cds:k=😀'}
+          - {query: 'prop:cds:k=18446744073709551615'}
+          - {query: 'prop:cds:k=1.8446744073709552e19'}
+          - {query: 'prop:cds:k=-9223372036854775808'}
+          - {query: 'prop:cds:k=-9.223372036854776e18'}
+          - {query: 'prop:cds:k=1e-7'}
+          - {query: 'prop:cds:k=0.0001'}
+          - {query: 'prop:cds:k=0.30000000000000004'}
+          - {query: 'prop:cds:k=[1,2,[3]]'}
+          - {query: 'prop:cds:k=5e-324'}
+          - {query: 'prop:cds:k=1.7976931348623157e308'}
+          - {query: 'prop:cds:k=1.2345678901234568e29'}
+          - {query: 'prop:cds:k=2500.0'}
+          - {query: 'prop:cds:k=7'}
+          - {query: 'prop:cds:k=1'}
+          - {query: 'prop:cds:k=0.00001'}
+          - {query: 'prop:cds:k=1e-5'}
+          - {query: 'prop:cds:k=1e-6'}
+          - {query: 'prop:cds:k=0.000001'}
+          - {query: 'prop:cds:k=1.5e-6'}
+          - {query: 'prop:cds:k=1.2345678901234568e17'}
+          - {query: 'prop:cds:k=123456789012345680.0'}
+          - {query: 'prop:cds:k=1234567890123456.8'}
+          - {query: 'prop:cds:k=1234567890123456.7'}
+          - {query: 'prop:cds:k=1.5e300'}
+          - {query: 'prop:cdn:k=0'}
+          - {query: 'prop:cdn:k=100'}
+          - {query: 'prop:cdn:k>1e30'}
+          - {query: 'prop:cdn:k<0'}
+          - {query: 'prop:cdn:k=1'}
+          - {query: 'prop:cds:k=8.000000000000001e-28'}
+          - {query: 'prop:cds:k=8e-28'}
+          - {query: 'prop:cds:k=2.6200000000000003e-21'}
+          - {query: 'prop:cds:k=2.62e-21'}
+          - {query: 'prop:cds:k=9007199254740994.0'}
+          - {query: 'prop:cds:k=9007199254740992.0'}
+          - {query: 'prop:cds:k=1.2345678901234567e20'}
+          - {query: 'prop:cds:k=1.2345678901234568e20'}
+          - {query: 'prop:cds:k=1.0000000000000002'}
+          - {query: 'prop:cds:k=1.0'}
+          - {query: 'prop:cds:k=5.7299999999999996e-307'}
+          - {query: 'prop:cds:k=5.73e-307'}
+          - {query: 'prop:cds:k=0.0'}

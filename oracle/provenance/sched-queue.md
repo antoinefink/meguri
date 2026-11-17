@@ -78,3 +78,11 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, wri
 | orders O4 order 12 harvest coverage: relative-overdueness; O2/O3 existing new-gather-* and O5 existing mix scenarios | `rslib/src/scheduler/queue/builder/mod.rs`, `rslib/src/scheduler/queue/builder/sized_chain.rs`, `proto/anki/deck_config.proto` | the behaviors the tests require (relative overdueness over due day and interval with ties, nested-limit gather orders with sibling order, concatenation of two queue lists) and the enum values of the review order, gather priority and sort order |
 | queue-building B5 / sibling-burying B2 at queue level: new-first-review-sibling | `rslib/src/scheduler/queue/builder/mod.rs`, `rslib/src/scheduler/queue/builder/gathering.rs`, `rslib/src/scheduler/answering/mod.rs`, `rslib/src/scheduler/bury_and_suspend.rs` | the required behavior (new-before-review mix with review-sibling burial: the queue must shrink by exactly one after the new card's answer) and confirming that an answer from the new queue excludes kinds gathered earlier from burial |
 | Scenarios sched/counts/congrats-work-kinds and sched/counts/congrats-user-buried (finished-deck facts by work kind; a user-buried card excluded from new work; a single-new-card queue batch) | `rslib/src/scheduler/service/mod.rs` (test module) | Which behaviors the harvested congrats, queued-cards and answer-again tests check. Expectations come from the oracle goldens, not the test assertions. |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| sched/counts C5 (causes of a deck-page difference; limits make none) and C7 next_page_change_at | `rslib/src/decks/tree.rs`; `rslib/src/decks/limits.rs`; `rslib/src/scheduler/queue/builder/mod.rs`; `rslib/src/scheduler/queue/builder/gathering.rs`; `ftl/core/studying.ftl` | deck tree sum-and-cap per node with optional parent limits and review-caps-new; queue limit tree capping children at insertion, decrementing node and ancestors, capping descendants at zero; take rule checking the card's deck node and the root; the overview's counts-differ string naming burying only |

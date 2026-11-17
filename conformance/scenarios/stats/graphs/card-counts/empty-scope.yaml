@@ -1,0 +1,17 @@
+# stats/graphs-cards C12: the form of every card graph part when the scope has
+# no card. One review card in Lang (s 5, d 5); the Search scope tag:absent
+# matches nothing. card_counts keeps both count sets as empty objects (message
+# members are written whenever Anki's data sets them); the other parts have no
+# key in any map and every scalar at 0.
+id: stats/graphs/card-counts/empty-scope
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 3, due = 1, data = '{\"s\":5.0,\"d\":5.0}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n1')"}}
+  - {"observe": [{"stats": [{"scope": {"search": "tag:absent"}, "history": "year", "parts": ["future_due", "card_counts", "intervals", "stability", "difficulty", "retrievability", "added"]}, {"scope": "collection", "history": "year", "parts": ["card_counts"]}]}]}

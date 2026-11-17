@@ -153,7 +153,7 @@ U71's `CardPreviewView` shows one card side in a single persistent page (`card-r
 - **Changing the appearance** while a side is shown switches classes as C5 says, without an update.
 - **Changing the platform** is done by native from the isolated world, with no page-world global (C9): on `<html>`, every class of the previous platform's C2.2 set is removed wherever it is, then the new set is appended in C2.2's order. Other classes, `night-mode` and classes card scripts added, stay where they are. So Mac to iPad in dark turns `night-mode mac safari` into `night-mode ipad ios mobile safari`. Native then shows the current side again at once, with the same display HTML and the new `bodyclass`. The page is not recreated.
 - The chosen platform changes classes only. The replay action (`display-transform.md` D4) and the page globals follow the device actually running the page: `pycmd` on Mac, the `meguri` message handler on iOS and iPadOS.
-- **reviewExtra.** The preview page leaves out `reviewExtra` (C2.3), as Anki's preview does. The K9 value in the result is not used by the page.
+- **reviewExtra.** The preview page includes `reviewExtra` as `card-runtime.md` C2.3 says, as both of Anki's preview pages (the card layout screen and the Add and Edit previewer) do, since they are built like its review page (R472). The value is the K9 `reviewExtra` of the first `RenderedCard` the page is created to show, placed after `#qa`. Its scripts run once, when the page is created. Later updates, target changes, fill-empty toggles, side toggles and platform switches never insert it again. If the key changes while the page lives, the page keeps its old copy until it is recreated. U71's test: card-runtime's SU6 `reviewExtra` in a preview page, then three updates, a side toggle and a platform switch, gives `#qa.nextElementSibling.id === "rx"` and `__rx === 1`.
 - **Media.** The preview never plays audio by itself. A replay button plays its entry. Card-authored `<audio>` and `<video>` do not start without a user gesture in the page: `autoplay` and a script's `play()` outside a gesture do not play. A control the user taps plays.
 - **Image occlusion.** Note types of the image occlusion kind preview through the same pipeline, and the U68 runtime is part of the preview page as in every card page (`image-occlusion-review.md`).
 - It draws no flag or mark (`#_flag` and `#_mark` stay hidden), has no answer gate and calls no scheduling op.
@@ -189,14 +189,20 @@ The oracle can observe none of these (they belong to Anki's desktop interface). 
 
 ## V16. Scenarios
 
-| Scenario | Covers |
-|---|---|
-| `render/preview/drafts` | V3 to V5 through the `template` observation (`conformance/render-ops#Q1`): a stored card with draft templates that match its stored template, and the stored card's specials; unsaved values without save normalization; the no-note case; drafts with errors a save would refuse |
-| `render/preview/type-in` | V9: the markers that A11.1 transforms in a draft's question and answer, and the comparison of `example` with `sample` in both modes |
-| `render/preview/fill-empty` | V6 and V7 on new notes: answer-only fields, conditionals, the blank check, cloze references through every filter form, the kind-independence, cloze card 2, special-named fields, unescaped names, E1 edge values |
-| `render/preview/fill-empty-cards` | V4 with V6: a stored note with an empty field, previewed with draft templates and fill-empty on, and the stored values unchanged afterwards |
+| Scenario | Status | Covers |
+|---|---|---|
+| `render/preview/drafts` | recorded | V3 to V5 through the `template` observation (`conformance/render-ops#Q1`): a stored card with draft templates that match its stored template, and the stored card's specials; unsaved values without save normalization; the no-note case; drafts with errors a save would refuse |
+| `render/preview/type-in` | recorded | V9: the markers that A11.1 transforms in a draft's question and answer, and the comparison of `example` with `sample` in both modes |
+| `render/preview/fill-empty` | planned | V6 and V7 on new notes: answer-only fields, conditionals, the blank check, cloze references through every filter form, the kind-independence, cloze card 2, special-named fields, unescaped names, E1 edge values |
+| `render/preview/fill-empty-cards` | planned | V4 with V6: a stored note with an empty field, previewed with draft templates and fill-empty on, and the stored values unchanged afterwards |
 
-The last two use the `template` observation's `fill_empty` case key (`conformance/render-ops#Q1`, Q1.4 step 0), which needs the finer capability `template.fill_empty` from Meguri's executor. Their goldens are recorded, but they stay out of `conformance/scenarios/` until the testkit's scenario model accepts the key (`conformance/render-ops#Q3`). Until then the two ids name no file in the tree.
+The two planned scenarios have no file and no golden yet. They use the `template` observation's `fill_empty` case key (`conformance/render-ops#Q1`, Q1.4 step 0), which needs the finer capability `template.fill_empty` from Meguri's executor. The oracle driver and the scenario schema accept the key, but the testkit's scenario model refuses it, so `tools/mg goldens-check` would report either file invalid and neither can sit under `conformance/scenarios/` yet. A spec writer writes them and records their goldens on a held branch; implementers do not write scenarios. They land in `conformance/scenarios/render/preview/` and `conformance/goldens/render/preview/` in the same change as U71's activation steps (`conformance/render-ops#Q3`):
+
+1. add the `fill_empty` key to the testkit's scenario model and `template` adapter, on new-note and card cases;
+2. declare `template.fill_empty` in Meguri's executor;
+3. add `preview/*` to `conformance/scenarios/render/area.yaml`.
+
+Until they land, U71's engine tests check V6's table and V7's text, and the oracle comparison of R939 waits for the two scenarios.
 
 These have no oracle and are covered by U71's Meguri tests (`CardPreviewTests` and the engine's own tests):
 
@@ -204,7 +210,7 @@ These have no oracle and are covered by U71's Meguri tests (`CardPreviewTests` a
 - two V4 rules that the `template` card case cannot reach, because it always uses the card's stored ordinal and stored template name: a draft whose templates were moved or added, so the stored card at the target's ordinal belongs to another template, and `Card` taken from the draft's template name for a stored card;
 - V6's card list;
 - V8's display steps, including draft CSS that holds `[[type:` or `<hr id=answer>`;
-- V12 and V14.
+- V12, its `reviewExtra` test included, and V14.
 
 ## V17. Plan alignment
 

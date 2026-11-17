@@ -67,7 +67,11 @@ No count subtracts siblings skipped during a queue build (R625). Every matching 
 ## C5. The deck page (R625, R767)
 
 - A deck's page shows the counts of its queue (`sched/queue-building#B9`), built as the study screen would build it.
-- For each of New, Learn and Due it also shows the deck list's count minus the queue's count, when that difference is not 0, as a signed number. It is positive when the queue skips siblings or limits a subdeck more strictly, and can be negative (Learn, for a learning card due exactly L from now, C3).
+- For each of New, Learn and Due it also shows the deck list's count minus the queue's count, when that difference is not 0, as a signed number. It has three causes:
+  - **Burying siblings** (positive): the queue skips buried siblings (`sched/queue-building#B5`) and the deck list does not (C4). Golden `sched/counts/deck-page-difference`, and `sched/queue/bury/review-siblings` and `interday-siblings`.
+  - **The learn-ahead edge** (negative, Learn only): a queue 1 card due exactly L from now is in the queue but not yet in the deck list (C3), for one second.
+  - **Filtered descendants** (positive, Meguri only): the deck list counts the cards of a filtered deck below the studied deck (C1, C3), and Meguri's queue never gathers them (`sched/queue-building#B2.2`, deviation `queue-nested-filtered-deck`). Anki gathers them and shows no difference. Golden `sched/queue/gather/nested-filtered`: the deck list shows Lang 2 new, 2 learning, 3 reviews; Meguri's queue 1, 0 and 2, so the page shows +1, +2 and +1.
+- Daily limits alone never make a difference, whether a subdeck's limits are stricter than the studied deck's or the other way round. The deck list applies each node's limits to its own cards plus its children's limited totals (C3, C4). The queue takes a card only while its deck and every deck above it have a limit left (`sched/limits#L4`). Both give the same totals for the studied deck, with reviews capping new cards included. Goldens: `sched/queue/limits/parent-limits` (the studied Top::Mid has a stricter limit than its child: deck list and queue both show 3 reviews, and both show 2 with `applyAllParentLimits` on) and `sched/queue/limits/new-capped-by-reviews` (equal counts at each read). No golden yet reads both counts for a studied deck whose subdeck is the stricter one; Meguri's tests cover that case.
 - Golden `sched/counts/deck-page-difference`: deck list 4 new, 0 learning, 6 reviews; queue 2, 1 and 3; differences +2, −1 and +3.
 
 ## C6. When counts change, and caching them (R1819)
@@ -90,6 +94,7 @@ One record per deck at one instant. Queue fields use the normal studied subtree 
 | `learning_later_today` | those cards with now < `due` ≤ `next_day_at` |
 | `next_learning_due` | minimum due among `learning_later_today`; absent when that set is empty |
 | `next_learning_ready_at` | `next_learning_due` − L; absent with it; it may already be at or before now |
+| `next_page_change_at` | the earliest instant strictly after now among: (a) `due` − L of each queue 1 or normal-deck queue 4 card of the studied subtree (B2) with `due` ≤ `next_day_at`, when it enters the queue's Learn count (B9); (b) C6's instants for the deck list's subtree (C3): `due` − L + 1 of each queue 1 card and `due` − L of each queue 4 card, when it enters the deck list's Learn count; (c) `next_day_at`. Never absent, never at or before now |
 | `review_limit_reached`, `new_limit_reached` | a review/interday or new card otherwise eligible for this queue remains excluded by its applicable daily limits, including ancestor/review caps; false when limits exclude no such card |
 | `learning_remaining` | compatibility total of every queue-1 card in the full subtree, regardless of due instant |
 | `secs_until_next_learn` | compatibility seconds: 86,400 with no queue-1 card; otherwise max(60, minimum queue-1 due − L − now), over that full subtree |
@@ -98,6 +103,17 @@ One record per deck at one instant. Queue fields use the normal studied subtree 
 | `sibling_buried`, `user_buried` | exact counts of queues −2 and −3 in the full subtree; Unbury offers each kind whose count exceeds 0 |
 | `tomorrow` | C8's projected deck-list record |
 | `empty` | C9's membership test |
+
+`next_page_change_at` is the only instant at which `queue_counts`, `list_counts` or `difference` can change while the collection does not; the deck page wakes on it (`decks/deck-list` H5.3). It includes `next_learning_ready_at` whenever that instant is after now, so the finished state still ends at the ready instant (R79). Examples, with L 1,200 s and no other change:
+
+| Cards | Read at | Page | `next_page_change_at` |
+|---|---|---|---|
+| one queue 1 card, due in 1,500 s | +0 s | finished | +300 s |
+| the same | +300 s | normal, Learn 1, difference −1 | +301 s |
+| the same | +301 s | normal, Learn 1, no difference | `next_day_at` |
+| queue 1 cards due in 600 s and in 3,600 s | +0 s | normal, Learn 1, no difference (the 600 s card is inside L on both sides) | +2,400 s |
+| the same | +2,400 s | normal, Learn 2, difference −1 | +2,401 s |
+| the same | +2,401 s | normal, Learn 2, no difference | `next_day_at` |
 
 The native today window includes the exact `next_day_at` boundary, as B4's gather rule does. It excludes imported queue-1 timestamps beyond that boundary. Such a row still contributes to compatibility `learning_remaining` and `secs_until_next_learn`. A tomorrow-only row must not supply a native today ready instant. These native fields are Meguri presentation requirements, not additional claims about Anki's congratulations fields.
 
@@ -133,5 +149,7 @@ Own tests must separately cover overdue, due-now, within-learn-ahead, later-toda
 | `sched/queue/learn-ahead/window`, `ready-in` | C3's strict test, C7 |
 | `sched/queue/gather/card-states`, `nested-filtered` | C1 (filtered decks counted under their parent), C7 |
 | `sched/queue/gather/preview-in-normal-deck` | C3 (queue 4's test), C7 (`learning_remaining` counts queue 1 only) |
+| `sched/queue/bury/review-siblings`, `interday-siblings` | C5 (a positive difference from burying) |
+| `sched/queue/limits/parent-limits`, `new-capped-by-reviews` | C5 (limits make no difference) |
 
-Meguri's required tests must check C6 (next_change_at, the cache key, never serving another day's counts), C8 against the goldens' next-day reads, and C9, which the oracle cannot observe.
+Meguri's required tests must check C6 (next_change_at, the cache key, never serving another day's counts), C7's `next_page_change_at` (each example of C7, both scopes, and over a whole day with no change at most one wake at a time and none at or before now), C8 against the goldens' next-day reads, and C9, which the oracle cannot observe.

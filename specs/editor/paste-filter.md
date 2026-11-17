@@ -21,7 +21,7 @@ The three filters pasted and dropped HTML goes through before it reaches a field
 - Fragment parsing drops a doctype and the `html`, `head` and `body` tags but keeps their contents; elements that belong in a document head (`title`, `meta`, `link`, `style`, `script`, `base`) become ordinary elements of the fragment, so the filters meet them. CR and CR LF become LF.
 - Serialization writes text with `&`, `<`, `>` and U+00A0 as `&amp;`, `&lt;`, `&gt;` and `&nbsp;`, attribute values in double quotes with `&`, `"` and U+00A0 escaped, and attribute and tag names in lower case. Engines differ in a few details (recent Chromium versions also escape `<` and `>` in attribute values); the harness compares as `editor/paste` P15.4 says.
 - The filter visits the tree depth first and filters an element's children before the element itself. Comments are removed in every mode, internal included. Text is never changed by a filter; only the output step (X6) touches whitespace.
-- Tag names are matched for HTML elements only; elements of SVG and MathML (`svg`, `circle`, `math`, `mi`) are never on a list. Attribute names match ASCII case-insensitively, and names with a prefix (`xlink:href`, `o:spt`) match no row.
+- Tag names are matched for HTML elements only; elements of SVG and MathML (`svg`, `circle`, `math`, `mi`) are never on a list. The pre-pass is the one exception: Meguri's (and the host editor's) removes `script`, `iframe`, `object` and `style` in any namespace (X3). Attribute names match ASCII case-insensitively, and names with a prefix (`xlink:href`, `o:spt`) match no row.
 
 ## X3. Pre-pass (P14)
 
@@ -30,11 +30,11 @@ Before the filter, external HTML goes through a pre-pass that fetches remote ima
 | | Host editor | Page editor | Meguri |
 |---|---|---|---|
 | parser | a lenient parser that is not HTML5, whose output is serialized again and parsed again by the page | the page's HTML5 fragment parser only | one HTML5 parse (P14, `editor-paste-html-parser`) |
-| `script`, `iframe`, `object`, `style` | removed with their content before images are fetched | left for the filter, which removes them (X4) | removed before images are fetched (P14.1) |
+| `script`, `iframe`, `object`, `style` | removed with their content before images are fetched, matched by name in any namespace (its parser has none), so an SVG `style` or `script` goes too | left for the filter, which removes the HTML elements of these names (X4); an SVG or MathML `style` or `script` is on no list (X2), so it is unwrapped and its text stays | removed with their content before images are fetched, in any namespace (HTML, SVG and MathML), as the host editor does (P14.1) |
 | `p` | renamed to `div`, attributes kept for the filter to remove | left for the filter, which replaces it with a new `div` | becomes a `div` (P14.1) |
 | internal content | none of the above; only the media-server rewrite of `editor/paste-sources` S11 | the same | none (`editor/paste-sources` S11) |
 
-Images inside `script`, `iframe`, `object` or `style` are never fetched by Meguri or the host editor. The content of `script`, `style` and `iframe` is text to an HTML parser, so it holds no `img` element; the content of `object` is parsed as markup, so the page editor fetches and stores an `img` inside an `object` before its filter removes the `object` (the file stays unused in the media folder; proposed deviation `editor-paste-object-image`, page editor). Unclosed elements (`<p>a<p>b`) can come out nested from the host editor's first parse; the golden records the field.
+Images inside `script`, `iframe`, `object` or `style` are never fetched by Meguri or the host editor. The content of an HTML `script`, `style` or `iframe` element is text to an HTML parser, so it holds no `img` element. Inside `svg` or `math` the HTML5 parser builds a foreign `style` or `script` element instead, whose content is parsed as ordinary content: for `<svg><style>p{}</style></svg>x` the host editor and Meguri give `x`, the page editor `p{}x` in both modes (X9; proposed deviation `editor-paste-foreign-style`, page editor). The content of `object` is parsed as markup, so the page editor fetches and stores an `img` inside an `object` before its filter removes the `object` (the file stays unused in the media folder; proposed deviation `editor-paste-object-image`, page editor). Unclosed elements (`<p>a<p>b`) can come out nested from the host editor's first parse; the golden records the field.
 
 ## X4. Strip mode (R873)
 
@@ -106,7 +106,7 @@ Since U+00A0 is serialized as `&nbsp;` (X2), no-break spaces survive both the co
 
 ## X8. Insertion
 
-Anki inserts the filtered HTML with the browser's insert-HTML editing command, which parses it again in the field's context and can change it further: it can put the surrounding text's inline style on inserted text, add a `tbody` to a table, merge or split blocks, and drop or add a trailing `<br>`. Meguri inserts the parsed nodes itself (`editor/paste` P16). Goldens recorded from Anki's editor include the command's changes; where Meguri's field differs only by them, the difference is proposed deviation `editor-paste-insert-command`, with each case listed beside its golden.
+Anki inserts the filtered HTML with the browser's insert-HTML editing command, which parses it again in the field's context and can change it further: it can put the surrounding text's inline style on inserted text, add a `tbody` to a table, merge or split blocks, and drop or add a trailing `<br>`. Meguri inserts the parsed nodes itself, unchanged (`editor/paste` P16). Goldens recorded from Anki's editor include the command's changes; where Meguri's field differs only by them, the difference is proposed deviation `editor-paste-insert-command` (`editor/paste-sources` S14, both editors), with each case listed beside its golden. P16's rule that Meguri's field equals the goldens holds through that deviation: such a golden is compared against the deviation's values. So X10.1 case 2 expects X9's cell, without the command's changes.
 
 ## X9. Examples
 
@@ -156,6 +156,8 @@ External HTML in each mode (light appearance unless the column says dark), and i
 | `<w-box>c<w-box></w-box></w-box><i>e</i>` | `ce` | `c<i>e</i>` | the same as light |
 | `<svg width="10"><circle r="1"></circle></svg>t` | `t` | `t` | `t` |
 | `<svg><text>s</text></svg>` | `s` | `s` | `s` |
+| `<svg><style>p{}</style></svg>x` | `x` (page editor `p{}x`) | `x` (page editor `p{}x`) | the same as light |
+| `<svg><script>s()</script></svg>x` | `x` (page editor `s()x`) | `x` (page editor `s()x`) | the same as light |
 | `<math><mi>x</mi></math>` | `x` | `x` | `x` |
 | `<template>x</template>y` | `y` | `y` | `y` |
 | `<DIV CLASS="x">d</DIV>` | `<div>d</div>` | the same | the same |

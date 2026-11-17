@@ -1,0 +1,32 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "check_media": {
+          "dirs": [],
+          "extracted": 0,
+          "field_templates": [],
+          "missing": ["latex-2403c67b7164762337f2465b41413a0cce01f67a.png", "latex-291ba45a7c0f5521a78ef3a6e04f25000a3a3f5c.svg", "latex-2f960094315d60883495f9b74148e17487ee9584.svg", "latex-4bda7ef13d11d4c5f0a017d9cf5e258981297eac.png", "latex-51e00cce84181f3e0ff8a7b8e805298c03950f75.png", "latex-7046d961a8144b7b2c2da6066849a9f889ff2ac9.png", "latex-fcd127ffa1016069006ad91f3f361248f9bdf272.png"],
+          "missing_notes": ["#n1", "#n2", "#n3", "#n4"],
+          "oversize": [],
+          "renamed": {},
+          "trash_count": 0,
+          "unused": ["latex-81db9653f6941b6dd49b51f15282bab95a0ede79.png"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-media/latex/line-breaks",
+  "scenario_sha256": "4b54778cfc78276979489bdd85a970111120d22be66f43e6512672cf33ee03d9",
+  "tz": "UTC"
+}

@@ -1,0 +1,1098 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 13,
+          "cards_without_note": 1,
+          "cards_without_template": 0,
+          "decks_missing": 3,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 4,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 4
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600001": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 10,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 0,
+              "type": 2,
+              "usn": -1
+            },
+            "1894701600003": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 2147483647,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1001,
+              "mod": 1894964400,
+              "nid": 1894701600003,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 0,
+              "type": 1,
+              "usn": -1
+            },
+            "1894701600004": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 1500000,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600004,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600004,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600005": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 1999999,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600005,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600005,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600006": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 1500000,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600006,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600006,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600007": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 2500000,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600007,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600007,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 4,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600008": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600008,
+              "ivl": 10,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600008,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 0,
+              "type": 2,
+              "usn": -1
+            },
+            "1894701600009": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 10,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600009,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600009,
+              "odid": 0,
+              "odue": 2,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600010": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 11,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600010,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600010,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600011": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 12,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600011,
+              "ivl": 2,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600011,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600012": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 13,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600012,
+              "ivl": 2147483647,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600012,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600013": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 1000000,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600013,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600013,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600014": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 1000012,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600014,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600014,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600015": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600015,
+              "ivl": 10,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600015,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 0,
+              "type": 2,
+              "usn": -1
+            },
+            "1894701600016": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 17,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600016,
+              "ivl": 12,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894964400,
+              "nid": 1894701600016,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894701600017": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 18,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600017,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 12,
+              "nid": 1894701600017,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600018": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 19,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600018,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600018,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600019": {
+              "data": "{}",
+              "did": 4242,
+              "due": 20,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600019,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600019,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600020": {
+              "data": "{}",
+              "did": 1894701600004,
+              "due": 21,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600020,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600020,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 5
+            },
+            "1894701600021": {
+              "data": "{}",
+              "did": 1894701600001,
+              "due": 22,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600021,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600021,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894964400000,
+              "models": "",
+              "scm": 1894964400000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1894701600000": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600000,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701600,
+              "name": "recovered4242",
+              "usn": -1
+            },
+            "1894701600001": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600001,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701600,
+              "name": "A\u001fB\u001fC",
+              "usn": 5
+            },
+            "1894701600002": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600002,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701600,
+              "name": "X\u001fY",
+              "usn": 5
+            },
+            "1894701600003": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600003,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701600,
+              "name": "X\u001fZ",
+              "usn": 5
+            },
+            "1894701600004": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894701600004,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894701600,
+              "name": "Inbox",
+              "usn": -1
+            },
+            "1894964400000": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894964400000,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894964400,
+              "name": "A",
+              "usn": -1
+            },
+            "1894964400001": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894964400001,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894964400,
+              "name": "A\u001fB",
+              "usn": -1
+            },
+            "1894964400002": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1894964400002,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894964400,
+              "name": "X",
+              "usn": -1
+            },
+            "4242": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 4242,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1894964400,
+              "name": "recovered4242+",
+              "usn": -1
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600001": {
+              "csum": 1883460402,
+              "data": "",
+              "flags": 0,
+              "flds": "duenew\u001fa",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "duenew",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600002": {
+              "csum": 891301600,
+              "data": "",
+              "flags": 0,
+              "flds": "duereview\u001fa",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "duereview",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600003": {
+              "csum": 3101804242,
+              "data": "",
+              "flags": 0,
+              "flds": "duelearn\u001fa",
+              "guid": "#random",
+              "id": 1894701600003,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "duelearn",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600004": {
+              "csum": 245422376,
+              "data": "",
+              "flags": 0,
+              "flds": "folda\u001fa",
+              "guid": "#random",
+              "id": 1894701600004,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "folda",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600005": {
+              "csum": 3547496744,
+              "data": "",
+              "flags": 0,
+              "flds": "foldb\u001fa",
+              "guid": "#random",
+              "id": 1894701600005,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "foldb",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600006": {
+              "csum": 4293932354,
+              "data": "",
+              "flags": 0,
+              "flds": "foldc\u001fa",
+              "guid": "#random",
+              "id": 1894701600006,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "foldc",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600007": {
+              "csum": 162244653,
+              "data": "",
+              "flags": 0,
+              "flds": "foldd\u001fa",
+              "guid": "#random",
+              "id": 1894701600007,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "foldd",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600008": {
+              "csum": 3700795269,
+              "data": "",
+              "flags": 0,
+              "flds": "oduea\u001fa",
+              "guid": "#random",
+              "id": 1894701600008,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "oduea",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600009": {
+              "csum": 356683777,
+              "data": "",
+              "flags": 0,
+              "flds": "odueb\u001fa",
+              "guid": "#random",
+              "id": 1894701600009,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "odueb",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600010": {
+              "csum": 160540330,
+              "data": "",
+              "flags": 0,
+              "flds": "ivla\u001fa",
+              "guid": "#random",
+              "id": 1894701600010,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "ivla",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600011": {
+              "csum": 745880812,
+              "data": "",
+              "flags": 0,
+              "flds": "ivlb\u001fa",
+              "guid": "#random",
+              "id": 1894701600011,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "ivlb",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600012": {
+              "csum": 4217490287,
+              "data": "",
+              "flags": 0,
+              "flds": "ivlc\u001fa",
+              "guid": "#random",
+              "id": 1894701600012,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "ivlc",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600013": {
+              "csum": 3167322653,
+              "data": "",
+              "flags": 0,
+              "flds": "texta\u001fa",
+              "guid": "#random",
+              "id": 1894701600013,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "texta",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600014": {
+              "csum": 3197687233,
+              "data": "",
+              "flags": 0,
+              "flds": "textb\u001fa",
+              "guid": "#random",
+              "id": 1894701600014,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "textb",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600015": {
+              "csum": 1259641002,
+              "data": "",
+              "flags": 0,
+              "flds": "textc\u001fa",
+              "guid": "#random",
+              "id": 1894701600015,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "textc",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600016": {
+              "csum": 3193510206,
+              "data": "",
+              "flags": 0,
+              "flds": "texte\u001fa",
+              "guid": "#random",
+              "id": 1894701600016,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "texte",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600017": {
+              "csum": 909989222,
+              "data": "",
+              "flags": 0,
+              "flds": "textf\u001fa",
+              "guid": "#random",
+              "id": 1894701600017,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "textf",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600018": {
+              "csum": 1408782316,
+              "data": "",
+              "flags": 0,
+              "flds": "modq\u001fa",
+              "guid": "#random",
+              "id": 1894701600018,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "modq",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600019": {
+              "csum": 537929757,
+              "data": "",
+              "flags": 0,
+              "flds": "lost\u001fa",
+              "guid": "#random",
+              "id": 1894701600019,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "lost",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600020": {
+              "csum": 1371682302,
+              "data": "",
+              "flags": 0,
+              "flds": "filt\u001fa",
+              "guid": "#random",
+              "id": 1894701600020,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "filt",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600021": {
+              "csum": 2791633163,
+              "data": "",
+              "flags": 0,
+              "flds": "parents\u001fa",
+              "guid": "#random",
+              "id": 1894701600021,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "parents",
+              "tags": "",
+              "usn": -1
+            }
+          },
+          "revlog": {
+            "1894701500001": {
+              "cid": 7,
+              "ease": 3,
+              "factor": 2500,
+              "id": 1894701500001,
+              "ivl": 2,
+              "lastIvl": 1,
+              "time": 4000,
+              "type": 1,
+              "usn": 5
+            },
+            "1894701500002": {
+              "cid": 7,
+              "ease": 3,
+              "factor": 2500,
+              "id": 1894701500002,
+              "ivl": 4,
+              "lastIvl": -3,
+              "time": 4000,
+              "type": 1,
+              "usn": 5
+            },
+            "1894701500003": {
+              "cid": 7,
+              "ease": 3,
+              "factor": 2500,
+              "id": 1894701500003,
+              "ivl": 4,
+              "lastIvl": 2,
+              "time": 0,
+              "type": 1,
+              "usn": 5
+            },
+            "1894701500004": {
+              "cid": 7,
+              "ease": 3,
+              "factor": 2500,
+              "id": 1894701500004,
+              "ivl": 4,
+              "lastIvl": 2,
+              "time": 2147483647,
+              "type": 1,
+              "usn": 5
+            }
+          },
+          "tags": {}
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["nextPos", "2500001", -1, 1894964400]
+          ]
+        }
+      },
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "maintenance/check-db/repaired-dump",
+  "scenario_sha256": "6a2497a042a44e7b5308b3d947ae5daa1ba827fc801ec53238c34d45a2027ebb",
+  "tz": "UTC"
+}

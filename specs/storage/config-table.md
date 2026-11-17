@@ -37,9 +37,11 @@ Numbers read as Anki reads them:
 | Text | Reads as |
 |---|---|
 | digits with no fraction and no exponent, from -9223372036854775808 to 18446744073709551615 | that integer |
-| such digits outside that range | the nearest 64-bit float (`18446744073709551616` is the float 1.8446744073709552e19) |
+| such digits outside that range | the 64-bit float of `model/json-numbers` N11 (`18446744073709551616` is the float 1.8446744073709552e19, `123456789012345678901` the float 1.2345678901234567e20) |
 | `-0` | the float -0.0 |
-| any number with a fraction or an exponent | the nearest 64-bit float (`1E2` is the float 100.0) |
+| any number with a fraction or an exponent | the 64-bit float of N11 (`1E2` is the float 100.0, `1.2345678901234567e20` the float 1.2345678901234568e20) |
+
+N11 is Anki's reading, which is not always the float nearest to the text: `123456789012345678901` and `1.2345678901234567e20` each read as a float one unit in the last place away from the nearest one. C4's comparison and C5's encoding use the values read this way; a correctly rounded parser gives other bytes for such numbers (`storage/schema-upgrade` U9.2).
 
 When an object repeats a member name, the last occurrence counts.
 
@@ -70,7 +72,7 @@ Meguri encodes a value exactly as Anki does, so the same value always gives the 
 - object members sorted by name, comparing names by Unicode code point (which is the byte order of their UTF-8): `{"B":2,"_x":3,"a":5,"a1":4,"b":1}`; each name once;
 - strings: `"` as `\"`, `\` as `\\`, U+0008 as `\b`, U+0009 as `\t`, U+000A as `\n`, U+000C as `\f`, U+000D as `\r`, every other code point below U+0020 as `\u00` and two lower-case hex digits (`\u001b`); every other character, `/`, U+007F and all non-ASCII included, as its UTF-8 bytes;
 - integers in decimal, `-` for negatives, no `+` and no leading zeros;
-- floats (C3) from the shortest digit string that reads back as the same 64-bit float:
+- floats (C3) from the shortest digit string that reads back as the same 64-bit float, where reading back is the correctly rounded reading, not N11's (`model/json-numbers` N5):
   - absolute value at least 1e-5 and below 1e16: written out in full, with `.0` added when it has no fractional digits (`0.00001`, `0.85`, `100.0`, `1000000000000000.0`);
   - any other non-zero value: the first digit, then `.` and the remaining digits when there are any, then `e` and the decimal exponent, with `-` when negative and no `+` (`1e-6`, `1.5e-7`, `1e16`, `2.5e20`, `1.2345678901234568e17`);
   - zero is `0.0`, negative zero `-0.0`; a negative value gets a leading `-`;
@@ -83,6 +85,7 @@ Meguri encodes a value exactly as Anki does, so the same value always gives the 
 | a deck id | `1894701600000` |
 | the float 1.0 | `1.0` |
 | the float 0.000001 | `1e-6` |
+| the float read from `123456789012345678901` (N11) | `1.2345678901234567e20` |
 | the string `a/b`, U+0001, `"`, line feed | `"a/b\u0001\"\n"` |
 
 ## C6. Changing part of a value

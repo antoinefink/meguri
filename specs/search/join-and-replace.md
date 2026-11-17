@@ -85,7 +85,7 @@ A field whose name, with ASCII letters lowered, is a reserved key of `grammar.md
 
 ### J3.4 Duplicates
 
-The `dupe:` text is compared exactly (`names-and-ids.md` N6), so no character may change on the way back: text holding White_Space other than U+0020, or U+001C–U+001F, is refused, and the caller (the editor's Show Duplicates, R807) builds a note-ids item from the duplicate notes it already found.
+The `dupe:` text is compared exactly (`names-and-ids.md` N6), so no character may change on the way back: text holding White_Space other than U+0020, or U+001C–U+001F, is refused, for every caller that builds this item. A caller that already holds the duplicate notes builds a note-ids item instead. The editor's Show Duplicates (R807) never builds this item: it always opens Browse on a note-ids item holding the duplicates of the last field check (`notes/field-check` K4), so it needs no fallback.
 
 ### J3.5 Deck and note type names that cannot be written exactly
 

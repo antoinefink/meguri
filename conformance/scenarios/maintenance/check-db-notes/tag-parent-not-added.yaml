@@ -1,0 +1,28 @@
+# N2 of specs/maintenance/check-database-notes.md: notes tagged p::q and
+# r::s::t, with no row for any of their ancestors (adding a note registers
+# only the tag itself). Check Database gives the ancestors no row: the tags
+# table still holds only p::q and r::s::t, with their columns, and the tag
+# tree shows p, r and r::s as implicit parents. Nothing is counted, scm
+# stays (col.mod is not observed: deviation check-db-no-change-keeps-mod of
+# specs/maintenance/check-database.md C11). A second run finds nothing.
+id: maintenance/check-db-notes/tag-parent-not-added
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno], tags: ["p::q"]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos], tags: ["r::s::t"]}
+steps:
+  - db_exec: {sql: "SELECT tag, usn, collapsed, config FROM tags ORDER BY tag"}
+  - db_exec: {sql: "SELECT scm FROM col"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT tag, usn, collapsed, config FROM tags ORDER BY tag"}
+  - observe: [tag_tree]
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT scm FROM col"}
+  - check_db: {}

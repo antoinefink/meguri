@@ -126,7 +126,7 @@ The upgrade runs as a client: every usn it stamps is −1 (decks renamed by U7, 
 
 ### U9.2 Compact JSON
 
-The JSON written by step 14 into `config.val` is the parsed value written back without any whitespace: object members sorted by name (code point order) at every depth, whatever their stored order; an integer that fits a signed or unsigned 64-bit integer written as an integer; every other number written as the shortest decimal that reads back as the same 64-bit float, with `.0` on whole values and an exponent outside the plain range (exactly what `serde_json` writes for an `f64`; table below); strings with only the escapes JSON requires (`\"`, `\\`, and the characters below U+0020 as `\b`, `\f`, `\n`, `\r`, `\t` or `\u00xx` with lower-case hex), every other character as itself. Duplicate member names keep the last occurrence. Examples:
+The JSON written by step 14 into `config.val` is the parsed value written back without any whitespace: object members sorted by name (code point order) at every depth, whatever their stored order; an integer that fits a signed or unsigned 64-bit integer written as an integer; every other number read as the 64-bit float of `model/json-numbers` N11 (Anki's reading, not always the float nearest to the stored digits) and written as the shortest decimal that a correctly rounded reader maps back to that float, with `.0` on whole values and an exponent outside the plain range (exactly what `serde_json` writes for an `f64`; table below); strings with only the escapes JSON requires (`\"`, `\\`, and the characters below U+0020 as `\b`, `\f`, `\n`, `\r`, `\t` or `\u00xx` with lower-case hex), every other character as itself. Duplicate member names keep the last occurrence. Examples:
 
 | In `col.conf` | In `config.val` |
 |---|---|
@@ -135,6 +135,7 @@ The JSON written by step 14 into `config.val` is the parsed value written back w
 | `2` | `2` |
 | `12345678901234567890` | `12345678901234567890` |
 | `123456789012345678901` | `1.2345678901234567e20` |
+| `1.2345678901234567e20` | `1.2345678901234568e20` |
 | `123.0` | `123.0` |
 | `1E2` | `100.0` |
 | `-0` | `-0.0` |
@@ -145,6 +146,8 @@ The JSON written by step 14 into `config.val` is the parsed value written back w
 | `1e300` | `1e300` |
 | `"a/b\u00e9\u0001\""` | `"a/bé\u0001\""` |
 | `true`, `null` | `true`, `null` |
+
+The two rows after `12345678901234567890` follow N11, not the nearest float: the nearest float to `123456789012345678901` would be written `1.2345678901234568e20`, and the nearest float to `1.2345678901234567e20` would be written as that same text. The first is the fixture value `meguriFixture` (U16) in `storage/upgrade/from-11`; the second is the same value after Anki's downgrade wrote it into the copy's `col.conf` and the upgrade read it again (`storage/downgrade/roundtrip`). So a number outside N11's exact range can change value at each pass through `col.conf`.
 
 ## U10. Inputs the upgrade cannot read
 
@@ -288,6 +291,7 @@ No fixture may come from `local-data/` or contain anything from the user's colle
 | Starting ease ×100 at 15 and the reset at or below 1.3 with the card factor fix | `storage/upgrade/initial-ease` |
 | `Pair`/`pair`/`PAIR`, note type id 0, duplicate field and template names, NFC, deck name normalization and duplicates, case-duplicate tags | `storage/upgrade/names-11` |
 | Card factor 1400 survives (preset not reset) | `storage/upgrade/from-11` |
+| `config.val` numbers read by `model/json-numbers` N11, not rounded to the nearest float (U9.2) | `storage/upgrade/from-11`, `storage/downgrade/roundtrip` (the `meguriFixture` row) |
 | Duplicate graves: first row kept | `storage/upgrade/from-*` (dump of `graves`) |
 | Pre-upgrade copy written first; killed mid-transaction → original intact, copy present, next open upgrades | `tests/upgrade.rs` (Meguri only) |
 | A foreign table, an index, a trigger and a view on `graves` (and on `tags` from 14 on), added to each fixture from 11 to 17, keep their stored definitions through the upgrade; the triggers did not fire on the upgrade's row copies, the views read the rebuilt tables, the triggers fire on them, `integrity_check` is `ok` | `tests/upgrade.rs` (Meguri only, U12) |

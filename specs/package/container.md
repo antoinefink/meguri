@@ -3,7 +3,7 @@
 Spec: package/container
 Requirements: R1597, R1598, R1599, R1619 (the latest-format, collection-only part of each), R2004 (atomic package output), R2015 (disk preflight), R1635, R1852, R1638 (data side), R1626, R1627, R1628, R2018 (P16 local media import); supports R2005, R2009 (format half)
 Anki: 26.09.3
-Scenarios: conformance/scenarios/package/collection-package/, conformance/scenarios/package/colpkg/ (P16, P19)
+Scenarios: conformance/scenarios/package/collection-package/; planned, not yet written: conformance/scenarios/package/colpkg/ (P16, P19; P16.4 says what blocks them)
 
 The zip container that collection packages (`.colpkg`) and deck packages (`.apkg`) share, in its latest format, for packages that hold a collection and no media file. It covers how Meguri reads such a package (bounded, into a staging directory), how it writes one (backups U126, server copies U109, and later U124's export without media), and how it inspects one before a restore (U127). The legacy formats are U120's, media entries U122's, the legacy writer U123's (`package/legacy-export`): each extends the sections that name it. P15 defines the narrow RF4 latest-format media writer/verifier used by user collection-file export, without accepting U122/U124 or changing the collection-only writers. P16 extends local collection-file inspection and activation to media; it is Meguri design, not a claim of new foreign behavior. P19 adds the legacy formats to that import (U124). Swapping an inspected package into place is `engine/collection-replace`. The scenario vocabulary is `specs/conformance/package-ops.md`.
 
@@ -47,7 +47,7 @@ A package is a zip archive (PKWARE APPNOTE 6.3.x, zip64 included). Three formats
   | anything else: 0, 4, any negative value | refused as `TooNew`, "made by a newer version" (R1597) |
 
 - No `meta` entry: legacy 2 when the archive has an entry `collection.anki21`, else legacy 1.
-- Until U120 adds the legacy reader, a legacy package is refused with `UnsupportedFormat` and nothing is written. That reader is P17.
+- Which callers refuse a legacy package with `UnsupportedFormat`, writing nothing: a backup restore (U127, `package/backup-triggers#T8`) always does, since its inspect (P12) reads only the latest format. A `.apkg` import reads the legacy formats from U120 on (P17, `package/apkg-import#I3`). A `.colpkg` import refuses them until U124 and imports them through P19 from then on.
 - Writer: the entry holds exactly the two bytes `08 03`.
 
 Examples: `08 03` is the latest format; `08 04` and the empty entry are `TooNew`; `08 83 80 80 80 10` (field 1 = 2^32 + 3) reads as 3, the latest format; `0a 01 33` (field 1 length-delimited) and `ff` (a truncated varint) are `Corrupt`.
@@ -139,6 +139,7 @@ Meguri's own limits (Anki 26.9.3 has none). Each is checked while reading; the r
 | decoded bytes of `media` | 64 MiB | `Corrupt` |
 | decoded bytes of `collection.anki21b` | 8 GiB | `Corrupt` |
 | decoded bytes of `collection.anki21b` and of `media`, each | the larger of 16 MiB and 1,000 times the entry's compressed size | `Corrupt` |
+| decoded bytes of one media payload in a deck package import | its declared size: the map's size (latest format, P5) or the member's uncompressed size in the zip directory (legacy, P17) | `Corrupt` (`package/apkg-import#I12.4`) |
 | decoded bytes of all entries read from one package | 16 GiB (U122 counts its media files in it) | `Corrupt` |
 | zstd window a frame may need | 2^27 bytes (the zstd library's default limit) | `Corrupt` |
 
@@ -231,7 +232,7 @@ Checks a collection package before a restore (U127), and later before a `.colpkg
 | Error | When |
 |---|---|
 | `TooNew` | the `meta` version is not 1, 2 or 3 (P3) |
-| `UnsupportedFormat` | a legacy package, until U120 (P17) |
+| `UnsupportedFormat` | a legacy package given to P12's inspect: always for a backup restore (U127); for a `.colpkg` import only before U124, which routes legacy packages to P19 (P3) |
 | `SchemaUnsupported{gate}` | the open gate refused the collection inside as `TooOld`, `TooNew` (version 12, 13 or above 18) or `V1Scheduler`; `gate` is that error, so the message can say which (U153) |
 | `Corrupt{detail}` | everything else that is wrong with the package: P2, P3, P4, P5, P8, the gate's `NotACollection`, `UpgradeFailed` and `Corrupt`, a failed integrity check; `detail` names the check for logs |
 | `InsufficientSpace{needed, available}` | P10 |
@@ -260,7 +261,7 @@ Checks a collection package before a restore (U127), and later before a `.colpkg
 | Inspect of the backup fixture: counts equal those of the `restore-backup` golden's `db_dump`, `ver_found` 18 | `core/crates/meguri-package/tests/collection_package.rs` |
 | Every refusal: no staging directory left, live collection and directory listing unchanged (SHA-256) | same file |
 | A stored 1 KiB `collection.anki21b` that decodes past 16 MiB: `Corrupt`, peak memory bounded, staging removed | same file |
-| Legacy package (no `meta`, or version 1 or 2): `UnsupportedFormat`, nothing written | same file |
+| Legacy package (no `meta`, or version 1 or 2) given to the restore inspect (P12): `UnsupportedFormat`, nothing written | same file |
 | Writer on a standalone file: inspects and restores to that file's rows | same file |
 | Writer during answers on the interactive lane: answers commit, the package passes the integrity check and holds every answer committed before the snapshot | same file |
 | Disk full during the write (failpoint): no destination file, temporary file removed, `DiskFull`; injected low space: `InsufficientSpace` before any write | same file |
@@ -338,6 +339,8 @@ Preflight each affected filesystem before writes. Add incoming media, simultaneo
 
 Use the existing single entry activation owner, long-operation slot and initial/Ready replacement paths. An active review still refuses replacement. Enter the exclusive phase and drain accepted work. Settle prior media stages against the old collection before closing it. Hold shared media-operation ownership so local media writes and jobs cannot interleave with this merge. Run scans and streams off the collection writer.
 
+The slot (`engine/lifecycle#L5`): the P16.1 inspection and its preview take no slot, like P12. The import job takes the slot when it starts, after the user confirms, and keeps the lease inside the job through its exclusive phase (`engine/jobs#J3`), so no FFI lease token exists for it. While another holder has the slot, the import's start returns `Busy{running_op}`. A start refused this way does not consume the inspection handle (P16.4), so the user can confirm again. A backup restore differs: its single job takes the slot before its inspect (`package/backup-triggers#T8` step 2).
+
 Take the real forced old-database backup after the drain (`package/backup-triggers` T6; `package/backups` B4). Keep its receipt through every outcome. No old database means no fabricated backup. Backup failure prevents media publication and database replacement.
 
 Check current destination files before publication. Reuse a file when its SHA-1 equals the incoming hash (R1627). For different bytes, apply the shared store's exact-name and trash operations (M6/M9/M10); do not choose a filename through M3. Write the incoming content under its supplied name. Save each replaced file in trash with its original name and durable identity. Leave other old media, prior trash entries and unused files intact. If the filesystem still reports a name collision, refuse before changing that name. A link or another nonregular entry must not be replaced. No foreign media index enters the imported state.
@@ -360,6 +363,19 @@ After the database rename, cancellation cannot report rollback. Finish the recor
 
 Entry progress must match that boundary (`engine/jobs` J5, `engine/op-model` O5). Use a cancellable named phase for preparation that writes reversible media or journal state; `Planning` describes only work before writes. Before database rename, cancellation keeps the rollback rule above; check its token at the last pre-rename boundary. Report `Committing` only after proof that the rename activated the candidate, including when later work fails with a candidate-active/recovery-required outcome. Deliver that phase change outside core and progress-sink locks, before the terminal result. A cancellation requested by its listener is past the cancel point: finish activation and required directory sync, or return the typed activated failure; never return `Cancelled` or claim the old generation remains active. Ordinary ops retain O5's existing boundary; entry does not move its rename boundary earlier.
 
+Stage names, in order, with the `cancellable` flag every progress report carries (as `maintenance/check-database` reports it; offer Cancel from the flag alone):
+
+| Call | Stage | Work | `cancellable` |
+|---|---|---|---|
+| inspect | `extracting` | the owned source copy and the collection member (P10, P16.1) | true |
+| inspect | `analysing` | the open gate, the integrity check, the map and every media payload streamed and checked (P16.1), the preview facts | true |
+| import | `Planning` | the guard rechecks and the admission work before any write | true |
+| import | `backup` | the forced backup after the drain (P16.2) | true |
+| import | `media` | the reversible preparation: the staged database checks, the R6 intent, media publication and trash moves, and the new journal (P16.3 steps 1 to 4); done and total count media files | true |
+| import | `Committing` | from the proof that the rename activated the candidate (P16.3 step 5) to the result | false |
+
+A stage with an unknown total is indeterminate. P19 uses the same stages.
+
 At reopen, reconcile R6 and these media actions before the ordinary staging sweep, collection open or media lookup. Proven old database means restore its media/journal view; proven candidate means finish its merge/journal activation. Use the recorded native identities or R6's durable activation witness when old and candidate database bytes are equal; byte hashes alone cannot select the media view. Missing/corrupt recovery data, conflicting identities or unprovable file contents block `Ready` and retain evidence. Never guess from equal timestamps or treat absent metadata as completion. Recovery is idempotent. Clear only completed operation ownership; do not sweep retained backup/media recovery data.
 
 ### P16.4 Facts, outcomes and checks
@@ -377,7 +393,7 @@ Until this entire path is implemented and verified, retain the explicit media-in
 | Entry progress and cancellation | Cancel from the last cancellable phase before rename: restore the old database/media/journal view and generation, or recorded absence. Cancel from the delivered `Committing` callback: activation has occurred, required completion and directory sync still run, and the result is success or a typed activated failure, never `Cancelled`. Cover a post-rename injected failure, retain backup/recovery facts, and verify callback delivery holds neither core nor progress-sink locks. |
 | Native chain | Mac, iPhone and iPad: Files/native import of generated media, rendered image/audio, accepted answer, relaunch without fixture reseed, native export with all media, then independent package comparison of saved reviews, media names and bytes. |
 
-Oracle scenarios (`specs/conformance/package-ops.md` E5): `conformance/scenarios/package/colpkg/media-merge` (the merge of P16.2 against Anki's import: a file with equal bytes kept, files with other bytes of the same or another length replaced by the package's, a removed file written again, an unrelated file kept, and a later collection-only import that changes no media file), `package/colpkg/oracle-made-import` (a live chain: the same merge read from packages Anki wrote, in both formats, so Meguri's reader meets Anki's zstd frames and map encoding) and `package/colpkg/refused-media-member` (a mapped member missing from the archive: `Corrupt`, nothing changed). They observe the folder, never the trash, which only Meguri fills (P16.2), and they avoid the cases of P16.5.
+Planned oracle scenarios (`specs/conformance/package-ops.md` E5). None of them, and no golden for them, exists in this checkout yet: the core suite pins the exact number of `package/` scenarios and requires each to load with its recorded golden, so they land with U124's import adapter. Until then U124's oracle verification of the merge, of the legacy size-only reuse and of the missing-member refusal is blocked on them; the fixture `package/variants/media-member-missing.colpkg` already exists. The scenarios: `conformance/scenarios/package/colpkg/media-merge` (the merge of P16.2 against Anki's import: a file with equal bytes kept, files with other bytes of the same or another length replaced by the package's, a removed file written again, an unrelated file kept, and a later collection-only import that changes no media file), `package/colpkg/oracle-made-import` (a live chain: the same merge read from packages Anki wrote, in both formats, so Meguri's reader meets Anki's zstd frames and map encoding) and `package/colpkg/refused-media-member` (a mapped member missing from the archive: `Corrupt`, nothing changed). They observe the folder, never the trash, which only Meguri fills (P16.2), and they avoid the cases of P16.5.
 
 Keep `package/file-export` E7.4 and `fixtures/synthetic-collections` F11.1 independent expected-source rules. Freeze the generated input and any declared pre-launch preparation before the app runs. Derive expected post-import stamps and accepted review facts from their existing contracts and recorded inputs. Never make the app's later state or decoded export its own expected baseline. Existing local focused, kill and native checks remain required; neither this addendum nor export proof closes full U124/U162 or any milestone.
 
@@ -387,8 +403,12 @@ Keep `package/file-export` E7.4 and `fixtures/synthetic-collections` F11.1 indep
 | Case | Anki 26.9.3 | Meguri | What keeps scenarios from seeing it |
 |---|---|---|---|
 | Reuse test, latest format | keeps a present file when the SHA-1 that its media database holds for the name equals the map's; the database learns of a change by a folder scan that compares modification times in whole seconds (the folder's first, then each file's), so a rewrite that leaves those times as the last scan recorded them goes unseen, and the folder's new bytes stay although they differ from the package's | hashes the file's current bytes (P16.2) | each `media_outside` step whose change the import must see comes after an `advance` (`conformance/package-ops#E2.2`, `conformance/media-ops#F12`) |
-| A mapped member missing or unreadable, in a map of several entries | writes files in map order and fails at that member, so the files before it may already be in the folder; the collection is not replaced | refuses at inspection, before any media write (P16.1) | `package/colpkg/refused-media-member` uses a one-entry map |
+| A mapped member missing or unreadable, in a map of several entries | writes files in map order and fails at that member, so the files before it may already be in the folder; the collection is not replaced | refuses at inspection, before any media write (P16.1) | the planned `package/colpkg/refused-media-member` uses a one-entry map |
 | A replaced file | overwritten; its old bytes are gone | kept in the trash (P16.2) | scenarios observe `media_dir`, never `media_trash` |
+| A payload whose decoded length or SHA-1 differs from its map record | never checks either: writes the decoded bytes under the name, unless the reuse test above keeps the present file | `Corrupt` at inspection (P16.1) | only a crafted package has such a payload; no fixture carries one |
+| A numbered member that no map record names, or a numeric member name with a leading zero | never opens it; the import goes on | `Corrupt` at inspection (P16.1; P19 keeps Anki's rule for legacy packages) | only a crafted package has one; no fixture carries one |
+| Two map records with the same name | handles each record in turn, so a later record's bytes can replace an earlier one's | `Corrupt` at inspection (P16.1) | only a crafted package has one; no fixture carries one |
+| Two incoming names that differ only in letter case | writes both; on a case-insensitive volume the later one replaces the earlier | refused at inspection, as conflicting case variants (P16.1, `media/media-files` M2, M6) | the oracle runs on a case-sensitive Linux volume, and package scenarios keep names distinct under NFC and case folding (`conformance/media-ops#F14.4` is for media scenarios only) |
 
 A scenario that shows one of these needs a `conformance/deviations.yaml` entry.
 
@@ -400,10 +420,10 @@ Added for U120. The reader of the legacy formats of P1 (legacy 1 and legacy 2), 
 - **Media map.** Entry `media`, method 0 or 8, not zstd, at most P8's 64 MiB. Its content is UTF-8 JSON: one object whose members map a zip member number, as a string, to a media file name.
   - Not valid UTF-8 or JSON, not an object, a member value that is not a string, or two members with the same key: `Corrupt` (Anki keeps the last of two equal keys).
   - A key is ASCII digits only, read as a decimal number (leading zeros allowed: `007` names member `7`, as in Anki); any other key is `Corrupt` (Anki also takes a leading `+`).
-  - A name that is empty, is `.` or `..`, or contains `/`: `Corrupt`. Any other name is kept as `text/media-filenames#F1` transforms it (Anki normalizes legacy names instead of refusing them, unlike P6); a name the transform leaves empty: `Corrupt`. Two members whose kept names are equal: `Corrupt` (Meguri; Anki keeps one).
+  - A name that is empty, is `.` or `..`, or contains `/`: `Corrupt`. Anki differs for a name whose only `/` characters come at its end or before `.` parts only (`x/`, `x//`, `x/.`, `x/./`): its safety check sees one plain path part, so it accepts the name, and its transform then drops each `/`, so it writes `x` (or `x._`, what F1 makes of `x.`). Meguri refuses them (Meguri; Anki normalizes them). No fixture or scenario carries one. Any other name is kept as `text/media-filenames#F1` transforms it (Anki normalizes legacy names instead of refusing them, unlike P6); a name the transform leaves empty: `Corrupt`. Two members whose kept names are equal: `Corrupt` (Meguri; Anki keeps one).
   - Entries are listed in ascending member number. They carry no size and no SHA-1: a reader that needs them hashes the payload.
   - No `media` entry: a map with no entry (as Anki).
-- **Media files.** The member named by the key's number in decimal without leading zeros; method 0 or 8; its content is the file's bytes, not zstd. Every decoded byte counts toward P8's 16 GiB. A missing or unreadable member is `Corrupt` when a reader needs its bytes (`package/apkg-import#I12.4`; U124 for collection packages); a member no reader needs is never opened.
+- **Media files.** The member named by the key's number in decimal without leading zeros; method 0 or 8; its content is the file's bytes, not zstd. Every decoded byte counts toward P8's 16 GiB. A deck package import reads a member at most to its uncompressed size in the zip directory; the next decoded byte is `Corrupt` (P8). A missing or unreadable member is `Corrupt` when a reader needs its bytes (`package/apkg-import#I12.4`; U124 for collection packages); a member no reader needs is never opened.
 - **Preflight.** P10's inspect row with E the collection member's uncompressed size from the zip directory, then the pre-upgrade row (the file is at schema 11).
 
 ## P18. Classifying a file (R1595, R1596)
@@ -441,8 +461,8 @@ Example: the folder holds `a.png` (4 bytes `FOUR`) and `b.png` (20 bytes); the p
 
 | What | Where |
 |---|---|
-| A legacy 2 package with media, exported with Support older Anki versions: upgraded on staging, the source's rows back, a same-length file kept, a resized file replaced, a removed file written, an unrelated file kept | `conformance/scenarios/package/colpkg/legacy-import` |
-| The same reuse rules against a legacy package Anki wrote (live chain) | `conformance/scenarios/package/colpkg/oracle-made-import` |
+| A legacy 2 package with media, exported with Support older Anki versions: upgraded on staging, the source's rows back, a same-length file kept, a resized file replaced, a removed file written, an unrelated file kept | `conformance/scenarios/package/colpkg/legacy-import` (planned, not yet written: P16.4) |
+| The same reuse rules against a legacy package Anki wrote (live chain) | `conformance/scenarios/package/colpkg/oracle-made-import` (planned, not yet written: P16.4) |
 | A missing member, an unreadable member, a member past P8's limits, a name P17 refuses: `Corrupt`, nothing changed; an unnamed numbered member never opened | `core/crates/meguri-package/tests/colpkg.rs` |
 | A schema-11 package upgraded and its `scm` set, the process killed right after the database rename: the reopened collection is schema 18 with the new `scm` (P16.3's recovery finishes the activation) | same file |
 | A legacy 1 package (`collection.anki2`, no `meta`) imports as a legacy 2 one | same file |

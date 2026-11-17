@@ -19,9 +19,11 @@ Progress: phase `notes`, completed = notes done, total = all notes (`maintenance
 
 Meguri keeps the `tags` rows as they are while it visits the notes. Each note's tags are stored and registered as `tags/tags#T4` says (N6.6), against the registry as it is at that moment. After the last note, every row that is neither a tag some note stores nor an ancestor of one is removed, by `tags/tags#T11`'s rule (steps 1 and 2). Kept rows keep `collapsed`, `config`, `usn` and spelling. Nothing is counted.
 
-So a parent row (`a` beside a note tagged `a::b`) and its expanded or collapsed state stay (R1642), and so does `config`.
+So a parent row (`a` beside a note tagged `a::b`) and its expanded or collapsed state stay (R1642), and so does `config`. A missing ancestor gets no row: a note tagged `p::q` with no row `p` leaves the table without `p`, and `tag_tree` shows `p` as an implicit parent (`tags/tags` T1, T13), as in Anki (scenario `tag-parent-not-added`).
 
-Anki empties the registry before the first note, registers each note's tags again as the notes are visited (new rows: `usn` -1, collapsed, no `config`; spellings from the rows registered so far), and afterwards marks expanded again only the rows that were expanded before and that a note still uses. Its result therefore loses parent-only rows with their state, every `config`, and every row's `usn`, and may respell a tag after the first note that uses it. Deviation `check-db-tags-keep-rows` (N9). Decided 2026-10-27: R1642 asks to keep collapse states and parent tags, and `tags/tags#T14` keeps `config`; Anki's rebuild keeps neither for parent-only rows.
+A note whose tag is spelled otherwise than a kept row (the row `FOO`, the note `foo`) takes the row's spelling by T4: its `tags` column is rewritten, without stamps (N6.6), so the respelling does not reach a sync until the note is next stamped.
+
+Anki empties the registry before the first note, registers each note's tags again as the notes are visited (new rows: `usn` -1, collapsed, no `config`; spellings from the rows registered so far), and afterwards marks expanded again only the rows that were expanded before and that a note still uses. Its result therefore loses parent-only rows with their state, every `config`, and every row's `usn`, and may respell a tag after the first note that uses it. In Anki the first note visited that uses a tag gives the new row its spelling, and later notes are respelled to it, also without stamps; so beside a row `FOO` whose notes all store `foo`, Anki's row becomes `foo` and the notes stay, while Meguri keeps `FOO` and respells the notes. Deviation `check-db-tags-keep-rows` (N9). Decided 2026-10-27: R1642 asks to keep collapse states and parent tags, and `tags/tags#T14` keeps `config`; Anki's rebuild keeps neither for parent-only rows.
 
 ## N3. Note types visited
 
@@ -51,7 +53,14 @@ For a note type of N1 whose `original_stock_kind` is 6 (Image Occlusion) and tha
 - `templates` rows are not touched;
 - no `notetypes/records` N4 normalization, no card requirement update, no `notetypes/validation` V3 check: the write cannot fail on a definition another client stored.
 
-Anki saves the note type through its unchecked save path, which also normalizes the names (`notetypes/records` N4) and writes every `fields` and `templates` row again, dropping unknown protobuf fields (deviation `notetype-unknown-fields-kept`, `notetypes/records` N3.2); on a note type whose stored names are already normalized the rows are the same. Decided 2026-10-27, data safety: the repair changes only the two field options it is about, and never renames a field or a template the user's templates may reference. Not a deviation entry: no scenario stores an Image Occlusion note type with names N4 would change.
+Anki saves the note type through its unchecked save path, which also recomputes what Meguri's direct write leaves as stored:
+
+- the names: `notetypes/records` N4's normalization, `"` removed from the note type's name, field and template names made valid and unique, the note type's name made unique;
+- the sort field index, moved to the position of the field that held it, or brought within range;
+- the card requirements (`reqs`), computed again from the templates;
+- the ordinals: every `fields` and `templates` row is written again numbered 0, 1, 2, ... in stored order, so ordinals with gaps are closed, and unknown protobuf fields are dropped (deviation `notetype-unknown-fields-kept`, `notetypes/records` N3.2).
+
+On a note type whose names are normalized and unique, whose sort index and requirements are current and whose ordinals have no gaps, the rows are the same. Decided 2026-10-27, data safety: the repair changes only the two field options it is about, and never renames a field or a template the user's templates may reference. Meguri's Check Database never renumbers ordinals, of this kind or any other; a note type stored with gaps keeps them until its next `notetypes/records` N3 save. Not a deviation entry: no scenario stores an Image Occlusion note type with names, a sort index, requirements or ordinals that Anki's save would change.
 
 - A field at positions 0 to 3 whose `prevent_deletion` is already true keeps its `tag`, even a missing one: only unprotected fields are tagged.
 - Position 4 (Comments) is never protected, so Anki finds it unprotected on every run and writes every such note type each time (`usn` -1, modification time now), also when nothing changes. Meguri writes it only when a field's config changes (`storage/ids-usn-mtime#S4`). Deviation `check-db-io-unchanged-skip` (N9).
@@ -75,7 +84,7 @@ Only for a standard note type (a cloze note type keeps every card, R1643; a card
 
 ### N6.4 Field count (R1643, R780)
 
-When the note's field count differs from the note type's (after N4, the recovered one's), the fields are repaired by `notes/note-records#F1`, the tag `db-check` is appended to the note's tags, and `field_counts` grows by one. Scenario `notes/fields/count-repair`.
+When the note's field count differs from the note type's (after N4, the recovered one's), the fields are repaired by `notes/note-records#F1`, the tag `db-check` is appended to the note's tags, and `field_counts` grows by one. Scenarios `notes/fields/count-repair` and, with N8's `scm`, `maintenance/check-db-notes/field-count-schema`.
 
 ### N6.5 Modification time in the future (R1644)
 
@@ -104,7 +113,7 @@ Each is a deviation entry in `conformance/deviations.yaml`, added with the scena
 
 | Id | Anki 26.09.3 | Meguri |
 |---|---|---|
-| `check-db-tags-keep-rows` | empties the tag registry and rebuilds it from the notes (N2) | keeps the rows, adds the notes' new tags, then removes only rows no note uses as a tag or an ancestor |
+| `check-db-tags-keep-rows` | empties the tag registry and rebuilds it from the notes (N2): a row takes the spelling of the first note that uses it | keeps the rows, adds the notes' new tags, then removes only rows no note uses as a tag or an ancestor; a note whose tag is spelled otherwise than its kept row is respelled to the row, without stamps (no golden shows this case) |
 | `check-db-tags-keep-rows-tree` | after the rebuild (N2) the registry has no row for the implicit parent `a`, and `tag_tree` shows `a` collapsed (`tag-rebuild`) | the kept row keeps `a`'s collapse state: expanded |
 | `check-db-io-unchanged-skip` | writes every Image Occlusion note type with notes on every run (N5) | writes it only when a field's config changes |
 | `check-db-recover-invalid-utf8` | stops with an error when the first note of a missing note type is not valid UTF-8 (N4) | counts the fields from the bytes and recovers |
@@ -125,7 +134,7 @@ N6.6 matches Anki: Anki writes every note, but a note whose row would not change
 
 ### N10.2 Recorded from these descriptions
 
-Every scenario below has its golden under `conformance/goldens/maintenance/check-db-notes/`, recorded at the current pin; N9's entries are in `conformance/deviations.yaml` (except `check-db-recover-invalid-utf8`, which no golden shows). They stay inactive until U129's adapter runs `check_db` with the notes stage; that change adds `check-db-notes/*` to `conformance/scenarios/maintenance/area.yaml`.
+Every scenario below has its golden under `conformance/goldens/maintenance/check-db-notes/`, recorded at the current pin; N9's entries are in `conformance/deviations.yaml` (except `check-db-recover-invalid-utf8`, which no golden shows). They stay inactive until U129's adapter runs `check_db` with the notes stage. That change adds `check-db-notes/*` to `conformance/scenarios/maintenance/area.yaml`, and it also takes over the three `check-db/` scenarios whose goldens include this stage's work (`card-ord`, `card-text-values`, `all-records`: N6.3's removal and N6.6's regenerated card), which U128's change leaves out of its by-name list: it replaces that list with `check-db/*`, or adds the three by name while `meguri-studied-handoff` cannot be active yet (`maintenance/check-database` C18.1).
 
 In `conformance/scenarios/maintenance/check-db-notes/`, with existing scenario ops only (`db_exec`, `check_db`, `add_note`, `set_tag_collapsed`, `ensure_io_notetype`, `reopen`, `advance`, setup; `io-field-tags` also `update_notetype`) and the observations `db_exec`, `notetype_structure`, `tag_tree` and `db_dump`. A scenario that recovers a note type (`recover-*`, `all-notes`) or creates a missing parent deck never observes `undo_status` (`maintenance/check-database` C14). Each damages rows by `db_exec`, sets `usn` 5 on them and advances 1 hour so stamps show, observes the rows and `SELECT mod, scm FROM col`, and ends with a second `check_db` that finds nothing.
 
@@ -148,6 +157,8 @@ Decided 2026-10-27: a scenario whose `db_exec` writes `notetypes`, `fields`, `te
 | `tag-states-kept` | notes that store tags `Alpha`, `Beta`, `Gamma` and `Gamma::Delta` (rows from their add: `usn` -1, collapsed, no `config`), `Alpha` and `Gamma` then expanded by `set_tag_collapsed` (`Gamma` is both stored on a note and the parent of `Gamma::Delta`), `Beta` and `Gamma::Delta` left collapsed, and an unused expanded row `Unused` with `usn` 5 inserted by `db_exec`: every used row keeps its `collapsed`, its `usn` -1 and its `config`, `Unused` is removed, `tag_tree` shows the same states, nothing is counted, `scm` unchanged. No deviation: each used row is a stored tag with `usn` -1 and no `config`, so Anki's rebuild (N2) gives it back unchanged, its expanded state included |
 | `no-card-note` | a note whose only card was deleted by `db_exec`, its note type's last deck (`_nt_<id>_lastDeck`) set to a second deck by `db_exec`: card 0 generated in that deck, at the counter's position, `nextPos` moved, not counted |
 | `all-notes` | every damage above with C18.2's card damage of `maintenance/check-database` in one collection, `future-ids-cards` left out: one report. The cards N6.6 generates take ids from `now_ms` up, which C10.4 would then need for a future card, and Anki stops on a taken id (C10.4). Also left out: `no-notetypes` (it deletes every note), `default-deck-missing` (Anki fails, below) and `io-field-tags`' damage (below); the tag rows are not observed (`tag-rebuild` shows them) |
+| `field-count-schema` | field counts the only damage: on a two-field note type, a note holding three fields and one holding one field repaired by `notes/note-records#F1` and tagged `db-check`, `mod` and `usn` kept, a third note untouched; `field_counts` 2 alone sets `scm` (N8, the plan's first U129 case); the new `db-check` row (`usn` -1, collapsed, no `config`) |
+| `tag-parent-not-added` | notes tagged `p::q` and `r::s::t` with no ancestor rows (N2): the `tags` table keeps only those two rows with their columns, `tag_tree` shows `p`, `r` and `r::s` as implicit parents, collapsed; nothing counted, `scm` unchanged; `col.mod` not read (deviation `check-db-no-change-keeps-mod`). No deviation: Anki's rebuild gives the same two rows |
 
 Recorded with the rejection `failed` of `conformance/collection-check` K10 on Anki's side, with no second `check_db`:
 

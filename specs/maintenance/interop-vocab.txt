@@ -75,6 +75,11 @@ mtime_secs
 guid
 set_config
 undo_status
+# The deck and note type record members the repairs decode or compute
+# (check-database.md C9.3, check-database-notes.md N5).
+common
+kind
+reqs
 # Check Media (check-media.md): the tag value it writes, the inline-image
 # data URL encoding, the note type key and the LaTeX environment it hashes.
 missing-media

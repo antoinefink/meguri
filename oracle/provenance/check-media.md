@@ -38,3 +38,12 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, wri
 | C5 and C20 scenario case/three-spellings (different-content case variants plus a third spelling with no exact file) | `rslib/src/media/check.rs` (tests module) | To learn that the harvested test pins how case-variant files with different content are deduplicated, and that a further spelling is reported missing on a case-sensitive folder. The outcome comes from the Linux oracle golden. |
 | Classification of the rows media_check, long-filename rename, inline images and case-insensitive unused check as covered by existing C22 scenarios | `rslib/src/media/check.rs` (tests module) | To match each test's obligation against the existing scenarios report/basic, rename/invalid-chars, rename/long-name, inline/extract and refs/case-insensitive. |
 | Check Media scenarios refs/several-tags, report/added-files, actions/trash-restore-check, actions/trash-empty-check (C6, C11, C16, C17) | `rslib/src/media/check.rs` (tests module: unicode_normalization, multiple_images), `rslib/src/media/service.rs` (tests module: media_check, restore_trash_check, empty_trash_check) | Which behaviors the harvested tests require: several image tags with alt before src in one field; the unused, missing and trash state of a check around trash, restore and empty; unused and missing for store-added files. Golden values come only from the oracle. |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| maintenance/check-media C8 and package/apkg-export A9.3 (scenario maintenance/check-media/latex/line-breaks) | `rslib/src/latex.rs`; `rslib/src/media/check.rs` | Checked that Check Media and export share the LaTeX extraction and naming (forms, line-break tags in verbose mode, svg or png extension) |
+| specs/maintenance/check-media.md C20 (rename row) and C22 (rename/long-name, rename/entities trash deviations) | `rslib/src/media/check.rs` | Confirmed that Anki's Check Media rename writes the normalized file and then permanently removes the old file. It never moves the old file to the trash, so trash_count stays 0 in the rename goldens. |

@@ -24,8 +24,9 @@ Meguri's editor page is Meguri's own: no Anki editor script, style or asset is u
 
 Decided 2026-10-27, for every editor spec: editor behaviour that the Python-library oracle cannot observe is specified from Anki 26.09.3 in this file's own words. Its goldens are observed by an oracle maintainer who runs Anki 26.09.3's own editor page inside a quarantined oracle image, as `stats/graphs-common` G12 decision 2 does for the graphs page. The page and its assets never leave that image; goldens hold observed values only; Meguri's tests and app never load any of it (R1960). This replaces the plan's U190 note that a spec writer records the editor goldens once by hand.
 
-- The page runs in the web engine of the pinned Anki desktop build (its QtWebEngine), because Return and space handling are that engine's defaults. Key presses reach it as native key events, never as script edits of the DOM. Each golden records the engine and its version.
-- Anki 26.09.3 has two editors, which save differently. Goldens come from its default editor, as `editor/paste` P1 follows: the experimental editor option off, and Edit Current and Add opened without Shift held (Shift opens the other editor). Each golden records that it did.
+- The page runs in the web engine of the pinned Anki desktop build (its QtWebEngine), because Return and space handling are that engine's defaults. Key presses reach it as native key events, never as script edits of the DOM.
+- Anki 26.09.3 has two editors, which save differently. Goldens come from its default editor, as `editor/paste` P1 follows: the experimental editor option off, and Edit Current and Add opened without Shift held (Shift opens the other editor).
+- How a golden carries this. As for the graphs page (`oracle/graphs-page/`), goldens are written only by `tools/mg oracle record`, which routes the editor scenarios to the quarantined image. They are ordinary goldens of `conformance/schema/golden.schema.json`, with no extra marker: the observation kind that drives the page returns, beside the probe's values, the engine's name and version and the editor variant used (default editor, no Shift), and the golden's `oracle` member pins the base lock and the driver (`lock_sha256`, `driver_sha256`, the driver covering the page runner). The desktop package's own lock is pinned as the graphs page's is, by the rule or golden member that `oracle/graphs-page/README.md` asks for. The kind and its image are the oracle maintainer's to add.
 - Goldens are authoritative for the markup that keystrokes produce (H4, H5). Every other rule in this file is normative as written, and a golden that contradicts one is a finding against this file.
 - Automated Meguri tests compare Meguri's runtime, in WKWebView on macOS and the iOS simulator, only with these goldens and with this file.
 
@@ -81,6 +82,16 @@ Where WebKit's serializer and the pinned engine's write a scenario's input diffe
 
 - In rich mode, Return starts a new line as a new block (the pinned engine's line element is `div`) and Shift-Return inserts a `<br>` line break, both at the caret, after replacing a non-empty selection. In a list item, Return starts a new item, and Return in an empty last item leaves the list.
 - The exact markup is what the goldens of T1's Return group record. Meguri's runtime handles the paragraph and line-break inputs (`beforeinput` with `insertParagraph` and `insertLineBreak`) itself instead of WebKit's default, and for each scenario its H3 result must equal the golden byte for byte. Its rule for cases no scenario covers is the general rule those goldens show; a later golden that contradicts the rule changes the rule.
+- Provisional until T1's goldens land; a golden overrides any row. No T1 golden is recorded yet (T1), so until then Meguri's runtime and tests take these H3 results, derived from the first bullet, H1 step 2 and H3:
+
+  | T1 row | Front stored | Expected H3 result |
+  |---|---|---|
+  | `return-end` | `abc` | `abc<div>d</div>`: the first line stays bare, the new line is a `div` |
+  | `return-end-no-text` | `abc` | `abc<div><br></div>` (the content is not inline-only, so H3 step 1 keeps the `<br>`) |
+  | `shift-return-end` | `abc` | `abc<br>d`: the line break goes before H1's appended `<br>`, which H3 step 1 then drops |
+  | `shift-return-end-no-text` | `abc` | `abc<br>`: two `<br>` elements in the page, the final one dropped by H3 step 1 |
+
+  The empty and trailing break group needs no such table: H1 step 2 and H3 steps 1 and 5 decide it.
 - Return never inserts a line feed character into rich content.
 - In HTML mode, Return and Shift-Return insert one line feed (U+000A) into the text.
 - Add shortcuts (⌘Return, U195) never insert anything.
@@ -88,6 +99,7 @@ Where WebKit's serializer and the pinned engine's write a scenario's input diffe
 ## H5. Spaces
 
 - In rich mode, a typed space that HTML would collapse or hide (at the start or end of a line, or next to another space) is held as U+00A0, so H3 writes it as `&nbsp;`. The pinned engine rebalances a run of spaces while the user types: a trailing U+00A0 becomes an ordinary space once a character is typed after it, and a run alternates the two. The goldens of T1's space group give the exact patterns; Meguri's runtime reproduces them.
+- Provisional until T1's space goldens land; a golden overrides any row. `space-between` gives `a b`, `space-trailing` `a&nbsp;`, and `space-leading` `&nbsp;a`. For runs of two or more spaces between characters (`space-double`, `space-triple`) no pattern is fixed before the golden: Meguri's runtime leaves typed spaces to WebKit's own editing, which shares the pinned engine's rebalancing of whitespace, and its tests check only that the run holds as many U+00A0 and space characters together as were typed, at least one U+00A0, and no two ordinary spaces in a row.
 - In HTML mode, a space is an ordinary space.
 - U+00A0 characters and `&nbsp;` that were already in a changed field are written `&nbsp;`; in an unchanged field they stay as stored.
 
@@ -273,7 +285,7 @@ U192 adds the command messages and U194 the insertion messages. A content change
 
 ## T1. Scenarios for the oracle maintainer
 
-Requested in `conformance/scenarios/editor/field-html/`, with goldens in `conformance/goldens/editor/field-html/` marked `source: observed`. None of the rows below is written or recorded yet: no runner step and no oracle driver op drives an editor page today. The scenarios that observe this file's core half with existing ops are listed in T3. The oracle maintainer builds the quarantined image (E2) and the scenario vocabulary from this list.
+Requested in `conformance/scenarios/editor/field-html/`, with goldens in `conformance/goldens/editor/field-html/` recorded in the quarantined editor-page image as E2 says. None of the rows below is written or recorded yet: no runner step and no oracle driver op drives an editor page today. The scenarios that observe this file's core half with existing ops are listed in T3. The oracle maintainer builds the quarantined image (E2) and the scenario vocabulary from this list.
 
 **Setup.** One note type `Pair` defined by the scenario (R1959), standard, fields `Front` and `Back`, empty CSS, field options as each row says (default: N5.2's). `closeHTMLTags` is `false` in every scenario, so typed tags are not completed (U192). One note, with the stored fields given; `Back` is empty unless given. Every probe reads the note's `flds` bytes and whether `mod` or `usn` changed since setup.
 

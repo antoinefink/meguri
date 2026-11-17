@@ -26,3 +26,13 @@ and `render/preview/fill-empty-cards`.
 | preview V13, V14 | none at the tag | Meguri's own design (plan U71, U190, U195, U202; R1835's share and the timing fixture) |
 | preview V16, V17 | none at the tag | scenario index and plan alignment (plan U71, U202) |
 | render-ops Q1.2-Q1.4 (`fill_empty`, step 0) | `rslib/src/notetype/render.rs`, `rslib/src/card_rendering/service.rs`, `proto/anki/card_rendering.proto` | the uncommitted render's fill flag fills the note copy it is sent before the field map is built, from the question template only, only when that template has no structural error, and never writes the stored note |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| render/preview#V12 (reviewExtra on the preview page) | `qt/aqt/clayout.py`, `qt/aqt/browser/previewer.py`, `qt/aqt/reviewer.py` | Both preview pages are built from the reviewer's page HTML, which appends the collection's reviewExtra after #qa |
+| render/preview#V6, V7, V16; conformance/render-ops#Q3 (fill-empty re-check) | `rslib/src/notetype/render.rs`, `ftl/core/card-templates.ftl` | Fill only when the question template parses, sample for the question's cloze references, '(name)' otherwise; the exact English sample text |
+| render/preview#V5 rule 2 (open question, not changed) | none newly read (finding cites `qt/aqt/models.py`) | Confirmed no recorded owner decision; no spec change |

@@ -1,0 +1,85 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-03-28T21:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "studied_today_raw": {
+          "cards": 2,
+          "time_ms": 12000
+        },
+        "studied_today_text": "Studied 2 cards in 12 seconds today (6s/card)",
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1774746000,
+          "now": 1774728000,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "studied_today_raw": {
+          "cards": 3,
+          "time_ms": 15000
+        },
+        "studied_today_text": "Studied 3 cards in 15 seconds today (5s/card)",
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1774746000,
+          "now": 1774744200,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "studied_today_raw": {
+          "cards": 3,
+          "time_ms": 15000
+        },
+        "studied_today_text": "Studied 3 cards in 15 seconds today (5s/card)",
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1774746000,
+          "now": 1774745999,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "studied_today_raw": {
+          "cards": 1,
+          "time_ms": 3000
+        },
+        "studied_today_text": "Studied 1 card in 3 seconds today (3s/card)",
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1774828800,
+          "now": 1774746000,
+          "utc_offset_secs": 7200
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/widget/day-start-spring-forward-r2-early-row",
+  "scenario_sha256": "e4c014d63d3796173a149cc6f36b2f2b0c58be9b30577d768f041597060498ac",
+  "tz": "Europe/Paris"
+}

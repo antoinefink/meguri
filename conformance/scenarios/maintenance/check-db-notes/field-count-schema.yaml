@@ -1,0 +1,29 @@
+# N6.4 and N8 of specs/maintenance/check-database-notes.md: field counts are
+# the only damage. On a two-field note type, a note holding three fields and
+# one holding one field are repaired by specs/notes/note-records.md F1 and
+# tagged db-check, without stamps (mod and usn kept); a third note is right
+# and stays as it is. field_counts 2 alone sets scm (and col's mod). The new
+# tag gets its row. A second run finds nothing.
+id: maintenance/check-db-notes/field-count-schema
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: [longer, b]}
+    - {notetype: Pair, deck: Inbox, fields: [shorter, b]}
+    - {notetype: Pair, deck: Inbox, fields: [right, b]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET flds = 'longer' || char(31) || 'b' || char(31) || 'c' WHERE sfld = 'longer'"}
+  - db_exec: {sql: "UPDATE notes SET flds = 'shorter' WHERE sfld = 'shorter'"}
+  - db_exec: {sql: "UPDATE notes SET usn = 5"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT sfld, flds, tags, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT tag, usn, collapsed, config FROM tags ORDER BY tag"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

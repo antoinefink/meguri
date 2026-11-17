@@ -68,3 +68,12 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, wri
 |---|---|---|
 | notes/empty-cards E1/E2/E7 scenarios cardgen/empty/after-template-change and cardgen/empty/special-front-edit | `pylib/tests/test_cards.py` | Which behaviors the two tests check: cards created when a template is added, a card left empty after a front edit and removed by Empty Cards, regeneration after a field edit, and a special-name section on an edited front counted by the Empty Cards scan. Golden values come from the oracle. |
 | needs-op classification of hf580907ab941 (single note type of a selection, notetypes/change-notetype M4) | `rslib/src/notes/service.rs`, `rslib/src/notetype/mod.rs`, `pylib/anki/models.py`, `qt/aqt/changenotetype.py` | Which Anki request decides the single note type of a selection and its refusals, to show that the driver's change_notetype_info check restates it in SQL instead of calling it. |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| change-notetype M7 (screen unchanged test with an absent template map), M9 step 3 (field copy for repeated entries, normalization without NFC) | `ts/routes/change-notetype/lib.ts` (unchanged, templates init, save); `rslib/src/notetype/notetypechange.rs` (update_notes_for_new_notetype_and_generate_cards, remap_fields); `rslib/src/notes/mod.rs` (prepare_for_update, normalize_field, invalid_char_for_field) | verifying U35 F1/F2 and U203 F2/F3 |
+| conformance/empty-cards-ops#Y5 (empty_cards_labels: report heading and line format, stripping of the note type name and the joined labels, cloze and missing-template wording) and notes/empty-cards#E2 label paragraph | `rslib/src/notetype/emptycards.rs`, `rslib/src/text.rs`, `ftl/core/empty-cards.ftl`, `ftl/core/notetypes.ftl`, `proto/anki/card_rendering.proto`, `pylib/anki/collection.py` | Checked F1 against the pin. The report heading and line format, and the literal delimiters the oracle splits on. strip_html decodes entities (and turns U+00A0 into a space), and the report inserts the decoded text without escaping it again. Cloze labels use the localized Cloze name and the missing-template fallback 'Card N', the basis for null labels under R1887. EmptyCardsReport exposes the raw `report` string to pylib. |

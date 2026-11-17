@@ -34,3 +34,11 @@ Probes (scripts in the session scratchpad, not kept):
   returns busy (1) and the file keeps 82 MB until the reader ends, after which
   it shrinks to 41 MB; an interrupt during `VACUUM` gives `interrupted`, the
   free page count unchanged, no open transaction, `quick_check` `ok`.
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| maintenance/optimize-integrity#M4 (new-profile last-optimize default) | `qt/aqt/profiles.py` (profile defaults, create, corrupt-profile reset); `qt/aqt/main.py` (automatic optimize check) | F8: confirm that the default last-optimize time is computed once per process and copied into every created or reset profile, and that the 14-day check compares against it |

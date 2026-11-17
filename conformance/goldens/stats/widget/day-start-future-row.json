@@ -1,0 +1,65 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "studied_today_raw": {
+          "cards": 2,
+          "time_ms": 12000
+        },
+        "studied_today_text": "Studied 2 cards in 12 seconds today (6s/card)",
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1791856800,
+          "now": 1791799200,
+          "utc_offset_secs": 7200
+        }
+      },
+      {},
+      {
+        "studied_today_raw": {
+          "cards": 1,
+          "time_ms": 9000
+        },
+        "studied_today_text": "Studied 1 card in 9 seconds today (9s/card)",
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1791943200,
+          "now": 1791856800,
+          "utc_offset_secs": 7200
+        }
+      },
+      {},
+      {
+        "studied_today_raw": {
+          "cards": 0,
+          "time_ms": 0
+        },
+        "studied_today_text": "Studied 0 cards in 0 seconds today (0s/card)",
+        "timing": {
+          "days_elapsed": 2,
+          "next_day_at": 1792029600,
+          "now": 1791943200,
+          "utc_offset_secs": 7200
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/widget/day-start-future-row",
+  "scenario_sha256": "6a85c9df20a4bb6c2fa207e97e8209121a468331e70634cc9c26f04118650330",
+  "tz": "Europe/Paris"
+}

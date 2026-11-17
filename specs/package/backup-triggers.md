@@ -78,7 +78,7 @@ Notes on the deadline:
 - Later commits never move an armed deadline.
 - **Re-evaluated** (the deadline computed again, armed, moved or cleared) when any backup of the live collection ends, when the deadline fires, and when the exclusive phase ends.
 - **Cleared** when no change is pending any more (a backup of any kind recorded the current `col.mod`, or an undo put `col.mod` back to the reference), and when the collection closes, fails or enters the exclusive phase.
-- Each change of the armed deadline (armed, moved, cleared) publishes one `MaintenanceDeadline{at}` event, with `at` absent when cleared. A re-evaluation that leaves it where it was publishes nothing. `run_due_maintenance` returns the deadline as it stands when the call ends.
+- Each change of the armed deadline (armed, moved, cleared) publishes one `MaintenanceDeadline{at}` event on the change stream (`engine/change-stream` S3), with no `cause_seq`. `at` is the deadline in epoch milliseconds on the host's clock (the clock of `engine/host#H1`'s configuration), absent when cleared. A re-evaluation that leaves it where it was publishes nothing. `run_due_maintenance` returns the deadline as it stands when the call ends.
 
 ### T3.4 Triggers
 
@@ -91,6 +91,7 @@ Notes on the deadline:
 | `BackgroundProcessing` | nothing for backups |
 
 - `run_due_maintenance` returns once the backup it started has ended (published, failed or cancelled).
+- **The call.** `run_due_maintenance` is a blocking call that Swift makes off the main thread; it is not a job and takes no cancel token. Only `suspend` cancels the backup it runs (below) and the quick check it runs (`maintenance/optimize-integrity` M5). In any state other than Ready it starts nothing, returns no deadline (T3.3 cleared it) and no error. It returns nothing besides the deadline: a quick check's verdict reaches Swift as a `Lifecycle` event and through the status record (`maintenance/optimize-integrity` M10), and a periodic backup's failure is only logged (below).
 - **States.** Periodic backups run only in Ready: never in ExclusiveBusy (the restore, import or one-way sync takes its own safety backup), Failed (Anki makes no close backup of a collection that fails its quick check), NoCollection, Opening or Upgrading. A periodic backup that is running when an exclusive phase starts ends before the swap: it holds the maintenance reader, which `engine/lifecycle#L8` waits for.
 - **Failure.** Logged with the error's name, never shown as a modal (R1848). It counts as an attempt; the change stays pending and the deadline is re-armed by T3.2. U132's status keeps showing the last backup that succeeded.
 - **Suspend.** The scheduler is a `SuspendParticipant` (U32): `flush` does nothing; `suspend` cancels a running periodic backup (`package/backups#B4`: nothing published, the change stays pending) and keeps the armed deadline; `resume` does nothing (U154's timer fires late when the deadline passed meanwhile).
@@ -126,7 +127,7 @@ Anki's desktop makes a forced backup (interval ignored, T2.1 still applied, the 
 | restore | T8 | always | no |
 | `.colpkg` import | U124 | always | yes |
 | Check Database | U128 | always | yes |
-| Empty Cards deletion | U131 | when its list of cards is not empty | no |
+| Empty Cards deletion | U35 (gives the op its safety class, `notes/empty-cards#E6`), U131 (the flow that submits the op) | when its list of cards is not empty | no |
 | Delete Unused media | U130 | when it deletes at least one file | no |
 | deleting decks | U28 | when the deletion removes at least one card (U28 decides which cards a deletion removes; a filtered deck's deletion removes none) | no |
 | deleting a note type | U34 | always | no |
@@ -182,8 +183,9 @@ A safety backup becomes a byte copy when the lifecycle is `Failed` (`Corrupt`, o
 8. **Replace**: the verified replace with reason `Restore` (`engine/collection-replace#R2` to `#R5`): the open gate and integrity check again, `scm` and `mod` stamped (R7), the replacement intent and publication fence recorded (R6.2), the swap, `CollectionReplaced`.
 9. **Result**: the restored name, safety backup name (or none), new generation and `cloudPublicationPending` true. R6 preserves the publication fence until U113/U114 resolve an explicit cloud/local choice. Manual Anki transfers remain separate.
 
+- **Progress stages**, in order: `preflight` (step 3), `inspect` (step 4), `drain` (step 6), `backup` (step 7) and `replace` (step 8). Every report carries `cancellable`: true until the rename of `engine/collection-replace#R5`, false from it on; the stage stays `replace`.
 - **Cancel or failure before the rename**: the lifecycle returns to the state it had (Ready, or `Failed`) with the same generation; publication recovery follows `engine/collection-replace#R6`; the safety backup stays.
-- **States**: allowed from Ready, from `Failed{Corrupt}` (`engine/lifecycle#L4`) and from NoCollection. No existing collection file means no safety backup; an existing file requires T7. A retained nonempty old WAL uses `engine/collection-replace#R6.5`, without weakening `LiveWalNotEmpty`.
+- **States**: allowed from Ready, from `Failed` whatever its reason (`Corrupt`, `engine/lifecycle#L4`, or a failed open) and from NoCollection, as `engine/lifecycle#L5` admits a replacement op and as T7.1 and `engine/collection-replace#R6.5` assume. In Opening, Upgrading and ExclusiveBusy the restore is refused with `CollectionUnavailable{reason}` before step 2. It uses the collection and backups directories the host was configured with (`engine/host#H1`, `package/backups#B1`); with no host, restore is not available and Swift opens a host first. No existing collection file means no safety backup; an existing file requires T7. A retained nonempty old WAL uses `engine/collection-replace#R6.5`, without weakening `LiveWalNotEmpty`.
 - After it, the restored collection's `col.mod` (the restore instant) differs from the reference, so the scheduler arms a deadline (T3.3) from the safety backup's creation time.
 - Anki, for comparison: its restore is its `.colpkg` import (the same stamps, `engine/collection-replace#R7`), with no forced backup first and automatic sync off until the restored profile closes (T4.1).
 
@@ -195,9 +197,9 @@ A safety backup becomes a byte copy when the lifecycle is `Failed` (`Corrupt`, o
 | `SessionActive` | T8 steps 5 and 6 |
 | `Busy{running_op}` | T8 step 2 |
 | `InvalidArgument` | T8 step 1 |
-| `CollectionUnavailable`, `CollectionCorrupt` | T5 |
+| `CollectionUnavailable`, `CollectionCorrupt` | T5; `CollectionUnavailable` also in T8 (States, and step 8 below) |
 
-The errors of `package/backups#B4`, `package/container#P13`, `engine/collection-replace#R9` and `engine/lifecycle` pass through unchanged. U133a maps them to its FFI error set.
+The errors of `package/backups#B4`, `package/container#P13` and `engine/lifecycle` pass through unchanged. T8 step 8 reports `engine/collection-replace#R9`'s errors as P13's kinds: `StagingRefused{gate}` as `SchemaUnsupported{gate}` when `gate` is `TooOld`, `TooNew` or `V1Scheduler`, else as `Corrupt{detail}`; `StagingCorrupt` as `Corrupt{detail}`, so `maintenance/optimize-integrity#M7.1` treats a file refused at step 8 as one refused at step 4; `NotExclusive`, `CrossDevice`, `StagingNotFinalised`, `CallerChangeFailed{source}` and `LiveWalNotEmpty` as `Io`, with the R9 name logged. `StaleGeneration` (`engine/lifecycle#L5`: another collection was opened meanwhile) is reported as `CollectionUnavailable{reason}`, as a close that freed the slot is (L5); nothing was replaced. U133a maps these kinds to its FFI error set.
 
 ## T10. Scenarios and tests
 

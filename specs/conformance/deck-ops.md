@@ -47,7 +47,7 @@ The scenario ops (`dsl.md` D7.2) and observation kinds (`observations.md` O4) th
 ## K6. `set_deck_collapsed`
 
 - **Argument** `{decks: [<name>, ...], scope, collapsed}`: at least one deck; `scope` is `study` or `browser`; `collapsed` a boolean.
-- **Effect** `decks/decks#D10` with the decks in order. The oracle runs Anki's collapse once per deck; Meguri runs one operation for the list. The rows they leave are the same.
+- **Effect** `decks/decks#D10` in `scope`, with one entry per listed deck, in order, each with the state `collapsed` gives. The oracle runs Anki's collapse once per deck; Meguri runs one operation for the list. The rows they leave are the same.
 - **Output** none (`{}`).
 - Scenarios never observe the undo status after this op: Anki records no step, Meguri records "Expand/Collapse" (`decks/decks#D15.3`).
 

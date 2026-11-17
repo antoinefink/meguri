@@ -1,0 +1,36 @@
+# stats/graphs-cards C13 (C1, C3.2, C10) tz-matrix (R1446), Europe/Paris with a collection created in
+# America/Los_Angeles (crt and creationOffset of 2026-10-10 04:00 -07:00).
+# N 1791856800, now_s 1791799200, today 2. Learning cards due N + 1,800 s, N - 1,800 s,
+# N - 86,401 s and N + 86,400 s, with ids N, N - 86,400 s, N - 86,399 s and
+# N - 172,800 s (+1 ms); a review card due today + 1 (ivl 3, s 5, d 5, lrt one
+# day back) and one due today (ivl 21, s 10, d 3, no lrt); two more learning
+# cards due 1791856799 and 1791684000 s, ids 1791856799999 and 1791770399999. Every card graph
+# part in Collection and Deck scope. Expected: the oracle's graph data.
+id: stats/graphs/future-due/tz-matrix/other-creation-zone
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4, "creationOffset": 420}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n7", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n8", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE col SET crt = 1791630000"}}
+  - {"reopen": {}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1791858600, id = 1791856800000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n1')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1791855000, id = 1791770400000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n2')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1791770399, id = 1791770401000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n3')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1791943200, id = 1791684000001 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n4')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 3, due = 3, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":1791712800}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n5')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 21, due = 2, data = '{\"s\":10.0,\"d\":3.0}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n6')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1791856799, id = 1791856799999 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n7')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 1, queue = 1, due = 1791684000, id = 1791770399999 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n8')"}}
+  - {"observe": ["timing", {"stats": [{"scope": "collection", "history": "year", "parts": ["future_due", "card_counts", "intervals", "stability", "difficulty", "retrievability", "added"]}, {"scope": {"deck": "Lang"}, "history": "year", "parts": ["future_due", "card_counts", "intervals", "stability", "difficulty", "retrievability", "added"]}]}]}

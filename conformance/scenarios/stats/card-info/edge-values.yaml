@@ -1,0 +1,32 @@
+# stats/card-info C14.1 (C3.1, C3.3, C3.5 step 2, C6.1): raw values at their
+# edges, on review cards whose data each has an lrt (nothing is written back,
+# C13.4):
+#   c1: stored state with an lrt 100 s after now (a device whose clock runs
+#       fast): the elapsed time wraps to 4,294,967,196 s, retrievability near 0;
+#   c2: pos 3,000,000,000: due_position wraps to a negative value;
+#   c3: odue 4 with odid 0 and due -5: the due instant comes from odue;
+#   c4: odid equal to did: no original_deck;
+#   c5: review-log rows with ivl and lastIvl 30,000 days, and a Manual row
+#       with ivl and lastIvl -2,147,483,648: interval seconds saturate at
+#       2,147,483,647.
+id: stats/card-info/edge-values
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {"fsrs": true, "loadBalancerEnabled": false, "rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["e1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["e2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["e3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["e4", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["e5", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 5, factor = 2500, reps = 3, data = '{\"s\":10.0,\"d\":5.0,\"lrt\":1894698100}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 5, factor = 2500, reps = 3, data = '{\"pos\":3000000000,\"lrt\":1894179600}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = -5, odue = 4, odid = 0, factor = 2500, reps = 3, data = '{\"lrt\":1894179600}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 5, odid = did, factor = 2500, reps = 3, data = '{\"lrt\":1894179600}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 30000, due = 5, factor = 2500, reps = 3, data = '{\"s\":10.0,\"d\":5.0,\"lrt\":1893920400}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1892970000000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4), -1, 3, 1, -600, 2500, 3000, 0), (1893229200000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4), -1, 3, 30000, 1, 2500, 3000, 1), (1893920400000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4), -1, 3, 30000, 30000, 2500, 3000, 1), (1894179600000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4), -1, 0, -2147483648, -2147483648, 2500, 0, 4)"}}
+  - {"observe": [{"card_stats": ["#c1", "#c2", "#c3", "#c4", "#c5"]}]}

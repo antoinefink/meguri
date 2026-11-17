@@ -150,7 +150,9 @@ Count: one per deck created, in `decks_missing`. Scenario `maintenance/check-db/
 
 Every card with `odid` above 0 whose `did` names a normal deck gets `odid` 0 and `odue` 0. Its other columns stay, `mod`, `usn` and `data` included (`data` byte for byte). Each such card is counted in `card_properties`. A card whose `did` names a filtered deck is left alone, whatever its `odid` names, also an `odid` that names no deck: C9.2 creates decks for missing `did`s only (scenario `maintenance/check-db/filtered-deck-kept`).
 
-Meguri reads only the cards' `id`, `did`, `odid` and `odue` here. Anki reads every column of each card it changes and stops the run, changing nothing, when one is out of its stored range (for example a negative `reps`); Meguri goes on and leaves those columns. Anki also writes the card's `data` back in its own canonical form: keys it does not know are dropped, a value that is not a JSON object becomes `{}`, `s` without `d` is dropped, and `s`, `d`, `dr` and `decay` are rounded to 4, 3, 2 and 3 decimal places. Decided 2026-10-27, data safety: Meguri keeps `data` as stored, since this repair is about `odid` and `odue` only. Both are deviation `check-db-lrt-reads-needed-columns` (C8.7, C17).
+Before it looks at a card, the step reads and decodes every deck record (`decks/decks`), as Anki does, whether or not a card is in that deck. A deck whose `common` or `kind` cannot be decoded fails the op at the cards stage (C13), on both sides (scenario `maintenance/check-db/undecodable-deck`).
+
+Of the cards, Meguri reads only `id`, `did`, `odid` and `odue` here. Anki reads every column of each card it changes and stops the run, changing nothing, when one is out of its stored range (for example a negative `reps`); Meguri goes on and leaves those columns. Anki also writes the card's `data` back in its own canonical form: keys it does not know are dropped, a value that is not a JSON object becomes `{}`, `s` without `d` is dropped, and `s`, `d`, `dr` and `decay` are rounded to 4, 3, 2 and 3 decimal places. Decided 2026-10-27, data safety: Meguri keeps `data` as stored, since this repair is about `odid` and `odue` only. Both are deviation `check-db-lrt-reads-needed-columns` (C8.7, C17).
 
 ## C10. History stage
 
@@ -182,7 +184,7 @@ D3's two refusals do not apply here. When the parent's nearest existing ancestor
 
 ### C10.3 Next new-card position (R1642)
 
-The config key `nextPos` becomes the largest `due` of the cards with `type` 0 (any queue) plus 1, or 0 when there is no such card or that value is negative. It is written as a config value (`storage/config-table`, local stamps) only when it differs from the stored one. Not counted.
+The config key `nextPos` becomes the largest `due` of the cards with `type` 0 (any queue) plus 1, or 0 when there is no such card or that value is negative. It is written as a config value only when it differs from the stored one, by `storage/config-table` C4's rule: the new value is an integer, so a stored float (`4.0`), a string (`"4"`) or a missing key is a change and gets the integer's compact form (`4`) with local stamps; a stored `4` is not, and neither is a stored integer with other spacing (` 4`), which keeps its bytes (Anki rewrites it, C4's deviation `config-same-value-other-bytes`; no Check Database scenario stores such a value). Not counted.
 
 ### C10.4 Ids in the future (R1643)
 
@@ -229,7 +231,7 @@ The job's result on success:
 
 - A repair fails when a row it must read cannot be decoded (`model/row-records`' typed error, naming the table, column and key: an unreadable deck or note type record, a note whose `guid` or other text is not valid UTF-8 beyond `flds`, `tags` and `sfld`, which `maintenance/check-database-notes` N6.1 repairs, or a note whose `guid`, `flds` or `tags` is stored as a blob, N6.1) or a statement fails (`SQLITE_FULL`, `SQLITE_IOERR`). The `check_database` op rolls back as a whole, so nothing of it is committed, and the job ends with `CheckFailed{stage, cause}`, `stage` being `cards`, `notes` or `history`. Anki also stops at such a row and changes nothing. No later run gets past such a row; the remedies are restore and the iCloud replace (`maintenance/optimize-integrity` M7.1). The safety backup stays.
 - A process killed during the repair op leaves the last committed file: the transaction is not in it.
-- U133a maps these to its FFI error set.
+- U133 maps these to the FFI error set that U133a defines.
 
 ## C14. After the commit
 
@@ -283,11 +285,17 @@ Not deviations, since no scenario can show them: the order of backup and integri
 | `maintenance/check-db/future-ids` | C10.4: one id two days ahead re-keyed to `now_ms`, one exactly a day ahead kept |
 | `sched/memory/lrt-repair` | C8.7 in full (`sched/memory-state#M6`) |
 
-These and every scenario of C18.2 have goldens recorded at the current pin under `conformance/goldens/maintenance/check-db/`. They stay inactive until U128's `check_db` adapter runs the op: the change that lands it adds `check-db/*` to `conformance/scenarios/maintenance/area.yaml` (which already lists `optimize/*`). That pattern also makes C18.4's live `meguri-studied-handoff` active, which T1 then requires; if Meguri's executor does not yet declare what that scenario's first segment uses (FSRS answers, `forget`, `suspend`, `edit_note`, `delete_notes`, `handoff`; `conformance/dsl` D9.2), the change lists the other `check-db/` scenarios by name instead and the pattern comes when those capabilities do. C17's four entries are already in `conformance/deviations.yaml` with the scenarios that show them.
+These and every scenario of C18.2 have goldens recorded at the current pin under `conformance/goldens/maintenance/check-db/`. They stay inactive until U128's `check_db` adapter runs the op. C17's four entries are already in `conformance/deviations.yaml` with the scenarios that show them.
+
+Activation is split between U128 and U129, because three goldens include the notes stage's work: `card-ord`, `card-text-values` and `all-records` count `cards_without_template` (`maintenance/check-database-notes` N6.3) and show the `ord` 0 card N6.6 generates again. Every other `check-db/` golden shows no notes-stage effect.
+
+- U128's adapter change adds the `check-db/` scenarios to `conformance/scenarios/maintenance/area.yaml` (which already lists `optimize/*`) by name, all but those three. `area.yaml` patterns cannot exclude a name (`conformance/dsl` D9.1), so the change lists them. Until U129 lands, U128 shows C8.6's clamp of `ord` 40,000 with C18.3's cards-stage `ord` test, and the combined case with `repaired-dump`.
+- U129's activation change (`maintenance/check-database-notes` N10.2) replaces that list with `check-db/*`, which adds the three.
+- `check-db/*` also makes C18.4's live `meguri-studied-handoff` active, which T1 then requires. If Meguri's executor does not yet declare what that scenario's first segment uses (FSRS answers, `forget`, `suspend`, `edit_note`, `delete_notes`, `handoff`; `conformance/dsl` D9.2), U129's change adds the three by name instead, and the pattern comes when those capabilities do. U128's list leaves `meguri-studied-handoff` out on the same condition.
 
 ### C18.2 Recorded from these descriptions
 
-Each uses only existing scenario ops (`db_exec`, `check_db`, `add_note`, `advance`, `answer`, `set_config`, setup) and, as observations, `db_exec` selects and `undo_status`. Unless a row says otherwise, the scenario first sets `usn` 5 on the rows it damages and advances the clock 1 hour, so a stamp shows, and ends with `SELECT mod, scm FROM col` and a second `check_db` that finds nothing. Every row and every `failed` scenario below has its golden.
+Each uses only existing scenario ops (`db_exec`, `check_db`, `add_note`, `advance`, `answer`, `set_config`, setup) and, as observations, `db_exec` selects, `undo_status` and, in `repaired-dump`, `db_dump` (`conformance/observations` O8). `repaired-dump`'s dump is R1924's "same repaired database" comparison: every column of the repaired cards and review-log rows, and the decks C9.2 and C10.2 create with their `common` and `kind` blobs and stamps (`decks/decks#D4`); a `db_exec` select reads C10.3's `nextPos` row (value, `usn`, `mtime_secs`). It leaves out the note type tables, which hold stock rows, and the `config` table: Anki's check computes the day for C8.2 and writes the missing `rollover` key at the check instant, which Meguri's check does not do (`sched/day-clock` D8, D14.2: no day query runs for `check_db`), and the other rows there are setup's, not the check's. Unless a row says otherwise, the scenario first sets `usn` 5 on the rows it damages and advances the clock 1 hour, so a stamp shows, and ends with `SELECT mod, scm FROM col` and a second `check_db` that finds nothing. Every row and every `failed` scenario below has its golden.
 
 | Scenario (`maintenance/check-db/`) | Damage and observation |
 |---|---|
@@ -309,6 +317,9 @@ Each uses only existing scenario ops (`db_exec`, `check_db`, `add_note`, `advanc
 | `all-records` | every damage above except `future-ids-cards`, in one collection: one report, counts equal to the sum; no `undo_status` (C14). `future-ids-cards` stays out because N6.6 gives the cards it generates (`card-ord`, `card-text-values`) ids from `now_ms` up, which C10.4 would then need for the future card, and Anki stops on a taken id (C10.4) |
 | `card-fixes-counted` | one new card with `due` 2,300,000, `odue` 3.5 and `ivl` 6.25, and a second new card with `ivl` 2.5: C8.1 folds the first `due` to 1,300,000 (`new_positions_too_high` 1); C8.3 and C8.4 round to 4, 6 and 3 (`card_properties` 3, once per fix and card); both cards stamped, `scm` unchanged |
 | `revlog-row-counted` | review-log rows with `ivl` 2.5 and `lastIvl` 1.5, and with `ivl` 3.5, `lastIvl` -0.5 and `time` 1500.5, plus one row of integers: each damaged row rewritten once (3, 2; 4, -1, 1501), the integer row untouched, `revlog_properties` 2, `scm` set |
+| `future-ids-card-order` | of one note's three cards, the second moved three days ahead and the third two days, the first left valid, each with a review-log row of a valid id: C10.4 gives the third `now_ms` and the second `now_ms` + 1 (ascending old id, not template order), the first keeps its id; `nid`, `mod`, `usn` and `due` kept; the rows keep their ids and their `cid` follows their card; `future_ids` 2; `col` not read |
+| `future-ids-each-table` | a note two days ahead, its card three days ahead and a review-log row of that card four days ahead, beside a valid note and card: `future_ids` 3 (the rows of the three tables added up); each table re-keys its own row to `now_ms`, the card's `nid` follows the note and the row's `cid` the card, `usn` kept; `col` not read |
+| `repaired-dump` | `all-records`' damage less `card-ord`'s and `card-text-values`' `ord` damage (whose cards the notes stage removes and generates again) and less its two answers: counts equal to the sum (`card_properties` 13), then a `db_dump` of `col`, `notes`, `cards`, `revlog`, `graves`, `decks` and `tags` and a select of the `nextPos` row (R1924); activated by U128 (C18.1) |
 
 Recorded with the rejection `failed` of `conformance/collection-check` K10 (`dsl.md` D7.2) on Anki's side, each with its deviation; they end with no second `check_db`:
 
@@ -317,13 +328,20 @@ Recorded with the rejection `failed` of `conformance/collection-check` K10 (`dsl
 - `parents-under-filtered`: a filtered deck `F` and a normal deck renamed by `db_exec` to `F::x::y`. Anki `failed`; Meguri creates the normal deck `F::x` (`decks_missing` 1). Deviation `check-db-parents-past-deck-limits`; no `undo_status`.
 - `parents-too-deep`: a deck renamed by `db_exec` to `1::2::…::13`, none of its ancestors existing. Anki `failed`; Meguri creates its twelve ancestors (`decks_missing` 1). Deviation `check-db-parents-past-deck-limits`; no `undo_status`.
 
+Recorded with the rejection `failed` on both sides, with no deviation (`conformance/collection-check` K10's decision):
+
+- `undecodable-deck`: a deck no card uses whose `kind` is set to the blob `x'FF'` by `db_exec`, and a card with `ivl` 1.5: `failed` (C9.3, C13); the deck row, the card's `ivl`, `mod` and `usn`, and `col`'s `mod` and `scm` unchanged; a second `check_db` gives `failed` again.
+
 ### C18.3 Meguri tests (`core/crates/meguri-engine/tests/check_db.rs`)
 
 - C3's order: a corrupt file (a table b-tree page overwritten on a copy) ends with `Corrupt`, not `SafetyBackupFailed`; no backup file, no maintenance task and no repair op ran; the file's bytes are unchanged; `Ready` moves to `Failed{Corrupt}`; `lastQuickCheck.passed` false and `lastCheckDatabase` `{instant, result: {"error": "corrupt"}}`.
 - From `Failed{Corrupt}`: a sound verdict returns to `Ready` with the same generation and the run completes; a corrupt one leaves the state (`maintenance/optimize-integrity` M9's row).
+- In `Failed{Corrupt}`, once U128 lands, the remedy list reads Check Database first, then restore and the iCloud replace under their conditions (`maintenance/optimize-integrity` M7.1); the status record (M10) shows the last run's instant and result (C14), also `{"error": "corrupt"}`.
+- The rows Meguri writes on the four collections of C18.2's Anki-`failed` list, which no golden shows: `future-ids-taken`, the valid note keeps `now_ms` and the future note takes `now_ms` + 1, its cards' `nid` following, `scm` set; `parents-under-filtered`, `F::x` created as a normal deck with D4's records and local stamps, `F` and `F::x::y` unchanged, `scm` unchanged; `parents-too-deep`, the twelve ancestors `1` to `1::2::…::12` created the same way; `revlog-ivl-overflow`, the row's `ivl` 2,147,483,647 with its `usn` kept, `scm` set (C10.1, C11).
 - The backup is published before the first maintenance task starts (op log order), and is protected until the job ends; exactly one safety backup is made per run (the executor takes none for the repair op); a failing backup gives `SafetyBackupFailed` with the file unchanged.
 - A failing `VACUUM` (`SQLITE_FULL` injected) gives `CheckFailed{optimize}` and no repair; a corrupt one gives `Corrupt`.
-- A row that cannot be decoded (a deck blob made invalid) gives `CheckFailed{cards}` and no change.
+- C8.6 without the notes stage (U128 before U129): a card set to `ord` 40,000 becomes `ord` 30,000 with local stamps, `card_properties` 1, the card kept, and `scm` unchanged (C8.6 alone does not set it, C11). Once U129 lands, `card-ord` shows the full run.
+- A row that cannot be decoded (a deck blob made invalid, also in a deck no card uses, as in `undecodable-deck`) gives `CheckFailed{cards}` and no change.
 - Cancel at each cancellable point gives `Cancelled` with no record and no change; a cancel during the repair op gives `past_cancel_point` and a complete report.
 - `Busy{running_op}` while restore holds the slot; `CollectionUnavailable` in `NoCollection` and `ExclusiveBusy`.
 - After a run: both undo histories empty with `ClearedByNonUndoableOp`; every derived component `Stale`; the status shows the run's time and result; malformed `lastOptimize`, `optimizeCadenceStart` and `optimizerLog` repaired (`optimizerLog` removed, nothing written in its place, the other `deviceState` members kept) and listed in `device_records_repaired`.
@@ -341,7 +359,7 @@ Inactive, with goldens recorded at the current pin by `tools/mg oracle record`; 
 | `filtered-deck-kept` | a filtered deck row (`conformance/deck-ops#K13`) holding one card whose `odid` is its home deck and one whose `odid` is 777, no deck: nothing counted, no deck 777, `odid`, `odue`, `mod`, `usn` and `scm` unchanged; `col.mod` not observed (deviation `check-db-no-change-keeps-mod`) (C9.2, C9.3) |
 | `meguri-studied-handoff` | live (T1, R1925): Meguri adds four notes with FSRS on, answers them on three days over four with every rating, resets one card, suspends a card of a note it keeps, edits and deletes a note; after `handoff: oracle`, `pragma_integrity_check` reads `ok` and Anki's Check Database counts nothing. It complements C18.3's 200-answer T1 suite, which stays a `tools/mg oracle check` job |
 
-Uses `corrupt_page` (`conformance/maintenance-ops#M2`), which the oracle implements and Meguri's testkit model does not read yet; written and recorded, it lands with that model (M2.4):
+Planned, not yet in `conformance/`: it uses `corrupt_page` (`conformance/maintenance-ops#M2`), which the oracle implements and Meguri's testkit model does not read yet, so the scenario would be `invalid` in T0 (`conformance/dsl` D10). It is written and recorded (`tools/mg oracle record maintenance/check-db/corrupt-page`) in the change that makes the testkit model read `corrupt_page` (M2.4). Until then C18.3's first bullet covers the corrupt path, on Meguri's side only.
 
 | Scenario (`maintenance/check-db/`) | Damage and observation |
 |---|---|

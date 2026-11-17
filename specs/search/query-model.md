@@ -123,10 +123,10 @@ Compiling a parsed query gives a plan for one mode:
 
 ## Q10. Streaming execution
 
-A plan with slow terms (Q9) may run in two stages (U85, `browser/result-sets` H3). Its result, order included, must equal the result of the plan's statement run whole.
+A plan with slow terms (Q9) may run in two stages (U85, `browser/result-sets` H3, H13). Its result, order included, must equal the result of the plan's statement run whole.
 
 1. **Relaxed query.** Replace every slow term by TRUE when an even number of negations stand above it (none counts as even), and by FALSE when an odd number do. Groups, AND and OR do not count. In `-(re:x tag:y)` the slow term `re:x` is under one negation and becomes FALSE; in `re:x or tag:y` it becomes TRUE.
-2. **Candidates.** The relaxed query runs in SQL, sorted by the request's sort with its final key (`browser/sorting` S8). It tests the rows that Q5 gives for the original query, not for the relaxed one: replacing `re:x` (note scope) does not make a cards-mode search return cards without a note.
+2. **Candidates.** The relaxed query runs in SQL, sorted by the request's sort with its final key (`browser/sorting` S8); a request without a sort (the one-shot search of `browser/result-sets` H13) sorts by the final key alone, ascending id. It tests the rows that Q5 gives for the original query, not for the relaxed one: replacing `re:x` (note scope) does not make a cards-mode search return cards without a note.
 3. **Superset.** Every row the original query returns is a candidate. Under Q7's order false < unknown < true, AND and OR never lower their value when an operand goes up, and NOT reverses the order; so each replacement raises the value of the whole query or keeps it, and a row for which the original is true is true for the relaxed one.
 4. **Final test.** The candidates are taken in sort order, in chunks, and the original query is tested on each, as Q5 tests rows in its mode and scope (in notes mode with card or card-and-note scope, a candidate note is kept when one of its card-and-note pairs makes the query true; otherwise each candidate is tested as Q5's table says, so in notes mode with note or either scope the note alone, whether it has cards or not). A candidate is kept when the query is true. Because candidates come in final order, the kept rows of the chunks tested so far are the start of the result: the first page is final as soon as it is full or the candidates end.
 5. **One snapshot.** Both stages, and the sort keys, read one read transaction.

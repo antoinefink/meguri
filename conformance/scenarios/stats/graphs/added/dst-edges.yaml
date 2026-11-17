@@ -1,0 +1,27 @@
+# stats/graphs-cards C13 (C1, C10): Added counts fixed 86,400 s spans back from N,
+# not local days. Europe/Paris, rollover 4. At 2026-10-26 12:00 (N 1793070000,
+# after the October change): id 1792809000000 (2026-10-24 04:30, two local days
+# back) gets -3, id 1792810801000 gets -2; n3 and n4 still have their creation
+# ids (day 0). At 2027-03-29 12:00 (N 1806372000, after the March change): id
+# 1806114600000 (2027-03-27 03:30, three local days back) gets -2, id
+# 1806112800000 gets -3.
+id: stats/graphs/added/dst-edges
+clock: {tz: Europe/Paris, start: "2026-10-26T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n4", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1792809000000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n1')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1792810801000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n2')"}}
+  - {"observe": ["timing", {"stats": [{"scope": "collection", "history": "year", "parts": ["added"]}]}]}
+  - {"set_clock": "2027-03-29T12:00:00"}
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1806114600000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n3')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1806112800000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n4')"}}
+  - {"observe": ["timing", {"stats": [{"scope": "collection", "history": "year", "parts": ["added"]}]}]}

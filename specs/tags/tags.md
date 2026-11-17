@@ -229,16 +229,16 @@ Rows `a`, `a::b`, `a::c`, `q`, `z` with notes using `a::c` and `z`: `a::b` and `
 
 ## T12. Collapsed state (R1164, R1166, R1467)
 
-Input: a list of names and the state (collapsed or expanded). Browse's sidebar disclosure passes one name; Expand Children and Collapse Children pass several.
+Input: a list of entries, each a name and a state (collapsed or expanded). Browse's sidebar disclosure passes one entry; Expand Children and Collapse Children (`browser/sidebar` S5) pass one entry per tag they change, and the states can differ within the list. A name listed more than once gets the state of its last entry.
 
-For each name in order:
+For each entry in order:
 
 1. Normalize it (T2; separators inside are removed, not split) and spell it with T3, registering it when new. So expanding an implicit parent (T13), which has no row, registers it with its tree spelling (T1), whatever case the name was given in. Anki registers the name as given (T3's deviation, `tags-implicit-parent-collapse`); the sidebar passes the tree spelling, so the two agree there.
-2. Set the row's `collapsed` (1 collapsed, 0 expanded). When that changes the value, the row also gets `usn` -1. Its `tag` spelling and `config` stay.
+2. Set the row's `collapsed` to its entry's state (1 collapsed, 0 expanded). When that changes the value, the row also gets `usn` -1. Its `tag` spelling and `config` stay.
 
 Deviations from Anki, shown by no scenario: Anki writes `usn` -1 even when `collapsed` already has the requested value; and when step 1 changes the given text, it registers the normalized row but leaves its `collapsed` at the new-row value. Meguri skips the unchanged row (`storage/ids-usn-mtime#S4`) and sets the state on the row step 1 found or made.
 
-Undo (plan Open Questions, U216): the whole list is one undoable step named "Expand/Collapse". Anki records no undo step for it and keeps its undo steps.
+Undo (plan Open Questions, U216): the whole list is one undoable step named "Expand/Collapse", whatever states it mixes; undo restores every row it changed. Anki records no undo step for it and keeps its undo steps.
 
 ## T13. The tag tree (R1164)
 

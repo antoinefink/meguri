@@ -1,0 +1,41 @@
+# stats/graphs-cards C13 (C9.2): the card's stored decay, else 0.5, never the
+# preset's. Review cards with s 5 and d 5, one per deck, at the retrievability clock of graphs-cards C13 (clock start 2030-01-15T11:00:00
+# Paris, advance 30d: now_s 1897293600, today 30, N 1897354800).
+# Decks Da1 to Da6: lrt now_s - 864,000 (10 days) with decay 0.1542, -0.5, none,
+# null, the string "0.2" and 0. Decks Db1 to Db6: no lrt, due 35, ivl 20 (15 days)
+# with the same six decays. Each deck's average is its card's R x 100.
+id: stats/graphs/fsrs/retrievability-decay
+clock: {tz: Europe/Paris, start: "2030-01-15T11:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Da1", "Da2", "Da3", "Da4", "Da5", "Da6", "Db1", "Db2", "Db3", "Db4", "Db5", "Db6"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Da1", "fields": ["a1", "x"]}
+    - {"notetype": "Pair", "deck": "Da2", "fields": ["a2", "x"]}
+    - {"notetype": "Pair", "deck": "Da3", "fields": ["a3", "x"]}
+    - {"notetype": "Pair", "deck": "Da4", "fields": ["a4", "x"]}
+    - {"notetype": "Pair", "deck": "Da5", "fields": ["a5", "x"]}
+    - {"notetype": "Pair", "deck": "Da6", "fields": ["a6", "x"]}
+    - {"notetype": "Pair", "deck": "Db1", "fields": ["b1", "x"]}
+    - {"notetype": "Pair", "deck": "Db2", "fields": ["b2", "x"]}
+    - {"notetype": "Pair", "deck": "Db3", "fields": ["b3", "x"]}
+    - {"notetype": "Pair", "deck": "Db4", "fields": ["b4", "x"]}
+    - {"notetype": "Pair", "deck": "Db5", "fields": ["b5", "x"]}
+    - {"notetype": "Pair", "deck": "Db6", "fields": ["b6", "x"]}
+steps:
+  - {"advance": "30d"}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":1896429600,\"decay\":0.1542}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'a1')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":1896429600,\"decay\":-0.5}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'a2')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":1896429600}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'a3')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":1896429600,\"decay\":null}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'a4')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":1896429600,\"decay\":\"0.2\"}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'a5')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":1896429600,\"decay\":0}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'a6')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 35, data = '{\"s\":5.0,\"d\":5.0,\"decay\":0.1542}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'b1')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 35, data = '{\"s\":5.0,\"d\":5.0,\"decay\":-0.5}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'b2')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 35, data = '{\"s\":5.0,\"d\":5.0}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'b3')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 35, data = '{\"s\":5.0,\"d\":5.0,\"decay\":null}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'b4')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 35, data = '{\"s\":5.0,\"d\":5.0,\"decay\":\"0.2\"}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'b5')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 35, data = '{\"s\":5.0,\"d\":5.0,\"decay\":0}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'b6')"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Da1"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Da2"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Da3"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Da4"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Da5"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Da6"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Db1"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Db2"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Db3"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Db4"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Db5"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "Db6"}, "history": "year", "parts": ["retrievability"]}]}]}

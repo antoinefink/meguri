@@ -1,0 +1,127 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-10-12T12:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "error": "unreadable_row"
+          },
+          {
+            "error": "unreadable_row"
+          },
+          {
+            "added": {
+              "added": {
+                "0": 1
+              }
+            },
+            "reviews": {}
+          },
+          {
+            "error": "unreadable_row"
+          }
+        ]
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "error": "unreadable_row"
+          },
+          {
+            "added": {
+              "added": {
+                "0": 1
+              }
+            },
+            "reviews": {}
+          },
+          {
+            "error": "unreadable_row"
+          }
+        ]
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "added": {
+              "added": {
+                "0": 1
+              }
+            },
+            "card_counts": {
+              "excluding_inactive": {
+                "newCards": 1
+              },
+              "including_inactive": {
+                "newCards": 1
+              }
+            },
+            "reviews": {}
+          },
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "newCards": 2
+              },
+              "including_inactive": {
+                "newCards": 2
+              }
+            }
+          }
+        ]
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "stats": [
+          {
+            "error": "unreadable_row"
+          },
+          {
+            "card_counts": {
+              "excluding_inactive": {
+                "newCards": 1
+              },
+              "including_inactive": {
+                "newCards": 1
+              }
+            }
+          },
+          {
+            "error": "unreadable_row"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/scope/unreadable-card",
+  "scenario_sha256": "8f7fa13e0f1f98e55403176681f3e9413ea001d67702da8ab2e5e073b3742198",
+  "tz": "Europe/Paris"
+}

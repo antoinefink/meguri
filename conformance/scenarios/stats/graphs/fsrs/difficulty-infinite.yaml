@@ -1,0 +1,38 @@
+# stats/graphs-cards C13 (C8.1, C8.2): d of 1e40 and -1e40 read as +inf and
+# -inf. Review cards with s 5. Deck A: the eight d values of C8.1 and 1e40;
+# deck B: -1e40, 5.5 and 10. Expected keys 4294967295 and 0 for the infinities,
+# average 39.999996 in A and 50.0 in B (the middle of -inf, 0.5 and 1).
+id: stats/graphs/fsrs/difficulty-infinite
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["A", "B"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "A", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "A", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "A", "fields": ["n3", "x"]}
+    - {"notetype": "Pair", "deck": "A", "fields": ["n4", "x"]}
+    - {"notetype": "Pair", "deck": "A", "fields": ["n5", "x"]}
+    - {"notetype": "Pair", "deck": "A", "fields": ["n6", "x"]}
+    - {"notetype": "Pair", "deck": "A", "fields": ["n7", "x"]}
+    - {"notetype": "Pair", "deck": "A", "fields": ["n8", "x"]}
+    - {"notetype": "Pair", "deck": "A", "fields": ["n9", "x"]}
+    - {"notetype": "Pair", "deck": "B", "fields": ["n10", "x"]}
+    - {"notetype": "Pair", "deck": "B", "fields": ["n11", "x"]}
+    - {"notetype": "Pair", "deck": "B", "fields": ["n12", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":1}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n1')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":1.09}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n2')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":2.08}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n3')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":4.6}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n4')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":5.5}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n5')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":10}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n6')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":11}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n7')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":0.5}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n8')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":1e40}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n9')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":-1e40}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n10')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":5.5}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n11')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 5, data = '{\"s\":5.0,\"d\":10}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n12')"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["difficulty"]}, {"scope": {"deck": "A"}, "history": "year", "parts": ["difficulty"]}, {"scope": {"deck": "B"}, "history": "year", "parts": ["difficulty"]}]}]}

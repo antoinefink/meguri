@@ -3,7 +3,7 @@
 Spec: conformance/maintenance-ops
 Requirements: R1655 (scenario side), R1640 (M2, scenario side); supports R1883
 Anki: 26.09.3
-Scenarios: conformance/scenarios/maintenance/optimize/; M2: conformance/scenarios/maintenance/check-db/corrupt-page.yaml (`maintenance/check-database` C18.4)
+Scenarios: conformance/scenarios/maintenance/optimize/; M2: planned `maintenance/check-db/corrupt-page` (`maintenance/check-database` C18.4), not yet in conformance/
 
 The scenario op that runs the automatic optimize of `specs/maintenance/optimize-integrity.md` M1, and the op that damages a collection file so that Check Database's integrity stage finds it corrupt (M2). Check Database's op `check_db` is `collection-check.md` K10.
 
@@ -64,4 +64,4 @@ Both executors do the same thing to the file:
 
 ### M2.4 Status
 
-Draft (`dsl.md` D7.2): the arguments and effect above are fixed, and the oracle implements them (the driver's maintenance ops, `schema/protocol.json`, the `scenario.schema.json` shape). `maintenance/check-db/corrupt-page` (`maintenance/check-database` C18.4) has its golden, recorded with `tools/mg oracle record maintenance/check-db/corrupt-page`. Pending: the testkit model (`core/crates/meguri-testkit/src/scenario/`) and Meguri's executor. Until the model reads the op, the scenario is `invalid` in T0 (`dsl.md` D10), so it lands with that model; it stays inactive until U128's adapter runs it.
+Draft (`dsl.md` D7.2): the arguments and effect above are fixed, and the oracle implements them (the driver's maintenance ops, `schema/protocol.json`, the `scenario.schema.json` shape). `maintenance/check-db/corrupt-page` (`maintenance/check-database` C18.4) is planned and not in `conformance/` yet: it is written and recorded (`tools/mg oracle record maintenance/check-db/corrupt-page`) in the change that makes the testkit model read the op. Pending: the testkit model (`core/crates/meguri-testkit/src/scenario/`) and Meguri's executor. Until the model reads the op, the scenario is `invalid` in T0 (`dsl.md` D10), so it lands with that model; it stays inactive until U128's adapter runs it.

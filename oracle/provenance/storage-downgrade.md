@@ -76,3 +76,11 @@ run). Read for it:
 Not taken: changes to `durability-and-files` F6, `model/schema11-json` S12,
 `model/row-records` R1/R8 and the plan's U33 row (outside this target);
 listed in the workflow result for their owners.
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| storage/schema11-downgrade#D3.1 (number values in conf follow model/json-numbers N11, not the nearest float), #D7 config row | `Cargo.lock` (serde_json 1.0.143; no workspace `Cargo.toml` enables float_roundtrip or arbitrary_precision) | Confirm that the JSON reader behind Anki's downgrade and upgrade config reads is serde_json without float_roundtrip. The N11 rule was then checked against the downgrade goldens (contents, oracle-opens, config-invalid, roundtrip). |

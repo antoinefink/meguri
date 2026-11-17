@@ -7,7 +7,7 @@ Scenarios: conformance/scenarios/stats/card-info/
 
 The read-only snapshot of one card that the Card Info view shows (U92 builds it, U222 shows it, U103 exports it): the stats rows, the review history, the forgetting curve and the debug dump, plus which card "Previous Card Info" names. Every text here is English and is shown exactly as the core returns it; the UI takes only labels from its String Catalogs (C12; the plan's Open Questions keep these strings verbatim in every locale, R1448).
 
-Anki builds the raw values in its core and writes every text in its web page. The oracle returns the raw values only, so the raw values are compared with oracle goldens (C13) and the texts are tested from the tables here (C14.2), as `stats/studied-today` T6.4 does for the Today lines.
+Anki builds the raw values in its core and writes every text in its web page. The oracle's `card_stats` returns the raw values only, so the raw values are compared with oracle goldens (C13) and the texts are tested from the tables here (C14.2), as `stats/studied-today` T6.4 does for the Today lines. As of 2026-11-17 the graphs-page oracle image exists (`conformance/stats-ops` H14), and the card-info page ships in the same page bundle, so a kind that reads this page's texts is possible. It is planned and has no draft yet. It needs its own `conformance/stats-ops` section and driver module (oracle-maintainer work). Until it lands, C4 to C7 are tested from this spec's tables only.
 
 Related specs: card columns `model/row-records#R4`, review-log columns and read rules `model/row-records#R5`, card data keys `model/card-data-json` and `sched/card-data`, home deck and preset `sched/presets#V1`, decay `#V6`, desired retention `#V7`, memory items `sched/fsrs-items`, memory states `sched/memory-state`, retrievability `search/card-extractors#X5`, number writing `stats/studied-today#T5.2`.
 
@@ -109,7 +109,7 @@ Decided 2026-10-27 (AE46, R1251): Meguri gives a retrievability for a computed m
 
 ### C4.1 Order and applicability
 
-The snapshot lists the applicable rows in this order. Each row has a key (the UI's `cardInfo.row.<key>` identifier), an English label (C12) and a value text (C5).
+The snapshot lists the applicable rows in this order. Each row has a key (the UI's `cardInfo.row.<key>` identifier, from which the UI takes its String Catalog label, C12) and a value text (C5). The snapshot carries no label; the Label column gives the catalog's English value.
 
 | # | Key | Label | Shown when | Value text |
 |---|---|---|---|---|
@@ -417,10 +417,24 @@ For a point the core writes (R1256, R1428): elapsed time, the long time span of 
 
 ## C10. Freshness (R1260, R1429)
 
-- The snapshot also returns what it depends on: the card id, note id, note type id, current deck id, home deck id, home preset id and the review-log ids it read.
-- `card_info_affected(dependencies, change_set)` (`engine/change-stream#S1`; decided 2026-11-10, it takes these dependencies rather than the plan's `card_id`, because the note type, decks, preset and review-log ids cannot be found from the id without a read) is true when the change set lists the card, the note, the note type, either deck or the preset; removes one of the review-log ids; adds a review-log row whose `cid` is the card (an indexed read of the added ids); changes the config key `rollover`; or reports `collection_row`. Otherwise false. U103 derives `CardStatsChanged` from it.
-- A new scheduler day changes the due date of a day-number due and the retrievability; U103 also refreshes on the day clock's day change. Retrievability is not refreshed on a timer.
-- Dates follow the clock and zone too: a day-number due instant keeps `now`'s time of day (C3.3), so its local date moves at local midnight, not at the scheduler-day change; and every date text (C5.1) depends on the device's zone. U103 therefore also refreshes at the next local midnight when the snapshot has a day-number due, and whenever the device's time zone or its UTC offset changes (decided 2026-11-10).
+- The snapshot also returns what it depends on: the card id, note id, note type id, current deck id, home deck id, home preset id and the review-log ids it read; whether its due instant comes from a day number (C3.3); and the collection generation it was built in.
+- `card_info_affected(dependencies, change_set)` (`engine/change-stream#S1`; decided 2026-11-10, it takes these dependencies rather than the plan's `card_id`, because the note type, decks, preset and review-log ids cannot be found from the id without a read) is true when the change set lists the card, the note, the note type, either deck or the preset; removes one of the review-log ids; adds a review-log row whose `cid` is the card; changes the config key `rollover`; or reports `collection_row`. Otherwise false. The `cid` of an added row comes from the observer payload (`engine/change-stream#S2`: the added review-log rows as stored), so the test reads nothing; called outside an observer, it reads the added ids by index.
+
+### C10.1 Watches and `CardStatsChanged` (U103)
+
+Decided 2026-11-17: the core runs the test, not the view, because the view has no review-log payload. This replaces the plan's `CardStatsChanged{cardIds}`, which cannot report a deck, preset, note type or `rollover` change on a card whose own row did not change.
+
+- `card_info_watch(dependencies)` returns a token; `card_info_unwatch(token)` ends the watch. The view watches the dependencies of the snapshot it shows. With each new snapshot it unwatches the old token and watches the new dependencies, and it unwatches when it changes card (Previous switch, Browse's current row) or closes. A watch belongs to the generation of its snapshot. Tokens are never reused while the engine lives.
+- On every non-empty change set, the stats crate's in-core observer (`engine/change-stream#S2`; U95 registers it, U103 adds this test) evaluates `card_info_affected` for each watch, in memory. When at least one watch is affected it publishes one change-stream `Extension` event `CardStatsChanged{tokens, reason: changes}` (`engine/change-stream#S3`): the affected tokens, ascending, each once; `cause_seq` the op's seq; after that op's `Changes` event. A watch that is not affected is not named, so a change to another card's preset, deck or note sends it nothing.
+- After the day clock publishes `RolledOver`, `TimeZoneChanged` or `NextDayAtChanged` (`sched/day-clock#D8`), U103 publishes one `CardStatsChanged{tokens, reason: clock}` naming every watch, after the last of the kinds that check published, with that check's `cause_seq`. A new scheduler day changes `days_elapsed` (the due instant of a day-number due) and `now` (retrievability); `next_day_at` changes the memory items (C2); a zone change changes every date text (C5.1).
+- A UTC offset change within one zone (a DST change) changes no date text, because each instant is written with the offset in effect at that instant (C2). What it changes in the day or in `next_day_at` arrives as `RolledOver` or `NextDayAtChanged`. These three kinds are the zone and offset triggers decided on 2026-11-10.
+- On `CollectionReplaced{generation}`, U103 publishes `CardStatsChanged{tokens, reason: replaced}` naming every watch of the older generation, then drops those watches. The view fetches the card again by id: a card that no longer exists gives C11's `not_found`. Apart from the day clock's kinds above and `CollectionReplaced`, no event changes a snapshot's inputs without a change set: `Lifecycle`, `Available`, `WriteDelay` and the media and sync-status extensions call for no refresh.
+- The view fetches again on every `CardStatsChanged` that names its token, and on nothing else from the core. It never evaluates `card_info_affected` in Swift. A fetch started after the event's `cause_seq` already shows that change, so a second fetch is harmless.
+
+### C10.2 Local midnight (U222)
+
+- The local date of a day-number due instant keeps `now`'s time of day (C3.3), so it moves at local midnight, not at the scheduler-day change. No core event marks local midnight, because the core never wakes on a timer (`engine/change-stream#S3`, R1854).
+- When the shown snapshot says its due instant comes from a day number, U222's view fetches again when the platform reports a calendar-day change (local midnight in the device's zone). This is the only refresh the view starts on its own (decided 2026-11-17, owner U222).
 - Decided 2026-11-10: R1423's "Retrievability (%, live)" means computed from the clock's `now` each time a snapshot is built and refreshed by the events above, never stored and never updated on a timer.
 
 ## C11. Errors and damaged records
@@ -472,7 +486,7 @@ Moved to `conformance/stats-ops` H9 (draft): request, value, oracle and Meguri s
 
 ### C13.2 Where it is defined
 
-The kind is `conformance/stats-ops` H9. As of 2026-11-10 the driver op is in `oracle/driver/ops/stats.py`, and `observations.md` has the kind in O4 and the O7 tolerance row (1e-5 for `stability` and `difficulty` in any `memory_state` and for `fsrs_retrievability` inside `card_stats`), with its shape in `conformance/schema/`. Meguri's side is missing: U92 adds the `card_stats` adapter to the testkit (`core/crates/meguri-testkit`, the scenario model and an observe adapter, as `conformance/AGENTS.md` asks) and lists the C14.1 scenarios as active in the same change. The plan's U92 Files list omits the testkit; this spec adds it.
+The kind is `conformance/stats-ops` H9. As of 2026-11-10 the driver op is in `oracle/driver/ops/stats.py`, and `observations.md` has the kind in O4 and the O7 tolerance row (1e-5 for `stability` and `difficulty` in any `memory_state` and for `fsrs_retrievability` inside `card_stats`), with its shape in `conformance/schema/`. As of 2026-11-17 the testkit (`core/crates/meguri-testkit`) parses and validates `card_stats` requests (a non-empty list of distinct card references) and applies the O7 tolerance paths for `card_stats`. What is missing is the observe executor that builds the value from the core's snapshot: U92 adds it and lists the C14.1 scenarios as active in the same change (`conformance/AGENTS.md`). The plan's U92 Files list omits the testkit; this spec adds it.
 
 ### C13.3 Anki's write
 
@@ -488,6 +502,7 @@ Later Anki steps on that card (another `card_stats`, an answer, a search) read t
 |---|---|---|---|
 | `card-info-no-lrt-backfill` | R1252 (an entry names one requirement; R1425 states the same no-write rule, C1) | after a `card_stats` observation Anki's card data holds an `lrt` it did not hold before | in `ae46-no-state`, `replace: {}` at `/steps/5/card/#c1/data` (the card observation after `card_stats`): the data Meguri keeps unchanged; that scenario reads `col.mod` around it and has no `db_dump` |
 | `card-info-computed-retrievability` | R1251 (AE46) | for a card whose data has no memory state, Meguri returns `fsrs_retrievability`, Anki `null` | in `ae46-no-state`, `replace: 0.9710832` at `/steps/4/card_stats/#c1/fsrs_retrievability`: C3.5 for the computed state, worked in f32 from Anki's own `memory_state` stability 42.094368 in that observation, `t` = (now 1,894,698,000 − `L` 1,893,920,400) ÷ 86,400 = 9 and the Default preset's decay 0.1542 (empty parameter list); compared within O7's tolerance. U92 confirms the value, or adds an ignore transform to the testkit if Meguri's differs |
+| `card-info-computed-retrievability-params-1` to `-4` | R1251 (AE46) | as `card-info-computed-retrievability`, for `params` #c1 to #c4 | in `params`, `replace` at `/steps/7/card_stats/#cN/fsrs_retrievability`: 0.96628534 (#c1, decay 0.5), 0.97238074 (#c2, decay 0.2), 0.95518851 (#c3, decay 0.05, the stored value, C3.5 step 4), 0.96583014 (#c4, decay 0.5): C3.5 from Anki's own `memory_state` stability in that observation (29.734219, 41.52225, 43.305325, 29.317263) and `t` = (now 1,894,698,000 − `L` 1,893,920,400) ÷ 86,400 = 9, computed in binary64 and compared within O7's tolerance. U92 confirms the values as for the entry above |
 
 The `card-info-no-lrt-backfill` transform covers only the added `lrt`, so card-info scenarios keep C13.3's rebuild from changing anything else:
 
@@ -501,7 +516,7 @@ The `card-info-no-lrt-backfill` transform covers only the added `lrt`, so card-i
 
 ### C14.1 Scenarios for the oracle-maintainer
 
-As of 2026-11-17 the oracle has the kind and every scenario below except `damaged` is in the tree with its golden recorded at the current oracle pin; the runner has no adapter yet (C13.2). `damaged`'s two cases are run errors, which a golden cannot hold (`conformance/dsl` D11): the driver's self-tests check them, and U92's unit tests check Meguri's typed errors. Each is under `conformance/scenarios/stats/card-info/` and `conformance/goldens/stats/card-info/`. All set the config key `fsrs` to true and build history with `answer` or with `db_exec` revlog inserts (`specs/conformance/stats-ops.md` H3). All follow C13.4's data rules.
+As of 2026-11-17 the oracle has the kind and every scenario below except `damaged` is in the tree with its golden recorded at the current oracle pin. The testkit parses the kind, but the executor that builds Meguri's value is not written yet (C13.2). `damaged`'s two cases are run errors, which a golden cannot hold (`conformance/dsl` D11): the driver's self-tests check them, and U92's unit tests check Meguri's typed errors. Each is under `conformance/scenarios/stats/card-info/` and `conformance/goldens/stats/card-info/`. All set the config key `fsrs` to true and build history with `answer` or with `db_exec` revlog inserts (`specs/conformance/stats-ops.md` H3). All follow C13.4's data rules.
 
 | Scenario | Pins |
 |---|---|
@@ -520,6 +535,9 @@ As of 2026-11-17 the oracle has the kind and every scenario below except `damage
 | `memory-and-retention` | four review cards with no review-log rows whose data (each with an `lrt`) holds a stored state without `dr`, a stored state with `dr` and `decay`, `dr` alone, and neither: `memory_state` and `fsrs_retrievability` only for the stored states (decay 0.5 when the data has none), `desired_retention` exactly when the data has `dr`, no state from `ivl` and `factor`; the card rows after `card_stats` are unchanged on both sides |
 | `no-item` | a new card given Set Due Date only, and a card answered twice, Reset and then given Set Due Date (history L L X M): review cards with a factor and no `memory_state`, no `fsrs_retrievability`, and no per-entry states (C3.4, no SM-2 conversion; `sched/fsrs-items` I3) |
 | `back-to-back-answers` | a new card answered twice at the same instant: both entries in the history, newest first, each with its own button, time taken and last interval; `reviews` and the total and average times count both entries; first and latest review are both the answer instant |
+| `params` | four review cards with the same history and no stored state, in presets holding 19 values (`fsrs_params_5`, `fsrs_params_6` empty), 21 values ending in 0.2, 21 values ending in 0.05, and 17 values (`fsrsWeights`): `fsrs_params` (V6's list choice), the computed `memory_state` and per-entry states under each model (the 0.05 list through the crate's clamped decay); Meguri's `fsrs_retrievability` under `card-info-computed-retrievability` transforms (C13.4) |
+| `zone-dst` | America/New_York, rollover 4: a history across the end of daylight saving time, with rows just after and just before the local rollover hour: per-entry states with the days the memory item counts from `next_day_at`, first and latest review, a day-number due |
+| `edge-values` | an `lrt` 100 s after `now` (C3.5 step 2: retrievability near 0), `pos` 3,000,000,000 (position −1,294,967,296), `odue` 4 with `odid` 0 and `due` −5 (due from `odue`), `odid` equal to `did` (no `original_deck`), review-log `ivl` and `lastIvl` of 30,000 days and of −2,147,483,648 (interval seconds 2,147,483,647) |
 | `damaged` | a card whose deck was removed with `db_exec`: run error on both sides; and a new card with no review-log row in a deck whose preset holds an 18-value `fsrs_params_6` list: run error on both sides (`fsrs_failed`) |
 
 ### C14.2 Unit tests
@@ -535,12 +553,11 @@ As of 2026-11-17 the oracle has the kind and every scenario below except `damage
 
 ### C14.3 Pending coverage
 
-The plan's U92 test asks for raw-value parity "for the fixture cards at three frozen clocks and for 50 generated cards across the TZ matrix" (R1261, R1448). The scenarios of C14.1 use one zone and one start clock, so this coverage is pending; U92's verification counts it once it lands, and until then C14.1 and C14.2 are the tests. What the oracle-maintainer adds:
+The plan's U92 test asks for raw-value parity "for the fixture cards at three frozen clocks and for 50 generated cards across the TZ matrix" (R1261, R1448). The scenarios of C14.1 use two zones (Europe/Paris, and America/New_York in `zone-dst`) and one start clock each, so this coverage is pending; U92's verification counts it once it lands, and until then C14.1 and C14.2 are the tests. The plan's "19 parameters → decay 0.5; empty → 0.1542" test is met by `params` (per-entry and computed states) with C14.2's unit tests of C3.5 step 4 and C7.4, since no oracle value shows the decay itself. What the oracle-maintainer adds:
 
 | Scenario | Pins |
 |---|---|
 | `corpus/*.json` from a seeded `corpora/card-info/generate.py` | 50 cards in every state of C14.1 (new, learning with an epoch-seconds due, review, relearning, filtered, reset, SM-2-era history), one scenario per zone of R1899, each observed with `card_stats` at three clocks: the start, past a DST change of that zone, and between local midnight and the rollover hour |
-| `params` | presets with 19 values (`fsrs_params_5`, `fsrs_params_6` empty) and 21 values, each on a card with history and no stored state: `fsrs_params` (V6's list choice), the computed `memory_state` and per-entry states under non-default parameters |
 | `no-item` (one more card) | a review card whose only review-log row is a Set Due Date row and whose `ivl` is above 0: no `memory_state` (C3.4) |
 | `times` (one more card) | only a Manual row of 5,000 ms: `average_secs` and `total_secs` 0 |
 | `data-no-keys` | review cards whose data is `{"pos":3,"s":10.0,"d":5.0,"lrt":0,"cd":5}` and the same with `"cd":null`: no `due_position`, computed `memory_state` (Meguri's `fsrs_retrievability` under a `card-info-computed-retrievability` transform), `custom_data` `""` (C1); the card row after `card_stats` only under a `card-info-no-lrt-backfill` transform (C13.4) |

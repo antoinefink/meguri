@@ -102,7 +102,7 @@ The NBSP change keeps text the user did not ask to change (data safety first).
 
 ## W9. Scenarios for the oracle maintainer
 
-Requested in `conformance/scenarios/editor/cloze/`, with goldens in `conformance/goldens/editor/cloze/` marked `source: observed`, recorded as `editor/field-html` E2 and T1 say. None of the rows below is written or recorded: no runner step and no oracle driver op drives an editor page today. The scenarios that observe how Anki reads and saves the commands' results with existing ops are listed in W10.
+Requested in `conformance/scenarios/editor/cloze/`, with goldens in `conformance/goldens/editor/cloze/` recorded in the quarantined editor-page image as `editor/field-html` E2 and T1 say. None of the rows below is written or recorded: no runner step and no oracle driver op drives an editor page today. The scenarios that observe how Anki reads and saves the commands' results with existing ops are listed in W10.
 
 **Setup.** One cloze note type `Gap` defined by the scenario (R1959): fields `Text`, `Extra` and `Note`; front template `{{cloze:Text}}`, back template `{{cloze:Text}}<br>{{Extra}}`, empty CSS. One note with the stored fields given (others empty). The maintainer opens Edit Current, focuses the field named, sets the selection in `editor/formatting` F1's notation and presses Anki's key (Ctrl+Shift+C, Ctrl+Alt+Shift+C). Each scenario ends with blur and probe: every field's stored HTML, and the caret's place for the collapsed cases (a `type "z"` before blur shows it).
 

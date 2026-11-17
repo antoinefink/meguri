@@ -107,8 +107,8 @@ S8's paragraphs, keys and order, with these rules for the deck page. A review se
 
 ### H5.3 Returning to the deck page (R79)
 
-- The page reads the record again at `next_learning_ready_at`, at `next_day_at`, after every change set that touches cards, decks, presets or the config keys the counts read, and when the app returns to the foreground.
-- **Scheduling the timed reads.** While the page shows, it holds one one-shot wake at the earlier of `next_learning_ready_at` (when present) and `next_day_at`, as Home's single timer does (`sched/counts#C6`). Each read replaces the wake with one for the new record; leaving the page cancels it. There is no repeating timer and no polling (R1854).
+- The page reads the record again at `next_page_change_at` (`sched/counts#C7`), after every change set that touches cards, decks, presets or the config keys the counts read, and when the app returns to the foreground.
+- **Scheduling the timed reads.** While the page shows, finished or normal, it holds one one-shot wake at the record's `next_page_change_at`, the deck page's counterpart of Home's single timer (`sched/counts#C6`). That instant covers `next_learning_ready_at` when it is after now, each instant a learning card enters the queue's or the deck list's Learn count, and `next_day_at`. No wake is ever armed at or before now. Each read replaces the wake with one for the new record; leaving the page cancels it. There is no repeating timer and no polling (R1854).
 - At `next_learning_ready_at` the card's due instant is now + L. The queue includes it (`sched/queue-building#B6`), so `finished` is no longer set. The page shows H4's normal content with Study enabled. Review never starts by itself.
 - **Anki.** Each time Anki's congratulations page fetches its facts (when it loads, and again every 60 seconds while it shows), Anki first checks whether the deck is still finished. When it is not, the main window returns to the overview state and draws the normal overview with Study Now, without starting review. So Anki leaves the page within 60 s after the card becomes ready, and until then keeps the last sentence it drew ("ready in 1 minute" at the latest). Its 10-minute main-window refresh and any operation that changes study queues also redraw the page. Meguri switches at the ready instant itself (H10).
 
@@ -119,6 +119,8 @@ Examples (AE3; scenario `review/finished/ready-in`):
 | 0 | learning card due in 240 s | finished, "The next learning card will be ready in 4 minutes." | +240 s: normal page, Study enabled, no review started |
 | 1,200 s | learning card due in 1,500 s | finished, "… ready in 5 minutes." | +300 s: normal page, Study enabled |
 | 1,200 s | learning card due in 1,500 s, at +299 s | finished, "… ready in 1 minute." (s clamps to 60) | |
+
+The wakes for the second row follow C7's examples: the page wakes at +300 s (normal, Learn 1, difference −1), again at +301 s (Learn 1, no difference), and not again before `next_day_at`. A normal page wakes the same way when a later learning card enters Learn: with cards due in 600 s and 3,600 s it wakes at +2,400 s and +2,401 s and at no other instant before `next_day_at`.
 
 ### H5.4 An empty deck (R80)
 
@@ -265,7 +267,7 @@ The oracle runs Anki's collection library, not its deck list, overview or dialog
 | Test (unit) | Covers |
 |---|---|
 | `GoToDeckFilterTests` (U156) | H6.2's table, Final_Sigma and U+0130, NFC of the query, the empty query; H6.1's default-deck rule (empty id 1 with a child: left out; id 1 with one card: listed; id 1's card sitting in a filtered deck with `odid` 1 and `did` elsewhere: left out) and filtered entries listed; H6.3's rows (no create row for a blank query), highlight on open and after an edit (the create row when nothing is listed), the wrap-around over the create row, Return with no row, and the empty state |
-| `DeckPageStoreTests` (U155) | H4's actions and their conditions; H5.1 and H5.4's choice from `finished` and `empty`; H5.2's paragraphs from a record; H5.3's examples with an injected clock; the reads at each H5.3 trigger; one wake at a time at the earlier instant, cancelled on leaving |
+| `DeckPageStoreTests` (U155) | H4's actions and their conditions; H5.1 and H5.4's choice from `finished` and `empty`; H5.2's paragraphs from a record; H5.3's examples with an injected clock; the reads at each H5.3 trigger; one wake at a time at `next_page_change_at`, cancelled on leaving: a single finished card that splits the queue's and the list's Learn instants (+300 s, +301 s), a normal page that a later card enters Learn on, and a whole simulated day with at most one wake pending at any time and none at or before now |
 | `DeckActionsModelTests` (U156) | H7: blank detection (spaces, U+3000, `::` not blank), New Subdeck's untouched pre-fill disabled, no op for an unchanged rename, an existing name opening that deck with no undo step, the final name report (reported for `+` and adopted case, not for trimming) |
 | `KeyMatcherTests`, `ShortcutConflictTests` (U158) | H9.2's two contexts and their enabled sets, the menu key equivalents' targets and their disabling in text inputs, the repeat column, the Korean physical-key cases for O, U and S |
 | `HomeStoreTests` (U152) | H2's current-deck mark with `curDeck` missing or naming a deleted deck, and no mark for a hidden Default or a deck under a collapsed parent; H3's single select write; a filtered deck showing R53's explanation for click, tap, Return and S |

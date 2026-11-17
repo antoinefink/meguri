@@ -52,15 +52,15 @@ The core services behind Browse's search field (U88): canonical text for a commi
 | `operator` | an operator word (`and`, `or`), and a negated operator word (G4) |
 | `group_open`, `group_close` | the `(` and the `)` of one group |
 
-An implicit AND has no span. Saved searches are not a kind: the text does not record that a group came from one.
+An implicit AND has no span. Saved searches are not a kind: the text does not record that a group came from one. Decided 2026-11-17: R1086 lists a saved-search icon among the chip kinds, and no span carries one. A saved search accepted from the suggestions (D6.6) enters the text as a bracketed group of its own items, which U214 shows as a token group like any other (R1087); U214 does not guess an origin by comparing group texts with saved searches. R1086's saved-search icon is therefore not provided, and the plan's R1086 needs the matching amendment.
 
 ### D3.2 Fields of a span
 
 | Field | Value |
 |---|---|
 | `kind` | D3.1 |
-| `range` | A term: from its first character to its last, quotes included. An operator word: the word. `group_open`: the `(`. `group_close`: the `)`. A negated term, group or operator word starts at its `-`. |
-| `negated` | true when a `-` (G4) negates the item |
+| `range` | A term: from its first character to its last, quotes included. An operator word: the word. `group_open`: the `(`, or `-(` for a negated group. `group_close`: the `)`. A negated term, group or operator word starts at its `-`, so for a negated group only the `group_open` range holds the `-`. |
+| `negated` | true when a `-` (G4) negates the item; for a negated group, true on its `group_open` and false on its `group_close` |
 | `key` | for a term with a reserved key, the key with ASCII letters lowered (`DECK:x` gives `deck`); none for every other span |
 | `key_range` | the key as written, for terms with a key (the field name for a field term); none otherwise |
 | `value_range` | for a term with a key, the text after its first unescaped colon (G6), inside the quotes for a quoted or partly quoted term; for plain text, the text inside its quotes, if any. It can be empty: an empty range at the position after the colon |
@@ -90,6 +90,7 @@ With a parse error, the list holds the term and operator-word spans whose `range
 - `deck:"a b"`: a `deck` span 0..10, `key_range` 0..4, `value_range` 6..9.
 - `deck:😀x`: the `deck` span is 0..7 in characters and 0..8 in UTF-16 code units; its `value_range` is 5..7 and 5..8.
 - `a -and b`: `plain`, an `operator` span 2..6 with `negated` and `canonical` `- `, `plain`.
+- `-(a b)`: a `group_open` span 0..2 with `negated`, depth 0 and partner 3; `plain` spans 2..3 and 4..5 at depth 1, not negated; a `group_close` span 5..6, not negated, depth 0, partner 0.
 
 ## D4. Token edits (R1088, R1089)
 
@@ -285,8 +286,9 @@ So `prop:r` gives `reps`, `rated`, `resched`, then the six operators for `r`.
   | flag n; state w; days d; button b | `flag:n`; `is:w`; key + `:` + d; `rated:` + the typed days text + `:` + b |
   | property p; operator o | `prop:` + p; `prop:` + p + o |
   | preset p | Q(`preset:` + p) |
-  | saved search with text s | s in an empty field; otherwise `(` + s + `)` |
+  | saved search with text s | c in an empty field, otherwise `(` + c + `)`, where c is `canonicalize(s)` (D2) |
 
+- **Saved search texts.** The stored text s is never inserted as it is: bracketing a text that does not parse can change where its items end (`abc\` in brackets becomes `(abc\)`, whose `\)` is part of the term). A saved search whose s does not parse (`canonicalize` gives an error) is not offered. One whose s parses but fails when it runs (`errors.md` E3) is offered, and its error shows when the accepted search runs.
 - **Names that cannot be written.** A template or preset name is offered only when its `insert_text` reads back (`grammar.md`) as a term of that kind holding exactly that name: so no preset name holding `"` (`names-and-ids.md` N3.6) or White_Space other than U+0020, and no template name that reads back as a number. Field names that `join-and-replace.md` J3.3 refuses are not offered. A deck that J3.5 refuses has no `Name::*` candidate (its subdecks are offered each with its own exact item), and a deck or note type whose exact item has a negative id is not offered.
 - **`completes`** is true when the inserted text is a whole term or a saved search: names, specials, template numbers, `K:_*` and `K:`, flags, states, days, buttons, presets, saved searches, and `as_typed`. It is false for keywords, field keys, `K:re:` and `K:nc:`, properties and operators, after which the user goes on typing. Decided 2026-10-27: accepting a candidate commits the search (R1109) only when `completes` is true. Committing `prop:` would show an error the user did not make.
 - **`cursor_after`**: the end of the inserted text; when `completes` is false and `insert_text` ends with a closing `"`, just before that `"`, so the value is typed inside the quotes.

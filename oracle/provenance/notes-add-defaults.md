@@ -30,3 +30,11 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, wri
 |---|---|---|
 | editor/config-keys K4.1 and notes/add-defaults D1/D2 (classified covered-existing) | `rslib/src/adding.rs` | The case list of the add-defaults test, used only to check that existing scenarios cover it. Nothing new was written. |
 | Harvest rows h57651ff721da and hab1f710886fe linked to the existing notes/add-defaults and editor/config-keys scenarios (D1, D2) | `rslib/src/notes/service.rs` | The harvested tests, to confirm that their obligations (fresh-collection add defaults; a note type's default deck, none and then set) are the ones the recorded add_defaults and notetype_last_deck scenarios already show. |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| notes/add-defaults#D8 (A replaced note type; Browse's sidebar Add) | `qt/aqt/notetypechooser.py`, `qt/aqt/browser/browser.py`, `qt/aqt/addcards_legacy.py`, `rslib/src/adding.rs` | Checking that replacing a missing note type and Browse's add-from-sidebar (set deck, then set note type) both go through the note type change path that applies the last deck for either addToCur value |

@@ -1,0 +1,82 @@
+# R1924 and C18.2 of specs/maintenance/check-database.md: the damage of
+# all-records, less the two ordinal repairs whose cards the notes stage then
+# removes and generates again (orda, textd: maintenance/check-database-notes
+# N6.3, N6.6) and less the two answers, so that only the cards, decks and
+# history stages change rows. After Check Database the repaired rows are
+# observed whole with db_dump: every column of the cards and revlog rows,
+# the decks C9.2 and C10.2 create with their blobs and stamps (recovered4242+,
+# A, A::B, X), the notes, graves and tags left unchanged, and col's mod and
+# scm. The note types' tables are left out (stock rows). The config table is
+# left out too: Anki's check writes the missing rollover key through its day
+# computation, which Meguri's check does not (day-clock D8, D14.2), and the
+# rows setup writes are not the check's. C10.3's nextPos is read by db_exec.
+# A second run finds nothing.
+id: maintenance/check-db/repaired-dump
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [recovered4242, Pdeck, Qdeck, Rdeck, Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [orphan, a]}
+    - {notetype: Single, deck: Inbox, fields: [duenew, a]}
+    - {notetype: Single, deck: Inbox, fields: [duereview, a]}
+    - {notetype: Single, deck: Inbox, fields: [duelearn, a]}
+    - {notetype: Single, deck: Inbox, fields: [folda, a]}
+    - {notetype: Single, deck: Inbox, fields: [foldb, a]}
+    - {notetype: Single, deck: Inbox, fields: [foldc, a]}
+    - {notetype: Single, deck: Inbox, fields: [foldd, a]}
+    - {notetype: Single, deck: Inbox, fields: [oduea, a]}
+    - {notetype: Single, deck: Inbox, fields: [odueb, a]}
+    - {notetype: Single, deck: Inbox, fields: [ivla, a]}
+    - {notetype: Single, deck: Inbox, fields: [ivlb, a]}
+    - {notetype: Single, deck: Inbox, fields: [ivlc, a]}
+    - {notetype: Single, deck: Inbox, fields: [texta, a]}
+    - {notetype: Single, deck: Inbox, fields: [textb, a]}
+    - {notetype: Single, deck: Inbox, fields: [textc, a]}
+    - {notetype: Single, deck: Inbox, fields: [texte, a]}
+    - {notetype: Single, deck: Inbox, fields: [textf, a]}
+    - {notetype: Single, deck: Inbox, fields: [modq, a]}
+    - {notetype: Single, deck: Inbox, fields: [lost, a]}
+    - {notetype: Single, deck: Inbox, fields: [filt, a]}
+    - {notetype: Single, deck: Pdeck, fields: [parents, a]}
+steps:
+  - advance: 3d
+  - set_config: {key: nextPos, value: 99}
+  - db_exec: {sql: "UPDATE config SET usn = 5 WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "UPDATE cards SET usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'orphan')"}
+  - db_exec: {sql: "DELETE FROM notes WHERE sfld = 'orphan'"}
+  - db_exec: {sql: "UPDATE cards SET type = 0, queue = 0, due = 2.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'duenew')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 200000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'duereview')"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, left = 1001, due = 3000000000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'duelearn')"}
+  - db_exec: {sql: "UPDATE cards SET due = 2500000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'folda')"}
+  - db_exec: {sql: "UPDATE cards SET due = 1999999, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'foldb')"}
+  - db_exec: {sql: "UPDATE cards SET due = 1500000.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'foldc')"}
+  - db_exec: {sql: "UPDATE cards SET queue = 4, due = 2500000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'foldd')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 5, odue = 10, odid = 0, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'oduea')"}
+  - db_exec: {sql: "UPDATE cards SET odue = 1.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'odueb')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = -5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'ivla')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = 1.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'ivlb')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = 3000000000, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'ivlc')"}
+  - db_exec: {sql: "UPDATE cards SET due = 'abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'texta')"}
+  - db_exec: {sql: "UPDATE cards SET due = x'3132', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'textb')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 'abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'textc')"}
+  - db_exec: {sql: "UPDATE cards SET ivl = '12abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'texte')"}
+  - db_exec: {sql: "UPDATE cards SET mod = '12abc', usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'textf')"}
+  - db_exec: {sql: "UPDATE cards SET mod = 1894701600.5, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'modq')"}
+  - db_exec: {sql: "UPDATE cards SET did = 4242, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'lost')"}
+  - db_exec: {sql: "UPDATE cards SET odid = 1, odue = 7, usn = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'filt')"}
+  - db_exec: {sql: "UPDATE decks SET name = 'A' || char(31) || 'B' || char(31) || 'C', usn = 5 WHERE name = 'Pdeck'"}
+  - db_exec: {sql: "UPDATE decks SET name = 'X' || char(31) || 'Y', usn = 5 WHERE name = 'Qdeck'"}
+  - db_exec: {sql: "UPDATE decks SET name = 'X' || char(31) || 'Z', usn = 5 WHERE name = 'Rdeck'"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500001, 7, 5, 3, 1.5, 1, 2500, 4000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500002, 7, 5, 3, 4, -2.5, 2500, 4000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500003, 7, 5, 3, 4, 2, 2500, -5, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500004, 7, 5, 3, 4, 2, 2500, 3000000000, 1)"}
+  - advance: 1h
+  - check_db: {}
+  - observe: [{db_dump: {tables: [col, notes, cards, revlog, graves, decks, tags]}}]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY = 'nextPos'"}
+  - check_db: {}

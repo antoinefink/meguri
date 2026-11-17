@@ -90,7 +90,9 @@ Anki writes the three keys on every add, whichever program adds. Meguri's local 
 - The new field values, exactly one per field of the note's note type.
 - The new tags, a list.
 
-The GUID, the note type and the id never change through an update (R771). Refusals, which write nothing: a field count different from the note type's is an invalid argument; a note that no longer exists is an error the caller can tell apart from that one, since the edit flows react to a note deleted meanwhile (U196).
+A second input form is `editor/field-html#S2`'s field patch: the note id, the note type id and field layout as the caller loaded the note, the (field ordinal, value) pairs to replace and, only when the tags change, the whole tag list. It is the same op, with the same step name and undo step. It reads the live rows in its own transaction, replaces the listed fields, keeps every other field and, without a tag list, the stored tags, then saves as U2 and U3 say. Its refusals, which write nothing, are S2's: `NotFound` for a note that no longer exists; `Stale` when the note's `mid` is not the patch's note type id or the note type's field layout (names and `id`s in ordinal order) differs from the patch's; `InvalidArgument` for an ordinal outside the layout or a stored row whose field count differs from the note type's.
+
+The GUID, the note type and the id never change through an update (R771). Refusals of the whole-note form, which write nothing: a field count different from the note type's is an invalid argument; a note that no longer exists is an error the caller can tell apart from that one, since the edit flows react to a note deleted meanwhile (U196).
 
 ## U2. Saves that change nothing
 

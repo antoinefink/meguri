@@ -3,9 +3,9 @@
 Spec: conformance/editor-ops
 Requirements: R1883, R1887, R1876, R870, R871, R115, R138, R139, R140, R149, R848
 Anki: 26.09.3
-Scenarios: conformance/scenarios/editor/paste/url/, conformance/scenarios/editor/config-keys/
+Scenarios: conformance/scenarios/editor/config-keys/ (E5's conformance/scenarios/editor/paste/url/ is planned, not written)
 
-The scenario vocabulary for a media fetch (U197): the setup sections `http_fixtures` and `url_files` and the op `add_media_from_url`. The paste of `editor/paste` downloads the URLs of `editor/paste-sources` S4, S5 and S10 and the `img` sources of P14.2 into the media folder. Anki's page editor (the experimental one, `editor/paste-sources` S1) does it through one call of the collection library, which downloads a URL, derives a file name from it, adds the bytes and returns the name. This op runs that call on the oracle and Meguri's fetcher and importer on Meguri, so that a scenario observes the downloaded name, the stored name and the failures without an editor. The behavior they observe is `editor/paste-sources` S5, S6 and S6.1 (the page editor's column) and `editor/paste` P10. `conformance/schema/scenario.schema.json` and `observation.schema.json` hold the shapes. Draft (`dsl.md` D7.2): the oracle implements them and the scenarios of E5 have goldens. Meguri's executor and the typed model do not have them yet. E6 and E7 add a config write op and an observation kind for the editing keys of `editor/config-keys` (E8: draft, no driver op yet).
+The scenario vocabulary for a media fetch (U197): the setup sections `http_fixtures` and `url_files` and the op `add_media_from_url`. The paste of `editor/paste` downloads the URLs of `editor/paste-sources` S4, S5 and S10 and the `img` sources of P14.2 into the media folder. Anki's page editor (the experimental one, `editor/paste-sources` S1) does it through one call of the collection library, which downloads a URL, derives a file name from it, adds the bytes and returns the name. This op runs that call on the oracle and Meguri's fetcher and importer on Meguri, so that a scenario observes the downloaded name, the stored name and the failures without an editor. The behavior they observe is `editor/paste-sources` S5, S6 and S6.1 (the page editor's column) and `editor/paste` P10. `conformance/schema/scenario.schema.json` and `observation.schema.json` hold the shapes. Draft (`dsl.md` D7.2): the oracle implements them; Meguri's executor and the testkit's typed model do not have them yet. The scenarios of E5 are planned and not written, because `goldens-check` refuses a scenario whose op or setup section the typed model does not parse (E5). E6 and E7 add a config write op and an observation kind for the editing keys of `editor/config-keys` (E8: draft, no driver op yet).
 
 ## E1. Scope
 
@@ -50,7 +50,7 @@ One fetch and the add of its bytes.
 
 ## E5. Scenarios
 
-In `conformance/scenarios/editor/paste/url/`, inactive:
+Planned for `conformance/scenarios/editor/paste/url/`, inactive once written. None of them is in the repository and none has a golden: the testkit's typed model does not parse `add_media_from_url`, `http_fixtures` or `url_files` yet, so `goldens-check` would refuse them. They are written and recorded in the change that adds that model, or kept with their goldens outside the main line until then. Each file spells out every fixture (`path`, `status`, `content_type`, `text` or `fill`, `delay_ms`, `byte_delay_ms`, `redirect_to`, and the `url_files` entries), so that its steps can be read without the oracle.
 
 | Scenario | Covers |
 |---|---|
@@ -62,27 +62,22 @@ In `conformance/scenarios/editor/paste/url/`, inactive:
 
 ### E5.1 Meguri's expected values
 
-What Meguri's executor must record for each step, by `editor/paste` P4 and P10. Where it differs from the golden, the deviation named is entered in `conformance/deviations.yaml`, with a `replace` holding these values, in the change that lands Meguri's adapter and activates the scenario; until then the scenarios stay inactive. Steps are numbered from 1; `failed` is `{error: fetch_failed}`; a hash is the SHA-1 of the step's fixture body.
+Provisional until the scenarios of E5 are written. With them, this section gains one table per scenario, in the scenario's own step order: each step's URL, Meguri's `name` or `failed` (`{error: fetch_failed}`), and every `media_dir` entry Meguri's adds leave (name, SHA-1 and size of its fixture body). The earlier tables, which numbered the steps of drafts that are not in the repository and gave values as changes to their goldens, no longer apply. Until then Meguri's executor records, by `editor/paste` P4 and P10:
 
-`editor/paste/url/names` (`editor-paste-url-stored-name`, `editor-paste-mime-params`, `editor-paste-url-slash`, `editor-paste-url-invalid-escape`, `editor-paste-leading-dots`):
+- **`name`.** The Meguri column of `editor/paste-sources` S6 for the step's URL and `Content-Type` (`editor/paste` P10.3), then stored by `media/media-files` M3 in the folder as the earlier steps of the scenario left it. The output is the stored name (E4): `text/media-filenames` F1's transform and lowercasing apply (`Pic.PNG` gives `pic.png`, `a.` gives `a._`), and a name the folder already holds with other bytes gets M3's hash suffix, the SHA-1 of the new bytes.
+- **`failed`.** Every row of `editor/paste-sources` S5 whose Meguri column is a failure: a final status other than 200 (204, 206, 4xx, 5xx, a path with no entry), a 3xx that is not followed (a 304, a redirect status without `Location`), an 11th redirect, no byte for 30 s, a missing or unreadable file, and `file://` escapes that are not UTF-8. A 200 with an empty body is a success and stores an empty file.
+- **Successes where Anki fails.** A body that keeps arriving with no 30 s gap, however long the whole exchange takes, and a URL path whose escapes are not UTF-8 (`%FF.png`, stored as U+FFFD `.png`, S6).
+- **`media_dir`.** Exactly the files Meguri's successful steps stored, each holding its fixture body's bytes; for an encoded `#` in a `file://` URL, the bytes of the file whose name holds the `#` (S5).
 
-| Steps | Meguri's `name` |
+Where Meguri's value differs from the golden, the deviation named is entered in `conformance/deviations.yaml`, with a `replace` holding Meguri's values, in the change that lands Meguri's adapter and activates the scenario; until then the scenarios stay inactive. The deviations each scenario needs:
+
+| Scenario | Deviations |
 |---|---|
-| 1 to 6 | `pic.png`, `img.png`, `paste.jpg`, `x.png`, `paste.png`, `paste-7a4c5950371ac7a4b2c077c2e96fd9f567890c7e.png` |
-| 7 to 12 | `a.png`, `b.png`, `ab.png`, `a b.png`, `日.png`, U+FFFD `.png` |
-| 13 to 18 | `y.png`, `.hidden.png`, `a._`, `play.weba`, `play`, `notes.tar` |
-| 19 to 29 | as the golden (`mpeg.mp3` to `avif.avif`) |
-| 30 to 35 | `gif`, `mp4`, `upper.jpg`, `params.mp3`, `none`, `..png.png` |
-
-`media_dir` is the golden's with `paste` named `paste.jpg`, `x` named `x.png`, `upper` named `upper.jpg`, `params` named `params.mp3`, `ab.png` (the `slash page bytes`) named `b.png`, `ab-bee1e6c9fbdfd6ea5572502b4ae589d5e8df2e37.png` named `ab.png`, `..png` named `..png.png`, and one more file, U+FFFD `.png` (SHA-1 `a230061f695616289efebb26eac66b71ebdc7263`, 20 bytes).
-
-`editor/paste/url/status` (`editor-paste-fetch-status`): steps 1 to 14 are `ok.png`, failed, failed, failed, `empty.png`, failed, failed, failed, `moved.png`, `seeother.png`, `r1.png`, failed, failed, failed. `media_dir` is the golden's without `nocontent.png`, `partial.png`, `accepted.png`, `bare.png` and `notmodified.png`.
-
-`editor/paste/url/timeout` (`editor-paste-fetch-timeout`): failed, `trickle.png`, `quick.png`. `media_dir` is the golden's plus `trickle.png` (SHA-1 `a9993e364706816aba3e25717850c26c9cd0d89d`, 3 bytes).
-
-`editor/paste/url/stored-name` (`editor-paste-url-stored-name`, `editor-paste-url-slash`): `pic.png`, `pic-08811aba945e9bf73dd3e12f16d85ceb8863779e.png`, `b.png`. `media_dir` is the golden's with `ab.png` named `b.png`.
-
-`editor/paste/url/file` (`editor-paste-url-stored-name`, `editor-paste-file-url-hash`): `b c.jpg`, `plain`, failed, failed, `a#b.png`, `c#d.png`. `media_dir`: `b c.jpg` and `plain` as the golden's, `a#b.png` with SHA-1 `3b20c52c8420fb9a95a52b0c8b07b332ca989b78` (10 bytes, the file `a#b.png`), and `c#d.png` with SHA-1 `07414acc1f28e4516ab9bb54c72a559fb4017aaf` (17 bytes).
+| `editor/paste/url/names` | `editor-paste-url-stored-name`, `editor-paste-mime-params`, `editor-paste-url-slash`, `editor-paste-url-invalid-escape`, `editor-paste-leading-dots` |
+| `editor/paste/url/status` | `editor-paste-fetch-status` |
+| `editor/paste/url/timeout` | `editor-paste-fetch-timeout` |
+| `editor/paste/url/stored-name` | `editor-paste-url-stored-name`, `editor-paste-url-slash` |
+| `editor/paste/url/file` | `editor-paste-url-stored-name`, `editor-paste-file-url-hash` |
 
 ## E6. Op `editor_config_set`
 

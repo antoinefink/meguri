@@ -52,3 +52,12 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, wri
 |---|---|---|
 | editor/paste P2, P3, P7, P11, P13, P14.2 and editor/paste-sources S7, S8, S9, S10 checked against the page-editor data-transfer obligations (h4d2c40a0930e, h88ee1a8ec135, hbed095c14b47, hc53d1db14186, hcddb2db9708d, hd319020c121d) | `ts/routes/editor/rich-text-input/data-transfer.test.ts`, `ts/routes/editor/rich-text-input/data-transfer.ts` | Which behavior must be proven, and whether the specs agree with the pinned page editor on four points: the audio/video and image extension lists with their case-insensitive last-dot extension rule; the bare name versus `[sound:]` snippet and the playback call; the pasteImagesAsPng extension choice with the `paste-<sha1>.<ext>` name taken from the converted bytes; and decoding of `data:image/{jpg,jpeg,png,gif};base64` for text tokens and img sources. They agree, so no new spec text. |
 | triage of the attach and record toolbar rows to editor/paste P5, P20, P24 snippets, P25, and the proposed P25 Meguri-tests line | `ts/tests/e2e/media-buttons.spec.ts` | Triage only: Attach and Record insert the added media into the field that was focused when the command started. Classified native-ui. |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| paste-sources S12 caret row (host column) | `qt/aqt/editor_legacy.py` (drop handler); `ts/routes/editor/NoteEditor.svelte` (focus-at-point helper, rich-text toggle); `ts/routes/editor/rich-text-input/RichTextInput.svelte` (refocus, caret to end) | Confirm that the host editor's drop moves the caret to the end of the field before the paste runs |
+| paste-sources S5 encoded-# file:// row, S6 redirect-naming sentence, S15 page-column note (and conformance/editor-ops E5.1 derivation rules) | `rslib/src/editor.rs` (URL retrieval, naming, extension from media type, 30 s client limit); `rslib/src/backend/media.rs` (add-media-from-URL service) | Re-check the page-column claims whose goldens are not in the repository: name taken from the asked-for URL, media type from the final response, whole-URL decoding before reading a file:// path, asked-for name returned |

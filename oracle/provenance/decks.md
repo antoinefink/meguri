@@ -47,3 +47,11 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, wri
 |---|---|---|
 | decks/presets/missing-reads-default (default-preset fallback for a deck whose preset is missing) | `rslib/src/deckconfig/service.rs`, `rslib/src/deckconfig/mod.rs`, `rslib/src/scheduler/reviews.rs`, `rslib/src/notetype/cardgen.rs`, `rslib/src/card/mod.rs`, `rslib/src/stats/card.rs` | Which behavior the getter tests target (an unknown id falls back to preset 1, then to the built-in defaults) and which collection paths read a deck's preset through that fallback. Those paths are Set Due Date's starting ease and the insertion order of new cards, which the scenario observes. |
 | classification of the legacy-add and add-if-unique rows (covered by sync/normal/preset-added and package/apkg-import/presets) | `rslib/src/deckconfig/service.rs`, `rslib/src/deckconfig/mod.rs`, `rslib/src/storage/deckconfig/mod.rs`, `rslib/src/import_export/package/apkg/import/decks.rs`, `rslib/src/sync/collection/changes.rs` (call site only), `rslib/src/import_export/insert.rs` (call site only) | Which callers reach the legacy add and the add-if-unique paths: deck-package import uses add-if-unique, while sync and legacy saves write under the existing id. This confirmed that existing scenarios prove the obligations. |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| decks/decks#D10 (one deck written per call in Anki; the browser scope is used by the filter sidebar's deck items) | `qt/aqt/browser/sidebar/tree.py` | Checked that the sidebar's deck items use the browser scope and toggle one deck per write |

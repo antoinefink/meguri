@@ -84,7 +84,7 @@ A change that leaves the selection valid changes nothing: the draft, its note ty
 
 ## D7. Scenarios
 
-Status (2026-10-27): the oracle driver has both observation kinds, and the five scenarios below are recorded on the Linux oracle. The K4 scenarios requested in `editor/config-keys` K7 (`add-defaults-current-deck`, `add-defaults-by-notetype`, `first-notetype-fallback`, `notetype-change`) need only these two kinds and `set_config`/`db_exec`; they are not recorded yet.
+Status (2026-11-17): the oracle driver has both observation kinds, and the five scenarios below are recorded on the Linux oracle. The K4 scenarios of `editor/config-keys` K7 (`add-defaults-current-deck`, `add-defaults-by-notetype`, `first-notetype-fallback`, `notetype-change`, `deck-key-curmodel-fallback`) use these observations and are recorded at the current oracle pin too. All of them stay inactive until Meguri implements the two observations (U191).
 
 The observation kinds, modeled on `fields_check` (`conformance/note-ops` N4). Both read the collection and change nothing, and each may be requested once per observe step:
 
@@ -107,6 +107,6 @@ Meguri's tests cover what no oracle shows: `preset_deck` (D1), D3 to D5 in the A
 The Add screen of Anki 26.09.3 differs from D3 to D5 in these ways. None is visible to a scenario, which calls D1 and D2 directly, so none has a `conformance/deviations.yaml` entry.
 
 - **Another screen's deck or note type change.** After any operation from another screen that changes decks or note types, Anki rebuilds the draft in place: the same note type and deck, the fields mapped as for a note type change, and the last added note forgotten, so the close prompt then shows for a sticky field that still holds its value. It requests the starting defaults but uses nothing from them. Meguri keeps the last added note unless the note type is replaced (D5).
-- **A replaced note type.** When Anki replaces a missing note type with the first by name, it treats that as a note type change: with `addToCur` `false` it also applies that note type's last deck (D2). Meguri keeps the selected deck (D5).
+- **A replaced note type.** When Anki replaces a missing note type with the first by name, it treats that as a note type change: it also applies that note type's last deck (D2) for either `addToCur` value, as on every note type change of its add window (`editor/add-flow` A10). Meguri keeps the selected deck (D5).
 - **Create Copy and prefilled drafts.** Anki replaces a draft that is not blank without asking. Meguri asks first (D3). When the replacement keeps the note type, Anki keeps the last added note; Meguri forgets it (D4).
-- **Browse's sidebar Add.** Anki presets the deck and then selects the note type of Browse's current note, which with `addToCur` `false` can apply that note type's last deck over the preset. It does both also for a draft that is not blank, whose fields are then mapped to that note type. Meguri uses D1 with `preset_deck` for a blank draft and changes only the deck of one that is not blank (D3, R48, R1174).
+- **Browse's sidebar Add.** Anki presets the deck and then selects the note type of Browse's current note, which, for either `addToCur` value, can apply that note type's last deck over the preset. It does both also for a draft that is not blank, whose fields are then mapped to that note type. Meguri uses D1 with `preset_deck` for a blank draft and changes only the deck of one that is not blank (D3, R48, R1174).

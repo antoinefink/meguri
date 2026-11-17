@@ -9,7 +9,7 @@ Meguri's backups are files Anki can restore: collection-only packages in the lat
 
 ## B1. The backups folder
 
-- The host passes the folder's path when it opens the collection, separately from the collection directory (KTD12, U151): `Documents/Backups` on iOS and iPadOS, where the Files app shows it (R1629), and a folder in the app's private container on the Mac (Show Backups, U163a). The core never derives the path from anything else.
+- The host receives the folder's path in its configuration, separately from the collection directory (`engine/host#H1`, KTD12, U151), and keeps it for its whole life, after a failed open too: `Documents/Backups` on iOS and iPadOS, where the Files app shows it (R1629), and a folder in the app's private container on the Mac (Show Backups, U163a). The core never derives the path from anything else.
 - The writer creates the folder, and any missing parent, when it does not exist: the user can delete it in the Files app, and every later backup would fail otherwise.
 - The folder may hold anything: Meguri's backups and server copies (B2), U32's unpublished work (`.meguri-tmp-…` files, `.meguri-stage-…` directories, `storage/durability-and-files#F4`), files the user put there, and backups that Anki or another Meguri device made and the user copied in. Only B2's names mean anything to this spec. Every other entry is foreign: the listing ignores it and retention never deletes it.
 
@@ -83,6 +83,7 @@ Writes one backup of the open collection and then thins the folder. It runs as a
 
 - **Failure.** Any failure before publication returns P13's error (`InsufficientSpace`, `DiskFull`, `Io`, `Cancelled`, `DestinationExists`). Nothing appears under a backup name, the temporary file and the staging directory are removed (P11), retention does not run and earlier backups keep their bytes.
 - **Cancel** is honoured until publication. A published backup stays, and its retention runs.
+- **Progress stages**, in order: `snapshot` (step 4's `VACUUM INTO`), `compress` (writing the package), `verify` (the read-back), `publish` (the rename and directory sync) and `retention` (step 6). Every report carries `cancellable`: true in `snapshot`, `compress` and `verify`, false from `publish` on.
 - **Retention failures** never fail the backup: a file that cannot be deleted is logged with its name and skipped, a file already gone counts as deleted, and a folder that cannot be read for retention is logged. The result lists only the files actually deleted.
 - **Concurrent writers.** Two backups may run at once (a periodic backup and "Back Up Now"). Steps 3 and 5 give them distinct names, and each retention deletes only files that existed when it read the folder and that it did not protect; the other writer's new file is always dated today, so no retention selects it.
 - Example: two forced backups start in the same second S, with a deck deletion committed between their snapshots. Both files exist: one named after S without the deletion, the other named after S + 1 second with it.
@@ -195,6 +196,7 @@ Lists what Restore can offer (R1637, U127, U133a), without opening any file.
 - Order: newest first by that date and time; equal date-times by file name in ascending byte order.
 - Foreign entries (B1) are left out, U32's temporary files and staging directories among them.
 - A folder that does not exist gives an empty listing. A file that disappears while the folder is read is left out. Any other failure to read the folder is `Io`.
+- Available in every lifecycle state while a host exists, `Failed{Corrupt}` and `NoCollection` included, so Restore can be offered there (`package/backup-triggers#T8`, `maintenance/optimize-integrity#M7.1`). It reads only the folder B1 names.
 - The listing never reads file contents, so a damaged file is listed like any other. Restore inspects the file before using it (`package/container#P12`, U127).
 
 ## B8. Budgets
@@ -210,6 +212,8 @@ Lists what Restore can offer (R1637, U127, U133a), without opening any file.
 | AE69: default limits over 400 days of hourly backups | `package/backups/retention-hourly-400-days` |
 | Fewer backups than the limits, on distinct days: all stay | `package/backups/fewer-than-limits` |
 | Daily-to-weekly and weekly-to-monthly anchors | `package/backups/period-boundaries` |
+| Limits above one in every stage; today, yesterday and later dates spared | `package/backups/three-stages` |
+| Default limits over a year of daily backups | `package/backups/retention-daily-one-year` |
 | Monday-start weeks | `package/backups/week-boundary` |
 | Names and today from the offset (+09:00, −05:00) | `package/backups/offset-east`, `offset-west` |
 | Foreign files, server copies, future-dated backups; all limits zero | `package/backups/foreign-files` |

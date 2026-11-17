@@ -1,0 +1,30 @@
+# stats/graphs-cards C13 (C2, C9.1, C9.6): the last four rows of the C9.6 table
+# and an lrt of -2^63, one card per deck, s 5 and d 5, at the retrievability clock of graphs-cards C13 (clock start 2030-01-15T11:00:00
+# Paris, advance 30d: now_s 1897293600, today 30, N 1897354800).
+# D8: a review card moved into filtered deck F (did 900, odid D8) with odue 0,
+# due 35, ivl 20; D9: odid -1, due 35, odue 40, ivl 20; D10: relearning, queue 1,
+# due 25 (a day number), ivl 2; D11: suspended review, due 1,896,429,600, ivl 0;
+# D12: lrt -9223372036854775808. Expected keys 54, 76, 3, 99 and 3.
+id: stats/graphs/fsrs/retrievability-elapsed-odd
+clock: {tz: Europe/Paris, start: "2030-01-15T11:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["D8", "D9", "D10", "D11", "D12"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "D8", "fields": ["r8", "x"]}
+    - {"notetype": "Pair", "deck": "D9", "fields": ["r9", "x"]}
+    - {"notetype": "Pair", "deck": "D10", "fields": ["r10", "x"]}
+    - {"notetype": "Pair", "deck": "D11", "fields": ["r11", "x"]}
+    - {"notetype": "Pair", "deck": "D12", "fields": ["r12", "x"]}
+steps:
+  - {"advance": "30d"}
+  - {"db_exec": {"sql": "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'F', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, did = 900, odid = (SELECT id FROM decks WHERE name = 'D8'), due = 35, odue = 0, data = '{\"s\":5.0,\"d\":5.0}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'r8')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, odid = -1, due = 35, odue = 40, data = '{\"s\":5.0,\"d\":5.0}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'r9')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 3, queue = 1, ivl = 2, due = 25, data = '{\"s\":5.0,\"d\":5.0}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'r10')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = -1, ivl = 0, due = 1896429600, data = '{\"s\":5.0,\"d\":5.0}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'r11')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":5.0,\"d\":5.0,\"lrt\":-9223372036854775808}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'r12')"}}
+  - {"reopen": {}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "F"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "D8"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "D9"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "D10"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "D11"}, "history": "year", "parts": ["retrievability"]}, {"scope": {"deck": "D12"}, "history": "year", "parts": ["retrievability"]}]}]}

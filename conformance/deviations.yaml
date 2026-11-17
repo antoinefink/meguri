@@ -4,6 +4,7 @@
 # requirement and a scenario or test that asserts Meguri's own behavior.
 # C5-only contract differences: specs/sched/review-session.md P11.
 # That register requires production test identities/evidence; it changes no transform.
+# stats graph register (no transform): specs/stats/graphs-revlog.md V9.
 deviations:
   - id: card-data-unknown-keys
     requirement: R1461
@@ -422,6 +423,16 @@ deviations:
     scenarios: [notetypes/structure/restore-forced-kind]
     pointer: /steps/7/db_exec/rows
     transform: {replace: [[1]]}
+  # specs/notetypes/restore-to-default.md D4: a restore generates cards from
+  # the stock fronts as they are; Anki rewrites the stock text with the old
+  # names mapped to the stock names by position and generates from that.
+  - id: restore-keeps-stock-references
+    requirement: R914
+    summary: After Trio (Front, Extra, Back) is restored as Basic (optional reversed card), the note with an empty Extra keeps only its Card 1 card, since the stock Card 2 front asks for Back and Add Reverse; Anki's rewritten front asks only for Add Reverse and gives it a Card 2 card.
+    test: notetypes/structure/restore-stock-references
+    scenarios: [notetypes/structure/restore-stock-references]
+    pointer: /steps/4/db_exec/rows/0/1
+    transform: {replace: "0"}
   # specs/engine/undo.md A8: a redo whose rows changed outside the undo
   # history (here a trigger took the answer's review-log id) is refused by
   # Meguri's check (M4.2) and dropped; Anki applies it, keeps the other row
@@ -1258,6 +1269,20 @@ deviations:
     scenarios: [maintenance/check-media/rerun/no-change]
     pointer: /steps/*/check_media/trash_count
     transform: {replace: 3}
+  - id: check-media-rename-trashes-old-long-name
+    requirement: R2018
+    summary: After the fix op Meguri moves the old 130-byte name of the renamed file to the trash, so the trash holds one entry; Anki deletes the old file permanently (specs/maintenance/check-media.md C4, C10 step 5).
+    test: maintenance/check-media/rename/long-name
+    scenarios: [maintenance/check-media/rename/long-name]
+    pointer: /steps/1/check_media/trash_count
+    transform: {replace: 1}
+  - id: check-media-rename-trashes-old-entities
+    requirement: R2018
+    summary: After the fix op Meguri moves the old name x&[y].jpg of the renamed file to the trash, so the trash holds one entry; Anki deletes the old file permanently (specs/maintenance/check-media.md C4, C10 step 5).
+    test: maintenance/check-media/rename/entities
+    scenarios: [maintenance/check-media/rename/entities]
+    pointer: /steps/1/check_media/trash_count
+    transform: {replace: 1}
   - id: check-media-nfd-keeps-case
     requirement: R1646
     summary: The NFD file Cafe U+0301 .jpg is renamed in place to its NFC name with its case kept, so both references are satisfied and nothing is unused; Anki stores it lowercased as caf U+00E9 .jpg and reports Caf U+00E9 .jpg missing (specs/maintenance/check-media.md C2 step 2, C20).
@@ -1407,6 +1432,42 @@ deviations:
     scenarios: [stats/card-info/ae46-no-state]
     pointer: /steps/4/card_stats/#c1/fsrs_retrievability
     transform: {replace: 0.9710832}
+  - id: card-info-computed-retrievability-params-1
+    requirement: R1251
+    summary: As card-info-computed-retrievability, for a preset with a non-default parameter list (specs/stats/card-info.md C3.5, C13.4).
+    test: stats/card-info/params
+    scenarios: [stats/card-info/params]
+    pointer: /steps/7/card_stats/#c1/fsrs_retrievability
+    transform: {replace: 0.96628534}
+  - id: card-info-computed-retrievability-params-2
+    requirement: R1251
+    summary: As card-info-computed-retrievability, for a preset with a non-default parameter list (specs/stats/card-info.md C3.5, C13.4).
+    test: stats/card-info/params
+    scenarios: [stats/card-info/params]
+    pointer: /steps/7/card_stats/#c2/fsrs_retrievability
+    transform: {replace: 0.97238074}
+  - id: card-info-computed-retrievability-params-3
+    requirement: R1251
+    summary: As card-info-computed-retrievability, for a preset with a non-default parameter list (specs/stats/card-info.md C3.5, C13.4).
+    test: stats/card-info/params
+    scenarios: [stats/card-info/params]
+    pointer: /steps/7/card_stats/#c3/fsrs_retrievability
+    transform: {replace: 0.95518851}
+  - id: card-info-computed-retrievability-params-4
+    requirement: R1251
+    summary: As card-info-computed-retrievability, for a preset with a non-default parameter list (specs/stats/card-info.md C3.5, C13.4).
+    test: stats/card-info/params
+    scenarios: [stats/card-info/params]
+    pointer: /steps/7/card_stats/#c4/fsrs_retrievability
+    transform: {replace: 0.96583014}
+  # specs/stats/graphs-revlog.md V9: the Reviews graph's per-day time sums.
+  - id: stats-review-time-no-wrap
+    requirement: R1446
+    summary: Meguri sums a day's Reviews times of one kind in 64 bits; Anki keeps them in 32 unsigned bits and wraps at 2^32 ms (specs/stats/graphs-revlog.md V9).
+    test: core/crates/meguri-stats/tests/graphs_revlog.rs review_time_sums_no_wrap
+    scenarios: [stats/graphs/reviews/time-wrap]
+    pointer: /steps/1/stats/0/reviews/time/0
+    transform: {replace: {"learn": 4400000000, "mature": 6000000000, "young": 3000000000}}
   # specs/sched/deck-options.md O4.2, O7.1, O12: Meguri refuses a deck options
   # save whose ignore date is after today's date; Anki stores today's date.
   - id: deck-options-future-ignore-date-refused

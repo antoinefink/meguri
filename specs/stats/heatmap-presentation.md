@@ -21,7 +21,7 @@ The host passes a series; the component draws it as it is.
 | `today` | T, a date. Home and deck pages: A11's `today`. Calendar: the record's `today_date` (P7). Widget: the entry's `today` (W4) |
 | `weekStart` | 0 (Sunday), 1 (Monday), 5 (Friday) or 6 (Saturday): the synced `firstDayOfWeek` after `specs/editor/config-keys.md` K5 (R149, R1381) |
 | `period` | the first and last dates shown: A11's `period_start` and `period_end` (`year`, `months`), January 1 to December 31 of the shown year (`calendar`), M5's weeks (`trailing`), or January 1 to December 31 of the year of the entry's `today` (the widget's `year`) |
-| `days` | `year`, `months`: A11's `days`, date → `{kind, count, level, search}`. `calendar`: exactly the dates P7's drawn-cell rule draws, date → `{count, query}`; the Stats host computes the set with U226's P7 rule and passes it (U230). `trailing`: date → `{kind, count, level}`, built by the widget host (U165) from W3 as below; the widget's `year`: the same mapping as `trailing`, for every date of its year (`stats/widget-families` F1) |
+| `days` | `year`, `months`: A11's `days`, date → `{kind, count, level, search}`. `calendar`: exactly the dates P7's drawn-cell rule draws, date → `{count, query}`, with no `query` where P7 gives none (`stats/browse-queries` Q4.2); U230's Calendar card computes the set, the counts and the queries by P7 (R1379 to R1384) and passes them, and the component computes none of them. `trailing`: date → `{kind, count, level}`, built by the widget host (U165) from W3 as below; the widget's `year`: the same mapping as `trailing`, for every date of its year (`stats/widget-families` F1) |
 | `colouring` | `discrete` (levels 0 to 10, M8.1) for `year`, `months` and `trailing`; `continuous` with the record's `max_count` for `calendar` (M8.3) |
 | `navigation` | `year`, `months`: A11's `first_period`, `last_period`, `can_go_back`, `can_go_forward` and the shown offset `p`. `calendar`: P7's year bounds as `can_go_back` and `can_go_forward`. `trailing` and the widget's `year`: none |
 | `totals` | A10's `totals` (`year` and `months` on Home and deck pages only; none in the widget), for M15.2 and M15.3 |
@@ -104,7 +104,7 @@ Mode `trailing(N)`, N 8 or 20, for the widget's small and medium families (R307,
 
 ## M6. Calendar layout
 
-Mode `calendar`, the Stats screen's Calendar card (R1379; U230).
+Mode `calendar`, the Stats screen's Calendar card (R1379; U230). This component (U227) draws the Calendar's grid, its colours (M8.3) and its `AXChartDescriptor` (M15.6); U230 hosts the card and passes the series (M1); `stats/graph-presentation` P7 gives the years, drawn dates, tooltip and query that U230 computes.
 
 - The shown year's cells are placed by M3, 54 columns included.
 - Only the dates the series holds are drawn (M1: the host passes P7's drawn dates). Every other date of the year has no cell, like the slots of M3. So no date after today has a cell (R1380).
@@ -297,6 +297,8 @@ Counts in M10, M15 and M17 use the locale's integer format with grouping: `1,234
 - The component asks the host for a period; it never computes data. `year`, `months`: a request carries the target `p`: Back `p − 1`, Forward `p + 1`, Today 0, a jump to the first period `first_period`, to the last period `last_period`, M15.3's paging `p − 1` or `p + 1`. `calendar`: the target year, the shown year minus or plus 1.
 - A further request while one is pending counts from the last requested period, not the shown one.
 - A series for a period other than the last one requested is dropped, so answers arriving out of order never show an older request.
+- A period is identified by its mode and offset `p` in `year` and `months` (M1's `navigation`, which the host passes with each series), and by its year in `calendar`; never by its dates. A series of another mode than the last request is a mode change (M11.2) and is always taken, at its `p`.
+- A host refresh (new data, the derived store's next event, a rollover or zone change that moves T: `stats/heatmap-addon` A11) asks again for the last requested period: the same `p` in `year` and `months`, the same year in `calendar`. So when a change of T moves the periods, the grid shows the new dates of that `p`: in `months` at `p` = −1, T moving from 2026-10-31 to 2026-11-01 changes the shown period from 2025-09-01 … 2026-05-31 to 2025-10-01 … 2026-06-30 (A5); in `year` at `p` = −1, T moving from 2026-12-31 to 2027-01-01 changes it from 2025 to 2026. The selection follows M9, and the bounds come with the new series. A year that P7 moves in `calendar` (a history change) replaces the last requested year.
 - The component draws nothing before its first series. The host requests period 0 (the current year in `calendar`) when it first appears.
 
 ## M12. Pointer interaction (Mac)
@@ -375,7 +377,7 @@ From A10's `totals`, one part per year of `totals.years`, joined with `, `: `<n>
 ### M15.4 Days
 
 - One element per drawn cell. Label: M10.1's text. A Calendar cell's label is P7's two lines joined with `, ` (P18.2): `Monday, October 12, 2026, 3 reviews`. Today's element has the value `Today`; the selected one the selected trait.
-- A cell with data has the button trait and the custom action `Show in Browser`, which runs the callback; activating it runs the same action. A cell without data activates as a tap (M13.1) or a click (M12) would.
+- A cell with data (count ≥ 1 with a `search`; in `calendar`, a cell with a `query`, whatever its count) has the button trait and the custom action `Show in Browser`, which runs the callback; activating it runs the same action. A cell without data activates as a tap (M13.1) or a click (M12) would. A Calendar cell with a count and no query (a date with rows only on day index 1, `stats/graphs-revlog` V3.3, `stats/browse-queries` Q4.2) has neither the trait nor the action.
 - Elements are built from the layout on demand, not as views (M16).
 
 ### M15.5 Identifiers
@@ -507,13 +509,13 @@ No conformance scenario (the Scenarios line). U227's tests, from this file's tab
 - Hit-testing (M7.4): points in cells, in widened gaps, in block gaps, in undrawn slots and on labels.
 - Colours (M8): every M8.1 row; M8.2's three rules in light, dark and both contrast settings; M8.3's table.
 - Outlines (M9): today, selection and hover combinations; selection kept across paging and width change; a selection on T moving with T at a rollover, and one on another date staying.
-- Period requests (M11.5): each control's target `p`; two quick Backs requesting `p − 1` then `p − 2`; an out-of-order answer dropped.
+- Period requests (M11.5): each control's target `p`; two quick Backs requesting `p − 1` then `p − 2`; an out-of-order answer dropped; a refresh in `months` at `p` = −1 with T moving from 2026-10-31 to 2026-11-01 requesting `p` = −1 again and showing 2025-10-01 … 2026-06-30, and the same in `year` from 2026-12-31 to 2027-01-01 showing 2026; a series of another mode taken as a mode change.
 - Text (M10, M17): every M10.1 table row; plurals at 0, 1 and 2; grouping at 1,234; the long date in Pacific/Kiritimati and Pacific/Niue; the summary examples of M15.2.
 - Navigator: A6's example (first history day 2024-12-03, last forecast day 2027-08-01, `year`: Back disabled at 2024, Forward at 2027, Shift-click Back from 2026 shows 2024); `months` bounds; Today; mode change to period 0; a width change from iPhone to iPad width keeps the period and the selected date (R1308).
 - AE54 (UI side): iPhone, 12 due today and no review: tapping today's cell shows `**12** cards **due** on …` with `Show in Browser`, whose callback gets a forecast descriptor with `prop:due=0`; after one answer the same cell reads `**1** card **reviewed** on …` and the callback gets a history descriptor with `prop:rated=0`.
 - AE55 (display side): a series with levels 4 and 10 draws `heatmap.history.4` and `heatmap.history.10` (snapshot).
 - Mac UI tests (VM): hover 0.35 s shows the tooltip, and moving to the next cell updates it at once; a click on an empty future day returns the selection to T with no callback; with the grid focused, → shows the next period and Shift-← the first; the focus order Back, Today, Forward, grid.
 - Touch UI tests: tap, scrub with the magnified callout, hold and release without moving, swipe paging (Calendar included), a short sideways drag that does nothing, long press jumps, a vertical drag that scrolls the list, and with a callout open a tap on another cell that moves it in one tap.
-- VoiceOver tree: the order of M15.1, the adjustable month element, the `Months` rotor, the day element `heatmap.day.2026-10-12` with `Show in Browser`.
+- VoiceOver tree: the order of M15.1, the adjustable month element, the `Months` rotor, the day element `heatmap.day.2026-10-12` with `Show in Browser`; a Calendar cell with a count and no query, with no button trait and no `Show in Browser` action (M15.4).
 - Snapshots: `year` and `months`, light and dark, Increase Contrast, an empty history, a very busy history, 53 and 54 columns, iPhone and iPad and Mac widths, the widget families (small, medium, large, extra large, in full-colour, accented and vibrant modes), and the Calendar with sparse and dense years; `months` and `calendar` at iPhone width with the default and an accessibility text size (alternate and absent weekday labels, narrow and absent month labels).
 - Drawing: M16's signpost within one frame at 120 Hz on the reference fixture.

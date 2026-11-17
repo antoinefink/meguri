@@ -1,0 +1,113 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "change_notetype_info": {
+          "card_counts": [
+            [0, 2]
+          ],
+          "discarded_fields": [],
+          "dropped_templates": [],
+          "field_content": [2, 1],
+          "fields": [0, null, 1],
+          "new_fields": ["Word", "Hint", "Gloss"],
+          "new_notetype": "Twin",
+          "new_templates": ["Ask", "Prompt"],
+          "old_fields": ["Word", "Gloss"],
+          "old_notetype": "Duo",
+          "old_templates": ["Ask"],
+          "removed_cards": 0,
+          "schema": 1894701600000,
+          "templates": [0, null]
+        }
+      },
+      {
+        "change_notetype": {
+          "notes": 2
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Default",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Default",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Twin", "zorvu|zorvu|kelpa", "zorvu", 3778425378, 1894705200, -1],
+            ["Twin", "mivax|mivax|", "mivax", 4078263443, 1894705200, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["zorvu", 0, 1, 1894701600, -1],
+            ["zorvu", 1, 1, 1894705200, -1],
+            ["mivax", 0, 2, 1894701600, -1],
+            ["mivax", 1, 2, 1894705200, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/change/repeat-field",
+  "scenario_sha256": "70f6ac3b8370bfdc51216f52143daa6dd0c387fb758f144794def174b9dd88e0",
+  "tz": "UTC"
+}

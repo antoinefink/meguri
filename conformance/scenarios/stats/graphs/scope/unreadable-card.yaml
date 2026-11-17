@@ -1,0 +1,26 @@
+# stats/graphs-common G15 (G4): every request reads the scope's cards and its
+# window rows, whatever parts it names. One card in deck A, one in deck B.
+# The A card is made unreadable (type 7, then queue 9): requests naming only
+# review-log parts fail for Deck A and Collection, Deck B returns data. Then
+# a due and odue of 2^40 on the A card (read as 0): data everywhere. Then a
+# review-log row with ease 300 on the B card, dated today: a request for
+# card_counts only fails for Deck B and Collection, Deck A returns data.
+id: stats/graphs/scope/unreadable-card
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["A", "B"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "A", "fields": ["in-a", "x"]}
+    - {"notetype": "Pair", "deck": "B", "fields": ["in-b", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET type = 7 WHERE nid = (SELECT id FROM notes WHERE sfld = 'in-a')"}}
+  - {"observe": [{"stats": [{"scope": {"deck": "A"}, "history": "year", "parts": ["reviews"]}, {"scope": {"deck": "A"}, "history": "all", "parts": ["reviews"]}, {"scope": {"deck": "B"}, "history": "year", "parts": ["reviews", "added"]}, {"scope": "collection", "history": "year", "parts": ["reviews"]}]}]}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 0, queue = 9 WHERE nid = (SELECT id FROM notes WHERE sfld = 'in-a')"}}
+  - {"observe": [{"stats": [{"scope": {"deck": "A"}, "history": "year", "parts": ["reviews"]}, {"scope": {"deck": "B"}, "history": "year", "parts": ["reviews", "added"]}, {"scope": "collection", "history": "year", "parts": ["reviews"]}]}]}
+  - {"db_exec": {"sql": "UPDATE cards SET queue = 0, due = 1099511627776, odue = 1099511627776 WHERE nid = (SELECT id FROM notes WHERE sfld = 'in-a')"}}
+  - {"observe": [{"stats": [{"scope": {"deck": "A"}, "history": "year", "parts": ["reviews", "added", "card_counts"]}, {"scope": "collection", "history": "year", "parts": ["card_counts"]}]}]}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1791799200000, (SELECT id FROM cards WHERE nid = (SELECT id FROM notes WHERE sfld = 'in-b')), -1, 300, 1, 30, 2500, 0, 1)"}}
+  - {"observe": [{"stats": [{"scope": {"deck": "B"}, "history": "year", "parts": ["card_counts"]}, {"scope": {"deck": "A"}, "history": "year", "parts": ["card_counts"]}, {"scope": "collection", "history": "year", "parts": ["card_counts"]}]}]}

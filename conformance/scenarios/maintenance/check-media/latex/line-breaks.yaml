@@ -1,0 +1,31 @@
+# C8 of specs/maintenance/check-media.md and A9.3 of
+# specs/package/apkg-export.md, which name LaTeX images the same way.
+# Each field holds one LaTeX form with its own letters, so each name is
+# distinct: an upper-case [LaTeX] opener, <br>, <br/>, <div> and an
+# upper-case <BR> each become a line feed; <br /> with a space is only
+# removed. On Vector (latexsvg true) a [$] and a [$$] field give .svg names.
+# Two files are in the folder: the name for "gh" (the <br /> field read as
+# removed) and the name for "g", LF, "h" (the same field read as a line
+# feed). The used one is not reported; the other one is unused.
+id: maintenance/check-media/latex/line-breaks
+description: LaTeX image names for line-break tags, the bracket forms and the svg setting.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Formula
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Vector
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Formula, fields: ["[LaTeX]a<br>b[/latex]", "[latex]c<br/>d[/latex]"]}
+    - {notetype: Formula, fields: ["[latex]e<div>f[/latex]", "[latex]g<br />h[/latex]"]}
+    - {notetype: Formula, fields: ["[latex]k<BR>l[/latex]", "[latex]x^2[/latex]"]}
+    - {notetype: Vector, fields: ["[$]\\frac{1}{2}[/$]", "[$$]x[/$$]"]}
+  media_files:
+    - {name: latex-1041179cbdda366fd7b0347f09255f775170e103.png, text: "formula gh"}
+    - {name: latex-81db9653f6941b6dd49b51f15282bab95a0ede79.png, text: "formula g h"}
+steps:
+  - legacy_update: {notetype: Vector, patch: {latexsvg: true}}
+  - check_media: {}

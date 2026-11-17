@@ -211,7 +211,7 @@ The oracle runs Anki's collection library, not its desktop screens, so it observ
 
 ## A18. Scenarios
 
-- `notetypes/manage/list-order` (a draft, inactive, no golden yet): A2's order and counts through `db_exec`, on scenario-defined note types whose names order differently under unicase and under code points, a note type without notes, a case-only rename (the order holds) and a note type removal (its notes leave the counts). Its `db_exec` reads the table ordered by the name column, as Anki's list does, so it checks the column's collation and the counts in both executors; it does not exercise Meguri's ordered list read (A2's core reads), which A19's engine tests cover. Its ops are all in the DSL; it waits for `remove_notetype`'s Meguri adapter (U34) and its golden.
+- `notetypes/manage/list-order` (recorded, with its golden; inactive until `remove_notetype`'s Meguri adapter, U34): A2's order and counts through `db_exec`, on scenario-defined note types whose names order differently under unicase and under code points, a note type without notes, a case-only rename (the order holds) and a note type removal (its notes leave the counts). Its `db_exec` reads the table ordered by the name column, as Anki's list does, so it checks the column's collation and the counts in both executors; it does not exercise Meguri's ordered list read (A2's core reads), which A19's engine tests cover. Its ops are all in the DSL; it waits only for that adapter.
 - Nothing else here is observable through the oracle: A3 to A16 are Anki's desktop screens.
 
 ## A19. Tests

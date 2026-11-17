@@ -125,9 +125,25 @@ Removed (2026-10-27): moved to `search/card-extractors` X6 (U82a). No search ter
 C(data, key), for the custom data of P9:
 
 1. `cd` as `search/card-extractors` X3 reads it. When it is absent, C is missing.
-2. The `cd` text is parsed as JSON (RFC 8259). When it does not parse or is not an object, C is missing.
+2. The `cd` text is parsed as one JSON value (RFC 8259), with white space allowed around it and between tokens. When it does not parse or is not an object, C is missing. The reader is stricter than RFC 8259 in four places, and each makes the whole text fail, so C is missing for every key, the one asked for included (`search/props/custom-data-json-edges`):
+   - a number anywhere in the text that `model/json-numbers` N10 puts out of range: its significand S is not 0 and either its exponent E is above 308 or the one scaling of step 5 gives infinity (`{"k":1,"z":1e400}`, `{"k":1,"z":1e9999999999}`, and `{"k":1,"z":1.7976931348623158e308}` although the float nearest that number is finite). A zero significand or a negative exponent never fails: `0e400` and `1e-400` give `0.0`;
+   - a string anywhere in the text holding an unpaired surrogate escape (`{"k":1,"z":"\ud800"}`); a paired one (`"\ud83d\ude00"`) is the one character it encodes, U+1F600;
+   - arrays and objects nested more than 127 deep, the outer object counting as one: `{"k":1,"z":` with 126 nested arrays parses, with 127 it does not;
+   - anything other than white space after the value (`{"k":1} x`).
 3. The member named key (the last one when the name repeats). When there is none, C is missing.
-4. A string member gives its content; any other value gives its compact JSON text as `serde_json` writes a value: integers in decimal, other numbers as `serde_json` writes an `f64` (`1.5`, `5.0`), `true`, `false`, `null`, arrays and objects without spaces.
+4. A string member gives its content; any other value gives its compact JSON text, written as Anki's reader (the `serde_json` crate 1.0.143 with its default features) writes a value: `true`, `false`, `null`; arrays and objects without spaces (`[1, 2, [3]]` gives `[1,2,[3]]`); numbers by step 5.
+5. A number written without a fraction or exponent, other than `-0`, keeps its decimal digits when it fits a 64-bit integer, unsigned from 0 to 18446744073709551615 or signed down to −9223372036854775808 (`18446744073709551615`, `-9223372036854775808`). Every other number, `-0` and integers beyond that range included, becomes the 64-bit float F of `model/json-numbers` N11, which is often not the float nearest the number:
+   - Digits go into an unsigned 64-bit significand S while S × 10 + digit stays at most 18446744073709551615. In the integer part, the first digit that does not fit ends the taking: it and the rest of the integer part are dropped, each adding 1 to the exponent E. In the fraction, each digit taken subtracts 1 from E, and the first digit that does not fit and all later fraction digits are dropped. Dropped digits are cut off, not rounded. After an integer part that dropped digits, fraction digits are still tried (one is taken when S is 1844674407370955161 and the digit is 5 or less). The exponent part is then added to E. An exponent part above 2147483647 makes the number 0 (−0 under a minus sign) when S is 0 or the exponent is negative, and counts as E above 308 otherwise.
+   - F starts as the float nearest S (ties to even). When 0 ≤ E ≤ 308, F is multiplied once by the float nearest 10^E; when −308 ≤ E < 0, it is divided once by the float nearest 10^−E. When E < −308, F is first divided by 1e308 and E raised by 308, as many times as it takes. Each operation rounds to the nearest float. A minus sign negates the result at the end, so a zero keeps its sign (`-1e-9999999999` gives `-0.0`). Step 2 says when this fails.
+   - Recorded results where F is not the nearest float (the nearest is in brackets): `8e-28` gives `8.000000000000001e-28` (`8e-28`); `2.62e-21` gives `2.6200000000000003e-21` (`2.62e-21`); `9007199254740993.0` and `9007199254740992.99999999999` give `9007199254740994.0` (`9007199254740992.0` for both: the first lies halfway and ties go to even); `123456789012345678901` gives `1.2345678901234567e20` (`1.2345678901234568e20`); `1.00000000000000011102230246251565404236316680908203125`, exactly halfway between 1 and the next float, gives `1.0000000000000002` (`1.0`); `573e-309` gives `5.7299999999999996e-307` (`5.73e-307`).
+
+   F is then written in its shortest form: the fewest significant digits d₁…dₙ whose nearest float is F (a correctly rounded reading, not the one above, as in `model/json-numbers` N5), with e the power of ten of the first digit (so the value is d₁.d₂…dₙ × 10^e):
+   - 0 ≤ e ≤ 15 and n ≤ e + 1: the digits, e + 1 − n zeros, then `.0` (`1e2` gives `100.0`, `-0` and `-0.0` give `-0.0`, `2.5E+3` gives `2500.0`, `1e15` gives `1000000000000000.0`);
+   - 0 ≤ e ≤ 15 and n > e + 1: the digits with the point after the first e + 1 (`1234567890123456.7` gives `1234567890123456.8`);
+   - −5 ≤ e ≤ −1: `0.`, −e − 1 zeros, then the digits (`0.0001`, `1e-5` gives `0.00001`);
+   - otherwise d₁, then `.` and d₂…dₙ when n > 1, then `e` and e in decimal with a `-` when negative and no `+` (`1e16`, `1e-6`, `1.5e-6`, `5e-324`, `1.5e300`, `18446744073709551616` gives `1.8446744073709552e19`, `-9223372036854775809` gives `-9.223372036854776e18`).
+
+   So `prop:cds:k=100.0` finds `{"k":1e2}` and `prop:cds:k=100` does not, while `prop:cdn:k=100` finds it (P9). The value reaches `prop:cdn:` as this text: `-0.0` reads as 0.
 
 ## P13. Original position (for U41 and U84)
 
@@ -164,6 +180,7 @@ Not Anki behavior. `meguri_card_f32`, `meguri_retrievability`, `meguri_relative_
 | `search/props/due-extremes` | P4 (stored `due` and `odue` near the ends of the 64-bit range, 32-bit operand bounds) |
 | `search/props/memory` | P6, P7, P8, P14; `search/card-extractors` X3, X5 |
 | `search/props/custom-data` | P9, P12, P14 |
+| `search/props/custom-data-json-edges` | P12 steps 2, 4 and 5 (texts that do not parse, number forms) |
 | `search/history/dst-paris`, `search/history/dst-new-york` | P4 across a change of UTC offset |
 
 All carry the tag `needs-prop`. They set card columns and `cards.data` with `db_exec`; card ids come from the frozen clock (`storage/ids-usn-mtime#I2`) and are pinned by an `ids` observation.

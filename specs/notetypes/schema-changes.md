@@ -27,7 +27,7 @@ Each op that can change the schema declares a reason. The table is the whole lis
 | `sort_field_changed` | a note type save that makes another field the sort field (U34, R926); an `.apkg` update of a note type that changes its sort field (U120, `package/apkg-import#I7`) | yes | yes |
 | `templates_changed` | a note type save whose templates are added, removed or reordered (U34) | yes | yes |
 | `notetype_removed` | deleting a note type (U34, R918) | yes | yes |
-| `notetype_restored` | Restore to Default when it changes the field or template structure (U34, R914) | yes | yes |
+| `notetype_restored` | Restore to Default when it changes the field count or the template count, or when a given stock kind changes the note type's `kind` (U34, R914; `notetypes/restore-to-default#D5`) | yes | yes |
 | `notes_notetype_changed` | Change Note Type (U35, R948) | yes | yes |
 | `preset_removed` | deleting a deck preset (U28; the deck options save, U49, U232) | yes | yes |
 | `notetypes_merged` | an `.apkg` import that merges incoming note types into local ones (U121) | yes | yes |
@@ -47,7 +47,9 @@ Not schema changes (R950), never setting `scm`: renaming a note type, field or t
 
 - An op is schema-classified by what it actually changes, not by how it was asked. A U34 save is `fields_changed` when the list of stored field positions differs: a field added or removed, or a kept field at another position. Moving a field to the position it already has, or setting the sort field to the current one, changes nothing (`notetypes/records` N3.1) and is not a schema change.
 - A rename alone is never one, even in the same save as a structural change; the save as a whole is then schema-classified.
+- Restore to Default is classified by `notetypes/restore-to-default#D5` instead: by its field and template counts and by a change of `kind`, since its by-position origins replace every field and template.
 - A save that is schema-classified for several reasons carries all of them; any one is enough.
+- Exception: an `.apkg` import's note type merge carries `notetypes_merged` alone, whatever it changes (`package/notetype-merge#J9`). An import's update of a note type without a merge still carries `sort_field_changed` (`package/apkg-import#I7`).
 - The classification is part of the op's plan, so it is known before the write phase: the safety backup (`package/backup-triggers#T6.1`, T6.2) is taken from it, before the op's first write.
 
 ## G4. No confirmation (R951, R1476)

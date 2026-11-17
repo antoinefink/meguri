@@ -122,7 +122,7 @@ The open and upgrade scenarios observe `schema_objects` after their last change:
 ### P4.2 Output and rejections
 
 - Success: `{}`.
-- Rejection (`dsl.md` D7.3): `{"schema11_copy": {"error": "invalid_json"}}` when a config value is not JSON the downgrade can read (`storage/schema11-downgrade` D3.1: not one JSON value, or a number beyond the 64-bit float range, or nested too deep). Anki reports it as its JSON error kind. Nothing is written then: no file of that name appears, and one that was there keeps its bytes.
+- Rejection (`dsl.md` D7.3): `{"schema11_copy": {"error": "invalid_json"}}` when a config value is not JSON the downgrade can read (`storage/schema11-downgrade` D3.1: not one JSON value, or a number beyond the 64-bit float range, or nested 128 levels or more, counting the value's own outermost array or object as level 1, which both sides refuse). Anki reports it as its JSON error kind. A value nested exactly 127 levels is refused by Meguri (`UnconvertibleConfig`, too deep) and written by Anki (`storage/schema11-downgrade` D3.1, D12 `downgrade-deep-json`), so no scenario uses that depth. Nothing is written then: no file of that name appears, and one that was there keeps its bytes.
 - Every other failure is a run error, on both sides: a config value stored as TEXT, a key that is not text, a blob that does not decode (Anki reports these as database or protobuf errors, which name no data fault a scenario could rely on). Scenarios avoid them; Meguri's tests cover them (`storage/schema11-downgrade` D11).
 
 ### P4.3 Use

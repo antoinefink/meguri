@@ -76,3 +76,11 @@ Driver hints for the oracle maintainer (model ops):
   one). L7's other run errors (an archive, entry, `col` row or column that
   does not read) are `internal_error` with a detail: protocol.json has no
   kind for a malformed package.
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| json-numbers N11 (and N2 rule 2, N5, N7, N10 last line as amended) | `Cargo.lock` (serde_json 1.0.143, no float_roundtrip or arbitrary_precision feature); `rslib/src/storage/card/data.rs` (known f32 keys are read through default_on_invalid into a JSON value, then into f32) | Anki's 64-bit float reading of JSON numbers: truncated u64 significand, then one multiply or divide by the nearest power of ten, with 1e308 steps below -308. That is serde_json's non-roundtrip path (third-party crate, read at 1.0.154 in the local cargo registry for the mechanism). Checked against goldens storage/upgrade/from-11, storage/downgrade/contents, oracle-opens, config-invalid and roundtrip. |

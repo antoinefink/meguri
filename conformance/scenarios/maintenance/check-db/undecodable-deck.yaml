@@ -1,0 +1,27 @@
+# C9.3 and C13 of specs/maintenance/check-database.md, and K10 of
+# specs/conformance/collection-check.md: a deck that no card uses holds a
+# kind blob that is not a valid record. The cards stage reads every deck
+# record, so Check Database stops there on both sides with the rejection
+# failed, and no deviation is needed. Nothing is committed: the card's ivl
+# 1.5, which the cards stage rounds before it reads the decks, stays as
+# stored with its mod and usn, and so do the deck row and col's mod and scm.
+# A second run stops the same way.
+id: maintenance/check-db/undecodable-deck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox, Spare]
+  notes: [{notetype: Single, deck: Inbox, fields: [one, uno]}]
+steps:
+  - db_exec: {sql: "UPDATE cards SET ivl = 1.5, usn = 5"}
+  - db_exec: {sql: "UPDATE decks SET kind = X'FF' WHERE name = 'Spare'"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT name, hex(kind), mtime_secs, usn FROM decks WHERE name = 'Spare'"}
+  - db_exec: {sql: "SELECT typeof(ivl), ivl, mod, usn FROM cards"}
+  - db_exec: {sql: "SELECT mod, scm FROM col"}
+  - check_db: {}

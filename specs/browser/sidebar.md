@@ -3,7 +3,7 @@
 Spec: browser/sidebar
 Requirements: R1157, R1158, R1159, R1160, R1161, R1162, R1163, R1164, R1165, R1166, R1167, R1168, R1169, R1170, R1171, R1172, R1174, R1175, R1176, R1177, R1178, R1179, R1180, R1268 (sidebar part), AE43 (sidebar part); supports R274, R899, R1173, R66, R67
 Anki: 26.09.3 for S2 to S12 (the desktop browser's sidebar); none for the Meguri rules S15 lists
-Scenarios: conformance/scenarios/browser/sidebar/ (drafts, not active; S16)
+Scenarios: conformance/scenarios/browser/sidebar/ (recorded, not active; S16)
 
 What Browse's filter sidebar (U216, U217) holds and does: its sections and items, the search each item stands for, their order, which items keep their expansion and where, the filter box, how activating items changes the search, and which management action each item offers with the operation it calls. The operations themselves are other files' (named in each section); this file says which one runs, with which input. Layout, icons, colours, labels and gestures are Meguri's (`docs/design/screen-inventory.yaml` `browse.browser`, `browser/browse-strings` W6). Anki's sidebar is a desktop widget the oracle does not run (`conformance/AGENTS.md`), so apart from the searches the items build (S16) Meguri's tests check this file from its tables.
 
@@ -114,7 +114,9 @@ Each item with children is expanded or collapsed. Where the state lives:
   | Expand Children | a direct child (that has children) of a selected item is collapsed | expands every selected item and each of its direct children that has children |
   | Collapse Children | a direct child (that has children) of a selected item is expanded | expands every selected item and collapses each of its direct children that has children |
 
-  Only direct children change, never deeper levels. One action writes in this order: first the collapse key of every section root whose state changes, then every deck whose state changes in one D10 list, then every tag whose state changes in one T12 list. So it records at most one "Expand/Collapse" step for decks and one for tags, and the key writes, which clear the undo history (S13), come before those steps and do not clear them. Anki toggles each row on its own (S15).
+  Only direct children change, never deeper levels. Each affected item gets one **final state**: a selected item takes the state its action gives selected items (expanded for Expand, Expand Children and Collapse Children, collapsed for Collapse), and a direct child that is not itself selected takes the state the action gives children. A selected item that is also a direct child of another selected item takes its state as a selected item, so Collapse Children on the selection `A`, `A::B` leaves `A` and `A::B` expanded and collapses those of `A`'s other direct children and `A::B`'s direct children that have children. This is Meguri's fixed rule; Anki's result depends on the order it reads the selection (S15).
+
+  One action then writes in this order: first the collapse key of every section root whose final state differs from the stored one, then one D10 call (browser scope) whose list holds one entry per deck whose final state differs from its stored `browser_collapsed`, each with that final state, then one T12 call whose list holds one entry per tag whose final state differs from its stored state (an implicit parent's is collapsed), each with that final state. Items whose final state equals the stored one are left out, and a kind with no entry left gets no call. The entries of one list can hold both states: Collapse Children on a collapsed deck `A` whose child `A::B` is expanded and has children makes one D10 call with `A` expanded and `A::B` collapsed. So the action records at most one "Expand/Collapse" step for decks and one for tags, and the key writes, which clear the undo history (S13), come before those steps and do not clear them. Anki toggles each row on its own (S15).
 
 ## S6. The filter box (R1165)
 
@@ -293,7 +295,7 @@ Every label and message here is Meguri's wording or a requirement's (`browser/br
 | Filter display | the tree is collapsed, then the ancestors of each match (and a matching section root one level) are expanded; every child of an expanded item is shown, matching or not, and items under collapsed items are hidden; with no match the whole list is hidden; a 600 ms pause before filtering | only matches and their ancestors are shown; an empty state when nothing matches; no pause (S6) | R1165 |
 | Filter's first focused match | the first match met after its children (deepest first) | the first in display order (S6) | simpler; not observable in the collection |
 | Filter folding | Python lowercasing | simple case folding (S6) | `search/case-folding` |
-| Expand Children / Collapse Children | each row toggled on its own, each deck or tag written alone | one list per kind, one undo step per kind (S5) | `decks/decks` D10, `tags/tags` T12 |
+| Expand Children / Collapse Children | each row toggled on its own, each deck or tag written alone; a selected item that is also the direct child of another selected item ends in the state of whichever of the two Anki reads last from its selection | one list per kind, holding each item's final state, one undo step per kind; such an item takes its state as a selected item (S5) | `decks/decks` D10, `tags/tags` T12; a result that does not depend on selection order |
 | Order of a multi-selection | the order the items were selected, for searches, drops and the tag actions | display order (S8.2, S9.6, S10) | the result does not depend on click order (as `browser/bulk-actions` B1) |
 | Return in the Select tool | searches the focused item | Search all selected (S7) | U216 |
 | Restore Default Name | none (only an empty rename) | a menu item (S9.1) | R899 |
@@ -313,7 +315,7 @@ Open points for Antoine:
 
 ## S16. Scenarios and tests
 
-The oracle runs Anki's collection library, not its sidebar, so only the searches the items build are recorded. Drafts, not yet in `browser/area.yaml`'s `active` list; they become active with U88's `search_build`, `search_join` and `search_replace` adapter, together with the search area's builder and join-replace scenarios:
+The oracle runs Anki's collection library, not its sidebar, so only the searches the items build are recorded. Both scenarios have goldens (`conformance/goldens/browser/sidebar/`) and are not yet in `browser/area.yaml`'s `active` list; they become active with U88's `search_build`, `search_join` and `search_replace` adapter, together with the search area's builder and join-replace scenarios:
 
 | Scenario | Covers |
 |---|---|

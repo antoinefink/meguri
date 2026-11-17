@@ -240,7 +240,7 @@ Scenarios `notetypes/structure/remove-notetype` and, for the undo, `undo-removal
 | `notetype-reqs-after-field-change`, `notetype-reqs-after-field-change-removal` | R903 | S8: `reqs` from the final fronts | `reqs` from the fronts before the rewrite |
 | `deck-placement-regeneration` | R792 | S7: D3's full list, the note type's last deck included | no last deck: such cards go to Default |
 
-`conformance/deviations.yaml` holds the entries of the scenarios that have goldens here: `notetype-reqs-after-field-change`, `notetype-reqs-after-field-change-removal` and `deck-placement-regeneration`. `template-rewrite-keeps-text` is added with `rewrite-format` (S16). Not in `conformance/deviations.yaml` because no scenario shows them: the protected-field and extra-values refusals (S1.2 items 3 and 4), `LastNotetype` (S12), the safety backup (`notetypes/schema-changes` G9).
+`conformance/deviations.yaml` holds the entries of the scenarios that have goldens here: `template-rewrite-keeps-text` (`rewrite-format`), `notetype-reqs-after-field-change`, `notetype-reqs-after-field-change-removal` and `deck-placement-regeneration`. Not in `conformance/deviations.yaml` because no scenario shows them: the protected-field and extra-values refusals (S1.2 items 3 and 4), `LastNotetype` (S12), the safety backup (`notetypes/schema-changes` G9).
 
 ## S15. Differences from the Product Contract's wording
 

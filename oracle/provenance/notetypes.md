@@ -55,3 +55,11 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows and 
 | Spec section and scenarios | Anki file | Read for |
 |---|---|---|
 | notetypes/records/incoming-stamps; notetypes/records#N3.5 and the N4 closing paragraph; conformance/model-ops#L2 first sentence | `rslib/src/notetype/service.rs`, `rslib/src/notetype/mod.rs`, `pylib/anki/models.py` | Which behavior the two add-or-update tests require (existing id updated, name changed, with and without keeping usn/mtime). In the fix pass: how the keep-stamps branch of the add-or-update service differs from the non-preserving branch; that the existing-id save runs the full save preparation, makes the name unique stamping a rename as a local change (usn -1, the current second), updates notes and cards for changed fields and templates when a record with that id exists, inserts the record when none exists, and runs without undo. Golden values come only from the oracle. |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| schema-changes G2 notetype_restored row, G3 restore bullet | `rslib/src/notetype/schemachange.rs` (set_schema_modified on template ord changes) | U34 F3 / U200 F9 classification wording |

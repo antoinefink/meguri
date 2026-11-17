@@ -34,3 +34,11 @@ write op and observation kind that `specs/editor/config-keys.md` K7 requests.
 |---|---|---|
 | editor-ops E6 | `rslib/src/config/bool.rs` (the three typed boolean keys), `rslib/src/backend/config.rs` and `pylib/anki/collection.py` (boolean and generic setters with an `undoable` flag), `rslib/src/stats/graphs/mod.rs` (the graph preferences save writes the week start and two other keys) | which setter the oracle uses per key; why `firstDayOfWeek` is not written through the graph preferences save |
 | editor-ops E7 | `rslib/src/config/bool.rs` (boolean read with per-key default, any decode failure giving the default), `rslib/src/config/mod.rs` (optional typed read; the week-start read and its four-value enum), `rslib/src/stats/graphs/mod.rs` and `proto/anki/stats.proto` (graph preferences read field) | the four reads and their defaults; that the two option keys and the palette have no collection-library read |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| editor-ops E5, E5.1 (provisional derivation rules) | `rslib/src/editor.rs`; `rslib/src/backend/media.rs` | Confirm what the oracle op observes and how its errors collapse into fetch_failed |

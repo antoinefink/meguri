@@ -51,7 +51,7 @@ The Home heatmap and its streak stats count the rows N2 keeps, from this set:
 
 - **N3.1** `limcdel` false and `limdecks` empty: every row, deleted cards' rows included (R1281, R291).
 - **N3.2** `limcdel` true and `limdecks` empty: only rows whose card exists (R1341).
-- **N3.3** `limdecks` a non-empty list: only rows whose card exists and whose card's current deck (`cards.did`) is neither a listed deck nor a descendant of one (R1340). This holds whatever `limcdel` says. A deleted card's row leaves Home as soon as the list is non-empty, also when the listed decks never held that card, and also when every listed id names no deck. An id that names no deck excludes nothing else. Scenario `limdecks-deleted-card` pins this. The add-on oracle's recording of it confirms the rule; its golden of 2026-11-10 holds it (`specs/conformance/stats-ops.md` H4).
+- **N3.3** `limdecks` a non-empty list: only rows whose card exists and whose card's current deck (`cards.did`) is neither a listed deck nor a descendant of one (R1340). This holds whatever `limcdel` says. A deleted card's row leaves Home as soon as the list is non-empty, also when the listed decks never held that card, and also when every listed id names no deck. An id that names no deck excludes nothing else. Scenario `limdecks-deleted-card` pins this. The 2026-11-10 probe of it on the add-on oracle image agreed with the rule; it has no golden yet (N9).
 - A descendant of deck `D` is a deck whose full name starts with `D`'s full name followed by `::`. `Excl::Sub` descends from `Excl`; `Exclusive` and `Keep::Excl` do not (scenario `limdecks-subtree`). Names are read at query time, so renaming, moving or deleting a deck changes what is excluded at once (R304).
 - N3.3 reads the card's **current** deck: a card sitting in a filtered deck is judged by the filtered deck, as the add-on does. Deck pages use the home deck instead (N4). A product decision to use the home deck on Home too would be a new deviation.
 - Each counted row adds 1 to its heatmap day (`stats/day-buckets` B4, with B4.3 at query time). Days with no counted row are absent.
@@ -109,7 +109,9 @@ Building, keeping, storing and querying these values never writes `collection.an
 
 ## N9. Scenarios
 
-`conformance/scenarios/stats/heatmap-totals/`, with the values N2 to N6 give. As of 2026-11-10 every scenario below is in the tree, inactive, with a golden recorded on the add-on image on 2026-11-10 (`specs/conformance/stats-ops.md` H4); the goldens are authoritative. Each equals this table, with no deviation except in `filtered-deck-card` (N4, `heatmap-deck-home-deck`). All rows are on 2026-10-12 in Europe/Paris, rollover 4.
+`conformance/scenarios/stats/heatmap-totals/`, with the values N2 to N6 give. All rows are on 2026-10-12 in Europe/Paris, rollover 4.
+
+Status (2026-11-17): none of these scenarios is in the tree, and none has a golden. They were prepared and are held, not committed, until the testkit parses `heatmap_totals` (`specs/conformance/stats-ops.md` H4), since `tools/mg goldens-check` reports a scenario of an unknown kind as invalid. No commit holds the current set. The unmerged branch `spec/U95` has older copies of 10 of them, without `limdecks-rename`, `filtered-deck-card`, `answer-undo`, `suspended-buried-rows` and `deck-names`, whose goldens came from an older driver: never use them as goldens. On 2026-11-10 the prepared set ran once on the add-on image as a probe, with its outputs discarded; it agreed with every row, `filtered-deck-card`'s oracle value 2/1/1 and `read-only`'s equal dumps included. Until the goldens are recorded with `tools/mg oracle record` on the add-on image, this table, with each named deviation's oracle value, is U95's reference for its test-first tests, and the activation of these scenarios (H4) waits for the goldens. Once recorded, the goldens are authoritative; each is expected to equal this table, with no deviation except in `filtered-deck-card` (N4, `heatmap-deck-home-deck`).
 
 | Scenario | Pins | Values |
 |---|---|---|
@@ -129,4 +131,4 @@ Building, keeping, storing and querying these values never writes `collection.an
 | `deck-names` | N3.3, N4, `stats/heatmap-config` K3 rule 3 (duplicate ids), `specs/conformance/stats-ops.md` H1 (deck names) | decks `Langue Été`, `Langue Été::Sub Deck`, `Autre` and `Reste`, one row each: Home/`Langue Été`/`Langue Été::Sub Deck` 4/2/1; with `limdecks` [Autre, Autre, Langue Été::Sub Deck] (ids) 2/2/1 |
 | `answers-and-deletes` | N7 through real answers and a deletion | Home/Lang none, 1/1, 2/2, 2/1; studied 0/0, 1/5000, 2/12000, 2/12000 |
 
-Also `stats/widget-today-count/limdecks-vs-studied` (N3.3, N6; `stats/widget-families` F5): Home today's cell 5, then 2 with `limdecks` [Lang]; studied 5 rows, 10,000 ms both times.
+Also `stats/widget-today-count/limdecks-vs-studied` (N3.3, N6; `stats/widget-families` F5): Home today's cell 5, then 2 with `limdecks` [Lang]; studied 5 rows, 10,000 ms both times. It is held like the rest, with no golden; the prepared file is in no commit.

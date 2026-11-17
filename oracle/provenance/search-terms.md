@@ -32,3 +32,12 @@ Added 2026-11-10, read at the same tag; the scenarios named here were first reco
 | names-and-ids N6 step 2 (`search/dupe/entities`) | `rslib/src/search/sqlwriter.rs`, `rslib/src/notes/mod.rs` | one strip of the dupe text, the checksum of that result without a second strip |
 | history H1 (`search/history/odd-ease`) | `rslib/src/search/sqlwriter.rs` | `ease > 0` for answers, `ease != 0` for the first-answer test, `ease = 0` for manual entries; no `type` condition |
 | properties P4 (`search/props/due-extremes`) | `rslib/src/search/sqlwriter.rs` | the learning-due difference and division written into the statement, evaluated by SQLite (real on 64-bit overflow) |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| search/properties#P12 (custom data parse failures and number reading and text, steps 2, 4, 5) | `rslib/src/storage/sqlite.rs` (custom data SQL function: parses the cd text as one untyped JSON value); `Cargo.lock` (serde_json 1.0.143); `Cargo.toml` and every other `Cargo.toml` in the tree (workspace serde_json requirement; neither float_roundtrip nor arbitrary_precision is enabled) | How the cd text is parsed and how non-string values are written as text, and whether the default, not correctly rounded float reading applies. I also read the third-party serde_json source (MIT/Apache, crates.io registry copy 1.0.154, not Anki) for the default float path, and confirmed it against the recorded golden search/props/custom-data-json-edges (notes e31 to e42). |
+| verification only (no spec change): search/properties#P7, #P8; search/names-and-ids#N3.6 | `rslib/src/search/sqlwriter.rs` (prop s/d/r SQL); `rslib/src/search/parser.rs` (preset value not unescaped) | Re-checking findings U82 F2 and F3 before routing them to the plan |

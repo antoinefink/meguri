@@ -1,0 +1,34 @@
+# U35, U203 (R945; specs/notetypes/change-notetype.md M1, M9 step 3): a field
+# map that names one old field twice copies its text into both new fields.
+# Duo notes move to Twin with the field map 0, 0, 1: Twin's Word and Hint
+# both get the old Word text and Gloss gets the old Gloss. Twin's second
+# template asks for Hint, which now holds the copied text, so every note
+# gets that card, also the one whose old Gloss is empty. flds, sfld and csum
+# follow the new fields.
+# The change runs as accepted (change-notetype-ops.md H2,
+# notetypes/schema-changes.md G4).
+id: notetypes/change/repeat-field
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duo
+      fields: [Word, Gloss]
+      templates:
+        - {name: Ask, front: "{{Word}}", back: "{{Gloss}}"}
+    - name: Twin
+      fields: [Word, Hint, Gloss]
+      templates:
+        - {name: Ask, front: "{{Word}}", back: "{{Gloss}}"}
+        - {name: Prompt, front: "{{Hint}}?", back: "{{Gloss}}"}
+  notes:
+    - {notetype: Duo, fields: [zorvu, kelpa]}
+    - {notetype: Duo, fields: [mivax, ""]}
+steps:
+  - advance: 1h
+  - change_notetype_info: {notes: ["#n1", "#n2"], notetype: Twin}
+  # step 2
+  - change_notetype: {fields: [0, 0, 1]}
+  - observe: [card]
+  - db_exec: {sql: "SELECT t.name, replace(n.flds, char(31), '|'), n.sfld, n.csum, n.mod, n.usn FROM notes n JOIN notetypes t ON t.id = n.mid ORDER BY n.id"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.due, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}

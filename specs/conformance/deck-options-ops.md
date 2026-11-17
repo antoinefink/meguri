@@ -39,7 +39,7 @@ The scenario ops and the observation kind that the memory-state (U46) and deck o
 ## E3. Driver and executor status
 
 - The oracle driver implements `save_deck_options` with all E1 arguments and the rejection `default_preset`, `set_scheduling_prefs` (E4), and `ignored_before_count` (E2). A missing Today-only limit follows E1's rule.
-- The goldens of `sched/memory/recompute` and `sched/memory/ignore-before-count` are recorded on the Linux and Apple oracles. All eleven `sched/options/` scenarios are recorded and pass comparison on both oracles, including `insertion-order-option`, `deck-limits`, `subtree`, `remove-preset`, `globals` and `prefs-rollover`.
+- The goldens of `sched/memory/recompute` and `sched/memory/ignore-before-count` are recorded on the Linux and Apple oracles. Every scenario under `sched/options/` has its golden. The eleven recorded first (`deck-limits`, `globals`, `insertion-order-option`, `insertion-order-switch`, `live-save`, `missing-preset`, `prefs-rollover`, `remap-steps`, `remove-preset`, `subtree`, `undo-save`) pass comparison on both oracles. The nine added on 2026-11-17 (`ignore-date/kept`, `ignore-date/future`, `nested-deck-opening-preset`, `remap-answered/learning`, `remap-answered/relearning`, `remap-floor-shortened`, `remap-passed-step-inserted`, `remove-preset-undo-rows`, `save-writes`) are recorded on the Linux oracle. No scenario uses `step_text` yet.
 - Meguri's executor implements `ignored_before_count` with U46's adapter, and `save_deck_options` and `set_scheduling_prefs` with U49's. Until then scenarios using them are `pending` (`dsl.md` D10).
 - Neither the oracle driver nor Meguri's executor implements `step_text` (E6). Until both do, scenarios that use it are `pending` (`dsl.md` D10).
 

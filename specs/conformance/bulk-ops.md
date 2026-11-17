@@ -37,7 +37,7 @@ The scenario ops and the observation kind that Browse's Find and Replace (`brows
 
 ## X2. `change_deck`
 
-- **Argument** `{cards, deck}`: `cards` a non-empty list of distinct card references; `deck` a deck the collection holds, by its stored name in human form (a `setup.decks` entry, a deck an op created, or a filtered deck a `db_exec` inserted, `deck-ops.md` K13). An unknown name is `unknown_ref`; another shape `invalid_scenario`.
+- **Argument** `{cards, deck}`: `cards` a non-empty list of distinct card references; `deck` a deck the collection holds, by its stored name in human form (a `setup.decks` entry, a deck an op created, or a filtered deck a `db_exec` inserted, `deck-ops.md` K13). An unknown name is `unknown_ref`; another shape `invalid_scenario`. A reference to a card that was deleted is passed on with its real id, and the operation skips it (`browser/bulk-actions` B7.2 step 2).
 - **Effect.** `browser/bulk-actions` B7.2 on the listed cards with that deck as target, as one "Change Deck" operation.
 - **Output** `{count}`: the cards moved (B7.2 step 5); cards that only the memory-state step wrote are not counted.
 - **Rejection** `filtered_deck`: the deck is filtered (B7.2 step 1). Nothing changes.
@@ -64,11 +64,13 @@ The scenario ops and the observation kind that Browse's Find and Replace (`brows
 
 ## X5. Status
 
-- **Oracle driver.** X1 to X3 exist (2026-11-10, `oracle/driver/ops/bulk.py`), with `dsl.md` D7.2's rows (draft: the oracle implements them), `observations.md` O4's row, both schemas and `protocol.json`. The oracle records scenarios that use them. None is in the tree yet (next bullet).
-- **Meguri's typed scenario model.** The model (`core/crates/meguri-testkit/src/scenario/`) has no `find_replace`, `change_deck` or `find_replace_fields` yet. Until it parses them with the shapes of X1 to X3 (`dsl.md` D7.2), a scenario that uses one does not parse: it is `invalid` (D10's first row), not `pending`, and `tools/mg goldens-check` fails on it (`unknown variant`). Such scenarios stay out of the tree until then (U86, U87). The model change makes them load and, while the executor lacks the op, gives them D10's `pending`. Recorded with goldens and waiting for it:
+- **Oracle driver.** X1 to X3 exist (2026-11-10, `oracle/driver/ops/bulk.py`), with `dsl.md` D7.2's rows (draft: the oracle implements them), `observations.md` O4's row, both schemas and `protocol.json`. The oracle records scenarios that use them. None is on `master` yet (next bullet).
+- **Meguri's typed scenario model.** The model (`core/crates/meguri-testkit/src/scenario/`) has no `find_replace`, `change_deck` or `find_replace_fields` yet. Until it parses them with the shapes of X1 to X3 (`dsl.md` D7.2), a scenario that uses one does not parse: it is `invalid` (D10's first row), not `pending`, and `tools/mg goldens-check` fails on it (`unknown variant`). Such scenarios stay off `master` until then (U86, U87). The model change makes them load and, while the executor lacks the op, gives them D10's `pending`. Recorded with goldens, committed on the branch `held/harvest-batch-2` (not `master`), and landing with that change, recorded again then:
   - `browser/find-replace/`: `field-names`, `literal-dollar-replacement`, `mixed-notetypes`, `mode-counts`, `whole-collection-count`;
   - `notes/change-deck/`: `fsrs-off`, `memory-states`, `remaining-steps`, `target-state-kept`;
   - `notes/transform/replace-saves`, `search/state/memory-state-moves`;
   - `tags/find-replace/`: `all-notes`, `invalid-regex`, `listed-notes`, `pattern-modes`.
+
+  Planned, with no scenario file: `browser/find-replace/` `ae47`, `regex`, `all-fields`, `nfc`, `card-generation`, `tags`, `all-notes`, `refusals`, `no-match` and `unchanged-match`. They were written and recorded once (2026-11-10) but never committed, and the files are lost. Each is written again from its row in `browser/find-replace` F12, recorded, and held on a branch in the same way, for the same reason.
 - **Meguri's executor.** The browser adapter (`core/crates/meguri-testkit/src/exec/`) implements X1 to X3 with U86 and U87; once the typed model parses them and until the adapter runs them, scenarios that use them are `pending` (`dsl.md` D10).
-- **Deviation.** `find-replace-unchanged-match` (R1204, R1207): on `browser/find-replace/unchanged-match`, the counts and the rows of the notes whose match leaves them as stored are Meguri's (not written, not counted), where Anki writes and counts them. The implementer adds the entry with its test (U86).
+- **Deviation.** `find-replace-unchanged-match` (R1204, R1207): on `browser/find-replace/unchanged-match`, the counts and the rows of the notes whose match leaves them as stored are Meguri's (not written, not counted), where Anki writes and counts them. The entry's pointers are each step's `count` output (Meguri: 0), the `mod` and `usn` of the matched note rows in each step's `db_dump` (Meguri: as before the step), and `col.mod` there (Meguri: unchanged). That scenario is planned (above), so the entry has no golden to apply to yet: the implementer adds it with its test (U86) once the scenario and its golden land.

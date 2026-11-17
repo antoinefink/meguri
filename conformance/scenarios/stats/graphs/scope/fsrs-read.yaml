@@ -1,0 +1,21 @@
+# stats/graphs-common G15 (G7): the result's fsrs value is the collection's
+# fsrs key read as a JSON boolean, false for a missing key or any other
+# value. No fsrs in setup; context observed with the key missing, then set to
+# true, 1, "true" and null, then removed. Expected fsrs: false, true, false,
+# false, false, false (a false value is omitted from the part).
+id: stats/graphs/scope/fsrs-read
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+steps:
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["context"]}]}]}
+  - {"set_config": {"key": "fsrs", "value": true}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["context"]}]}]}
+  - {"set_config": {"key": "fsrs", "value": 1}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["context"]}]}]}
+  - {"set_config": {"key": "fsrs", "value": "true"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["context"]}]}]}
+  - {"set_config": {"key": "fsrs", "value": null}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["context"]}]}]}
+  - {"remove_config": {"key": "fsrs"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["context"]}]}]}

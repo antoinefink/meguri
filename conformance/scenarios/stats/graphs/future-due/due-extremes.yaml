@@ -1,0 +1,20 @@
+# stats/graphs-cards C13 (C3.2), at the retrievability clock of graphs-cards C13 (clock start 2030-01-15T11:00:00
+# Paris, advance 30d: now_s 1897293600, today 30, N 1897354800).
+# A review card due N + 259,200 s (a timestamp above 1,000,000,000) and a review
+# card due -2,147,483,648 (a day number; H - today wraps in 32 bits). Expected
+# keys 3 and 2147483618, daily_load 1, no have_backlog.
+id: stats/graphs/future-due/due-extremes
+clock: {tz: Europe/Paris, start: "2030-01-15T11:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+steps:
+  - {"advance": "30d"}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 3, due = 1897614000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n1')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 1, due = -2147483648 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n2')"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["future_due"]}]}]}

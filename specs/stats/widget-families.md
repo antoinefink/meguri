@@ -3,7 +3,7 @@
 Spec: stats/widget-families
 Requirements: R306, R307, R308, R309, R310, R311, R312, R313, R314, R317, R318, R1309, R1431, R1432, R1435, R1436, R1437, R1438
 Anki: none (Meguri's widget; the grid, its levels, the streak stats and their wording are the Review Heatmap add-on 1.0.1's through `stats/heatmap-addon`, `stats/heatmap-presentation` and `stats/activity-strings`, which carry the pins)
-Scenarios: conformance/scenarios/stats/widget-today-count/ (F5's scope rule, through the Home values the snapshot copies)
+Scenarios: conformance/scenarios/stats/widget-today-count/ (F5's scope rule, through the Home values the snapshot copies; held, not yet in the tree, F7)
 
 What each family of the heatmap and streak widget (U165) draws from one state of the widget snapshot (`stats/widget-snapshot`). The snapshot already holds every count, level, streak value and date, computed by the Home heatmap's rules (R1431), so the widget runs no date, count, level or streak logic (R1435). This file binds those values to the add-on's grid and streak stats in the widget, so the widget looks and reads as the Home activity section does. The widget's layout, typography, the look of its rendering modes, its timeline, its staleness line and its deep link are U165's design and are not specified here.
 
@@ -84,4 +84,4 @@ No oracle observes a widget. U165's tests, from the tables here:
 - HeatmapKit unit tests: F1's rows and its year-end example; F3's year choice for Tₛ on December 31 and January 1; F4's texts for 0, 1 and 1,234 and the AE51 tints; F5's today's count for kinds `today` and `future` and an empty cell; F6's three states, including a `no-history` snapshot whose `studiedToday.cards` is 3.
 - A catalog test of F4's keys in every bundle that holds them.
 - Snapshot tests per family and per rendering mode (full colour, accented, vibrant on the Mac), in U165's matrix.
-- The data behind F5's scope rule is pinned by the inactive oracle scenario `stats/widget-today-count/limdecks-vs-studied` (Home today's cell against studied today under `limdecks`), whose golden was recorded on the add-on oracle image on 2026-11-10 like those of the other `heatmap_report` scenarios (`specs/conformance/stats-ops.md` H4, H11).
+- The data behind F5's scope rule is to be pinned by the oracle scenario `stats/widget-today-count/limdecks-vs-studied` (Home today's cell against studied today under `limdecks`). As of 2026-11-17 it is prepared and held with the other add-on scenarios: it is not in the tree and has no golden (`stats/counting-rules` N9, `specs/conformance/stats-ops.md` H4). Until it lands, N9's row for it is the reference.

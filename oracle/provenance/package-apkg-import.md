@@ -47,3 +47,11 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, wri
 | Harvest row hceea58e626d5 mapped to existing package/apkg-import/v1-scheduler and storage/open/v1-scheduler | `rslib/src/scheduler/upgrade.rs` | Which v1-to-v2 card conversions the test requires: relearning reclassification, step capping in filtered decks, learning cards reset without rescheduling, relearning cards kept without rescheduling (not proved by the fixture), and reviews moved out of the new queue. I checked these against the fixture's state before conversion and the existing golden. |
 | I11.3 review-log rows with a taken id on apkg import; scenario package/apkg-import/revlog-id-taken | `rslib/src/storage/revlog/mod.rs`, `rslib/src/storage/revlog/add.sql`, `rslib/src/import_export/package/apkg/import/cards.rs`, `rslib/src/revlog/undo.rs` | Which callers insert review-log rows without uniquify (import, sync merge, undo restore), and confirming the skip-on-taken-id behavior exists at the pin; golden values come from the oracle |
 | package/apkg-import I12.2 (scenario package/apkg-import/media-rename-in-field) | `rslib/src/text.rs`, `rslib/src/import_export/package/apkg/import/notes.rs` | that the harvested replacement test rewrites some media and sound references of one field and keeps others, and that import applies it to the fields of new and updated notes |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| package/apkg-import I12.4 decoded-size bound and the I17 row (Anki's import has no bound of its own on media members) | `rslib/src/import_export/package/media.rs` (copy_and_ensure_sha1_set, media copier) | Confirming that Anki copies a legacy or latest media member with no declared-size bound of its own. |

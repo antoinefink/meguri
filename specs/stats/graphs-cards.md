@@ -21,7 +21,7 @@ Every value here equals Anki's graph data for the same collection, scope and clo
   | `decay`, `lrt` | the card data's keys, each absent when the data has none |
 
 - The context is G1's: `N` (`next_day_at`, epoch seconds), `today` (`days_elapsed`) and now. Here now is used in whole epoch seconds: now_s = ⌊now / 1,000⌋.
-- No graph here reads the UTC offset or the rollover hour itself. Offset changes, DST days and a collection created in another zone reach these graphs only through `N` and `today`, as the day clock gives them (`sched/day-clock` D8). So Added (C10) and Future Due's timestamp days (C3.2) count fixed 86,400 s spans back from `N`, which on and after a DST change need not match the local rollover days.
+- No graph here reads the UTC offset or the rollover hour itself. Offset changes, DST days and a collection created in another zone reach these graphs only through `N` and `today`, as the day clock gives them (`sched/day-clock` D8). So Added (C10) and Future Due's timestamp days (C3.2) count fixed 86,400 s spans back from `N`, which on and after a DST change need not match the local rollover days. Scenarios `added/dst-edges` and `future-due/tz-matrix/*` pin this (C13).
 - f32 means IEEE-754 binary32, each step rounded to f32. Where a value is summed in f32, the cards are taken in ascending `id`.
 
 ## C2. Home due
@@ -168,7 +168,7 @@ The f32 steps matter: d 2.08 and 4.6 fall one key below the decimal reading.
 - The median of the values (d − 1) / 9 (f32, not × 100) over the cards of C6.1: for an odd count the middle value, for an even count the f32 mean (a + b) / 2 of the two middle values; then × 100 in f32. With no card it is 0.
 - Anki's data returns it in the Difficulty message's `average` member, and its table shows it as Median difficulty (R1401), so the core returns it. Decided 2026-10-27: a 1% map cannot give it exactly, so it is a scalar beside the map (`stats/graphs-common` G6, what a record's maps cannot give). It is Anki's `average` member, not a Meguri extra, and it is observed (C11, C12). The core computes it from a count per distinct f32 value, cumulated in order, never from one value per card handed to U226 (R1293).
 - ±∞ take part like any other value, −∞ first and +∞ last: −∞ and +∞ as the two middle values give NaN. No scenario has that case.
-- The first eight cards of C8.1: 26 (the middle values 0.11999999 and 0.39999998). Without d 0.5: 39.999996. The first eight with `1e40` added: 39.999996 (the fifth of nine values).
+- The first eight cards of C8.1: 26 (the middle values 0.11999999 and 0.39999998). Without d 0.5: 39.999996. The first eight with `1e40` added: 39.999996 (the fifth of nine values). d `-1e40`, 5.5 and 10: 50.0 (the middle of −∞, 0.5 and 1).
 
 ### C8.3 Record
 
@@ -193,7 +193,7 @@ H is C2's. The review log is never read for a missing `lrt` (`stats/graphs-commo
 
 ### C9.2 Value
 
-R is `search/card-extractors` X5 steps 3 to 5 with e from C9.1: t = e as f32 / 86,400 in f32, decay = the card's `decay` or 0.5 (a `null` or string `decay` is absent, `model/card-data-json` C3 rule 3), R = `fsrs::current_retrievability` of the pinned `fsrs` crate, in f32 (R1402). The preset's decay is never read. Meguri calls that function; it does not reimplement it. X5's step 6 does not apply: R stays f32 for the bins (C9.3) and the sums (C9.4).
+R is `search/card-extractors` X5 steps 3 to 5 with e from C9.1: t = e as f32 / 86,400 in f32, decay = the card's `decay` or 0.5 (a `null` or string `decay` is absent, `model/card-data-json` C3 rule 3), R = `fsrs::current_retrievability` of the pinned `fsrs` crate, in f32 (R1402). The preset's decay is never read. At C9.6's clock, s 5 and d 5: 10 days with decay 0.1542 give R 0.8458846 (key 84), −0.5 give 0.7874007 (78), 0 give 1 (99), and no `decay`, `null` or `"0.2"` give 0.8250286 (82); 15 days with 0.1542 give 0.80938804 (80) and with −0.5 give 0.6557437 (65) (scenario `fsrs/retrievability-decay`). Meguri calls that function; it does not reimplement it. X5's step 6 does not apply: R stays f32 for the bins (C9.3) and the sums (C9.4).
 
 ### C9.3 Bins
 
@@ -207,7 +207,7 @@ x = R × 100 in f32. The key is 99 when x is exactly 100, and otherwise ⌊x⌋ 
 - The edge values below are the function's own (X5's list); Meguri gets them by calling it. A NaN R gets key 0 and makes the sums NaN, as in Anki. With a positive decay (0.5 when the data has none):
   - a stability of 0 gives R = 0 (key 0) when e > 0 and NaN when e = 0; a stability of +∞ gives 1 (key 99);
   - a negative stability gives NaN when the base t / s × factor + 1 is below 0, and otherwise R of 1 or more: key 99 at e 0, key 100 or above for a small e (s −3 with e 3,600: key 100), and +∞ (key 4,294,967,295, infinite sums) when the base is exactly 0.
-- A stored decay of 0 (either sign) gives R = 1 for every e and stability, NaN base included (key 99). A negative decay makes factor negative, so R is below 1 for a positive stability (−0.5: 0.7874007 after 10 days at stability 5, key 78), and the base falls below 0 for a large enough e. For any decay, a negative base gives NaN only when −decay is not a whole number; otherwise R is a finite value (key 0 when it is negative). No scenario has any of these cases.
+- A stored decay of 0 (either sign) gives R = 1 for every e and stability, NaN base included (key 99). A negative decay makes factor negative, so R is below 1 for a positive stability (−0.5: 0.7874007 after 10 days at stability 5, key 78), and the base falls below 0 for a large enough e. For any decay, a negative base gives NaN only when −decay is not a whole number; otherwise R is a finite value (key 0 when it is negative). Scenario `fsrs/retrievability-decay` has decay 0 and −0.5 with a positive stability; no scenario has the other cases of this item.
 
 Example: note A with a card of R 0.7182781 and a card without a memory state, note B with one card of R 0.7661308: `sum_by_card` 1.4844089, `average` 74.22044, `sum_by_note` 1.1252699 (0.35913906 + 0.7661308).
 
@@ -228,9 +228,9 @@ R is computed for G1's now at every request: never cached, never reused from an 
 | relearning, `queue` 1, no `lrt`, H = now_s − 3,600, `ivl` 2, s 4, d 6 | 3,600 / 3,602 | 0.9987805 / 0.9987799 | 99 |
 | review, no `lrt`, H 35, `ivl` 40 | 35 days / 30 days | 0.6152273 / 0.6445033 | 61 |
 | new (`type` 0, `queue` 0) with a memory state, `due` 5 | now_s − 5 / (not matched, P8) | 0.031140784 / none | 3 |
-| review in a filtered deck, `odid` > 0, `odue` 0, no `lrt`, `due` 35, `ivl` 20 | 50 days (H = 0) / 15 days (D = `due`) | 0.5467111 / 0.7661308 | 54 |
+| review in a filtered deck, `odid` > 0, `odue` 0, no `lrt`, `due` 35, `ivl` 20 | 50 days (H = 0) / 15 days (D = `due`) | 0.54671097 / 0.7661308 | 54 |
 | review, `odid` −1, no `lrt`, `due` 35, `odue` 40, `ivl` 20 | 15 days (H = `due`) / 10 days (D = `odue`) | 0.7661308 / 0.8250287 | 76 |
-| relearning, `queue` 1, no `lrt`, H 25 (a day number), `ivl` 2 | now_s + 172,775 / 7 days | 0.031139376 / 0.8676336 | 3 |
+| relearning, `queue` 1, no `lrt`, H 25 (a day number), `ivl` 2 | now_s + 172,775 / 7 days | 0.031139368 / 0.8676336 | 3 |
 | suspended review (`queue` −1), no `lrt`, H 1,896,429,600, `ivl` 0 | 0 (day-due by type and queue) / 864,000 | 1 / 0.8250287 | 99 |
 
 A card last reviewed 400 days ago with no `lrt` (H = `today` − 400 + `ivl`) meets the agreement condition only when `today` ≥ 400. At `today` 30 with `ivl` 420 and H 50 the graph gives 400 days and X5 30 days (D ⊖ `ivl` stops at 0).
@@ -285,12 +285,13 @@ U101's parts of the `stats` kind (`stats/graphs-common` G14), in G14's form (fie
 - `retrievability`: `{retrievability: {<key>: <cards>}, average, sum_by_card, sum_by_note}`;
 - `card_counts` and `added` as G14 defines them.
 - A map member with no key is omitted, by G14's default rule, as in `stats/graphs-revlog` V8: `stability` with no card is `{}`, and `future_due` with no counted card holds at most `daily_load`.
+- A message member is written whenever Anki's data sets it, empty or not; only empty maps and scalar members at their default are omitted. Anki always sets both count sets of `card_counts`, so a scope with no card gives `{excluding_inactive: {}, including_inactive: {}}`, never `{}`, and each of the other six parts gives `{}` (scenario `card-counts/empty-scope`).
 
 Meguri maps the record's Anki members into these shapes; the Meguri extras are not observed. The oracle's graph data reads Anki's clock, which the scenario's `set_clock` and `advance` fix (time stands still between ops), so R is reproducible. Numbers compare with G14's tolerance (1e-6 relative, `conformance/observations` O7), which applies only when both sides write the number with a fraction or exponent: f32 members (`average`, `sum_by_card`, `sum_by_note`) are written as the shortest f32 decimal with a fraction (26.0, never 26), as `conformance/observations` says for 32-bit floats. Keys and counts compare exactly, so retrievability scenarios keep every R at least 1e-4 from a whole percent, where a last-bit difference of the platform's power function (KTD24) could move a key.
 
 ## C13. Scenarios
 
-For the oracle-maintainer, under `conformance/scenarios/stats/graphs/`, with the `stats` kind (C12) of `oracle/driver/ops/stats.py`; as of 2026-10-27 every scenario below is in the tree with its golden. The filtered deck `F` is a `decks` row written as `conformance/deck-ops` K13 says (`build_filtered` has no driver op), moved into with `db_exec`. Cards come from setup notes, then `db_exec` sets `type`, `queue`, `due`, `ivl`, `odue`, `odid`, `data`, `did` and, for Added, `id` (`conformance/stats-ops` H3). `did` and `odid` take deck ids from the `decks` table by name (H3, "Card moves"). A card moved into `F` gets `did` 900 (the row's fixed id) and `odid` the home deck's id by name, then the scenario `reopen`s before its observation. All in Europe/Paris, rollover 4, Collection scope and `year` unless named.
+For the oracle-maintainer, under `conformance/scenarios/stats/graphs/`, with the `stats` kind (C12) of `oracle/driver/ops/stats.py`; every scenario below is in the tree with its golden (the first table as of 2026-10-27, the second as of 2026-11-17). The filtered deck `F` is a `decks` row written as `conformance/deck-ops` K13 says (`build_filtered` has no driver op), moved into with `db_exec`. Cards come from setup notes, then `db_exec` sets `type`, `queue`, `due`, `ivl`, `odue`, `odid`, `data`, `did` and, for Added, `id` (`conformance/stats-ops` H3). `did` and `odid` take deck ids from the `decks` table by name (H3, "Card moves"). A card moved into `F` gets `did` 900 (the row's fixed id) and `odid` the home deck's id by name, then the scenario `reopen`s before its observation. All in Europe/Paris, rollover 4, Collection scope and `year` unless named.
 
 The retrievability clock, for the scenarios that name it: `clock.start` 2030-01-15T11:00:00 (Paris wall time, 10:00 UTC), so the new collection's `crt` is 2030-01-15 04:00 +01:00 (`sched/day-clock` D11), then `advance` 30d before `db_exec` and the observation. Now is then 2030-02-14 10:00:00 UTC (now_s 1897293600), `today` 30 and `N` 1897354800, the values of C9.6's table. "Day t + k" is the day number `today` + k. Values are this file's; the goldens are the authority once recorded.
 
@@ -312,21 +313,23 @@ The retrievability clock, for the scenarios that name it: `clock.start` 2030-01-
 | `fsrs/fsrs-off` | C6.3 | two review cards with s 5, d 5 and an `lrt` 10 days back, observed with `fsrs` true and then false: the `stability`, `difficulty` and `retrievability` parts are equal; `context` has `fsrs` only the first time |
 | `added/day-edges` | C10 | `clock.start` 2026-10-12T12:00:00 (Paris wall time, 10:00 UTC), so `N` = 1791856800 as in C10's table; cards with the six ids of that table: {0: 2, −1: 2, 1: 1, −400: 1}, with `year` and `all` |
 
-Meguri-only tests (no oracle field): due tomorrow (C3.6), the notes count (C4.2), the label texts in the record for both settings (C4.3), the left-out count (C6.2), f32 summation order (C1, C9.4), an `lrt` of −9223372036854775808 with no panic and e = now_s mod 2^32 (C9.1), a review `due` of −2,147,483,648 with no panic (C3.2), the difficulty median from distinct-value counts against a sort of all values (C8.2), and that R is recomputed on every request after a clock change with the caches warm (C9.5). Also:
+Meguri-only tests (no oracle field): due tomorrow (C3.6), the notes count (C4.2), the label texts in the record for both settings (C4.3), the left-out count (C6.2), f32 summation order (C1, C9.4), the difficulty median from distinct-value counts against a sort of all values (C8.2), and that R is recomputed on every request after a clock change with the caches warm (C9.5). Also:
 
 - AE60, core part (`stats/browse-queries` Q4.1, Q6): the `card-counts/states` cards in a deck `Japanese`, with `cardCountsSeparateInactive` true and false. Each shown label's text, joined with the Deck scope by Q6's test-only join and run through U80, finds exactly the cards of that label's count.
 - Graph against `prop:r` (C9.6): a review card with no `lrt`, last reviewed 400 days ago, at `today` ≥ 400 (`advance` 430d from the retrievability clock's start, H = `today` − 400 + `ivl`). Its key is the same with `year` and `all`, and its R equals `prop:r`'s (`search/card-extractors` X5).
 
-Proposed 2026-11-10, not yet in the tree (the oracle-maintainer records them; values are this file's until then):
+Recorded 2026-11-17 (proposed 2026-11-10). The rows that add cards to a scenario of the first table are scenarios of their own, so the first table's goldens stay as they are. Values are the goldens'.
 
 | Scenario | Pins | Expected |
 |---|---|---|
-| `fsrs/retrievability-decay` | C9.2 | at the retrievability clock, review cards with s 5 and d 5: `lrt` now_s − 864,000 with `decay` 0.1542 (key 84), −0.5 (78) and none (82); no `lrt`, H 35, `ivl` 20 with `decay` 0.1542 (80), `null` (76), `"0.2"` (76) and 0 (99) |
-| `fsrs/retrievability-elapsed`, more cards | C2, C9.1, C9.6 | the last four rows of C9.6 (keys 54, 76, 3, 99), and a review card with `lrt` −9223372036854775808 (e 1897293600, R 0.031140793, key 3) |
-| `fsrs/difficulty-bins`, more cards | C8 | review cards with d `1e40` (key 4294967295) and `-1e40` (key 0); `average` as recorded |
-| `future-due/due-kinds`, more cards | C3.2 | review cards with H `N` + 259,200 (key 3) and −2,147,483,648 (key 2147483618) |
-| `fsrs/retrievability-orphan` | C9.4 | a card with a memory state whose `notes` row is deleted with `db_exec`, beside a note with one card: its R counts in `sum_by_card` and as its own group in `sum_by_note` |
-| `added/dst-edges` | C1, C10 | the two Paris ids of C10 at their clocks (−3 and −2), and, in Asia/Kathmandu at 2026-10-12T12:00 (`N` 1791843300), ids `N` × 1000 (0) and (`N` − 86,400) × 1000 (−1) |
-| `added/day-edges`, more cards | C10 | ids 1791856799999 (0) and −1 (−20739) |
-| `future-due/tz-matrix/*` | C1, C3.2 | learning cards due `N` ± 1,800 s and `N` − 86,401 s, and a review card due day t + 1, in Paris on 2026-10-25 (a 25-hour day), Australia/Lord_Howe on 2026-10-04, Asia/Kathmandu, and Paris with a collection created in America/Los_Angeles, as the `buttons/tz-matrix` scenarios set them up; every card graph part in Collection, Deck and Search scope |
+| `fsrs/retrievability-decay` | C9.2 | at the retrievability clock, review cards with s 5 and d 5, one per deck: `lrt` now_s − 864,000 with `decay` 0.1542, −0.5, none, `null`, `"0.2"` and 0 give keys 84, 78, 82, 82, 82 and 99; no `lrt`, H 35, `ivl` 20 with the same six decays give 80, 65, 76, 76, 76 and 99. Each deck's `average` is its card's R × 100 (C9.2's values) |
+| `fsrs/retrievability-elapsed-odd` | C2, C9.1, C9.6 | the last four rows of C9.6 (keys 54, 76, 3, 99; the filtered card in Deck `F` and in its home deck), and a review card with `lrt` −9223372036854775808 (e 1897293600, R 0.031140784, key 3), one card per deck |
+| `fsrs/difficulty-infinite` | C8 | review cards with s 5. Deck `A`: the eight d values of C8.1 and `1e40` (key 4294967295), `average` 39.999996; Deck `B`: `-1e40` (key 0), 5.5 and 10, `average` 50.0; Collection: `average` 45.0 |
+| `future-due/due-extremes` | C3.2 | at the retrievability clock, review cards with H `N` + 259,200 (key 3) and −2,147,483,648 (key 2147483618): `daily_load` 1, no `have_backlog` |
+| `fsrs/retrievability-orphan` | C9.4 | at the retrievability clock, the two cards of C9.4's example that have a memory state, on notes n1 and n2; n1's `notes` row deleted with `db_exec`: the orphan card stays in the scope (Collection and Deck), `sum_by_card` and `sum_by_note` 1.4844089 (two groups of one card), `average` 74.22044 |
+| `added/day-edges-odd` | C10 | at `added/day-edges`' clock, ids 1791856799999 (0), −1 and −1500 (both −20739) |
+| `added/dst-edges` | C1, C10 | Europe/Paris. At 2026-10-26 12:00 (`N` 1793070000): ids 1792809000000 (−3, two local days back) and 1792810801000 (−2). `set_clock` 2027-03-29 12:00 (`N` 1806372000): ids 1806114600000 (−2, three local days back) and 1806112800000 (−3); the first two are then −156 |
+| `card-counts/empty-scope` | C12 | Search `tag:absent` (no card), every card part: `card_counts` `{excluding_inactive: {}, including_inactive: {}}`, the six others `{}` |
+| `future-due/tz-matrix/*` | C1, C3.2, C10 | five zones at 12:00 local, each observing `timing` and every card part in Collection and Deck scope (equal): `paris-fall-back` (Europe/Paris, 2026-10-25; the scheduler day before it lasts 25 h), `lord-howe-dst` (Australia/Lord_Howe, 2026-10-04, its DST start; the day before lasts 23.5 h), `kathmandu` (+05:45), `st-johns` (−02:30) and `other-creation-zone` (Paris, `crt` and `creationOffset` of America/Los_Angeles, `today` 2), as the `buttons/tz-matrix` scenarios set them up. Six learning cards (`ivl` 0) and two review cards (`ivl` 3 and 21) with set ids; values in each scenario's comment. In all five, the parts that the zone cannot move are equal: `intervals` {3: 1, 21: 1}, `stability` {5: 1, 10: 1}, `difficulty` {22: 1, 44: 1} with `average` 33.333336, `retrievability` {81: 1, 97: 1}, `daily_load` 6 |
 
+In `future-due/tz-matrix/paris-fall-back` (`N` 1792983600) a learning card due 1792807200 with that second as its id (2026-10-24 04:00 CEST, the start of the local day before) gets Future Due key −2 and Added day −2, where local days would give −1: `future_due` {−2: 1, −1: 2, 0: 3, 1: 2}, `added` {−2: 2, −1: 2, 0: 4}. In `lord-howe-dst` (`N` 1791133200) a card due and created at 1790961000 (2026-10-03 03:40 +10:30, two local days back) gets −1 in both, where local days would give −2; the parts are those of `paris-fall-back`. In the three zones without a DST change on the day, `future_due` is {−2: 1, −1: 1, 0: 4, 1: 2} and `added` {−2: 1, −1: 2, 0: 5}. In `kathmandu` that includes the ids `N` × 1000 (day 0) and (`N` − 86,400) × 1000 (day −1).

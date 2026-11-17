@@ -1,0 +1,127 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T11:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "stats": [
+          {
+            "retrievability": {
+              "average": 47.50244,
+              "retrievability": {
+                "3": 2,
+                "54": 1,
+                "76": 1,
+                "99": 1
+              },
+              "sum_by_card": 2.375122,
+              "sum_by_note": 2.375122
+            }
+          },
+          {
+            "retrievability": {
+              "average": 54.671097,
+              "retrievability": {
+                "54": 1
+              },
+              "sum_by_card": 0.54671097,
+              "sum_by_note": 0.54671097
+            }
+          },
+          {
+            "retrievability": {
+              "average": 54.671097,
+              "retrievability": {
+                "54": 1
+              },
+              "sum_by_card": 0.54671097,
+              "sum_by_note": 0.54671097
+            }
+          },
+          {
+            "retrievability": {
+              "average": 76.61308,
+              "retrievability": {
+                "76": 1
+              },
+              "sum_by_card": 0.7661308,
+              "sum_by_note": 0.7661308
+            }
+          },
+          {
+            "retrievability": {
+              "average": 3.113937,
+              "retrievability": {
+                "3": 1
+              },
+              "sum_by_card": 0.031139368,
+              "sum_by_note": 0.031139368
+            }
+          },
+          {
+            "retrievability": {
+              "average": 100.0,
+              "retrievability": {
+                "99": 1
+              },
+              "sum_by_card": 1.0,
+              "sum_by_note": 1.0
+            }
+          },
+          {
+            "retrievability": {
+              "average": 3.1140783,
+              "retrievability": {
+                "3": 1
+              },
+              "sum_by_card": 0.031140784,
+              "sum_by_note": 0.031140784
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "stats/graphs/fsrs/retrievability-elapsed-odd",
+  "scenario_sha256": "1d3a0c4cc4303746d3736e9c23bbaa6b45ba59ee734c1074a4a80f497b1d5a47",
+  "tz": "Europe/Paris"
+}

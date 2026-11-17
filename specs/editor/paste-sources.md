@@ -143,7 +143,7 @@ The name a fetch adds its bytes under.
 
 `play?f=a.mp3` is a media URL (S4: its text ends with `.mp3`), so it is fetched although its path has no extension.
 
-After redirects, both paths name the file from the URL they were asked to fetch and take the media type from the final response: `https://ex.com/moved` answered with a redirect to an `image/png` response is named `moved.png`. Recorded for the page editor by `editor/paste/url/status` (S15).
+After redirects, both paths name the file from the URL they were asked to fetch and take the media type from the final response: `https://ex.com/moved` answered with a redirect to an `image/png` response is named `moved.png`. The planned scenario `editor/paste/url/status` is to record this for the page editor (S15); no golden holds it yet.
 
 ### S6.1 The name the field references
 
@@ -269,7 +269,7 @@ The page editor's column follows from the order of events at copy time and is no
 |---|---|---|---|
 | target | the field under the drop point; outside a field or on a collapsed field nothing is inserted, but the media of a dropped URL, image or text item were already fetched and added; the `img` sources of dropped HTML are not fetched | the rich-text area that receives the drop, focused; a collapsed field shows none, so nothing happens | P17: the target is checked first; nothing is added (`editor-drop-outside-field`) |
 | a field showing only its HTML editor | its rich-text view is shown first | the drop lands in the HTML editor, not in this pipeline | P17 |
-| caret | the field's restored selection; the golden records where the content lands | the field's selection after the focus | the end of the field (P17) |
+| caret | the end of the field: the drop focuses the field and moves the caret to its end, as P17 does | the field's selection after the focus | the end of the field (P17) |
 | HTML dragged from anywhere inside Anki (a drag whose source is in the app: another field, the same field, another editor window, another Anki web view) | inserted as internal content (`editor/paste-filter` X7 only), whatever the drop's mode | external HTML, filtered in the drop's mode | a drag that started in a Meguri field: internal content (P17, R877) |
 | Shift | held at the drop inverts the mode | S2 | held at the drop inverts the mode |
 | sources | S3's order, as a paste | S3's order, as a paste | P9 from step 2 |
@@ -322,6 +322,7 @@ How each path compares with Meguri's rules. Ids are `conformance/deviations.yaml
 | copy between fields (S11) | as Meguri | filtered as external content (to be confirmed) | `editor-paste-field-copy` (page) |
 | drag from another field (S12) | as Meguri | filtered | `editor-drop-field-html` (page) |
 | drop outside a field (S12) | media added | as Meguri | `editor-drop-outside-field` (P23, host) |
+| inserting the filtered HTML (`editor/paste-filter` X8, `editor/paste` P16) | the browser's insert-HTML command re-parses it in the field's context: inherited inline style, an added `tbody`, merged or split blocks, a `<br>` added or dropped | the same | `editor-paste-insert-command` (both) |
 | Shift remembered from the last key press (S2) | as Meguri | remembered | none: no golden can hold a key state across steps |
 
 ## S15. Oracle and scenarios
@@ -330,9 +331,9 @@ The conformance oracle runs Anki's collection library, not its editor. Of this f
 
 - the media store's handling of every desired name a paste produces: pasted bitmaps and data images (`paste-<sha1>.<ext>`, reuse, the hash suffix), fetched names (S6, S6.1's stored column, `text/media-filenames` F1), through `add_media` and `media_dir` (`specs/conformance/media-ops.md` F5, F9) and the `text` function `media_filename`;
 - the save's decoding of every snippet form of S7 and the references the saved field holds, through the `text` functions `iri_decode`, `media_refs` and `iri_encode` (`specs/conformance/observations.md` O9);
-- the page editor's fetch: S5's page column, S6's page column and S6.1, through the op `add_media_from_url` against the scenario's own fixture server or file folder (`specs/conformance/editor-ops.md`, S15.1). The page editor makes this fetch through one call of the collection library, so the oracle runs the editor's own fetch, without the editor. These goldens therefore observe the experimental editor's fetch (S1). The default host editor's fetch has no golden: its rules (200 only, 30 redirects, 30 s without data, the fragment kept, decoding before the last `/`) rest on S5's and S6's host column alone.
+- the page editor's fetch: S5's page column, S6's page column and S6.1, through the op `add_media_from_url` against the scenario's own fixture server or file folder (`specs/conformance/editor-ops.md`, S15.1). The page editor makes this fetch through one call of the collection library, so the oracle runs the editor's own fetch, without the editor. Those goldens will therefore observe the experimental editor's fetch (S1). The oracle has the op; the scenarios are planned and not written (`specs/conformance/editor-ops.md` E5), so S5's, S6's and S6.1's page columns rest on Anki 26.09.3's behavior as read until they are recorded. The default host editor's fetch has no golden: its rules (200 only, 30 redirects, 30 s without data, the fragment kept, decoding before the last `/`) rest on S5's and S6's host column alone.
 
-Scenarios (inactive):
+Scenarios, all inactive. The three `store/` scenarios are written and have goldens. The five `url/` scenarios are planned and not written: the testkit's typed model does not parse `add_media_from_url` and its setup sections yet (`specs/conformance/editor-ops.md` E5).
 
 | Scenario | Covers |
 |---|---|
@@ -345,7 +346,7 @@ Scenarios (inactive):
 | `editor/paste/url/stored-name` | S6.1's three rows |
 | `editor/paste/url/file` | S5's `file://` rows and S6's `file://` row (page column); the encoded `#` against a present file `a` (the page editor reads `a` and names it `a#b.png`) and against a missing truncated path |
 
-The host editor's fetch runs in the desktop process, outside the collection library, and the oracle cannot observe it. Meguri's expected value for every step of these scenarios is `specs/conformance/editor-ops.md` E5.1. Everything else in this file happens in the editor and is unobservable by that oracle too: S2 to S4, S5's and S6's host column, S8's encoding, S9 to S13. For those Meguri's tests (U197: `PasteProcessorTests`, `PlainTextToHTMLTests`, `RemoteMediaFetcherTests`) take the tables of this file as their expected values, and the editor-page oracle of `editor/paste` P1 records goldens for `editor/paste` P24's scenarios from both paths (S1).
+The host editor's fetch runs in the desktop process, outside the collection library, and the oracle cannot observe it. Meguri's expected values for the `url/` scenarios are `specs/conformance/editor-ops.md` E5.1 (provisional until they are written). Everything else in this file happens in the editor and is unobservable by that oracle too: S2 to S4, S5's and S6's host column, S8's encoding, S9 to S13. For those Meguri's tests (U197: `PasteProcessorTests`, `PlainTextToHTMLTests`, `RemoteMediaFetcherTests`) take the tables of this file as their expected values, and the editor-page oracle of `editor/paste` P1 records goldens for `editor/paste` P24's scenarios from both paths (S1).
 
 ### S15.1 The fetch op
 

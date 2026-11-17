@@ -3,9 +3,9 @@
 Spec: editor/add-flow
 Requirements: R797, R802, R805, R809, R810, R811, R813, R814, R815, R816, R862, R245, R246, R247, R255, R259 (Add); supports R796, R800, R801, R806, R807, R808, R812, R817, R851, R1114; AE34, AE35
 Anki: 26.09.3
-Scenarios: conformance/scenarios/editor/add-flow/ (written inactive; A12)
+Scenarios: conformance/scenarios/editor/add-flow/ (recorded at the current oracle pin; inactive until Meguri's adapters land, A12)
 
-What the Add screen (U195) does between opening and closing: its two choosers, a note type change and how the draft's content follows it, the sticky pins, the add itself, the History list, the close and the keys. The starting deck and note type, when the screen asks for them, blank and unchanged drafts, a selection that stops existing, Create Copy and the next draft after an add are `notes/add-defaults` D1 to D6; the `addToCur` rules are `editor/config-keys` K4. The field check is `notes/field-check`; the add op and the keys it writes are `notes/note-records` A1 to A5. The field editor, its commits and its flush are `editor/field-html`; the tag area is `editor/tag-editor`. The screen contract `editor.add` (`docs/design/screen-inventory.yaml`) owns layout, wording other than `editor/editing-strings` E3, states and VoiceOver.
+What the Add screen (U195) does between opening and closing: its two choosers, a note type change and how the draft's content follows it, the sticky pins, the add itself, the History list, the close and the keys. The starting deck and note type, when the screen asks for them, blank and unchanged drafts, a selection that stops existing, Create Copy and the next draft after an add are `notes/add-defaults` D1 to D6; the `addToCur` rules are `editor/config-keys` K4. The field check is `notes/field-check`; the add op and the keys it writes are `notes/note-records` A1 to A5. The field editor, its commits and its flush are `editor/field-html`; the tag area is `editor/tag-editor`. The screen contract `editor.add` (`docs/design/screen-inventory.yaml`) owns layout, wording other than `editor/editing-strings` E3, states and VoiceOver. This file owns the behaviour it states: the contract's short summaries of it (which decks the deck chooser lists, what a History row shows) follow A2 and A6.
 
 ## A1. Terms and sources
 
@@ -108,7 +108,15 @@ Esc, ⌘W, the close button, the iPhone swipe-down and a Mac quit go through one
 2. when the draft is unchanged since the last add (`notes/add-defaults` D4; tags are not looked at), the screen closes at once and keeps the draft for the next opening (`notes/add-defaults` D3);
 3. otherwise "Discard current input?" asks (`editor/editing-strings` E3). Discard closes the screen and drops the draft: every field empty, no tags, no last added note; the next opening asks for the defaults (D3). Keep Editing sends `release` and leaves the screen as it was.
 
-On iPhone the swipe-down is held back while the draft is not unchanged, and the same question shows. With suggestions shown in the tag editor, Esc first hides them (`editor/tag-editor` G4). A collection replacement asks the same question first (screen contract, KTD17).
+On iPhone the swipe-down is held back while the draft is not unchanged, and the same question shows. With suggestions shown in the tag editor, Esc first hides them (`editor/tag-editor` G4). A collection replacement goes through the same guard first (A7.1).
+
+### A7.1 Before a collection replacement (KTD17)
+
+A replacement (a one-way sync, a restore, a `.colpkg` import, the adoption of an iCloud collection) enters its exclusive phase only once open editors are closed (KTD17, `sync/one-way` O4). When the Add screen is open at that moment, the app runs A7's guard on it:
+
+- **Closed** (the draft is unchanged, or the user chose Discard): the screen closes as A7 says, and the replacement goes on. From then until the phase ends, every Add entry point is disabled with "Waiting for <operation>" (KTD17, screen contract), so the Add screen cannot open again before `CollectionReplaced`, or before the phase ends without one (a cancel or a failure).
+- **Keep Editing**: `release` is sent, the screen stays as it was, and the replacement does not start; nothing is written. The user can start it again later, which runs the guard again.
+- **After `CollectionReplaced`**: the History is emptied (A6). Decided 2026-11-17: an unchanged draft that step 2 kept is dropped as well, since its note type and deck name the old collection's rows; the next opening asks for the defaults on the new collection (`notes/add-defaults` D3). A phase that ends without a replacement changes neither: the History and a kept draft stay, and Add is enabled again.
 
 ## A8. Create Copy and prefilled drafts (R817)
 
@@ -140,7 +148,8 @@ Anki 26.09.3's add window differs as follows. None is visible to a scenario (the
 - **Adding.** Anki shows its refusals in a warning dialog and stops audio of every source after an add; Meguri shows the refusal line in place (screen contract) and stops only audio the editor started. Anki's toast ends with a full stop ("1 card added."); Meguri's text is the screen contract's.
 - **Closing.** Anki forgets the whole draft when its window closes, sticky values included; Meguri keeps an unchanged draft for the next opening (A7, `notes/add-defaults` D3).
 - **Keys.** On macOS Anki's keys are the same as Meguri's: its Qt shortcuts and its editor write Ctrl, which is ⌘ there, and it closes its active window with ⌘W. ⌥⌘P is Meguri's addition.
-- A3 and A4 match Anki, including name matching that counts case, positional filling that skips empty values and drops the extras, and toggle-all clearing when any field is sticky.
+- **Deck on a note type change.** Anki's add window selects the new note type's last deck (`notes/add-defaults` D2, when it gives one) on every note type change, whatever `addToCur` holds. Meguri does so only with `false` and keeps the selected deck with `true` (A3 step 3, `editor/config-keys` K4.2, R800). Anki's experimental editor, which A1 does not compare, checks `addToCur` as Meguri does.
+- The rest of A3 (the field mapping, the focus rule, forgetting the last added note) and A4 match Anki, including name matching that counts case, positional filling that skips empty values and drops the extras, and toggle-all clearing when any field is sticky.
 
 ## A11. Meguri tests
 
@@ -152,14 +161,14 @@ Anki 26.09.3's add window differs as follows. None is visible to a scenario (the
 - A4: a pin toggled on and off, F9 in a field and in the tag editor, ⇧F9 with none, one and every field sticky, the pin following an undo of the toggle; after an add with the first and third of three fields pinned, the next draft holds those two values and an empty second field (`notes/add-defaults` D6);
 - A5: with a note type of two fields, type into the first field, move focus to the second, type there, then within 100 ms press ⌘↩ (and, in a second case, the Add button) while focus is still in the second field: the added note holds both typed values, each in its own field (R813); during that add the screen sends no note-update op (only the add op of A5 step 5), and afterwards the collection history holds the one "Add Note" step above the steps it held before; a double ⌘↩ adds one note; each refusal state with its line and focus; the missing-cloze confirmation in both answers (confirming adds one card); the toast count for a note with one, two and three cards; ⌘Z after an add (focus in the first field, nothing typed) removes the note and the undo menu showed "Add Note"; ⌘Z after typing in the next draft undoes the typing first; the toast's Undo disabled after a pin toggle; a selection replaced at the add (its deck deleted in Browse) stops the add; a deck picked in the deck chooser just before ⌘↩ is the deck the card goes to; after a successful add with a note type and a deck that are neither default (a cloze kind and a deck other than the current one), both choosers still show that note type and deck, the next draft has that note type's fields, and D1 (`notes/add-defaults`) is not requested again; a failure keeps the draft;
 - A6: newest first, the 30-character label and its ellipsis, a media-only first field, an image occlusion note labelled by its Header, "(Note deleted)" after a delete in Browse and after an undo, a row opening Browse on `nid:`, the list kept across close and reopen and emptied by a collection replacement;
-- A7: AE35 (a sticky Sentence and tags `german::verb`: add, close at once without a prompt; type into a non-sticky field, close, "Discard current input?"); Discard then reopen gives the defaults; Keep Editing keeps the draft;
+- A7: AE35 (a sticky Sentence and tags `german::verb`: add, close at once without a prompt; type into a non-sticky field, close, "Discard current input?"); Discard then reopen gives the defaults; Keep Editing keeps the draft; A7.1: a one-way download confirmed while the draft holds typed input shows the prompt; after Discard the screen is closed and Add stays disabled until `CollectionReplaced`, after which the History is empty and the next opening asks for the defaults; Keep Editing keeps the draft and the download does not start; a cancelled phase leaves the History and a kept unchanged draft as they were;
 - A9's keys through the menu commands; ⌘D and ⌘N with focus in the Mac panel and with focus in Browse's table beside it; and the registry's duplicate check.
 
 AE34's duplicate state and its Show Duplicates search are `notes/field-check` K4 (scenario `notes/fields-check/duplicates`); the UI test checks that Add still adds the note.
 
 ## A12. Scenarios
 
-Written in `conformance/scenarios/editor/add-flow/`, inactive, using only existing ops (`update_notetype` with `field_options`, `add_note`, `undo`, `undo_status`, `db_exec`, `notetype_structure`, `fields_check`, `set_config`, `set_current_deck`, `delete_decks`, `reopen`, the `card` observation, and the `add_defaults` and `notetype_last_deck` observations of `notes/add-defaults` D7). They show the collection half of A4 and A5, and the defaults an add leaves behind (`editor/config-keys` K4.1, K4.2; `notes/add-defaults` D2, D6); the UI half is A11's.
+Written in `conformance/scenarios/editor/add-flow/` and recorded at the current oracle pin (goldens in `conformance/goldens/editor/add-flow/`). They stay inactive until Meguri's adapters for their ops and observations land (U191, U195). They use only existing ops (`update_notetype` with `field_options`, `add_note`, `undo`, `undo_status`, `db_exec`, `notetype_structure`, `fields_check`, `set_config`, `set_current_deck`, `delete_decks`, `reopen`, the `card` observation, and the `add_defaults` and `notetype_last_deck` observations of `notes/add-defaults` D7). They show the collection half of A4 and A5, and the defaults an add leaves behind (`editor/config-keys` K4.1, K4.2; `notes/add-defaults` D2, D6); the UI half is A11's.
 
 | Scenario | Covers |
 |---|---|

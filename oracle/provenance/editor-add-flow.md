@@ -40,3 +40,11 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, wri
 | conformance/scenarios/editor/add-flow/selected-context (A5 step 5, notes/add-defaults D6) and the proposed A11 A5 line | `ts/tests/e2e/context-switching.spec.ts` | Which behavior to prove: an add carries the selected deck and note type, and both stay selected and are the defaults afterwards. The expectations come from the oracle golden. |
 | editor/add-flow A5 (flush, field check refusal, the add), the proposed A11 change, and scenario editor/add-flow/add-leaves-other-notes | `ts/tests/e2e/note-add-roundtrip.spec.ts` | Which behaviors harvest rows h3632fc2d2bac, hd760eb8143a3 and hd9a760a2f259 require: the focused field flushed into the add, both fields and the deck committed with no update of existing notes, the next draft reset, and no add for an empty draft. The expected values come from the oracle golden only. |
 | editor/add-flow A4 sticky pins and scenario editor/add-flow/sticky-pin-each-way; harvest rows h8c899c6506a2, hc01768203874 | `ts/tests/e2e/sticky-field.spec.ts` | Which behaviors the harvested e2e tests require: a single field's sticky toggle persisting on and off, and sticky values kept while other fields clear after an add. No assertions or values were taken; the golden comes from the oracle. |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| editor/add-flow#A10 (Deck on a note type change; scope of the 'match Anki' bullet) | `qt/aqt/addcards_legacy.py`, `qt/aqt/notetypechooser.py`, `rslib/src/adding.rs` | Checking that the legacy add window applies the note type's default deck on every note type change without reading addToCur, how the note type chooser's setter calls the change handler (user pick and replacement of a missing type), and that the default-deck lookup reads only the per-note-type last-deck key |

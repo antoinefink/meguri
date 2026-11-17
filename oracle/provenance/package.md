@@ -100,3 +100,11 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to classify deferred harvest rows, wri
 | Spec section and scenarios | Anki file | Read for |
 |---|---|---|
 | Legacy media name normalization vs latest-format refusal (classification only) | `rslib/src/import_export/package/media.rs` | Legacy entries normalized and latest entries with noncanonical names refused; used to split the row into a covered latest half and a legacy half that needs a fixture. |
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| package/container#P16.5 (new rows: payload length/SHA-1 unchecked, unmapped or non-canonical numbered members never opened, duplicate map names handled in turn, case-variant incoming names) and #P17 media-map name bullet (trailing '/' or '/.' accepted and normalised by Anki) | `rslib/src/import_export/package/colpkg/import.rs`; `rslib/src/import_export/package/media.rs`; `rslib/src/import_export/package/meta.rs`; `rslib/io/src/lib.rs` | Checked that the colpkg import writes media payloads without a hash or length check, fetches members only by map index, decodes the latest map with no duplicate-name check, and that the path-safety check works on path components so trailing separators and '.' parts pass and the filename transform then removes '/'. |

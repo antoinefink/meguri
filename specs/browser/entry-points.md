@@ -3,7 +3,7 @@
 Spec: browser/entry-points
 Requirements: R1112, R1113, R1114; supports R48, R98, R216, R300, R319, R807, R815, R1092, R1102, R1106, R1109, R1110, R1116, R1153, R1322, R1417, R1615, R1728, R1733, R1782, R1786, R1792
 Anki: 26.09.3 for the Anki rows of E2 to E9 (what Anki's desktop browser does when it opens, when it is handed a card or a search, when a search is committed, what it remembers and how long its field text can be); none for the rest (Meguri design)
-Scenarios: conformance/scenarios/browser/entry/ (drafts, inactive: E11)
+Scenarios: conformance/scenarios/browser/entry/ (recorded, inactive: E11)
 
 Which search Browse runs when it opens, what each entry point hands it, what a commit does to the field text and which text it runs, which searches the recent-search list records, and what Clear, Select All, Invert Selection and Select Notes do. The field-text rule is `search/join-and-replace` J2, the canonical text `search/canonical-form` (through `search/editing-services` D2), the built items `search/join-and-replace` J3 and J4, the runs, handles and selection mapping `browser/result-sets` H3, H11 and H12, the stored keys `browser/config-keys` K5, K6.1 and K6.4. The query pipeline, debounce and layout are U210's; the field, tokens and inline errors U214's; the suggestions U215's.
 
@@ -38,7 +38,7 @@ Which search Browse runs when it opens, what each entry point hands it, what a c
 2. It is put in canonical form (`search/editing-services` D2).
 3. **It parses.** The field shows the canonical text and that text runs as a commit (E5): it is recorded in recent searches (E6). When Browse holds a result, the selection and current row are mapped into the new one (R1154, `browser/result-sets` H12, same mode); otherwise E2 rule 5 applies. An entry point whose own spec sets the selection (the Selection column below) sets it instead, once the result is complete. The mode stays the stored mode, and the sort is that mode's stored sort, unless the entry point's spec writes another (`guiBrowse`'s `reorderCards`, `servers/ankiconnect-gui` G3). Anki records a search another window hands to its browser in its history as well, and keeps the browser's mode.
 4. **It does not parse.** The field shows the text after J2, not in canonical form, with the inline error of E5 step 4; an earlier result stays, dimmed (R1108); nothing runs and nothing is recorded. Anki's callers hand its browser only valid searches: one that does not parse raises an error, Anki shows its generic error dialog with the parse message, and the field does not change (on a first open the browser window does not appear).
-5. **Stats' joined text** (`stats/browse-queries` Q3, Q5) is shown in the field exactly as written and runs as written, so it is the shown search (E1). Decided 2026-10-27 (plan U210): it is still a commit, so recent searches record its canonical form, which U210 gets from `search/editing-services` D2 only for that purpose (E6). Anki shows and runs it as written and does not record it.
+5. **Stats' joined text** (`stats/browse-queries` Q3, Q5) is shown in the field exactly as written and runs as written, so it is the shown search (E1). Decided 2026-10-27 (plan U210): it is still a commit, so recent searches record its canonical form, which U210 gets from `search/editing-services` D2 only for that purpose (E6). Anki shows and runs it as written and does not record it. A joined text that does not parse (none does: the Stats search has parsed before any item is clickable, and every joined text parses, `stats/browse-queries` Q2.3, Q6) is rule 4's case: it is shown as written with its error inline, nothing runs and nothing is recorded.
 6. **AnkiConnect's `guiBrowse`** is checked in the core before Browse sees it (`servers/ankiconnect-gui` G2 rule 2, G3 check 7): a `query` that does not parse, or whose run fails, gets the error reply and Browse does not change. Without `query`, `guiBrowse` is a plain open (E2): Browse keeps the result it holds, or runs the default search when it holds none.
 
 The entry points, what each hands Browse, and the spec that builds it:
@@ -96,7 +96,7 @@ Before a commit changes the result, the inspector's pending save is flushed and 
 
 1. The list is newest first and holds at most 30 texts.
 2. Recording a text t removes every entry equal to t (code point for code point), puts t first and drops the entries after the 30th. Anki keeps its search history the same way (30 entries, newest first, an equal entry moved to the front).
-3. What is recorded is the committed canonical text: E3 rule 3, E4 rule 5, E5 step 3; for Stats' joined text its canonical form (E3 rule 5). A Stats text whose canonical form cannot be made (it does not parse) runs as written and records nothing.
+3. What is recorded is the committed canonical text: E3 rule 3, E4 rule 5, E5 step 3; for Stats' joined text its canonical form (E3 rule 5). A Stats text that does not parse neither runs nor records anything (E3 rules 4 and 5).
 4. Nothing else is recorded: not the default search (E2), not a live run, not Clear (E7), not Select Notes (E8), not a commit or open that does not parse, not a `guiBrowse` refused by E3 rule 6.
 5. The list stays on the device in app-private storage, never in the collection and never synced (`browser/config-keys` K11). It survives relaunch and a change of collection. It is the only search history Browse keeps; the accepted-suggestion list of `search/editing-services` D6.1 (`recent`) is a separate device list that only ranks suggestions.
 6. Anki records only Return in its field and searches other windows hand to its browser. Its sidebar clicks, its Select Notes, its default search, its Stats links and its duplicate finder's links run without being recorded. Meguri also records sidebar, chip, suggestion and token commits (R1109) and Stats' canonical text (E3 rule 5).
@@ -142,7 +142,7 @@ None of these is observable by the oracle, which runs Anki's collection library 
 
 ## E11. Tests and scenarios
 
-The oracle sees the texts and the results, never the browser's choices. The scenarios of `conformance/scenarios/browser/entry/` are drafts, not yet listed in `area.yaml` and without goldens:
+The oracle sees the texts and the results, never the browser's choices. The scenarios of `conformance/scenarios/browser/entry/` are recorded (their goldens are under `conformance/goldens/browser/entry/`, so the expected texts and results are pinned) and inactive: not yet listed in `browser/area.yaml`'s `active` list. `browser/entry/texts` becomes active with U88's `search_build` adapter (`specs/conformance/search-ops.md` S6); `browser/entry/default-and-empty` with U82's deck terms (`deck:current`, `deck:*`), which Meguri's search plan does not yet match:
 
 | Scenario | Covers | Observations |
 |---|---|---|

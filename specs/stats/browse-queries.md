@@ -119,7 +119,7 @@ With X = ` AND -("is:buried" OR "is:suspended")` when `cardCountsSeparateInactiv
 - The joined text goes to the `open(search:)` route on AppNavigation (R1417, U210; the plan's U225 calls the same route U150's `openBrowser(search:)`, `browser/entry-points` E1). The Browser opens in the same window (sidebar Browse on Mac and iPad, the Browse tab on iPhone), shows exactly that text in its search field, and runs it in its current cards or notes mode, as Anki's Browser does with a search handed to it.
 - On touch, the item's tooltip shows "Show in Browser" first; on Mac a click opens at once (R1418, U226).
 - Coming back restores the Stats screen as it was (R1419, U225).
-- Browse records the joined text's canonical form in recent searches while showing and running the text as written; a joined text that does not parse records nothing (`browser/entry-points` E3 rule 5, E6).
+- Browse records the joined text's canonical form in recent searches while showing and running the text as written; a joined text that does not parse (unreachable, Q2.3, Q6) is shown as written with its error inline, and nothing runs or is recorded (`browser/entry-points` E3 rules 4 and 5, E6).
 
 ## Q6. Validity
 

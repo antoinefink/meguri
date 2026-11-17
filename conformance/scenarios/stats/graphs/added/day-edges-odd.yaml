@@ -1,0 +1,20 @@
+# stats/graphs-cards C13 (C10): more ids of the C10 table (N = 1791856800):
+# 1791856799999 (1 ms before N: the ceiling is -0, day 0), -1 and -1500 (creation
+# seconds 0 and -1: the division truncates toward zero). Expected {0: 1,
+# -20739: 2}.
+id: stats/graphs/added/day-edges-odd
+clock: {tz: Europe/Paris, start: "2026-10-12T12:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n3", "x"]}
+steps:
+  - {"db_exec": {"sql": "UPDATE cards SET id = 1791856799999 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n1')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET id = -1 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n2')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET id = -1500 WHERE nid = (SELECT id FROM notes WHERE sfld = 'n3')"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["added"]}]}]}

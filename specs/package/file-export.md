@@ -3,7 +3,7 @@
 Spec: package/file-export
 Requirements: R1619, R1624, R1625, R1635, R1852, R2004, R2015, R2046, R2059
 Anki: none (Meguri app flow over package/container P5/P10/P11/P15)
-Scenarios: none (focused Rust/Swift tests and native VM journeys in E6)
+Scenarios: conformance/scenarios/package/apkg-export/colpkg/ (E7 through `package/apkg-export#A14`'s latest-format media form: `export-with-media`, a T1 live chain in which Anki imports Meguri's media package, and `media-entries`); focused Rust/Swift tests and native VM journeys in E6
 
 This contract covers RF3's owned file-export flow and RF4's media-inclusive extension,
 a partial U124/U162 delivery. Collection-only internal writers remain
@@ -39,7 +39,9 @@ Do not replay answers, end the session, freeze later input or advertise pending 
 Record snapshot_modified from the closed captured copy, not from the later live collection.
 Admission sequence identifies the request; it is not an exact snapshot revision or proof of currentness.
 If an exact snapshot sequence is exposed later, obtain it from the same snapshot, never guess it.
-Report queued/snapshot/write/verify/ready progress honestly; indeterminate stages may be indeterminate.
+Report progress honestly, in these stages, with `package/apkg-export#A11`'s names where the work is the same:
+`queued`, `snapshot` (VACUUM INTO), `media` (E7 capture; files done of total), `writing`, `verifying`, `ready`.
+A stage whose total is unknown is indeterminate. Each report carries `cancellable`, true until `ready` (E5 then governs).
 Cancellation requests wait for the real terminal outcome, including during non-interruptible snapshot work.
 After draining/dropping leases, recheck generation before Ready; replacement makes unfinished output stale and disposable.
 
@@ -182,6 +184,13 @@ An absent media directory means zero media files. A present path that cannot be
 safely inventoried is an error, not an empty directory. Validate name, count,
 individual length and aggregate limits before producing a Ready artifact.
 
+Differences from Anki 26.9.3's collection export with media, for comparison:
+Anki silently skips a symbolic link in the media folder, where Meguri refuses
+the export; Anki includes operating-system metadata files such as `.DS_Store`
+and `Thumbs.db`, which `media/media-files#M8` excludes here. The recorded
+scenarios give the folder only regular files with ordinary names, so none
+shows either case.
+
 ### E7.2 Capture and concurrent changes
 
 Capture media as immutable operation-owned data with bounded streaming I/O;
@@ -283,6 +292,13 @@ Cover nested hard-link aliases, symlinks and special files. Change nested names,
 contents, directory bindings and ancestors between inventory, capture and Ready;
 require safe refusal. Exercise cancellation and each traversal bound while
 proving that retained recovery evidence was not changed.
+
+Oracle scenarios: `package/apkg-export/colpkg/export-with-media` (T1 live:
+Anki imports Meguri's media package and finds the source's rows and files) and
+`package/apkg-export/colpkg/media-entries` (each map record's exact size and
+SHA-1 and each numbered entry's decoded length). The legacy option of
+`package/apkg-export#A14` (`package/legacy-export/colpkg-listing`,
+`colpkg-oracle-import`) is outside this flow (E1).
 
 Native VM checks on Mac, iPhone and iPad must save a media-inclusive artifact
 through the actual destination flow and validate the resulting bytes. Replace

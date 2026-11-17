@@ -1,0 +1,22 @@
+# stats/widget-snapshot W4, W5 (a window that starts before at(D)): Europe/Paris,
+# rollover 2, built 2026-03-28 21:00 +01:00 with two answers that day, then one
+# more at 2026-03-29 00:20Z (01:20 +01:00), whose heatmap day is still 03-28.
+# Anki's day 2026-03-29 starts at 01:00Z = at(D) = e(D), and its window then
+# starts at hour 2 under +02:00 = 00:00Z, so the 00:20Z answer is in it. A
+# snapshot built at 00:30Z puts that answer in upcoming[0].studiedToday (one
+# card), while Home still counts all three. The build's day ends at 01:00Z, so
+# the oracle's cached day and a fresh computation agree at every instant here.
+id: stats/widget/day-start-spring-forward-r2-early-row
+clock: {tz: Europe/Paris, start: "2026-03-28T21:00:00"}
+steps:
+  - {"set_config": {"key": "rollover", "value": 2}}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1774688400000, 1000, -1, 3, 10, 5, 2500, 5000, 1), (1774717200000, 1000, -1, 3, 10, 5, 2500, 7000, 1)"}}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-03-29T00:20:00Z"}
+  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1774743600000, 1000, -1, 3, 10, 5, 2500, 3000, 1)"}}
+  - {"set_clock": "2026-03-29T00:30:00Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-03-29T00:59:59Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}
+  - {"set_clock": "2026-03-29T01:00:00Z"}
+  - {"observe": ["timing", "studied_today_raw", "studied_today_text"]}

@@ -1,0 +1,22 @@
+# stats/graphs-cards C13 (C9.4): sum_by_note groups by the card's nid, whether or
+# not the note row exists. at the retrievability clock of graphs-cards C13 (clock start 2030-01-15T11:00:00
+# Paris, advance 30d: now_s 1897293600, today 30, N 1897354800).
+# n1's card: lrt now_s - 864,000, s 2.5, d 5 (R 0.7182781); n2's card: review, no
+# lrt, due 35, ivl 20, s 5, d 5 (R 0.7661308); then n1's notes row is deleted.
+# Expected sum_by_card and sum_by_note 1.4844089 (two groups of one card).
+id: stats/graphs/fsrs/retrievability-orphan
+clock: {tz: Europe/Paris, start: "2030-01-15T11:00:00"}
+setup:
+  config: {"rollover": 4}
+  decks: ["Lang"]
+  notetypes:
+    - {"name": "Pair", "fields": ["Front", "Back"], "templates": [{"name": "Forward", "front": "{{Front}}", "back": "{{Back}}"}]}
+  notes:
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
+    - {"notetype": "Pair", "deck": "Lang", "fields": ["n2", "x"]}
+steps:
+  - {"advance": "30d"}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 31, data = '{\"s\":2.5,\"d\":5.0,\"lrt\":1896429600}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n1')"}}
+  - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 35, data = '{\"s\":5.0,\"d\":5.0}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'n2')"}}
+  - {"db_exec": {"sql": "DELETE FROM notes WHERE sfld = 'n1'"}}
+  - {"observe": [{"stats": [{"scope": "collection", "history": "year", "parts": ["retrievability", "card_counts"]}, {"scope": {"deck": "Lang"}, "history": "year", "parts": ["retrievability", "card_counts"]}]}]}

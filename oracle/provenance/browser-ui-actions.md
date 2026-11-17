@@ -36,3 +36,11 @@ Notes for the reviewer:
 - `browser/sidebar` S10.3 follows Anki in naming a dragged item's saved search after its shown name (the last level for a deck or tag); the plan's U217 test names it after the full name. Raised as an open point in S15.
 - `browser/preview` P10's third row is a Meguri choice (no autoplay on a re-render after a note save), raised as an open question there.
 - `tools/mg similarity` and the provenance and privacy checks for these files still need a run from the main checkout before merging; record the run ids here.
+
+## Audit fixes (2026-11-17, session s-20261117T172637Z-685ca4ee)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; no code was copied, and every rule was restated in the spec writer's words.
+
+| Subject | Anki file | Read for |
+|---|---|---|
+| browser/sidebar#S5 (Expand/Collapse and Expand/Collapse Children: when each is offered, and expanding selected items then setting their direct children, read in selection order), #S15 Expand/Collapse Children row | `qt/aqt/browser/sidebar/tree.py` | Checked that Collapse Children writes both states in one action and that the overlap case depends on selection order |

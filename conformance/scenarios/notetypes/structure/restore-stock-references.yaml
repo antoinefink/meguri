@@ -1,0 +1,36 @@
+# Restore to Default where a base field name equals a stock field name at
+# another position (specs/notetypes/restore-to-default.md D4; deviation
+# restore-keeps-stock-references). Trio, made from scratch with fields
+# Front, Extra, Back, is restored with the given kind Basic (optional
+# reversed card), whose fields are Front, Back, Add Reverse. Values stay by
+# position. Anki maps the old names to the stock names by position (Extra to
+# Back, Back to Add Reverse) and applies that map to the stock text, so its
+# second stock front asks only for Add Reverse; its card generation reads
+# that rewritten front. Meguri keeps the stock front, which asks for Back and
+# Add Reverse. The first note (Extra empty, Back set) lacks its second card
+# before the restore: Anki gives it one and Meguri does not. The second note
+# (Back empty) gets none on either; the third already has both. Only notes
+# and cards are observed: stock template text is each executor's own (R908,
+# R1959).
+id: notetypes/structure/restore-stock-references
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Trio
+      fields: [Front, Extra, Back]
+      templates:
+        - {name: Forth, front: "{{Front}}", back: "{{Extra}}"}
+        - {name: Back Again, front: "{{#Extra}}{{Back}}{{/Extra}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Trio, fields: [tovel, "", brask]}
+    - {notetype: Trio, fields: [quorn, flid, ""]}
+    - {notetype: Trio, fields: [yarp, wense, dulo]}
+steps:
+  - db_exec: {sql: "SELECT replace(n.flds, char(31), '|'), (SELECT group_concat(ord) FROM (SELECT c.ord FROM cards c WHERE c.nid = n.id ORDER BY c.ord)) FROM notes n ORDER BY n.id"}
+  - advance: 1m
+  # step 2
+  - restore_notetype: {notetype: Trio, kind: basic_optional_reversed}
+  - observe:
+      - {notetype_structure: {notetypes: [Trio]}}
+  # step 4
+  - db_exec: {sql: "SELECT replace(n.flds, char(31), '|'), (SELECT group_concat(ord) FROM (SELECT c.ord FROM cards c WHERE c.nid = n.id ORDER BY c.ord)) FROM notes n ORDER BY n.id"}

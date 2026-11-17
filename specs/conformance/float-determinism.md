@@ -46,7 +46,7 @@ The scheduling rules the probe exercises are `sched/fsrs-transitions` (review ca
   | `params` | string | a name in `param-sets.json` | the parameter set (F2.3) |
   | `max_ivl` | integer | 1–36,500 | the maximum interval of the card's preset |
 
-  An `f32` member is written as the shortest decimal that both readings of `model/json-numbers#N2` (one step to the nearest `f32`, or through the nearest 64-bit float) map to the same `f32`, always with a fraction or an exponent. So every reader gets the same `f32`.
+  An `f32` member is written as the shortest decimal that both readings of `model/json-numbers#N2` (one step to the nearest `f32`, or through the 64-bit float of `model/json-numbers#N11`) map to the same `f32`, always with a fraction or an exponent. So every reader gets the same `f32`.
 - `param-sets.json`: one JSON object, the parameter sets of F2.3 by name, each a list of numbers written as above.
 - `generate.py`: the generator (F2.4).
 
