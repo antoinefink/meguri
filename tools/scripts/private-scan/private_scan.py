@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'docs/process/review-log/meguri-sync-U11.md':
+        'b1f55fc58d2c7319cb2ab7cca6492eee9810b867956f4acd949bff84be8d22a3',
     'tools/tests/sync_recovery.bats':
         '6f6fd41c4c891150029db7abafd2b46022eea2b8f52cabc96bff1ca10981ce83',
     'tools/scripts/private-scan/tests/test_private_scan.py':
@@ -845,7 +847,7 @@ PUBLIC_ARTIFACTS = {
     'conformance/peers/retained-sync/src/fixture.rs':
         'c081384f0291814d7befe8aa178a5af98162331ced069c231a79fb125c7a026b',
     'conformance/peers/retained-sync/README.md':
-        'd2093cf58d8fd8a5e323beebd39a527a9a8b7fb647853f0334c776d503e1eb94',
+        'b54bf7d41d4973a3df93224f0d8ce40e71748819acc69050e2316ad1e9de37d8',
     'conformance/peers/retained-sync/AGENTS.md':
         'a1aba360d6591c26719cf41483087415844925d55fdc8646419848aa68f30a06',
     'server/web/scripts/fixture.mjs':

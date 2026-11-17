@@ -340,6 +340,23 @@ public entrypoints. Existing tests are unchanged. New tooling tests are
 external lock identity substitutions. Parent owns compilation, focused MG tests,
 independent correctness/simplicity review, privacy/provenance/similarity and gates.
 
+### Current status, 2026-11-17
+
+The paragraph below records the first draft's plain-save limitation. Current
+preparation uses the separately reviewed checked public template API. Its
+four-file patch is identical in Main
+`f4770d47eab63e8965e5514a01f052ef653a9fde` and the root cherry-pick
+`106aa7f5877086f458eeab3a37bc3e9fbfc451b7`; 22 focused note-type cases passed.
+
+Actual retained run `20261117T163339Z-10727` on clean source
+`224f7d8e03fcee5a7593bdb2e70b935442010d78` matched all eight selected cases,
+with zero different or unavailable cases. Independent actual-artifact review is
+CLEAR for that exact source and run; the U11 log records its report and limits.
+This is not a compatibility seal, Mobile10, complete-unit, coherent-batch gate
+or final acceptance. Original failures and the historical text remain evidence.
+
+### Historical first-draft limitation
+
 Source review identifies a lead: public plain note-type save refuses front/back
 template edits. This is an unsupported public authoring claim, not an observed
 compatibility/runtime failure. Forward preparation attempts it once after
