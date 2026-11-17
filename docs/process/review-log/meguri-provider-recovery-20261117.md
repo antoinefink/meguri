@@ -441,3 +441,13 @@ Source checks pass: privacy `053628-91998` scans all eleven changed paths; stati
 ## First affected CoreBridge run
 
 `swift-test/20261117T053750Z-93481`, clean `5712fcaa`: 47 passed, one failed, zero skipped. The diagnostic formatter, privacy and cancellation methods pass, as do selected native lifecycle and positive fixture checks. `nativePolicySetupRejectsLocalOnlyOpeningBeforeSDKCreation` fails all three retained assertions: it receives no error and observes an engine and retained SDK. The shared Swift opener currently prepares a connected prior-provider installation for this negative caller too. Its explicit local-only opening must be restored; no assertion is relaxed. The original receipt remains retained and the CPU window was released from its actual JSON. AppModel11 and the required gate remain pending.
+
+## Compiler and explicit negative setup corrections
+
+AppModel `swift-test/20261117T054141Z-96263`, clean `fc509a47`, stops at compilation with zero executed tests. Two nested ownership predicates need explicit `@MainActor` annotations for their state reads. Author `054355-98386` adds only those two annotations. No guard or expression changes.
+
+Fixture author `054134-95711` adds an explicit local-only opening for the negative caller. It skips prior-provider migration, opens through the ordinary collection service, and checks LocalOnly after baseline preparation. The three refusal assertions and all positive setup paths remain. Independent review `054443-99065` clears P0–P2 for both corrections. Root verifies complete author/reviewer source equality. Focused compilation and runtime checks remain pending.
+
+Snapshot decision: PUBLIC. The independent non-author `provider_public_snapshot_review` inspected the entire final coordinator, with all comments, literals, data and paths. Actual bytes match SHA-256 `d17a17aafe357db445010b6d580ad11bac91f5d7e23496088de5f60f865b9130`: 2,866 lines, 165,110 bytes. Only its existing map value changes. Preserve the failed receipts, batch base and acceptance limits.
+
+Correction checks pass: privacy `054753-3096` covers six paths; static `054702-2305` passes three stages; similarity `054659-1499` scans three files with zero flags or exemptions. Root read the filtered report. Scanner `054700-1910` passes its selected case. The prior prose scan `054702-2416` remains retained; its fixed public sentence was rewritten without changing source or policy.

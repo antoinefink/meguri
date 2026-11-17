@@ -1181,12 +1181,12 @@ public final class SyncCoordinator {
         let action = startOwnTask(backend: backend, generation: expected, revision: revision, resumePreparation: preparation) { [self] in
             defer { finishOwnWork(); cancellingConnectionOperation = false }
             guard let originalOwner = ownOwner else { return }
-            func currentOwner() -> Bool {
+            @MainActor func currentOwner() -> Bool {
                 !Task.isCancelled && !closing && !suspended && !replacing && !backendRetired
                     && expected == generation && revision == hostRevision && self.backend === backend
                     && backend.connection === connection && ownOwner == originalOwner && ownTask?.isCancelled == false
             }
-            func current() -> Bool {
+            @MainActor func current() -> Bool {
                 currentOwner() && ownResumePreparation?.owner == originalOwner && ownResumePreparation?.token === preparation
             }
             do {
