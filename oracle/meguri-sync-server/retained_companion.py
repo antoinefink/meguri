@@ -5,6 +5,7 @@ import pathlib
 import re
 import sqlite3
 import struct
+import sys
 
 from candidate import read_credentials, retained_dependencies
 from final_contract import RECIPE_SHA256, recipes
@@ -185,6 +186,9 @@ def execute(root,out,state,credential_path):
     action,actor,invocation,expect,store,hashes=inputs(root,out)
     case,name=action['case'],action['action'];client=api.runtime()['client']
     require(client['version'] == '26.09.4' and client['build'] == 'c06370ff' and client['runtime_sha256'] == 'bf0ccafe0f15bcba59a652db68c4cfdfaa8191756f8c547839c9d134dee12784','companion Desktop identity changed')
+    libraries=list(pathlib.Path(sys.modules['anki.collection'].__file__).parent.glob('_rsbridge*.so'))
+    require(len(libraries) == 1,'companion native runtime artifact unavailable')
+    require(store.put(libraries[0].read_bytes()) == client['runtime_sha256'],'companion native runtime artifact changed')
     result={'format':'meguri-retained-companion-v1',**action,'actor':actor,'invocation_sha256':hashes['invocation.json'],
         'preflight_peer_sha256':hashes['preflight.json'],'expectations_sha256':hashes['expectations.json'],'client':client,
         'before_sha256':None,'after_sha256':None,'authority_sha256':None,'wire_sha256':None,

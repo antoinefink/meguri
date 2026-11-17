@@ -181,6 +181,7 @@ class RetainedHarness(unittest.TestCase):
             self.assertNotIn(sha(prefix).encode(),encoded(value))
 
     def test_real_sdk_offline_preparation_retains_raw_cells_and_never_reads_credentials(self):
+        import sys
         # Only trusted input admission is stubbed. Authoring, SDK, projection and
         # finite offline dispatch are actual; there is no candidate service.
         with tempfile.TemporaryDirectory() as directory:
@@ -197,6 +198,9 @@ class RetainedHarness(unittest.TestCase):
             observation=decode((out/'observations.json').read_bytes())
             self.assertFalse(observation['case_credit']);self.assertIsNone(observation['wire_sha256'])
             self.assertTrue(observation['observed']['operation_complete'])
+            libraries=list(pathlib.Path(sys.modules['anki.collection'].__file__).parent.glob('_rsbridge*.so'))
+            self.assertEqual(len(libraries),1)
+            self.assertEqual(store.read(observation['client']['runtime_sha256']),libraries[0].read_bytes())
             snapshot=store.json(observation['authority_sha256'])
             self.assertEqual(snapshot['format'],'meguri-retained-snapshot-v1')
             self.assertEqual(set(snapshot['tables']),{row[0] for row in companion.TABLES})
