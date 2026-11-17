@@ -274,6 +274,12 @@ mg__run_job() {
 # ignores while its job runs, and once the `docker` CLI wrapping the compose
 # plugin gets a signal, the plugin exits without stopping the container.
 mg__remove_run_containers() {
+  # This fixed utility owns a tunnel-first lifecycle. Its refusal must never
+  # fall through to the ordinary run-label sweep, even if job traps were killed.
+  if [ "${MG_JOB:-}" = sync-server-mobile-smoke ]; then
+    mg_mobile__cancel_cleanup
+    return $?
+  fi
   # Ownership cleanup must run in this parent too: job traps may have been
   # killed. Never let the generic run-label sweep destroy a reserved route.
   if [ -e "$MG_RUN_DIR/edge-owners" ] || [ -L "$MG_RUN_DIR/edge-owners" ]; then
