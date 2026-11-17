@@ -34,6 +34,18 @@ RECORDER_ERRORS = []
 FINAL_CAPTURE = None
 FINAL_MEASURE = False
 FINAL_LEGACY = None
+FINAL_FAILURE = None
+
+
+def result_bytes(result):
+    from normal import exact_numbers
+    return encoded(exact_numbers(result))
+
+
+def retain_final_failure(out):
+    if FINAL_FAILURE is not None:
+        (out/'sdk-failure.json').write_bytes(result_bytes({'format':'meguri-sync-final-failure-v1',
+            'selection_credit':False,'failure':FINAL_FAILURE}))
 
 
 def runtime():
@@ -332,10 +344,13 @@ def snapshot(col):
 
 
 def media_sync(col, auth, timeout=30):
+    global PHASE
     started=time.monotonic()
     if FINAL_CAPTURE is not None: FINAL_CAPTURE(col,'media')
+    PHASE='media-sync-submit'
     col.sync_media(auth)
     deadline = time.monotonic() + timeout
+    PHASE='media-sync-status'
     while col.media_sync_status().active:
         if time.monotonic() >= deadline:
             col.abort_media_sync()
@@ -680,8 +695,9 @@ if __name__ == "__main__":
         if request.get('phase','').startswith('final-'):
             from final_desktop import resources
             result['runtime_environment']=resources()
-        sys.stdout.buffer.write(encoded(result))
+        sys.stdout.buffer.write(result_bytes(result))
     except BaseException as error:
+        retain_final_failure(pathlib.Path('/out'))
         # Never export source frames, backend messages or collection content.
         sys.stdout.buffer.write(encoded({"failure": {"kind": type(error).__name__, "phase": PHASE, "recording_errors": RECORDER_ERRORS, "driver_frames": [str(pathlib.Path(frame.filename).name)+":"+str(frame.lineno) for frame in __import__("traceback").extract_tb(error.__traceback__) if frame.filename.startswith("/opt/reference/")]}}))
         sys.stdout.buffer.flush()

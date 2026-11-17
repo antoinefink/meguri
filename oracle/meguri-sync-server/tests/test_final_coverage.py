@@ -13,6 +13,80 @@ from final_desktop import author, authored_values, change, expected_values, expe
 
 
 class FinalCoverage(unittest.TestCase):
+    def test_completed_final_payload_keeps_late_wide_values_and_frozen_hashes_exact(self):
+        from normal import exact_numbers
+        from validation import decode, encoded, same_value, sha
+        wide=9007199254740993
+        frozen=exact_numbers({'projection':{'notes':[[wide,-wide,17,True]]},'media':{'synthetic.txt':'f'*64}})
+        frozen_bytes=encoded(frozen);digest=sha(frozen_bytes)
+        output={'projection':copy.deepcopy(frozen['projection']),'media':copy.deepcopy(frozen['media'])}
+        output_digest=sha(encoded(output))
+        traffic={'normal_response':{'nested':[[wide,-wide,9007199254740991,-9007199254740991,17,True,False,None]]}}
+        for phase in ('final-normal','final-rich'):
+            with self.subTest(phase=phase):
+                result={'phase':phase,'runtime_environment':{'available_cpus':17}}
+                if phase == 'final-normal':
+                    result=exact_numbers(result)
+                    result.update(prepared_inputs=[{'sha256':digest,'value':copy.deepcopy(frozen)}],
+                        legacy_events={'events':[{'input_sha256':digest,'output':output,'output_sha256':output_digest,'traffic':[traffic]}]})
+                    inputs=result['prepared_inputs'];receipts=result['legacy_events']['events']
+                else:
+                    result['final_details']={'inputs':[{'sha256':digest,'value':copy.deepcopy(frozen)}],
+                        'receipts':[{'input_sha256':digest,'traffic':[traffic]}]}
+                    inputs=result['final_details']['inputs'];receipts=result['final_details']['receipts']
+                with self.assertRaisesRegex(ValueError,'wide integer'):decode(encoded(result))
+                captured=decode(api.result_bytes(result))
+                if phase == 'final-normal':
+                    captured_inputs=captured['prepared_inputs'];captured_receipts=captured['legacy_events']['events']
+                    self.assertEqual(sha(encoded(captured_receipts[0]['output'])),output_digest)
+                else:
+                    captured_inputs=captured['final_details']['inputs'];captured_receipts=captured['final_details']['receipts']
+                self.assertTrue(same_value(captured_receipts[0]['traffic'][0]['normal_response']['nested'][0],
+                    [str(wide),str(-wide),9007199254740991,-9007199254740991,17,True,False,None]))
+                self.assertEqual(encoded(captured_inputs[0]['value']),frozen_bytes)
+                self.assertEqual(sha(encoded(captured_inputs[0]['value'])),digest)
+                self.assertEqual(captured_inputs[0]['sha256'],digest)
+                self.assertEqual(captured_receipts[0]['input_sha256'],digest)
+                self.assertEqual(inputs[0]['value'],frozen)
+                self.assertEqual(receipts[0]['traffic'][0]['normal_response']['nested'][0][0],wide)
+
+    def test_failed_media_call_retains_only_sanitized_noncredit_traffic(self):
+        from anki.errors import SyncErrorKind
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from final_desktop import Run
+        from validation import decode
+        case=candidate_selection('final-migration')['cases'][0]
+        record=SimpleNamespace(observations=[{'route':'/sync/upload','status':200}])
+        traffic={'method':'POST','route':'/msync/mediaChanges','status':500,'header_members':['k','s','v'],
+                 'media_request':{'lastUsn':9007199254740993},'request_bytes':29,'compressed_response_bytes':7}
+        secret='synthetic-secret-must-stay-excluded'
+        class FailedMedia:
+            def sync_media(self,auth):record.observations.append(copy.deepcopy(traffic))
+            def media_sync_status(self):raise api.SyncError(secret,None,None,None,SyncErrorKind.OTHER)
+        with tempfile.TemporaryDirectory() as directory:
+            root=pathlib.Path(directory)
+            run=Run(api,root,{'username':secret,'password':secret},case)
+            with patch('final_desktop.projection',return_value={'notes':[]}),patch('final_desktop.media_map',return_value={}),\
+                 patch.object(api,'FINAL_CAPTURE',None),patch.object(api,'PHASE','stale-runtime-installation-receipt'),\
+                 patch.object(api,'FINAL_FAILURE',None):
+                with self.assertRaises(api.SyncError):run.call(FailedMedia(),SimpleNamespace(hkey=secret),'client_a',1,'media',record)
+                self.assertEqual(run.receipts,[])
+                api.retain_final_failure(root)
+                payload=(root/'sdk-failure.json').read_bytes();captured=decode(payload)
+                self.assertFalse(captured['selection_credit'])
+                self.assertEqual(captured['failure']['phase'],'media-sync-status')
+                self.assertEqual(captured['failure']['kind'],'SyncError')
+                self.assertEqual(captured['failure']['operation'],'media')
+                self.assertEqual(captured['failure']['case_id'],case['id'])
+                self.assertEqual(captured['failure']['action_index'],1)
+                self.assertEqual(captured['failure']['actor'],'client_a')
+                expected=copy.deepcopy(traffic);expected['media_request']['lastUsn']='9007199254740993'
+                self.assertEqual(captured['failure']['traffic'],[expected])
+                self.assertNotIn(secret.encode(),payload)
+                self.assertNotIn('driver_frames',captured['failure'])
+                self.assertEqual({path.name for path in root.iterdir()},{'sdk-failure.json'})
+
     def test_final31_preserves_each_historical_case_and_order(self):
         final=candidate_selection('final')['cases']
         unchanged=sum([candidate_selection(phase)['cases'] for phase in ('full','normal','media')],[])

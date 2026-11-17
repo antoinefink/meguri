@@ -145,10 +145,18 @@ class Run:
 
     def call(self,col,auth,actor,action,operation,record,upload=None):
         frozen=self.freeze(col,actor,action,operation);before=len(record.observations);start=time.monotonic()
-        if operation == 'normal':result=normal_sync(col,auth,record,actor);decision=result.required
-        elif operation == 'decision':result=col.sync_collection(auth,sync_media=False);decision=result.required
-        elif operation == 'media':self.api.media_sync(col,auth);decision=None
-        else:self.api.full(col,auth,upload);decision=None
+        self.api.PHASE='final-'+operation+('-upload' if upload else '-download' if operation == 'full' else '')
+        try:
+            if operation == 'normal':result=normal_sync(col,auth,record,actor);decision=result.required
+            elif operation == 'decision':result=col.sync_collection(auth,sync_media=False);decision=result.required
+            elif operation == 'media':self.api.media_sync(col,auth);decision=None
+            else:self.api.full(col,auth,upload);decision=None
+        except BaseException as error:
+            kind=('SyncError' if isinstance(error,self.api.SyncError) else 'NetworkError' if isinstance(error,self.api.NetworkError)
+                  else 'TimeoutError' if isinstance(error,TimeoutError) else 'unexpected-error')
+            self.api.FINAL_FAILURE={'case_id':self.case['id'],'action_index':action,'actor':actor,'operation':operation,
+                'phase':self.api.PHASE,'kind':kind,'traffic':copy.deepcopy(record.observations[before:])}
+            raise
         rows=copy.deepcopy(record.observations[before:])
         self.receipts.append({'sequence':len(self.receipts),'case_id':self.case['id'],'action_index':action,'actor':actor,'operation':operation,
             'input_sha256':sha(encoded(frozen)),'resources':resources(),'elapsed_ms':int((time.monotonic()-start)*1000),'decision':decision,'traffic':rows,
