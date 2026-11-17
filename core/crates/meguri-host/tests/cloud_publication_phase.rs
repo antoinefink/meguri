@@ -3082,6 +3082,132 @@ fn bind_and_write(host: &CoreHost, service: &mut Service<SeededRandom>, scope: &
     runtime.publication_op().unwrap().unwrap()
 }
 
+#[test]
+fn cancel_replacement_requalifies_restored_provider_before_reconciliation() {
+    use cloud::runtime::RuntimeError;
+    use meguri_engine::device_state::{DeviceState, PublicationDecision};
+    use meguri_sync::provider::Selection;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("cancel-provider-replacement");
+    generated(&dir);
+    let account = Arc::new(ColdResumeAccount(std::sync::atomic::AtomicUsize::new(0)));
+    let config = cold_resume_config(&dir, account);
+    let host = CoreHost::open(config).unwrap();
+    let initial = host.provider_authority().snapshot().unwrap();
+    assert_eq!(initial.selection, Selection::ICloud);
+    assert!(initial.settings.enabled && !initial.settings.paused && initial.legacy_binding_pending);
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(715)).unwrap();
+    let predecessor = publish_cold_resume_pending(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let collection = host.collection().unwrap();
+    let generation = collection.generation();
+    let before = decision(&host);
+    let device = DeviceState::for_collection(&dir.join("collection.anki2"));
+    let publication = device.settled_publication().unwrap().unwrap();
+    assert_eq!(before.publication, publication);
+    assert_eq!(publication.identity, predecessor.facts.publication);
+    assert_eq!(publication.decision, PublicationDecision::Clear);
+    assert!(before.pending_reason.is_none());
+    let qualified = host.provider_authority().snapshot().unwrap();
+    assert!(qualified.binding.is_some() && !qualified.legacy_binding_pending);
+    assert!(qualified.handoff.is_none());
+    let rows = cold_resume_rows(&host);
+    let history = cold_resume_entities(&host);
+    assert!(history.iter().any(|entity| entity.mark.is_some()
+        && entity.local_rev > entity.acked_rev && entity.acked_rev > 0
+        && entity.acked_payload.is_some() && entity.base_payload.is_some()
+        && !entity.acked_system_fields.is_empty()));
+
+    // Read the actual published Active and complete Epoch, then authorize a
+    // replacement on this original Host without performing its network switch.
+    let preview = actual_preview(&host, &mut service, &scope());
+    assert!(preview.active.is_some() && preview.cloud.is_some());
+    assert_eq!(preview.active_epoch, Some(predecessor.facts.epoch));
+    assert_eq!(preview.account, predecessor.facts.account);
+    assert_eq!(preview.decision_before.as_ref(), Some(&before));
+    let requests = service.request_log().unwrap().len();
+    let trace_len = runtime.trace().len();
+    let id = runtime.confirm_connection_publication(&preview, &collection).unwrap();
+    let confirmed = runtime.publication_op().unwrap().unwrap();
+    assert_eq!(confirmed.step, PublishStep::Confirmed);
+    assert_eq!(confirmed.reason, cloud::control_codec::EpochReason::ReplaceCloud as u8);
+    assert_eq!(confirmed.binding_before.as_ref().unwrap().id, predecessor.id);
+    assert_eq!(confirmed.binding_before.as_ref().unwrap().state, cloud::BindingState::Active);
+    assert!(confirmed.binding_after.is_none());
+    assert_eq!(confirmed.fence_before, before);
+    runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();
+    let bound = runtime.publication_op().unwrap().unwrap();
+    let replacement = runtime.status().unwrap().binding.unwrap();
+    assert_eq!(bound.id, id);
+    assert_eq!(bound.step, PublishStep::Bound);
+    assert!(runtime.status().unwrap().scan_required);
+    assert_eq!(bound.binding_after, Some(replacement.id));
+    assert_eq!(replacement.facts.state, cloud::BindingState::Active);
+    assert_ne!(replacement.id, predecessor.id);
+    assert_ne!(replacement.facts.epoch, predecessor.facts.epoch);
+    assert!(!bound.switch_sent && !bound.root_acked && bound.active_attempt.is_none());
+    assert!(runtime.publication_cancellable(id).unwrap());
+    // The durable provider document still names the predecessor, but the real
+    // Bind has closed its writer admission while validating the replacement.
+    assert_eq!(host.provider_authority().snapshot().unwrap(), qualified);
+    assert!(!host.provider_authority().permits_icloud_binding(&replacement));
+    assert!(!host.provider_authority().permits_icloud_binding(&predecessor));
+    assert!(matches!(runtime.require_provider_collection_admission(),
+        Err(RuntimeError::IdentityUnverified)));
+    let mut retained = predecessor.clone();
+    retained.facts.state = cloud::BindingState::Isolated(cloud::IsolationReason::Republished);
+    let facts = runtime.publication_facts(&collection).unwrap();
+    assert_eq!(facts.bindings.iter().find(|binding| binding.id == predecessor.id), Some(&retained));
+    for entity in &history {
+        assert_eq!(runtime.binding_entity(predecessor.id, &entity.name).unwrap().as_ref(), Some(entity));
+    }
+    assert_eq!(decision(&host), before);
+    assert_eq!(device.settled_publication().unwrap(), Some(publication.clone()));
+    assert_eq!(cold_resume_rows(&host), rows);
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+
+    let cancelled = runtime.cancel_publication(id, &collection);
+    // Diagnose the source gap only after the actual predecessor and its settled
+    // R6 decision have been restored; preserve the required success below.
+    assert_eq!(runtime.status().unwrap().binding.as_ref(), Some(&predecessor));
+    assert_eq!(decision(&host), before);
+    assert_eq!(device.settled_publication().unwrap(), Some(publication.clone()));
+    assert!(runtime.publication_op().unwrap().is_none());
+    if let Err(error) = &cancelled {
+        assert!(matches!(error, RuntimeError::IdentityUnverified));
+        assert!(runtime.status().unwrap().scan_required);
+        assert!(!host.provider_authority().permits_icloud_binding(&predecessor));
+        assert!(matches!(runtime.require_provider_collection_admission(),
+            Err(RuntimeError::IdentityUnverified)));
+        assert_eq!(host.provider_authority().snapshot().unwrap(), qualified);
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_eq!(cold_resume_entities(&host), history);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    }
+    cancelled.expect("cancel must requalify the restored provider before media/whole-binding reconciliation");
+    let status = runtime.status().unwrap();
+    assert!(status.stored_usable && status.identity_verified && status.scan_completed_this_open);
+    assert!(!status.scan_required && !status.tracking_stopped);
+    assert_eq!(status.generation, Some(generation));
+    assert!(host.provider_authority().permits_icloud_binding(&predecessor));
+    runtime.require_provider_collection_admission().unwrap();
+    assert_eq!(host.provider_authority().snapshot().unwrap(), qualified);
+    assert_eq!(cold_resume_rows(&host), rows);
+    assert_cold_resume_history(&host, &history);
+    let stored = runtime.stored_state_for_testing().unwrap();
+    assert!(stored.whole_scan);
+    assert_eq!(stored.coverage.as_ref().unwrap().cursor.generation, generation.0);
+    assert_eq!(service.request_log().unwrap().len(), requests);
+    assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+    assert!(!runtime.trace().iter().skip(trace_len).any(|event| matches!(event,
+        cloud::workflow::TraceEvent::EngineStarted { .. }
+        | cloud::workflow::TraceEvent::CollectionBatchBuilt { .. })));
+    host.close().unwrap();
+}
+
 fn cancel_with_account_status(status: IdentityStatus) {
     use meguri_engine::device_state::{PendingDecisionReason, PublicationDecision};
     let temp = tempfile::tempdir().unwrap();
@@ -4601,10 +4727,10 @@ fn cold_stopped_provider_admission_remains_closed(finish: bool) {
     assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
     assert_eq!(preview.resume_binding, Some(binding.id));
     assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
-    assert_cold_resume_closed(&host, &binding);
     let handoff = host.begin_provider_handoff(Selection::Meguri).unwrap();
     assert!(host.provider_authority().snapshot().unwrap().handoff.is_some());
     assert!(host.provider_authority().network_blocked());
+    assert_cold_resume_closed(&host, &binding);
     if finish {
         // This fixture has never installed a native SDK or spawned a cloud
         // job. There is no native owner to drain or fabricated join proof.
