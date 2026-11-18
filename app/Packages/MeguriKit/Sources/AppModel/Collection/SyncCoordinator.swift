@@ -530,6 +530,7 @@ public final class SyncCoordinator {
     private var meguriReady = false
     private var meguriWakePending = false
     private var meguriWakeManual = false
+    private var meguriReachabilityRecoveryRevision: UInt64 = 0
     private var meguriReadyWakePending = false
     private var meguriWake: (id: UUID, task: Task<Void, Never>)?
     private var meguriAddressDrain: Task<Void, Never>?
@@ -1000,6 +1001,7 @@ public final class SyncCoordinator {
             while meguriWakePending, meguriCanRun, meguriRound === round,
                   meguriCurrent(owner, expected, revision), !Task.isCancelled {
                 let manual = meguriWakeManual
+                let recoveryRevision = meguriReachabilityRecoveryRevision
                 meguriWakePending = false; meguriWakeManual = false
                 guard manual || settings.automatic else { return }
                 meguriRoutine = .exchanging
@@ -1022,7 +1024,11 @@ public final class SyncCoordinator {
                     if meguriRoutine == .fullSyncRequired, let facade = meguriBootstrap {
                         try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
                     }
-                    if meguriRoutine != .idle && meguriRoutine != .pending { meguriWakePending = false }
+                    // Preserve only an already queued recovery wake. The next
+                    // round consumes the latest revision before suspending.
+                    let recoveredNetwork = meguriRoutine == .network && reachable == true
+                        && meguriReachabilityRecoveryRevision != recoveryRevision
+                    if meguriRoutine != .idle && meguriRoutine != .pending && !recoveredNetwork { meguriWakePending = false }
                 } catch {
                     meguriLastError = error
                     guard meguriWake?.id == id, meguriCurrent(owner, expected, revision) else { return }
@@ -2937,7 +2943,10 @@ public final class SyncCoordinator {
         if case .network(let value) = event {
             let recovered = reachable == false && value
             reachable = value
-            if recovered { requestMeguriWake(automatic: true) }
+            if recovered {
+                meguriReachabilityRecoveryRevision &+= 1
+                requestMeguriWake(automatic: true)
+            }
         }
         if awaitingResumeProof, !suspended {
             switch event {
