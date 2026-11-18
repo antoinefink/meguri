@@ -172,7 +172,7 @@ extension ReviewCollectionStartupTests {
         _ = await fixture.model.end()
     }
 
-    @Test(arguments: [MeguriCoreBindings.OpSource.syncIncoming, .cloudIncoming])
+    @Test(arguments: [MeguriCoreBindings.OpSource.syncIncoming, .cloudIncoming, .cloudRekey])
     func incomingChangesCannotMakeLocalAnswerDurable(source: MeguriCoreBindings.OpSource) async throws {
         let fixture = Fixture()
         await fixture.model.start()
