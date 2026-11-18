@@ -109,6 +109,14 @@ fn recovery_status_cancel_operation_retires_only_recovered_candidate() {
         app_group_snapshot: root.path().join("widget").to_string_lossy().into_owned(),
         manual_transfer_directory: root.path().join("manual").to_string_lossy().into_owned(),
     };
+    // The FFI installation root is distinct from the publication rigs' root.
+    // Admit its prior iCloud choice without changing the replacement Host's R6.
+    meguri_host::CoreHost::migrate_provider_configuration(
+        Path::new(&location.manual_transfer_directory),
+        meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+            enabled: true, paused: false, automatic: false, media: false,
+        }),
+    ).unwrap();
     let open = || {
         let job = collection::start_open(location.clone(), Arc::new(Clock), Arc::new(Space), 821).unwrap();
         assert_eq!(finished(&rx, job.id), JobOutcome::Succeeded);

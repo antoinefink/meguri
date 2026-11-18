@@ -7,6 +7,9 @@ use meguri_ffi::{
     sync::{self, CloudAccountStatus, CloudEnvironment, CloudKeyByteProvider, CloudWorkflow},
     test_hooks,
 };
+use meguri_host::CoreHost;
+use meguri_sync::provider::{LegacyInput, LegacySettings};
+use meguri_testkit::cloud::devices::options;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -59,6 +62,28 @@ fn configured_secure_provider_is_lazy_through_ffi_open_and_adapter_discovery() {
         manual_transfer_directory: directory.path().join("manual").to_str().unwrap().into(),
     };
     test_hooks::test_bootstrap_collection(location.clone()).unwrap();
+    // Bootstrap has no R6. Establish the synthetic prior configuration through
+    // an ordinary Host, without attaching the measured foreign key provider.
+    let mut config = options(&data, Clock.now_ms(), 114);
+    config.backups_directory = location.backups_directory.clone().into();
+    config.app_group_snapshot = location.app_group_snapshot.clone().into();
+    config.manual_transfer_directory = location.manual_transfer_directory.clone().into();
+    config.publication_binding = meguri_engine::device_state::AccountBinding::Connected {
+        account: "synthetic-account-A".into(),
+        configuration: "synthetic-u114".into(),
+        environment: "development".into(),
+    };
+    CoreHost::migrate_provider_configuration(
+        &config.manual_transfer_directory,
+        LegacyInput::Settings(LegacySettings {
+            enabled: true,
+            paused: false,
+            automatic: false,
+            media: false,
+        }),
+    )
+    .unwrap();
+    CoreHost::open(config).unwrap().close().unwrap();
     let keys = Arc::new(Keys(AtomicUsize::new(0)));
     sync::configure_cloud_platform(
         "synthetic-u114".into(),

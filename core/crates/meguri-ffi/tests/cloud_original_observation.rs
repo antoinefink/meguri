@@ -139,6 +139,23 @@ impl Fixture {
             config.random.as_ref(),
         )
         .unwrap();
+        // The receiver is a previously configured synthetic iCloud collection;
+        // its first open must establish the matching R6, before any row capture.
+        config.publication_binding = meguri_engine::device_state::AccountBinding::Connected {
+            account: "synthetic-account".into(),
+            configuration: "synthetic.original-observation".into(),
+            environment: "development".into(),
+        };
+        CoreHost::migrate_provider_configuration(
+            &config.manual_transfer_directory,
+            meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+                enabled: true,
+                paused: false,
+                automatic: false,
+                media: false,
+            }),
+        )
+        .unwrap();
         let host = CoreHost::open(config.clone()).unwrap();
         let collection = host.collection().unwrap();
         let kind = meguri_engine::notetypes::add_stock(
@@ -247,6 +264,8 @@ impl Fixture {
         let collection = host.collection().unwrap();
         let runtime = host.cloud_runtime().unwrap().clone();
         runtime.refresh_identity().unwrap();
+        // Qualify this original Host only after the actual binding row exists.
+        host.refresh_provider_admission();
         runtime
             .reconcile_binding(&collection, &host.media().unwrap(), WAIT)
             .unwrap();
