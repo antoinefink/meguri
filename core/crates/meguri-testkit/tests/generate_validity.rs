@@ -1409,12 +1409,12 @@ fn recipe_learn_ahead_only_changes_the_collection_setting() {
             "SELECT * FROM config WHERE KEY != 'collapseTime' ORDER BY KEY"
         )
     );
-    for name in Recipe::names()
-        .unwrap()
-        .into_iter()
-        .filter(|name| name != "local-review")
-    {
-        assert_eq!(Recipe::named(&name).unwrap().learn_ahead_secs, 1200, "{name}");
+    for name in Recipe::names().unwrap() {
+        let expected = match name.as_str() {
+            "owned-sync-review" | "local-review" => 0,
+            _ => 1200,
+        };
+        assert_eq!(Recipe::named(&name).unwrap().learn_ahead_secs, expected, "{name}");
     }
 }
 

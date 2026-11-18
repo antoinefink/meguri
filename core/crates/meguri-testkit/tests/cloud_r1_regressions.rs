@@ -501,7 +501,13 @@ fn corehost_card_capture_uses_untracked_raw_history_and_preserves_negative_maxim
     for history in [vec![NOW + 123, NOW + 999], vec![i64::MIN, -1]] {
         let (_root, _service, files) = fixture(1);
         // Store real untracked history through CoreHost before the cloud owner opens.
-        let plain = CoreHost::open(options(&files.directory, NOW, SEED)).unwrap();
+        let mut config = options(&files.directory, NOW, SEED);
+        config.publication_binding = meguri_engine::device_state::AccountBinding::Connected {
+            account: files.scope.account.clone(),
+            configuration: files.scope.container.clone(),
+            environment: files.scope.environment.clone(),
+        };
+        let plain = CoreHost::open(config).unwrap();
         let c = plain.collection().unwrap();
         let card_id = {
             let lease = c.reader(ReaderRole::Query).unwrap();
