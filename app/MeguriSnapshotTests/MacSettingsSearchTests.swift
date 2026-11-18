@@ -52,47 +52,48 @@ import Testing
                 window.setContentSize(contentSize)
                 controller.view.frame = NSRect(origin: .zero, size: contentSize)
                 window.orderFront(nil); window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded()
-                var lastObservedNativePickerCount: Int?
+                var lastObservedGraph: NativeAccountGraph?
                 do {
                     try await waitForNativeAccountState {
                         window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded(); window.displayIfNeeded()
-                        let pickerCount = nativeServicePickers(in: controller.view).count
-                        lastObservedNativePickerCount = pickerCount
-                        return pickerCount > 0
+                        let graph = nativeAccountGraph(in: controller.view, window: window, controller: controller)
+                        lastObservedGraph = graph
+                        return graph.complete && graph.matches("settings.accountSync.service").count == 1
                     }
+                    guard let graph = lastObservedGraph else { throw NativeAccountStateFailure.incompleteGraph }
+                    try selectNativeService(SyncText.value("sync.service.meguri"), in: graph)
                 } catch {
-                    recordNativeServiceMountDiagnostic(window: window, controller: controller,
-                        lastObservedNativePickerCount: lastObservedNativePickerCount)
+                    lastObservedGraph?.recordDiagnostic()
                     throw error
                 }
-                let picker = try #require(nativeServicePickers(in: controller.view).first)
-                #expect(Set(picker.itemTitles) == [SyncText.value("sync.service.iCloud"), SyncText.value("sync.service.meguri")])
-                picker.selectItem(withTitle: SyncText.value("sync.service.meguri"))
-                try #require(picker.sendAction(picker.action, to: picker.target))
                 try await waitForNativeAccountState {
                     collection.sync.providerState?.selection == .meguri && !collection.sync.meguriBusy
                 }
                 window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded()
+                let accountGraph = nativeAccountGraph(in: controller.view, window: window, controller: controller)
                 for id in ["address", "username", "password", "signIn"] {
-                    let accountElementResult = try nativeAccountElement("settings.accountSync.meguri.\(id)", in: controller.view)
+                    let accountElementResult = try accountGraph.element("settings.accountSync.meguri.\(id)")
                     _ = try #require(accountElementResult)
                 }
-                let passwordElementResult = try nativeAccountElement("settings.accountSync.meguri.password", in: controller.view)
+                let passwordElementResult = try accountGraph.element("settings.accountSync.meguri.password")
                 let password = try #require(passwordElementResult)
-                #expect(accessibilityString(in: password, selector: #selector(NSAccessibilityProtocol.accessibilitySubrole))
-                    == NSAccessibility.Subrole.secureTextField.rawValue)
+                let securePassword = try nativeAccountString(in: password,
+                    selector: #selector(NSAccessibilityProtocol.accessibilitySubrole)) == NSAccessibility.Subrole.secureTextField.rawValue
+                #expect(securePassword)
                 for id in ["settings.accountSync.iCloudHeading", "settings.accountSync.connect", "settings.accountSync.automatic", "settings.accountSync.media"] {
-                    #expect(try nativeAccountElement(id, in: controller.view) == nil)
+                    let absent = try accountGraph.element(id) == nil
+                    #expect(absent)
                 }
                 #expect(collection.sync.meguriPhase == .unconfigured)
                 #expect(collection.sync.meguriPreview == nil && collection.sync.meguriRoundReport == nil)
-                let currentPicker = try #require(nativeServicePickers(in: controller.view).first)
-                currentPicker.selectItem(withTitle: SyncText.value("sync.service.iCloud"))
-                try #require(currentPicker.sendAction(currentPicker.action, to: currentPicker.target))
+                let currentGraph = nativeAccountGraph(in: controller.view, window: window, controller: controller)
+                do { try selectNativeService(SyncText.value("sync.service.iCloud"), in: currentGraph) }
+                catch { currentGraph.recordDiagnostic(); throw error }
                 try await waitForNativeAccountState { window.attachedSheet != nil }
                 let sheet = try #require(window.attachedSheet)
                 let sheetContent = try #require(sheet.contentView)
-                let serviceSwitchConfirmElementResult = try nativeAccountElement("sync.serviceSwitch.confirm", in: sheetContent)
+                let sheetGraph = nativeAccountGraph(in: sheetContent, window: sheet)
+                let serviceSwitchConfirmElementResult = try sheetGraph.element("sync.serviceSwitch.confirm")
                 _ = try #require(serviceSwitchConfirmElementResult)
                 let revision = collection.sync.providerState?.revision
                 let enter = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
@@ -104,11 +105,13 @@ import Testing
                 #expect(!collection.syncPresentation.serviceChanging)
                 #expect(collection.sync.providerState?.selection == .meguri)
                 #expect(collection.sync.providerState?.revision == revision)
-                let serviceSwitchCancelElementResult = try nativeAccountElement("sync.serviceSwitch.cancel", in: sheetContent)
+                let cancelGraph = nativeAccountGraph(in: sheetContent, window: sheet)
+                let serviceSwitchCancelElementResult = try cancelGraph.element("sync.serviceSwitch.cancel")
                 let cancel = try #require(serviceSwitchCancelElementResult)
-                let press = NSSelectorFromString("accessibilityPerformPress")
-                try #require(cancel.responds(to: press))
-                _ = cancel.perform(press)
+                guard cancelGraph.nodes[ObjectIdentifier(cancel)]?.role == NSAccessibility.Role.button.rawValue else {
+                    throw NativeAccountStateFailure.inappropriateRole
+                }
+                try performNativeAccountPress(on: cancel)
                 try await waitForNativeAccountState { window.attachedSheet == nil }
                 #expect(collection.sync.providerState?.selection == .meguri)
                 #expect(collection.sync.meguriLastCommand == nil && collection.sync.meguriRoundReport == nil)
@@ -124,215 +127,203 @@ import Testing
         }
         throw NativeAccountStateFailure.notSettled
     }
-    private enum NativeAccountStateFailure: Error { case notSettled }
-    private func nativeServicePickers(in view: NSView) -> [NSPopUpButton] {
-        var matches: [NSPopUpButton] = []
-        if let picker = view as? NSPopUpButton,
-           picker.itemTitles.contains(SyncText.value("sync.service.meguri")) { matches.append(picker) }
-        return matches + view.subviews.flatMap { nativeServicePickers(in: $0) }
+    private enum NativeAccountStateFailure: Error {
+        case notSettled, incompleteGraph, duplicateIdentifier, inappropriateRole, invalidOptions
+        case unsupportedGetter, malformedGetter, unsupportedAction, actionFailed
     }
-    // Diagnostic only: one owned-root graph, fixed scalars, public getters, no AX actions.
-    private func recordNativeServiceMountDiagnostic(window: NSWindow, controller: NSViewController,
-        lastObservedNativePickerCount: Int?) {
-        let root = controller.view
-        let controllerAttached = window.contentViewController === controller
-        let hostAttached = root.window === window
-        let contentAttached = window.contentView === root
-        let mounted = controllerAttached && hostAttached && contentAttached
-        let maxObjects = 128, maxDepth = 16
+    private struct NativeAccountNode {
+        let object: NSObject
+        let identifier: String?
+        let role: String?
+        let parent: ObjectIdentifier?
+    }
+    private struct NativeAccountGraph {
+        var nodes: [ObjectIdentifier: NativeAccountNode] = [:]
+        var edges: [ObjectIdentifier: Set<ObjectIdentifier>] = [:]
         var visited: Set<ObjectIdentifier> = []
-        var visitedRoot = 0, visitedNative = 0, visitedAX = 0, skippedElsewhere = 0
-        var objectLimit = false, depthLimit = false, incomplete = !mounted, readFailed = false
-        var popupCount = 0, buttonCount = 0, controlCount = 0, viewCount = 0, otherCount = 0
-        var matchingTitlePopups = 0, menuPresentPopups = 0, menuNonemptyPopups = 0
-        var popupsWithICloudOption = 0, popupsWithMeguriOption = 0
-        var exactServiceCount = 0, category = "missing", role = "missing"
-        var roleGetterAvailable = false, childrenGetterAvailable = false
-        var pickAvailable = false, pressAvailable = false, showMenuAvailable = false
-        var rootIdentifierRoute = "not-observed", rootIdentifierKind = "not-observed"
-        var rootChildrenRoute = "not-observed", rootChildrenKind = "not-observed"
-        let identifierSelector = #selector(NSAccessibilityProtocol.accessibilityIdentifier)
-        let roleSelector = #selector(NSAccessibilityProtocol.accessibilityRole)
-        let childrenSelector = #selector(NSAccessibilityProtocol.accessibilityChildren)
-        let legacyGetter = NSSelectorFromString("accessibilityAttributeValue:")
-        let iCloudOption = SyncText.value("sync.service.iCloud")
-        let meguriOption = SyncText.value("sync.service.meguri")
-        struct GetterCounts {
-            var modern = 0, legacy = 0, neither = 0
-            var nilValue = 0, string = 0, array = 0, other = 0
-            mutating func record(route: String, kind: String) {
-                switch route {
-                case "modern": modern += 1
-                case "legacy": legacy += 1
-                default: neither += 1
-                }
-                switch kind {
-                case "nil": nilValue += 1
-                case "string": string += 1
-                case "array": array += 1
-                default: other += 1
-                }
-            }
+        var mounted = false
+        var objectLimit = false, depthLimit = false, foreign = false
+        var unsupported = false, malformed = false, unknownNilChildren = false
+        var complete: Bool {
+            mounted && !objectLimit && !depthLimit && !foreign
+                && !unsupported && !malformed && !unknownNilChildren
         }
-        var identifiers = GetterCounts(), children = GetterCounts()
-        func read(_ object: NSObject, selector: Selector) -> (value: AnyObject?, route: String, kind: String) {
-            let route = object.responds(to: selector) ? "modern"
-                : (object.responds(to: legacyGetter) ? "legacy" : "neither")
-            // The existing reader preserves modern precedence, including nil/wrong types.
-            let value = accessibilityValue(in: object, selector: selector)
-            let kind = value == nil ? "nil" : (value is String ? "string" : (value is NSArray ? "array" : "other"))
-            return (value, route, kind)
+        func matches(_ identifier: String) -> [NativeAccountNode] {
+            nodes.values.filter { $0.identifier == identifier }
         }
-        func publicCategory(_ object: NSObject) -> String {
-            if object is NSPopUpButton { return "NSPopUpButton" }
-            if object is NSButton { return "NSButton" }
-            if object is NSControl { return "NSControl" }
-            if object is NSView { return "NSView" }
-            return "other"
+        func element(_ identifier: String) throws -> NSObject? {
+            guard complete else {
+                recordDiagnostic()
+                throw NativeAccountStateFailure.incompleteGraph
+            }
+            let found = matches(identifier)
+            guard found.count <= 1 else { throw NativeAccountStateFailure.duplicateIdentifier }
+            return found.first?.object
         }
-        func inspect(_ object: NSObject, depth: Int, viaNative: Bool) {
-            guard !visited.contains(ObjectIdentifier(object)) else { return }
-            guard visited.count < maxObjects else { objectLimit = true; incomplete = true; return }
-            visited.insert(ObjectIdentifier(object))
-            if depth == 0 { visitedRoot += 1 }
-            else if viaNative { visitedNative += 1 }
-            else { visitedAX += 1 }
-            // These rejected objects consume a slot, but supply no getters or outgoing edges.
-            if object is NSWindow { skippedElsewhere += 1; incomplete = true; return }
-            if let view = object as? NSView, let owner = view.window, owner !== window {
-                skippedElsewhere += 1; incomplete = true; return
+        // This traverses only the already bounded snapshot, without additional getters or roots.
+        func descendants(of object: NSObject) -> Set<ObjectIdentifier> {
+            var found: Set<ObjectIdentifier> = []
+            var pending = Array(edges[ObjectIdentifier(object)] ?? [])
+            while let next = pending.popLast() {
+                guard found.insert(next).inserted else { continue }
+                pending.append(contentsOf: edges[next] ?? [])
             }
-            let objectCategory = publicCategory(object)
-            switch objectCategory {
-            case "NSPopUpButton": popupCount += 1
-            case "NSButton": buttonCount += 1
-            case "NSControl": controlCount += 1
-            case "NSView": viewCount += 1
-            default: otherCount += 1
-            }
-            if let popup = object as? NSPopUpButton {
-                // Read only this visited control's menu/title properties; do not walk menus/items.
-                if popup.menu != nil { menuPresentPopups += 1 }
-                if popup.numberOfItems > 0 { menuNonemptyPopups += 1 }
-                let titles = popup.itemTitles
-                if titles.contains(iCloudOption) { popupsWithICloudOption += 1 }
-                if titles.contains(meguriOption) {
-                    popupsWithMeguriOption += 1
-                    matchingTitlePopups += 1
-                }
-            }
-            let identifier = read(object, selector: identifierSelector)
-            identifiers.record(route: identifier.route, kind: identifier.kind)
-            let childResult = read(object, selector: childrenSelector)
-            children.record(route: childResult.route, kind: childResult.kind)
-            if depth == 0 {
-                rootIdentifierRoute = identifier.route; rootIdentifierKind = identifier.kind
-                rootChildrenRoute = childResult.route; rootChildrenKind = childResult.kind
-            }
-            // A supported nil identifier is missing metadata, not a getter failure.
-            if identifier.route == "neither" || (identifier.kind != "nil" && identifier.kind != "string") {
-                readFailed = true; incomplete = true
-            }
-            if identifier.value as? String == "settings.accountSync.service" {
-                exactServiceCount += 1
-                // Describe only the first exact-ID observation, never a title-only candidate.
-                if exactServiceCount == 1 {
-                    category = objectCategory
-                    if let value = accessibilityString(in: object, selector: roleSelector) {
-                        switch value {
-                        case NSAccessibility.Role.popUpButton.rawValue: role = "popup"
-                        case NSAccessibility.Role.comboBox.rawValue: role = "combo"
-                        case NSAccessibility.Role.menuButton.rawValue: role = "menu-button"
-                        case NSAccessibility.Role.group.rawValue: role = "group"
-                        default: role = "other"
-                        }
-                    }
-                    roleGetterAvailable = object.responds(to: roleSelector)
-                    childrenGetterAvailable = object.responds(to: childrenSelector)
-                    pickAvailable = object.responds(to: NSSelectorFromString("accessibilityPerformPick"))
-                    pressAvailable = object.responds(to: NSSelectorFromString("accessibilityPerformPress"))
-                    showMenuAvailable = object.responds(to: NSSelectorFromString("accessibilityPerformShowMenu"))
-                }
-            }
-            // Inspect NSArray conditionally, without assertion-bearing/typed child helpers.
-            let axChildren = childResult.value as? NSArray
-            defer { withExtendedLifetime(axChildren) {} }
-            if childResult.route == "neither" || (childResult.kind != "nil" && childResult.kind != "array") {
-                readFailed = true; incomplete = true
-            }
-            // Nil children cannot establish a complete child observation, even with a getter.
-            if axChildren == nil { incomplete = true }
-            let nativeChildren = (object as? NSView)?.subviews ?? []
-            guard depth < maxDepth else {
-                if !nativeChildren.isEmpty || (axChildren?.count ?? 0) > 0 {
-                    depthLimit = true; incomplete = true
-                }
+            return found
+        }
+        func recordDiagnostic() {
+            print("nativeAccountGraph mounted=\(mounted) complete=\(complete)"
+                + " visited=\(visited.count) nodes=\(nodes.count)"
+                + " exactServiceCount=\(matches("settings.accountSync.service").count)"
+                + " objectLimit=\(objectLimit) depthLimit=\(depthLimit) foreign=\(foreign)"
+                + " unsupported=\(unsupported) malformed=\(malformed) unknownNilChildren=\(unknownNilChildren)")
+        }
+    }
+    // Modern object getters retain their actual nullable result. Unsupported getters and
+    // wrong types are failures, rather than an empty relationship or a missing identifier.
+    private func nativeAccountString(in object: NSObject, selector: Selector) throws -> String? {
+        guard object.responds(to: selector) else { throw NativeAccountStateFailure.unsupportedGetter }
+        let value = object.perform(selector)?.takeUnretainedValue()
+        guard value == nil || value is String else { throw NativeAccountStateFailure.malformedGetter }
+        return value as? String
+    }
+    private func nativeAccountGraph(in root: NSView, window: NSWindow,
+        controller: NSViewController? = nil) -> NativeAccountGraph {
+        let maxObjects = 128, maxDepth = 16
+        var graph = NativeAccountGraph()
+        graph.mounted = root.window === window && window.contentView === root
+            && (controller == nil || window.contentViewController === controller)
+        guard graph.mounted else { return graph }
+        var active: Set<ObjectIdentifier> = []
+        // These roles permit terminal AX elements. A supported nullable children getter
+        // can describe a leaf; nil on an unknown/container role cannot establish completeness.
+        let leafRoles: Set<String> = [
+            NSAccessibility.Role.button.rawValue, NSAccessibility.Role.checkBox.rawValue,
+            NSAccessibility.Role.radioButton.rawValue, NSAccessibility.Role.menuItem.rawValue,
+            NSAccessibility.Role.staticText.rawValue, NSAccessibility.Role.textField.rawValue,
+            NSAccessibility.Role.image.rawValue
+        ]
+        func readString(_ object: NSObject, _ selector: Selector) -> String? {
+            guard object.responds(to: selector) else { graph.unsupported = true; return nil }
+            let value = object.perform(selector)?.takeUnretainedValue()
+            guard value == nil || value is String else { graph.malformed = true; return nil }
+            return value as? String
+        }
+        func inspect(_ object: NSObject, parent: NSObject?, depth: Int, native: Bool) {
+            let identity = ObjectIdentifier(object)
+            if graph.visited.contains(identity) {
+                if active.contains(identity) { graph.malformed = true }
+                if let storedParent = graph.nodes[identity]?.parent,
+                   parent.map({ ObjectIdentifier($0) }) != storedParent { graph.malformed = true }
                 return
             }
-            // Bound edge-list inspection too, including duplicate or malformed entries.
-            // Any omitted edge keeps the observation incomplete; no absence is inferred.
-            if nativeChildren.count > maxObjects { objectLimit = true; incomplete = true }
-            for child in nativeChildren.prefix(maxObjects) {
-                guard visited.count < maxObjects else { objectLimit = true; incomplete = true; break }
-                inspect(child, depth: depth + 1, viaNative: true)
+            guard graph.visited.count < maxObjects else { graph.objectLimit = true; return }
+            graph.visited.insert(identity)
+            guard depth <= maxDepth else { graph.depthLimit = true; return }
+            // No getters or outgoing edges from a foreign window/application/view.
+            guard !(object is NSWindow), !(object is NSApplication) else { graph.foreign = true; return }
+            var axParent: ObjectIdentifier?
+            if let view = object as? NSView {
+                guard view.window === window, view === root || view.isDescendant(of: root) else {
+                    graph.foreign = true; return
+                }
+                if native && view.superview !== parent { graph.malformed = true; return }
+            } else {
+                // A virtual node must have the actual public parent that exposed it.
+                // Parent identities are checked, never followed into a second graph.
+                let selector = #selector(NSAccessibilityProtocol.accessibilityParent)
+                guard object.responds(to: selector) else { graph.unsupported = true; return }
+                let value = object.perform(selector)?.takeUnretainedValue()
+                guard let actualParent = value as? NSObject, let parent, actualParent === parent else {
+                    graph.malformed = true; return
+                }
+                axParent = ObjectIdentifier(actualParent)
             }
-            if let axChildren {
-                if axChildren.count > maxObjects { objectLimit = true; incomplete = true }
-                for index in 0..<min(axChildren.count, maxObjects) {
-                    guard visited.count < maxObjects else { objectLimit = true; incomplete = true; break }
-                    guard let child = axChildren.object(at: index) as? NSObject else {
-                        readFailed = true; incomplete = true; continue
+            let identifier = readString(object, #selector(NSAccessibilityProtocol.accessibilityIdentifier))
+            let role = readString(object, #selector(NSAccessibilityProtocol.accessibilityRole))
+            if !(object is NSView) && role == nil { graph.malformed = true }
+            graph.nodes[identity] = NativeAccountNode(object: object, identifier: identifier, role: role, parent: axParent)
+            active.insert(identity)
+            defer { active.remove(identity) }
+            func visit(_ child: NSObject, native: Bool) {
+                guard depth < maxDepth else { graph.depthLimit = true; return }
+                let childIdentity = ObjectIdentifier(child)
+                guard graph.visited.contains(childIdentity) || graph.visited.count < maxObjects else {
+                    graph.objectLimit = true; return
+                }
+                graph.edges[identity, default: []].insert(childIdentity)
+                inspect(child, parent: object, depth: depth + 1, native: native)
+            }
+            if let view = object as? NSView {
+                let children = view.subviews
+                if children.count > maxObjects { graph.objectLimit = true }
+                for child in children.prefix(maxObjects) { visit(child, native: true) }
+            }
+            func inspectAXChildren(_ selector: Selector) {
+                guard object.responds(to: selector) else { graph.unsupported = true; return }
+                let value = object.perform(selector)?.takeUnretainedValue()
+                guard let value else {
+                    if !leafRoles.contains(role ?? "") { graph.unknownNilChildren = true }
+                    return
+                }
+                guard let children = value as? NSArray else { graph.malformed = true; return }
+                defer { withExtendedLifetime(children) {} }
+                if children.count > maxObjects { graph.objectLimit = true }
+                for index in 0..<min(children.count, maxObjects) {
+                    guard let child = children.object(at: index) as? NSObject else {
+                        graph.malformed = true; continue
                     }
-                    inspect(child, depth: depth + 1, viaNative: false)
+                    visit(child, native: false)
                 }
             }
+            inspectAXChildren(#selector(NSAccessibilityProtocol.accessibilityChildren))
+            // This is another ordering of public children, not a promise of extra nodes.
+            // Union both observations under the same identity/depth/object budget.
+            inspectAXChildren(#selector(NSAccessibilityProtocol.accessibilityChildrenInNavigationOrder))
         }
-        if mounted { inspect(root, depth: 0, viaNative: false) }
-        let lookup = exactServiceCount > 0 ? "found"
-            : (readFailed ? "read-failed" : (incomplete ? "incomplete" : "not-found"))
-        print("nativeServiceMount controllerAttached=\(controllerAttached) hostAttached=\(hostAttached)"
-            + " contentAttached=\(contentAttached) windowVisible=\(window.isVisible)"
-            + " windowOcclusionVisible=\(window.occlusionState.contains(.visible))"
-            + " hostFrameNonempty=\(!root.frame.isEmpty) hostBoundsNonempty=\(!root.bounds.isEmpty)"
-            + " windowFrameNonempty=\(!window.frame.isEmpty)"
-            + " nativePickerMatches=LAST-OBSERVED:\(lastObservedNativePickerCount.map { String($0) } ?? "not-observed")"
-            + " visited=\(visited.count) visitedRoot=\(visitedRoot) visitedNative=\(visitedNative) visitedAX=\(visitedAX)"
-            + " skippedElsewhere=\(skippedElsewhere) objectLimit=\(objectLimit) depthLimit=\(depthLimit)"
-            + " readFailed=\(readFailed) incomplete=\(incomplete) axService=\(lookup) exactServiceCount=\(exactServiceCount)")
-        print("nativeServiceMount rawPopUpButtons=\(popupCount) matchingTitlePopups=\(matchingTitlePopups)"
-            + " menuPresentPopups=\(menuPresentPopups) menuNonemptyPopups=\(menuNonemptyPopups)"
-            + " popupsWithICloudOption=\(popupsWithICloudOption) popupsWithMeguriOption=\(popupsWithMeguriOption)"
-            + " classNSPopUpButton=\(popupCount) classNSButton=\(buttonCount) classNSControl=\(controlCount)"
-            + " classNSView=\(viewCount) classOther=\(otherCount)")
-        print("nativeServiceMount rootIdentifierRoute=\(rootIdentifierRoute) rootIdentifierKind=\(rootIdentifierKind)"
-            + " rootChildrenRoute=\(rootChildrenRoute) rootChildrenKind=\(rootChildrenKind)"
-            + " identifierModern=\(identifiers.modern) identifierLegacy=\(identifiers.legacy) identifierNeither=\(identifiers.neither)"
-            + " identifierNil=\(identifiers.nilValue) identifierString=\(identifiers.string)"
-            + " identifierArray=\(identifiers.array) identifierOther=\(identifiers.other)"
-            + " childrenModern=\(children.modern) childrenLegacy=\(children.legacy) childrenNeither=\(children.neither)"
-            + " childrenNil=\(children.nilValue) childrenString=\(children.string)"
-            + " childrenArray=\(children.array) childrenOther=\(children.other)")
-        if exactServiceCount > 0 {
-            print("nativeServiceMount firstExactServiceCategory=\(category) firstExactServiceRole=\(role)"
-                + " roleGetterAvailable=\(roleGetterAvailable) childrenGetterAvailable=\(childrenGetterAvailable)"
-                + " pickSelectorAvailable=\(pickAvailable) pressSelectorAvailable=\(pressAvailable)"
-                + " showMenuSelectorAvailable=\(showMenuAvailable)")
-        }
+        inspect(root, parent: nil, depth: 0, native: false)
+        return graph
     }
-    private func nativeAccountElement(_ identifier: String, in root: NSObject) throws -> NSObject? {
-        var visited: Set<ObjectIdentifier> = []
-        func find(_ object: NSObject) throws -> NSObject? {
-            guard visited.insert(ObjectIdentifier(object)).inserted else { return nil }
-            if accessibilityString(in: object, selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier)) == identifier { return object }
-            let children = try accessibilityChildArray(in: object, selector: #selector(NSAccessibilityProtocol.accessibilityChildren))
-            defer { withExtendedLifetime(children) {} }
-            for index in 0..<children.count {
-                let child = try #require(children.object(at: index) as? NSObject)
-                if let found = try find(child) { return found }
-            }
-            return nil
+    private func selectNativeService(_ intendedLabel: String, in graph: NativeAccountGraph) throws {
+        let matches = graph.matches("settings.accountSync.service")
+        guard graph.complete else { throw NativeAccountStateFailure.incompleteGraph }
+        guard matches.count == 1, let service = matches.first else {
+            throw NativeAccountStateFailure.duplicateIdentifier
         }
-        return try find(root)
+        let serviceRoles: Set<String> = [NSAccessibility.Role.popUpButton.rawValue,
+            NSAccessibility.Role.menuButton.rawValue, NSAccessibility.Role.comboBox.rawValue]
+        guard let role = service.role, serviceRoles.contains(role) else {
+            throw NativeAccountStateFailure.inappropriateRole
+        }
+        let optionRoles: Set<String> = [NSAccessibility.Role.menuItem.rawValue, NSAccessibility.Role.radioButton.rawValue]
+        let options = graph.descendants(of: service.object).compactMap { graph.nodes[$0] }.filter {
+            guard let role = $0.role else { return false }
+            return optionRoles.contains(role)
+        }
+        guard options.count == 2 else { throw NativeAccountStateFailure.invalidOptions }
+        let labels = try options.map {
+            try nativeAccountString(in: $0.object, selector: #selector(NSAccessibilityProtocol.accessibilityLabel))
+        }
+        let expected: Set<String> = [SyncText.value("sync.service.iCloud"), SyncText.value("sync.service.meguri")]
+        guard expected.count == 2, labels.allSatisfy({ $0 != nil }),
+              Set(labels.compactMap { $0 }) == expected else { throw NativeAccountStateFailure.invalidOptions }
+        let targets = zip(options, labels).filter { $0.1 == intendedLabel }.map { $0.0 }
+        guard targets.count == 1, let target = targets.first else { throw NativeAccountStateFailure.invalidOptions }
+        // Only options ALREADY exposed by this exact control are actionable here.
+        // Never open the picker: public menu-opening actions may synchronously track.
+        try performNativeAccountPress(on: target.object)
+    }
+    private func performNativeAccountPress(on object: NSObject) throws {
+        let succeeded: Bool
+        guard object.responds(to: #selector(NSAccessibilityProtocol.accessibilityPerformPress)) else {
+            throw NativeAccountStateFailure.unsupportedAction
+        }
+        if let accessible = object as? any NSAccessibilityProtocol {
+            succeeded = accessible.accessibilityPerformPress()
+        } else if let accessible = object as? any NSAccessibilityButton {
+            succeeded = accessible.accessibilityPerformPress()
+        } else { throw NativeAccountStateFailure.unsupportedAction }
+        // One actual typed Bool action, with no alternate action after a failure.
+        guard succeeded else { throw NativeAccountStateFailure.actionFailed }
     }
 
     @Test func nativeSidebarSearchIdentifiersSurviveRemountWithText() throws {
