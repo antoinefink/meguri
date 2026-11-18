@@ -475,7 +475,7 @@ fn optional_cloud_composition_captures_without_live_identity_and_keeps_sync_pend
 
 #[test]
 fn mid_capture_write_failure_rolls_back_every_tracking_row_but_not_collection_commit() {
-    let fixture = Fixture::new(BindingState::Active);
+    let fixture = Fixture::with_prior_icloud(BindingState::Active, true);
     let host = fixture.open();
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
@@ -581,7 +581,7 @@ impl Drop for PausedScan {
 
 #[test]
 fn paused_snapshot_scan_allows_a_real_note_op_and_preserves_its_newer_capture() {
-    let fixture = Fixture::new(BindingState::Active);
+    let fixture = Fixture::with_prior_icloud(BindingState::Active, true);
     let host = fixture.open();
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
@@ -625,7 +625,7 @@ fn paused_snapshot_scan_allows_a_real_note_op_and_preserves_its_newer_capture() 
 
 #[test]
 fn account_event_while_scan_paused_prevents_page_and_cursor_commit() {
-    let fixture = Fixture::new(BindingState::Active);
+    let fixture = Fixture::with_prior_icloud(BindingState::Active, true);
     let host = fixture.open();
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
@@ -662,7 +662,7 @@ fn account_event_while_scan_paused_prevents_page_and_cursor_commit() {
 
 #[test]
 fn suspend_resume_during_pre_snapshot_pause_invalidates_same_generation_scan() {
-    let fixture = Fixture::new(BindingState::Active);
+    let fixture = Fixture::with_prior_icloud(BindingState::Active, true);
     let host = fixture.open();
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
@@ -692,7 +692,7 @@ fn suspend_resume_during_pre_snapshot_pause_invalidates_same_generation_scan() {
 
 #[test]
 fn creation_fact_mismatch_during_pause_prevents_scan_completion() {
-    let fixture = Fixture::new(BindingState::Active);
+    let fixture = Fixture::with_prior_icloud(BindingState::Active, true);
     let host = fixture.open();
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
@@ -732,7 +732,7 @@ fn creation_fact_mismatch_during_pause_prevents_scan_completion() {
 
 #[test]
 fn historical_birthtime_mismatch_reopen_durably_isolates_and_preserves_pending_ack() {
-    let fixture = Fixture::new(BindingState::Active);
+    let fixture = Fixture::with_prior_icloud(BindingState::Active, true);
     let host = fixture.open();
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
@@ -822,7 +822,7 @@ fn isolation_account_precedence_preserves_pending_and_permanent_reasons() {
         (IsolationReason::FileMismatch, IsolationReason::FileMismatch),
         (IsolationReason::ReplacedLocally, IsolationReason::ReplacedLocally),
     ] {
-        let fixture = Fixture::new(BindingState::Active);
+        let fixture = Fixture::with_prior_icloud(BindingState::Active, true);
         let active = fixture.open();
         let collection = active.collection().unwrap();
         edit(&collection, fixture.ids[0], "pending before isolation");
@@ -1015,7 +1015,7 @@ fn restored_collection_runs_real_generation_listener_and_invalidates_old_capture
 #[test]
 fn delayed_media_notification_cannot_stop_a_reopened_runtime() {
     use meguri_engine::media::MediaFeedConsumer;
-    let fixture = Fixture::new(BindingState::Active);
+    let fixture = Fixture::with_prior_icloud(BindingState::Active, true);
     let process = ProcessCore::new(fixture.options.engine.clone()).unwrap();
     let host = process.open(fixture.options.clone()).unwrap();
     let old_collection = host.collection().unwrap();
@@ -1077,8 +1077,8 @@ fn actual_local_only_collection_open_expires_copies_without_verified_identity_or
     let host = fixture.open();
     let baseline_identity_reads = identity.reads.load(Ordering::SeqCst) - reads_before_open;
     assert_eq!(
-        baseline_identity_reads, 1,
-        "startup publication ownership requires one identity read"
+        baseline_identity_reads, 0,
+        "LocalOnly without prior consent must not read the underlying identity provider"
     );
     host.close().unwrap();
 
@@ -1115,7 +1115,7 @@ fn actual_local_only_collection_open_expires_copies_without_verified_identity_or
     assert_eq!(
         identity.reads.load(Ordering::SeqCst) - reads_before_open,
         baseline_identity_reads,
-        "copy expiry must add no identity reads beyond startup ownership"
+        "LocalOnly copy expiry must not read the underlying identity provider"
     );
     assert!(!host.cloud_runtime().unwrap().status().unwrap().identity_verified);
     assert!(host.cloud_runtime().unwrap().require_collection_sending().is_err());
@@ -1132,7 +1132,7 @@ fn actual_local_only_collection_open_expires_copies_without_verified_identity_or
     assert_eq!(
         identity.reads.load(Ordering::SeqCst) - reads_before_open,
         baseline_identity_reads,
-        "reopen cleanup must add no identity reads beyond startup ownership"
+        "LocalOnly reopen cleanup must not read the underlying identity provider"
     );
     with_store(&fixture.options.collection_directory, fixture.scope(), |store| {
         assert_eq!(store.conflict_copies().unwrap().len(), 1);

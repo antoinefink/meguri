@@ -38,7 +38,20 @@ fn config(dir: &Path, identity: Arc<dyn IdentityProvider>) -> meguri_host::HostC
     config
 }
 pub(super) fn open_actual(dir: &Path, identity: Arc<dyn IdentityProvider>) -> CoreHost {
-    CoreHost::open(config(dir, identity)).unwrap()
+    let config = config(dir, identity);
+    // Preserve these scenarios' prior iCloud choice before the first Host open.
+    // Initial R6 stays LocalOnly until the actual publication confirmation.
+    CoreHost::migrate_provider_configuration(
+        &config.manual_transfer_directory,
+        meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+            enabled: true,
+            paused: false,
+            automatic: false,
+            media: false,
+        }),
+    )
+    .unwrap();
+    CoreHost::open(config).unwrap()
 }
 pub(super) fn generated(dir: &Path) {
     let recipe = Recipe::parse("recipe: resume-absence\ndescription: Public synthetic Resume regression\nnow: \"2025-01-01T00:00:00Z\"\ndecks:\n  - name: Generic::Resume\n    notetype: basic\n    new: 1\n    due: 1\n    fields: [\"generic {n}\", \"back {n}\"]\n").unwrap();

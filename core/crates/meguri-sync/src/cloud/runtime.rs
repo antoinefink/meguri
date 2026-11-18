@@ -565,7 +565,7 @@ struct State {
 // tracking state and is never acquired while reading a provider or store.
 #[derive(Clone, Default)]
 pub(crate) struct NativeAuthority {
-    provider: Option<(Arc<crate::provider::Authority>, Binding)>,
+    provider: Option<(Arc<crate::provider::Authority>, Option<Binding>)>,
     pub(crate) guard: super::adapter::Guard,
     pub(crate) instance: Option<String>,
     sdk: Option<super::adapter::SDKAuthority>,
@@ -579,7 +579,7 @@ pub(crate) struct NativeAuthority {
 impl NativeAuthority {
     fn from_state(s: &State) -> Self {
         Self {
-            provider: s.provider.as_ref().and_then(|p| s.bound.as_ref().map(|b| (p.clone(), b.binding.clone()))),
+            provider: s.provider.as_ref().map(|p| (p.clone(), s.bound.as_ref().map(|b| b.binding.clone()))),
             guard: Runtime::adapter_guard_locked(s),
             instance: Runtime::instance_locked(s).ok(),
             sdk: s.adapter.sdk.clone(),
@@ -595,8 +595,11 @@ impl NativeAuthority {
         }
     }
     fn caller(&self, instance: &str) -> Result<(), RuntimeError> {
-        if self.provider.as_ref().is_some_and(|(p, b)| !p.permits_icloud_binding(b)) {
-            return Err(RuntimeError::IdentityUnverified);
+        if let Some((provider, binding)) = &self.provider {
+            let binding = binding.as_ref().ok_or(RuntimeError::IdentityUnverified)?;
+            if !provider.permits_icloud_binding(binding) {
+                return Err(RuntimeError::IdentityUnverified);
+            }
         }
         let host = self.instance.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if !self.sdk_matches(instance) && host != instance {
