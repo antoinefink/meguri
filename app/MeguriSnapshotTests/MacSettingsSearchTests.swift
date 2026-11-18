@@ -24,10 +24,12 @@ import Testing
             let sync = SyncCoordinator(directory: directory, defaults: nil)
             let collection = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
                 providerDirectory: installation)
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
+            let contentSize = NSSize(width: 900, height: 700)
+            let window = NSWindow(contentRect: NSRect(origin: .zero, size: contentSize),
                 styleMask: [.titled, .resizable], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             let controller = NSHostingController(rootView: AccountSyncView(collection: collection, host: .settings))
+            controller.sizingOptions = []
             defer {
                 window.contentViewController = nil; window.close()
                 withExtendedLifetime(controller) {}
@@ -47,6 +49,8 @@ import Testing
                 try #require(collection.state == .ready)
                 try #require(collection.sync.providerState?.selection == .localOnly)
                 window.contentViewController = controller
+                window.setContentSize(contentSize)
+                controller.view.frame = NSRect(origin: .zero, size: contentSize)
                 window.orderFront(nil); window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded()
                 var lastObservedNativePickerCount: Int?
                 do {
