@@ -963,7 +963,7 @@ PUBLIC_ARTIFACTS = {
         "1ed9e31a27b7f3f194d055a182f7097377437a5bacb1fa40377e3aad64818482",
     # Complete public-file review: provider_test_delta_review, 2026-11-17.
     "docs/process/verification-status.md":
-        "acc51afe68cbaca83ceb2f15f5c7ee698e1b11ff6301cd411edad3d7080c1cae",
+        "a4dcf93efe114f2f789a6d84004a01ef97d47863d6a2b1d2cb0e916463542b9a",
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
         'e08d22f2441c5f77bb0aa33ad08b315e9650eb81049b6bc047e37b6164fdc6ea',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
