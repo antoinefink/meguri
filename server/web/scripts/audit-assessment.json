@@ -249,8 +249,8 @@
         "sha256": "a4dba10f1d809a0c05836778c7c075b2e2243d7c4aeeff12ddc6f9eec3cfc6e4"
       },
       "server/compose.yaml": {
-        "bytes": 931,
-        "sha256": "03737d36cd35810513c04e39a193b707e14228ca997e116ca93557c09e7a0d9b"
+        "bytes": 1008,
+        "sha256": "303972069cba005453abe7939235e27b5622e986968adb0344836cb0475875d9"
       },
       "server/src/httpapi/mod.rs": {
         "bytes": 17356,
