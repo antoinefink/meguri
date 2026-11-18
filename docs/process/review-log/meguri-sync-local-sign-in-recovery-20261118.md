@@ -32,3 +32,13 @@ The work started on `1a5e6ecbb32e1e2df06c8906200216d81ddd5907` and landed in `d7
 The initial export `cleanroom/20261118T134822Z-50777` and the toolbar follow-up `cleanroom/20261118T135536Z-56178` were independently reviewed. The report SHA-256 digests are `3c752bccc3ce19896597a8aeed1fc4a9e94ec4acf43d44103543040d681d726f` and `7867e9413deac4e9d28daf844332f21062556500cae6007a8837516fddc11399`. The initial privacy scan `135935Z-63382` found the already reviewed test-file match. Its exact public-content digest was refreshed. `private/20261118T140011Z-64731`, `static-checks/20261118T140108Z-68843`, and `similarity/20261118T140100Z-66000` passed.
 
 `swift-test/20261118T140102Z-66917` passed all 30 presentation methods on clean `d7544ecf8`. The signed Release personal preview `build-app/20261118T140149Z-66913` passed on the same clean commit. The installed app and widget signatures and executable hashes matched the receipt. The focused scope covers presentation precedence and exact formatting. The earlier full Mac journey remains open.
+
+## Retrying on an overlapping availability event
+
+The work started on `0457f16eee8fcf8a3817402e35f5c4cda6ec019f` and landed in `69e54cd92d71f5cf6159dcff06c195fe52cc1169` after the intervening web update. The original wake records a newer same-generation Core Available event while the collection round is returning. A typed pre-start Busy refusal can consume that event and try once more through the same automatic settings and current binding checks. The retry budget belongs to that wake. Media Busy and terminal outcomes cannot use it.
+
+The isolated export `cleanroom/20261118T140750Z-78046` received complete independent review of both final Swift files. The report SHA-256 is `c7b7b8acd01efeeff8da49c9f372f3a3a9f1d874bf38a1424c0fe9903f854f83`. The initial privacy scan `141506Z-88331` flagged the prior test-file match. Its exact reviewed digest was refreshed. `private/20261118T141521Z-88650`, `static-checks/20261118T141558Z-91839`, and `similarity/20261118T141603Z-92364` passed.
+
+`swift-test/20261118T141549Z-89537` passed all 34 presentation methods on clean `69e54cd9`. The four added methods check the actual wake record's single use, generation and sequence, outcome and admission, and cancellation. The focused check does not exercise the signed journey or a review ending without a corresponding Core Available event.
+
+The signed Release personal preview `build-app/20261118T141643Z-89527` passed on the same clean commit. The installed app and widget signatures and executable hashes matched the receipt.
