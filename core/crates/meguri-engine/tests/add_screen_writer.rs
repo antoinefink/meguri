@@ -71,9 +71,13 @@ fn replaced_generation_refuses_even_when_successor_has_identical_ids_and_layout(
     refused(&successor, captured.clone(), EngineError::StaleGeneration {
         planned: expected, current: successor.generation(),
     });
-    // Also retain the executor's generation protection on an old handle.
-    assert!(matches!(notes::add_for_screen(&h.collection, captured),
-        Err(EngineError::StaleGeneration { .. })));
+    // Full close stops the old executor, which refuses before generation checks.
+    let before = rows(&successor);
+    let seq = successor.last_seq();
+    assert_eq!(notes::add_for_screen(&h.collection, captured).unwrap_err(),
+        EngineError::CollectionUnavailable { reason: "the collection is closed".into() });
+    assert_eq!(rows(&successor), before);
+    assert_eq!(successor.last_seq(), seq, "no successful op or change-stream sequence");
 }
 
 #[test]
@@ -121,7 +125,18 @@ fn same_count_reorder_checks_stored_names_ids_and_ordinals_independently_of_dige
 #[test]
 fn cloze_template_edit_invalidates_captured_consent_with_unchanged_field_layout() {
     let h = fresh();
-    let id = kind(&h, true, &["Front", "Back"], &["{{cloze:Front}}"]);
+    let id = notetypes::add(&h.collection, notetypes::NewNotetype {
+        name: "Add-screen cloze consent".into(),
+        kind: notetypes::NotetypeKind::Cloze,
+        fields: vec!["Front".into(), "Back".into()],
+        templates: vec![notetypes::NewTemplate {
+            name: "Cloze view".into(),
+            front: "{{cloze:Front}}".into(),
+            back: "{{cloze:Front}} {{Back}}".into(),
+            ..Default::default()
+        }],
+        css: Some(String::new()),
+    }).unwrap().value.id;
     let captured = request(&h.collection, id);
     let nt = h.collection.reader(ReaderRole::Query).unwrap().notetype(id).unwrap().unwrap();
     notetypes::update_template_formats(&h.collection, notetypes::TemplateFormatsUpdate {
@@ -129,10 +144,12 @@ fn cloze_template_edit_invalidates_captured_consent_with_unchanged_field_layout(
         base: notetypes::AggregateDigest::of(&nt),
         template: notetypes::TemplateIdentity::of(&nt.templates[0]),
         front: "{{cloze:Back}}".into(),
-        back: nt.templates[0].config.a_format.clone(),
+        back: "{{cloze:Back}} {{Front}}".into(),
         css: None,
     }, meguri_engine::CancelToken::new(), meguri_engine::ProgressSink::new()).unwrap();
-    assert_eq!(request(&h.collection, id).field_layout, captured.field_layout);
+    let current = request(&h.collection, id);
+    assert_ne!(current.notetype_base, captured.notetype_base);
+    assert_eq!(current.field_layout, captured.field_layout);
     refused(&h.collection, captured, stale(id));
 }
 
