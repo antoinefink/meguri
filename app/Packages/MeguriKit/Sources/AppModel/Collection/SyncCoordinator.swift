@@ -2928,7 +2928,11 @@ public final class SyncCoordinator {
     }
     private func policy(_ event: CloudPolicyEvent) async {
         guard !closing else { return }
-        if case .network(let value) = event { reachable = value }
+        if case .network(let value) = event {
+            let recovered = reachable == false && value
+            reachable = value
+            if recovered { requestMeguriWake(automatic: true) }
+        }
         if awaitingResumeProof, !suspended {
             switch event {
             case .refresh(let cause):
