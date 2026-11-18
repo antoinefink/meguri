@@ -33,6 +33,11 @@ enum TestHooks {
             }
             #endif
             guard !setupOnly, error == nil else { return }
+            #if os(macOS)
+            if let ownedProvider {
+                ownedProvider.transport.bind(to: collection, owned: ownedProvider)
+            }
+            #endif
             shell?.prepare(navigation)
             ShellCommands.shared.listen(navigation: navigation, sizeClass: options.sizeClass,
                 nativeCollection: options.nativeReview == nil ? nil : collection)
@@ -44,6 +49,22 @@ enum TestHooks {
         arguments: [String] = ProcessInfo.processInfo.arguments,
         bundleIdentifier: String = Bundle.main.bundleIdentifier ?? ""
     ) -> Session {
+        // Environment admission precedes every setup-only/agent early return.
+        let environment = ProcessInfo.processInfo.environment
+        let transportRequested = environment["MEGURI_OWNED_PROVIDER_TRANSPORT_RUN_ID"] != nil
+            || environment["MEGURI_OWNED_PROVIDER_TRANSPORT_MANIFEST_SHA256"] != nil
+        #if os(macOS)
+        var transportRequest: OwnedProviderTransport.Request?
+        if transportRequested {
+            do {
+                let options = try LaunchOptions(arguments: Array(arguments.dropFirst()))
+                transportRequest = try OwnedProviderTransport.Request.admit(environment: environment,
+                    ownedMode: options.ownedProviderFixture && bundleIdentifier.hasSuffix(".dev"))
+            } catch { return Session(error: OwnedProviderTransport.refusal) }
+        }
+        #else
+        if transportRequested { return Session(error: TestHookError("Owned provider transport refused")) }
+        #endif
         // Reject setup-only environments before they can exclude normal startup.
         if arguments.contains("-MeguriOwnedProviderFixture") {
             do throws(TestHookError) {
@@ -74,6 +95,9 @@ enum TestHooks {
         do throws(TestHookError) {
             let options = try LaunchOptions(arguments: Array(arguments.dropFirst()))
             let ownedProvider = try options.prepareOwnedProviderFixture(bundleIdentifier: bundleIdentifier)
+            #if os(macOS)
+            ownedProvider?.transport.admit(transportRequest)
+            #endif
             let shell = try options.apply(
                 to: &configuration,
                 installer: FixtureInstaller(bundleIdentifier: bundleIdentifier),

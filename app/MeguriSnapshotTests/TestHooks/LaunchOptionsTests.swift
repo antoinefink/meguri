@@ -2,6 +2,9 @@
 import AppModel
 import Foundation
 import Testing
+#if os(macOS)
+import Darwin
+#endif
 
 @testable import Meguri
 
@@ -328,4 +331,208 @@ import Testing
         #endif
     }
 }
+
+#if os(macOS)
+extension LaunchOptionsTests {
+    private typealias Transport = TestHooks.OwnedProviderTransport
+
+    private func transportManifest() -> [String: Any] {
+        let der = Data([0x30, 0x00]) // Synthetic parser input, never installed.
+        return ["format": 1, "purpose": "meguri-owned-provider-transport", "run_id": "run_1",
+            "origin": "https://localhost:8443/", "ca_der_base64": der.base64EncodedString(),
+            "ca_der_sha256": Transport.digest(der),
+            "app_executable_sha256": Transport.digest(Data("synthetic launch stub".utf8)),
+            "app_debug_dylib_sha256": Transport.digest(Data("synthetic debug code".utf8))]
+    }
+
+    private func transportRaw(_ shape: [String: Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: shape, options: [.sortedKeys])
+    }
+
+    private func transportRequest(_ raw: Data) -> Transport.Request {
+        Transport.Request(runID: "run_1", manifestSHA256: Transport.digest(raw))
+    }
+
+    @Test func ownedTransportEnvironmentIsOpaqueAndInertWithoutBothEntries() throws {
+        let run = Transport.runKey, hash = Transport.digestKey
+        let digest = String(repeating: "a", count: 64)
+        #expect(try Transport.Request.admit(environment: [:], ownedMode: false) == nil)
+        #expect(try Transport.Request.admit(environment: [:], ownedMode: true) == nil)
+        #expect(try Transport.Request.admit(environment: [run: "A_1-z", hash: digest], ownedMode: true)?.runID == "A_1-z")
+        #expect(try Transport.Request.admit(environment: [run: String(repeating: "x", count: 96), hash: digest], ownedMode: true) != nil)
+        for environment in [[run: "run_1"], [hash: digest], [run: "", hash: digest], [run: "run_1", hash: ""]] {
+            #expect(throws: Transport.Refusal.self) { try Transport.Request.admit(environment: environment, ownedMode: true) }
+        }
+        #expect(throws: Transport.Refusal.self) {
+            try Transport.Request.admit(environment: [run: "run_1", hash: digest], ownedMode: false)
+        }
+        for invalid in [".", "..", "a.b", "/run", "a/b", "a%2fb", " run", "a\n", "é", "_run", "-run", String(repeating: "a", count: 97)] {
+            #expect(throws: Transport.Refusal.self) {
+                try Transport.Request.admit(environment: [run: invalid, hash: digest], ownedMode: true)
+            }
+        }
+        for invalid in [String(repeating: "A", count: 64), String(repeating: "a", count: 63),
+                        String(repeating: "a", count: 65), String(repeating: "g", count: 64), digest + "\n"] {
+            #expect(throws: Transport.Refusal.self) {
+                try Transport.Request.admit(environment: [run: "run_1", hash: invalid], ownedMode: true)
+            }
+        }
+    }
+
+    @Test func ownedTransportManifestRequiresExactSchemaTypesAndRawDigest() throws {
+        let shape = transportManifest()
+        let raw = try transportRaw(shape)
+        let request = transportRequest(raw)
+        #expect(try Transport.Manifest.parse(raw, request: request).origin == "https://localhost:8443/")
+        var changedBytes = raw
+        changedBytes.append(0x20)
+        #expect(throws: Transport.Refusal.self) { try Transport.Manifest.parse(changedBytes, request: request) }
+        #expect(try Transport.Manifest.parse(changedBytes, request: transportRequest(changedBytes)).run_id == "run_1")
+        for key in shape.keys {
+            var missing = shape; missing.removeValue(forKey: key)
+            let bytes = try transportRaw(missing)
+            #expect(throws: (any Error).self) { try Transport.Manifest.parse(bytes, request: transportRequest(bytes)) }
+            var wrongType = shape
+            if key == "format" { wrongType[key] = "1" } else { wrongType[key] = 1 }
+            let wrong = try transportRaw(wrongType)
+            #expect(throws: (any Error).self) { try Transport.Manifest.parse(wrong, request: transportRequest(wrong)) }
+        }
+        var extra = shape; extra["extra"] = "refuse"
+        let extraBytes = try transportRaw(extra)
+        #expect(throws: Transport.Refusal.self) { try Transport.Manifest.parse(extraBytes, request: transportRequest(extraBytes)) }
+        let invalidFields: [(String, Any)] = [("format", true), ("format", 2), ("purpose", "other"),
+                ("run_id", "other"), ("ca_der_sha256", String(repeating: "A", count: 64)),
+                ("app_executable_sha256", "short"), ("app_debug_dylib_sha256", String(repeating: "g", count: 64)),
+                ("origin", "http://localhost/"), ("origin", "https://user@localhost/"),
+                ("origin", "https://localhost/path"), ("origin", "https://localhost/?q=1"),
+                ("origin", "https://localhost/#fragment"), ("origin", "https://local%68ost/"),
+                ("origin", "https://localhost:0/")]
+        for (key, value) in invalidFields {
+            var invalid = shape; invalid[key] = value
+            let bytes = try transportRaw(invalid)
+            #expect(throws: (any Error).self) { try Transport.Manifest.parse(bytes, request: transportRequest(bytes)) }
+        }
+        // Preserve the numeric spelling: JSON serialization may canonicalize it.
+        let fractionalFormat = Data(String(decoding: raw, as: UTF8.self).replacingOccurrences(of: "\"format\":1", with: "\"format\":1.0").utf8)
+        #expect(fractionalFormat != raw)
+        #expect(throws: Transport.Refusal.self) { try Transport.Manifest.parse(fractionalFormat, request: transportRequest(fractionalFormat)) }
+        let oversized = raw + Data(repeating: 0x20, count: Transport.manifestLimit)
+        #expect(throws: Transport.Refusal.self) { try Transport.Manifest.parse(oversized, request: transportRequest(oversized)) }
+    }
+
+    @Test func ownedTransportCertificateEncodingAndBoundsAreStrict() throws {
+        let shape = transportManifest()
+        for encoding in ["", "MAA=\n", "MAA==", "!!!!", "MA B", "MB==", String(repeating: "A", count: 87388)] {
+            var invalid = shape; invalid["ca_der_base64"] = encoding
+            let raw = try transportRaw(invalid)
+            #expect(throws: (any Error).self) { try Transport.Manifest.parse(raw, request: transportRequest(raw)) }
+        }
+        for size in [65536, 65537] {
+            let der = Data(repeating: 0x30, count: size)
+            var bounded = shape
+            bounded["ca_der_base64"] = der.base64EncodedString()
+            bounded["ca_der_sha256"] = Transport.digest(der)
+            let raw = try transportRaw(bounded)
+            if size == 65536 {
+                #expect(try Transport.Manifest.parse(raw, request: transportRequest(raw)).caDER() == der)
+            } else {
+                #expect(throws: Transport.Refusal.self) { try Transport.Manifest.parse(raw, request: transportRequest(raw)) }
+            }
+        }
+        var wrongDigest = shape; wrongDigest["ca_der_sha256"] = String(repeating: "0", count: 64)
+        let raw = try transportRaw(wrongDigest)
+        #expect(throws: Transport.Refusal.self) { try Transport.Manifest.parse(raw, request: transportRequest(raw)) }
+    }
+
+    @Test func ownedTransportAdmitsOnlyPrivateStableFilesAndBothCodeHashes() throws {
+        let files = FileManager.default
+        let scratch = files.temporaryDirectory.appending(path: "owned-transport-input-\(UUID().uuidString)")
+        defer { try? files.removeItem(at: scratch) }
+        let run = scratch.appending(path: "build/fixtures/owned-meguri-provider/run_1")
+        let binaries = scratch.appending(path: "MacOS")
+        try files.createDirectory(at: run, withIntermediateDirectories: true)
+        try files.createDirectory(at: binaries, withIntermediateDirectories: false)
+        let manifest = run.appending(path: "transport.json")
+        let executable = binaries.appending(path: "Meguri")
+        let debug = binaries.appending(path: "Meguri.debug.dylib")
+        let raw = try transportRaw(transportManifest())
+        try raw.write(to: manifest)
+        #expect(chmod(manifest.path, 0o600) == 0)
+        let stub = Data("synthetic launch stub".utf8), code = Data("synthetic debug code".utf8)
+        try stub.write(to: executable); try code.write(to: debug)
+        let request = transportRequest(raw)
+        func admit() throws -> Transport.Input {
+            try Transport.admitFiles(checkout: scratch, executable: executable, request: request)
+        }
+        #expect(try admit().origin == "https://localhost:8443/")
+        try Data("changed stub".utf8).write(to: executable)
+        #expect(throws: Transport.Refusal.self) { try admit() }
+        try stub.write(to: executable)
+        try Data("changed debug code".utf8).write(to: debug)
+        #expect(throws: Transport.Refusal.self) { try admit() }
+        try files.removeItem(at: debug)
+        #expect(throws: Transport.Refusal.self) { try admit() }
+        try files.createSymbolicLink(at: debug, withDestinationURL: executable)
+        #expect(throws: Transport.Refusal.self) { try admit() }
+        try files.removeItem(at: debug); try code.write(to: debug)
+        #expect(chmod(manifest.path, 0o644) == 0)
+        #expect(throws: Transport.Refusal.self) { try admit() }
+        #expect(chmod(manifest.path, 0o600) == 0)
+
+        var before = stat()
+        #expect(lstat(manifest.path, &before) == 0)
+        var wrongUID = before; wrongUID.st_uid = geteuid() == 0 ? 1 : 0
+        #expect(throws: Transport.Refusal.self) { try Transport.validateFile(wrongUID, cap: Transport.manifestLimit, privateManifest: true) }
+        var tooLarge = before; tooLarge.st_size = off_t(Transport.manifestLimit + 1)
+        #expect(throws: Transport.Refusal.self) { try Transport.validateFile(tooLarge, cap: Transport.manifestLimit, privateManifest: true) }
+        var mutated = before; mutated.st_mtimespec.tv_nsec ^= 1
+        #expect(throws: Transport.Refusal.self) { try Transport.requireStable(before, mutated) }
+        try raw.write(to: manifest, options: .atomic)
+        #expect(chmod(manifest.path, 0o600) == 0)
+        var replaced = stat()
+        #expect(lstat(manifest.path, &replaced) == 0)
+        #expect(throws: Transport.Refusal.self) { try Transport.requireStable(before, replaced) }
+
+        var finder = [UInt8](repeating: 0, count: 32); finder[8] = 0x80
+        let aliasSet = finder.withUnsafeBytes { setxattr(manifest.path, "com.apple.FinderInfo", $0.baseAddress, $0.count, 0, 0) }
+        #expect(aliasSet == 0)
+        #expect(throws: Transport.Refusal.self) { try admit() }
+        #expect(removexattr(manifest.path, "com.apple.FinderInfo", 0) == 0)
+        let saved = run.appending(path: "saved.json")
+        try files.moveItem(at: manifest, to: saved)
+        try files.createSymbolicLink(at: manifest, withDestinationURL: saved)
+        #expect(throws: Transport.Refusal.self) { try admit() }
+        try files.removeItem(at: manifest); try files.moveItem(at: saved, to: manifest)
+        let movedRun = run.deletingLastPathComponent().appending(path: "saved-run")
+        try files.moveItem(at: run, to: movedRun)
+        try files.createSymbolicLink(at: run, withDestinationURL: movedRun)
+        #expect(throws: Transport.Refusal.self) { try admit() }
+    }
+
+    @Test func ownedTransportReservationIsOnceOnlyAndGateStaysBlockedOnFailure() async {
+        var inert = Transport.Reservation(requested: false)
+        #expect(inert.state == .inert && !inert.blocksInteraction && !inert.reserve())
+        inert.fail()
+        #expect(inert.state == .inert)
+        var reservation = Transport.Reservation(requested: true)
+        #expect(reservation.state == .pending && reservation.blocksInteraction)
+        #expect(reservation.reserve())
+        #expect(reservation.state == .installing && reservation.blocksInteraction)
+        #expect(!reservation.reserve())
+        reservation.fail()
+        #expect(reservation.state == .failed && reservation.blocksInteraction && !reservation.reserve())
+        let transport = Transport()
+        #expect(transport.state == .inert && !transport.blocksInteraction)
+        await transport.cancelAndJoin()
+        #expect(transport.state == .inert)
+        let request = Transport.Request(runID: "run_1", manifestSHA256: String(repeating: "a", count: 64))
+        transport.admit(request)
+        #expect(transport.state == .pending && transport.blocksInteraction)
+        await transport.cancelAndJoin()
+        #expect(transport.state == .failed && transport.blocksInteraction)
+        transport.admit(request)
+        #expect(transport.state == .failed && transport.blocksInteraction)
+    }
+}
+#endif
 #endif

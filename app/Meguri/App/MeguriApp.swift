@@ -108,6 +108,7 @@ struct MeguriApp: App {
             #if MEGURI_TEST_HOOKS
             if let ownedProvider = hooks.ownedProvider {
                 AppDelegate.closeCollection = {
+                    await ownedProvider.transport.cancelAndJoin()
                     let closed = await collection.closeForQuit()
                     return ownedProvider.cleanup(afterClosing: closed)
                 }
@@ -151,6 +152,7 @@ struct MeguriApp: App {
                 if let ownedProvider = hooks.ownedProvider {
                     SettingsWindow(collection: collection, features: features, configuration: configuration)
                         .defaultAppStorage(ownedProvider.defaults)
+                        .modifier(TestHooks.OwnedProviderTransportGate(transport: ownedProvider.transport))
                 } else {
                     SettingsWindow(collection: collection, features: features, configuration: configuration)
                 }
@@ -176,6 +178,9 @@ struct MeguriApp: App {
             if let ownedProvider = hooks.ownedProvider {
                 RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore, collection: collection)
                     .defaultAppStorage(ownedProvider.defaults)
+                    #if os(macOS)
+                    .modifier(TestHooks.OwnedProviderTransportGate(transport: ownedProvider.transport))
+                    #endif
             } else {
                 RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore, collection: collection)
             }

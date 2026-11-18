@@ -15,6 +15,9 @@ extension TestHooks {
         let collectionLocation: CollectionLocation
         let installationDirectory: URL
         let defaults: UserDefaults
+        #if os(macOS)
+        let transport = OwnedProviderTransport()
+        #endif
         private let root: URL
         private let suite: String
         private var removedRoot = false
