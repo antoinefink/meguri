@@ -122,3 +122,18 @@ username refusal without creating a collection or starting a transfer.
 | docs/process/review-log/account-sync-cold-sign-in-20261118.md | 8fe90f0737ad4614e6b601ff9b1344f98acf64357ffa8ade927a5b68cf21f4a8 |
 | specs/sync/status-strings.md | 24dd422510bcb309b0cd30d0ff4f44e286f441da5a5284b1ef9acde3432b5b4e |
 | docs/design/screens.md | 8075ff26d0014382e34c434f36d8c3dc9974b606fd1d4008df0a953bf39b3ac7 |
+
+## Installed preview
+
+The signed Release app from `build-app/20261118T155855Z-76219` was installed
+as the existing development app. Its app and widget signatures and
+executables verified against that receipt. The previous app was archived
+locally. The app remains closed for the next sign-in.
+
+Privacy, static and similarity evidence passed in
+`static-checks/20261118T160505Z-91063` and
+`similarity/20261118T160141Z-86273` with the staged privacy receipt.
+
+The Mac VM UI job `ui-test/20261118T160505Z-90578` stopped in approved
+profile validation with guarded-input. No UI case ran in that attempt.
+The local regression and signed build evidence remain scoped.
