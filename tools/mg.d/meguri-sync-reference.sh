@@ -89,16 +89,19 @@ PY
   return "$rc"
 }
 
-# Hash captured Docker stdout, but publish only finite identity/config fields.
+# Read Docker stdout as bytes before any shell capture, retaining its whitespace
+# in the raw hash. Publish only finite identity/config fields and hash metadata.
 # In particular, neither arbitrary environment values nor State.Error escape.
 mg_sync_reference__inspect() {
-  local raw hash configuration_hash fingerprints
-  raw="$(docker inspect "$1")" || return 1
-  hash="$(printf '%s' "$raw" | shasum -a 256 | cut -d ' ' -f1)" || return 1
+  local measured rc=0 stage pipeline_status
   # Parent-only diagnostics: hash each complete property, including all nested
   # values, but emit only static top-level Docker schema names. These never
   # replace the complete raw configuration fingerprint or excuse a difference.
-  fingerprints="$(printf '%s' "$raw" | python3 -c '
+  measured="$(
+    # Check both processes explicitly, including valid output followed by a
+    # failing Docker exit. Only validated projection/fixed metadata is captured.
+    set +e
+    docker inspect "$1" 2>/dev/null | python3 -c '
 import hashlib, json, re, sys
 def require(condition):
     if not condition:
@@ -114,15 +117,20 @@ def invalid_number(value):
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=True, allow_nan=False).encode("ascii")
+stage = "read"
 try:
     # Bound decoding as well as the final diagnostic representation. No parse
     # error or exception text (which could contain raw values) is published.
     raw = sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
+    stage = "bounds"
     require(0 < len(raw) <= 8 * 1024 * 1024)
     # Docker diagnostics support integer numbers only. Refuse decimal/exponent
     # tokens before conversion can round them or underflow them to zero.
+    stage = "json"
+    require(b"\x00" not in raw)
     records = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
                          parse_float=invalid_number, parse_constant=invalid_number)
+    stage = "shape"
     require(type(records) is list and len(records) == 1 and type(records[0]) is dict)
     record = records[0]
     config_names = set("""Hostname Domainname User AttachStdin AttachStdout AttachStderr
@@ -141,8 +149,9 @@ try:
         MemoryReservation MemorySwap MemorySwappiness OomKillDisable PidsLimit
         Ulimits CpuCount CpuPercent IOMaximumIOps IOMaximumBandwidth Mounts MaskedPaths
         ReadonlyPaths Init Annotations""".split())
-    required_config = set("""Entrypoint Cmd User Image WorkingDir ExposedPorts Volumes
-        Labels Env""".split())
+    # Empty ExposedPorts/Volumes may be omitted. Hash actual keys only: absent
+    # and present-null must remain different inventories and raw configurations.
+    required_config = set("""Entrypoint Cmd User Image WorkingDir Labels Env""".split())
     required_host = set("""NetworkMode PortBindings PublishAllPorts Init ReadonlyRootfs
         CapDrop CapAdd SecurityOpt Memory PidsLimit AutoRemove RestartPolicy
         Privileged Devices DeviceRequests VolumesFrom Links ExtraHosts PidMode
@@ -152,43 +161,96 @@ try:
             ("Config", config_names, required_config, 32),
             ("HostConfig", host_names, required_host, 96)):
         values = record.get(section)
-        require(type(values) is dict and 0 < len(values) <= limit)
-        require(required <= values.keys() <= allowed)
+        stage = "shape"
+        require(type(values) is dict)
+        stage = "bounds"
+        require(0 < len(values) <= limit)
+        stage = "schema"
+        require(values.keys() <= allowed)
         require(all(re.fullmatch(r"[A-Z][A-Za-z0-9]{0,39}", name) for name in values))
+        stage = "required"
+        require(required <= values.keys())
+        stage = "canonical"
         inventory[section] = {name: hashlib.sha256(canonical(value)).hexdigest()
                               for name, value in values.items()}
+    stage = "required"
+    require("Path" in record and "Args" in record)
+    stage = "shape"
     require(type(record.get("Path")) is str and type(record.get("Args")) is list
             and all(type(arg) is str for arg in record["Args"]))
+    stage = "canonical"
     for name in ("Path", "Args"):
         inventory[name] = hashlib.sha256(canonical(record[name])).hexdigest()
+    stage = "bounds"
     require(len(inventory) == 4 and sum(len(inventory[s]) for s in ("Config", "HostConfig")) + 2 <= 130)
+    stage = "canonical"
     encoded = canonical(inventory)
+    stage = "bounds"
     require(len(encoded) <= 16384)
-except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
+    stage = "canonical"
+    # Full configuration and individual properties share an exact integer,
+    # sorted-key ASCII encoding, without whitespace or a trailing newline.
+    configuration_hash = hashlib.sha256(canonical(
+        {name: record[name] for name in ("Config", "HostConfig", "Path", "Args")})).hexdigest()
+    stage = "shape"
+    config, host = record["Config"], record["HostConfig"]
+    labels, env = config["Labels"], config["Env"]
+    state, network, mounts = record.get("State"), record.get("NetworkSettings"), record.get("Mounts")
+    require(type(labels) is dict and type(env) is list and all(type(item) is str for item in env))
+    require(type(state) is dict and type(network) is dict and type(network.get("Networks")) is dict)
+    require(type(mounts) is list and all(type(item) is dict for item in mounts))
+    def pick(value, names):
+        return {name: value.get(name) for name in names.split()}
+    def default(value, fallback):
+        return fallback if value is None or value is False else value
+    projected_host = pick(host, """NetworkMode PortBindings PublishAllPorts Init ReadonlyRootfs
+        CapDrop CapAdd SecurityOpt Memory PidsLimit AutoRemove RestartPolicy Privileged
+        Devices DeviceRequests VolumesFrom Links ExtraHosts PidMode IpcMode UTSMode UsernsMode Binds Tmpfs""")
+    host_mounts = host["Mounts"]
+    require(host_mounts is None or type(host_mounts) is list)
+    projected_host["Mounts"] = []
+    for mount in host_mounts or []:
+        require(type(mount) is dict)
+        bind = mount.get("BindOptions")
+        require(bind is None or type(bind) is dict)
+        bind = bind if bind is not None else {}
+        projected_host["Mounts"].append(dict(pick(mount, "Type Source Target"),
+            ReadOnly=default(mount.get("ReadOnly"), False),
+            propagation=default(bind.get("Propagation"), ""),
+            extra_options=(mount.get("VolumeOptions") is not None or mount.get("TmpfsOptions") is not None
+                           or (bind.get("NonRecursive") is not None and bind.get("NonRecursive") is not False))))
+    container = pick(record, "Id Image Name Created RestartCount Path Args")
+    container.update(
+        Config=dict(pick(config, "Entrypoint Cmd User Image WorkingDir ExposedPorts Volumes"),
+            Labels={"run": labels.get("meguri.mg.run-id"), "nonce": labels.get("meguri.sync.owner")},
+            run_environment=[item for item in env if item.startswith("MG_RUN_ID=")]),
+        HostConfig=projected_host,
+        Mounts=[pick(mount, "Type Source Destination RW") for mount in mounts],
+        NetworkSettings={"Ports": network.get("Ports"), "networks": sorted(network["Networks"])},
+        State=dict(pick(state, "Status Running Paused Restarting Dead OOMKilled ExitCode StartedAt FinishedAt"),
+                   error_present=(state.get("Error") != "")))
+    stage = "canonical"
+    encoded = canonical(dict(inspection_sha256=hashlib.sha256(raw).hexdigest(),
+        configuration_sha256=configuration_hash, property_fingerprints=inventory, container=container))
+except (ValueError, TypeError, KeyError, OverflowError, RecursionError, OSError):
+    # Only author-owned finite stages escape, never input names or exceptions.
+    print(stage)
     sys.exit(1)
 sys.stdout.buffer.write(encoded)
-  ')" || return 1
-  configuration_hash="$(jq -cS '.[0] | {Config,HostConfig,Path,Args}' <<<"$raw" | shasum -a 256 | cut -d ' ' -f1)" || return 1
-  [[ "$hash" =~ ^[0-9a-f]{64}$ ]] && [[ "$configuration_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
-  jq -ce --arg hash "$hash" --arg configuration "$configuration_hash" --argjson fingerprints "$fingerprints" '
-    select(length==1) | .[0] |
-    {inspection_sha256:$hash,configuration_sha256:$configuration,property_fingerprints:$fingerprints,container:{Id,Image,Name,Created,RestartCount,Path,Args,
-      Config:{Entrypoint:.Config.Entrypoint,Cmd:.Config.Cmd,User:.Config.User,
-        Image:.Config.Image,
-        WorkingDir:.Config.WorkingDir,ExposedPorts:.Config.ExposedPorts,Volumes:.Config.Volumes,
-        Labels:{run:.Config.Labels["meguri.mg.run-id"],nonce:.Config.Labels["meguri.sync.owner"]},
-        run_environment:[.Config.Env[] | select(startswith("MG_RUN_ID="))]},
-      HostConfig:(.HostConfig | {NetworkMode,PortBindings,PublishAllPorts,Init,ReadonlyRootfs,
-        CapDrop,CapAdd,SecurityOpt,Memory,PidsLimit,AutoRemove,RestartPolicy,
-        Privileged,Devices,DeviceRequests,VolumesFrom,Links,ExtraHosts,PidMode,IpcMode,UTSMode,UsernsMode,
-        Binds,Tmpfs,Mounts:[.Mounts[]? | {Type,Source,Target,ReadOnly:(.ReadOnly // false),
-          propagation:(.BindOptions.Propagation // ""),
-          extra_options:(.VolumeOptions!=null or .TmpfsOptions!=null or (.BindOptions.NonRecursive // false))}]}),
-      Mounts:[.Mounts[] | {Type,Source,Destination,RW}],
-      NetworkSettings:{Ports:.NetworkSettings.Ports,networks:(.NetworkSettings.Networks | keys)},
-      State:(.State | {Status,Running,Paused,Restarting,Dead,OOMKilled,ExitCode,StartedAt,FinishedAt,
-        error_present:(.Error!="")})}}
-  ' <<<"$raw"
+    ' 2>/dev/null
+    pipeline_status=("${PIPESTATUS[@]}")
+    [ "${pipeline_status[0]}" -eq 0 ] || exit 2
+    [ "${pipeline_status[1]}" -eq 0 ] || exit 1
+  )" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    stage=read
+    if [ "$rc" -eq 1 ]; then
+      case "$measured" in read|bounds|json|shape|schema|required|canonical) stage="$measured" ;; esac
+    fi
+    printf 'reference inspection refused: %s\n' "$stage" >&2
+    return 1
+  fi
+  printf '%s\n' "$measured"
 }
 
 mg_sync_reference__check() {
@@ -212,7 +274,7 @@ mg_sync_reference__check() {
     (.property_fingerprints | inventory) and
     ((.property_fingerprints.Config | keys) - config_names == []) and
     ((.property_fingerprints.HostConfig | keys) - host_names == []) and
-    ((.property_fingerprints.Config | keys) | contains(["Cmd","Entrypoint","Env","ExposedPorts","Image","Labels","User","Volumes","WorkingDir"])) and
+    ((.property_fingerprints.Config | keys) | contains(["Cmd","Entrypoint","Env","Image","Labels","User","WorkingDir"])) and
     ((.property_fingerprints.HostConfig | keys) | contains($h | keys)) and
     ($c.Id==$p.id and ($c.Id | test("^[0-9a-f]{64}$"))) and
     $c.Image==$p.image and $c.Config.Image==$p.image and $c.Name==("/"+$p.name) and
@@ -248,17 +310,19 @@ mg_sync_reference__check() {
        .property_fingerprints==$before.property_fingerprints and
        ($c | del(.State,.NetworkSettings))==($before.container | del(.State,.NetworkSettings)) and
        $c.State.Status=="exited" and $c.State.Running==false and
+       ($c.State.OOMKilled | type=="boolean") and
        ($c.State.ExitCode | type=="number" and floor==. and .>=0 and .<=255) and
        ($c.State.StartedAt | timestamp) and ($c.State.FinishedAt | timestamp) and
        ($c.State.StartedAt | instant)>=($c.Created | instant) and
        ($c.State.FinishedAt | instant)>=($c.State.StartedAt | instant) and $c.State.FinishedAt[0:19]<=$ceiling
      end)
-  ' <<<"$measured" >/dev/null
+  ' <<<"$measured" >/dev/null 2>&1
 }
 
 mg_sync_reference__retained() {
   local mode="$1" output="$2" image owner name control="$MG_RUN_DIR/reference-control"
   local plan cid before=null after=null rc=0 cleanup_rc=0 attach_rc=null actual_exit=null valid=false invocation_sha
+  local before_valid=false
   image="$(mg_sync_server__image sync-reference -f "$MG_ROOT/docker/meguri-sync-reference.compose.yml")" || return 1
   [[ "$image" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
   owner="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" || return 1
@@ -286,12 +350,16 @@ mg_sync_reference__retained() {
     plan="$(jq -c --arg id "$cid" '. + {id:$id}' <<<"$plan")" || rc=1
     before="$(mg_sync_reference__inspect "$cid")" || { before=null; rc=1; }
     if [ "$rc" -eq 0 ] && mg_sync_reference__check "$before" "$plan" null before; then
+      before_valid=true
       # One start only, and always inspect after attach, even on process failure.
       attach_rc=0
       docker start --attach "$cid" || attach_rc=$?
       rc="$attach_rc"
       after="$(mg_sync_reference__inspect "$cid")" || { after=null; [ "$rc" -ne 0 ] || rc=1; }
-      actual_exit="$(jq -c '.container.State.ExitCode // null' <<<"$after")"
+      # This scalar is published separately even when the full postcheck fails.
+      # Never copy a rejected string/object (or out-of-range number) into it.
+      actual_exit="$(jq -c '.container.State.ExitCode | if type=="number" then
+        if floor==. and .>=0 and .<=255 then . else null end else null end' <<<"$after")" || actual_exit=null
       if mg_sync_reference__check "$after" "$plan" "$before" after; then
         valid=true
         if [ "$actual_exit" -ne 0 ] || [ "$(jq -r .container.State.OOMKilled <<<"$after")" != false ]; then
@@ -308,11 +376,19 @@ mg_sync_reference__retained() {
       ! cmp -s "$control/invocation.json" "$output/invocation.json"; then
     [ "$rc" -ne 0 ] || rc=1
   fi
+  # Producer diagnostics are already bounded and safe. Only a full successful
+  # check permits publication of a container projection, independently for
+  # each phase. Keep the full measurements in parent memory for comparison.
   mg_detail reference_execution "$(jq -nc --arg image "$image" --argjson plan "$plan" --arg invocation "$invocation_sha" \
     --argjson before "$before" --argjson after "$after" --argjson attach "$attach_rc" --argjson exit "$actual_exit" \
-    --argjson cleanup "$cleanup_rc" --argjson valid "$valid" --argjson rc "$rc" \
-    '{image_id:$image,container_id:($plan.id // null),invocation_sha256:$invocation,
-      before:$before,after:$after,measurements_valid:$valid,attach_exit:$attach,actual_exit:$exit,
+    --argjson before_valid "$before_valid" --argjson cleanup "$cleanup_rc" --argjson valid "$valid" --argjson rc "$rc" \
+    'def published($checked):
+       if .==null or $checked then . else
+         {inspection_sha256,configuration_sha256,property_fingerprints,validation_failure:"check"}
+       end;
+    {image_id:$image,container_id:($plan.id // null),invocation_sha256:$invocation,
+      before:($before | published($before_valid)),after:($after | published($valid)),
+      measurements_valid:$valid,attach_exit:$attach,actual_exit:$exit,
       cleanup_exit:$cleanup,absence_verified:($cleanup==0),execution_exit:$rc}')" || { [ "$rc" -ne 0 ] || rc=1; }
   return "$rc"
 }

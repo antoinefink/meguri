@@ -153,17 +153,49 @@ elif args[0] == 'inspect':
     if defect == ('post-inspect-fail' if started else 'pre-inspect-fail'):
         fail(51)
     value = copy.deepcopy(load())
+    inspection_fault = defect == 'raw-inspect' or defect == (
+        'post-inspect-output-fail' if started else 'pre-inspect-output-fail')
+    if inspection_fault and (root/'inspect-fault-emitted').exists():
+        # Only the selected measurement is damaged. A later cleanup inspection
+        # sees the real synthetic ownership, without overwriting fault bytes.
+        emit([value])
+        fail(0)
     mutation_phase = os.environ.get('MUTATION_PHASE','before')
-    if started == (mutation_phase == 'after'):
+    if mutation_phase == 'both' or started == (mutation_phase == 'after'):
         exec(os.environ.get('MUTATION',''), {}, {'c':value})
     if defect == 'numeric-token':
         # Inject the original token without any test-side numeric conversion.
         value['Config']['Healthcheck'] = {'Interval':'SYNTHETIC_JSON_NUMBER','Test':['NONE']}
-        raw = json.dumps([value]).replace('"SYNTHETIC_JSON_NUMBER"', os.environ['NUMBER_TOKEN'])
-        (root/'inspection.json').write_text(raw)
-        print(raw)
+        raw = json.dumps([value]).replace('"SYNTHETIC_JSON_NUMBER"', os.environ['NUMBER_TOKEN']).encode()+b'\n'
     else:
-        emit([value])
+        raw = json.dumps([value]).encode()+b'\n'
+    if defect == 'inspect-whitespace':
+        raw = b' \r\n\t'+raw+b' \t\r\n\n'
+    if defect == 'raw-inspect':
+        raw = raw.replace(b'private-fixture-value', b'SYNTHETIC_RAW_VALUE')
+        damage = os.environ['RAW_DEFECT']
+        if damage == 'nul-prefix': raw = b'\x00'+raw
+        elif damage == 'nul-key': raw = raw.replace(b'"Config"', b'"Con\x00fig"')
+        elif damage == 'nul-string': raw = raw.replace(b'SYNTHETIC_RAW_VALUE', b'SYNTHETIC_\x00RAW_VALUE')
+        elif damage == 'nul-integer': raw = raw.replace(b'2147483648', b'2147\x00483648')
+        elif damage == 'nul-between': raw = raw.replace(b'[{', b'[\x00{')
+        elif damage == 'nul-suffix': raw += b'\x00'
+        elif damage == 'invalid-utf8': raw = raw.replace(b'SYNTHETIC_RAW_VALUE', b'\xffSYNTHETIC_RAW_VALUE')
+        elif damage == 'malformed': raw = raw[:-3]
+        elif damage == 'duplicate': raw = raw.replace(b'"Path": "python"', b'"Path":"SYNTHETIC_RAW_VALUE","Path":"python"')
+        elif damage == 'oversized':
+            # A complete JSON object one byte beyond the existing bound. The
+            # producer can finish, so this isolates consumer bounds refusal.
+            raw = raw.replace(b'SYNTHETIC_RAW_VALUE', b'X'*(8*1024*1024+1-len(raw)+len(b'SYNTHETIC_RAW_VALUE')))
+        else: fail(98)
+    (root/'inspection.json').write_bytes(raw)
+    (root/('inspection-after.json' if started else 'inspection-before.json')).write_bytes(raw)
+    sys.stdout.buffer.write(raw)
+    sys.stdout.buffer.flush()
+    if inspection_fault:
+        (root/'inspect-fault-emitted').touch()
+    if defect == ('post-inspect-output-fail' if started else 'pre-inspect-output-fail'):
+        fail(51)
 elif args[0] == 'start':
     assert args == ['start','--attach',cid] and not (root/'started').exists()
     (root/'started').touch()
@@ -244,6 +276,7 @@ SH
 reference_execute() {
   run env REPO_ROOT="$REPO_ROOT" REF="$REF" MODE="$1" DEFECT="${2:-}" \
     MUTATION="${3:-}" MUTATION_PHASE="${4:-before}" bash "$REF/run.sh" "$1"
+  printf '%s' "$output" >"$REF/wrapper.log"
   [ "$status" -eq 0 ] # MG jobs report status through the receipt sink.
 }
 
@@ -256,6 +289,232 @@ reference_inspection_fixture() {
   mg_job() { :; }
   source "$REPO_ROOT/tools/mg.d/meguri-sync-reference.sh"
   docker() { [ "$1" = inspect ] && cat "$REF/inspection.json"; }
+}
+
+@test "reference actual producer and predicates admit only stable empty optional config representations" {
+  local mutation index=0 measured expected_hash
+  mg_job() { :; }
+  source "$REPO_ROOT/tools/mg.d/meguri-sync-reference.sh"
+  for mutation in '' "del c['Config']['ExposedPorts']" "del c['Config']['Volumes']" \
+    "del c['Config']['ExposedPorts']; del c['Config']['Volumes']" \
+    "c['Config']['ExposedPorts']={}; c['Config']['Volumes']={}"; do
+    index=$((index+1))
+    reference_execution_fixture "optional-stable-$index"
+    reference_execute identity '' "$mutation" both
+    [ "$(cat "$REF/status")" = pass ]
+    [ -z "$output" ] && [ ! -e "$REF/failures" ] && [ ! -e "$REF/container.json" ]
+    jq -se '[.[] | select(.[0]=="start")] | length==1' "$REF/docker.jsonl"
+    jq -se --argjson variant "$index" 'map(select(.key=="reference_execution"))[0].value |
+      .measurements_valid and .absence_verified and .execution_exit==0 and
+      .before.property_fingerprints==.after.property_fingerprints and
+      .before.configuration_sha256==.after.configuration_sha256 and
+      (.before.property_fingerprints.Config as $c |
+        ($c|has("ExposedPorts"))==($variant!=2 and $variant!=4) and
+        ($c|has("Volumes"))==($variant!=3 and $variant!=4))' "$REF/details.jsonl"
+    if [ "$index" -eq 1 ] || [ "$index" -eq 5 ]; then
+      measured="$(jq -cs 'map(select(.key=="reference_execution"))[0].value.before' "$REF/details.jsonl")"
+      # Known canonical bytes, independently hashed for both present forms.
+      if [ "$index" -eq 1 ]; then
+        expected_hash="$(printf null | shasum -a 256 | cut -d ' ' -f1)"
+      else
+        expected_hash="$(printf '{}' | shasum -a 256 | cut -d ' ' -f1)"
+      fi
+      jq -e --arg digest "$expected_hash" '.property_fingerprints.Config |
+        .ExposedPorts==$digest and .Volumes==$digest' <<<"$measured"
+    fi
+  done
+}
+
+@test "reference absent versus null changes retain distinct raw hashes and fail terminal identity" {
+  local field phase index=0 before after measured_after plan damaged
+  mg_job() { :; }
+  source "$REPO_ROOT/tools/mg.d/meguri-sync-reference.sh"
+  for field in ExposedPorts Volumes; do
+    for phase in before after; do
+      index=$((index+1))
+      reference_execution_fixture "optional-transition-$index"
+      reference_execute identity '' "del c['Config']['$field']" "$phase"
+      [ "$(cat "$REF/status")" = fail ] && [ -e "$REF/started" ]
+      [ ! -e "$REF/container.json" ]
+      jq -se '[.[] | select(.[0]=="start")] | length==1' "$REF/docker.jsonl"
+      before="$(jq -cs 'map(select(.key=="reference_execution"))[0].value.before' "$REF/details.jsonl")"
+      after="$(jq -cs 'map(select(.key=="reference_execution"))[0].value.after' "$REF/details.jsonl")"
+      jq -ne --argjson b "$before" --argjson a "$after" --arg field "$field" --arg phase "$phase" '
+        $b!=null and $a!=null and $b.configuration_sha256!=$a.configuration_sha256 and
+        $b.inspection_sha256!=$a.inspection_sha256 and
+        ($b.property_fingerprints.Config|has($field))==($phase=="after") and
+        ($a.property_fingerprints.Config|has($field))==($phase=="before") and
+        ($b.property_fingerprints.Config|del(.[$field]))==($a.property_fingerprints.Config|del(.[$field])) and
+        ($b|has("container")) and ($a|has("container")|not) and $a.validation_failure=="check"'
+      plan="$(jq -c '.container | {id:.Id,image:.Image,name:(.Name|ltrimstr("/")),nonce:.Config.Labels.nonce,
+        run:.Config.Labels.run,mode:.Config.Cmd[0],output:.HostConfig.Mounts[0].Source,user:.Config.User,creation_floor:.Created[0:19]}' <<<"$before")"
+      run mg_sync_reference__check "$before" "$plan" null before
+      [ "$status" -eq 0 ]
+      # Rebuild the trusted comparison input from synthetic test-only Docker
+      # stdout; rejected projections are deliberately absent from publication.
+      docker() { [ "$1" = inspect ] && cat "$REF/inspection-after.json"; }
+      measured_after="$(mg_sync_reference__inspect synthetic)"
+      jq -ne --argjson b "$before" --argjson a "$measured_after" '
+        ($b.container|del(.State,.NetworkSettings))==($a.container|del(.State,.NetworkSettings))'
+      # Independently retain both equality barriers: neither copied full hash
+      # nor copied inventory can conceal an actual optional-field transition.
+      damaged="$(jq -c --arg hash "$(jq -r .configuration_sha256 <<<"$before")" '.configuration_sha256=$hash' <<<"$measured_after")"
+      run mg_sync_reference__check "$damaged" "$plan" "$before" after
+      [ "$status" -ne 0 ]
+      damaged="$(jq -c --argjson inv "$(jq -c .property_fingerprints <<<"$before")" '.property_fingerprints=$inv' <<<"$measured_after")"
+      run mg_sync_reference__check "$damaged" "$plan" "$before" after
+      [ "$status" -ne 0 ]
+      jq -se 'map(select(.key=="reference_execution"))[0].value |
+        (.measurements_valid|not) and .execution_exit!=0 and .absence_verified' "$REF/details.jsonl"
+    done
+  done
+}
+
+@test "reference nonempty declared ports and volumes fail actual safety before child start" {
+  local mutation index=0
+  for mutation in "c['Config']['ExposedPorts']={'80/tcp':{}}" \
+    "c['Config']['Volumes']={'/unauthorized':{}}"; do
+    index=$((index+1))
+    reference_execution_fixture "optional-unsafe-$index"
+    reference_execute identity '' "$mutation"
+    [ "$(cat "$REF/status")" = fail ] && [ ! -e "$REF/started" ]
+    [ ! -e "$REF/container.json" ]
+    jq -se '[.[] | select(.[0]=="start")] | length==0' "$REF/docker.jsonl"
+    # The producer admits the schema; the real safety predicate refuses it.
+    jq -se 'map(select(.key=="reference_execution"))[0].value |
+      .before!=null and .after==null and (.measurements_valid|not) and
+      (.before|has("container")|not) and .before.validation_failure=="check" and
+      .actual_exit==null and .execution_exit!=0 and .absence_verified and
+      (.before.property_fingerprints.Config.ExposedPorts|test("^[0-9a-f]{64}$")) and
+      (.before.property_fingerprints.Config.Volumes|test("^[0-9a-f]{64}$"))' "$REF/details.jsonl"
+  done
+}
+
+# Check the actual wrapper publication against the complete synthetic Docker
+# input, independently hashing known bytes. Raw inspections live only in this
+# fake daemon's test scratch, never in an MG report or child output directory.
+reference_assert_rejected_publication() {
+  python3 - "$REF" "$1" "$2" <<'PY'
+import hashlib, json, pathlib, sys
+root, phase, marker = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+details = (root/'details.jsonl').read_text()
+assert marker not in details and marker not in (root/'wrapper.log').read_text()
+execution, = [item['value'] for item in map(json.loads, details.splitlines())
+              if item['key'] == 'reference_execution']
+assert not execution['measurements_valid'] and execution['execution_exit'] != 0
+published = execution[phase]
+assert set(published) == {'inspection_sha256', 'configuration_sha256',
+                          'property_fingerprints', 'validation_failure'}
+assert published['validation_failure'] == 'check'
+raw = (root/('inspection-'+phase+'.json')).read_bytes()
+assert marker in raw.decode()
+assert published['inspection_sha256'] == hashlib.sha256(raw).hexdigest()
+c = json.loads(raw)[0]
+complete = json.dumps({key:c[key] for key in ('Config','HostConfig','Path','Args')},
+                      sort_keys=True, separators=(',',':'), ensure_ascii=True, allow_nan=False).encode('ascii')
+assert published['configuration_sha256'] == hashlib.sha256(complete).hexdigest()
+def fingerprint(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',',':'),
+                                    ensure_ascii=True, allow_nan=False).encode('ascii')).hexdigest()
+assert published['property_fingerprints'] == {
+    **{section:{name:fingerprint(value) for name,value in c[section].items()}
+       for section in ('Config','HostConfig')},
+    **{name:fingerprint(c[name]) for name in ('Path','Args')}}
+if phase == 'before':
+    assert execution['after'] is None and execution['actual_exit'] is None
+    assert not (root/'started').exists()
+else:
+    assert (root/'started').exists() and 'container' in execution['before']
+    assert marker not in json.dumps(execution['before'])
+PY
+}
+
+@test "reference actual producer and wrapper omit arbitrary rejected pre and post projections" {
+  local phase mutation index=0 marker
+  for phase in before after; do
+    for mutation in \
+      "c['Config']['ExposedPorts']={marker:{'nested':marker}}" \
+      "c['Config']['Volumes']={marker:{'nested':marker}}" \
+      "c['Args'].append(marker)" "c['Path']=marker" \
+      "c['Config']['Entrypoint'].append(marker)" "c['Config']['Cmd'].append(marker)" \
+      "c['Config']['Env'].append('MG_RUN_ID='+marker)" \
+      "c['Mounts'][0]['Source']=marker" "c['Mounts'][0]['Destination']=marker" \
+      "c['HostConfig']['Mounts'][0]['Source']=marker" \
+      "c['HostConfig']['Mounts'][0]['Target']=marker" \
+      "c['State']['Error']=marker" "c['State']['OOMKilled']=marker" \
+      "c['Config']['Env'].append('UNEXPECTED='+marker); c['State']['FinishedAt']=marker; c['Mounts'][0]['Source']=marker"; do
+      index=$((index+1))
+      # Arbitrary synthetic data, never a real credential or private token.
+      marker="synthetic-publication-$index-$(printf '%s' "$BATS_TEST_TMPDIR-$index" | shasum -a 256 | cut -c1-24)"
+      reference_execution_fixture "publication-$index"
+      reference_execute identity '' "marker='$marker'; $mutation" "$phase"
+      [ "$(cat "$REF/status")" = fail ]
+      [ ! -e "$REF/container.json" ]
+      reference_assert_rejected_publication "$phase" "$marker"
+      jq -se --arg phase "$phase" '[.[] | select(.[0]=="start")] |
+        length==(if $phase=="before" then 0 else 1 end)' "$REF/docker.jsonl"
+      jq -se 'map(select(.key=="reference_execution"))[0].value |
+        .absence_verified and .cleanup_exit==0 and
+        (.actual_exit==null or .actual_exit==0)' "$REF/details.jsonl"
+      grep -Fx reference-execution "$REF/failures"
+    done
+  done
+}
+
+@test "reference rejected post publication preserves process and cleanup failures" {
+  local defect marker=synthetic-post-failure-volume
+  for defect in process cleanup process-cleanup; do
+    reference_execution_fixture "publication-$defect"
+    reference_execute identity "$defect" "c['Config']['Volumes']={'$marker':{}}" after
+    [ "$(cat "$REF/status")" = fail ]
+    reference_assert_rejected_publication after "$marker"
+    jq -se --arg defect "$defect" 'map(select(.key=="reference_execution"))[0].value |
+      if $defect=="cleanup" then .attach_exit==0 and .actual_exit==0 and .execution_exit!=0
+      else .attach_exit==37 and .actual_exit==37 and .execution_exit==37 end' "$REF/details.jsonl"
+    jq -se --arg defect "$defect" 'map(select(.key=="reference_execution"))[0].value |
+      if $defect=="process" then .cleanup_exit==0 and .absence_verified
+      else .cleanup_exit!=0 and (.absence_verified|not) end' "$REF/details.jsonl"
+    grep -Fx reference-execution "$REF/failures"
+  done
+}
+
+@test "reference afterstate actualExit invalidtype and bounds never disclose raw scalars" {
+  local value index=0 marker=synthetic-actualExit-invalidtype
+  # Isolate actualExit refusal too: no configuration mismatch is needed to
+  # protect a scalar (or its nested values) from separate sibling publication.
+  for value in "'$marker'" "{'$marker':['$marker']}" "['$marker']"; do
+    index=$((index+1))
+    reference_execution_fixture "actualExit-only-$index"
+    reference_execute identity '' "c['State']['ExitCode']=$value" after
+    [ "$(cat "$REF/status")" = fail ]
+    reference_assert_rejected_publication after "$marker"
+    jq -se 'map(select(.key=="reference_execution"))[0].value |
+      .actual_exit==null and .absence_verified and .execution_exit!=0' "$REF/details.jsonl"
+  done
+  for value in "'$marker'" "{'$marker':['$marker']}" "['$marker']" \
+    True False None -1 256; do
+    index=$((index+1))
+    reference_execution_fixture "actualExit-invalidtype-$index"
+    # A simultaneous raw-config mismatch must not short-circuit the scalar
+    # publication barrier, even with an earlier process and cleanup failure.
+    reference_execute identity process-cleanup \
+      "c['Config']['Env'].append('UNEXPECTED=$marker'); c['State']['ExitCode']=$value" after
+    [ "$(cat "$REF/status")" = fail ]
+    reference_assert_rejected_publication after "$marker"
+    jq -se 'map(select(.key=="reference_execution"))[0].value |
+      .actual_exit==null and .attach_exit==37 and .execution_exit==37 and
+      .cleanup_exit!=0 and (.absence_verified|not)' "$REF/details.jsonl"
+  done
+  # Bounded integers remain useful diagnostics even on a rejected postcheck.
+  for value in 0 23 255; do
+    reference_execution_fixture "actualExit-bounded-$value"
+    reference_execute identity '' \
+      "c['Config']['Env'].append('UNEXPECTED=$marker'); c['State']['ExitCode']=$value" after
+    [ "$(cat "$REF/status")" = fail ]
+    reference_assert_rejected_publication after "$marker"
+    jq -se --argjson expected "$value" 'map(select(.key=="reference_execution"))[0].value |
+      .actual_exit==$expected and .absence_verified' "$REF/details.jsonl"
+  done
 }
 
 @test "reference property fingerprints canonicalize object order and retain raw hashes" {
@@ -273,23 +532,24 @@ def reorder(value):
     if isinstance(value, list):
         return [reorder(item) for item in value]
     return value
-path.write_text(json.dumps(reorder(json.loads(path.read_text()))))
+path.write_bytes(b' \r\n\t'+json.dumps(reorder(json.loads(path.read_text())), indent=2).encode()+b'\n \t\r\n\n')
 PY
   second="$(mg_sync_reference__inspect synthetic)"
   printf '%s' "$second" >"$REF/second.json"
   python3 - "$REF" <<'PY'
-import hashlib, json, pathlib, subprocess, sys
+import hashlib, json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 first, second = [json.loads((root/name).read_text()) for name in ('first.json','second.json')]
 assert first['property_fingerprints'] == second['property_fingerprints']
 assert first['inspection_sha256'] != second['inspection_sha256']
 assert first['configuration_sha256'] == second['configuration_sha256']
 for raw_name, measured in [('original.json',first),('inspection.json',second)]:
-    raw = (root/raw_name).read_bytes().rstrip(b'\n')  # Shell capture semantics.
+    raw = (root/raw_name).read_bytes()
     assert measured['inspection_sha256'] == hashlib.sha256(raw).hexdigest()
-    complete = subprocess.check_output(['jq','-cS','.[0] | {Config,HostConfig,Path,Args}'], input=raw)
-    assert measured['configuration_sha256'] == hashlib.sha256(complete).hexdigest()
     original = json.loads(raw)[0]
+    complete = json.dumps({key:original[key] for key in ('Config','HostConfig','Path','Args')},
+                          sort_keys=True, separators=(',',':'), ensure_ascii=True, allow_nan=False).encode('ascii')
+    assert measured['configuration_sha256'] == hashlib.sha256(complete).hexdigest()
     inventory = measured['property_fingerprints']
     assert set(inventory) == {'Config','HostConfig','Path','Args'}
     def fingerprint(value):
@@ -361,20 +621,26 @@ PY
   done
 }
 
-@test "reference property fingerprints distinguish exact integers booleans strings and null" {
+@test "reference full configuration and property hashes distinguish exact integers booleans strings and null" {
   reference_inspection_fixture property-types
-  cp "$REF/inspection.json" "$REF/original.json"
   local token measured index=0
-  for token in 0 1 -1 9007199254740992 9007199254740993 9223372036854775807 \
+  for token in 0 1 -1 9007199254740992 9007199254740993 9007199254740994 9007199254740995 9223372036854775807 \
     true false '"0"' '"1"' '"true"' '"false"' '"null"' '"1e-400"' '"NaN"' null; do
     index=$((index+1))
-    python3 - "$REF" "$token" <<'PY'
-import json, pathlib, sys
-root, token = pathlib.Path(sys.argv[1]), sys.argv[2]
-c = json.loads((root/'original.json').read_text())[0]
-c['Config']['Healthcheck'] = {'Interval':'SYNTHETIC_JSON_NUMBER','Test':['NONE']}
-raw = json.dumps([c]).replace('"SYNTHETIC_JSON_NUMBER"', token)
-(root/'inspection.json').write_text(raw)
+    python3 - "$REF" "$token" "$index" <<'PY'
+import pathlib, sys
+root, token, index = pathlib.Path(sys.argv[1]), sys.argv[2].encode('ascii'), sys.argv[3]
+# Independently specified complete canonical bytes, no numeric parsing or
+# implementation serializer in either expected full or property preimage.
+full = (b'{"Args":["synthetic"],"Config":{"Cmd":[],"Entrypoint":[],"Env":[],"Healthcheck":{"Interval":'
+        +token+b',"Test":["NONE"]},"Image":"","Labels":{},"User":"","WorkingDir":""},'
+        b'"HostConfig":{"AutoRemove":false,"Binds":null,"CapAdd":null,"CapDrop":[],"DeviceRequests":null,'
+        b'"Devices":[],"ExtraHosts":null,"Init":true,"IpcMode":"private","Links":null,"Memory":2147483648,'
+        b'"Mounts":[],"NetworkMode":"none","PidMode":"","PidsLimit":128,"PortBindings":{},"Privileged":false,'
+        b'"PublishAllPorts":false,"ReadonlyRootfs":true,"RestartPolicy":{"MaximumRetryCount":0,"Name":"no"},'
+        b'"SecurityOpt":[],"Tmpfs":{},"UTSMode":"","UsernsMode":"","VolumesFrom":null},"Path":"python"}')
+(root/('full-'+index+'.json')).write_bytes(full)
+(root/'inspection.json').write_bytes(b'['+full[:-1]+b',"Mounts":[],"NetworkSettings":{"Networks":{},"Ports":{}},"State":{}}]\n')
 PY
     measured="$(mg_sync_reference__inspect synthetic)"
     printf '%s' "$measured" >"$REF/type-$index.json"
@@ -383,15 +649,18 @@ PY
   python3 - "$REF" "$index" <<'PY'
 import hashlib, json, pathlib, sys
 root, count = pathlib.Path(sys.argv[1]), int(sys.argv[2])
-digests = []
+digests, full_digests = [], []
 for index in range(1, count+1):
     token = (root/f'token-{index}.txt').read_bytes()
     measured = json.loads((root/f'type-{index}.json').read_text())
     digest = measured['property_fingerprints']['Config']['Healthcheck']
     # Known canonical bytes, with no numeric parsing in the expectation.
     assert digest == hashlib.sha256(b'{"Interval":'+token+b',"Test":["NONE"]}').hexdigest()
+    assert measured['configuration_sha256'] == hashlib.sha256((root/f'full-{index}.json').read_bytes()).hexdigest()
     digests.append(digest)
+    full_digests.append(measured['configuration_sha256'])
 assert len(set(digests)) == count
+assert len(set(full_digests)) == count
 PY
 }
 
@@ -412,19 +681,87 @@ PY
     jq -se '[.[] | select(.[0]=="start")] | length==0' "$REF/docker.jsonl"
     jq -se 'map(select(.key=="reference_execution"))[0].value |
       .before==null and .after==null and (.measurements_valid|not) and .actual_exit==null' "$REF/details.jsonl"
-    run mg_sync_reference__inspect synthetic
+    run --separate-stderr mg_sync_reference__inspect synthetic
     [ "$status" -ne 0 ]
     [ -z "$output" ]
+    [ "$stderr" = 'reference inspection refused: json' ]
   done
+}
+
+@test "reference literal NUL and malformed Docker bytes refuse before capture publication and child start" {
+  local defect expected
+  mg_job() { :; }
+  source "$REPO_ROOT/tools/mg.d/meguri-sync-reference.sh"
+  docker() { [ "$1" = inspect ] && cat "$REF/inspection.json"; }
+  for defect in nul-prefix nul-key nul-string nul-integer nul-between nul-suffix \
+    invalid-utf8 malformed duplicate oversized; do
+    reference_execution_fixture "raw-$defect"
+    RAW_DEFECT="$defect" reference_execute identity raw-inspect
+    [ "$(cat "$REF/status")" = fail ] && [ ! -e "$REF/started" ]
+    [ ! -e "$REF/container.json" ]
+    expected=json
+    [ "$defect" != oversized ] || expected=bounds
+    [ "$output" = "reference inspection refused: $expected" ]
+    jq -se '[.[] | select(.[0]=="start")] | length==0' "$REF/docker.jsonl"
+    jq -se 'map(select(.key=="reference_execution"))[0].value |
+      .before==null and .after==null and .actual_exit==null and
+      (.measurements_valid|not) and .execution_exit!=0 and .absence_verified' "$REF/details.jsonl"
+    ! rg 'SYNTHETIC_RAW_VALUE|private-fixture-value|NOT_PUBLIC|ignored null byte' "$REF/details.jsonl" "$REF/wrapper.log"
+    # Exercise the actual binary reader directly on the same original bytes.
+    run --separate-stderr mg_sync_reference__inspect synthetic
+    [ "$status" -ne 0 ] && [ -z "$output" ]
+    [ "$stderr" = "reference inspection refused: $expected" ]
+  done
+}
+
+@test "reference wrapper refuses valid Docker inspection stdout followed by producer failure" {
+  local phase
+  for phase in pre post; do
+    reference_execution_fixture "output-fail-$phase"
+    reference_execute identity "$phase-inspect-output-fail"
+    [ "$(cat "$REF/status")" = fail ] && [ ! -e "$REF/container.json" ]
+    [ "$output" = 'reference inspection refused: read' ]
+    jq -se --arg phase "$phase" '[.[] | select(.[0]=="start")] |
+      length==(if $phase=="pre" then 0 else 1 end)' "$REF/docker.jsonl"
+    jq -se --arg phase "$phase" 'map(select(.key=="reference_execution"))[0].value |
+      .after==null and .actual_exit==null and (.measurements_valid|not) and
+      .execution_exit!=0 and .absence_verified and
+      (if $phase=="pre" then .before==null else (.before|has("container")) end)' "$REF/details.jsonl"
+    ! rg 'private-fixture-value|NOT_PUBLIC' "$REF/details.jsonl" "$REF/wrapper.log"
+    if [ "$phase" = pre ]; then [ ! -e "$REF/started" ]; else [ -e "$REF/started" ]; fi
+  done
+}
+
+@test "reference wrapper retains complete raw whitespace in both accepted inspection hashes" {
+  reference_execution_fixture inspect-whitespace
+  reference_execute identity inspect-whitespace
+  [ "$(cat "$REF/status")" = pass ] && [ -z "$output" ]
+  [ ! -e "$REF/container.json" ] && [ ! -e "$REF/failures" ]
+  python3 - "$REF" <<'PY'
+import hashlib, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+execution, = [item['value'] for item in map(json.loads, (root/'details.jsonl').read_text().splitlines())
+              if item['key'] == 'reference_execution']
+assert execution['measurements_valid'] and execution['absence_verified']
+for phase in ('before','after'):
+    raw = (root/('inspection-'+phase+'.json')).read_bytes()
+    assert raw.startswith(b' \r\n\t') and raw.endswith(b' \t\r\n\n')
+    assert execution[phase]['inspection_sha256'] == hashlib.sha256(raw).hexdigest()
+    assert execution[phase]['inspection_sha256'] != hashlib.sha256(raw.strip()).hexdigest()
+assert execution['before']['configuration_sha256'] == execution['after']['configuration_sha256']
+assert execution['before']['property_fingerprints'] == execution['after']['property_fingerprints']
+PY
 }
 
 @test "reference inspection refuses overcount oversized malformed and incomplete diagnostics before publication" {
   reference_inspection_fixture property-invalid
   cp "$REF/inspection.json" "$REF/original.json"
-  local defect
+  local defect expected
   for defect in config-count host-count oversized-value oversized-name invalid-name unknown-name \
     missing-config missing-host missing-path missing-args missing-property empty-config wrong-host \
-    wrong-path wrong-args extra-record duplicate-property duplicate-nested nan infinity overflow; do
+    wrong-path wrong-args extra-record duplicate-property duplicate-nested nan infinity overflow \
+    missing-user missing-memory empty-input malformed-json invalid-utf8 projection-shape \
+    env-shape labels-shape state-shape network-shape host-mount-shape bind-shape; do
     python3 - "$REF" "$defect" <<'PY'
 import json, pathlib, sys
 root, defect = pathlib.Path(sys.argv[1]), sys.argv[2]
@@ -432,10 +769,12 @@ c = json.loads((root/'original.json').read_text())[0]
 if defect in ('config-count','host-count'):
     section, count = ('Config',33) if defect == 'config-count' else ('HostConfig',97)
     c[section] = {'Schema'+str(index):None for index in range(count)}
-elif defect == 'oversized-value': c['Config']['Env'].append('X'*(8*1024*1024))
+elif defect == 'oversized-value': c['Config']['Env'].append('SYNTHETIC_OVERSIZE')
 elif defect == 'oversized-name': c['Config']['A'*10000] = None
 elif defect == 'invalid-name': c['HostConfig']['synthetic\nname'] = None
 elif defect == 'unknown-name': c['Config']['UnknownSchemaProperty'] = None
+elif defect == 'missing-user': del c['Config']['User']
+elif defect == 'missing-memory': del c['HostConfig']['Memory']
 elif defect.startswith('missing-') and defect != 'missing-property':
     del c[{'missing-config':'Config','missing-host':'HostConfig','missing-path':'Path','missing-args':'Args'}[defect]]
 elif defect == 'missing-property': del c['Config']['Env']
@@ -443,17 +782,56 @@ elif defect == 'empty-config': c['Config'] = {}
 elif defect == 'wrong-host': c['HostConfig'] = []
 elif defect == 'wrong-path': c['Path'] = None
 elif defect == 'wrong-args': c['Args'] = [False]
+elif defect == 'projection-shape': c['Mounts'] = None
+elif defect == 'env-shape': c['Config']['Env'] = [{'SYNTHETIC_EXCEPTION_VALUE':['SYNTHETIC_EXCEPTION_VALUE']}]
+elif defect == 'labels-shape': c['Config']['Labels'] = 'SYNTHETIC_EXCEPTION_VALUE'
+elif defect == 'state-shape': c['State'] = 'SYNTHETIC_EXCEPTION_VALUE'
+elif defect == 'network-shape': c['NetworkSettings']['Networks'] = 'SYNTHETIC_EXCEPTION_VALUE'
+elif defect == 'host-mount-shape': c['HostConfig']['Mounts'] = ['SYNTHETIC_EXCEPTION_VALUE']
+elif defect == 'bind-shape': c['HostConfig']['Mounts'][0]['BindOptions'] = 'SYNTHETIC_EXCEPTION_VALUE'
 elif defect in ('nan','infinity'): c['HostConfig']['Memory'] = float('nan' if defect == 'nan' else 'inf')
 raw = json.dumps([c,c] if defect == 'extra-record' else [c])
+if defect == 'oversized-value':
+    raw = raw.replace('SYNTHETIC_OVERSIZE', 'X'*(8*1024*1024+1-len(raw)+len('SYNTHETIC_OVERSIZE')))
 if defect == 'duplicate-property': raw = raw.replace('"Path": "python"','"Path": "other", "Path": "python"')
 if defect == 'duplicate-nested': raw = raw.replace('"MaximumRetryCount": 0','"MaximumRetryCount": 1, "MaximumRetryCount": 0')
 if defect == 'overflow': raw = raw.replace('2147483648','1e9999')
+if defect == 'empty-input': raw = ''
+if defect == 'malformed-json': raw = '{"SYNTHETIC_ARBITRARY_KEY":"/synthetic/private/path"'
+if defect == 'invalid-utf8':
+    (root/'inspection.json').write_bytes(b'\xffSYNTHETIC_EXCEPTION_VALUE')
+    raise SystemExit(0)
 (root/'inspection.json').write_text(raw)
 PY
-    run mg_sync_reference__inspect synthetic
+    case "$defect" in
+      config-count|host-count|oversized-value|empty-config|empty-input) expected=bounds ;;
+      oversized-name|invalid-name|unknown-name) expected=schema ;;
+      missing-path|missing-args|missing-property|missing-user|missing-memory) expected=required ;;
+      missing-config|missing-host|wrong-host|wrong-path|wrong-args|extra-record|projection-shape|\
+      env-shape|labels-shape|state-shape|network-shape|host-mount-shape|bind-shape) expected=shape ;;
+      *) expected=json ;;
+    esac
+    run --separate-stderr mg_sync_reference__inspect synthetic
     [ "$status" -ne 0 ]
     [ -z "$output" ]
+    [ "$stderr" = "reference inspection refused: $expected" ]
   done
+}
+
+@test "reference producer failures including valid stdout expose only fixed read failure" {
+  reference_inspection_fixture property-stage
+  docker() { printf '%s\n' 'SYNTHETIC_DAEMON_EXCEPTION /synthetic/private/path' >&2; return 51; }
+  run --separate-stderr mg_sync_reference__inspect synthetic
+  [ "$status" -ne 0 ] && [ -z "$output" ]
+  [ "$stderr" = 'reference inspection refused: read' ]
+  docker() {
+    cat "$REF/inspection.json"
+    printf '%s\n' 'SYNTHETIC_DAEMON_EXCEPTION /synthetic/private/path' >&2
+    return 51
+  }
+  run --separate-stderr mg_sync_reference__inspect synthetic
+  [ "$status" -ne 0 ] && [ -z "$output" ]
+  [ "$stderr" = 'reference inspection refused: read' ]
 }
 
 @test "reference fingerprint predicates refuse missing malformed and inconsistent inventories" {
@@ -468,16 +846,22 @@ PY
   run mg_sync_reference__check "$after" "$plan" "$before" after
   [ "$status" -eq 0 ]
   for filter in 'del(.property_fingerprints)' 'del(.property_fingerprints.Config.Env)' \
+    'del(.property_fingerprints.Config.User)' 'del(.property_fingerprints.HostConfig.Memory)' \
     '.property_fingerprints.HostConfig={}' '.property_fingerprints.Config.Env="bad"' \
     '.property_fingerprints.Extra={}' '.property_fingerprints.Path=null' \
     '.property_fingerprints.Config.UnknownSchemaProperty=("a"*64)' \
     '.property_fingerprints.Config["bad-name"]=("a"*64)' \
     '.property_fingerprints.Config[("A"*41)]=("a"*64)' \
     '.property_fingerprints.Config=reduce range(33) as $i ({}; .["Schema"+($i|tostring)]=("a"*64))' \
-    '.property_fingerprints.HostConfig=reduce range(97) as $i ({}; .["Schema"+($i|tostring)]=("a"*64))'; do
+    '.property_fingerprints.HostConfig=reduce range(97) as $i ({}; .["Schema"+($i|tostring)]=("a"*64))' \
+    '.container="SYNTHETIC_PREDICATE_VALUE"' \
+    '.container.HostConfig="SYNTHETIC_PREDICATE_VALUE"' \
+    '.container.State="SYNTHETIC_PREDICATE_VALUE"' \
+    '.property_fingerprints.Config=[{"SYNTHETIC_PREDICATE_VALUE":"SYNTHETIC_PREDICATE_VALUE"}]'; do
     damaged="$(jq -c "$filter" <<<"$before")"
-    run mg_sync_reference__check "$damaged" "$plan" null before
+    run --separate-stderr mg_sync_reference__check "$damaged" "$plan" null before
     [ "$status" -ne 0 ]
+    [ -z "$output" ] && [ -z "$stderr" ]
   done
   # Even a syntactically valid property digest change remains a refusal when
   # the complete raw hash and sanitized projection are supplied unchanged.
@@ -493,6 +877,7 @@ PY
 @test "reference malformed property diagnostics fail closed without starting the child" {
   local mutation index=0
   for mutation in "c['Config']['UnknownSchemaProperty']=None" "del c['Config']['Env']" \
+    "del c['Config']['User']" "del c['HostConfig']['Memory']" \
     "c['HostConfig']['synthetic-name']=None" "c['Config']['A'*10000]=None" \
     "c['Config'].update({'Schema'+str(i):None for i in range(33)})"; do
     index=$((index+1))
@@ -507,7 +892,9 @@ PY
 }
 
 @test "reference retained selftest and identity measure the launched immutable image and terminal state" {
-  local mode
+  local mode measurement_phase measured published
+  mg_job() { :; }
+  source "$REPO_ROOT/tools/mg.d/meguri-sync-reference.sh"
   for mode in selftest identity; do
     reference_execution_fixture "$mode"
     reference_execute "$mode"
@@ -530,6 +917,15 @@ PY
     jq -e --arg mode "$mode" 'keys==["arguments","author_session","batch_base","lock_sha256","mg_job","run_id","source_author_sessions","source_commit","source_sha256"] and
       .arguments==[$mode] and (.source_author_sessions|length)==10' "$REF/run/invocation.json"
     [ "$(cat "$REF/counts")" = "$(printf 'total=3\npassed=3\nfailed=0')" ]
+    # A successful full check still publishes the entire measured object;
+    # compare both phases with the real producer, including every strict field.
+    docker() { [ "$1" = inspect ] && cat "$REF/inspection-$measurement_phase.json"; }
+    for measurement_phase in before after; do
+      measured="$(mg_sync_reference__inspect synthetic)"
+      published="$(jq -cs --arg phase "$measurement_phase" '
+        map(select(.key=="reference_execution"))[0].value[$phase]' "$REF/details.jsonl")"
+      jq -ne --argjson measured "$measured" --argjson published "$published" '$measured==$published'
+    done
   done
 }
 
