@@ -3,6 +3,7 @@
 
 PRODUCT_NAME = Meguri
 PRODUCT_BUNDLE_IDENTIFIER = $(MEGURI_BUNDLE_ID)
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
 
 // Only tools/mg's explicit Mac or simulator Debug CloudAgent build enables this input.

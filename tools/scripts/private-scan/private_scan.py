@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "docs/process/review-log/app-icon-20261118.md":
+        "3c02ff0da56dff510620c4c77ebb5b3919b0f47672b20699f05b7f669ff5b63e",
     'docker/sync-web.Dockerfile.dockerignore':
         'd0f1710720bc5b9d16c22f715f1094909a5978401fd22c65ecefcb07e66c60c6',
     'server/web/scripts/audit-applicability.py':
@@ -1261,6 +1263,8 @@ PUBLIC_ARTIFACTS = {
 # 071ee5ebf2138e3ad180e0aacf6940c2cab5e6d8333741d9925c7bee2b153f39.
 # Keys pin exact repository-path UTF-8 bytes; values pin complete file bytes.
 PUBLIC_VENDOR_ARTIFACTS = {
+    "757fd5fb3da8ccfca681ebdc23701b14eb3a62c18056c970122d156377c7099e":
+        "0d93e6307d73b7076746e06c68cb665584b71b353889af8cf00261e1a130e76b",
     '7f3eddd9b055b1b5220d7e096440db86572a8f0074cc61166de2a6609b308e78':
         '3e2b6410255d6c7d07c209a11d02c793e6b0a1e1156ac8fc0509f2f375051e0d',
     '6a9d04ca41587836af459446bdc65bf4d7255154cbe98aabcce66a19b4c66043':
