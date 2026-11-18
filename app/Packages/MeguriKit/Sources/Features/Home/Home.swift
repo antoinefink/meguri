@@ -10,6 +10,7 @@ public struct HomeView: View {
     public let collection: ReviewCollection
     public let deckID: Int64?
     #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
     @State private var isVisible = false
     @FocusState private var homeFocused: Bool
     #else
@@ -182,7 +183,12 @@ public struct HomeView: View {
                 canPresentAccountSync: collection.navigation.sheet == nil,
                 accountSyncAction: {
                     guard collection.navigation.sheet == nil else { return }
+                    #if os(macOS)
+                    collection.syncPresentation.settingsRequest = UUID()
+                    openSettings()
+                    #else
                     collection.navigation.present(.accountSync)
+                    #endif
                 })
         case .unavailable:
             LoadingStateView(Text("Collection is busy…", bundle: .module))

@@ -12,7 +12,7 @@ import notify
 /// --suite CollectionEntryJourneyTests. First-run picker hierarchy attachments
 /// are required evidence; provider navigation uses visible system labels only.
 @MainActor final class CollectionEntryJourneyTests: XCTestCase {
-    func testNoFileHomeAccountSyncSheetReturnsToCollectionChoices() throws {
+    func testNoFileHomeAccountSyncActionReturnsToCollectionChoices() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
         let bundle = try build.bundleIdentifier
@@ -39,19 +39,33 @@ import notify
         XCTAssertFalse(element(app, "settings.accountSync.content").exists)
         try click(accountSync, app, bundle)
 
+        #if os(macOS)
+        let settings = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10), app.debugDescription)
+        let root = settings.descendants(matching: .any).matching(identifier: "settings.root.content")
+        XCTAssertEqual(root.count, 1, "Account & Sync must open in the native Settings window")
+        let contents = settings.descendants(matching: .any).matching(identifier: "settings.accountSync.content")
+        let content = contents.firstMatch
+        XCTAssertTrue(content.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(contents.count, 1)
+        #else
         let content = element(app, "settings.accountSync.content")
         XCTAssertTrue(content.waitForExistence(timeout: 10), app.debugDescription)
+        #endif
         let service = content.descendants(matching: .any).matching(identifier: "settings.accountSync.service")
         XCTAssertTrue(service.firstMatch.waitForExistence(timeout: 10))
         XCTAssertEqual(service.count, 1, "The standard form must contain its existing Sync Service picker")
         #if os(macOS)
         XCTAssertEqual(service.firstMatch.elementType, .popUpButton)
-        XCTAssertEqual(app.sheets.containing(.button, identifier: "settings.accountSync.done").count, 1)
-        #endif
+        try app.bringToFront(bundleIdentifier: bundle)
+        settings.typeKey("w", modifierFlags: .command)
+        XCTAssertTrue(settings.waitForNonExistence(timeout: 10), "Close the actual Settings window")
+        #else
         let doneButtons = app.buttons.matching(identifier: "settings.accountSync.done")
         let done = try XCTUnwrap(waitForHittable(doneButtons), app.debugDescription)
         XCTAssertEqual(doneButtons.count, 1)
         try click(done, app, bundle)
+        #endif
 
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: content)], timeout: 10), .completed)
