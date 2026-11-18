@@ -106,7 +106,7 @@ public final class CollectionEntryCoordinator {
         editorDecision = (operation, decision)
         task = Task {
             defer { if editorDecision?.operation === operation { editorDecision = nil } }
-            let current = {
+            let current: @MainActor @Sendable () -> Bool = {
                 self.owner === owner && self.revision == expected && self.operation === operation &&
                     self.cancelledActivation !== operation && !Task.isCancelled
             }

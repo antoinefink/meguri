@@ -323,7 +323,7 @@ public final class ManualTransferCoordinator {
         defer { finishWaiters() }
         stage = .applyingDecision; message = nil
         let operation = ManualTransferOperation(); self.operation = operation
-        let current = {
+        let current: @MainActor @Sendable () -> Bool = {
             self.owner === owner && self.revision == expected && self.operation === operation &&
                 self.preview === prepared && operation.cancellation == nil && !Task.isCancelled
         }

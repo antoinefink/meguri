@@ -962,7 +962,7 @@ public final class SyncCoordinator {
         issueMeguri { id in
             let expected = self.generation, revision = self.hostRevision
             self.meguriActiveFacade = facade
-            let current = {
+            let current: @MainActor @Sendable () -> Bool = {
                 self.meguriAction?.id == id && self.meguriBootstrap === facade && self.meguriPreview === preview &&
                     self.meguriCurrent(owner, expected, revision) && !self.meguriCancelling &&
                     !self.settings.paused && !Task.isCancelled
@@ -1034,7 +1034,7 @@ public final class SyncCoordinator {
         issueMeguri { id in
             let expected = self.generation, revision = self.hostRevision
             self.meguriActiveFacade = facade
-            let current = {
+            let current: @MainActor @Sendable () -> Bool = {
                 self.meguriAction?.id == id && self.meguriBootstrap === facade &&
                     self.meguriCurrent(owner, expected, revision) && !self.meguriCancelling &&
                     !self.settings.paused && !Task.isCancelled
@@ -2471,7 +2471,7 @@ public final class SyncCoordinator {
     private func prepareOwnEditorReplacement(_ original: any SyncCoordinatorBackend,
                                             generation expected: UInt64, revision: UInt64) async throws -> Bool {
         guard let taskOwner = ownOwner else { throw CancellationError() }
-        let current = {
+        let current: @MainActor @Sendable () -> Bool = {
             self.ownOwner == taskOwner && self.latestOwnOwner == taskOwner && self.ownTask?.isCancelled == false &&
                 self.backend === original && self.generation == expected && self.hostRevision == revision &&
                 !self.closing && !self.suspended && !self.replacing && !self.settings.paused &&
