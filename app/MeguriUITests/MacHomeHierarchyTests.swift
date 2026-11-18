@@ -225,7 +225,7 @@ final class MacHomeHierarchyTests: XCTestCase {
                 "Media then syncs both ways. On either side, files can be added, replaced or deleted. Files that no card uses are kept.",
                 "After setup, Meguri Sync syncs this collection and its media automatically."
             ] {
-                let content = preview.staticTexts.matching(NSPredicate(format: "label == %@", caption))
+                let content = preview.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", caption, caption))
                 XCTAssertTrue(content.element(boundBy: 0).waitForExistence(timeout: 10), "Require ordinary setup consequence content")
                 XCTAssertEqual(content.count, 1)
             }
