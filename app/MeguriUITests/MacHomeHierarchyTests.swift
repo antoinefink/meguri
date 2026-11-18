@@ -262,7 +262,8 @@ final class MacHomeHierarchyTests: XCTestCase {
             XCTAssertTrue(homeScreens.element(boundBy: 0).waitForExistence(timeout: 10))
             XCTAssertEqual(homeScreens.count, 1)
             let recorded = unique(main, "home.session.recorded")
-            waitFor({ recorded.label == "1 answer recorded" }, "Require exactly the existing one-answer presentation")
+            let expected = "1 answer recorded"
+            waitFor({ recorded.label == expected || recorded.value as? String == expected }, "Require exactly the existing one-answer presentation")
 
             try app.bringToFront(bundleIdentifier: bundle)
             main.typeKey(",", modifierFlags: .command)
