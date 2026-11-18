@@ -1627,7 +1627,20 @@ impl Runtime {
                 activation,
             )?;
             self.refresh_identity()?;
-            if op.binding_before.as_ref().is_some_and(|b| b.state == BindingState::Active) {
+            if let Some(before) = op.binding_before.as_ref().filter(|b| b.state == BindingState::Active) {
+                // The row is durably gone before predecessor setup consent may
+                // qualify again. Leave other owners and unavailable providers
+                // to the ordinary reconciliation checks and their typed errors.
+                let qualify = {
+                    let s = self.state();
+                    s.bound.as_ref().is_some_and(|b| b.binding.id == before.id && b.usable && b.verified)
+                        && s.provider.as_ref().is_none_or(|provider| provider.snapshot().is_ok_and(|doc|
+                            doc.selection == crate::provider::Selection::ICloud && doc.settings.enabled
+                                && !doc.settings.paused && doc.handoff.is_none()))
+                };
+                if qualify {
+                    self.qualify_provider_binding()?;
+                }
                 match self.reconcile_binding(collection, &self.media_service(collection)?, Duration::from_secs(30)) {
                     Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => {},
                     Err(error) => return Err(error),
