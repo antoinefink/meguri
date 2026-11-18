@@ -855,7 +855,7 @@ PUBLIC_ARTIFACTS = {
     'docs/process/review-log/meguri-sync-U11.md':
         '0c346236c3ff8af871444237053e8d6dd93c0eae7b04de31f58856f6ddfda5fd',
     'tools/tests/sync_recovery.bats':
-        'ff842c56e256bbb10fef9de9426c8c7e49f6e2f0417f6db567abb63825843762',
+        '58d02510a34db73837bd1e6fcde1441541892adfa2e46ba2128124a7b07ecb40',
     'tools/scripts/private-scan/tests/test_private_scan.py':
         'f6a486a548efb3a11731237f9d1802f9329b55532c2933ea74704158964288f1',
     'oracle/meguri-sync-server/retained_observer.py':
@@ -1142,7 +1142,7 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/validation.py':
         '0b18623520af011b829fee4f31728ffda31c2c99cc10046b7143b9fdba2a7034',
     'tools/mg.d/meguri-sync-reference.sh':
-        '110c25d69285d792c0994a5acc70130e1a3674ac9a9a99937425cecd21cbd050',
+        '6328d822a00e648b5c3def04590fb55a0a29f0dd793780789d8783ac8b606d4b',
 
     'docs/process/review-log/meguri-sync-reference-privacy.md':
         '4ef0a4f96b31e513f73415ac2160a9ce14e335fbd9cc841ddbe4ed2159e643a8',
