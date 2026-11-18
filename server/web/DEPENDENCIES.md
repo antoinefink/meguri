@@ -23,11 +23,18 @@ installation. The current report has four high findings, assessed below.
 
 The notice scanner retains complete top-level license, copying, notice,
 THIRD-PARTY-LICENSE, ThirdPartyNotice and CopyrightNotice texts. Every installed
-package requires notice evidence. Four exact package/version/path supplements
+package requires notice evidence. Five exact package/version/path supplements
 use SHA-256-pinned files under notices/:
 
 - @rolldown/binding-linux-arm64-gnu 1.2.19: official rolldown 1.2.19 archive
   LICENSE and THIRD-PARTY-LICENSE, matching version, repository and directory.
+- @rolldown/binding-linux-x64-gnu 1.2.19: the optional build-only AMD64 binding
+  uses the same two pinned official rolldown 1.2.19 notice files. Its official
+  archive matches the existing lock's SHA-512 and official metadata, contains
+  only package.json, README.md and the native binding, and omits license text.
+  The same-version rolldown package matches its repository URL and directory;
+  both notice files match the retained files byte-for-byte. This supplements
+  tooling inventory only; runtime notice selection is unchanged.
 - @tailwindcss/oxide-wasm32-wasi 4.3.5: official @tailwindcss/oxide 4.3.5 MIT notice.
 - Bundled @napi-rs/wasm-runtime 1.2.2: official repository root LICENSE at its
   matching package gitHead 5b344c367eeed81d1917f7c4d8e65b1adc16de12.

@@ -835,7 +835,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '69fc817296d3e614184f2c00d8a04a5103fcebeaed8aa7a40d225e375fb1014d',
+        '7b1797798337fd33ae3564c4e2af0d01058e99cc808187b3ae495afac320a493',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1030,7 +1030,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/notices/rolldown-THIRD-PARTY-LICENSE.txt':
         'a877291d800ed43692f3f9ae09d8e01cc6f7293ad39d43896059c188ffbb8b7c',
     'server/web/DEPENDENCIES.md':
-        '098b5299fe78468b47d91c44ef75fec8e7bf8a1c41b49a227993f8f652228e94',
+        'f8d9de7b39e2f8d9deaa25d1333314e25998cd365b162d3973eae3afa655c4e2',
     'server/build.rs':
         'a4dba10f1d809a0c05836778c7c075b2e2243d7c4aeeff12ddc6f9eec3cfc6e4',
     'docker/sync-web.Dockerfile':

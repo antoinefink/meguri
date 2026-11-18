@@ -13,6 +13,11 @@ const supplements = {
     qualification: "Official rolldown 1.2.19 archive LICENSE and THIRD-PARTY-LICENSE; same version, repository and package directory as the binding.",
     files: [["rolldown-LICENSE.txt", "23ecfff35a5a2e80d92142f75228912c3b1abc4b5a8337a821ff4397e2f9f734"], ["rolldown-THIRD-PARTY-LICENSE.txt", "a877291d800ed43692f3f9ae09d8e01cc6f7293ad39d43896059c188ffbb8b7c"]]
   },
+  "node_modules/@rolldown/binding-linux-x64-gnu": {
+    name: "@rolldown/binding-linux-x64-gnu", version: "1.2.19",
+    qualification: "Official rolldown 1.2.19 archive LICENSE and THIRD-PARTY-LICENSE; same version, repository and package directory as the binding.",
+    files: [["rolldown-LICENSE.txt", "23ecfff35a5a2e80d92142f75228912c3b1abc4b5a8337a821ff4397e2f9f734"], ["rolldown-THIRD-PARTY-LICENSE.txt", "a877291d800ed43692f3f9ae09d8e01cc6f7293ad39d43896059c188ffbb8b7c"]]
+  },
   "node_modules/@tailwindcss/oxide-wasm32-wasi": {
     name: "@tailwindcss/oxide-wasm32-wasi", version: "4.3.5",
     qualification: "Official @tailwindcss/oxide 4.3.5 archive MIT notice.",

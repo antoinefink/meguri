@@ -59,6 +59,41 @@
       "licenses": []
     },
     {
+      "name": "@rolldown/binding-linux-x64-gnu",
+      "version": "1.2.19",
+      "url": "https://registry.npmjs.org/@rolldown/binding-linux-x64-gnu/1.2.19",
+      "dist": {
+        "shasum": "3aaea578ecdfd10c83ec4a14db5b70332a761996",
+        "tarball": "https://registry.npmjs.org/@rolldown/binding-linux-x64-gnu/-/binding-linux-x64-gnu-1.2.19.tgz",
+        "fileCount": 3,
+        "integrity": "sha512-rm75/9DkHKeU2WnA8w4X94WGYgLlDCFCfkQC+4bguVJmC/jvDRv2B+2wLOYhyE0fVuv7//Ckk39OoOufyCu76Q==",
+        "signatures": [
+          {
+            "sig": "MEUCIQCDAozhCYHXjNN4P0/b5UyZTHJXEyS4pSXtKoiJXsN7HgIgLntR/dRZ//jXKgVHNEfAXFLCW2TE5UKu6GstgnASnJU=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          },
+          {
+            "sig": "MEUCIHCCQYP1iT4Lhwl1v72EkWaQQKA8IuABk0Fzvy9jM9uMAiEArw/4Nu7ReW6MlAyFuWvlsjbvP0kirhf0RwNUNXvLw4U=",
+            "keyid": "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U"
+          }
+        ],
+        "attestations": {
+          "url": "https://registry.npmjs.org/-/npm/v1/attestations/@rolldown%2fbinding-linux-x64-gnu@1.2.19",
+          "provenance": {
+            "predicateType": "https://slsa.dev/provenance/v1"
+          }
+        },
+        "unpackedSize": 21118337
+      },
+      "gitHead": null,
+      "repository": {
+        "url": "git+https://github.com/rolldown/rolldown.git",
+        "type": "git",
+        "directory": "packages/rolldown"
+      },
+      "licenses": []
+    },
+    {
       "name": "rolldown",
       "version": "1.2.19",
       "url": "https://registry.npmjs.org/rolldown/1.2.19",

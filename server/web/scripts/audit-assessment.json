@@ -28,8 +28,8 @@
         "sha256": "26a7be161cd270092d667210d2d64b2e5089bca2d2f01eb2fe601de4eb657e41"
       },
       "DEPENDENCIES.md": {
-        "bytes": 12478,
-        "sha256": "098b5299fe78468b47d91c44ef75fec8e7bf8a1c41b49a227993f8f652228e94"
+        "bytes": 13014,
+        "sha256": "f8d9de7b39e2f8d9deaa25d1333314e25998cd365b162d3973eae3afa655c4e2"
       },
       "LICENSE": {
         "bytes": 1076,
@@ -44,8 +44,8 @@
         "sha256": "3e49e61ef5d19d79a98698db546a6979b07b4f1a4c50ed3fcf2f8de0b431d3d4"
       },
       "notices/acquisition-records.json": {
-        "bytes": 12409,
-        "sha256": "893c4fe1741391104dc11b9f12960675125849cf8f2bf4108ca23343ca911663"
+        "bytes": 13879,
+        "sha256": "5e178266607d72aeb8fca49fc8ac9de9dc8ba2cc1da5b15c24144cd48c2d6106"
       },
       "notices/napi-rs-LICENSE.txt": {
         "bytes": 2138,
@@ -103,8 +103,8 @@
         "sha256": "1e56ce695dd420abc3d79395a7472ddd89a415e06819ddf4fe0a8cbbbfece660"
       },
       "scripts/notices.mjs": {
-        "bytes": 8947,
-        "sha256": "f454fdbe474abc50ef11ac9cef7aa7e442d9d5072615ec5a22d3176195505362"
+        "bytes": 9431,
+        "sha256": "9b9dcfff4cf6811dcdafe5292b7ec25c87379d0205cf1764ac484c1cd7523ae9"
       },
       "scripts/ready.mjs": {
         "bytes": 581,
