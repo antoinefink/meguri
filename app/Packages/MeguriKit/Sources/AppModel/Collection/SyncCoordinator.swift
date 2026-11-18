@@ -112,8 +112,8 @@ nonisolated struct SyncCommandResult: Sendable {
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }
 
-// Observation and a single replay budget belong to the original wake. Neither
-// an Available event nor this record can create a task or grant admission.
+// Observation and a single replay budget belong to the original wake.
+// Recording either release signal creates no task and grants no admission.
 @MainActor final class MeguriWakeAvailability {
     private let generation: UInt64
     private(set) var revision: UInt64 = 0
@@ -121,8 +121,12 @@ enum SyncOwnerFailure: Error { case configurationUnavailable }
 
     init(generation: UInt64) { self.generation = generation }
 
-    func observe(sequence: UInt64, generation: UInt64) {
+    func observe(kind: CoreEvent.Kind, sequence: UInt64, generation: UInt64) {
         guard generation == self.generation else { return }
+        switch kind {
+        case .available, .sessionEnded: break
+        default: return
+        }
         revision = max(revision, sequence)
     }
 
@@ -1084,9 +1088,9 @@ public final class SyncCoordinator {
                     // round consumes the latest revision before suspending.
                     let recoveredNetwork = meguriRoutine == .network && reachable == true
                         && meguriReachabilityRecoveryRevision != recoveryRevision
-                    // Available may arrive while a not-started collection Busy
-                    // is still returning. Replay once in this wake, only for
-                    // that original outcome; a Media Busy or terminal cannot qualify.
+                    // Available or SessionEnded may arrive while a not-started
+                    // collection Busy is still returning. Replay once in this
+                    // wake for that outcome; a Media Busy or terminal cannot qualify.
                     let missedAvailability = availability.consume(collectionOutcome: report.collection.outcome,
                         since: availabilityRevision, allowed: settings.automatic && meguriCanRun && !meguriCancelling
                             && editRevision == meguriAddressEditRevision)
@@ -1480,6 +1484,7 @@ public final class SyncCoordinator {
     func coreEvent(_ event: CoreEvent) {
         guard !closing else { return }
         if event.generation == generation, providerState?.selection == .meguri {
+            meguriWake?.availability.observe(kind: event.kind, sequence: event.seq, generation: event.generation)
             switch event.kind {
             case .changes(let changes):
                 if changes.source != .syncIncoming && changes.source != .cloudIncoming && changes.source != .cloudRekey {
@@ -1487,8 +1492,7 @@ public final class SyncCoordinator {
                 }
             case .sessionEnded: requestMeguriWake(automatic: true)
             case .available:
-                if let wake = meguriWake { wake.availability.observe(sequence: event.seq, generation: event.generation) }
-                else { requestMeguriWake(automatic: true) }
+                if meguriWake == nil { requestMeguriWake(automatic: true) }
             default: break
             }
         }

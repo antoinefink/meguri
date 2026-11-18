@@ -1,5 +1,5 @@
 @testable import AppModel
-import CoreBridge
+@testable import CoreBridge
 import Foundation
 import SwiftUI
 import Testing
@@ -196,12 +196,12 @@ import Testing
         let wake = MeguriWakeAvailability(generation: 7)
         let beforeFullRound = wake.revision
         // The slot released, but the refused start has not returned to Swift.
-        wake.observe(sequence: 40, generation: 7)
-        wake.observe(sequence: 41, generation: 7)
+        wake.observe(kind: .available, sequence: 40, generation: 7)
+        wake.observe(kind: .available, sequence: 41, generation: 7)
         #expect(wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
         let beforeAdditionalRound = wake.revision
         #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeAdditionalRound, allowed: true))
-        wake.observe(sequence: 42, generation: 7)
+        wake.observe(kind: .available, sequence: 42, generation: 7)
         #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeAdditionalRound, allowed: true))
         // A later wake has its own budget and cannot inherit this observation.
         let laterWake = MeguriWakeAvailability(generation: 7)
@@ -209,15 +209,15 @@ import Testing
     }
     @Test func meguriAvailabilityMustBeNewDuringThisAttemptAndFromItsGeneration() {
         let wake = MeguriWakeAvailability(generation: 7)
-        wake.observe(sequence: 40, generation: 7)
+        wake.observe(kind: .available, sequence: 40, generation: 7)
         let beforeFullRound = wake.revision
-        wake.observe(sequence: 100, generation: 8)
-        wake.observe(sequence: 101, generation: 6)
-        wake.observe(sequence: 40, generation: 7)
-        wake.observe(sequence: 39, generation: 7)
+        wake.observe(kind: .available, sequence: 100, generation: 8)
+        wake.observe(kind: .available, sequence: 101, generation: 6)
+        wake.observe(kind: .available, sequence: 40, generation: 7)
+        wake.observe(kind: .available, sequence: 39, generation: 7)
         #expect(wake.revision == beforeFullRound)
         #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
-        wake.observe(sequence: 41, generation: 7)
+        wake.observe(kind: .available, sequence: 41, generation: 7)
         #expect(wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
     }
     @Test func meguriAvailabilityCannotReplayOtherStartOutcomesOrBypassAdmission() {
@@ -228,12 +228,12 @@ import Testing
         for outcome in outcomes {
             let wake = MeguriWakeAvailability(generation: 7)
             let beforeFullRound = wake.revision
-            wake.observe(sequence: 40, generation: 7)
+            wake.observe(kind: .available, sequence: 40, generation: 7)
             #expect(!wake.consume(collectionOutcome: outcome, since: beforeFullRound, allowed: true))
         }
         let wake = MeguriWakeAvailability(generation: 7)
         let beforeFullRound = wake.revision
-        wake.observe(sequence: 40, generation: 7)
+        wake.observe(kind: .available, sequence: 40, generation: 7)
         // The caller combines the unchanged owner/attempt/facade guards with
         // automatic consent, readiness, edit, pause and cancellation admission.
         #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: false))
@@ -242,11 +242,69 @@ import Testing
     @Test func meguriCancelledWakeCannotConsumeAvailability() async {
         let wake = MeguriWakeAvailability(generation: 7)
         let beforeFullRound = wake.revision
-        wake.observe(sequence: 40, generation: 7)
+        wake.observe(kind: .available, sequence: 40, generation: 7)
         await Task { @MainActor in
             withUnsafeCurrentTask { $0?.cancel() }
             #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
         }.value
+    }
+    @Test func meguriSessionEndedAlonePreservesOneBusyCollectionRetry() {
+        let wake = MeguriWakeAvailability(generation: 7)
+        wake.observe(kind: .sessionEnded(sessionId: 1), sequence: 40, generation: 7)
+        let beforeFullRound = wake.revision
+        wake.observe(kind: .sessionEnded(sessionId: 1), sequence: 100, generation: 8)
+        wake.observe(kind: .sessionEnded(sessionId: 1), sequence: 101, generation: 6)
+        wake.observe(kind: .sessionEnded(sessionId: 1), sequence: 40, generation: 7)
+        wake.observe(kind: .sessionEnded(sessionId: 1), sequence: 39, generation: 7)
+        #expect(wake.revision == beforeFullRound)
+        #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
+        // Real review admission released while the original Busy is returning;
+        // no lifecycle slot release or Available event is required.
+        wake.observe(kind: .sessionEnded(sessionId: 2), sequence: 41, generation: 7)
+        #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: false))
+        #expect(wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
+        let beforeAdditionalRound = wake.revision
+        wake.observe(kind: .sessionEnded(sessionId: 3), sequence: 42, generation: 7)
+        #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeAdditionalRound, allowed: true))
+    }
+    @Test func meguriReleaseSignalsShareOneRetryBudget() {
+        let orders: [[CoreEvent.Kind]] = [
+            [.available, .sessionEnded(sessionId: 1)],
+            [.sessionEnded(sessionId: 1), .available]
+        ]
+        for order in orders {
+            // Cover both coalesced signals and the other signal arriving only
+            // during the retry. Neither order creates a second retry budget.
+            for coalesced in [false, true] {
+                let wake = MeguriWakeAvailability(generation: 7)
+                let beforeFullRound = wake.revision
+                wake.observe(kind: order[0], sequence: 40, generation: 7)
+                if coalesced { wake.observe(kind: order[1], sequence: 41, generation: 7) }
+                #expect(wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
+                let beforeAdditionalRound = wake.revision
+                wake.observe(kind: order[1], sequence: 42, generation: 7)
+                #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeAdditionalRound, allowed: true))
+            }
+        }
+    }
+    @Test func meguriUnrelatedEventsCannotSpendBusyCollectionRetry() {
+        let changes = ChangeSet(wholeCollection: false, source: .userUndoable,
+            cards: [], notes: [], notetypes: [], decks: [], deckConfigs: [], configKeys: [], tags: [],
+            revlogAdded: [], revlogRemoved: [], mediaAdded: [], mediaRemoved: [],
+            skippedIncomingCards: [], skippedIncomingNotes: [], skippedIncomingDecks: [], collectionRow: false)
+        let unrelated: [CoreEvent.Kind] = [.changes(changes), .sessionStarted(sessionId: 1, deckId: 1),
+            .waitingUntil(sessionId: 1, instant: 0), .mediaArrived(names: []),
+            .lifecycle(.opening), .collectionReplaced(generation: 7), .maintenanceDeadline(at: nil),
+            .rolledOver(oldDay: 1, newDay: 2), .timeZoneChanged(zoneID: "UTC"), .nextDayAtChanged(nextDayAt: 0)]
+        for kind in unrelated {
+            let wake = MeguriWakeAvailability(generation: 7)
+            let beforeFullRound = wake.revision
+            wake.observe(kind: kind, sequence: 40, generation: 7)
+            #expect(wake.revision == beforeFullRound)
+            #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
+            wake.observe(kind: .sessionEnded(sessionId: 1), sequence: 41, generation: 7)
+            #expect(wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
+        }
     }
     @Test func meguriLocalRoundCredentialFailuresOfferExistingConnectionRecovery() {
         // Exercise the production local transition without fabricating a ready
