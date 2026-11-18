@@ -140,6 +140,8 @@ elif args[0] == 'create':
       NetworkSettings=dict(Ports={},Networks={}),
       State=dict(Status='created',Running=False,Paused=False,Restarting=False,Dead=False,OOMKilled=False,
         ExitCode=0,Error='',StartedAt='0001-01-01T00:00:00Z',FinishedAt='0001-01-01T00:00:00Z'))
+    # Synthetic raw input for direct tests of the real inspection producer.
+    (root/'inspection.json').write_text(json.dumps([value]))
     if defect != 'create-absent':
         save(value)
     if defect in ('create-uncertain','create-absent'):
@@ -154,7 +156,14 @@ elif args[0] == 'inspect':
     mutation_phase = os.environ.get('MUTATION_PHASE','before')
     if started == (mutation_phase == 'after'):
         exec(os.environ.get('MUTATION',''), {}, {'c':value})
-    emit([value])
+    if defect == 'numeric-token':
+        # Inject the original token without any test-side numeric conversion.
+        value['Config']['Healthcheck'] = {'Interval':'SYNTHETIC_JSON_NUMBER','Test':['NONE']}
+        raw = json.dumps([value]).replace('"SYNTHETIC_JSON_NUMBER"', os.environ['NUMBER_TOKEN'])
+        (root/'inspection.json').write_text(raw)
+        print(raw)
+    else:
+        emit([value])
 elif args[0] == 'start':
     assert args == ['start','--attach',cid] and not (root/'started').exists()
     (root/'started').touch()
@@ -236,6 +245,265 @@ reference_execute() {
   run env REPO_ROOT="$REPO_ROOT" REF="$REF" MODE="$1" DEFECT="${2:-}" \
     MUTATION="${3:-}" MUTATION_PHASE="${4:-before}" bash "$REF/run.sh" "$1"
   [ "$status" -eq 0 ] # MG jobs report status through the receipt sink.
+}
+
+# The real wrapper establishes a valid synthetic baseline first. Direct calls
+# below replace only Docker stdout; producer and fingerprint predicates stay real.
+reference_inspection_fixture() {
+  reference_execution_fixture "$1"
+  reference_execute identity
+  [ "$(cat "$REF/status")" = pass ]
+  mg_job() { :; }
+  source "$REPO_ROOT/tools/mg.d/meguri-sync-reference.sh"
+  docker() { [ "$1" = inspect ] && cat "$REF/inspection.json"; }
+}
+
+@test "reference property fingerprints canonicalize object order and retain raw hashes" {
+  reference_inspection_fixture property-order
+  local first second
+  first="$(mg_sync_reference__inspect synthetic)"
+  printf '%s' "$first" >"$REF/first.json"
+  cp "$REF/inspection.json" "$REF/original.json"
+  python3 - "$REF/inspection.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+def reorder(value):
+    if isinstance(value, dict):
+        return {key: reorder(value[key]) for key in reversed(list(value))}
+    if isinstance(value, list):
+        return [reorder(item) for item in value]
+    return value
+path.write_text(json.dumps(reorder(json.loads(path.read_text()))))
+PY
+  second="$(mg_sync_reference__inspect synthetic)"
+  printf '%s' "$second" >"$REF/second.json"
+  python3 - "$REF" <<'PY'
+import hashlib, json, pathlib, subprocess, sys
+root = pathlib.Path(sys.argv[1])
+first, second = [json.loads((root/name).read_text()) for name in ('first.json','second.json')]
+assert first['property_fingerprints'] == second['property_fingerprints']
+assert first['inspection_sha256'] != second['inspection_sha256']
+assert first['configuration_sha256'] == second['configuration_sha256']
+for raw_name, measured in [('original.json',first),('inspection.json',second)]:
+    raw = (root/raw_name).read_bytes().rstrip(b'\n')  # Shell capture semantics.
+    assert measured['inspection_sha256'] == hashlib.sha256(raw).hexdigest()
+    complete = subprocess.check_output(['jq','-cS','.[0] | {Config,HostConfig,Path,Args}'], input=raw)
+    assert measured['configuration_sha256'] == hashlib.sha256(complete).hexdigest()
+    original = json.loads(raw)[0]
+    inventory = measured['property_fingerprints']
+    assert set(inventory) == {'Config','HostConfig','Path','Args'}
+    def fingerprint(value):
+        encoded = json.dumps(value, sort_keys=True, separators=(',',':'), ensure_ascii=True, allow_nan=False).encode('ascii')
+        return hashlib.sha256(encoded).hexdigest()
+    for section in ('Config','HostConfig'):
+        assert set(inventory[section]) == set(original[section])
+        assert inventory[section] == {key:fingerprint(value) for key,value in original[section].items()}
+    for name in ('Path','Args'):
+        assert inventory[name] == fingerprint(original[name])
+    # Independent known canonical bytes, not just a mirrored serializer.
+    assert inventory['Path'] == hashlib.sha256(b'"python"').hexdigest()
+    assert inventory['HostConfig']['Memory'] == hashlib.sha256(b'2147483648').hexdigest()
+    assert inventory['Config']['Volumes'] == hashlib.sha256(b'null').hexdigest()
+PY
+}
+
+@test "reference property fingerprints isolate changes without publishing nested keys or marker values" {
+  reference_inspection_fixture property-private
+  python3 - "$REF/inspection.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+c = json.loads(path.read_text())[0]
+c['Config']['Env'].append('SYNTHETIC_ENV_KEY=SYNTHETIC_ENV_VALUE')
+c['Config']['Labels']['synthetic-label-key'] = 'SYNTHETIC_LABEL_VALUE'
+c['HostConfig']['LogConfig'] = {'Type':'json-file','Config':{'synthetic-log-key':'SYNTHETIC_LOG_VALUE'}}
+c['State']['Error'] = 'SYNTHETIC_STATE_ERROR_VALUE'
+path.write_text(json.dumps([c]))
+PY
+  local first changed target
+  first="$(mg_sync_reference__inspect synthetic)"
+  printf '%s' "$first" >"$REF/first.json"
+  cp "$REF/inspection.json" "$REF/original.json"
+  for target in Config.Env Config.Labels HostConfig.LogConfig Path Args State.Error; do
+    python3 - "$REF" "$target" <<'PY'
+import json, pathlib, sys
+root, target = pathlib.Path(sys.argv[1]), sys.argv[2]
+c = json.loads((root/'original.json').read_text())[0]
+if target == 'Config.Env': c['Config']['Env'].append('SYNTHETIC_SECOND_ENV=second')
+elif target == 'Config.Labels': c['Config']['Labels']['synthetic-label-key'] = 'second'
+elif target == 'HostConfig.LogConfig': c['HostConfig']['LogConfig']['Config']['synthetic-log-key'] = 'second'
+elif target == 'Path': c['Path'] = 'synthetic-program'
+elif target == 'Args': c['Args'].append('synthetic-argument')
+else: c['State']['Error'] = 'SYNTHETIC_SECOND_STATE_ERROR'
+(root/'inspection.json').write_text(json.dumps([c]))
+PY
+    changed="$(mg_sync_reference__inspect synthetic)"
+    printf '%s' "$changed" >"$REF/changed.json"
+    python3 - "$REF" "$target" <<'PY'
+import json, pathlib, sys
+root, target = pathlib.Path(sys.argv[1]), sys.argv[2]
+first, changed = [(root/name).read_text() for name in ('first.json','changed.json')]
+for published in (first, changed):
+    for marker in ('SYNTHETIC_ENV_KEY','SYNTHETIC_ENV_VALUE','synthetic-label-key',
+                   'SYNTHETIC_LABEL_VALUE','synthetic-log-key','SYNTHETIC_LOG_VALUE',
+                   'SYNTHETIC_STATE_ERROR_VALUE','SYNTHETIC_SECOND_ENV','SYNTHETIC_SECOND_STATE_ERROR',
+                   'NOT_PUBLIC','private-fixture-value'):
+        assert marker not in published
+a, b = json.loads(first), json.loads(changed)
+def flatten(inventory):
+    return {section+'.'+name:value for section in ('Config','HostConfig')
+            for name,value in inventory[section].items()} | {name:inventory[name] for name in ('Path','Args')}
+fa, fb = flatten(a['property_fingerprints']), flatten(b['property_fingerprints'])
+assert fa.keys() == fb.keys()
+assert [key for key in fa if fa[key] != fb[key]] == ([] if target == 'State.Error' else [target])
+assert (a['configuration_sha256'] == b['configuration_sha256']) == (target == 'State.Error')
+assert a['inspection_sha256'] != b['inspection_sha256']
+PY
+  done
+}
+
+@test "reference property fingerprints distinguish exact integers booleans strings and null" {
+  reference_inspection_fixture property-types
+  cp "$REF/inspection.json" "$REF/original.json"
+  local token measured index=0
+  for token in 0 1 -1 9007199254740992 9007199254740993 9223372036854775807 \
+    true false '"0"' '"1"' '"true"' '"false"' '"null"' '"1e-400"' '"NaN"' null; do
+    index=$((index+1))
+    python3 - "$REF" "$token" <<'PY'
+import json, pathlib, sys
+root, token = pathlib.Path(sys.argv[1]), sys.argv[2]
+c = json.loads((root/'original.json').read_text())[0]
+c['Config']['Healthcheck'] = {'Interval':'SYNTHETIC_JSON_NUMBER','Test':['NONE']}
+raw = json.dumps([c]).replace('"SYNTHETIC_JSON_NUMBER"', token)
+(root/'inspection.json').write_text(raw)
+PY
+    measured="$(mg_sync_reference__inspect synthetic)"
+    printf '%s' "$measured" >"$REF/type-$index.json"
+    printf '%s' "$token" >"$REF/token-$index.txt"
+  done
+  python3 - "$REF" "$index" <<'PY'
+import hashlib, json, pathlib, sys
+root, count = pathlib.Path(sys.argv[1]), int(sys.argv[2])
+digests = []
+for index in range(1, count+1):
+    token = (root/f'token-{index}.txt').read_bytes()
+    measured = json.loads((root/f'type-{index}.json').read_text())
+    digest = measured['property_fingerprints']['Config']['Healthcheck']
+    # Known canonical bytes, with no numeric parsing in the expectation.
+    assert digest == hashlib.sha256(b'{"Interval":'+token+b',"Test":["NONE"]}').hexdigest()
+    digests.append(digest)
+assert len(set(digests)) == count
+PY
+}
+
+@test "reference unsupported numeric tokens publish no diagnostic and never start the child" {
+  mg_job() { :; }
+  source "$REPO_ROOT/tools/mg.d/meguri-sync-reference.sh"
+  docker() { [ "$1" = inspect ] && cat "$REF/inspection.json"; }
+  local token index=0
+  # Finite underflow, binary64 rounding collisions, ordinary decimals and
+  # exponent-form integers are unsupported even in optional nested properties.
+  for token in 1e-400 -1e-400 0.0 -0.0 9007199254740992.0 9007199254740993.0 \
+    1.0000000000000001 1.0000000000000002 1e0 1E+0 NaN Infinity -Infinity 1e9999; do
+    index=$((index+1))
+    reference_execution_fixture "numeric-no-start-$index"
+    NUMBER_TOKEN="$token" reference_execute identity numeric-token
+    [ "$(cat "$REF/status")" = fail ]
+    [ ! -e "$REF/started" ]
+    jq -se '[.[] | select(.[0]=="start")] | length==0' "$REF/docker.jsonl"
+    jq -se 'map(select(.key=="reference_execution"))[0].value |
+      .before==null and .after==null and (.measurements_valid|not) and .actual_exit==null' "$REF/details.jsonl"
+    run mg_sync_reference__inspect synthetic
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "reference inspection refuses overcount oversized malformed and incomplete diagnostics before publication" {
+  reference_inspection_fixture property-invalid
+  cp "$REF/inspection.json" "$REF/original.json"
+  local defect
+  for defect in config-count host-count oversized-value oversized-name invalid-name unknown-name \
+    missing-config missing-host missing-path missing-args missing-property empty-config wrong-host \
+    wrong-path wrong-args extra-record duplicate-property duplicate-nested nan infinity overflow; do
+    python3 - "$REF" "$defect" <<'PY'
+import json, pathlib, sys
+root, defect = pathlib.Path(sys.argv[1]), sys.argv[2]
+c = json.loads((root/'original.json').read_text())[0]
+if defect in ('config-count','host-count'):
+    section, count = ('Config',33) if defect == 'config-count' else ('HostConfig',97)
+    c[section] = {'Schema'+str(index):None for index in range(count)}
+elif defect == 'oversized-value': c['Config']['Env'].append('X'*(8*1024*1024))
+elif defect == 'oversized-name': c['Config']['A'*10000] = None
+elif defect == 'invalid-name': c['HostConfig']['synthetic\nname'] = None
+elif defect == 'unknown-name': c['Config']['UnknownSchemaProperty'] = None
+elif defect.startswith('missing-') and defect != 'missing-property':
+    del c[{'missing-config':'Config','missing-host':'HostConfig','missing-path':'Path','missing-args':'Args'}[defect]]
+elif defect == 'missing-property': del c['Config']['Env']
+elif defect == 'empty-config': c['Config'] = {}
+elif defect == 'wrong-host': c['HostConfig'] = []
+elif defect == 'wrong-path': c['Path'] = None
+elif defect == 'wrong-args': c['Args'] = [False]
+elif defect in ('nan','infinity'): c['HostConfig']['Memory'] = float('nan' if defect == 'nan' else 'inf')
+raw = json.dumps([c,c] if defect == 'extra-record' else [c])
+if defect == 'duplicate-property': raw = raw.replace('"Path": "python"','"Path": "other", "Path": "python"')
+if defect == 'duplicate-nested': raw = raw.replace('"MaximumRetryCount": 0','"MaximumRetryCount": 1, "MaximumRetryCount": 0')
+if defect == 'overflow': raw = raw.replace('2147483648','1e9999')
+(root/'inspection.json').write_text(raw)
+PY
+    run mg_sync_reference__inspect synthetic
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+  done
+}
+
+@test "reference fingerprint predicates refuse missing malformed and inconsistent inventories" {
+  reference_inspection_fixture property-predicate
+  local before after plan filter damaged
+  before="$(jq -cs 'map(select(.key=="reference_execution"))[0].value.before' "$REF/details.jsonl")"
+  after="$(jq -cs 'map(select(.key=="reference_execution"))[0].value.after' "$REF/details.jsonl")"
+  plan="$(jq -c '.container | {id:.Id,image:.Image,name:(.Name|ltrimstr("/")),nonce:.Config.Labels.nonce,
+    run:.Config.Labels.run,mode:.Config.Cmd[0],output:.HostConfig.Mounts[0].Source,user:.Config.User,creation_floor:.Created[0:19]}' <<<"$before")"
+  run mg_sync_reference__check "$before" "$plan" null before
+  [ "$status" -eq 0 ]
+  run mg_sync_reference__check "$after" "$plan" "$before" after
+  [ "$status" -eq 0 ]
+  for filter in 'del(.property_fingerprints)' 'del(.property_fingerprints.Config.Env)' \
+    '.property_fingerprints.HostConfig={}' '.property_fingerprints.Config.Env="bad"' \
+    '.property_fingerprints.Extra={}' '.property_fingerprints.Path=null' \
+    '.property_fingerprints.Config.UnknownSchemaProperty=("a"*64)' \
+    '.property_fingerprints.Config["bad-name"]=("a"*64)' \
+    '.property_fingerprints.Config[("A"*41)]=("a"*64)' \
+    '.property_fingerprints.Config=reduce range(33) as $i ({}; .["Schema"+($i|tostring)]=("a"*64))' \
+    '.property_fingerprints.HostConfig=reduce range(97) as $i ({}; .["Schema"+($i|tostring)]=("a"*64))'; do
+    damaged="$(jq -c "$filter" <<<"$before")"
+    run mg_sync_reference__check "$damaged" "$plan" null before
+    [ "$status" -ne 0 ]
+  done
+  # Even a syntactically valid property digest change remains a refusal when
+  # the complete raw hash and sanitized projection are supplied unchanged.
+  damaged="$(jq -c '.property_fingerprints.Config.Env=("a"*64)' <<<"$after")"
+  run mg_sync_reference__check "$damaged" "$plan" "$before" after
+  [ "$status" -ne 0 ]
+  # Identical property diagnostics cannot excuse a different raw fingerprint.
+  damaged="$(jq -c '.configuration_sha256=("a"*64)' <<<"$after")"
+  run mg_sync_reference__check "$damaged" "$plan" "$before" after
+  [ "$status" -ne 0 ]
+}
+
+@test "reference malformed property diagnostics fail closed without starting the child" {
+  local mutation index=0
+  for mutation in "c['Config']['UnknownSchemaProperty']=None" "del c['Config']['Env']" \
+    "c['HostConfig']['synthetic-name']=None" "c['Config']['A'*10000]=None" \
+    "c['Config'].update({'Schema'+str(i):None for i in range(33)})"; do
+    index=$((index+1))
+    reference_execution_fixture "property-no-start-$index"
+    reference_execute identity '' "$mutation"
+    [ "$(cat "$REF/status")" = fail ]
+    [ ! -e "$REF/started" ]
+    jq -se '[.[] | select(.[0]=="start")] | length==0' "$REF/docker.jsonl"
+    jq -se 'map(select(.key=="reference_execution"))[0].value |
+      .before==null and (.measurements_valid|not) and .actual_exit==null' "$REF/details.jsonl"
+  done
 }
 
 @test "reference retained selftest and identity measure the launched immutable image and terminal state" {

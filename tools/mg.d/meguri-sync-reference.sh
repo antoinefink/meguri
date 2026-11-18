@@ -92,14 +92,87 @@ PY
 # Hash captured Docker stdout, but publish only finite identity/config fields.
 # In particular, neither arbitrary environment values nor State.Error escape.
 mg_sync_reference__inspect() {
-  local raw hash configuration_hash
+  local raw hash configuration_hash fingerprints
   raw="$(docker inspect "$1")" || return 1
   hash="$(printf '%s' "$raw" | shasum -a 256 | cut -d ' ' -f1)" || return 1
+  # Parent-only diagnostics: hash each complete property, including all nested
+  # values, but emit only static top-level Docker schema names. These never
+  # replace the complete raw configuration fingerprint or excuse a difference.
+  fingerprints="$(printf '%s' "$raw" | python3 -c '
+import hashlib, json, re, sys
+def require(condition):
+    if not condition:
+        raise ValueError()
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result)
+        result[key] = value
+    return result
+def invalid_number(value):
+    raise ValueError()
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True, allow_nan=False).encode("ascii")
+try:
+    # Bound decoding as well as the final diagnostic representation. No parse
+    # error or exception text (which could contain raw values) is published.
+    raw = sys.stdin.buffer.read(8 * 1024 * 1024 + 1)
+    require(0 < len(raw) <= 8 * 1024 * 1024)
+    # Docker diagnostics support integer numbers only. Refuse decimal/exponent
+    # tokens before conversion can round them or underflow them to zero.
+    records = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
+                         parse_float=invalid_number, parse_constant=invalid_number)
+    require(type(records) is list and len(records) == 1 and type(records[0]) is dict)
+    record = records[0]
+    config_names = set("""Hostname Domainname User AttachStdin AttachStdout AttachStderr
+        ExposedPorts Tty OpenStdin StdinOnce Env Cmd Healthcheck ArgsEscaped Image
+        Volumes WorkingDir Entrypoint NetworkDisabled MacAddress OnBuild Labels
+        StopSignal StopTimeout Shell""".split())
+    host_names = set("""Binds ContainerIDFile LogConfig NetworkMode PortBindings
+        RestartPolicy AutoRemove VolumeDriver VolumesFrom ConsoleSize CapAdd CapDrop
+        CgroupnsMode Dns DnsOptions DnsSearch ExtraHosts GroupAdd IpcMode Cgroup Links
+        OomScoreAdj PidMode Privileged PublishAllPorts ReadonlyRootfs SecurityOpt
+        StorageOpt Tmpfs UTSMode UsernsMode ShmSize Sysctls Runtime Isolation
+        CpuShares Memory NanoCpus CgroupParent BlkioWeight BlkioWeightDevice
+        BlkioDeviceReadBps BlkioDeviceWriteBps BlkioDeviceReadIOps BlkioDeviceWriteIOps
+        CpuPeriod CpuQuota CpuRealtimePeriod CpuRealtimeRuntime CpusetCpus CpusetMems
+        Devices DeviceCgroupRules DeviceRequests KernelMemory KernelMemoryTCP
+        MemoryReservation MemorySwap MemorySwappiness OomKillDisable PidsLimit
+        Ulimits CpuCount CpuPercent IOMaximumIOps IOMaximumBandwidth Mounts MaskedPaths
+        ReadonlyPaths Init Annotations""".split())
+    required_config = set("""Entrypoint Cmd User Image WorkingDir ExposedPorts Volumes
+        Labels Env""".split())
+    required_host = set("""NetworkMode PortBindings PublishAllPorts Init ReadonlyRootfs
+        CapDrop CapAdd SecurityOpt Memory PidsLimit AutoRemove RestartPolicy
+        Privileged Devices DeviceRequests VolumesFrom Links ExtraHosts PidMode
+        IpcMode UTSMode UsernsMode Binds Tmpfs Mounts""".split())
+    inventory = {}
+    for section, allowed, required, limit in (
+            ("Config", config_names, required_config, 32),
+            ("HostConfig", host_names, required_host, 96)):
+        values = record.get(section)
+        require(type(values) is dict and 0 < len(values) <= limit)
+        require(required <= values.keys() <= allowed)
+        require(all(re.fullmatch(r"[A-Z][A-Za-z0-9]{0,39}", name) for name in values))
+        inventory[section] = {name: hashlib.sha256(canonical(value)).hexdigest()
+                              for name, value in values.items()}
+    require(type(record.get("Path")) is str and type(record.get("Args")) is list
+            and all(type(arg) is str for arg in record["Args"]))
+    for name in ("Path", "Args"):
+        inventory[name] = hashlib.sha256(canonical(record[name])).hexdigest()
+    require(len(inventory) == 4 and sum(len(inventory[s]) for s in ("Config", "HostConfig")) + 2 <= 130)
+    encoded = canonical(inventory)
+    require(len(encoded) <= 16384)
+except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
+    sys.exit(1)
+sys.stdout.buffer.write(encoded)
+  ')" || return 1
   configuration_hash="$(jq -cS '.[0] | {Config,HostConfig,Path,Args}' <<<"$raw" | shasum -a 256 | cut -d ' ' -f1)" || return 1
   [[ "$hash" =~ ^[0-9a-f]{64}$ ]] && [[ "$configuration_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
-  jq -ce --arg hash "$hash" --arg configuration "$configuration_hash" '
+  jq -ce --arg hash "$hash" --arg configuration "$configuration_hash" --argjson fingerprints "$fingerprints" '
     select(length==1) | .[0] |
-    {inspection_sha256:$hash,configuration_sha256:$configuration,container:{Id,Image,Name,Created,RestartCount,Path,Args,
+    {inspection_sha256:$hash,configuration_sha256:$configuration,property_fingerprints:$fingerprints,container:{Id,Image,Name,Created,RestartCount,Path,Args,
       Config:{Entrypoint:.Config.Entrypoint,Cmd:.Config.Cmd,User:.Config.User,
         Image:.Config.Image,
         WorkingDir:.Config.WorkingDir,ExposedPorts:.Config.ExposedPorts,Volumes:.Config.Volumes,
@@ -124,7 +197,23 @@ mg_sync_reference__check() {
   jq -e --argjson p "$plan" --argjson before "$before" --arg phase "$phase" --arg ceiling "$ceiling" '
     def timestamp: type=="string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$");
     def instant: rtrimstr("Z") | split(".") | .[0]+"."+(((.[1] // "")+"000000000")[0:9]);
+    def digest: type=="string" and test("^[0-9a-f]{64}$");
+    def properties($limit): type=="object" and length>0 and length<=$limit and
+      all(to_entries[]; (.key | test("^[A-Z][A-Za-z0-9]{0,39}$")) and (.value | digest));
+    def inventory: type=="object" and keys==["Args","Config","HostConfig","Path"] and
+      (.Config | properties(32)) and (.HostConfig | properties(96)) and
+      (.Path | digest) and (.Args | digest) and (tojson | length<=16384);
+    # Same finite Docker schema as the producer; caller-shaped property names
+    # are never admitted by the predicate, even when their hashes look valid.
+    def config_names: "Hostname Domainname User AttachStdin AttachStdout AttachStderr ExposedPorts Tty OpenStdin StdinOnce Env Cmd Healthcheck ArgsEscaped Image Volumes WorkingDir Entrypoint NetworkDisabled MacAddress OnBuild Labels StopSignal StopTimeout Shell" | split(" ");
+    def host_names: "Binds ContainerIDFile LogConfig NetworkMode PortBindings RestartPolicy AutoRemove VolumeDriver VolumesFrom ConsoleSize CapAdd CapDrop CgroupnsMode Dns DnsOptions DnsSearch ExtraHosts GroupAdd IpcMode Cgroup Links OomScoreAdj PidMode Privileged PublishAllPorts ReadonlyRootfs SecurityOpt StorageOpt Tmpfs UTSMode UsernsMode ShmSize Sysctls Runtime Isolation CpuShares Memory NanoCpus CgroupParent BlkioWeight BlkioWeightDevice BlkioDeviceReadBps BlkioDeviceWriteBps BlkioDeviceReadIOps BlkioDeviceWriteIOps CpuPeriod CpuQuota CpuRealtimePeriod CpuRealtimeRuntime CpusetCpus CpusetMems Devices DeviceCgroupRules DeviceRequests KernelMemory KernelMemoryTCP MemoryReservation MemorySwap MemorySwappiness OomKillDisable PidsLimit Ulimits CpuCount CpuPercent IOMaximumIOps IOMaximumBandwidth Mounts MaskedPaths ReadonlyPaths Init Annotations" | split(" ");
     .container as $c | $c.HostConfig as $h |
+    (.inspection_sha256 | digest) and (.configuration_sha256 | digest) and
+    (.property_fingerprints | inventory) and
+    ((.property_fingerprints.Config | keys) - config_names == []) and
+    ((.property_fingerprints.HostConfig | keys) - host_names == []) and
+    ((.property_fingerprints.Config | keys) | contains(["Cmd","Entrypoint","Env","ExposedPorts","Image","Labels","User","Volumes","WorkingDir"])) and
+    ((.property_fingerprints.HostConfig | keys) | contains($h | keys)) and
     ($c.Id==$p.id and ($c.Id | test("^[0-9a-f]{64}$"))) and
     $c.Image==$p.image and $c.Config.Image==$p.image and $c.Name==("/"+$p.name) and
     ($c.Created | timestamp) and $c.Created[0:19]>=$p.creation_floor and $c.Created[0:19]<=$ceiling and
@@ -156,6 +245,7 @@ mg_sync_reference__check() {
        $c.State.StartedAt=="0001-01-01T00:00:00Z" and $c.State.FinishedAt=="0001-01-01T00:00:00Z"
      else
        .configuration_sha256==$before.configuration_sha256 and
+       .property_fingerprints==$before.property_fingerprints and
        ($c | del(.State,.NetworkSettings))==($before.container | del(.State,.NetworkSettings)) and
        $c.State.Status=="exited" and $c.State.Running==false and
        ($c.State.ExitCode | type=="number" and floor==. and .>=0 and .<=255) and
