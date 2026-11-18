@@ -354,6 +354,162 @@ fn daily_facts(host: &CoreHost, fixture: &Fixture, initial: &Value) -> Result<Va
     result["media"] = media_facts(host, true)?;
     Ok(result)
 }
+// PUBLIC provider-client-equality-v1 is one compact line, below 8KiB by its
+// fixed schema (only booleans, fixed labels, usize counts and fixed-width masks).
+// Masks are ordered left to right in Record::to_cells order:
+// notes: id,guid,notetype_id,mtime,usn,tags,fields,sort_field,checksum,flags,data
+// cards: id,note_id,deck_id,ord,mtime,usn,type,queue,due,interval,ease_factor,
+//        reps,lapses,remaining_steps,original_due,original_deck_id,flags,data
+// revlogs: id,card_id,usn,button,interval,last_interval,ease_factor,answer_millis,kind
+// decks: id,name,mtime,usn,common,kind; fsrs: key,usn,mtime,value.
+// A true bit observes unequal whole cells at corresponding positions. No identity
+// alignment occurs. position_key_mismatch may mean reordered or different rows;
+// mask_valid must be true before zero bits imply complete column equality.
+fn daily_equality_diagnostic(actual: &Value, expected: &Value) {
+    use std::io::Write;
+    const KEYS: [&str; 8] = ["format", "notes", "cards", "revlogs", "decks", "fsrs", "fsrs_ok", "media"];
+    const LIMIT: usize = 100;
+    fn exact_keys(v: &Value) -> bool {
+        v.as_object().is_some_and(|o| o.len() == KEYS.len() && KEYS.iter().all(|k| o.contains_key(*k)))
+    }
+    fn bytes(v: &Value) -> bool {
+        v.as_array().is_some_and(|a| a.iter().all(|b| b.as_u64().is_some_and(|n| n <= 255)))
+    }
+    fn cell(v: &Value) -> bool {
+        let Some(c) = v.as_array() else { return false; };
+        match c.first().and_then(Value::as_str) {
+            Some("null") => c.len() == 1,
+            Some("integer") => c.len() == 2 && c[1].as_i64().is_some(),
+            Some("real-bits") => c.len() == 2 && c[1].as_u64().is_some(),
+            Some("text" | "blob") => c.len() == 2 && bytes(&c[1]),
+            _ => false,
+        }
+    }
+    fn row_shape(v: &Value, width: usize) -> &'static str {
+        let Some(r) = v.as_array() else { return "wrong-type"; };
+        if r.len() != width { return "wrong-width"; }
+        if !r.iter().all(cell) { return "invalid-cell"; }
+        "valid"
+    }
+    fn kind(v: Option<&Value>) -> &'static str {
+        match v { None => "missing", Some(v) if v.is_array() => "array", _ => "not-array" }
+    }
+    fn scalar(a: Option<&Value>, b: Option<&Value>, boolean: bool) -> Value {
+        let valid = |v: Option<&Value>| v.is_some_and(|v| if boolean { v.is_boolean() } else { v.as_i64().is_some() });
+        json!({"equal":a == b,"actual":{"present":a.is_some(),"shape_valid":valid(a)},
+            "expected":{"present":b.is_some(),"shape_valid":valid(b)}})
+    }
+    fn rows(a: Option<&Value>, b: Option<&Value>, width: usize, single_fsrs: bool) -> Value {
+        let aa = a.and_then(Value::as_array);
+        let bb = b.and_then(Value::as_array);
+        let count = |r: Option<&Vec<Value>>| if single_fsrs { usize::from(r.is_some()) } else { r.map_or(0, Vec::len) };
+        let an = count(aa); let bn = count(bb);
+        let capped = [an > LIMIT, bn > LIMIT];
+        // Flags accumulate only over existing rows; cardinality is independent.
+        let mut bad_type = [false; 2]; let mut bad_width = [false; 2]; let mut bad_cell = [false; 2];
+        let mut different = vec![false; width];
+        let mut position_key_mismatch = false;
+        // FSRS is a single row, never four rows. Even a non-array FSRS value is
+        // classified below; no columns are accessed until both rows are valid.
+        let n = if single_fsrs { 1 } else { an.max(bn).min(LIMIT) };
+        for i in 0..n {
+            let ar = if single_fsrs { a } else { aa.and_then(|r| r.get(i)) };
+            let br = if single_fsrs { b } else { bb.and_then(|r| r.get(i)) };
+            let mut valid = [false; 2];
+            for (side, row) in [ar, br].into_iter().enumerate() {
+                if let Some(row) = row {
+                    let shape = row_shape(row, width);
+                    bad_type[side] |= shape == "wrong-type";
+                    bad_width[side] |= shape == "wrong-width";
+                    bad_cell[side] |= shape == "invalid-cell";
+                    valid[side] = shape == "valid";
+                }
+            }
+            if valid[0] && valid[1] {
+                if let (Some(ar), Some(br)) = (ar.and_then(Value::as_array), br.and_then(Value::as_array)) {
+                    for col in 0..width { different[col] |= ar[col] != br[col]; }
+                    position_key_mismatch |= ar[0] != br[0];
+                }
+            }
+        }
+        let shape_valid = [aa.is_some() && !capped[0] && !bad_type[0] && !bad_width[0] && !bad_cell[0],
+            bb.is_some() && !capped[1] && !bad_type[1] && !bad_width[1] && !bad_cell[1]];
+        let cardinality_equal = aa.zip(bb).map(|(a, b)| if single_fsrs { true } else { a.len() == b.len() });
+        let mask_valid = shape_valid[0] && shape_valid[1] && cardinality_equal == Some(true);
+        let side = |v: Option<&Value>, r: Option<&Vec<Value>>, i: usize| {
+            let mut facts = json!({"kind":kind(v),"shape_valid":shape_valid[i],"wrong_type":bad_type[i],
+                "wrong_width":bad_width[i],"invalid_cell":bad_cell[i],"capped":capped[i]});
+            // Counts are null for missing/non-array values, never invented zero.
+            if single_fsrs { facts["cell_count"] = json!(r.map(Vec::len)); }
+            else { facts["array_count"] = json!(r.map(Vec::len)); }
+            facts
+        };
+        let mut facts = json!({"equal":a == b,"actual":side(a, aa, 0),"expected":side(b, bb, 1),
+            "different_columns":different,"mask_valid":mask_valid,"incomplete":!mask_valid});
+        if !single_fsrs {
+            facts["cardinality_equal"] = json!(cardinality_equal);
+            facts["position_key_mismatch"] = json!(position_key_mismatch);
+            facts["position_keys_complete"] = json!(mask_valid);
+        }
+        facts
+    }
+    fn media(a: Option<&Value>, b: Option<&Value>) -> Value {
+        const FIELDS: [&str; 3] = ["name", "bytes", "sha256"];
+        let aa = a.and_then(Value::as_array); let bb = b.and_then(Value::as_array);
+        let an = aa.map_or(0, Vec::len); let bn = bb.map_or(0, Vec::len);
+        let capped = [an > LIMIT, bn > LIMIT];
+        let mut wrong_type = [false; 2]; let mut wrong_keys = [false; 2]; let mut invalid_fields = [false; 2];
+        let mut different = [false; 3];
+        for i in 0..an.max(bn).min(LIMIT) {
+            let ar = aa.and_then(|r| r.get(i)); let br = bb.and_then(|r| r.get(i));
+            let mut valid = [false; 2];
+            for (side, row) in [ar, br].into_iter().enumerate() {
+                if let Some(row) = row {
+                    if let Some(o) = row.as_object() {
+                        let keys = o.len() == 3 && FIELDS.iter().all(|k| o.contains_key(*k));
+                        wrong_keys[side] |= !keys;
+                        // Inspect only the three literal fields, never input keys.
+                        let fields = keys && o.get("name").is_some_and(Value::is_string)
+                            && o.get("bytes").is_some_and(bytes)
+                            && o.get("sha256").and_then(Value::as_str).is_some_and(|s|
+                                s.len() == 64 && s.bytes().all(|c| c.is_ascii_hexdigit()));
+                        invalid_fields[side] |= keys && !fields;
+                        valid[side] = fields;
+                    } else { wrong_type[side] = true; }
+                }
+            }
+            if valid[0] && valid[1] {
+                if let (Some(ar), Some(br)) = (ar, br) {
+                    for (col, key) in FIELDS.into_iter().enumerate() { different[col] |= ar.get(key) != br.get(key); }
+                }
+            }
+        }
+        let shape_valid = [aa.is_some() && !capped[0] && !wrong_type[0] && !wrong_keys[0] && !invalid_fields[0],
+            bb.is_some() && !capped[1] && !wrong_type[1] && !wrong_keys[1] && !invalid_fields[1]];
+        let cardinality_equal = aa.zip(bb).map(|(a, b)| a.len() == b.len());
+        let mask_valid = shape_valid[0] && shape_valid[1] && cardinality_equal == Some(true);
+        let side = |v: Option<&Value>, r: Option<&Vec<Value>>, i: usize| json!({"kind":kind(v),
+            "shape_valid":shape_valid[i],"array_count":r.map(Vec::len),"wrong_type":wrong_type[i],
+            "wrong_keys":wrong_keys[i],"invalid_fields":invalid_fields[i],"capped":capped[i]});
+        json!({"equal":a == b,"actual":side(a, aa, 0),"expected":side(b, bb, 1),
+            "cardinality_equal":cardinality_equal,"different_fields":{"name":different[0],"bytes":different[1],"sha256":different[2]},
+            "mask_valid":mask_valid,"incomplete":!mask_valid})
+    }
+    // Only literal lookups enter these constructors. No input Value, key, cell,
+    // payload, tag, filename, digest, scalar value or error is serialized.
+    let facts = json!({"actual_object":actual.is_object(),"expected_object":expected.is_object(),
+        "actual_exact_keys":exact_keys(actual),"expected_exact_keys":exact_keys(expected),"equal":false,
+        "format":scalar(actual.get("format"), expected.get("format"), false),
+        "notes":rows(actual.get("notes"), expected.get("notes"), 11, false),
+        "cards":rows(actual.get("cards"), expected.get("cards"), 18, false),
+        "revlogs":rows(actual.get("revlogs"), expected.get("revlogs"), 9, false),
+        "decks":rows(actual.get("decks"), expected.get("decks"), 6, false),
+        "fsrs":rows(actual.get("fsrs"), expected.get("fsrs"), 4, true),
+        "fsrs_ok":scalar(actual.get("fsrs_ok"), expected.get("fsrs_ok"), true),
+        "media":media(actual.get("media"), expected.get("media"))});
+    // Best effort only: stderr failure must not replace the equality assertion.
+    let _ = writeln!(std::io::stderr().lock(), "provider-client-equality-v1:{facts}");
+}
 fn round_witness(host: &CoreHost) -> Result<Value> {
     let witness = ready(host)?;
     let doc = checked(host.provider_authority().snapshot(), "round-settings")?;
@@ -451,7 +607,11 @@ fn execute_daily(args: &Args, fixture: &Fixture, config: &HostConfig) -> Result<
     }
     require(round_witness(&host)? == witness, "retained-binding-epoch-settings")?;
     let actual = daily_facts(&host, fixture, &initial)?;
-    if !send { require(actual == read_json(&expected_dir.join("expected-daily.json"))?, "exact-daily-row-and-media-equality")?; }
+    if !send {
+        let expected = read_json(&expected_dir.join("expected-daily.json"))?;
+        if args.phase == "review-receive" && actual != expected { daily_equality_diagnostic(&actual, &expected); }
+        require(actual == expected, "exact-daily-row-and-media-equality")?;
+    }
     if reopen { require(read_json(&args.root.join("daily-witness.json"))? == witness, "persisted-daily-witness")?; }
     checked(host.close(), "daily-close")?;
     drop(host);
