@@ -7,12 +7,23 @@ Keep integration base `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
 Its result records 26 passing jobs, 11 failed jobs, one error and pending work.
 T1 checks skipped after T0 did not run.
 
+Latest attempt: `gate/20261118T170640Z-84436` on clean `11692b9ad`, from the same
+integration base. Static checks, static tree, both canary jobs, browser
+verification, Core lint and dependency checks passed. The gate joined with
+exit 2 after the Core child stalled on the unbounded account-read barrier in
+`foreign_collection_arriving_during_account_read_is_preserved_and_never_opened`.
+The retained Core log `core-test/20261118T171335Z-53601` contains 1,283 pass and
+308 fail events for 5,598 selected cases. The cancellation receipts report
+incomplete totals. The remaining jobs did not finish under this gate.
+
 This register groups related failures. The original receipts retain every test
 failure and attachment. Update a row only from actual verification evidence.
 See [the repair rule](merge.md#failure-register).
 
 | Check group | State and evidence | Next check |
 |---|---|---|
+| Tag conformance inventory | Focused repair `87da21848` explicitly accounts for the inactive `tags/complete/filter-sequence` case. All 20 tests passed in `core-test/20261118T173440Z-58177`, including the inventory assertion that failed in the latest gate. Static checks `173556Z-60072` and similarity `173556Z-60528` passed on the committed repair. | Retain the incomplete gate evidence and include the repair in the next required gate. |
+| Synthetic CloudKit identity admission | The incomplete Core log includes FFI identity or account admission failures and Host adoption guard failures. The held-account test waits without a timeout when the underlying identity callback is never reached. | Verify the affected positive fixtures under explicit synthetic service admission and keep the no-consent cases. Bound the held-account test and retain its ownership and recovery assertions. |
 | Rust head metadata, export ownership and CloudKit sort fixture | Focused-verified at `fefef71ad`: nine checks in `core-test/20261116T065928Z-24828` and 361 checks in `20261116T070312Z-26769` pass. [Repair record](review-log/U113-head-metadata-and-export-20261116.md). Full gate not rechecked. | Retain focused evidence; include the repair in the next required gate. |
 | Native conformance | The affected native regression binary passes all eight tests with zero skips in `conformance/20261116T094851Z-94699` on clean `efac37b97`, including the original failed case. [Evidence](review-log/U113-head-metadata-and-export-20261116.md#native-regression-follow-up). | Run the complete corpus and required gate. This focused receipt is diagnostic-only, not full conformance acceptance. |
 | Route inventories | Focused-verified on clean `e5b32751`: both Mac registry assertions and the bad-launch UI case on iPhone Debug/Profile and iPad Debug pass with zero skips. [Repair record](review-log/test-route-inventories-20261116.md). | Include in the required Xcode, snapshot and integration checks. Other failures in those suites remain open. |
