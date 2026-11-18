@@ -243,8 +243,8 @@ extension ReviewCollectionStartupTests {
             try await proof.waitForAdmission(stage: "startup-account-proof-admission")
             // The real resolver is admitted first; hold a later actual status.
             hold.armed = true
-            harness.sync.setDeviceSettings(paused: false, automatic: false, media: false)
-            harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            let settings = harness.sync.settings
+            harness.sync.setDeviceSettings(paused: settings.paused, automatic: settings.automatic, media: !settings.media)
             try #require(try await publicationSignal(entered.stream, stage: "startup-issued-status-entry"))
             #expect(harness.sync.recovery?.step == .bound)
             #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
