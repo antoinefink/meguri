@@ -872,29 +872,64 @@ impl cloud::runtime::IdentityProvider for InitialIdentity {
 }
 struct HeldInitialIdentity {
     source: Arc<dyn cloud::runtime::IdentityProvider>,
-    entered: std::sync::Barrier,
-    release: std::sync::Barrier,
+    entered: std::sync::mpsc::SyncSender<()>,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
     did_hold: std::sync::atomic::AtomicBool,
 }
 impl cloud::runtime::IdentityProvider for HeldInitialIdentity {
     fn read_identity(&self, scope: &cloud::BuildScope) -> cloud::runtime::IdentityStatus {
         if !self.did_hold.swap(true, Ordering::SeqCst) {
-            self.entered.wait();
-            self.release.wait();
+            self.entered.send(()).unwrap();
+            self.release.lock().unwrap().recv_timeout(std::time::Duration::from_secs(30))
+                .expect("release held initial identity read");
         }
         self.source.read_identity(scope)
     }
 }
-fn hold_initial_identity(config: &mut meguri_host::HostConfig) -> Arc<HeldInitialIdentity> {
+struct HeldInitialRead {
+    entered: std::sync::mpsc::Receiver<()>,
+    release: std::sync::mpsc::SyncSender<()>,
+    worker: Option<std::thread::JoinHandle<Result<meguri_host::CoreHost, EngineError>>>,
+}
+impl HeldInitialRead {
+    fn wait_until_entered(&self) {
+        self.entered.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("admitted initial identity callback must be reached");
+    }
+    fn finish(mut self) -> std::thread::Result<Result<meguri_host::CoreHost, EngineError>> {
+        let _ = self.release.try_send(());
+        self.worker.take().unwrap().join()
+    }
+}
+impl Drop for HeldInitialRead {
+    fn drop(&mut self) {
+        // Release and join even if the callback was suppressed, preparation
+        // finished early, or an assertion/file operation unwinds the test.
+        let _ = self.release.try_send(());
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+fn prepare_with_held_initial_identity(
+    process: &meguri_host::ProcessCore,
+    mut config: meguri_host::HostConfig,
+) -> HeldInitialRead {
+    let (entered, arrival) = std::sync::mpsc::sync_channel(1);
+    let (release, resume) = std::sync::mpsc::sync_channel(1);
     let inputs = config.cloud.as_mut().unwrap();
-    let identity = Arc::new(HeldInitialIdentity {
+    inputs.identity = Arc::new(HeldInitialIdentity {
         source: inputs.identity.clone(),
-        entered: std::sync::Barrier::new(2),
-        release: std::sync::Barrier::new(2),
+        entered,
+        release: std::sync::Mutex::new(resume),
         did_hold: std::sync::atomic::AtomicBool::new(false),
     });
-    inputs.identity = identity.clone();
-    identity
+    let process = process.clone();
+    HeldInitialRead {
+        entered: arrival,
+        release,
+        worker: Some(std::thread::spawn(move || process.prepare_cloud_connection(config))),
+    }
 }
 struct NoInitialBackup(AtomicUsize);
 impl meguri_engine::ports::BackupService for NoInitialBackup {
@@ -921,6 +956,14 @@ fn initial_config(directory: &Path) -> (meguri_host::HostConfig, Arc<InitialIden
         files: Arc::new(NativeFiles),
     });
     (config, identity, backup)
+}
+// Match the publication-phase fixtures' real migration of a prior iCloud
+// choice. Existing provider metadata, including Local Only, is never replaced.
+fn prepare_prior_icloud_fixture_configuration(config: &meguri_host::HostConfig) {
+    meguri_host::CoreHost::migrate_provider_configuration(&config.manual_transfer_directory,
+        meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+            enabled: true, paused: false, automatic: true, media: true,
+        })).unwrap();
 }
 fn initial_read(service: &mut Service<SeededRandom>, zone: &str, name: &str) -> cloud::publication::RecordRead {
     let response = service
@@ -1143,15 +1186,12 @@ fn foreign_collection_arriving_during_account_read_is_preserved_and_never_opened
             let local = meguri_host::CoreHost::open(local_config).unwrap();
             assert!(!stored_collection_rows(&local).is_empty());
             local.close().unwrap();
-            let (mut config, _, backup) = initial_config(&directory);
-            let identity = hold_initial_identity(&mut config);
+            let (config, _, backup) = initial_config(&directory);
+            prepare_prior_icloud_fixture_configuration(&config);
             let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
             let generation = process.engine().generation();
-            let worker = {
-                let process = process.clone();
-                std::thread::spawn(move || process.prepare_cloud_connection(config))
-            };
-            identity.entered.wait();
+            let worker = prepare_with_held_initial_identity(&process, config);
+            worker.wait_until_entered();
             assert!(!directory.join("collection.anki2").exists());
             std::fs::rename(foreign.join("collection.anki2"), directory.join("collection.anki2")).unwrap();
             if saved_sidecar {
@@ -1163,8 +1203,7 @@ fn foreign_collection_arriving_during_account_read_is_preserved_and_never_opened
             }
             let before = initial_file_bytes(&directory);
             let native = NativeFiles.identity(&directory.join("collection.anki2")).unwrap();
-            identity.release.wait();
-            assert!(worker.join().unwrap().is_err());
+            assert!(worker.finish().unwrap().is_err());
             assert_eq!(initial_file_bytes(&directory), before);
             assert_eq!(
                 NativeFiles.identity(&directory.join("collection.anki2")).unwrap(),
@@ -1208,19 +1247,15 @@ fn exact_initial_r6_candidate_arriving_during_account_read_uses_the_prepared_hos
         let native = NativeFiles.identity(&live).unwrap();
         let parked = directory.join("held-candidate.anki2");
         std::fs::rename(&live, &parked).unwrap();
-        let (mut config, _, backup) = initial_config(&directory);
-        let identity = hold_initial_identity(&mut config);
+        let (config, _, backup) = initial_config(&directory);
+        prepare_prior_icloud_fixture_configuration(&config);
         let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
         let generation = process.engine().generation();
-        let worker = {
-            let process = process.clone();
-            std::thread::spawn(move || process.prepare_cloud_connection(config))
-        };
-        identity.entered.wait();
+        let worker = prepare_with_held_initial_identity(&process, config);
+        worker.wait_until_entered();
         assert!(process.engine().collection().is_err());
         std::fs::rename(&parked, &live).unwrap();
-        identity.release.wait();
-        let host = worker.join().unwrap().unwrap();
+        let host = worker.finish().unwrap().unwrap();
         assert!(std::ptr::eq(host.review(), process.review()));
         assert_eq!(host.engine().generation().0, generation.0 + 1);
         assert_eq!(process.engine().generation(), host.engine().generation());
@@ -1252,6 +1287,7 @@ fn retained_no_collection_host_adopts_real_inline_rows_without_backup_and_reopen
     let expected = pair.sender.driver().collection_rows().unwrap();
     let directory = pair._root.path().join("initial");
     let (config, _, backup) = initial_config(&directory);
+    prepare_prior_icloud_fixture_configuration(&config);
     let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
     let host = process.prepare_cloud_connection(config.clone()).unwrap();
     let generation = host.engine().generation();
@@ -1331,6 +1367,7 @@ fn initial_adoption_cancel_account_change_and_destination_collision_leave_no_fal
         let mut pair = Pair::published();
         let directory = pair._root.path().join("initial");
         let (config, identity, backup) = initial_config(&directory);
+        prepare_prior_icloud_fixture_configuration(&config);
         let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
         let host = process.prepare_cloud_connection(config).unwrap();
         let preview = initial_preview(&host, &mut pair.service);
@@ -1448,6 +1485,7 @@ fn adoption_payload_source_failures_and_owned_copy_cancellation_leave_live_untou
 
         let directory = generated(pair._root.path(), "live-source-failure", 899);
         let (config, _, backup) = initial_config(&directory);
+        prepare_prior_icloud_fixture_configuration(&config);
         let host = meguri_host::CoreHost::open(config.clone()).unwrap();
         let core = host.cloud_runtime().unwrap();
         let local = initial_rows(&host);
@@ -1570,8 +1608,16 @@ fn initial_adoption_crash_child_entry() {
     let directory = PathBuf::from(directory);
     let point = std::env::var("MEGURI_INITIAL_ADOPT_POINT").unwrap();
     let (config, _, backup) = initial_config(&directory);
+    prepare_prior_icloud_fixture_configuration(&config);
     let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
     let host = process.prepare_cloud_connection(config).unwrap();
+    // The optional prior-sidecar fixture was opened locally without consent.
+    // Migration must preserve that choice; use the real explicit discovery
+    // and successful-confirmation route, as the existing child driver does.
+    let discovery = if host.provider_authority().snapshot().unwrap().selection
+        == meguri_sync::provider::Selection::LocalOnly {
+        Some(host.provider_authority().begin_discovery().unwrap())
+    } else { None };
     let mut replies: std::collections::VecDeque<cloud::adoption::AdoptionReply> =
         serde_json::from_slice(&std::fs::read(directory.join("service-replies.json")).unwrap()).unwrap();
     use cloud::{
@@ -1599,6 +1645,11 @@ fn initial_adoption_crash_child_entry() {
         panic!("ready")
     };
     host.confirm_cloud_adoption(&preview).unwrap();
+    if discovery.is_some() {
+        host.cloud_runtime().unwrap().provider_accept_icloud_connection().unwrap();
+        host.refresh_provider_admission();
+    }
+    drop(discovery);
     meguri_model::faultpoint::arm(&point, meguri_model::faultpoint::Fault::Abort);
     for _ in 0..64 {
         let PublicationWork::Adoption(work) = host.next_cloud_publication_work().unwrap() else {
