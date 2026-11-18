@@ -7,7 +7,15 @@ Keep integration base `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
 Its result records 26 passing jobs, 11 failed jobs, one error and pending work.
 T1 checks skipped after T0 did not run.
 
-Latest attempt: `gate/20261118T170640Z-84436` on clean `11692b9ad`, from the same
+Latest attempt: `gate/20261118T182457Z-10002` on clean `b14752095`, from the same
+integration base. The gate joined with exit 2 after the MeguriKit child stopped
+producing output for over five minutes. The gate recorded 21 passing and five
+failing T0 jobs before cancellation, with no T1 jobs run. The gate and child
+cancellation receipts have incomplete totals. The unfinished checks remain required.
+The completed server suite passed 193 cases, the ARM64 package smoke passed all
+four cases, and native durability passed 320 cases on this source.
+
+Previous attempt: `gate/20261118T170640Z-84436` on clean `11692b9ad`, from the same
 integration base. Static checks, static tree, both canary jobs, browser
 verification, Core lint and dependency checks passed. The gate joined with
 exit 2 after the Core child stalled on the unbounded account-read barrier in
@@ -22,6 +30,11 @@ See [the repair rule](merge.md#failure-register).
 
 | Check group | State and evidence | Next check |
 |---|---|---|
+| Core and native conformance | Core `183312Z-79774` finished with 5,564 passed, 40 failed and 10 skipped. Both 150,000-record sync cases passed. Conformance `191454Z-3799` failed on the same two testkit cases already in Core: learn-ahead fixture settings and prebound card capture. | Verify the reader pin observation, synthetic consent, caller authority, selected control size, retained media and testkit repairs. Keep the remaining adoption failures open. |
+| Host tooling rebuild | `selftest-host/20261118T195313Z-31339` passed 28 of 29. The dev image rebuild stopped before its cache comparison. Child `dev-image/20261118T195444Z-68797` reports a rustup timeout during locked cargo-fuzz installation. | Retain the failed receipt and verify the normal rebuild and cache comparison. |
+| Swift Core pending acknowledgment | Debug `swift-test/20261118T200228Z-99167` finished with 686 passes and one failure. The `afterSDKMutation: true` case of `cloudKitRejectedPendingDrainAutomaticallyRetiresOriginal` threw `runtimeIdentityUnverified`. The false parameter passed. | Verify both parameter cases and keep genuine ownership and identity failures strict. |
+| Swift Core Profile | `swift-test/20261118T201105Z-3839` failed to compile tests that use the Debug-only `MaintenanceCallObservation` helper. The five-millisecond check did not execute. | Verify Profile compilation and run the original performance case. |
+| MeguriKit | `swift-test/20261118T201635Z-6717` joined after SIGTERM. Its partial log records failed methods for retained publication startup, selected provider bootstrap and late cancellation, original revision acknowledgment and peer apply, and adopted phone restoration. The partial log also records tests without a completion line. | Resolve failures and the stall, then rerun the whole child through the original-base gate. |
 | Tag conformance inventory | Focused repair `87da21848` explicitly accounts for the inactive `tags/complete/filter-sequence` case. All 20 tests passed in `core-test/20261118T173440Z-58177`, including the inventory assertion that failed in the latest gate. Static checks `173556Z-60072` and similarity `173556Z-60528` passed on the committed repair. | Retain the incomplete gate evidence and include the repair in the next required gate. |
 | Synthetic CloudKit identity admission | Focused Core `175317Z-80145` passed all 32 Host adoption tests, including the stranded case, and retained 110 FFI failures. The identical 317-case FFI library selection passed in `core-test/20261118T181120Z-96687` after the follow-up in `31dbf3561`. All seven integration checks passed in `core-test/20261118T181515Z-98968` after the repair in `b8889f4af`, including the six original FFI integration failures. Together with the tag repair, focused runs cover all 308 failure IDs recorded by the interrupted Core job. | Include the repairs in the required full gate and retain all original failed and incomplete results. |
 | Rust head metadata, export ownership and CloudKit sort fixture | Focused-verified at `fefef71ad`: nine checks in `core-test/20261116T065928Z-24828` and 361 checks in `20261116T070312Z-26769` pass. [Repair record](review-log/U113-head-metadata-and-export-20261116.md). Full gate not rechecked. | Retain focused evidence; include the repair in the next required gate. |
