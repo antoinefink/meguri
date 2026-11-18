@@ -72,52 +72,21 @@ final class MacHomeHierarchyTests: XCTestCase {
             actionable(picker)
             try click(picker, app: app, bundle: bundle)
             let items = picker.menuItems
-            let optionExists = items.matching(NSPredicate(format: "label == %@", "Meguri Sync"))
-                .element(boundBy: 0).waitForExistence(timeout: 10)
-            if !optionExists {
-                let scopes: [(code: String, menus: XCUIElementQuery, items: XCUIElementQuery)] = [
-                    ("picker", picker.menus, picker.menuItems),
-                    ("settings", settings.menus, settings.menuItems),
-                    ("app", app.menus, app.menuItems)
-                ]
-                let menuItemType = NSNumber(value: XCUIElement.ElementType.menuItem.rawValue)
-                for scope in scopes {
-                    let labelICloud = scope.items.matching(NSPredicate(format: "label == %@", "iCloud Sync")).count
-                    let labelMeguri = scope.items.matching(NSPredicate(format: "label == %@", "Meguri Sync")).count
-                    let titleICloud = scope.items.matching(NSPredicate(format: "title == %@", "iCloud Sync")).count
-                    let titleMeguri = scope.items.matching(NSPredicate(format: "title == %@", "Meguri Sync")).count
-                    let valueICloud = scope.items.matching(NSPredicate(format: "value == %@", "iCloud Sync")).count
-                    let valueMeguri = scope.items.matching(NSPredicate(format: "value == %@", "Meguri Sync")).count
-                    print("ownedPopupScope: \(scope.code) menuTotal=\(scope.menus.count) itemsTotal=\(scope.items.count) "
-                        + "labelICloud=\(labelICloud) labelMeguri=\(labelMeguri) "
-                        + "titleICloud=\(titleICloud) titleMeguri=\(titleMeguri) "
-                        + "valueICloud=\(valueICloud) valueMeguri=\(valueMeguri)")
-                    for attribute in ["label", "title", "value"] {
-                        let candidates = scope.menus.containing(NSPredicate(
-                            format: "elementType == %@ AND %K == %@", menuItemType, attribute, "iCloud Sync"))
-                            .containing(NSPredicate(
-                                format: "elementType == %@ AND %K == %@", menuItemType, attribute, "Meguri Sync"))
-                        let candidateCount = candidates.count
-                        let totalItems = candidateCount == 1 ? candidates.element(boundBy: 0).menuItems.count : -1
-                        print("ownedPopupMenuCandidate: \(scope.code) attribute=\(attribute) "
-                            + "candidateCount=\(candidateCount) totalItems=\(totalItems)")
-                    }
-                }
-            }
-            XCTAssertTrue(optionExists)
+            XCTAssertTrue(items.matching(NSPredicate(format: "title == %@", "Meguri Sync"))
+                .element(boundBy: 0).waitForExistence(timeout: 10))
             XCTAssertEqual(items.count, 2, "LocalOnly is a separate Stop action, never a third provider")
-            XCTAssertEqual(Set(items.allElementsBoundByIndex.map(\.label)), Set(["iCloud Sync", "Meguri Sync"]),
+            XCTAssertEqual(Set(items.allElementsBoundByIndex.map(\.title)), Set(["iCloud Sync", "Meguri Sync"]),
                 "Require the full native menu's actual captions")
             for title in ["iCloud Sync", "Meguri Sync"] {
-                let options = items.matching(NSPredicate(format: "label == %@", title))
+                let options = items.matching(NSPredicate(format: "title == %@", title))
                 XCTAssertEqual(options.count, 1, "Require the exact native service caption: \(title)")
                 XCTAssertEqual(options.element(boundBy: 0).elementType, .menuItem)
                 actionable(options.element(boundBy: 0))
             }
-            let intended = items.matching(NSPredicate(format: "label == %@", caption))
+            let intended = items.matching(NSPredicate(format: "title == %@", caption))
             XCTAssertEqual(intended.count, 1)
             let option = intended.element(boundBy: 0)
-            XCTAssertEqual(option.label, caption)
+            XCTAssertEqual(option.title, caption)
             XCTAssertEqual(option.elementType, .menuItem)
             actionable(option)
             try click(option, app: app, bundle: bundle)
