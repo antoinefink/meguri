@@ -73,7 +73,7 @@ import notify
         try pick(saved, app, bundle)
         XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "6 notes · 11 cards · 7 reviews"))
         try click(element(app, "onboarding.collectionImport.confirm"), app, bundle)
-        let imported = app.buttons.matching(NSPredicate(format: "identifier == %@", "home.deck.row.1788249600212"))
+        let imported = deckRows(app, identifier: "home.deck.row.1788249600212")
         // Return to Home through the production shell after native replacement.
         let home = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.decks",
             sidebarIdentifier: "shell.root.sidebar.home", compactLabel: "Decks", timeout: 30), app.debugDescription)
@@ -252,7 +252,7 @@ import notify
         XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "1 notes · 1 cards · \(reviews) reviews"))
         capture(app, "native-review-import-preview")
         try click(element(app, "onboarding.collectionImport.confirm"), app, bundle)
-        let deckQuery = app.buttons.matching(identifier: "home.deck.row.\(deckID)")
+        let deckQuery = deckRows(app, identifier: "home.deck.row.\(deckID)")
         try waitForAdmission(deckQuery, app, bundle)
         let importedEvidence = try waitNativeReview("imported", app, bundle)
         try click(try XCTUnwrap(waitForHittable(deckQuery)), app, bundle)
@@ -1178,7 +1178,11 @@ import notify
         addTeardownBlock { @MainActor in app.terminate() }
         // Replacement may need RF1's scheduler admission before Home actions.
         if hasLocalCollection {
+            #if os(macOS)
+            let localDeck = deckRows(app, identifier: "home.deck.row.1884308400001")
+            #else
             let localDeck = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.row."))
+            #endif
             try waitForAdmission(localDeck, app, bundle)
         }
         let entry = element(app, "home.collection.import")
@@ -1212,7 +1216,7 @@ import notify
         // Real activation dismisses entry. FSRS policy is the production gate.
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: entryContent)], timeout: 30), .completed)
-        let importedDeck = app.buttons.matching(NSPredicate(format: "identifier == %@", "home.deck.row.1788249600212"))
+        let importedDeck = deckRows(app, identifier: "home.deck.row.1788249600212")
         try waitForAdmission(importedDeck, app, bundle)
         XCTAssertFalse(element(app, "onboarding.collectionImport.error").exists)
         XCTAssertFalse(element(app, "home.collection.error").exists)
@@ -1267,7 +1271,11 @@ import notify
         app.launchArguments = MeguriLaunch(now: "2030-01-15T10:00:00Z", timeZone: "UTC", locale: "en_US", animations: false).arguments
         app.launch()
         XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"))
+        #if os(macOS)
+        let retainedDeck = deckRows(app, identifier: deckIdentifier).element
+        #else
         let retainedDeck = app.buttons[deckIdentifier].firstMatch
+        #endif
         let restartReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             (deckPage.exists && study.isHittable) || (retainedDeck.exists && retainedDeck.isHittable)
         }, object: nil)
@@ -1389,6 +1397,17 @@ import notify
         target.clickOrTap()
     }
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
+    private func deckRows(_ app: XCUIApplication, identifier: String) -> XCUIElementQuery {
+        #if os(macOS)
+        // Home's native outline exposes deck content as static text or a button.
+        // Exact identity excludes the separate sidebar deck outline.
+        return app.outlines.outlineRows.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ AND elementType IN %@", identifier,
+            [XCUIElement.ElementType.staticText.rawValue, XCUIElement.ElementType.button.rawValue]))
+        #else
+        return app.buttons.matching(identifier: identifier)
+        #endif
+    }
     private func text(_ element: XCUIElement) -> String { (element.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? element.label }
     #if os(iOS)
     private func toggleSizeClass(_ bundle: String) throws -> (before: UIUserInterfaceSizeClass, after: UIUserInterfaceSizeClass) {
@@ -1436,13 +1455,21 @@ import notify
         let enable = element(app, "home.policy.enable")
         let policy = element(app, "home.policy.sheet")
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            enable.isHittable || (query.allElementsBoundByIndex.contains { $0.exists && $0.isHittable } && !policy.exists)
+            if enable.isHittable { return true }
+            #if os(macOS)
+            guard query.count == 1 else { return false }
+            #endif
+            return query.allElementsBoundByIndex.contains { $0.exists && $0.isHittable } && !policy.exists
         }, object: nil)
         XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, app.debugDescription)
         if enable.isHittable {
             try click(enable, app, bundle)
             let admitted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                !policy.exists && query.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
+                guard !policy.exists else { return false }
+                #if os(macOS)
+                guard query.count == 1 else { return false }
+                #endif
+                return query.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
             }, object: nil)
             XCTAssertEqual(XCTWaiter().wait(for: [admitted], timeout: 30), .completed, app.debugDescription)
         }
