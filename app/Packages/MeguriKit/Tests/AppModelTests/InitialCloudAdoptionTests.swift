@@ -1485,6 +1485,14 @@ nonisolated struct InitialCloudFixture: Sendable {
         try await adoptedBackend.workflow.stopSyncing()
         try requireHealthy(stage: "core-stopped")
         #expect(sync.settings.enabled && persistedEnabled == true)
+        // Disable the retained selection through its original live owner;
+        // legacy defaults do not override an existing durable preference.
+        let provider = try await CoreProviderService.attached()
+        let current = try await provider.refresh()
+        try #require(current.selection == .iCloud && current.settings?.enabled == true)
+        let saved = try await provider.saveSettings(.init(enabled: false, paused: false, automatic: false, media: true))
+        try #require(saved.selection == .iCloud && !saved.permitsICloudStartup
+            && saved.settings == .init(enabled: false, paused: false, automatic: false, media: true))
         try #require(await owner.close())
         try requireHealthy(stage: "stopped-owner-closed")
         #expect(backends.allSatisfy { $0.closeCount == 1 })

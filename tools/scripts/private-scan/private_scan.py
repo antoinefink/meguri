@@ -1254,7 +1254,7 @@ PUBLIC_ARTIFACTS = {
     'tools/tests/meguri_provider_real_server.bats': '08ede8953f4bd60ee36a9ae0824347d1b5340cb48a412b95523241a1dd661cbe',
     'tools/tests/meguri_native_provider.bats': 'efa0d705a98ddcec7570a1ceb9b84e828808555ca7d3252d2e3c48e5542df74f',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudPreviewActivityTests.swift': '9ad2c7dfb1e320bf428f622df4137fc660375692936788bc8202c11e43dbeded',
-    'app/Packages/MeguriKit/Tests/AppModelTests/InitialCloudAdoptionTests.swift': '48ab986acd174f5306188c85a4d44d1232baea6097f2cb1c27a2794392841796',
+    'app/Packages/MeguriKit/Tests/AppModelTests/InitialCloudAdoptionTests.swift': 'adb1c143645d356dc8cc961329dfbf65d3cc800a2df0fe87e2299f9510aa193e',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudPublicationConfirmationTests.swift': 'b138a276e46e231897282352ec24692aa34d717bdf19b7f6b7a59b702567ecab',
     'app/Packages/MeguriKit/Tests/AppModelTests/Support/CloudServiceAppHarness.swift': 'ca43eb8423fe40f9b19356bce3c4005a1c173e1b8e60dcd3d074bb0eb07b1808',
     "specs/conformance/meguri-sync-mobile-package.md": "4f31ac538c06a2928e97c9c6edfd4378e2bbccaa647e4ff6101ac99b4d90cf9f",
