@@ -17,6 +17,7 @@ enum TestHooks {
         var error: TestHookError?
         /// A shell route's state and features.
         var shell: ShellLaunch?
+        var ownedProvider: OwnedProviderFixture?
 
         /// A launch with any hook option starts from a fresh UI state and
         /// leaves none behind, so a run never depends on the previous one;
@@ -43,6 +44,19 @@ enum TestHooks {
         arguments: [String] = ProcessInfo.processInfo.arguments,
         bundleIdentifier: String = Bundle.main.bundleIdentifier ?? ""
     ) -> Session {
+        // Reject setup-only environments before they can exclude normal startup.
+        if arguments.contains("-MeguriOwnedProviderFixture") {
+            do throws(TestHookError) {
+                let options = try LaunchOptions(arguments: Array(arguments.dropFirst()))
+                if options.ownedProviderFixture {
+                    let environment = ProcessInfo.processInfo.environment
+                    guard ["MEGURI_CLOUD_AGENT_PATH_PREFLIGHT", "MEGURI_CLOUD_ACCOUNT_SETUP",
+                        "MEGURI_CLOUD_AGENT_RUN_DIRECTORY"].allSatisfy({ environment[$0] == nil }) else {
+                        throw TestHookError("OwnedProviderFixture is incompatible with setup-only or agent startup")
+                    }
+                }
+            } catch { return Session(error: error) }
+        }
         #if DEBUG
         if CloudAgentPreflight.requested() {
             CloudAgentPreflight.excludeNormalStartup()
@@ -59,13 +73,15 @@ enum TestHooks {
         WebContentWarmup.shared.listen()
         do throws(TestHookError) {
             let options = try LaunchOptions(arguments: Array(arguments.dropFirst()))
+            let ownedProvider = try options.prepareOwnedProviderFixture(bundleIdentifier: bundleIdentifier)
             let shell = try options.apply(
                 to: &configuration,
                 installer: FixtureInstaller(bundleIdentifier: bundleIdentifier),
-                routes: .standard
+                routes: .standard,
+                ownedProvider: ownedProvider
             )
             AppearanceOverrides.applyProcessWide(options)
-            return Session(options: options, shell: shell)
+            return Session(options: options, shell: shell, ownedProvider: ownedProvider)
         } catch {
             return Session(error: error)
         }

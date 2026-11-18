@@ -58,7 +58,11 @@ struct MeguriApp: App {
         #if MEGURI_TEST_HOOKS
         startsProduction = startsProduction && !hooks.setupOnly && hooks.shell == nil && hooks.error == nil && hooks.options.route == nil
         #endif
-        if startsProduction {
+        var recordsFieldDiagnostics = startsProduction
+        #if MEGURI_TEST_HOOKS
+        recordsFieldDiagnostics = recordsFieldDiagnostics && hooks.ownedProvider == nil
+        #endif
+        if recordsFieldDiagnostics {
             let store = FieldDiagnosticsStore.standard
             configuration.recordDiagnostic = { store.enqueue($0) }
             configuration.fieldDiagnostics = FieldDiagnosticsCallbacks(
@@ -80,7 +84,19 @@ struct MeguriApp: App {
         } else {
             fieldDiagnostics = nil
         }
-        let collection = startsProduction ? ReviewCollection(configuration: configuration, navigation: navigation) : nil
+        let collection: ReviewCollection?
+        #if MEGURI_TEST_HOOKS && os(macOS)
+        if startsProduction, let ownedProvider = hooks.ownedProvider {
+            let sync = SyncCoordinator(directory: configuration.collectionLocation.directory,
+                clock: configuration.clock, defaults: nil, recordDiagnostic: configuration.recordDiagnostic)
+            collection = ReviewCollection(configuration: configuration, navigation: navigation,
+                sync: sync, providerDirectory: ownedProvider.installationDirectory)
+        } else {
+            collection = startsProduction ? ReviewCollection(configuration: configuration, navigation: navigation) : nil
+        }
+        #else
+        collection = startsProduction ? ReviewCollection(configuration: configuration, navigation: navigation) : nil
+        #endif
         #if MEGURI_TEST_HOOKS
         hooks.start(navigation, collection: collection)
         #endif
@@ -89,7 +105,18 @@ struct MeguriApp: App {
             // Preserve navigation/window restoration while unavailable areas stay absent.
             navigation.show(.home)
             #if os(macOS)
+            #if MEGURI_TEST_HOOKS
+            if let ownedProvider = hooks.ownedProvider {
+                AppDelegate.closeCollection = {
+                    let closed = await collection.closeForQuit()
+                    return ownedProvider.cleanup(afterClosing: closed)
+                }
+            } else {
+                AppDelegate.closeCollection = { await collection.closeForQuit() }
+            }
+            #else
             AppDelegate.closeCollection = { await collection.closeForQuit() }
+            #endif
             #endif
         }
         self.collection = collection
@@ -120,7 +147,16 @@ struct MeguriApp: App {
         }
         SwiftUI.Settings {
             if let collection {
+                #if MEGURI_TEST_HOOKS
+                if let ownedProvider = hooks.ownedProvider {
+                    SettingsWindow(collection: collection, features: features, configuration: configuration)
+                        .defaultAppStorage(ownedProvider.defaults)
+                } else {
+                    SettingsWindow(collection: collection, features: features, configuration: configuration)
+                }
+                #else
                 SettingsWindow(collection: collection, features: features, configuration: configuration)
+                #endif
             }
         }
         #else
@@ -137,7 +173,12 @@ struct MeguriApp: App {
     @ViewBuilder private var root: some View {
         #if MEGURI_TEST_HOOKS
         TestHooks.Root(session: hooks, configuration: configuration, navigation: navigation) {
-            RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore, collection: collection)
+            if let ownedProvider = hooks.ownedProvider {
+                RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore, collection: collection)
+                    .defaultAppStorage(ownedProvider.defaults)
+            } else {
+                RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore, collection: collection)
+            }
         }
         #else
         RootView(configuration: configuration, navigation: navigation, features: features, uiStateStore: uiStateStore, collection: collection)

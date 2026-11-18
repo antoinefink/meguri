@@ -17,6 +17,7 @@ extension TestHooks {
     /// | `-MeguriNativeReviewFreezeSHA256`, `-MeguriNativeReviewFreezeBytes` | pinned freeze.json SHA256/size; only the compiled checkout's EmptyCollection fixture is allowed, before any case receipt; no Route/Now/TimeZone |
     /// | `-MeguriImportSource` | iOS only: absolute regular synthetic .colpkg copied to Documents/RF2 Import Tests/review.colpkg for the system picker; changes no collection or route |
     /// | `-MeguriFixture` | absolute path of a collection file (installed as `collection.anki2`) or of a collection directory (installed as the collection directory) |
+    /// | `-MeguriOwnedProviderFixture` | `on` or `off` (default): Mac .dev only, isolated normal-provider launch of this checkout's local-review-1 recipe |
     /// | `-MeguriNow` | `YYYY-MM-DDTHH:MM:SS` with `Z` or `±HH:MM`; without one, the time is local to `-MeguriTimeZone` (or the system zone) |
     /// | `-MeguriTimeZone` | IANA id, e.g. `Asia/Tokyo` |
     /// | `-MeguriLocale` | locale id, e.g. `en_US`; also pass `-AppleLanguages` and `-AppleLocale` for system strings (the UI-test launch helper does) |
@@ -47,6 +48,7 @@ extension TestHooks {
         /// checkout; case resolves only build/mg/ui-test/<case>/expected-replay.
         var nativeReview: NativeReviewInput.Request?
         var fixture: URL?
+        var ownedProviderFixture = false
         var importSource: URL?
         var now: Date?
         var timeZone: TimeZone?
@@ -66,7 +68,7 @@ extension TestHooks {
         static let names = [
             "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
             "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "SizeClass",
-            "Integrations", "Route", "BackgroundLaunch", "ImportSource",
+            "Integrations", "Route", "BackgroundLaunch", "ImportSource", "OwnedProviderFixture",
             "NativeReviewRoot", "NativeReviewCase", "NativeReviewPlatform", "NativeReviewFreezeSHA256", "NativeReviewFreezeBytes",
         ]
 
@@ -92,6 +94,21 @@ extension TestHooks {
                 }
                 values[name] = arguments[index]
                 index += 1
+            }
+
+            if let value = values["OwnedProviderFixture"] {
+                ownedProviderFixture = try Self.onOff(value, "OwnedProviderFixture")
+            }
+            if ownedProviderFixture {
+                let permitted = ["OwnedProviderFixture", "Fixture", "Now", "TimeZone", "Locale", "Animations",
+                    "WindowSize", "Appearance", "ReduceMotion", "ReduceTransparency"]
+                guard values.keys.allSatisfy({ permitted.contains($0) }),
+                      !arguments.contains("-ShowAnkiServerInterface") else {
+                    throw TestHookError("OwnedProviderFixture requires a normal foreground launch without routes, imports, native replay or integrations")
+                }
+                guard values["Fixture"] == OwnedProviderFixture.source.path(percentEncoded: false) else {
+                    throw TestHookError("OwnedProviderFixture requires exactly this checkout's generated local-review-1 directory")
+                }
             }
 
             let nativeNames = ["NativeReviewRoot", "NativeReviewCase", "NativeReviewPlatform", "NativeReviewFreezeSHA256", "NativeReviewFreezeBytes"]
@@ -176,6 +193,25 @@ extension TestHooks {
             }
         }
 
+        func prepareOwnedProviderFixture(bundleIdentifier: String) throws(TestHookError) -> OwnedProviderFixture? {
+            guard ownedProviderFixture else { return nil }
+            try validateOwnedProviderFixture(bundleIdentifier: bundleIdentifier)
+            return try OwnedProviderFixture()
+        }
+
+        private func validateOwnedProviderFixture(bundleIdentifier: String) throws(TestHookError) {
+            #if !os(macOS)
+            throw TestHookError("OwnedProviderFixture applies to the Mac only")
+            #else
+            guard bundleIdentifier.hasSuffix(".dev") else { throw TestHookError("OwnedProviderFixture requires a .dev bundle") }
+            guard nativeReview == nil, importSource == nil, route == nil, sizeClass == nil,
+                  integrations == nil, ankiConnectPort == nil, migakuPort == nil else {
+                throw TestHookError("OwnedProviderFixture requires normal production composition")
+            }
+            try OwnedProviderFixture.validateSource(fixture)
+            #endif
+        }
+
         /// Installs the fixture and overrides the configuration. The route is
         /// resolved last, so its view sees every other override; a shell
         /// route's launch is returned (the app sets its navigation up).
@@ -183,8 +219,15 @@ extension TestHooks {
         func apply(
             to configuration: inout LaunchConfiguration,
             installer: FixtureInstaller,
-            routes: RouteRegistry
+            routes: RouteRegistry,
+            ownedProvider: OwnedProviderFixture? = nil
         ) throws(TestHookError) -> ShellLaunch? {
+            if ownedProviderFixture {
+                try validateOwnedProviderFixture(bundleIdentifier: installer.bundleIdentifier)
+                guard ownedProvider != nil else { throw TestHookError("OwnedProviderFixture requires its prepared owned context") }
+            } else if ownedProvider != nil {
+                throw TestHookError("OwnedProviderFixture context requires explicit opt-in")
+            }
             if let nativeReview {
                 guard installer.bundleIdentifier.hasSuffix(".dev") else { throw TestHookError("NativeReview requires a .dev bundle") }
                 #if os(macOS)
@@ -226,6 +269,9 @@ extension TestHooks {
             }
             if route?.path == "settings/account-sync/setup-needed", fixture == nil {
                 throw TestHookError("settings/account-sync/setup-needed requires -MeguriFixture with a generated collection")
+            }
+            if let ownedProvider {
+                configuration.collectionLocation = ownedProvider.collectionLocation
             }
             if let fixture {
                 try installer.install(from: fixture, into: configuration.collectionLocation)

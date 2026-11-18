@@ -5,6 +5,140 @@ import XCTest
 /// Production Mac outlines over the public generated recipe, with no screen route.
 @MainActor
 final class MacHomeHierarchyTests: XCTestCase {
+    func testNormalMeguriSetupControlsAndCancelledServiceSwitch() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        XCTAssertTrue(build.hasHooks && bundle.hasSuffix(".dev"), "This case requires the actual hook-enabled .dev app")
+        guard build.hasHooks, bundle.hasSuffix(".dev") else { return }
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"),
+            ownedProviderFixture: true, now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris",
+            locale: "en_US", animations: false).arguments
+        app.launch()
+        // Forced termination is failure cleanup only; success requires native Quit below.
+        addTeardownBlock { @MainActor in if app.state != .notRunning { app.terminate() } }
+        let homeMatches = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "shell.root.sidebar.home"))
+        let home = homeMatches.element(boundBy: 0)
+        XCTAssertTrue(home.waitForExistence(timeout: 20))
+        XCTAssertEqual(homeMatches.count, 1)
+        try click(home, app: app, bundle: bundle)
+        let homeScreens = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "home.collection.screen"))
+        XCTAssertTrue(homeScreens.element(boundBy: 0).waitForExistence(timeout: 20),
+            "Stage the generated local-review-1 fixture through tools/mg")
+        XCTAssertEqual(homeScreens.count, 1)
+        _ = namedRow(app, prefix: "home.deck.row.", path: "Local Review::Cards")
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "home.policy.enable"))
+            .element(boundBy: 0).exists, "The generated recipe must already enable FSRS")
+        XCTAssertEqual(app.sheets.count, 0, "Unexpected admission sheets are fixture prerequisite failures")
+
+        func waitFor(_ predicate: @escaping () -> Bool, _ message: String) {
+            let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in predicate() }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 10), .completed, message)
+        }
+        func unique(_ scope: XCUIElement, _ id: String) -> XCUIElement {
+            let matches = scope.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", id))
+            let target = matches.element(boundBy: 0)
+            XCTAssertTrue(target.waitForExistence(timeout: 10), id)
+            XCTAssertEqual(matches.count, 1, id)
+            return target
+        }
+        func actionable(_ target: XCUIElement) {
+            waitFor({ target.exists && target.isEnabled && target.isHittable }, "Native action must be enabled and hittable: \(target.identifier)")
+        }
+        func finiteWindow(_ window: XCUIElement) {
+            let frame = window.frame
+            XCTAssertTrue(!frame.isEmpty && [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite))
+        }
+        let mainWindows = app.windows.containing(NSPredicate(format: "identifier == %@", "home.collection.screen"))
+        XCTAssertEqual(mainWindows.count, 1)
+        let main = mainWindows.element(boundBy: 0)
+        finiteWindow(main)
+        try app.bringToFront(bundleIdentifier: bundle)
+        main.typeKey(",", modifierFlags: .command)
+
+        let settingsWindows = app.windows.containing(NSPredicate(format: "identifier == %@", "settings.root.content"))
+        let settings = settingsWindows.element(boundBy: 0)
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        XCTAssertEqual(settingsWindows.count, 1)
+        finiteWindow(settings)
+        _ = unique(settings, "settings.root.accountSync")
+        let picker = unique(settings, "settings.accountSync.service")
+        XCTAssertEqual(picker.elementType, .popUpButton)
+        actionable(picker)
+
+        func choose(_ caption: String) throws {
+            actionable(picker)
+            try click(picker, app: app, bundle: bundle)
+            let items = picker.menuItems
+            XCTAssertTrue(items.matching(NSPredicate(format: "label == %@", "Meguri Sync"))
+                .element(boundBy: 0).waitForExistence(timeout: 10))
+            XCTAssertEqual(items.count, 2, "LocalOnly is a separate Stop action, never a third provider")
+            XCTAssertEqual(Set(items.allElementsBoundByIndex.map(\.label)), Set(["iCloud Sync", "Meguri Sync"]),
+                "Require the full native menu's actual captions")
+            for title in ["iCloud Sync", "Meguri Sync"] {
+                let options = items.matching(NSPredicate(format: "label == %@", title))
+                XCTAssertEqual(options.count, 1, "Require the exact native service caption: \(title)")
+                XCTAssertEqual(options.element(boundBy: 0).elementType, .menuItem)
+                actionable(options.element(boundBy: 0))
+            }
+            let intended = items.matching(NSPredicate(format: "label == %@", caption))
+            XCTAssertEqual(intended.count, 1)
+            let option = intended.element(boundBy: 0)
+            XCTAssertEqual(option.label, caption)
+            XCTAssertEqual(option.elementType, .menuItem)
+            actionable(option)
+            try click(option, app: app, bundle: bundle)
+        }
+        func meguriForm() {
+            waitFor({ picker.value as? String == "Meguri Sync" }, "The real Picker must retain Meguri selection")
+            actionable(picker)
+            for name in ["address", "username", "password"] {
+                let field = unique(settings, "settings.accountSync.meguri.\(name)")
+                XCTAssertEqual(field.elementType, name == "password" ? .secureTextField : .textField)
+                actionable(field)
+            }
+            let secure = settings.secureTextFields.matching(NSPredicate(format: "identifier == %@", "settings.accountSync.meguri.password"))
+            XCTAssertEqual(secure.count, 1, "Password must be an actual native secure field")
+            let signIn = unique(settings, "settings.accountSync.meguri.signIn")
+            XCTAssertEqual(signIn.elementType, .button)
+            XCTAssertFalse(signIn.isEnabled, "The empty setup form cannot sign in")
+            for id in ["iCloudHeading", "connect", "automatic", "media"] {
+                XCTAssertEqual(settings.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "settings.accountSync.\(id)")).count, 0)
+            }
+        }
+        try choose("Meguri Sync")
+        meguriForm()
+        try choose("iCloud Sync")
+        let sheets = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.serviceSwitch.cancel"))
+        let sheet = sheets.element(boundBy: 0)
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        XCTAssertEqual(sheets.count, 1)
+        let cancel = unique(sheet, "sync.serviceSwitch.cancel")
+        let confirm = unique(sheet, "sync.serviceSwitch.confirm")
+        XCTAssertEqual(cancel.elementType, .button)
+        XCTAssertEqual(confirm.elementType, .button)
+        actionable(cancel)
+        actionable(confirm)
+        try app.bringToFront(bundleIdentifier: bundle)
+        sheet.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
+        XCTAssertTrue(sheet.exists, "Return must not activate the destructive confirmation")
+        XCTAssertEqual(sheets.count, 1)
+        XCTAssertEqual(picker.value as? String, "Meguri Sync")
+        for id in ["address", "username", "password", "signIn"] {
+            _ = unique(settings, "settings.accountSync.meguri.\(id)")
+        }
+        actionable(cancel)
+        try click(cancel, app: app, bundle: bundle)
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(settings.sheets.count, 0)
+        meguriForm()
+        try app.bringToFront(bundleIdentifier: bundle)
+        settings.typeKey("q", modifierFlags: .command)
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 10), "Native Quit must finish actual close and owned cleanup")
+    }
+
     func testExpandedTreesKeepUniqueIDsNativeDisclosureSelectionAndChildMenus() throws {
         let (app, bundle) = try launchFixture()
         let parent = namedRow(app, prefix: "home.deck.row.", path: "Local Review")

@@ -212,5 +212,118 @@ import Testing
             (error as? TestHookError)?.message.contains(message) == true
         }
     }
+    @Test func ownedProviderFixtureIsIsolatedAndInertByDefault() throws {
+        typealias Owned = TestHooks.OwnedProviderFixture
+        let files = FileManager.default
+        let scratch = files.temporaryDirectory.appending(path: "owned-provider-options-\(UUID().uuidString)")
+        try files.createDirectory(at: scratch, withIntermediateDirectories: false)
+        defer { try? files.removeItem(at: scratch) }
+        let destination = scratch.appending(path: "Destination")
+        try files.createDirectory(at: destination, withIntermediateDirectories: false)
+        let sentinel = destination.appending(path: "collection.anki2")
+        let bytes = Data("synthetic destination must survive rejected options".utf8)
+        try bytes.write(to: sentinel)
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = .init(directory: destination)
+        let initialLocation = configuration.collectionLocation
+        let installer = TestHooks.FixtureInstaller(bundleIdentifier: "test.dev")
+
+        #expect(!Options().ownedProviderFixture)
+        let off = try Options(arguments: ["-MeguriOwnedProviderFixture", "off"])
+        #expect(off == Options())
+        #expect(try off.prepareOwnedProviderFixture(bundleIdentifier: "release") == nil)
+        #expect(try Options().prepareOwnedProviderFixture(bundleIdentifier: "test.dev") == nil)
+        try off.apply(to: &configuration, installer: installer, routes: .standard)
+        #expect(configuration.collectionLocation == initialLocation)
+        #expect(try Data(contentsOf: sentinel) == bytes)
+
+        let flag = ["-MeguriOwnedProviderFixture", "on"]
+        let arguments = flag + ["-MeguriFixture", Owned.source.path(percentEncoded: false)]
+        let on = try Options(arguments: arguments)
+        #expect(on.ownedProviderFixture)
+        #expect(on != Options())
+        for bad in [["-MeguriOwnedProviderFixture"], ["-MeguriOwnedProviderFixture", "yes"],
+                    flag + ["-MeguriOwnedProviderFixture", "off"], flag,
+                    flag + ["-MeguriFixture", "relative/local-review-1"],
+                    flag + ["-MeguriFixture", scratch.path],
+                    flag + ["-MeguriFixture", Owned.source.path + "/../local-review-1"]] {
+            #expect(throws: TestHookError.self) { try Options(arguments: bad) }
+        }
+        for pair in [["-MeguriRoute", "settings/account-sync/setup-needed"],
+                     ["-MeguriImportSource", scratch.appending(path: "synthetic.colpkg").path],
+                     ["-MeguriBackgroundLaunch", "YES"], ["-MeguriBackgroundLaunch", "NO"],
+                     ["-MeguriAnkiConnectPort", "18765"], ["-MeguriMigakuPort", "18766"],
+                     ["-MeguriIntegrations", "off"], ["-MeguriIntegrations", "on"],
+                     ["-MeguriSizeClass", "regular"], ["-ShowAnkiServerInterface", "YES"], nativeArguments] {
+            #expect(throws: TestHookError.self) { try Options(arguments: arguments + pair) }
+        }
+        let alias = scratch.appending(path: "alias")
+        try files.createSymbolicLink(at: alias, withDestinationURL: Owned.source)
+        #expect(throws: TestHookError.self) { try Options(arguments: flag + ["-MeguriFixture", alias.path]) }
+        #expect(throws: TestHookError.self) { try Owned.validateSource(nil) }
+        #expect(throws: TestHookError.self) { try Owned.validateSource(scratch.appending(path: "absent")) }
+        #expect(throws: TestHookError.self) { try Owned.validateSource(alias) }
+        #expect(throws: TestHookError.self) { try on.prepareOwnedProviderFixture(bundleIdentifier: "test.release") }
+        #expect(throws: TestHookError.self) {
+            try on.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "test.release"), routes: .standard)
+        }
+        #expect(throws: TestHookError.self) { try on.apply(to: &configuration, installer: installer, routes: .standard) }
+        #expect(configuration.collectionLocation == initialLocation)
+        #expect(configuration.nativeReviewInput == nil && !configuration.clock.isFixed)
+        #expect(try Data(contentsOf: sentinel) == bytes)
+        #expect(try files.contentsOfDirectory(atPath: destination.path) == ["collection.anki2"])
+
+        #if os(macOS)
+        // The public generated recipe is read-only; all destinations and defaults
+        // below are fresh synthetic inputs. MG stages the recipe for the UI lane.
+        let owned = try #require(on.prepareOwnedProviderFixture(bundleIdentifier: "test.dev"))
+        defer { _ = owned.cleanup(afterClosing: true) }
+        let other = try Owned()
+        defer { _ = other.cleanup(afterClosing: true) }
+        let root = owned.collectionLocation.directory.deletingLastPathComponent()
+        let otherRoot = other.collectionLocation.directory.deletingLastPathComponent()
+        #expect(root != otherRoot)
+        #expect(owned.collectionLocation.directory.lastPathComponent == "Collection")
+        #expect(owned.collectionLocation.backupsDirectory == root.appending(path: "Backups", directoryHint: .isDirectory))
+        #expect(owned.installationDirectory == root.appending(path: "Installation", directoryHint: .isDirectory))
+        #expect(owned.collectionLocation != .standard)
+        #expect(!files.fileExists(atPath: owned.installationDirectory.path))
+        #expect(!files.fileExists(atPath: owned.collectionLocation.directory.path))
+        let permissions = try #require(files.attributesOfItem(atPath: root.path)[.posixPermissions] as? NSNumber)
+        #expect(permissions.intValue & 0o777 == 0o700)
+        #expect(owned.defaults !== other.defaults)
+        let key = "synthetic-owned-marker"
+        #expect(owned.defaults.object(forKey: key) == nil)
+        owned.defaults.set("first", forKey: key)
+        #expect(other.defaults.object(forKey: key) == nil)
+        other.defaults.set("second", forKey: key)
+        #expect(owned.defaults.string(forKey: key) == "first")
+        #expect(throws: TestHookError.self) {
+            try off.apply(to: &configuration, installer: installer, routes: .standard, ownedProvider: owned)
+        }
+        #expect(configuration.collectionLocation == initialLocation)
+        try on.apply(to: &configuration, installer: installer, routes: .standard, ownedProvider: owned)
+        #expect(configuration.collectionLocation == owned.collectionLocation)
+        #expect(files.fileExists(atPath: configuration.collectionLocation.collectionFile.path))
+        #expect(!files.fileExists(atPath: owned.installationDirectory.path), "No provider choice or state is synthesized")
+        #expect(try Data(contentsOf: sentinel) == bytes)
+        #expect(!owned.cleanup(afterClosing: false))
+        #expect(files.fileExists(atPath: root.path))
+        #expect(owned.defaults.string(forKey: key) == "first")
+        #expect(owned.cleanup(afterClosing: true))
+        #expect(!files.fileExists(atPath: root.path))
+        #expect(owned.defaults.object(forKey: key) == nil)
+        #expect(owned.cleanup(afterClosing: true))
+        #expect(files.fileExists(atPath: otherRoot.path))
+        #expect(other.defaults.string(forKey: key) == "second")
+        #expect(other.cleanup(afterClosing: true))
+        #else
+        #expect(throws: TestHookError("OwnedProviderFixture applies to the Mac only")) {
+            try on.prepareOwnedProviderFixture(bundleIdentifier: "test.dev")
+        }
+        #expect(configuration.collectionLocation == initialLocation)
+        #expect(try Data(contentsOf: sentinel) == bytes)
+        #endif
+    }
 }
 #endif
