@@ -19,6 +19,23 @@ pub fn decode_for_saving(html: &str) -> Cow<'_, str> {
     rename_local_media(html, decode_name)
 }
 
+/// Editor H3 steps 3–5. Step 1–2's serialization comes from the editor
+/// runtime, while unchanged fields bypass this function entirely.
+pub fn editor_target(html: &str) -> String {
+    if html == "<br>" || html == "<div><br></div>" {
+        return String::new();
+    }
+    let without_nulls = html.replace('\0', "");
+    rename_local_media(&without_nulls, |name| {
+        let decoded = decode_name(name);
+        if decoded.contains('"') {
+            Cow::Owned(decoded.replace('"', "&quot;"))
+        } else {
+            decoded
+        }
+    }).into_owned()
+}
+
 /// M6 step 1: the raw name with ASCII controls, space, `"`, `<`, `>`,
 /// backtick and `#` written as `%XX` (upper-case hex). Everything else,
 /// `%` and non-ASCII included, is kept; entities are not decoded.
@@ -102,6 +119,20 @@ fn hex_value(digit: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_target_keeps_markup_and_decoded_quotes_inside_attributes() {
+        assert_eq!(editor_target("<img src=\"q%22r.png\" onerror=\"f()\">"),
+            "<img src=\"q&quot;r.png\" onerror=\"f()\">");
+        assert_eq!(editor_target("<script>f()</script><style>div{display:none}</style>"),
+            "<script>f()</script><style>div{display:none}</style>");
+        assert_eq!(editor_target("<br>"), "");
+        assert_eq!(editor_target("<div><br></div>"), "");
+        assert_eq!(editor_target("<br>\0"), "<br>");
+        assert_eq!(editor_target("<img src=\"https://example.invalid/a%20b\">"),
+            "<img src=\"https://example.invalid/a%20b\">");
+        assert_eq!(editor_target("<img src=\"a%00b\">"), "<img src=\"a\0b\">");
+    }
 
     #[test]
     fn encoding_matches_the_spec_examples() {

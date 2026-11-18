@@ -1,0 +1,9 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "editor.html" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "HTML" } } } },
+    "editor.rich" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Rich Text" } } } },
+    "editor.mode" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Field mode" } } } }
+  },
+  "version" : "1.0"
+}

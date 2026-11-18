@@ -145,6 +145,8 @@ pub struct NotetypeRecord {
     pub id: i64,
     pub name: String,
     pub kind: i32,
+    pub original_stock_kind: i32,
+    pub cloze_fields: Vec<u32>,
     pub sort_field: u32,
     pub css: String,
     pub base: Vec<u8>,
@@ -181,6 +183,17 @@ pub fn read_notetype(id: i64) -> Result<NotetypeRecord, CoreError> {
         id,
         name: n.name.clone(),
         kind: n.config.kind,
+        original_stock_kind: n.config.original_stock_kind,
+        cloze_fields: if n.config.kind == 1 {
+            n.templates.first().map(|template| {
+                let parsed = meguri_template::ParsedTemplate::parse(&template.config.q_format);
+                if parsed.structure_error().is_some() { return Vec::new(); }
+                let names = parsed.cloze_references();
+                n.fields.iter().filter(|field| names.iter().any(|name|
+                    meguri_text::fold::compare_folded(name, &field.name).is_eq()
+                )).map(|field| field.ord).collect()
+            }).unwrap_or_default()
+        } else { Vec::new() },
         sort_field: n.config.sort_field_idx,
         css: n.config.css.clone(),
         base: AggregateDigest::of(&n).0.to_vec(),

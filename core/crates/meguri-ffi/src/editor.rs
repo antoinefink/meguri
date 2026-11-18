@@ -44,3 +44,15 @@ pub fn tag_complete(input: String, limit: u64, cancel: Arc<CancelToken>) -> Resu
     }
     Ok(editor::tag_complete(&runtime::host()?.collection()?, &input, limit, cancel.engine_token())?)
 }
+
+/// Pure field conversion, shared by every native editor context. No host
+/// or collection is consulted, and nothing is persisted.
+#[uniffi::export]
+pub fn editor_field_html(html: Vec<String>, for_display: bool) -> Result<Vec<String>, CoreError> {
+    callback::enter("editor_field_html");
+    Ok(html.iter().map(|value| if for_display {
+        meguri_text::iri::encode_for_display(value).into_owned()
+    } else {
+        meguri_text::iri::editor_target(value)
+    }).collect())
+}

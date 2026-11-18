@@ -177,15 +177,19 @@ public struct NotetypeRecord: Sendable, Hashable {
     public let id: Int64
     public let name: String
     public let kind: Int32
+    public let originalStockKind: Int32
+    public let clozeFields: [UInt32]
     public let sortField: UInt32
     public let css: String
     public let base: [UInt8]
     public let fields: [NotetypeField]
     public let templates: [NotetypeTemplate]
-    public init(id: Int64, name: String, kind: Int32, sortField: UInt32, css: String, base: [UInt8], fields: [NotetypeField], templates: [NotetypeTemplate]) {
+    public init(id: Int64, name: String, kind: Int32, sortField: UInt32, css: String, base: [UInt8], fields: [NotetypeField], templates: [NotetypeTemplate], originalStockKind: Int32 = 0, clozeFields: [UInt32] = []) {
         self.id = id
         self.name = name
         self.kind = kind
+        self.originalStockKind = originalStockKind
+        self.clozeFields = clozeFields
         self.sortField = sortField
         self.css = css
         self.base = base
@@ -196,6 +200,8 @@ public struct NotetypeRecord: Sendable, Hashable {
         id = value.id
         name = value.name
         kind = value.kind
+        originalStockKind = value.originalStockKind
+        clozeFields = value.clozeFields
         sortField = value.sortField
         css = value.css
         base = Array(value.base)

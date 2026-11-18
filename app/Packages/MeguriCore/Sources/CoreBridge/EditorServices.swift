@@ -60,3 +60,14 @@ public actor CoreEditorServices: EditorServices {
         }
     }
 }
+
+/// Pure H1/H3 conversion on a CoreBridge lane. Runtime serialization stays
+/// in WebKit; media-name grammar stays in the existing text implementation.
+public actor CoreEditorFieldHTML {
+    public init() {}
+    public func convert(_ html: [String], forDisplay: Bool) async throws(BridgeError) -> [String] {
+        try await QueryLane.shared.call(.editorFieldHTML) {
+            try MeguriCoreBindings.editorFieldHtml(html: html, forDisplay: forDisplay)
+        }
+    }
+}

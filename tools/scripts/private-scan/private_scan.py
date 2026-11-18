@@ -1270,6 +1270,15 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "core/crates/meguri-engine/src/editor/tag_complete.rs":
         "2c9222832834a1a4251d5388c2e158f15d69be007739c0953c7980e1ba13e768",
+    # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
+    "app/Packages/MeguriKit/Sources/Features/Editor/FieldEditorHost.swift":
+        "49ac124ec5127a47f9322a1bb82b046a59770aff674073c33c86cce2380ba0c9",
+    # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
+    "app/Packages/MeguriKit/Tests/AppModelTests/FieldEditorTests.swift":
+        "3ce97b6a8cd4064da1ce5b7ac76ff3daac287e1c1ebf4a3bc61353ab0688f461",
+    # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
+    "docs/process/review-log/U190-U195-field-runtime-cleanroom-20261118.md":
+        "f1432c094aa8dc1498d33b196e56b0b15fb1b8ab73c23ee7bac34c15f302d455",
 }
 
 

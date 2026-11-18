@@ -75,7 +75,7 @@ let package = Package(
         .target(name: "HeatmapKit", swiftSettings: settings),
         .testTarget(
             name: "AppModelTests",
-            dependencies: ["AppModel", "CardRendering", .product(name: "CoreBridge", package: "MeguriCore"), .product(name: "Instrumentation", package: "MeguriCore")],
+            dependencies: ["AppModel", "CardRendering", "Editor", .product(name: "CoreBridge", package: "MeguriCore"), .product(name: "Instrumentation", package: "MeguriCore")],
             exclude: ["AGENTS.md"],
             resources: [.copy("Fixtures/schema-18.anki2"), .copy("Fixtures/review.colpkg")],
             swiftSettings: settings
@@ -98,9 +98,9 @@ let package = Package(
     ] + features.map { name in
         .target(
             name: name,
-            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (["Home", "Review", "Settings"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []),
+            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (["Home", "Review", "Settings", "Editor"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (name == "Editor" ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
             path: "Sources/Features/\(name)",
-            resources: ["Home", "Review", "Settings"].contains(name) ? [.process("Resources")] : [],
+            resources: ["Home", "Review", "Settings", "Editor"].contains(name) ? [.process("Resources")] : [],
             swiftSettings: settings
         )
     }
