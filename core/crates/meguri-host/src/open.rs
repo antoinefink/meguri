@@ -249,6 +249,8 @@ impl Drop for RestoreCloseState<'_> {
 mod cloud_adoption;
 
 pub struct CoreHost {
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fixture_transport: crate::provider::FixtureTransportCell,
     pub(crate) provider: Arc<meguri_sync::provider::Authority>,
     pub(crate) meguri_rounds: crate::provider_normal::RoundRegistry,
     pub(crate) cloud_policy: Option<meguri_sync::cloud::policy::Driver>,
@@ -545,7 +547,14 @@ impl CoreHost {
         let cloud_policy = cloud
             .as_ref()
             .map(|runtime| meguri_sync::cloud::policy::Driver::new(runtime.clone(), config.clock.clone()));
+        #[cfg(feature = "test-hooks")]
+        let original_liveness = OriginalHostLiveness::default();
         let host = Self {
+            #[cfg(feature = "test-hooks")]
+            fixture_transport: crate::provider::FixtureTransportCell::new(
+                paths.collection(), config.manual_transfer_directory.clone(),
+                engine.downgrade(), original_liveness.clone(),
+            ),
             meguri_rounds: Default::default(),
             provider,
             cloud_policy,
@@ -557,6 +566,9 @@ impl CoreHost {
             export,
             process: process.clone(),
             closed: Mutex::new(CloseState::Prepared),
+            #[cfg(feature = "test-hooks")]
+            original_liveness,
+            #[cfg(not(feature = "test-hooks"))]
             original_liveness: OriginalHostLiveness::default(),
             no_collection_identity_owner: None,
             engine,

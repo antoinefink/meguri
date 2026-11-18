@@ -5,6 +5,84 @@ use crate::CoreHost;
 use meguri_engine::{EngineError, device_state::{DeviceState, Publication}};
 use meguri_sync::provider::{Handoff, Selection};
 
+#[cfg(feature = "test-hooks")]
+pub(crate) struct FixtureTransportCell {
+    owner: FixtureTransportOwner,
+    installation_directory: std::path::PathBuf,
+    policy: std::sync::Mutex<Option<Arc<FixtureTransportPolicy>>>,
+}
+#[cfg(feature = "test-hooks")]
+#[derive(Clone)]
+struct FixtureTransportOwner {
+    collection: std::path::PathBuf,
+    engine: meguri_engine::WeakEngine,
+    liveness: meguri_engine::jobs::registry::OriginalHostLiveness,
+}
+#[cfg(feature = "test-hooks")]
+struct FixtureTransportPolicy {
+    origin: meguri_sync::Endpoint,
+    ca_der: Vec<u8>,
+}
+#[cfg(feature = "test-hooks")]
+impl FixtureTransportCell {
+    pub(crate) fn new(collection: std::path::PathBuf, installation_directory: std::path::PathBuf,
+        engine: meguri_engine::WeakEngine, liveness: meguri_engine::jobs::registry::OriginalHostLiveness,
+    ) -> Self {
+        Self { owner: FixtureTransportOwner { collection, engine, liveness }, installation_directory,
+            policy: std::sync::Mutex::new(None) }
+    }
+}
+#[cfg(feature = "test-hooks")]
+impl FixtureTransportOwner {
+    fn live(&self) -> bool {
+        // Resolve the CURRENT incarnation only within the original engine and
+        // original Host liveness. Bootstrap activation legitimately advances it.
+        // Bootstrap requests may hold exclusive executor admission; this gate
+        // checks ownership, not ordinary collection-operation admission.
+        self.engine.upgrade().is_some_and(|engine| engine.collection().is_ok_and(|collection|
+            collection.path() == self.collection
+                && engine.original_resource_authority(&collection, self.liveness.clone()).is_live()))
+    }
+}
+#[cfg(feature = "test-hooks")]
+impl FixtureTransportPolicy {
+    fn options(&self) -> meguri_sync::JobOptions {
+        meguri_sync::JobOptions::new(self.origin.clone(), meguri_sync::ServerKind::SelfHosted)
+            .trust_root(self.ca_der.clone())
+    }
+}
+#[cfg(feature = "test-hooks")]
+enum FixtureTransportFailure {
+    Owner(EngineError),
+    Transport(meguri_sync::SyncError),
+}
+#[cfg(feature = "test-hooks")]
+impl From<EngineError> for FixtureTransportFailure {
+    fn from(error: EngineError) -> Self { Self::Owner(error) }
+}
+// Admission wrapper only: HTTP/TLS, cancellation, timeouts, proxies and response
+// handling remain the real transport's. No outcome or request state is shared.
+#[cfg(feature = "test-hooks")]
+struct FixtureHttpTransport {
+    owner: FixtureTransportOwner,
+    policy: Arc<FixtureTransportPolicy>,
+    http: meguri_sync::transport::http::HttpTransport,
+}
+#[cfg(feature = "test-hooks")]
+impl meguri_sync::SyncTransport for FixtureHttpTransport {
+    fn post(&self, request: meguri_sync::transport::TransportRequest)
+        -> meguri_sync::transport::BoxFuture<'_, Result<meguri_sync::transport::TransportResponse, meguri_sync::SyncError>> {
+        Box::pin(async move {
+            // The normalized origin ends in '/', so another host/port cannot
+            // pass by sharing a textual prefix. Redirects pass this gate too.
+            if !request.url.starts_with(self.policy.origin.as_str()) || !self.owner.live() {
+                return Err(meguri_sync::SyncError::EndpointRefused("Meguri fixture original owner or origin changed".into()));
+            }
+            meguri_sync::SyncTransport::post(&self.http, request).await
+        })
+    }
+}
+
 pub struct ProviderHandoff { intent: Handoff, generation: meguri_engine::Generation, publication: Option<Publication> }
 
 pub(crate) struct AdmittedIdentity {
@@ -17,6 +95,111 @@ impl IdentityProvider for AdmittedIdentity {
     }
 }
 impl CoreHost {
+    /// One-shot, original-Host admission of public synthetic CA bytes (T12).
+    /// `expected_collection` is the exact opened collection FILE; the installation
+    /// directory is HostConfig's manual_transfer_directory, not a cleanup root.
+    #[cfg(feature = "test-hooks")]
+    pub fn install_meguri_fixture_transport(&self, expected_generation: meguri_engine::Generation,
+        expected_collection: &std::path::Path, expected_installation_directory: &std::path::Path,
+        origin: &str, ca_der: &[u8],
+    ) -> Result<(), EngineError> {
+        let invalid = || EngineError::InvalidArgument { message: "invalid Meguri fixture transport policy".into() };
+        if ca_der.is_empty() || ca_der.len() > 64 * 1024 { return Err(invalid()); }
+        // Check the caller's text too: URL normalization must not bypass the
+        // existing local endpoint guard. Admit an origin, with no base path.
+        meguri_sync::endpoint_guard::check_endpoint(origin).map_err(|_| invalid())?;
+        let endpoint = meguri_sync::provider::native_endpoint(origin).map_err(|_| invalid())?;
+        if endpoint.as_str().strip_prefix("https://").and_then(|rest| rest.split_once('/'))
+            .is_none_or(|(_, path)| !path.is_empty()) { return Err(invalid()); }
+        let candidate = Arc::new(FixtureTransportPolicy { origin: endpoint, ca_der: ca_der.to_vec() });
+        // Use the actual T12 parser/client constructor, never a parallel TLS
+        // implementation. This performs no request, and precedes publication.
+        meguri_sync::transport::http::HttpTransport::new(&candidate.options()).map_err(|_| invalid())?;
+        let collection = self.cloud_connection_collection()?;
+        let original = self.original_resource_authority(&collection);
+        let cell = &self.fixture_transport;
+        self.publish_provider_metadata(expected_generation, |publication| {
+            if expected_collection != cell.owner.collection || collection.path() != expected_collection
+                || expected_installation_directory != cell.installation_directory
+                || collection.generation() != expected_generation || !original.is_live() {
+                return Err(invalid());
+            }
+            // Immutable evidence only: no lifecycle reentry or writer operation
+            // under the engine state lane. Also refuses a retired executor.
+            collection.open_evidence()?;
+            if !publication.as_ref().is_some_and(|p|
+                p.binding == meguri_engine::device_state::AccountBinding::LocalOnly
+                    && p.decision == meguri_engine::device_state::PublicationDecision::Clear) {
+                return Err(EngineError::CollectionUnavailable { reason: "Meguri fixture requires a ready local collection".into() });
+            }
+            // snapshot releases its document lock before any other provider read.
+            let doc = self.provider.snapshot()?;
+            if doc.selection != Selection::LocalOnly || doc.settings.enabled || doc.meguri.is_some()
+                || doc.binding.is_some() || doc.legacy_binding_pending || doc.handoff.is_some()
+                || doc.meguri_binding.is_some() || doc.meguri_bootstrap.is_some() {
+                return Err(EngineError::Busy { running_op: "Meguri fixture requires an unconfigured local provider".into() });
+            }
+            self.require_meguri_round_join()?;
+            if !self.manual_transfer_history().active().is_ok_and(|active| active.is_none())
+                || !self.engine().jobs().running().is_empty() {
+                return Err(EngineError::Busy { running_op: "Meguri fixture requires idle transfer owners".into() });
+            }
+            // Host setup uses this same lane; a racing round reservation cannot
+            // pass admission without a configured Meguri selection/binding.
+            // Cell ownership is last and spans only the one-shot store.
+            let mut policy = cell.policy.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if policy.is_some() { return Err(EngineError::Busy { running_op: "Meguri fixture policy already installed".into() }); }
+            *policy = Some(candidate);
+            Ok(())
+        })
+    }
+
+    #[cfg(feature = "test-hooks")]
+    fn meguri_fixture_transport(&self, connection: &meguri_sync::provider::MeguriConnection)
+        -> Result<Option<Box<dyn meguri_sync::SyncTransport>>, FixtureTransportFailure> {
+        let policy = self.fixture_transport.policy.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let Some(policy) = policy else { return Ok(None); };
+        let generation = self.cloud_connection_generation()?;
+        let collection = self.cloud_connection_collection()?;
+        let original = self.original_resource_authority(&collection);
+        self.publish_provider_metadata(generation, |_| {
+            if collection.path() != self.fixture_transport.owner.collection || !original.is_live()
+                || meguri_sync::provider::native_endpoint(&connection.endpoint).ok()
+                    .is_none_or(|endpoint| !endpoint.as_str().starts_with(policy.origin.as_str())) {
+                return Err(EngineError::CollectionUnavailable { reason: "Meguri fixture original owner or origin changed".into() });
+            }
+            collection.open_evidence()?;
+            // Retained bootstrap preparation intentionally closes ordinary
+            // network admission. Its phase-specific checks remain with the
+            // existing bootstrap caller; do not prevent its media continuation.
+            let doc = self.provider.snapshot()?;
+            if doc.handoff.is_some() || doc.meguri.as_ref() != Some(connection) {
+                return Err(EngineError::CollectionUnavailable { reason: "Meguri fixture connection changed".into() });
+            }
+            Ok(())
+        })?;
+        let http = meguri_sync::transport::http::HttpTransport::new(&policy.options())
+            .map_err(FixtureTransportFailure::Transport)?;
+        Ok(Some(Box::new(FixtureHttpTransport { owner: self.fixture_transport.owner.clone(), policy, http })))
+    }
+
+    /// Next slice must call this from BOTH FFI access helpers: bootstrap's
+    /// ProviderConnection::access and normal's round_access. No FFI is wired here.
+    #[cfg(feature = "test-hooks")]
+    pub fn meguri_access_for_testing(&self, connection: meguri_sync::provider::MeguriConnection,
+        username: &str, key: meguri_sync::HostKey,
+    ) -> Result<crate::MeguriAccess, crate::MeguriBootstrapError> {
+        let access = crate::MeguriAccess::new(connection.clone(), username, key)?;
+        match self.meguri_fixture_transport(&connection) {
+            Ok(Some(transport)) => Ok(access.with_transport_for_testing(transport)),
+            Ok(None) => Ok(access),
+            Err(FixtureTransportFailure::Owner(error)) => Err(error.into()),
+            Err(FixtureTransportFailure::Transport(error)) => Err(crate::MeguriBootstrapError::Transfer(
+                meguri_sync::oneway::TransferError::Server(meguri_sync::JobError::from_transport(
+                    error, None, meguri_sync::ServerKind::SelfHosted)))),
+        }
+    }
+
     pub fn migrate_provider_configuration(root: &std::path::Path, legacy: meguri_sync::provider::LegacyInput) -> Result<(), meguri_storage::StorageError> {
         Authority::migrate_input(root, legacy)
     }
@@ -258,7 +441,14 @@ impl CoreHost {
     pub fn authenticate_meguri_connection(&self, connection: &meguri_sync::provider::MeguriConnection,
         username: &str, password: &str, cancel: Arc<meguri_engine::CancelToken>,
     ) -> Result<meguri_sync::provider::AuthenticatedConnection, meguri_sync::provider::AuthenticationFailure> {
+        #[cfg(feature = "test-hooks")]
+        let transport = self.meguri_fixture_transport(connection).map_err(|error| match error {
+            FixtureTransportFailure::Owner(_) => meguri_sync::provider::AuthenticationFailure::ConnectionChanged,
+            FixtureTransportFailure::Transport(error) => meguri_sync::provider::AuthenticationFailure::Transport(error),
+        })?;
+        #[cfg(not(feature = "test-hooks"))]
+        let transport = None;
         meguri_sync::provider::authenticate(&self.provider, connection, self.engine().threads(),
-            self.provider_random(), username, password, cancel, None)
+            self.provider_random(), username, password, cancel, transport)
     }
 }
