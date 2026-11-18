@@ -26,6 +26,7 @@ pub mod deck_config;
 pub mod decks;
 pub mod derived_host;
 pub mod device_state;
+pub mod editor;
 pub mod error;
 pub mod executor;
 pub mod external_change;

@@ -971,6 +971,9 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: provider_test_delta_review, 2026-11-17.
     "docs/process/verification-status.md":
         "da2800143283bb7440ed2e503d88a0887578e671c4af00da18c45fcbd772ab5b",
+    # Complete public-file review: owned_diagnostic_review, 2026-11-18.
+    "core/crates/meguri-engine/tests/editor_services.rs":
+        "6d96006aeedd56b9fbc6d4f4fb7b374d743bc49050ef1c206a6312b0c8967019",
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
         '456aa2d9303b4e4a689f40f4ecfdf3692e5ee75612c8319f6652c3f8a5936b68',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':

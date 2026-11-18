@@ -364,6 +364,18 @@ pub trait ReadRows: sealed::Connected {
         notetypes::get(self.connection(), id)
     }
 
+    /// Editor defaults (K4.1): select the persisted identity in SQL unicase
+    /// name order, independently of id order and without loading templates.
+    fn first_notetype_id_by_name(&self) -> Result<Option<NotetypeId>, StorageError> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .connection()
+            .query_row("SELECT id FROM notetypes ORDER BY name COLLATE unicase LIMIT 1", [], |row| {
+                row.get::<_, i64>(0).map(NotetypeId)
+            })
+            .optional()?)
+    }
+
     fn tag(&self, name: &str) -> Result<Option<Tag>, StorageError> {
         rows::get(self.connection(), &RowKey::text(name))
     }

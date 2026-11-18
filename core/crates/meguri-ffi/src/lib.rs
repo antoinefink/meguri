@@ -24,6 +24,7 @@ pub mod collection_export;
 pub mod day_clock;
 pub mod deck_tree;
 pub mod decks;
+pub mod editor;
 pub mod error;
 pub mod error_types;
 pub mod events;
