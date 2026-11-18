@@ -8,7 +8,7 @@ mg_sync_reference_digest() {
     cd "$MG_ROOT" || exit 1
     rg --files oracle/meguri-sync-server docker/meguri-sync-reference.Dockerfile \
       docker/meguri-sync-reference.Dockerfile.dockerignore docker/meguri-sync-reference.compose.yml \
-      tools/mg.d/meguri-sync-reference.sh conformance/schema/meguri-sync-server.schema.json \
+      tools/mg tools/mg.d/meguri-sync.sh tools/mg.d/meguri-sync-reference.sh conformance/schema/meguri-sync-server.schema.json \
       conformance/catalog/meguri-sync-server.json conformance/fixtures/meguri-sync-server/original.json \
       conformance/recordings/scenarios/meguri-sync-server/desktop-selection.json \
       conformance/fixtures/meguri-sync-server/edges.json conformance/recordings/scenarios/meguri-sync-server/desktop-edge-selection.json \
@@ -28,6 +28,203 @@ mg_sync_reference_digest() {
       conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json |
       LC_ALL=C sort | while IFS= read -r file; do shasum -a 256 "$file" || exit 1; done | shasum -a 256 | cut -d ' ' -f1
   )
+}
+
+# This record is outside the only child-writable mount. Both the job's exit
+# hook and MG's cancellation parent use it; refusal never permits a label sweep.
+mg_sync_reference__cancel_cleanup() {
+  local ownership name owner cleanup rc=0
+  ownership="$(python3 - "$MG_RUN_DIR/reference-control" "$MG_RUN_ID" <<'PY'
+import json, os, pathlib, re, stat, sys
+def require(value):
+    if not value:
+        raise SystemExit('invalid reference ownership')
+directory = pathlib.Path(sys.argv[1])
+s = directory.lstat()
+require(stat.S_ISDIR(s.st_mode) and s.st_uid == os.getuid() and stat.S_IMODE(s.st_mode) == 0o700)
+path = directory / 'owner.json'
+s = path.lstat()
+require(stat.S_ISREG(s.st_mode) and s.st_uid == os.getuid() and s.st_nlink == 1 and stat.S_IMODE(s.st_mode) == 0o600)
+# A parent record is small; bound both the admitted size and the actual read
+# before decoding or parsing, including growth after the metadata check.
+maximum_bytes = 4096
+require(0 < s.st_size <= maximum_bytes)
+with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
+    opened = os.fstat(stream.fileno())
+    require((opened.st_dev, opened.st_ino) == (s.st_dev, s.st_ino))
+    require(stat.S_ISREG(opened.st_mode) and opened.st_uid == os.getuid() and opened.st_nlink == 1
+            and stat.S_IMODE(opened.st_mode) == 0o600 and 0 < opened.st_size <= maximum_bytes)
+    contents = stream.read(maximum_bytes + 1)
+require(len(contents) == opened.st_size and len(contents) <= maximum_bytes)
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result)
+        result[key] = value
+    return result
+record = json.loads(contents.decode('utf-8'), object_pairs_hook=unique)
+require(set(record) == {'run', 'name', 'nonce'} and record['run'] == sys.argv[2])
+require(re.fullmatch(r'[A-Za-z0-9_-]+', record['run']))
+require(isinstance(record['nonce'], str) and re.fullmatch(r'[0-9a-f]{32}', record['nonce']))
+require(record['name'] == 'meguri-reference-' + record['run'] + '-' + record['nonce'])
+print(record['name'])
+print(record['nonce'])
+PY
+  )" || {
+    mg_failure reference-cleanup "Missing or invalid parent ownership; no broad container cleanup is permitted"
+    mg_status fail
+    return 1
+  }
+  name="${ownership%%$'\n'*}" owner="${ownership#*$'\n'}"
+  mg_sync_server__remove_container "$name" "$owner" || rc=$?
+  if ! cleanup="$(jq -nc --argjson rc "$rc" \
+      '{checked:true,exit_code:$rc,absence_verified:($rc==0),late_create_excluded:false}')" ||
+      ! mg_detail reference_cleanup "$cleanup"; then
+    # EXIT runners discard hook returns. Persist the failure here so an
+    # earlier pass or a later successful cleanup cannot hide lost evidence.
+    mg_failure reference-cleanup-publication "Could not publish owned reference cleanup evidence; no compatibility credit"
+    mg_status fail
+    [ "$rc" -ne 0 ] || rc=1
+  fi
+  return "$rc"
+}
+
+# Hash captured Docker stdout, but publish only finite identity/config fields.
+# In particular, neither arbitrary environment values nor State.Error escape.
+mg_sync_reference__inspect() {
+  local raw hash configuration_hash
+  raw="$(docker inspect "$1")" || return 1
+  hash="$(printf '%s' "$raw" | shasum -a 256 | cut -d ' ' -f1)" || return 1
+  configuration_hash="$(jq -cS '.[0] | {Config,HostConfig,Path,Args}' <<<"$raw" | shasum -a 256 | cut -d ' ' -f1)" || return 1
+  [[ "$hash" =~ ^[0-9a-f]{64}$ ]] && [[ "$configuration_hash" =~ ^[0-9a-f]{64}$ ]] || return 1
+  jq -ce --arg hash "$hash" --arg configuration "$configuration_hash" '
+    select(length==1) | .[0] |
+    {inspection_sha256:$hash,configuration_sha256:$configuration,container:{Id,Image,Name,Created,RestartCount,Path,Args,
+      Config:{Entrypoint:.Config.Entrypoint,Cmd:.Config.Cmd,User:.Config.User,
+        Image:.Config.Image,
+        WorkingDir:.Config.WorkingDir,ExposedPorts:.Config.ExposedPorts,Volumes:.Config.Volumes,
+        Labels:{run:.Config.Labels["meguri.mg.run-id"],nonce:.Config.Labels["meguri.sync.owner"]},
+        run_environment:[.Config.Env[] | select(startswith("MG_RUN_ID="))]},
+      HostConfig:(.HostConfig | {NetworkMode,PortBindings,PublishAllPorts,Init,ReadonlyRootfs,
+        CapDrop,CapAdd,SecurityOpt,Memory,PidsLimit,AutoRemove,RestartPolicy,
+        Privileged,Devices,DeviceRequests,VolumesFrom,Links,ExtraHosts,PidMode,IpcMode,UTSMode,UsernsMode,
+        Binds,Tmpfs,Mounts:[.Mounts[]? | {Type,Source,Target,ReadOnly:(.ReadOnly // false),
+          propagation:(.BindOptions.Propagation // ""),
+          extra_options:(.VolumeOptions!=null or .TmpfsOptions!=null or (.BindOptions.NonRecursive // false))}]}),
+      Mounts:[.Mounts[] | {Type,Source,Destination,RW}],
+      NetworkSettings:{Ports:.NetworkSettings.Ports,networks:(.NetworkSettings.Networks | keys)},
+      State:(.State | {Status,Running,Paused,Restarting,Dead,OOMKilled,ExitCode,StartedAt,FinishedAt,
+        error_present:(.Error!="")})}}
+  ' <<<"$raw"
+}
+
+mg_sync_reference__check() {
+  local measured="$1" plan="$2" before="$3" phase="$4" ceiling
+  ceiling="$(date -u +%Y-%m-%dT%H:%M:%S)" || return 1
+  jq -e --argjson p "$plan" --argjson before "$before" --arg phase "$phase" --arg ceiling "$ceiling" '
+    def timestamp: type=="string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$");
+    def instant: rtrimstr("Z") | split(".") | .[0]+"."+(((.[1] // "")+"000000000")[0:9]);
+    .container as $c | $c.HostConfig as $h |
+    ($c.Id==$p.id and ($c.Id | test("^[0-9a-f]{64}$"))) and
+    $c.Image==$p.image and $c.Config.Image==$p.image and $c.Name==("/"+$p.name) and
+    ($c.Created | timestamp) and $c.Created[0:19]>=$p.creation_floor and $c.Created[0:19]<=$ceiling and
+    $c.Config.Entrypoint==["python","/opt/reference/driver.py"] and $c.Config.Cmd==[$p.mode] and
+    $c.Path=="python" and $c.Args==["/opt/reference/driver.py",$p.mode] and
+    $c.Config.User==$p.user and $c.Config.WorkingDir=="/scratch" and
+    $c.Config.Labels=={run:$p.run,nonce:$p.nonce} and $c.Config.run_environment==["MG_RUN_ID="+$p.run] and
+    (($c.Config.ExposedPorts // {})=={}) and (($c.Config.Volumes // {})=={}) and
+    $h.NetworkMode=="none" and (($h.PortBindings // {})=={}) and $h.PublishAllPorts==false and
+    $c.NetworkSettings.Ports=={} and ($c.NetworkSettings.networks==[] or $c.NetworkSettings.networks==["none"]) and
+    $h.Init==true and $h.ReadonlyRootfs==true and $h.CapDrop==["ALL"] and (($h.CapAdd // [])==[]) and
+    $h.SecurityOpt==["no-new-privileges"] and $h.Memory==2147483648 and $h.PidsLimit==128 and
+    $h.AutoRemove==false and $h.RestartPolicy=={Name:"no",MaximumRetryCount:0} and
+    $h.Privileged==false and (($h.Devices // [])==[]) and (($h.DeviceRequests // [])==[]) and
+    (($h.VolumesFrom // [])==[]) and (($h.Links // [])==[]) and (($h.ExtraHosts // [])==[]) and
+    $h.PidMode=="" and $h.IpcMode=="private" and $h.UTSMode=="" and $h.UsernsMode=="" and
+    (($h.Binds // [])==[]) and
+    ($h.Mounts | length==1 and .[0].Type=="bind" and .[0].Source==$p.output and .[0].Target=="/out" and
+      .[0].ReadOnly==false and (.[0].propagation=="" or .[0].propagation=="rprivate") and .[0].extra_options==false) and
+    $h.Tmpfs=={"/scratch":"exec,mode=1777,size=1g","/tmp":"mode=1777,size=64m"} and
+    ([$c.Mounts[] | select(.Type!="tmpfs")]==[{Type:"bind",Source:$p.output,Destination:"/out",RW:true}]) and
+    ([$c.Mounts[] | select(.Type=="tmpfs")] as $t |
+      ($t | length)<=2 and ([$t[].Destination] | unique | length)==($t | length) and
+      all($t[]; (.Destination=="/scratch" or .Destination=="/tmp") and .RW==true and (.Source=="" or .Source==null))) and
+    $c.RestartCount==0 and $c.State.Paused==false and $c.State.Restarting==false and $c.State.Dead==false and
+    $c.State.error_present==false and
+    (if $phase=="before" then
+       $c.State.Status=="created" and $c.State.Running==false and $c.State.OOMKilled==false and $c.State.ExitCode==0 and
+       $c.State.StartedAt=="0001-01-01T00:00:00Z" and $c.State.FinishedAt=="0001-01-01T00:00:00Z"
+     else
+       .configuration_sha256==$before.configuration_sha256 and
+       ($c | del(.State,.NetworkSettings))==($before.container | del(.State,.NetworkSettings)) and
+       $c.State.Status=="exited" and $c.State.Running==false and
+       ($c.State.ExitCode | type=="number" and floor==. and .>=0 and .<=255) and
+       ($c.State.StartedAt | timestamp) and ($c.State.FinishedAt | timestamp) and
+       ($c.State.StartedAt | instant)>=($c.Created | instant) and
+       ($c.State.FinishedAt | instant)>=($c.State.StartedAt | instant) and $c.State.FinishedAt[0:19]<=$ceiling
+     end)
+  ' <<<"$measured" >/dev/null
+}
+
+mg_sync_reference__retained() {
+  local mode="$1" output="$2" image owner name control="$MG_RUN_DIR/reference-control"
+  local plan cid before=null after=null rc=0 cleanup_rc=0 attach_rc=null actual_exit=null valid=false invocation_sha
+  image="$(mg_sync_server__image sync-reference -f "$MG_ROOT/docker/meguri-sync-reference.compose.yml")" || return 1
+  [[ "$image" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  owner="$(python3 -c 'import secrets; print(secrets.token_hex(16))')" || return 1
+  [[ "$MG_RUN_ID" =~ ^[A-Za-z0-9_-]+$ ]] && [[ "$owner" =~ ^[0-9a-f]{32}$ ]] || return 1
+  name="meguri-reference-$MG_RUN_ID-$owner"
+  mkdir -m 700 "$control" "$output" || return 1
+  # Publish atomically before any uncertain daemon operation. Neither this
+  # record nor the original invocation/pre-inspection is accessible via /out.
+  (umask 077; jq -nc --arg run "$MG_RUN_ID" --arg name "$name" --arg nonce "$owner" \
+    '{run:$run,name:$name,nonce:$nonce}' >"$control/owner.pending" && mv "$control/owner.pending" "$control/owner.json") || return 1
+  mg_on_exit mg_sync_reference__cancel_cleanup
+  cp "$MG_RUN_DIR/invocation.json" "$control/invocation.json" && cp "$control/invocation.json" "$output/invocation.json" || return 1
+  invocation_sha="$(shasum -a 256 "$control/invocation.json" | cut -d ' ' -f1)" || return 1
+  [[ "$invocation_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+  plan="$(jq -nc --arg image "$image" --arg name "$name" --arg nonce "$owner" --arg run "$MG_RUN_ID" \
+    --arg mode "$mode" --arg output "$output" --arg user "$(id -u):$(id -g)" \
+    --arg floor "$(date -u +%Y-%m-%dT%H:%M:%S)" \
+    '{image:$image,name:$name,nonce:$nonce,run:$run,mode:$mode,output:$output,user:$user,creation_floor:$floor}')" || return 1
+  cid="$(docker create --pull never --name "$name" --label "meguri.mg.run-id=$MG_RUN_ID" \
+    --label "meguri.sync.owner=$owner" --user "$(id -u):$(id -g)" --env "MG_RUN_ID=$MG_RUN_ID" \
+    --network none --init --read-only --cap-drop ALL --security-opt no-new-privileges --memory 2g --pids-limit 128 \
+    --tmpfs /scratch:exec,mode=1777,size=1g --tmpfs /tmp:mode=1777,size=64m \
+    --mount "type=bind,src=$output,dst=/out" "$image" "$mode")" || rc=$?
+  if [ "$rc" -eq 0 ] && [[ "$cid" =~ ^[0-9a-f]{64}$ ]]; then
+    plan="$(jq -c --arg id "$cid" '. + {id:$id}' <<<"$plan")" || rc=1
+    before="$(mg_sync_reference__inspect "$cid")" || { before=null; rc=1; }
+    if [ "$rc" -eq 0 ] && mg_sync_reference__check "$before" "$plan" null before; then
+      # One start only, and always inspect after attach, even on process failure.
+      attach_rc=0
+      docker start --attach "$cid" || attach_rc=$?
+      rc="$attach_rc"
+      after="$(mg_sync_reference__inspect "$cid")" || { after=null; [ "$rc" -ne 0 ] || rc=1; }
+      actual_exit="$(jq -c '.container.State.ExitCode // null' <<<"$after")"
+      if mg_sync_reference__check "$after" "$plan" "$before" after; then
+        valid=true
+        if [ "$actual_exit" -ne 0 ] || [ "$(jq -r .container.State.OOMKilled <<<"$after")" != false ]; then
+          [ "$rc" -ne 0 ] || rc=1
+        fi
+      else [ "$rc" -ne 0 ] || rc=1; fi
+    else rc=1; fi
+  else [ "$rc" -ne 0 ] || rc=1; fi
+  mg_sync_reference__cancel_cleanup || cleanup_rc=$?
+  [ "$rc" -ne 0 ] || rc="$cleanup_rc"
+  # Child invocation mutation cannot replace the trusted original.
+  if [ -L "$output/invocation.json" ] ||
+      [ -z "$(find "$output/invocation.json" -prune -type f -links 1 -print)" ] ||
+      ! cmp -s "$control/invocation.json" "$output/invocation.json"; then
+    [ "$rc" -ne 0 ] || rc=1
+  fi
+  mg_detail reference_execution "$(jq -nc --arg image "$image" --argjson plan "$plan" --arg invocation "$invocation_sha" \
+    --argjson before "$before" --argjson after "$after" --argjson attach "$attach_rc" --argjson exit "$actual_exit" \
+    --argjson cleanup "$cleanup_rc" --argjson valid "$valid" --argjson rc "$rc" \
+    '{image_id:$image,container_id:($plan.id // null),invocation_sha256:$invocation,
+      before:$before,after:$after,measurements_valid:$valid,attach_exit:$attach,actual_exit:$exit,
+      cleanup_exit:$cleanup,absence_verified:($cleanup==0),execution_exit:$rc}')" || { [ "$rc" -ne 0 ] || rc=1; }
+  return "$rc"
 }
 
 mg_sync_server_reference() {
@@ -116,23 +313,33 @@ mg_sync_server_reference() {
     --arg run "$MG_RUN_ID" --arg author "$author_session" --argjson authors "$source_author_sessions" --argjson args "$argument_json" \
     '{source_commit:$commit,batch_base:$batch,source_sha256:$source,lock_sha256:$lock,mg_job:"sync-server-reference",arguments:$args,run_id:$run,author_session:$author,source_author_sessions:$authors}' \
     >"$MG_RUN_DIR/invocation.json" || return 1
-  local execution_status=0
-  mg_compose -f "$MG_ROOT/docker/meguri-sync-reference.compose.yml" run --rm -T --no-deps \
+  local execution_status=0 output_dir="$MG_RUN_DIR" trusted_invocation
+  if [ "$mode" = selftest ] || [ "$mode" = identity ]; then
+    trusted_invocation="$(cat "$MG_RUN_DIR/invocation.json")" || return 1
+    output_dir="$MG_RUN_DIR/reference-output"
+    mg_sync_reference__retained "$mode" "$output_dir" || execution_status=$?
+  else
+    mg_compose -f "$MG_ROOT/docker/meguri-sync-reference.compose.yml" run --rm -T --no-deps \
     --label "meguri.mg.run-id=$MG_RUN_ID" -u "$(id -u):$(id -g)" \
     -v "$MG_RUN_DIR:/out" -e "MG_RUN_ID=$MG_RUN_ID" \
     ${mount_args[0]+"${mount_args[@]}"} \
-    sync-reference "${runtime_args[@]}" || execution_status=$?
+      sync-reference "${runtime_args[@]}" || execution_status=$?
+  fi
   if [ "$source_sha" != "$(mg_sync_reference_digest)" ] || [ "$source_commit" != "$(git -C "$MG_ROOT" rev-parse HEAD)" ]; then
     mg_failure source-changed "reference source/commit changed during execution"; execution_status=1
   fi
-  if [ -f "$MG_RUN_DIR/summary.json" ]; then
-    mg_count total "$(jq -r '.total // 0' "$MG_RUN_DIR/summary.json")"
-    mg_count passed "$(jq -r '.passed // 0' "$MG_RUN_DIR/summary.json")"
-    mg_count failed "$(jq -r '.failed // 0' "$MG_RUN_DIR/summary.json")"
-    mg_detail reference_evidence "$(cat "$MG_RUN_DIR/summary.json")"
+  if [ -f "$output_dir/summary.json" ]; then
+    mg_count total "$(jq -r '.total // 0' "$output_dir/summary.json")"
+    mg_count passed "$(jq -r '.passed // 0' "$output_dir/summary.json")"
+    mg_count failed "$(jq -r '.failed // 0' "$output_dir/summary.json")"
+    mg_detail reference_evidence "$(cat "$output_dir/summary.json")"
   fi
-  mg_detail reference_invocation "$(cat "$MG_RUN_DIR/invocation.json")"
-  if [ -f "$MG_RUN_DIR/evidence.json" ]; then mg_artifact report "$MG_RUN_DIR/evidence.json" "Exact neutral observations"; fi
+  if [ "$mode" = selftest ] || [ "$mode" = identity ]; then
+    mg_detail reference_invocation "$trusted_invocation"
+  else
+    mg_detail reference_invocation "$(cat "$MG_RUN_DIR/invocation.json")"
+  fi
+  if [ -f "$output_dir/evidence.json" ]; then mg_artifact report "$output_dir/evidence.json" "Exact neutral observations"; fi
   mg_artifact directory "$MG_RUN_DIR" "Current-release reference evidence"
   if [ "$execution_status" -ne 0 ]; then
     mg_failure reference-execution "reference harness failed; no compatibility credit"; mg_status fail; return

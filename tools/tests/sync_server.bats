@@ -1101,9 +1101,114 @@ SH
   done
 }
 
+@test "sync-server: reference cleanup publication failures persist through real MG EXIT hooks and later success" {
+  # Use MG's real status/failure sinks, host.sh EXIT runner and result writer.
+  # Faults affect only one cleanup publication; a later real hook succeeds.
+  cat >"$SB/tools/mg.d/zz-sync-reference-cleanup-fixture.sh" <<'SH'
+mg_job sync-reference-cleanup-fixture host sync_reference_cleanup_fixture "synthetic reference cleanup publication"
+eval "$(declare -f mg_detail | sed '1s/mg_detail/mg_fixture_detail/')"
+fixture_publication_failure() {
+  [ "$fixture_phase" = "$fixture_stage" ] && [ "$fixture_fault" = "$1" ] &&
+    [ ! -e "$MG_RUN_DIR/publication-failed" ] || return 1
+  touch "$MG_RUN_DIR/publication-failed"
+  printf 'publication:%s:%s\n' "$fixture_phase" "$1" >>"$MG_RUN_DIR/events"
+}
+mg_detail() {
+  if [ "$1" = reference_cleanup ]; then
+    fixture_publication_failure sink && return 89
+    printf 'detail:%s\n' "$fixture_phase" >>"$MG_RUN_DIR/events"
+  fi
+  mg_fixture_detail "$@"
+}
+jq() {
+  # Fail the actual cleanup JSON construction, before mg_detail is called.
+  if [ "$#" -eq 5 ] && [ "$1" = -nc ] && [ "$2" = --argjson ] && [ "$3" = rc ]; then
+    fixture_publication_failure encode && return 88
+  fi
+  command jq "$@"
+}
+sync_reference_cleanup_fixture() {
+  fixture_stage="$1" fixture_fault="$2" fixture_previous="$3" fixture_phase=normal
+  fixture_owner=11111111111111111111111111111111
+  fixture_name="meguri-reference-$MG_RUN_ID-$fixture_owner"
+  mkdir -m 700 "$MG_RUN_DIR/reference-control" || return 1
+  (umask 077; jq -nc --arg run "$MG_RUN_ID" --arg name "$fixture_name" --arg nonce "$fixture_owner" \
+    '{run:$run,name:$name,nonce:$nonce}' >"$MG_RUN_DIR/reference-control/owner.json") || return 1
+  touch "$MG_RUN_DIR/present"
+  mg_on_exit mg_sync_reference__cancel_cleanup
+  mg_on_exit mg_sync_reference__cancel_cleanup
+  mg_on_exit 'fixture_phase=exit'
+  case "$fixture_previous" in
+    execution|both) mg_failure reference-execution "Synthetic earlier execution failure" ;;
+  esac
+  local rc=0
+  mg_sync_reference__cancel_cleanup || rc=$?
+  mg_detail fixture_normal_cleanup "$rc"
+  if [ "$rc" -ne 0 ] || [ "$fixture_previous" != none ]; then mg_status fail; else mg_status pass; fi
+  printf 'returned\n' >>"$MG_RUN_DIR/events"
+}
+docker() {
+  printf '%s\n' "$*" >>"$MG_RUN_DIR/docker-calls"
+  case "$1 ${2:-}" in
+    'container ls')
+      [ "$#" -eq 6 ] && [ "$3 $4 $5" = '-aq --no-trunc --filter' ] &&
+        [ "$6" = "name=^/$fixture_name$" ] || return 97
+      [ ! -e "$MG_RUN_DIR/present" ] || printf '%064d\n' 7
+      return 0 ;;
+    'inspect '*)
+      [ "$#" -eq 2 ] && [ "$2" = "$(printf '%064d' 7)" ] || return 97
+      jq -nc --arg id "$2" --arg name "/$fixture_name" --arg run "$MG_RUN_ID" --arg owner "$fixture_owner" \
+        '[{Id:$id,Name:$name,Config:{Labels:{"meguri.mg.run-id":$run,"meguri.sync.owner":$owner}}}]' ;;
+    'rm -f')
+      [ "$#" -eq 3 ] && [ "$3" = "$(printf '%064d' 7)" ] || return 97
+      case "$fixture_previous" in
+        cleanup|both)
+          if [ ! -e "$MG_RUN_DIR/removal-failed" ]; then touch "$MG_RUN_DIR/removal-failed"; return 98; fi ;;
+      esac
+      rm "$MG_RUN_DIR/present" ;;
+    *) return 97 ;;
+  esac
+}
+SH
+  local scenario stage fault previous run_dir expected_rc
+  for scenario in exit:none:none normal:sink:none exit:sink:none normal:encode:none exit:encode:none \
+    exit:sink:execution exit:sink:cleanup exit:encode:both; do
+    IFS=: read -r stage fault previous <<<"$scenario"
+    run --separate-stderr "$SB/tools/mg" sync-reference-cleanup-fixture "$stage" "$fault" "$previous"
+    result="${lines[${#lines[@]} - 1]:-}"
+    run_dir="$(dirname "$result")"
+    if [ "$fault" = none ]; then
+      [ "$status" -eq 0 ] && [ "$(field .status)" = pass ]
+      jq -e '.failures==[]' "$result"
+    else
+      [ "$status" -eq 1 ] && [ "$(field .status)" = fail ]
+      jq -e '[.failures[] | select(.id=="reference-cleanup-publication")] | length==1' "$result"
+      grep -Fx "publication:$stage:$fault" "$run_dir/events"
+    fi
+    # A failing EXIT hook return is discarded by the runner; the durable
+    # failure/status must survive both that and the final successful hook.
+    [ "$(tail -n 1 "$run_dir/events")" = detail:exit ]
+    if [ "$stage" = exit ] && [ "$fault" != none ]; then
+      [ "$(head -n 2 "$run_dir/events")" = "$(printf 'detail:normal\nreturned')" ]
+    fi
+    expected_rc=0
+    if [ "$stage" = normal ] || [ "$previous" = cleanup ] || [ "$previous" = both ]; then expected_rc=1; fi
+    jq -e --argjson rc "$expected_rc" '.details.fixture_normal_cleanup==$rc and
+      .details.reference_cleanup=={checked:true,exit_code:0,absence_verified:true,late_create_excluded:false}' "$result"
+    case "$previous" in
+      execution|both) jq -e 'any(.failures[]; .id=="reference-execution")' "$result" ;;
+    esac
+    case "$previous" in
+      cleanup|both) jq -e 'any(.failures[]; .id=="candidate-cleanup")' "$result" ;;
+    esac
+    [ ! -e "$run_dir/present" ]
+    validate
+  done
+}
+
 @test "sync-server: container cleanup checks ownership and propagates removal or verification failures" {
   local mode
-  for mode in owned unowned wrong-nonce remove-failed still-present list-failed absent; do
+  for mode in owned unowned wrong-nonce wrong-name wrong-id missing-run missing-nonce inspect-failed invalid-id multiple-ids remove-failed still-present list-failed absent; do
     local dir="$BATS_TEST_TMPDIR/cleanup-$mode"
     mkdir "$dir"
     [ "$mode" = absent ] || touch "$dir/present"
@@ -1118,14 +1223,21 @@ SH
         case "$1 $2" in
           "container ls")
             [ "$mode" != list-failed ] || return 97
+            [ "$mode" != invalid-id ] || { echo not-an-id; return 0; }
+            [ "$mode" != multiple-ids ] || { printf "%064d\n%064d\n" 7 8; return 0; }
             [ ! -e "$dir/present" ] || printf "%064d\n" 7
             return 0 ;;
           "inspect "*)
-            local run="$MG_RUN_ID" label_owner="$owner"
+            [ "$mode" != inspect-failed ] || return 97
+            local run="$MG_RUN_ID" label_owner="$owner" inspected_id="$2" inspected_name="/meguri-candidate-$MG_RUN_ID"
             [ "$mode" != unowned ] || run=someone-else
             [ "$mode" != wrong-nonce ] || label_owner=someone-else
-            jq -nc --arg id "$2" --arg name "/meguri-candidate-$MG_RUN_ID" --arg run "$run" --arg owner "$label_owner" \
-              "[{Id:\$id,Name:\$name,Config:{Labels:{\"meguri.mg.run-id\":\$run,\"meguri.sync.owner\":\$owner}}}]" ;;
+            [ "$mode" != wrong-name ] || inspected_name=/foreign
+            [ "$mode" != wrong-id ] || inspected_id="$(printf "%064d" 8)"
+            jq -nc --arg id "$inspected_id" --arg name "$inspected_name" --arg run "$run" --arg owner "$label_owner" --arg mode "$mode" \
+              "[{Id:\$id,Name:\$name,Config:{Labels:{\"meguri.mg.run-id\":\$run,\"meguri.sync.owner\":\$owner}}}] |
+                if \$mode==\"missing-run\" then del(.[0].Config.Labels[\"meguri.mg.run-id\"])
+                elif \$mode==\"missing-nonce\" then del(.[0].Config.Labels[\"meguri.sync.owner\"]) else . end" ;;
           "rm -f")
             [ "$mode" != remove-failed ] || return 98
             [ "$mode" = still-present ] || rm "$dir/present" ;;
@@ -1138,7 +1250,127 @@ SH
       owned|absent) [ "$status" -eq 0 ]; [ ! -e "$dir/present" ] ;;
       *) [ "$status" -ne 0 ]; [[ "$output" == *candidate-cleanup* ]]; [[ "$output" == *status:fail* ]]; [ -e "$dir/present" ] ;;
     esac
-    case "$mode" in unowned|wrong-nonce|list-failed|absent) ! grep -q '^rm ' "$dir/commands" ;; esac
+    case "$mode" in unowned|wrong-nonce|wrong-name|wrong-id|missing-run|missing-nonce|inspect-failed|invalid-id|multiple-ids|list-failed|absent) ! grep -q '^rm ' "$dir/commands" ;; esac
+  done
+}
+
+@test "sync-server: omitted empty selftest and identity cancellation enforce bounded nonce ownership without sweeping" {
+  # Source MG's actual functions in the synthetic checkout, omitting only its
+  # final dispatcher call. No production predicates or helper bodies are copied.
+  sed '$d' "$SB/tools/mg" >"$SB/tools/mg-functions"
+  local mode selector dir
+  for selector in default empty selftest identity; do
+    for mode in owned record-limit oversized-control uncertain-create interrupted-attach absent unpublished invalid-record record-symlink record-permissions wrong-record-run foreign missing-nonce wrong-name wrong-id list-failed inspect-failed remove-failed still-present; do
+      dir="$BATS_TEST_TMPDIR/reference-cancel-$selector-$mode"
+      mkdir -p "$dir/run"
+      run bash -c '
+        . "$1/tools/mg-functions"
+        mg__load_families
+        MG_RUN_DIR="$2/run" MG_RUN_ID=reference-cancel MG_JOB=sync-server-reference
+        mode="$3" selector="$4" dir="$2"
+        case "$selector" in
+          default) args=() ;;
+          empty) args=("") ;;
+          *) args=("$selector") ;;
+        esac
+        mg_failure() { echo "$1"; }
+        mg_status() { echo "status:$1"; }
+        mg_detail() { printf "%s=%s\n" "$1" "$2" >>"$dir/details"; }
+        mg__remove_unreserved_run_containers() { echo sweep >>"$dir/events"; }
+        owner=11111111111111111111111111111111
+        name="meguri-reference-$MG_RUN_ID-$owner"
+        if [ "$mode" != unpublished ]; then
+          mkdir -m 700 "$MG_RUN_DIR/reference-control"
+          (umask 077; jq -nc --arg run "$MG_RUN_ID" --arg name "$name" --arg nonce "$owner" \
+            "{run:\$run,name:\$name,nonce:\$nonce}" >"$MG_RUN_DIR/reference-control/owner.json")
+          case "$mode" in
+            record-limit|oversized-control)
+              limit=4096
+              [ "$mode" != oversized-control ] || limit=4097
+              size="$(wc -c <"$MG_RUN_DIR/reference-control/owner.json")"
+              printf "%*s" "$((limit-size))" "" >>"$MG_RUN_DIR/reference-control/owner.json" ;;
+            invalid-record) printf "{}\n" >"$MG_RUN_DIR/reference-control/owner.json" ;;
+            record-symlink)
+              mv "$MG_RUN_DIR/reference-control/owner.json" "$dir/other.json"
+              ln -s "$dir/other.json" "$MG_RUN_DIR/reference-control/owner.json" ;;
+            record-permissions) chmod 644 "$MG_RUN_DIR/reference-control/owner.json" ;;
+            wrong-record-run)
+              jq ".run=\"foreign\"" "$MG_RUN_DIR/reference-control/owner.json" >"$dir/changed"
+              cat "$dir/changed" >"$MG_RUN_DIR/reference-control/owner.json" ;;
+          esac
+        fi
+        case "$mode" in absent|unpublished) ;; *) touch "$dir/present" ;; esac
+        docker() {
+          printf "%s\n" "$*" >>"$dir/events"
+          case "$1 $2" in
+            "container ls")
+              [ "$6" = "name=^/$name$" ] || return 96
+              [ "$mode" != list-failed ] || return 97
+              [ ! -e "$dir/present" ] || printf "%064d\n" 7
+              return 0 ;;
+            "inspect "*)
+              [ "$mode" != inspect-failed ] || return 97
+              local run="$MG_RUN_ID" nonce="$owner" actual_name="/$name" actual_id="$2"
+              [ "$mode" != foreign ] || run=foreign
+              [ "$mode" != missing-nonce ] || nonce=
+              [ "$mode" != wrong-name ] || actual_name=/foreign
+              [ "$mode" != wrong-id ] || actual_id="$(printf "%064d" 8)"
+              local state=exited
+              [ "$mode" != uncertain-create ] || state=created
+              [ "$mode" != interrupted-attach ] || state=running
+              jq -nc --arg id "$actual_id" --arg name "$actual_name" --arg run "$run" --arg owner "$nonce" \
+                --arg state "$state" \
+                "[{Id:\$id,Name:\$name,State:{Status:\$state,Running:(\$state==\"running\")},
+                   Config:{Labels:{\"meguri.mg.run-id\":\$run,\"meguri.sync.owner\":\$owner}}}]" ;;
+            "rm -f")
+              [ "$mode" != remove-failed ] || return 98
+              [ "$mode" = still-present ] || rm "$dir/present" ;;
+            *) return 99 ;;
+          esac
+        }
+        mg__remove_run_containers
+      ' fixture "$SB" "$dir" "$mode" "$selector"
+      case "$mode" in
+        owned|record-limit|uncertain-create|interrupted-attach|absent) [ "$status" -eq 0 ]; [ ! -e "$dir/present" ] ;;
+        *) [ "$status" -ne 0 ] ;;
+      esac
+      [ ! -e "$dir/events" ] || ! grep -Fx sweep "$dir/events"
+      case "$mode" in
+        unpublished|oversized-control|invalid-record|record-symlink|record-permissions|wrong-record-run)
+          [ ! -e "$dir/events" ]
+          [[ "$output" == *reference-cleanup* ]] && [[ "$output" == *status:fail* ]]
+          [ "$mode" = unpublished ] || [ -e "$dir/present" ] ;;
+        foreign|missing-nonce|wrong-name|wrong-id|list-failed|inspect-failed|absent)
+          ! grep -q '^rm ' "$dir/events" ;;
+      esac
+    done
+  done
+}
+
+@test "sync-server: other cancellation modes retain generic cleanup" {
+  sed '$d' "$SB/tools/mg" >"$SB/tools/mg-functions"
+  local mode
+  for mode in deps lock recovery-discover recovery recovery-dirty smoke edges normal normal-sdk normal-matrix media catalog validate seal; do
+    run bash -c '
+      . "$1/tools/mg-functions"
+      MG_JOB=sync-server-reference MG_RUN_DIR="$2" args=("$3")
+      mg_sync_reference__cancel_cleanup() { echo forbidden-delegation; return 97; }
+      mg__remove_unreserved_run_containers() { echo generic-cleanup; }
+      mg__remove_run_containers
+    ' fixture "$SB" "$BATS_TEST_TMPDIR" "$mode"
+    [ "$status" -eq 0 ] && [ "$output" = generic-cleanup ]
+  done
+  # An extra argument must not accidentally opt into retained cancellation,
+  # including the explicit empty spelling of the default mode.
+  for mode in '' selftest identity; do
+    run bash -c '
+      . "$1/tools/mg-functions"
+      MG_JOB=sync-server-reference MG_RUN_DIR="$2" args=("$3" unexpected)
+      mg_sync_reference__cancel_cleanup() { echo forbidden-delegation; return 97; }
+      mg__remove_unreserved_run_containers() { echo generic-cleanup; }
+      mg__remove_run_containers
+    ' fixture "$SB" "$BATS_TEST_TMPDIR" "$mode"
+    [ "$status" -eq 0 ] && [ "$output" = generic-cleanup ]
   done
 }
 
