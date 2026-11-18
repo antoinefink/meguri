@@ -276,7 +276,8 @@ import Testing
         #if os(macOS)
         // The public generated recipe is read-only; all destinations and defaults
         // below are fresh synthetic inputs. MG stages the recipe for the UI lane.
-        let owned = try #require(on.prepareOwnedProviderFixture(bundleIdentifier: "test.dev"))
+        let ownedResult = try on.prepareOwnedProviderFixture(bundleIdentifier: "test.dev")
+        let owned = try #require(ownedResult)
         defer { _ = owned.cleanup(afterClosing: true) }
         let other = try Owned()
         defer { _ = other.cleanup(afterClosing: true) }
@@ -289,7 +290,8 @@ import Testing
         #expect(owned.collectionLocation != .standard)
         #expect(!files.fileExists(atPath: owned.installationDirectory.path))
         #expect(!files.fileExists(atPath: owned.collectionLocation.directory.path))
-        let permissions = try #require(files.attributesOfItem(atPath: root.path)[.posixPermissions] as? NSNumber)
+        let attributes = try files.attributesOfItem(atPath: root.path)
+        let permissions = try #require(attributes[.posixPermissions] as? NSNumber)
         #expect(permissions.intValue & 0o777 == 0o700)
         #expect(owned.defaults !== other.defaults)
         let key = "synthetic-owned-marker"
