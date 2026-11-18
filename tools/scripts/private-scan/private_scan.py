@@ -1228,7 +1228,7 @@ PUBLIC_ARTIFACTS = {
     'oracle/meguri-sync-server/tests/test_recovery_dirty.py':
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
-    'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '139c6dd84f3d9f583836dc4eb0938e0d9ce9317289c9935193eff48fa1a114c1',
+    'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': 'ade27cc22bf5afe3de14694059f2ede71a2620244cfbbf12dea59c1a1a4c2fb7',
     'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '4cc3f07c55382427fa0da220e387abbbfb39498682b393477ee9f4219c9756c0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': '4c91f1149f3995778b0bf75a329cf9a1f64d0cfc567e36699ac36e8c90ce238c',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
