@@ -543,11 +543,25 @@ public final class SyncCoordinator {
     public var meguriCanRetryMedia: Bool {
         !meguriBusy && !settings.paused && meguriStage == .mediaBlocked && meguriOperation != nil
     }
+    public var deviceSettingsSettling: Bool { desiredProviderSettings != nil }
+    public var meguriAutomaticSettingVisible: Bool {
+        meguriReady && meguriRound != nil && providerState?.selection == .meguri
+    }
+    public var meguriAutomaticSettingAvailable: Bool {
+        meguriAutomaticSettingVisible && provider != nil && meguriConnectionOwner != nil
+            && meguriCanRun && meguriWake == nil && !meguriCancelling && !deviceSettingsSettling && meguriStage == nil
+            && meguriPhase == .setupRequired && meguriStatus.route == .round
+    }
+    public func setMeguriAutomatic(_ automatic: Bool) {
+        guard meguriAutomaticSettingAvailable, automatic != settings.automatic else { return }
+        setDeviceSettings(paused: settings.paused, automatic: automatic, media: settings.media)
+    }
     public var meguriStatus: MeguriSyncStatusPresentation {
         .init(stopped: providerNeedsAttention, connection: meguriAuthenticating ? .authenticating : meguriPhase,
             stage: meguriStage, localCollection: meguriHasLocalCollection, paused: settings.paused,
             routine: meguriRoutine, failureKey: meguriFailureKey,
-            lastExchange: meguriCanRun && !meguriCancelling ? meguriLastExchange : nil)
+            lastExchange: meguriCanRun && !meguriCancelling ? meguriLastExchange : nil,
+            settling: deviceSettingsSettling)
     }
     var beginMeguriActivation: (@MainActor () throws -> Void)?
     var finishMeguriActivation: (@MainActor (Bool) async -> SyncCoordinator?)?
@@ -1031,12 +1045,21 @@ public final class SyncCoordinator {
             && !closing && !suspended && !replacing && !providerActionInProgress && !providerHandoffInProgress
             && !providerNeedsAttention && !entryActivationHeld
     }
+    // Any settings write closes Core's ordinary admission. Reserve against new
+    // rounds until it settles; durable Automatic OFF still allows manual rounds.
+    static func meguriSchedulingAllowed(automatic: Bool, committed: CloudPolicyDeviceSettings,
+                                       desired: CloudPolicyDeviceSettings?) -> Bool {
+        desired == nil && committed.enabled && !committed.paused && (!automatic || committed.automatic)
+    }
+    private func meguriSchedulingAllowed(automatic: Bool) -> Bool {
+        Self.meguriSchedulingAllowed(automatic: automatic, committed: settings, desired: desiredProviderSettings)
+    }
     public func retryMeguriRoundMedia() {
         guard meguriRoutine == .mediaBlocked, meguriWake == nil, !meguriBusy else { return }
         requestMeguriWake(automatic: false, retryMedia: true)
     }
     private func requestMeguriWake(automatic: Bool, retryMedia: Bool = false) {
-        guard meguriCanRun, !automatic || settings.automatic else { return }
+        guard meguriCanRun, meguriSchedulingAllowed(automatic: automatic) else { return }
         switch meguriRoutine {
         case .mediaBlocked: if !retryMedia { return }
         case .acceptanceUnknown, .fullSyncRequired, .authentication, .failed: return
@@ -1056,7 +1079,7 @@ public final class SyncCoordinator {
                 let manual = meguriWakeManual
                 let recoveryRevision = meguriReachabilityRecoveryRevision
                 meguriWakePending = false; meguriWakeManual = false
-                guard manual || settings.automatic else { return }
+                guard meguriSchedulingAllowed(automatic: !manual) else { return }
                 meguriRoutine = .exchanging
                 let availabilityRevision = availability.revision
                 do {
@@ -1092,7 +1115,7 @@ public final class SyncCoordinator {
                     // collection Busy is still returning. Replay once in this
                     // wake for that outcome; a Media Busy or terminal cannot qualify.
                     let missedAvailability = availability.consume(collectionOutcome: report.collection.outcome,
-                        since: availabilityRevision, allowed: settings.automatic && meguriCanRun && !meguriCancelling
+                        since: availabilityRevision, allowed: meguriSchedulingAllowed(automatic: true) && meguriCanRun && !meguriCancelling
                             && editRevision == meguriAddressEditRevision)
                     if missedAvailability { meguriWakePending = true }
                     else if meguriRoutine != .idle && meguriRoutine != .pending && !recoveredNetwork { meguriWakePending = false }
@@ -1508,6 +1531,9 @@ public final class SyncCoordinator {
     public func setDeviceSettings(paused: Bool, automatic: Bool, media: Bool) {
         guard !closing, !replacing, !providerActionInProgress else { return }
         guard desiredProviderSettings == nil || providerState?.phase != .blocked else { return }
+        // Meguri's controls read committed fields. Reject reentry so a rapid
+        // ON or Pause/Resume cannot supersede a pending OFF with stale fields.
+        guard providerState?.selection != .meguri || !deviceSettingsSettling else { return }
         if let provider {
             providerSettingsRevision &+= 1
             let revision = providerSettingsRevision
@@ -1557,6 +1583,7 @@ public final class SyncCoordinator {
     }
     private func applyDeviceSettings(paused: Bool, automatic: Bool, media: Bool, enabled: Bool? = nil) {
         let wasPaused = settings.paused
+        let wasAutomatic = settings.automatic
         if paused { initialOwnAdmission.setOpen(false) }
         saveSettings(.init(enabled: enabled ?? settings.enabled, paused: paused, automatic: automatic, media: media))
         if wasPaused, !paused, settings.enabled, let pending = retainedRecoveryStart,
@@ -1567,7 +1594,9 @@ public final class SyncCoordinator {
             // that returned while paused grants no authority to this attempt.
             enqueue(.account(false))
         }
-        if providerState?.selection == .meguri, wasPaused, !paused { requestMeguriWake(automatic: true) }
+        if providerState?.selection == .meguri, (wasPaused && !paused) || (!wasAutomatic && automatic) {
+            requestMeguriWake(automatic: true)
+        }
         guard initialAdoptionEnabledBefore != nil, wasPaused != paused else { return }
         if paused { drainInitialOwnWork() }
         else {

@@ -372,7 +372,7 @@ public struct MeguriSyncStatusPresentation {
     }
     public init(stopped: Bool, connection: MeguriProviderConnectionPhase, stage: MeguriSetupStage?,
                 localCollection: Bool, paused: Bool, routine: MeguriRoutineState?, failureKey: String? = nil,
-                lastExchange: Int64? = nil) {
+                lastExchange: Int64? = nil, settling: Bool = false) {
         if stopped || connection == .blocked {
             route = .disabled("sync.meguri.now.unavailable.stopped")
         } else if paused {
@@ -384,7 +384,7 @@ public struct MeguriSyncStatusPresentation {
             case .mediaBlocked: .account("sync.meguri.media.showAffected")
             case .authentication: .disabled("sync.meguri.now.unavailable.signIn")
             case .exchanging, .failed: .disabled(nil)
-            case .unreported, .idle, .pending, .waiting, .network, .server, .cancelled: .round
+            case .unreported, .idle, .pending, .waiting, .network, .server, .cancelled: settling ? .disabled(nil) : .round
             }
         } else { route = .account("sync.meguri.setup.continue") }
         let pair: (String, String?)

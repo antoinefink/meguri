@@ -274,6 +274,7 @@ struct MeguriSyncSections: View {
                     let settings = sync.settings
                     sync.setDeviceSettings(paused: !settings.paused, automatic: settings.automatic, media: settings.media)
                 }
+                .disabled(sync.deviceSettingsSettling)
                 .accessibilityIdentifier("settings.accountSync.meguri.pause")
                 if sync.meguriRoutine == .failed,
                    sync.meguriRoundReport?.collection.finalization != nil || sync.meguriRoundReport?.media?.finalization != nil {
@@ -306,6 +307,17 @@ struct MeguriSyncSections: View {
                         if succeeded { stopping = false }
                     }
                 })
+        }
+        if sync.meguriAutomaticSettingVisible {
+            Section {
+                Toggle(SyncText.value("sync.settings.automatic"), isOn: Binding(
+                    get: { sync.settings.automatic }, set: { sync.setMeguriAutomatic($0) }))
+                    .disabled(!sync.meguriAutomaticSettingAvailable || signingOut || changing)
+                    .accessibilityIdentifier("settings.accountSync.meguri.automatic")
+            } footer: {
+                Text(SyncText.value("sync.settings.automatic.footer"))
+                    .accessibilityIdentifier("settings.accountSync.meguri.automaticFooter")
+            }
         }
     }
     private func signInAction() {

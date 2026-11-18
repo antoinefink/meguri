@@ -5,6 +5,89 @@ import SwiftUI
 import Testing
 
 @MainActor @Suite struct CloudSyncPresentationTests {
+    @Test func meguriSchedulingDeniesEveryPendingWriteButAllowsDurableManualOff() {
+        let on = CloudPolicyDeviceSettings(enabled: true, paused: false, automatic: true, media: true)
+        let off = CloudPolicyDeviceSettings(enabled: true, paused: false, automatic: false, media: true)
+        let paused = CloudPolicyDeviceSettings(enabled: true, paused: true, automatic: true, media: true)
+        let disabled = CloudPolicyDeviceSettings(enabled: false, paused: false, automatic: true, media: true)
+        let mediaOff = CloudPolicyDeviceSettings(enabled: true, paused: false, automatic: true, media: false)
+        let cases = [(on, true, true), (off, true, false), (paused, false, false),
+                     (disabled, false, false), (mediaOff, true, true)]
+        for (committed, manualAllowed, automaticAllowed) in cases {
+            #expect(SyncCoordinator.meguriSchedulingAllowed(automatic: false,
+                committed: committed, desired: nil) == manualAllowed)
+            #expect(SyncCoordinator.meguriSchedulingAllowed(automatic: true,
+                committed: committed, desired: nil) == automaticAllowed)
+            // Includes identical writes, Pause, Resume and media-only writes.
+            for desired in [on, off, paused, disabled, mediaOff] {
+                for automatic in [false, true] {
+                    #expect(!SyncCoordinator.meguriSchedulingAllowed(automatic: automatic,
+                        committed: committed, desired: desired))
+                }
+            }
+        }
+    }
+    @Test func meguriPendingWriteSuppressesEntryAndAvailabilityRetryUntilCommit() {
+        let on = CloudPolicyDeviceSettings(enabled: true, paused: false, automatic: true, media: true)
+        let off = CloudPolicyDeviceSettings(enabled: true, paused: false, automatic: false, media: true)
+        // Use the production admission shared by enqueue, task entry and retry.
+        // These settings inputs grant no owner, Ready binding or network job.
+        #expect(SyncCoordinator.meguriSchedulingAllowed(automatic: true, committed: on, desired: nil))
+        let wake = MeguriWakeAvailability(generation: 7)
+        let snapshot = wake.revision
+        wake.observe(kind: .available, sequence: 40, generation: 7)
+        for automatic in [false, true] {
+            for (committed, desired) in [(on, off), (off, on), (on, on)] {
+                let allowed = SyncCoordinator.meguriSchedulingAllowed(automatic: automatic,
+                    committed: committed, desired: desired)
+                #expect(!allowed)
+                #expect(!wake.consume(collectionOutcome: .refused(.busy), since: snapshot, allowed: allowed))
+            }
+        }
+        let committedOn = SyncCoordinator.meguriSchedulingAllowed(automatic: true, committed: on, desired: nil)
+        #expect(wake.consume(collectionOutcome: .refused(.busy), since: snapshot, allowed: committedOn))
+        #expect(!wake.consume(collectionOutcome: .refused(.busy), since: snapshot, allowed: committedOn))
+    }
+    @Test func meguriSettlingOnlyDisablesTheOrdinaryRoundRoute() {
+        let cases: [(Bool, MeguriProviderConnectionPhase, MeguriSetupStage?, Bool, MeguriRoutineState?)] = [
+            (true, .setupRequired, nil, false, .idle),
+            (false, .blocked, nil, false, .idle),
+            (false, .setupRequired, nil, true, .idle),
+            (false, .signedOut, nil, false, nil),
+            (false, .setupRequired, .acceptanceUnknown, false, nil)
+        ]
+        let completed: Int64 = 1_700_000_000_000
+        let now = Date(timeIntervalSince1970: Double(completed) / 1_000 + 60)
+        for (stopped, connection, stage, paused, routine) in cases {
+            let original = MeguriSyncStatusPresentation(stopped: stopped, connection: connection,
+                stage: stage, localCollection: true, paused: paused, routine: routine, lastExchange: completed)
+            let settling = MeguriSyncStatusPresentation(stopped: stopped, connection: connection,
+                stage: stage, localCollection: true, paused: paused, routine: routine,
+                lastExchange: completed, settling: true)
+            #expect(settling.route == original.route)
+            #expect(settling.titleKey == original.titleKey && settling.detailKey == original.detailKey)
+            #expect(settling.detailLines(now: now) == original.detailLines(now: now))
+        }
+    }
+    @Test func meguriAutomaticControlCannotCreateReadinessOrChangeProtectedSettings() {
+        // Offline coordinator only; do not manufacture a Ready binding/service.
+        for paused in [false, true] {
+            let sync = SyncCoordinator(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+                configuration: nil, defaults: nil)
+            sync.setDeviceSettings(paused: paused, automatic: false, media: true)
+            let settings = sync.settings
+            #expect(!sync.meguriAutomaticSettingVisible && !sync.meguriAutomaticSettingAvailable)
+            sync.setMeguriAutomatic(true)
+            sync.setMeguriAutomatic(false)
+            #expect(sync.settings == settings && !sync.deviceSettingsSettling)
+            #expect(sync.meguriPhase == .unconfigured && sync.meguriRoutine == nil && !sync.meguriBusy)
+            #expect(sync.providerState == nil && sync.meguriLastCommand == nil && sync.meguriRoundReport == nil)
+            #expect(sync.applyMeguriRoundCredentialFailure(MeguriProviderCredentialFailure.wrongConnection))
+            #expect(!sync.meguriAutomaticSettingVisible && !sync.meguriAutomaticSettingAvailable)
+            sync.setMeguriAutomatic(true)
+            #expect(sync.settings == settings && sync.meguriPhase == .blocked && !sync.deviceSettingsSettling)
+        }
+    }
     @Test func meguriReplacementRowsRenderActualNumericValuesWithPlainLabels() {
         // These are display inputs, not an issued preview, receipt or confirmation.
         let rows = MeguriSyncStatusPresentation.replacementCountRows(cards: 237, notes: 184, reviews: 96)
@@ -112,6 +195,11 @@ import Testing
             #expect(presentation.titleKey == "sync.meguri.status.\(title).title")
             #expect(presentation.detailKey == detail)
             #expect(presentation.route == route)
+            let settling = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+                stage: nil, localCollection: true, paused: false, routine: state, settling: true)
+            #expect(settling.route == (route == .round ? .disabled(nil) : route))
+            #expect(settling.titleKey == presentation.titleKey && settling.detailKey == presentation.detailKey)
+            #expect(settling.symbol == presentation.symbol && settling.isBusy == presentation.isBusy)
         }
     }
     @Test func meguriLastExchangeDetailsFollowRoutineAndStatusPrecedence() {
@@ -125,6 +213,11 @@ import Testing
                 stage: nil, localCollection: true, paused: false, routine: routine, lastExchange: completed)
             #expect(presentation.detailLines(now: now) == (routine == .idle ? [exchange] : [pending, exchange]))
             #expect(presentation.route == .round && !presentation.isBusy)
+            let settling = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+                stage: nil, localCollection: true, paused: false, routine: routine,
+                lastExchange: completed, settling: true)
+            #expect(settling.route == .disabled(nil))
+            #expect(settling.detailLines(now: now) == presentation.detailLines(now: now))
             let unavailable = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
                 stage: nil, localCollection: true, paused: false, routine: routine)
             #expect(unavailable.detailLines(now: now) == (routine == .idle ? [] : [pending]))
