@@ -271,6 +271,8 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await memberRow.getByRole("button", { name: `Confirm disable ${memberUsername}`, exact: true }).click();
   await expect(memberRow.getByText(/Member · Disabled · Ready/)).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/accounts");
+  await expect(memberRow).toBeVisible();
   await accountShell(page, "root.admin", true);
   await expect(memberRow.getByText(memberUsername, { exact: true })).toBeVisible();
   await expect(memberRow.locator("dd").nth(1)).toHaveText("0 B");

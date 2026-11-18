@@ -835,7 +835,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '7cf6314ddc6f5fd632a1524c7d62288cbd074e871392bd67c4d351b33880b62f',
+        '37e14baecea0ed68a947c246dbaa86dddcb0551811067aa1b7c0cc20686b65f1',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':

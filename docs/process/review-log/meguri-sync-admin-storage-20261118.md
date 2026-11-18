@@ -35,3 +35,18 @@ refreshing existing exact-path privacy admissions.
 | `specs/servers/meguri-sync-web.md` | `d9d3c5be056dd56eda6414ea3ed58a9e6eded6467c07c13e0f4cf80d08f333d6` |
 
 This work awaits the full integration gate and design feedback.
+
+## Compile repair
+
+Initial server test `20261118T131157Z-82081` and web verification
+`20261118T131157Z-82326` failed to compile three unsigned SQLite reads.
+Filtered repair `20261118T131320Z-91386` uses checked conversions from signed
+SQLite values. The captures reload Accounts to clear earlier form results.
+Independent review `20261118T131553Z-99128` cleared the four exact files.
+
+| File | SHA-256 |
+| --- | --- |
+| server/src/accounts/administration.rs | `4f1b074a16d8cff8fc24db37a30a8e72be4186e4e832bf291e44a68ad5f78fca` |
+| server/src/media/index.rs | `1ca6c74ff37ee54935caff68f2d33c04df4f34482d9cfb214c9d1a5ccd55013f` |
+| server/web/tests/browser/accounts.spec.ts | `c781843e58425b1fbd35ea7cb86c1d6c3a68cea75834c33893486e1bb7f1f565` |
+| server/web/scripts/audit-assessment.json | `37e14baecea0ed68a947c246dbaa86dddcb0551811067aa1b7c0cc20686b65f1` |

@@ -56,8 +56,9 @@ pub(crate) fn storage_bytes(c: &Connection, id: &str) -> Result<u64> {
     let mut rows = query.query([id])?;
     let mut bytes = 0u64;
     while let Some(row) = rows.next()? {
-        let size: u64 = row.get(0)?;
+        let size: i64 = row.get(0)?;
         if !(1..=104_857_600).contains(&size) { return Err(integrity()); }
+        let size = u64::try_from(size).map_err(|_| integrity())?;
         bytes = bytes.checked_add(size).ok_or_else(integrity)?;
     }
     Ok(bytes)

@@ -159,8 +159,8 @@
         "sha256": "036fe75a617cc7a806cb828d9908a5470a20bb7c731ea70cbbe730499a4a169f"
       },
       "tests/browser/accounts.spec.ts": {
-        "bytes": 19895,
-        "sha256": "430ae2c48ad6f123095322cc16f4c0dc877ff32985f118bb32a137096a786193"
+        "bytes": 19968,
+        "sha256": "c781843e58425b1fbd35ea7cb86c1d6c3a68cea75834c33893486e1bb7f1f565"
       },
       "tests/policy.test.ts": {
         "bytes": 1397,
