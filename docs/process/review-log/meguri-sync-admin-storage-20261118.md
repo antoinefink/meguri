@@ -67,3 +67,17 @@ as specified in W3.
 | server/web/src/accounts.tsx | `9ae8c5ef1390d255f14a0351cf4da350fc22f46dbb28f4663f9f7fec6d591d35` |
 | server/web/src/style.css | `44744bdf30fb05f52184838f5ce2fc52a745ee1bb96557cfe703e5170e265aed` |
 | server/web/tests/browser/accounts.spec.ts | `3281b1fe21e3bc27330fa47e3cf7292b01c7cdfd6fd44fca2295eb7a6bd16296` |
+
+## Preview verification
+
+Clean `03215c7da` passed 192 server tests with zero skips in
+`sync-server-test/20261118T132820Z-31918`. The same source passed nine frontend
+checks and the full private-HTTPS browser journey in
+`sync-web-verify/20261118T132818Z-30551`. The browser checked navigation names,
+account grouping, admin access, storage values and narrow layouts. The wide
+Accounts, narrow Accounts and Connection captures were inspected and opened
+as one local Chrome preview.
+
+Similarity `20261118T132815Z-30073` and staged privacy
+`20261118T132722Z-28321` passed. Correctness lint
+`20261118T132945Z-35377` passed with an unrelated untracked Finder file present.
