@@ -47,6 +47,7 @@ public struct AddNoteView: View {
             HStack { Spacer(); addButton }.padding()
         }
         .modifier(AddNoteDecisions(flow: flow))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("editor.add")
         #else
         NavigationStack {
@@ -65,6 +66,7 @@ public struct AddNoteView: View {
         .interactiveDismissDisabled()
         .background(AddNoteSwipeGuard(attempt: close))
         .modifier(AddNoteDecisions(flow: flow))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("editor.add")
         #endif
     }

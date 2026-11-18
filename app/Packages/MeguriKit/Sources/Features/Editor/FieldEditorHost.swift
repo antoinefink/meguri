@@ -72,11 +72,6 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         relay.owner = self; webView.navigationDelegate = self
-        #if os(macOS)
-        webView.setAccessibilityIdentifier("editor.fields")
-        #else
-        webView.accessibilityIdentifier = "editor.fields"
-        #endif
     }
 
     public func start() async throws {
@@ -380,7 +375,13 @@ private final class EditorMessageRelay: NSObject, WKScriptMessageHandlerWithRepl
 public struct FieldEditorView: View {
     public let host: FieldEditorHost
     public init(host: FieldEditorHost) { self.host = host }
-    public var body: some View { FieldEditorMount(host: host) }
+    public var body: some View {
+        VStack(spacing: 0) {
+            FieldEditorMount(host: host)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("editor.fields")
+    }
 }
 #if os(macOS)
 private struct FieldEditorMount: NSViewRepresentable {
