@@ -9,6 +9,82 @@ import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import { once } from 'node:events';
 import assert from 'node:assert/strict';
 const phase = process.argv[2];
+// The route-only phase has its own parser and lifecycle. It never enters the
+// account/browser/provider branches below, and never mounts the service data.
+if (phase === 'native-route-fixture') {
+  let nativeProxy;
+  try {
+    assert.equal(process.argv.length, 12);
+    const [gateway, origin, source, run, owner, runtime, tool, scriptSha, fixture] = process.argv.slice(3);
+    const octets = gateway.split('.');
+    assert.equal(octets.length, 4);
+    assert(octets.every(x => /^(0|[1-9][0-9]{0,2})$/.test(x) && Number(x) <= 255));
+    const [a, b] = octets.map(Number);
+    assert(a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168));
+    const url = new URL(origin);
+    assert.equal(url.hostname, gateway); assert.equal(url.protocol, 'https:');
+    assert(/^[1-9][0-9]{3,4}$/.test(url.port) && Number(url.port) >= 1024 && Number(url.port) <= 65535);
+    assert.equal(origin, `https://${gateway}:${url.port}`);
+    assert(/^[0-9a-f]{40}$/.test(source)); assert(/^[A-Za-z0-9_-]{1,100}$/.test(run));
+    assert(/^[0-9a-f]{32}$/.test(owner)); assert(/^[0-9a-f]{64}$/.test(runtime));
+    assert(/^sha256:[0-9a-f]{64}$/.test(tool)); assert(/^[0-9a-f]{64}$/.test(scriptSha));
+    assert(/^meguri-native-fixture-[A-Za-z0-9_-]{1,100}$/.test(fixture));
+    assert.equal(createHash('sha256').update(await readFile('/smoke/package-smoke.mjs')).digest('hex'), scriptSha);
+    await mkdir('/tmp/native-route', { mode: 0o700 });
+    const openssl = args => execFileSync('openssl', args, { stdio: 'ignore', timeout: 15000,
+      env: { PATH: '/usr/bin:/bin', OPENSSL_CONF: '/dev/null' } });
+    openssl(['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+      '-subj', '/CN=Meguri Native Route CA', '-addext', 'basicConstraints=critical,CA:TRUE',
+      '-addext', 'keyUsage=critical,keyCertSign', '-keyout', '/tmp/native-route/ca-key.pem',
+      '-out', '/tmp/native-route/root-ca.pem']);
+    openssl(['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=localhost',
+      '-keyout', '/tmp/native-route/leaf-key.pem', '-out', '/tmp/native-route/leaf.csr']);
+    await writeFile('/tmp/native-route/leaf.ext',
+      `basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost,IP:127.0.0.1,IP:${gateway}\n`,
+      { mode: 0o600, flag: 'wx' });
+    openssl(['x509', '-req', '-in', '/tmp/native-route/leaf.csr', '-CA', '/tmp/native-route/root-ca.pem',
+      '-CAkey', '/tmp/native-route/ca-key.pem', '-set_serial', '1', '-days', '1',
+      '-extfile', '/tmp/native-route/leaf.ext', '-out', '/tmp/native-route/leaf.pem']);
+    const root = await readFile('/tmp/native-route/root-ca.pem');
+    const leaf = await readFile('/tmp/native-route/leaf.pem');
+    const ca = new X509Certificate(root); const server = new X509Certificate(leaf);
+    assert.equal(ca.ca, true); assert.equal(server.ca, false);
+    assert.equal(server.subjectAltName, `DNS:localhost, IP Address:127.0.0.1, IP Address:${gateway}`);
+    assert.equal(server.checkIP(gateway), gateway); assert.equal(server.checkIP('127.0.0.1'), '127.0.0.1');
+    assert.equal(server.checkHost('localhost', { subject: 'never' }), 'localhost');
+    assert(ca.verify(ca.publicKey)); assert(server.verify(ca.publicKey));
+    for (const c of [ca, server]) {
+      const start = Date.parse(c.validFrom); const end = Date.parse(c.validTo);
+      assert(end > Date.now() && start <= Date.now() && end - start === 86400000);
+    }
+    await writeFile('/tmp/native-route/binding.json', JSON.stringify({ gateway, origin, source, run, owner,
+      runtime, tool, scriptSha, fixture, caSha: createHash('sha256').update(root).digest('hex'), caBytes: root.length }),
+      { mode: 0o600, flag: 'wx' });
+    nativeProxy = createServer({ key: await readFile('/tmp/native-route/leaf-key.pem'), cert: leaf }, (incoming, outgoing) => {
+      if (incoming.method !== 'GET' || incoming.url !== '/health') { outgoing.writeHead(404); outgoing.end(); return; }
+      const headers = { ...incoming.headers, 'x-forwarded-for': '127.0.0.1', 'x-forwarded-proto': 'https' };
+      delete headers['x-forwarded-host'];
+      const upstream = httpRequest({ hostname: '127.0.0.1', port: 8080, method: incoming.method, path: incoming.url, headers }, response => {
+        outgoing.writeHead(response.statusCode, response.headers); response.pipe(outgoing);
+      });
+      upstream.on('error', () => { if (!outgoing.headersSent) outgoing.writeHead(502); outgoing.end(); });
+      incoming.on('aborted', () => upstream.destroy()); outgoing.on('close', () => upstream.destroy()); incoming.pipe(upstream);
+    });
+    nativeProxy.listen(18443, '0.0.0.0'); await once(nativeProxy, 'listening');
+    await new Promise(resolve => {
+      const stop = () => {
+        process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop); resolve();
+      };
+      process.once('SIGTERM', stop); process.once('SIGINT', stop);
+      console.log('MEGURI_NATIVE_ROUTE_READY');
+    });
+  } catch {
+    console.error('Packaged service smoke failed: native-route-fixture'); process.exitCode = 1;
+  } finally {
+    if (nativeProxy) { nativeProxy.closeAllConnections(); await new Promise(resolve => nativeProxy.close(resolve)); }
+  }
+  process.exit(process.exitCode || 0);
+}
 const browserMode = process.argv[3] === 'browser';
 assert(['seed', 'check', 'provider-fixture'].includes(phase));
 const providerFixture = phase === 'provider-fixture';

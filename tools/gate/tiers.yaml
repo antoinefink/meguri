@@ -896,6 +896,7 @@ runs:
     user_step: device-run
 
 utilities:
+  - {job: meguri-native-route, why: "Explicit single leased-guest route/TLS/health diagnostic only; no app/T12, UI, account, bootstrap, review, Mobile, compatibility or gate credit"}
   - {job: sync-server-mobile-smoke, why: "Explicit temporary synthetic phone endpoint; no formal Mobile or compatibility credit"}
   - {job: sync-server-retained, why: "Explicit separate retained HTTP worker lock preparation/build; parent-owned final package and reviewed eight-case execution remain required"}
   - {job: sync-web-browser, why: "Focused real browser journey against an owned preview; sync-web-verify uses a private gate fixture"}
