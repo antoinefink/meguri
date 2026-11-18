@@ -1234,7 +1234,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '1c0e2f456b4949ae64cedd5ba926d5963806718d6a0a1687716311b98e741c60',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '839287d38bdb1d762a5158155e2ae13b2919b3a26bbb44c05d7c47987eda5a7c',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': '4c91f1149f3995778b0bf75a329cf9a1f64d0cfc567e36699ac36e8c90ce238c',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',
