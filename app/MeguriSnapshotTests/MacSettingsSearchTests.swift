@@ -131,7 +131,7 @@ import Testing
            picker.itemTitles.contains(SyncText.value("sync.service.meguri")) { matches.append(picker) }
         return matches + view.subviews.flatMap { nativeServicePickers(in: $0) }
     }
-    // Diagnostic only: fixed categories, bounded public getters, no AX actions.
+    // Diagnostic only: one owned-root graph, fixed scalars, public getters, no AX actions.
     private func recordNativeServiceMountDiagnostic(window: NSWindow, controller: NSViewController,
         lastObservedNativePickerCount: Int?) {
         let root = controller.view
@@ -139,68 +139,185 @@ import Testing
         let hostAttached = root.window === window
         let contentAttached = window.contentView === root
         let mounted = controllerAttached && hostAttached && contentAttached
+        let maxObjects = 128, maxDepth = 16
         var visited: Set<ObjectIdentifier> = []
-        var objectLimit = false, depthLimit = false, incomplete = !mounted, readFailed = !mounted
+        var visitedRoot = 0, visitedNative = 0, visitedAX = 0, skippedElsewhere = 0
+        var objectLimit = false, depthLimit = false, incomplete = !mounted, readFailed = false
+        var popupCount = 0, buttonCount = 0, controlCount = 0, viewCount = 0, otherCount = 0
+        var matchingTitlePopups = 0, menuPresentPopups = 0, menuNonemptyPopups = 0
+        var popupsWithICloudOption = 0, popupsWithMeguriOption = 0
+        var exactServiceCount = 0, category = "missing", role = "missing"
+        var roleGetterAvailable = false, childrenGetterAvailable = false
+        var pickAvailable = false, pressAvailable = false, showMenuAvailable = false
+        var rootIdentifierRoute = "not-observed", rootIdentifierKind = "not-observed"
+        var rootChildrenRoute = "not-observed", rootChildrenKind = "not-observed"
+        let identifierSelector = #selector(NSAccessibilityProtocol.accessibilityIdentifier)
         let roleSelector = #selector(NSAccessibilityProtocol.accessibilityRole)
         let childrenSelector = #selector(NSAccessibilityProtocol.accessibilityChildren)
-        func find(_ object: NSObject, depth: Int) -> NSObject? {
-            guard !visited.contains(ObjectIdentifier(object)) else { return nil }
-            guard visited.count < 128 else { objectLimit = true; incomplete = true; return nil }
+        let legacyGetter = NSSelectorFromString("accessibilityAttributeValue:")
+        let iCloudOption = SyncText.value("sync.service.iCloud")
+        let meguriOption = SyncText.value("sync.service.meguri")
+        struct GetterCounts {
+            var modern = 0, legacy = 0, neither = 0
+            var nilValue = 0, string = 0, array = 0, other = 0
+            mutating func record(route: String, kind: String) {
+                switch route {
+                case "modern": modern += 1
+                case "legacy": legacy += 1
+                default: neither += 1
+                }
+                switch kind {
+                case "nil": nilValue += 1
+                case "string": string += 1
+                case "array": array += 1
+                default: other += 1
+                }
+            }
+        }
+        var identifiers = GetterCounts(), children = GetterCounts()
+        func read(_ object: NSObject, selector: Selector) -> (value: AnyObject?, route: String, kind: String) {
+            let route = object.responds(to: selector) ? "modern"
+                : (object.responds(to: legacyGetter) ? "legacy" : "neither")
+            // The existing reader preserves modern precedence, including nil/wrong types.
+            let value = accessibilityValue(in: object, selector: selector)
+            let kind = value == nil ? "nil" : (value is String ? "string" : (value is NSArray ? "array" : "other"))
+            return (value, route, kind)
+        }
+        func publicCategory(_ object: NSObject) -> String {
+            if object is NSPopUpButton { return "NSPopUpButton" }
+            if object is NSButton { return "NSButton" }
+            if object is NSControl { return "NSControl" }
+            if object is NSView { return "NSView" }
+            return "other"
+        }
+        func inspect(_ object: NSObject, depth: Int, viaNative: Bool) {
+            guard !visited.contains(ObjectIdentifier(object)) else { return }
+            guard visited.count < maxObjects else { objectLimit = true; incomplete = true; return }
             visited.insert(ObjectIdentifier(object))
-            // Never follow an AX edge into a window or a view owned elsewhere.
-            if object is NSWindow { incomplete = true; return nil }
+            if depth == 0 { visitedRoot += 1 }
+            else if viaNative { visitedNative += 1 }
+            else { visitedAX += 1 }
+            // These rejected objects consume a slot, but supply no getters or outgoing edges.
+            if object is NSWindow { skippedElsewhere += 1; incomplete = true; return }
             if let view = object as? NSView, let owner = view.window, owner !== window {
-                incomplete = true; return nil
+                skippedElsewhere += 1; incomplete = true; return
             }
-            if let identifier = accessibilityString(in: object,
-                selector: #selector(NSAccessibilityProtocol.accessibilityIdentifier)) {
-                if identifier == "settings.accountSync.service" { return object }
-            } else { readFailed = true; incomplete = true }
-            guard let children = accessibilityValue(in: object, selector: childrenSelector) as? NSArray else {
-                readFailed = true; incomplete = true; return nil
+            let objectCategory = publicCategory(object)
+            switch objectCategory {
+            case "NSPopUpButton": popupCount += 1
+            case "NSButton": buttonCount += 1
+            case "NSControl": controlCount += 1
+            case "NSView": viewCount += 1
+            default: otherCount += 1
             }
-            defer { withExtendedLifetime(children) {} }
-            guard depth < 16 else {
-                if children.count > 0 { depthLimit = true; incomplete = true }
-                return nil
-            }
-            for index in 0..<children.count {
-                guard visited.count < 128 else { objectLimit = true; incomplete = true; break }
-                guard let child = children.object(at: index) as? NSObject else {
-                    readFailed = true; incomplete = true; continue
-                }
-                if let found = find(child, depth: depth + 1) { return found }
-            }
-            return nil
-        }
-        let found = mounted ? find(root, depth: 0) : nil
-        let lookup = found != nil ? "found" : (readFailed || incomplete ? "read-failed" : "not-found")
-        var category = "missing", role = "missing"
-        if let found {
-            category = found is NSPopUpButton ? "NSPopUpButton" : (found is NSView ? "NSView" : "other")
-            if let value = accessibilityString(in: found, selector: roleSelector) {
-                switch value {
-                case NSAccessibility.Role.popUpButton.rawValue: role = "popup"
-                case NSAccessibility.Role.comboBox.rawValue: role = "combo"
-                case NSAccessibility.Role.menuButton.rawValue: role = "menu-button"
-                case NSAccessibility.Role.group.rawValue: role = "group"
-                default: role = "other"
+            if let popup = object as? NSPopUpButton {
+                // Read only this visited control's menu/title properties; do not walk menus/items.
+                if popup.menu != nil { menuPresentPopups += 1 }
+                if popup.numberOfItems > 0 { menuNonemptyPopups += 1 }
+                let titles = popup.itemTitles
+                if titles.contains(iCloudOption) { popupsWithICloudOption += 1 }
+                if titles.contains(meguriOption) {
+                    popupsWithMeguriOption += 1
+                    matchingTitlePopups += 1
                 }
             }
+            let identifier = read(object, selector: identifierSelector)
+            identifiers.record(route: identifier.route, kind: identifier.kind)
+            let childResult = read(object, selector: childrenSelector)
+            children.record(route: childResult.route, kind: childResult.kind)
+            if depth == 0 {
+                rootIdentifierRoute = identifier.route; rootIdentifierKind = identifier.kind
+                rootChildrenRoute = childResult.route; rootChildrenKind = childResult.kind
+            }
+            // A supported nil identifier is missing metadata, not a getter failure.
+            if identifier.route == "neither" || (identifier.kind != "nil" && identifier.kind != "string") {
+                readFailed = true; incomplete = true
+            }
+            if identifier.value as? String == "settings.accountSync.service" {
+                exactServiceCount += 1
+                // Describe only the first exact-ID observation, never a title-only candidate.
+                if exactServiceCount == 1 {
+                    category = objectCategory
+                    if let value = accessibilityString(in: object, selector: roleSelector) {
+                        switch value {
+                        case NSAccessibility.Role.popUpButton.rawValue: role = "popup"
+                        case NSAccessibility.Role.comboBox.rawValue: role = "combo"
+                        case NSAccessibility.Role.menuButton.rawValue: role = "menu-button"
+                        case NSAccessibility.Role.group.rawValue: role = "group"
+                        default: role = "other"
+                        }
+                    }
+                    roleGetterAvailable = object.responds(to: roleSelector)
+                    childrenGetterAvailable = object.responds(to: childrenSelector)
+                    pickAvailable = object.responds(to: NSSelectorFromString("accessibilityPerformPick"))
+                    pressAvailable = object.responds(to: NSSelectorFromString("accessibilityPerformPress"))
+                    showMenuAvailable = object.responds(to: NSSelectorFromString("accessibilityPerformShowMenu"))
+                }
+            }
+            // Inspect NSArray conditionally, without assertion-bearing/typed child helpers.
+            let axChildren = childResult.value as? NSArray
+            defer { withExtendedLifetime(axChildren) {} }
+            if childResult.route == "neither" || (childResult.kind != "nil" && childResult.kind != "array") {
+                readFailed = true; incomplete = true
+            }
+            // Nil children cannot establish a complete child observation, even with a getter.
+            if axChildren == nil { incomplete = true }
+            let nativeChildren = (object as? NSView)?.subviews ?? []
+            guard depth < maxDepth else {
+                if !nativeChildren.isEmpty || (axChildren?.count ?? 0) > 0 {
+                    depthLimit = true; incomplete = true
+                }
+                return
+            }
+            // Bound edge-list inspection too, including duplicate or malformed entries.
+            // Any omitted edge keeps the observation incomplete; no absence is inferred.
+            if nativeChildren.count > maxObjects { objectLimit = true; incomplete = true }
+            for child in nativeChildren.prefix(maxObjects) {
+                guard visited.count < maxObjects else { objectLimit = true; incomplete = true; break }
+                inspect(child, depth: depth + 1, viaNative: true)
+            }
+            if let axChildren {
+                if axChildren.count > maxObjects { objectLimit = true; incomplete = true }
+                for index in 0..<min(axChildren.count, maxObjects) {
+                    guard visited.count < maxObjects else { objectLimit = true; incomplete = true; break }
+                    guard let child = axChildren.object(at: index) as? NSObject else {
+                        readFailed = true; incomplete = true; continue
+                    }
+                    inspect(child, depth: depth + 1, viaNative: false)
+                }
+            }
         }
+        if mounted { inspect(root, depth: 0, viaNative: false) }
+        let lookup = exactServiceCount > 0 ? "found"
+            : (readFailed ? "read-failed" : (incomplete ? "incomplete" : "not-found"))
         print("nativeServiceMount controllerAttached=\(controllerAttached) hostAttached=\(hostAttached)"
             + " contentAttached=\(contentAttached) windowVisible=\(window.isVisible)"
             + " windowOcclusionVisible=\(window.occlusionState.contains(.visible))"
             + " hostFrameNonempty=\(!root.frame.isEmpty) hostBoundsNonempty=\(!root.bounds.isEmpty)"
             + " windowFrameNonempty=\(!window.frame.isEmpty)"
             + " nativePickerMatches=LAST-OBSERVED:\(lastObservedNativePickerCount.map { String($0) } ?? "not-observed")"
-            + " axService=\(lookup) category=\(category) role=\(role)"
-            + " objectLimit=\(objectLimit) depthLimit=\(depthLimit) incomplete=\(incomplete)"
-            + " roleGetterAvailable=\(found?.responds(to: roleSelector) ?? false)"
-            + " childrenGetterAvailable=\(found?.responds(to: childrenSelector) ?? false)"
-            + " pickSelectorAvailable=\(found?.responds(to: NSSelectorFromString("accessibilityPerformPick")) ?? false)"
-            + " pressSelectorAvailable=\(found?.responds(to: NSSelectorFromString("accessibilityPerformPress")) ?? false)"
-            + " showMenuSelectorAvailable=\(found?.responds(to: NSSelectorFromString("accessibilityPerformShowMenu")) ?? false)")
+            + " visited=\(visited.count) visitedRoot=\(visitedRoot) visitedNative=\(visitedNative) visitedAX=\(visitedAX)"
+            + " skippedElsewhere=\(skippedElsewhere) objectLimit=\(objectLimit) depthLimit=\(depthLimit)"
+            + " readFailed=\(readFailed) incomplete=\(incomplete) axService=\(lookup) exactServiceCount=\(exactServiceCount)")
+        print("nativeServiceMount rawPopUpButtons=\(popupCount) matchingTitlePopups=\(matchingTitlePopups)"
+            + " menuPresentPopups=\(menuPresentPopups) menuNonemptyPopups=\(menuNonemptyPopups)"
+            + " popupsWithICloudOption=\(popupsWithICloudOption) popupsWithMeguriOption=\(popupsWithMeguriOption)"
+            + " classNSPopUpButton=\(popupCount) classNSButton=\(buttonCount) classNSControl=\(controlCount)"
+            + " classNSView=\(viewCount) classOther=\(otherCount)")
+        print("nativeServiceMount rootIdentifierRoute=\(rootIdentifierRoute) rootIdentifierKind=\(rootIdentifierKind)"
+            + " rootChildrenRoute=\(rootChildrenRoute) rootChildrenKind=\(rootChildrenKind)"
+            + " identifierModern=\(identifiers.modern) identifierLegacy=\(identifiers.legacy) identifierNeither=\(identifiers.neither)"
+            + " identifierNil=\(identifiers.nilValue) identifierString=\(identifiers.string)"
+            + " identifierArray=\(identifiers.array) identifierOther=\(identifiers.other)"
+            + " childrenModern=\(children.modern) childrenLegacy=\(children.legacy) childrenNeither=\(children.neither)"
+            + " childrenNil=\(children.nilValue) childrenString=\(children.string)"
+            + " childrenArray=\(children.array) childrenOther=\(children.other)")
+        if exactServiceCount > 0 {
+            print("nativeServiceMount firstExactServiceCategory=\(category) firstExactServiceRole=\(role)"
+                + " roleGetterAvailable=\(roleGetterAvailable) childrenGetterAvailable=\(childrenGetterAvailable)"
+                + " pickSelectorAvailable=\(pickAvailable) pressSelectorAvailable=\(pressAvailable)"
+                + " showMenuSelectorAvailable=\(showMenuAvailable)")
+        }
     }
     private func nativeAccountElement(_ identifier: String, in root: NSObject) throws -> NSObject? {
         var visited: Set<ObjectIdentifier> = []
