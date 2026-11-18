@@ -62,3 +62,13 @@ The isolated exports were `cleanroom/20261118T143303Z-22932` and `cleanroom/2026
 Privacy scan `144535Z-31095` flagged the existing test-file match. Its exact complete reviewed digest was refreshed. `private/20261118T144553Z-31509`, `static-checks/20261118T144635Z-34755`, and `similarity/20261118T144638Z-35664` passed.
 
 `swift-test/20261118T144624Z-32580` passed all 41 presentation methods on clean `7e2df75df`. They cover the scheduling predicate, ordinary route availability and refusal without a ready binding. The signed Release personal preview `build-app/20261118T144708Z-32570` passed on the same clean commit. The installed app and widget signatures and executable hashes matched that receipt. The signed Mac journey and exercising this toggle on an actual ready test-server binding remain open.
+
+## Daily review and packaged server checks
+
+The current Mac native journey `ui-test/20261118T145651Z-59551` passed its one selected method, `LocalReviewJourneyTests/testStudyRevealFourRatingsUndoWaitAndRestart`, on clean `274b4f88fa758d90d9b5028648413dffeaa650e9`. The app ran in the dedicated Mac test VM with generated data. The journey exercises reveal, all four ratings, undo, the waiting state and persistence through app restart.
+
+The production server package `sync-server-package/20261118T145512Z-50357` passed on the same clean commit. With that exact receipt, `meguri-provider-real-server/20261118T145801Z-65061` passed six phases. It bootstraps two independent CoreHost clients, saves a real Good review in the first, transfers the review and updated media, and checks the same daily rows and media on the second after cold reopen. It uses a disposable service and generated accounts. The first launch wrapper stopped before running Meguri because the intervening web commit advanced master. No failed runtime check was rerun.
+
+The two jobs establish the native local review path and the packaged server's separate CoreHost path. The combined signed app-to-server journey and live use of the Automatic toggle remain open. The configured profile file for the dedicated Mac test VM is unavailable.
+
+The same native method passed once on each simulated device in the dedicated VM. iPhone receipt `ui-test/20261118T145940Z-71735` and iPad receipt `ui-test/20261118T150207Z-71727` are clean at `16ccabb4654f44502f9073932aca740cd9b4ceea`. The intervening verification record leaves the app, Core and server trees byte-identical to `274b4f88`. These three local journeys and six CoreHost phases do not close the original integration gate.
