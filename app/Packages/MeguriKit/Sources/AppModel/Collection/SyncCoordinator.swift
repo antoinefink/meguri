@@ -1075,18 +1075,31 @@ public final class SyncCoordinator {
         return true
     }
     private func reduceMeguriRound(_ report: MeguriRoundReport) {
-        guard case .collection(let collection) = meguriCollectionFinalization ?? report.collection.outcome else { meguriRoutine = .failed; return }
+        let collectionOutcome = meguriCollectionFinalization ?? report.collection.outcome
+        guard case .collection(let collection) = collectionOutcome else {
+            meguriRoutine = Self.meguriUnstartedPhaseState(collectionOutcome); return
+        }
         if collection.acceptanceUnknown { meguriRoutine = .acceptanceUnknown; return }
         if case .fullSyncRequired = collection.state { meguriRoutine = .fullSyncRequired; return }
         guard collection.recovery == nil, report.collection.trackingFailure == nil else { meguriRoutine = .failed; return }
         if let failure = collection.failure { meguriRoutine = Self.meguriRoundFailure(failure); return }
         guard collection.succeeded else { meguriRoutine = .failed; return }
-        guard let mediaResult = report.media, case .media(let media) = meguriMediaFinalization ?? mediaResult.outcome else { meguriRoutine = .failed; return }
+        guard let mediaResult = report.media else { meguriRoutine = .failed; return }
+        let mediaOutcome = meguriMediaFinalization ?? mediaResult.outcome
+        guard case .media(let media) = mediaOutcome else {
+            meguriRoutine = Self.meguriUnstartedPhaseState(mediaOutcome); return
+        }
         guard media.recovery == nil, media.refusal == nil, media.accountingFailure == nil,
               mediaResult.trackingFailure == nil else { meguriRoutine = .failed; return }
         if let failure = media.failure { meguriRoutine = Self.meguriRoundFailure(failure); return }
         guard media.complete else { meguriRoutine = .mediaBlocked; return }
         meguriRoutine = collection.skipped > 0 ? .pending : .idle
+    }
+    static func meguriUnstartedPhaseState(_ outcome: MeguriRoundPhaseOutcome) -> MeguriRoutineState {
+        // Only a typed start refusal proves this phase did no work. A later
+        // legitimate wake may try again; terminal failures keep their guards.
+        if case .refused(.busy) = outcome { return .waiting }
+        return .failed
     }
     private static func meguriRoundFailure(_ failure: MeguriRoundFailure) -> MeguriRoutineState {
         switch failure.kind {

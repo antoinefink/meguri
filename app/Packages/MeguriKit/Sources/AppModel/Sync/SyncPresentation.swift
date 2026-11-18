@@ -325,7 +325,7 @@ public enum MeguriSetupStage: Sendable, Equatable {
     case acceptanceUnknown, acceptedLocalIncomplete, failed
 }
 public enum MeguriRoutineState: Sendable, Equatable {
-    case unreported, exchanging, idle, pending, mediaBlocked, authentication
+    case unreported, exchanging, idle, pending, waiting, mediaBlocked, authentication
     case acceptanceUnknown, fullSyncRequired, network, server, cancelled, failed
 }
 public enum MeguriSyncNowRoute: Equatable, Sendable {
@@ -375,7 +375,7 @@ public struct MeguriSyncStatusPresentation {
             case .mediaBlocked: .account("sync.meguri.media.showAffected")
             case .authentication: .disabled("sync.meguri.now.unavailable.signIn")
             case .exchanging, .failed: .disabled(nil)
-            case .unreported, .idle, .pending, .network, .server, .cancelled: .round
+            case .unreported, .idle, .pending, .waiting, .network, .server, .cancelled: .round
             }
         } else { route = .account("sync.meguri.setup.continue") }
         let pair: (String, String?)
@@ -404,6 +404,7 @@ public struct MeguriSyncStatusPresentation {
             case .exchanging: ("syncingCollection", nil)
             case .idle: ("on", nil)
             case .pending: ("pending", "sync.meguri.status.pending.detail")
+            case .waiting: ("pending", nil)
             case .mediaBlocked: ("mediaBlocked", "sync.meguri.media.blocked")
             case .authentication: ("signInRequired", "sync.meguri.status.signInRequired.detail")
             case .acceptanceUnknown: ("acceptanceUnknown", "sync.meguri.round.acceptanceUnknown")

@@ -35,6 +35,7 @@ import Testing
         let rounds: [(MeguriRoutineState, String, Bool)] = [
             (.unreported, attention, false), (.exchanging, busy, true),
             (.idle, "checkmark.circle", false), (.pending, "arrow.up.circle", false),
+            (.waiting, "arrow.up.circle", false),
             (.mediaBlocked, attention, false), (.authentication, account, false),
             (.acceptanceUnknown, attention, false), (.fullSyncRequired, account, false),
             (.network, attention, false), (.server, attention, false),
@@ -94,6 +95,7 @@ import Testing
         let cases: [(MeguriRoutineState, String, String?, MeguriSyncNowRoute)] = [
             (.idle, "on", nil, .round),
             (.pending, "pending", "sync.meguri.status.pending.detail", .round),
+            (.waiting, "pending", nil, .round),
             (.fullSyncRequired, "chooseCollection", "sync.meguri.round.fullSyncRequired", .account("sync.meguri.now.chooseCollection")),
             (.mediaBlocked, "mediaBlocked", "sync.meguri.media.blocked", .account("sync.meguri.media.showAffected")),
             (.authentication, "signInRequired", "sync.meguri.status.signInRequired.detail", .disabled("sync.meguri.now.unavailable.signIn")),
@@ -109,6 +111,43 @@ import Testing
                 stage: nil, localCollection: true, paused: false, routine: state)
             #expect(presentation.titleKey == "sync.meguri.status.\(title).title")
             #expect(presentation.detailKey == detail)
+            #expect(presentation.route == route)
+        }
+    }
+    @Test func meguriOnlyBusyStartRefusalWaitsWithoutClaimingUnsentChanges() {
+        // Exercise the same typed-outcome classifier used at both production
+        // phase starts, without manufacturing a ready binding or server result.
+        let outcomes: [(MeguriRoundPhaseOutcome, MeguriRoutineState)] = [
+            (.refused(.busy), .waiting), (.pending, .failed),
+            (.refused(.notSelected), .failed), (.refused(.paused), .failed),
+            (.refused(.notReady), .failed), (.refused(.bindingChanged), .failed),
+            (.refused(.connectionChanged), .failed), (.refused(.accountChanged), .failed),
+            (.refused(.publicationChanged), .failed), (.refused(.interrupted), .failed),
+            (.refused(.storage), .failed)
+        ]
+        for (outcome, expected) in outcomes {
+            let state = SyncCoordinator.meguriUnstartedPhaseState(outcome)
+            #expect(state == expected)
+            let presentation = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+                stage: nil, localCollection: true, paused: false, routine: state)
+            #expect(!presentation.isBusy && presentation.detailKey == nil)
+            if expected == .waiting {
+                #expect(presentation.titleKey == "sync.meguri.status.pending.title")
+                #expect(SyncText.value(presentation.titleKey) == "Waiting to Sync")
+                #expect(presentation.route == .round)
+            } else {
+                #expect(presentation.titleKey == "sync.meguri.status.stopped.title")
+                #expect(presentation.route == .disabled(nil))
+            }
+        }
+        let safeguards: [(Bool, MeguriProviderConnectionPhase, Bool, MeguriSyncNowRoute)] = [
+            (true, .setupRequired, false, .disabled("sync.meguri.now.unavailable.stopped")),
+            (false, .blocked, false, .disabled("sync.meguri.now.unavailable.stopped")),
+            (false, .setupRequired, true, .disabled("sync.meguri.now.unavailable.paused"))
+        ]
+        for (stopped, connection, paused, route) in safeguards {
+            let presentation = MeguriSyncStatusPresentation(stopped: stopped, connection: connection,
+                stage: nil, localCollection: true, paused: paused, routine: .waiting)
             #expect(presentation.route == route)
         }
     }
