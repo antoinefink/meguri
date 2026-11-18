@@ -283,13 +283,44 @@ p = subprocess.Popen(['docker','logs','--follow',sys.argv[1]], stdout=subprocess
 s = selectors.DefaultSelector(); s.register(p.stdout, selectors.EVENT_READ)
 buf = b''; deadline = time.monotonic() + 30; startup_failed = False
 role = 'relay' if sys.argv[2] == 'MEGURI_NATIVE_RELAY_READY' else 'fixture'
+# Only exact, complete LF-delimited lines select these fixed private messages.
+# A truncated first line is never a diagnostic; emit each known tag at most once.
+stage_tags = {
+    b'MEGURI_NATIVE_FIXTURE_STAGE_ARGUMENTS_SOURCE_BINDING': 'MEGURI_NATIVE_FIXTURE_STAGE_ARGUMENTS_SOURCE_BINDING',
+    b'MEGURI_NATIVE_FIXTURE_STAGE_CERTIFICATE': 'MEGURI_NATIVE_FIXTURE_STAGE_CERTIFICATE',
+    b'MEGURI_NATIVE_FIXTURE_STAGE_HTTPS_LISTENER': 'MEGURI_NATIVE_FIXTURE_STAGE_HTTPS_LISTENER',
+    b'MEGURI_NATIVE_FIXTURE_STAGE_SYNTHETIC_SETUP': 'MEGURI_NATIVE_FIXTURE_STAGE_SYNTHETIC_SETUP',
+    b'MEGURI_NATIVE_FIXTURE_STAGE_READINESS': 'MEGURI_NATIVE_FIXTURE_STAGE_READINESS',
+}
+line_boundary = True; seen_tags = set()
 try:
     while True:
         left = deadline - time.monotonic()
-        if left <= 0 or not s.select(left): raise ValueError('fixture deadline')
+        if left <= 0 or not s.select(left):
+            print('MEGURI_NATIVE_LOG_FOLLOWER_DEADLINE', file=sys.stderr)
+            raise ValueError()
         chunk = os.read(p.stdout.fileno(), 4096)
-        if not chunk: raise ValueError('fixture ended')
-        buf = (buf + chunk)[-32768:]
+        if not chunk:
+            # EOF describes the log stream, not the fixture process. Only poll's
+            # already-observed result can classify this owned follower's exit.
+            print('MEGURI_NATIVE_LOG_FOLLOWER_EOF', file=sys.stderr)
+            exit_code = p.poll()
+            if exit_code is not None:
+                if exit_code == 0:
+                    print('MEGURI_NATIVE_LOG_FOLLOWER_EXIT_ZERO', file=sys.stderr)
+                else:
+                    print('MEGURI_NATIVE_LOG_FOLLOWER_EXIT_NONZERO', file=sys.stderr)
+            raise ValueError()
+        buf += chunk
+        if len(buf) > 32768: line_boundary = buf[-32769] == 10
+        buf = buf[-32768:]
+        if role == 'fixture':
+            lines = buf.split(b'\n')[:-1]
+            if not line_boundary: lines = lines[1:]
+            for line in lines:
+                tag = stage_tags.get(line)
+                if tag is not None and tag not in seen_tags:
+                    print(tag, file=sys.stderr); seen_tags.add(tag)
         if sys.argv[2].encode('ascii') in buf.splitlines(): break
 except Exception:
     startup_failed = True

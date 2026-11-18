@@ -153,10 +153,16 @@ class _OwnedFollower:
         self.killed = False; self.waits = 0
         read_fd, write_fd = os.pipe()
         self.stdout = os.fdopen(read_fd, 'rb')
+        if (_root / 'follower-lines').exists():
+            os.write(write_fd, (_root / 'follower-lines').read_bytes())
         if not (_root / 'marker-missing').exists():
             os.write(write_fd, b'MEGURI_NATIVE_ROUTE_READY\n')
         os.close(write_fd)
         _event('owned')
+    def poll(self):
+        if _case == 'eof-exited-zero': return 0
+        if _case == 'eof-exited-nonzero': return 37
+        return None
     def terminate(self):
         _event('terminate')
         if _case == 'already-exited': raise ProcessLookupError('synthetic-private-terminate')
@@ -167,7 +173,7 @@ class _OwnedFollower:
     def wait(self, timeout):
         assert timeout == 5
         _event('wait:5'); self.waits += 1
-        if _case not in ('normal', 'already-exited'):
+        if _case not in ('normal', 'already-exited', 'eof-running', 'eof-exited-zero', 'eof-exited-nonzero'):
             if self.waits == 1 or _case == 'final-reap-timeout':
                 raise subprocess.TimeoutExpired('synthetic-private-wait', timeout)
             if _case == 'final-reap-error': raise OSError('synthetic-private-reap')
@@ -634,9 +640,68 @@ reset_run() {
   touch "$fake/marker-missing"
   invoke --package-receipt "$receipt"; assert_failed
   ! grep -Eq '^ca-export$|^guest-curl$' "$trace"
+  grep -Fxq MEGURI_NATIVE_LOG_FOLLOWER_EOF "$MG_RUN_DIR/private/native-route/control.log"
+  ! grep -Fxq MEGURI_NATIVE_LOG_FOLLOWER_DEADLINE "$MG_RUN_DIR/private/native-route/control.log"
   rm "$fake/marker-missing"; reset_run; LATE_MARKER=1
   invoke --package-receipt "$receipt"; assert_failed
   ! grep -Eq '^ca-export$|^guest-curl$' "$trace"
+  grep -Fxq MEGURI_NATIVE_LOG_FOLLOWER_DEADLINE "$MG_RUN_DIR/private/native-route/control.log"
+  ! grep -Fxq MEGURI_NATIVE_LOG_FOLLOWER_EOF "$MG_RUN_DIR/private/native-route/control.log"
+}
+@test "native route: EOF distinguishes only an observed owned follower exit" {
+  local scenario expected
+  MG_NR_FIXTURE_ID="$fixture_id"; touch "$fake/marker-missing"
+  for scenario in eof-running eof-exited-zero eof-exited-nonzero; do
+    export NR_TEST_FOLLOWER_CASE="$scenario"
+    : >"$fake/follower-trace"
+    expected=MEGURI_NATIVE_LOG_FOLLOWER_EOF
+    case "$scenario" in
+      eof-exited-zero) expected+=$'\nMEGURI_NATIVE_LOG_FOLLOWER_EXIT_ZERO' ;;
+      eof-exited-nonzero) expected+=$'\nMEGURI_NATIVE_LOG_FOLLOWER_EXIT_NONZERO' ;;
+    esac
+    run mg_native_route__wait
+    [ "$status" != 0 ]
+    [ "$output" = "$expected"$'\nnative fixture startup failed' ]
+    [ "$(cat "$fake/follower-trace")" = "$(printf 'owned\nterminate\nwait:5\nreaped')" ]
+  done
+}
+@test "native route: only exact enumerated fixture stages enter private control log and never grant readiness" {
+  local marker expected
+  export NR_TEST_FOLLOWER_CASE=normal
+  cat >"$fake/follower-lines" <<'LINES'
+MEGURI_NATIVE_FIXTURE_STAGE_ARGUMENTS_SOURCE_BINDING
+MEGURI_NATIVE_FIXTURE_STAGE_CERTIFICATE
+MEGURI_NATIVE_FIXTURE_STAGE_HTTPS_LISTENER
+MEGURI_NATIVE_FIXTURE_STAGE_SYNTHETIC_SETUP
+MEGURI_NATIVE_FIXTURE_STAGE_READINESS
+LINES
+  expected="$(cat "$fake/follower-lines")"
+  cat >>"$fake/follower-lines" <<'LINES'
+MEGURI_NATIVE_FIXTURE_STAGE_CERTIFICATE
+prefix MEGURI_NATIVE_FIXTURE_STAGE_ARGUMENTS_SOURCE_BINDING
+MEGURI_NATIVE_FIXTURE_STAGE_CERTIFICATE synthetic-private-payload
+ MEGURI_NATIVE_FIXTURE_STAGE_HTTPS_LISTENER
+meguri_native_fixture_stage_readiness
+MEGURI_NATIVE_FIXTURE_STAGE_UNKNOWN
+prefix MEGURI_NATIVE_ROUTE_READY
+MEGURI_NATIVE_ROUTE_READY synthetic-private-payload
+LINES
+  printf '%s \n' MEGURI_NATIVE_FIXTURE_STAGE_SYNTHETIC_SETUP >>"$fake/follower-lines"
+  for marker in missing ready; do
+    reset_run
+    if [ "$marker" = missing ]; then touch "$fake/marker-missing"; else rm "$fake/marker-missing"; fi
+    run invoke --package-receipt "$receipt"
+    if [ "$marker" = missing ]; then
+      assert_failed
+      ! grep -Eq '^ca-export$|^guest-curl$' "$trace"
+      [ "$(cat "$MG_RUN_DIR/private/native-route/control.log")" = "$expected"$'\nMEGURI_NATIVE_LOG_FOLLOWER_EOF\nnative fixture startup failed' ]
+    else
+      grep -Fxq status:pass "$trace"
+      [ "$(cat "$MG_RUN_DIR/private/native-route/control.log")" = "$expected" ]
+    fi
+    ! grep -Eq 'MEGURI_NATIVE_(FIXTURE_STAGE|LOG_FOLLOWER)' "$trace"
+    [[ "$output" != *MEGURI_NATIVE_* && "$output" != *synthetic-private* ]]
+  done
 }
 @test "native route: fixture follower normal and already exited handles are reaped without kill" {
   local scenario

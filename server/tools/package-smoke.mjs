@@ -14,6 +14,8 @@ const phase = process.argv[2];
 if (phase === 'native-route-fixture' || phase === 'native-owned-journey-fixture') {
   const journey = phase === 'native-owned-journey-fixture';
   let nativeProxy;
+  // Catch reports only the current source-literal stage, never exception data.
+  let nativeStage = 'MEGURI_NATIVE_FIXTURE_STAGE_ARGUMENTS_SOURCE_BINDING';
   try {
     assert.equal(process.argv.length, 12);
     const [gateway, origin, source, run, owner, runtime, tool, scriptSha, fixture] = process.argv.slice(3);
@@ -32,6 +34,7 @@ if (phase === 'native-route-fixture' || phase === 'native-owned-journey-fixture'
     assert(/^sha256:[0-9a-f]{64}$/.test(tool)); assert(/^[0-9a-f]{64}$/.test(scriptSha));
     assert(/^meguri-native-fixture-[A-Za-z0-9_-]{1,100}$/.test(fixture));
     assert.equal(createHash('sha256').update(await readFile('/smoke/package-smoke.mjs')).digest('hex'), scriptSha);
+    nativeStage = 'MEGURI_NATIVE_FIXTURE_STAGE_CERTIFICATE';
     await mkdir('/tmp/native-route', { mode: 0o700 });
     const openssl = args => execFileSync('openssl', args, { stdio: 'ignore', timeout: 15000,
       env: { PATH: '/usr/bin:/bin', OPENSSL_CONF: '/dev/null' } });
@@ -62,6 +65,7 @@ if (phase === 'native-route-fixture' || phase === 'native-owned-journey-fixture'
     await writeFile('/tmp/native-route/binding.json', JSON.stringify({ gateway, origin, source, run, owner,
       runtime, tool, scriptSha, fixture, caSha: createHash('sha256').update(root).digest('hex'), caBytes: root.length }),
       { mode: 0o600, flag: 'wx' });
+    nativeStage = 'MEGURI_NATIVE_FIXTURE_STAGE_HTTPS_LISTENER';
     // Exact first-party protocol methods (protocol/mod.rs and media.rs).
     // No API/setup/browser path is exposed by the journey's public proxy.
     const sync = new Set(['hostKey', 'meta', 'upload', 'download', 'start', 'applyGraves',
@@ -84,6 +88,7 @@ if (phase === 'native-route-fixture' || phase === 'native-owned-journey-fixture'
     });
     nativeProxy.listen(18443, '0.0.0.0'); await once(nativeProxy, 'listening');
     if (journey) {
+      nativeStage = 'MEGURI_NATIVE_FIXTURE_STAGE_SYNTHETIC_SETUP';
       // The image-owned volume is mounted read-only only in this phase. Setup
       // and identity checks go to the actual API over the internal loopback;
       // no setup token, cookie or response is logged or passed as an argument.
@@ -119,6 +124,7 @@ if (phase === 'native-route-fixture' || phase === 'native-owned-journey-fixture'
         run_id: run, username, password, account_id: account.id,
       }) + '\n', { mode: 0o600, flag: 'wx' });
     }
+    nativeStage = 'MEGURI_NATIVE_FIXTURE_STAGE_READINESS';
     await new Promise(resolve => {
       const stop = () => {
         process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop); resolve();
@@ -127,6 +133,7 @@ if (phase === 'native-route-fixture' || phase === 'native-owned-journey-fixture'
       console.log('MEGURI_NATIVE_ROUTE_READY');
     });
   } catch {
+    console.error(nativeStage);
     console.error('Packaged service smoke failed: native-route-fixture'); process.exitCode = 1;
   } finally {
     if (nativeProxy) { nativeProxy.closeAllConnections(); await new Promise(resolve => nativeProxy.close(resolve)); }
