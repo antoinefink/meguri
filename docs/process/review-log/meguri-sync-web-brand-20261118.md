@@ -36,3 +36,15 @@ The browser journey captures the standard sign-in and account pages.
 | server/web/src/style.css | 76b61dbe9ea87cbb18c1e1f1e77a01dd2ef7ecce598367ac0456386ee0b582d7 |
 | server/web/tests/browser/accounts.spec.ts | 2f4c795eec9d7a9fd2ebc5b8c14e6ef07f06c7a355f289faa509070c22d78cb3 |
 | server/web/upstream-records.json | bf0800b18e97502d4058d66aa7c666930de66f710e1d1aca564d08ddeecbf0d4 |
+
+## Verification
+
+- `sync-server-test/20261118T141302Z-82620` passed 192 tests on `9b8893ba0`.
+- `sync-web-verify/20261118T142646Z-13769` on clean `77afcdfe9` passed
+  all nine frontend tests and the private HTTPS browser journey. Nine audited
+  screenshots were produced. The sign-in, desktop and narrow Accounts, and
+  Connection renders were inspected. The administrator name fits on one line
+  in each inspected layout. The screenshots were opened in Chrome.
+- `private/20261118T142629Z-9118`, `static-checks/20261118T142644Z-12920`,
+  and `similarity/20261118T142644Z-12836` passed.
+- The full integration gate remains pending.
