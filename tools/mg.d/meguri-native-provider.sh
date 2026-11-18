@@ -86,18 +86,110 @@ mg_native_route__images() {
   fi
 }
 mg_native_route__network() {
-  docker network inspect "$MG_NR_NETWORK" >"$MG_NR_PRIVATE/network.json" || return 1
-  jq -e --arg name "$MG_NR_NETWORK" --arg id "$MG_NR_NETWORK_ID" --arg run "$MG_RUN_ID" --arg owner "$MG_NR_OWNER" '
+  local kind="${1:-backend}" name id internal file
+  case "$kind" in
+    backend) name="$MG_NR_NETWORK"; id="$MG_NR_NETWORK_ID"; internal=true; file=network ;;
+    ingress) name="$MG_NR_INGRESS"; id="$MG_NR_INGRESS_ID"; internal=false; file=ingress ;;
+    *) return 1 ;;
+  esac
+  docker network inspect "$name" >"$MG_NR_PRIVATE/$file.json" || return 1
+  jq -e --arg name "$name" --arg id "$id" --arg run "$MG_RUN_ID" --arg owner "$MG_NR_OWNER" \
+    --argjson internal "$internal" '
     length==1 and .[0].Id==$id and .[0].Name==$name and .[0].Driver=="bridge" and
-    .[0].Internal==true and .[0].EnableIPv6==false and
-    .[0].Labels=={"meguri.mg.run-id":$run,"meguri.sync.owner":$owner}
-  ' "$MG_NR_PRIVATE/network.json" >/dev/null
+    .[0].Internal==$internal and .[0].EnableIPv6==false and
+    (.[0].EnableIPv4==true or .[0].EnableIPv4==null) and (.[0].Containers | type)=="object" and
+    .[0].Labels=={"meguri.mg.run-id":$run,"meguri.sync.owner":$owner} and
+    (.[0].IPAM.Config | length==1 and (.[0].Subnet | type)=="string")
+  ' "$MG_NR_PRIVATE/$file.json" >/dev/null || return 1
+  python3 - "$MG_NR_PRIVATE/$file.json" <<'PYNET'
+import ipaddress, json, sys
+try:
+    config = json.load(open(sys.argv[1]))[0]['IPAM']['Config'][0]
+    net = ipaddress.IPv4Network(config['Subnet'])
+    gateway = ipaddress.IPv4Address(config['Gateway'])
+    if gateway not in net or gateway in (net.network_address, net.broadcast_address): raise ValueError()
+except (ValueError, KeyError, TypeError, IndexError): raise SystemExit(1)
+PYNET
+}
+mg_native_route__members() {
+  # Fixture shares the runtime namespace and has no independent attachment.
+  [ "$MG_NR_NETWORK_ID" != "$MG_NR_INGRESS_ID" ] &&
+    mg_native_route__network && mg_native_route__network ingress || return 1
+  jq -e --arg runtime "$MG_NR_RUNTIME_ID" --arg relay "$MG_NR_RELAY_ID" '
+    (.[0].Containers | keys)==([$runtime,$relay] | map(select(.!="")) | sort)
+  ' "$MG_NR_PRIVATE/network.json" >/dev/null &&
+    jq -e --arg relay "$MG_NR_RELAY_ID" '
+      (.[0].Containers | keys)==([$relay] | map(select(.!="")))
+    ' "$MG_NR_PRIVATE/ingress.json" >/dev/null
+}
+mg_native_route__target() {
+  mg_native_route__container runtime && mg_native_route__members || return 1
+  local ip
+  ip="$(python3 - "$MG_NR_PRIVATE/runtime.json" "$MG_NR_PRIVATE/network.json" "$MG_NR_NETWORK" \
+    "$MG_NR_NETWORK_ID" "$MG_NR_RUNTIME_ID" "$MG_NR_RUNTIME" <<'PYTARGET'
+import ipaddress, json, re, sys
+try:
+    runtime, network = [json.load(open(p))[0] for p in sys.argv[1:3]]
+    name, netid, runtimeid, runtime_name = sys.argv[3:]
+    if runtime['Id'] != runtimeid or network['Id'] != netid: raise ValueError()
+    attachment = runtime['NetworkSettings']['Networks'][name]
+    if attachment['NetworkID'] != netid: raise ValueError()
+    value = attachment['IPAddress']
+    if not re.fullmatch(r'(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}', value): raise ValueError()
+    address = ipaddress.IPv4Address(value)
+    subnet = ipaddress.IPv4Network(network['IPAM']['Config'][0]['Subnet'])
+    if address not in subnet or address in (subnet.network_address, subnet.broadcast_address): raise ValueError()
+    if address == ipaddress.IPv4Address(network['IPAM']['Config'][0]['Gateway']): raise ValueError()
+    if attachment['IPPrefixLen'] != subnet.prefixlen: raise ValueError()
+    member = network['Containers'][runtimeid]
+    if member['Name'] != runtime_name or member['IPv4Address'] != f'{address}/{subnet.prefixlen}': raise ValueError()
+    if not member['EndpointID'] or member['EndpointID'] != attachment['EndpointID']: raise ValueError()
+except (ValueError, KeyError, TypeError, IndexError): raise SystemExit(1)
+print(value)
+PYTARGET
+)" || return 1
+  [ -z "$MG_NR_TARGET" ] || [ "$MG_NR_TARGET" = "$ip" ] || return 1
+  MG_NR_TARGET="$ip"
+}
+mg_native_route__relay_source() {
+  # Fixed TLS-transparent byte forwarding only; no TLS, HTTP, DNS or options.
+  cat <<'JS'
+const net = require('node:net');
+const [target, runtime, network] = process.argv.slice(1);
+const fail = () => { process.stderr.write('MEGURI_NATIVE_RELAY_FAILED\n'); process.exit(1); };
+if (process.argv.length !== 4 || !net.isIPv4(target) || !/^[0-9a-f]{64}$/.test(runtime) || !/^[0-9a-f]{64}$/.test(network)) fail();
+let used = false;
+const server = net.createServer({ allowHalfOpen: true }, client => {
+  if (used) { client.destroy(); fail(); }
+  used = true;
+  const upstream = net.createConnection({ host: target, port: 18443, family: 4, allowHalfOpen: true });
+  const deadline = setTimeout(fail, 20000);
+  let received = 0, sent = 0, closed = 0;
+  client.on('data', b => { received += b.length; if (received > 65536) fail(); });
+  upstream.on('data', b => { sent += b.length; if (sent > 65536) fail(); });
+  for (const socket of [client, upstream]) {
+    socket.setTimeout(10000, fail);
+    socket.on('error', fail);
+    socket.on('close', hadError => {
+      // A graceful close may precede the other pipe's queued writes/finish.
+      // Errors and incomplete closes still fail without exposing payloads.
+      if (hadError || !socket.readableEnded || !socket.writableFinished) return fail();
+      if (++closed === 2) clearTimeout(deadline);
+    });
+  }
+  client.pipe(upstream); upstream.pipe(client);
+});
+server.on('error', fail);
+setTimeout(fail, 180000);
+server.listen({ host: '0.0.0.0', port: 18443 }, () => process.stdout.write('MEGURI_NATIVE_RELAY_READY\n'));
+JS
 }
 mg_native_route__container() {
   local kind="$1" name id image
   case "$kind" in
     runtime) name="$MG_NR_RUNTIME"; id="$MG_NR_RUNTIME_ID"; image="$MG_NR_RUNTIME_IMAGE" ;;
     fixture) name="$MG_NR_FIXTURE"; id="$MG_NR_FIXTURE_ID"; image="$MG_NR_TOOL_IMAGE" ;;
+    relay) name="$MG_NR_RELAY"; id="$MG_NR_RELAY_ID"; image="$MG_NR_TOOL_IMAGE" ;;
     *) return 1 ;;
   esac
   docker inspect "$id" >"$MG_NR_PRIVATE/$kind.json" || return 1
@@ -108,27 +200,53 @@ mg_native_route__container() {
     .[0].HostConfig.ReadonlyRootfs==true and .[0].HostConfig.Privileged==false and
     ((.[0].HostConfig.CapAdd // [])==[]) and .[0].HostConfig.CapDrop==["ALL"] and
     (.[0].HostConfig.SecurityOpt==["no-new-privileges"] or .[0].HostConfig.SecurityOpt==["no-new-privileges:true"]) and
-    ((.[0].HostConfig.Devices // [])==[]) and ((.[0].HostConfig.Binds // [])==[])
+    ((.[0].HostConfig.Devices // [])==[])
   ' "$MG_NR_PRIVATE/$kind.json" >/dev/null || return 1
   if [ "$kind" = runtime ]; then
-    jq -e --arg net "$MG_NR_NETWORK" --arg netid "$MG_NR_NETWORK_ID" --arg gateway "$MG_NR_GATEWAY" \
-      --arg port "$MG_NR_PORT" --arg origin "$MG_NR_ORIGIN" --arg volume "$(jq -r .volume "$MG_NR_PRIVATE/instance/instance.json")" '
+    jq -e --arg net "$MG_NR_NETWORK" --arg netid "$MG_NR_NETWORK_ID" --arg origin "$MG_NR_ORIGIN" \
+      --arg volume "$(jq -r .volume "$MG_NR_PRIVATE/instance/instance.json")" '
       .[0] | .HostConfig.NetworkMode==$net and (.NetworkSettings.Networks | keys)==[$net] and
       .NetworkSettings.Networks[$net].NetworkID==$netid and
-      .HostConfig.PortBindings=={"18443/tcp":[{HostIp:$gateway,HostPort:$port}]} and
-      ([.NetworkSettings.Ports | to_entries[] | select(.value!=null)]==[{key:"18443/tcp",value:[{HostIp:$gateway,HostPort:$port}]}]) and
+      (.HostConfig.PortBindings==null or .HostConfig.PortBindings=={}) and
+      (.NetworkSettings.Ports==null or (.NetworkSettings.Ports | type)=="object") and
+      ([.NetworkSettings.Ports // {} | to_entries[] | select(.value!=null)]==[]) and
+      (.HostConfig.Binds==null or .HostConfig.Binds==[] or .HostConfig.Binds==[($volume+":/data:rw")]) and
+      .Config.Entrypoint==["/usr/local/bin/meguri-sync-server"] and
       .Config.Cmd==["serve","/data/owner",$origin,"0.0.0.0:8080","--trusted-peer","127.0.0.1"] and
       (.Mounts | map(select(.Type!="tmpfs")) | length==1 and .[0].Type=="volume" and .[0].Name==$volume and .[0].Destination=="/data" and .[0].RW==true) and
-      (.Mounts | all(.[]; .Destination=="/data" or (.Type=="tmpfs" and .Destination=="/tmp"))) and
+      (.Mounts | all(.[]; (.Type=="volume" and .Destination=="/data") or (.Type=="tmpfs" and .Destination=="/tmp"))) and
+      (.Mounts | map(select(.Type=="tmpfs")) | length<=1) and
       (.HostConfig.Tmpfs | keys)==["/tmp"]
     ' "$MG_NR_PRIVATE/runtime.json" >/dev/null || return 1
     mg_sync_package__volume_check
+  elif [ "$kind" = relay ]; then
+    local relay
+    relay="$(mg_native_route__relay_source)" || return 1
+    jq -e --arg backend "$MG_NR_NETWORK" --arg netid "$MG_NR_NETWORK_ID" \
+      --arg ingress "$MG_NR_INGRESS" --arg ingressid "$MG_NR_INGRESS_ID" \
+      --arg gateway "$MG_NR_GATEWAY" --arg port "$MG_NR_PORT" --arg target "$MG_NR_TARGET" \
+      --arg runtime "$MG_NR_RUNTIME_ID" --arg relay "$relay" '
+      .[0] | .HostConfig.NetworkMode==$ingress and .HostConfig.Init==true and
+      (.HostConfig.Binds==null or .HostConfig.Binds==[]) and .Mounts==[] and
+      (.HostConfig.Tmpfs==null or .HostConfig.Tmpfs=={}) and
+      (.NetworkSettings.Networks | keys)==([$backend,$ingress] | sort) and
+      .NetworkSettings.Networks[$backend].NetworkID==$netid and
+      .NetworkSettings.Networks[$ingress].NetworkID==$ingressid and
+      .NetworkSettings.Networks[$ingress].GwPriority==1 and
+      .NetworkSettings.Networks[$backend].GwPriority==0 and
+      .HostConfig.PortBindings=={"18443/tcp":[{HostIp:$gateway,HostPort:$port}]} and
+      ([.NetworkSettings.Ports | to_entries[] | select(.value!=null)]==[{key:"18443/tcp",value:[{HostIp:$gateway,HostPort:$port}]}]) and
+      .Config.Entrypoint==["node"] and .Config.Cmd==["-e",$relay,$target,$runtime,$netid]
+    ' "$MG_NR_PRIVATE/relay.json" >/dev/null
   else
     jq -e --arg runtime "$MG_NR_RUNTIME_ID" --arg gateway "$MG_NR_GATEWAY" --arg origin "$MG_NR_ORIGIN" \
       --arg source "$MG_NR_COMMIT" --arg run "$MG_RUN_ID" --arg owner "$MG_NR_OWNER" --arg tool "$MG_NR_TOOL_IMAGE" \
       --arg sha "$MG_NR_SCRIPT_SHA" --arg name "$MG_NR_FIXTURE" '
       .[0] | .HostConfig.NetworkMode==("container:"+$runtime) and
-      ((.HostConfig.PortBindings // {})=={}) and
+      (.HostConfig.Binds==null or .HostConfig.Binds==[]) and
+      (.HostConfig.PortBindings==null or .HostConfig.PortBindings=={}) and
+      (.NetworkSettings.Ports==null or (.NetworkSettings.Ports | type)=="object") and
+      ([.NetworkSettings.Ports // {} | to_entries[] | select(.value!=null)]==[]) and
       (.Mounts | all(.[]; .Type=="tmpfs" and .Destination=="/tmp")) and
       .HostConfig.Tmpfs=={"/tmp":"uid=10001,gid=10001,mode=0700,size=128m"} and
       .Config.Entrypoint==["node"] and
@@ -137,11 +255,14 @@ mg_native_route__container() {
   fi
 }
 mg_native_route__wait() {
-  python3 - "$MG_NR_FIXTURE_ID" <<'PY'
+  local id="${1:-$MG_NR_FIXTURE_ID}" marker=MEGURI_NATIVE_ROUTE_READY
+  [ "$id" != "${MG_NR_RELAY_ID:-}" ] || marker=MEGURI_NATIVE_RELAY_READY
+  python3 - "$id" "$marker" <<'PY'
 import os, selectors, subprocess, sys, time
 p = subprocess.Popen(['docker','logs','--follow',sys.argv[1]], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 s = selectors.DefaultSelector(); s.register(p.stdout, selectors.EVENT_READ)
 buf = b''; deadline = time.monotonic() + 30; startup_failed = False
+role = 'relay' if sys.argv[2] == 'MEGURI_NATIVE_RELAY_READY' else 'fixture'
 try:
     while True:
         left = deadline - time.monotonic()
@@ -149,10 +270,10 @@ try:
         chunk = os.read(p.stdout.fileno(), 4096)
         if not chunk: raise ValueError('fixture ended')
         buf = (buf + chunk)[-32768:]
-        if b'MEGURI_NATIVE_ROUTE_READY' in buf.splitlines(): break
+        if sys.argv[2].encode('ascii') in buf.splitlines(): break
 except Exception:
     startup_failed = True
-    raise SystemExit('native fixture startup failed') from None
+    raise SystemExit(f'native {role} startup failed') from None
 finally:
     s.close()
     try:
@@ -168,7 +289,7 @@ finally:
     except Exception:
         # A marker failure stays primary, including when cleanup is uncertain.
         if not startup_failed:
-            raise SystemExit('native fixture log follower cleanup failed') from None
+            raise SystemExit(f'native {role} log follower cleanup failed') from None
 PY
 }
 mg_native_route__exporter() {
@@ -320,6 +441,9 @@ mg_native_route__cleanup() {
   MG_NR_CLEANED=1
   local rc=0 guest_rc=0 ids owner MG_SYNC_INSTANCE="$MG_NR_PRIVATE/instance"
   mg_native_route__guest_cleanup || guest_rc=1
+  if [ "$MG_NR_RELAY_ATTEMPT" = 1 ]; then
+    mg_native_route__remove_container "$MG_NR_RELAY" "$MG_NR_RELAY_ID" "$MG_NR_OWNER" "$MG_NR_TOOL_IMAGE" || rc=1
+  fi
   if [ "$MG_NR_FIXTURE_ATTEMPT" = 1 ]; then
     mg_native_route__remove_container "$MG_NR_FIXTURE" "$MG_NR_FIXTURE_ID" "$MG_NR_OWNER" "$MG_NR_TOOL_IMAGE" || rc=1
   fi
@@ -333,21 +457,28 @@ mg_native_route__cleanup() {
     fi
   fi
   # A surviving or unobserved container prevents network/volume destruction.
-  if [ "$rc" = 0 ] && [ "$MG_NR_NETWORK_ATTEMPT" = 1 ]; then
-    ids="$(docker network ls -q --no-trunc --filter "name=^$MG_NR_NETWORK$")" || rc=1
-    if [ -n "$ids" ]; then
-      [[ "$ids" =~ ^[0-9a-f]{64}$ ]] && { [ -z "$MG_NR_NETWORK_ID" ] || [ "$ids" = "$MG_NR_NETWORK_ID" ]; } || rc=1
-      if [ "$rc" = 0 ]; then
-        MG_NR_NETWORK_ID="$ids"
-        mg_native_route__network && jq -e '.[0].Containers=={}' "$MG_NR_PRIVATE/network.json" >/dev/null || rc=1
-      fi
-      if [ "$rc" = 0 ]; then
-        docker network rm "$ids" >"$MG_NR_PRIVATE/network-remove" || rc=1
-        ids="$(docker network ls -q --no-trunc --filter "name=^$MG_NR_NETWORK$")" || rc=1
-        [ -z "$ids" ] || rc=1
-      fi
-    elif [ -n "$MG_NR_NETWORK_ID" ]; then rc=1; fi
-  fi
+  local kind attempt expected name file
+  for kind in ingress backend; do
+    case "$kind" in
+      ingress) attempt="$MG_NR_INGRESS_ATTEMPT"; expected="$MG_NR_INGRESS_ID"; name="$MG_NR_INGRESS"; file=ingress ;;
+      backend) attempt="$MG_NR_NETWORK_ATTEMPT"; expected="$MG_NR_NETWORK_ID"; name="$MG_NR_NETWORK"; file=network ;;
+    esac
+    if [ "$rc" = 0 ] && [ "$attempt" = 1 ]; then
+      ids="$(docker network ls -q --no-trunc --filter "name=^$name$")" || rc=1
+      if [ -n "$ids" ]; then
+        [[ "$ids" =~ ^[0-9a-f]{64}$ ]] && { [ -z "$expected" ] || [ "$ids" = "$expected" ]; } || rc=1
+        if [ "$rc" = 0 ]; then
+          case "$kind" in ingress) MG_NR_INGRESS_ID="$ids" ;; backend) MG_NR_NETWORK_ID="$ids" ;; esac
+          mg_native_route__network "$kind" && jq -e '.[0].Containers=={}' "$MG_NR_PRIVATE/$file.json" >/dev/null || rc=1
+        fi
+        if [ "$rc" = 0 ]; then
+          docker network rm "$ids" >"$MG_NR_PRIVATE/$file-remove" || rc=1
+          ids="$(docker network ls -q --no-trunc --filter "name=^$name$")" || rc=1
+          [ -z "$ids" ] || rc=1
+        fi
+      elif [ -n "$expected" ]; then rc=1; fi
+    fi
+  done
   if [ "$rc" = 0 ] && [ "$MG_NR_INIT_ATTEMPT" = 1 ] && [ -f "$MG_SYNC_INSTANCE/instance.json" ]; then
     # The existing volume guard checks both creation nonce and run before rm,
     # and observes absence afterward. No name-only or absent-inspect fallback.
@@ -381,7 +512,16 @@ mg_native_route__execute() {
   docker network create --driver bridge --internal --label "meguri.mg.run-id=$MG_RUN_ID" \
     --label "meguri.sync.owner=$MG_NR_OWNER" "$MG_NR_NETWORK" >"$MG_NR_PRIVATE/network-id" || return 1
   MG_NR_NETWORK_ID="$(cat "$MG_NR_PRIVATE/network-id")" || return 1
-  [[ "$MG_NR_NETWORK_ID" =~ ^[0-9a-f]{64}$ ]] && mg_native_route__network || return 1
+  [[ "$MG_NR_NETWORK_ID" =~ ^[0-9a-f]{64}$ ]] && mg_native_route__network &&
+    jq -e '.[0].Containers=={}' "$MG_NR_PRIVATE/network.json" >/dev/null || return 1
+  mg_native_route__stage ingress-create
+  ids="$(docker network ls -q --no-trunc --filter "name=^$MG_NR_INGRESS$")" || return 1
+  [ -z "$ids" ] || return 1
+  MG_NR_INGRESS_ATTEMPT=1
+  docker network create --driver bridge --label "meguri.mg.run-id=$MG_RUN_ID" \
+    --label "meguri.sync.owner=$MG_NR_OWNER" "$MG_NR_INGRESS" >"$MG_NR_PRIVATE/ingress-id" || return 1
+  MG_NR_INGRESS_ID="$(cat "$MG_NR_PRIVATE/ingress-id")" || return 1
+  [[ "$MG_NR_INGRESS_ID" =~ ^[0-9a-f]{64}$ ]] && mg_native_route__members || return 1
   mg_native_route__stage volume-init
   MG_NR_INIT_ATTEMPT=1
   mg_sync_package__init "$MG_NR_RECEIPT" && mg_sync_package__volume_check && mg_native_route__source || return 1
@@ -390,7 +530,7 @@ mg_native_route__execute() {
   # Sibling of package start(): no default HTTP/service-port publication, no
   # health request or package-ready HTTP polling before the countable request.
   mg_sync_package__compose run -d --name "$MG_NR_RUNTIME" --no-deps --pull never \
-    --label "meguri.mg.run-id=$MG_RUN_ID" --publish "$MG_NR_GATEWAY:$MG_NR_PORT:18443" local-sync \
+    --label "meguri.mg.run-id=$MG_RUN_ID" local-sync \
     >"$MG_NR_PRIVATE/runtime-id" || return 1
   MG_NR_RUNTIME_ID="$(cat "$MG_NR_PRIVATE/runtime-id")" || return 1
   [[ "$MG_NR_RUNTIME_ID" =~ ^[0-9a-f]{64}$ ]] && mg_native_route__container runtime || return 1
@@ -412,10 +552,29 @@ mg_native_route__execute() {
   mg_native_route__wait || return 1
   mg_native_route__stage ca-export
   mg_native_route__export || return 1
+  mg_native_route__stage relay-target
+  mg_native_route__target || return 1
+  mg_native_route__stage relay-start
+  local relay
+  relay="$(mg_native_route__relay_source)" || return 1
+  ids="$(docker container ls -aq --no-trunc --filter "name=^/$MG_NR_RELAY$")" || return 1
+  [ -z "$ids" ] || return 1
+  MG_NR_RELAY_ATTEMPT=1
+  docker run -d --name "$MG_NR_RELAY" --init --pull never \
+    --network "name=$MG_NR_INGRESS,gw-priority=1" --network "name=$MG_NR_NETWORK,gw-priority=0" \
+    --user 10001:10001 --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --label "meguri.mg.run-id=$MG_RUN_ID" --label "meguri.sync.owner=$MG_NR_OWNER" \
+    --publish "$MG_NR_GATEWAY:$MG_NR_PORT:18443/tcp" --entrypoint node "$MG_NR_TOOL_IMAGE" \
+    -e "$relay" "$MG_NR_TARGET" "$MG_NR_RUNTIME_ID" "$MG_NR_NETWORK_ID" >"$MG_NR_PRIVATE/relay-id" || return 1
+  MG_NR_RELAY_ID="$(cat "$MG_NR_PRIVATE/relay-id")" || return 1
+  [[ "$MG_NR_RELAY_ID" =~ ^[0-9a-f]{64}$ ]] && mg_native_route__container relay && mg_native_route__target || return 1
+  mg_native_route__stage relay-marker
+  mg_native_route__wait "$MG_NR_RELAY_ID" || return 1
   mg_native_route__stage guest-health
-  mg_native_route__guest || return 1
+  mg_native_route__target && mg_native_route__container relay && mg_native_route__container fixture &&
+    mg_native_route__images request && mg_native_route__source && mg_native_route__guest || return 1
   mg_native_route__stage identities-after
-  mg_native_route__images after && mg_native_route__network && mg_native_route__container runtime &&
+  mg_native_route__images after && mg_native_route__target && mg_native_route__container relay &&
     mg_native_route__container fixture && mg_native_route__source || return 1
   [ "$(shasum -a 256 "$MG_NR_PRIVATE/root-ca.pem" | awk '{print $1}')" = "$MG_NR_CA_SHA" ] || return 1
   # Re-export to a distinct private file and compare. This rechecks internal
@@ -436,6 +595,7 @@ mg_meguri_native_route() {
   MG_NR_CLEANED=0; MG_NR_CLEAN_OK=0; MG_NR_GUEST_ATTEMPT=0; MG_NR_GUEST_ID=
   MG_NR_NETWORK_ATTEMPT=0; MG_NR_INIT_ATTEMPT=0; MG_NR_RUNTIME_ATTEMPT=0; MG_NR_FIXTURE_ATTEMPT=0
   MG_NR_NETWORK_ID=; MG_NR_RUNTIME_ID=; MG_NR_FIXTURE_ID=; MG_NR_CA_SHA=; MG_NR_CA_BYTES=
+  MG_NR_INGRESS_ATTEMPT=0; MG_NR_RELAY_ATTEMPT=0; MG_NR_INGRESS_ID=; MG_NR_RELAY_ID=; MG_NR_TARGET=
   MG_NR_PRIVATE="$MG_RUN_DIR/private/native-route"; MG_NR_STAGING="$MG_NR_PRIVATE/guest"
   MG_NR_COMMIT="$(mg_meguri_provider__commit)" || { mg_native_route__failure; return; }
   MG_NR_SCRIPT_SHA="$(shasum -a 256 "$MG_ROOT/server/tools/package-smoke.mjs" | awk '{print $1}')" || { mg_native_route__failure; return; }
@@ -458,6 +618,8 @@ mg_meguri_native_route() {
   MG_NR_OWNER="$(mg_meguri_provider__nonce)" || { mg_native_route__failure; return; }
   [[ "$MG_NR_OWNER" =~ ^[0-9a-f]{32}$ ]] && [[ "$MG_RUN_ID" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || { mg_native_route__failure; return; }
   MG_NR_NETWORK="meguri-native-net-$MG_RUN_ID-$MG_NR_OWNER"
+  MG_NR_INGRESS="meguri-native-ingress-$MG_RUN_ID-$MG_NR_OWNER"
+  MG_NR_RELAY="meguri-native-relay-$MG_RUN_ID-$MG_NR_OWNER"
   MG_NR_GUEST="/tmp/meguri-native-route-$MG_RUN_ID-$MG_NR_OWNER"
   MG_NR_RUNTIME="meguri-native-runtime-$MG_RUN_ID"; MG_NR_FIXTURE="meguri-native-fixture-$MG_RUN_ID"
   (umask 077; mkdir -p "$MG_RUN_DIR/private" && mkdir "$MG_NR_PRIVATE" && mkdir "$MG_NR_STAGING") || { mg_native_route__failure; return; }
@@ -478,7 +640,8 @@ mg_meguri_native_route() {
   mg_detail route "$(jq -nc --arg source "$MG_NR_COMMIT" --arg runtime "$MG_NR_RUNTIME_ID" --arg fixture "$MG_NR_FIXTURE_ID" \
     --arg runtime_image "$MG_NR_RUNTIME_IMAGE" --arg tool_image "$MG_NR_TOOL_IMAGE" --arg network "$MG_NR_NETWORK_ID" \
     --arg owner "$MG_NR_OWNER" --arg run "$MG_RUN_ID" --arg sha "$MG_NR_CA_SHA" --argjson bytes "$MG_NR_CA_BYTES" \
-    '{source_commit:$source,runtime_id:$runtime,fixture_id:$fixture,runtime_image_id:$runtime_image,tool_image_id:$tool_image,network_id:$network,owner:$owner,run:$run,root_ca_sha256:$sha,root_ca_bytes:$bytes,route_class:"RFC1918-host-interface",owned_cleanup:true,source_unchanged:true}')"
+    --arg relay "$MG_NR_RELAY_ID" --arg ingress "$MG_NR_INGRESS_ID" \
+    '{relay_id:$relay,ingress_network_id:$ingress,source_commit:$source,runtime_id:$runtime,fixture_id:$fixture,runtime_image_id:$runtime_image,tool_image_id:$tool_image,network_id:$network,owner:$owner,run:$run,root_ca_sha256:$sha,root_ca_bytes:$bytes,route_class:"RFC1918-host-interface",owned_cleanup:true,source_unchanged:true}')"
   mg_count total 1; mg_count passed 1; mg_count failed 0; mg_count skipped 0
   mg_status pass
 }

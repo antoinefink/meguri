@@ -21,6 +21,7 @@ setup() {
   cp "$REPO_ROOT/server/tools/package-ready.py" "$MG_ROOT/server/tools/package-ready.py"
   commit="$(printf '%040d' 1)"; runtime_id="$(printf '%064d' 2)"; fixture_id="$(printf '%064d' 3)"
   init_id="$(printf '%064d' 4)"; net_id="$(printf '%064d' 5)"
+  ingress_id="$(printf '%064d' 8)"; relay_id="$(printf '%064d' 9)"
   runtime_image="sha256:$(printf '%064d' 6)"; tool_image="sha256:$(printf '%064d' 7)"
   receipt="$MG_ROOT/build/mg/sync-server-package/package-test/result.json"
   mkdir -p "$(dirname "$receipt")/context" "$(dirname "$receipt")/product"
@@ -58,7 +59,7 @@ setup() {
     mg_on_exit "printf 'release\\n' >>$(printf '%q' "$trace")"
   }
   mg__host_lease_release() { printf 'release\n' >>"$trace"; }
-  export NR_TEST_FAKE="$fake" NR_TEST_TRACE="$trace" NR_TEST_RUNTIME_ID="$runtime_id" NR_TEST_FIXTURE_ID="$fixture_id"
+  export NR_TEST_FAKE="$fake" NR_TEST_TRACE="$trace" NR_TEST_RUNTIME_ID="$runtime_id" NR_TEST_FIXTURE_ID="$fixture_id" NR_TEST_RELAY_ID="$relay_id"
   cat >"$fake/bin/tart" <<'SH'
 #!/usr/bin/env bash
 [ "$1" = list ] || exit 97
@@ -110,6 +111,8 @@ case "$1" in
     if [ "$3" = "$NR_TEST_RUNTIME_ID" ]; then printf 'listening 0.0.0.0:8080\n';
     elif [ "$3" = "$NR_TEST_FIXTURE_ID" ]; then
       if [ ! -e "$NR_TEST_FAKE/marker-missing" ]; then printf 'MEGURI_NATIVE_ROUTE_READY\n'; fi
+    elif [ "$3" = "$NR_TEST_RELAY_ID" ]; then
+      if [ ! -e "$NR_TEST_FAKE/relay-marker-missing" ]; then printf 'MEGURI_NATIVE_RELAY_READY\n'; fi
     else exit 97; fi ;;
   inspect)
     [ "$#" = 2 ] && [ "$2" = "$NR_TEST_RUNTIME_ID" ] || exit 97
@@ -186,45 +189,55 @@ resource_json() {
   local kind="$1" name="$2" id="$3" image="$4" owner="$5" network="$6" running="$7" cmd="$8"
   jq -n --arg name "/$name" --arg id "$id" --arg image "$image" --arg owner "$owner" --arg run "$MG_RUN_ID" \
     --arg network "$network" --argjson running "$running" --argjson cmd "$cmd" --arg netid "$net_id" \
+    --arg ingress "${MG_NR_INGRESS:-}" --arg ingressid "$ingress_id" --arg backend "${MG_NR_NETWORK:-}" \
     --arg gateway "${MG_NR_GATEWAY:-192.168.64.1}" --arg port "${MG_NR_PORT:-24567}" --arg kind "$kind" \
     --arg volume "meguri-sync-data-$MG_RUN_ID" '
     [{Id:$id,Name:$name,Image:$image,Config:{User:"10001:10001",Labels:{"meguri.mg.run-id":$run,"meguri.sync.owner":$owner},
-      Entrypoint:(if $kind=="fixture" then ["node"] else ["/usr/local/bin/meguri-sync-server"] end),Cmd:$cmd},
-      State:{Running:$running,ExitCode:0},HostConfig:{ReadonlyRootfs:true,Privileged:false,CapAdd:null,CapDrop:["ALL"],
-      SecurityOpt:["no-new-privileges"],Devices:[],Binds:[],NetworkMode:$network,
-      Tmpfs:{"/tmp":(if $kind=="fixture" then "uid=10001,gid=10001,mode=0700,size=128m" else "mode=1777,size=64m" end)},
-      PortBindings:(if $kind=="runtime" then {"18443/tcp":[{HostIp:$gateway,HostPort:$port}]} else {} end)},
-      Mounts:(if $kind=="fixture" then [] else [{Type:"volume",Name:$volume,Destination:"/data",RW:true}] end),
-      NetworkSettings:{Networks:(if $kind=="runtime" then {($network):{NetworkID:$netid}} else {} end),
-      Ports:(if $kind=="runtime" then {"18443/tcp":[{HostIp:$gateway,HostPort:$port}],"8080/tcp":null} else {} end)}}]'
+      Entrypoint:(if $kind=="fixture" or $kind=="relay" then ["node"] else ["/usr/local/bin/meguri-sync-server"] end),Cmd:$cmd},
+      State:{Running:$running,ExitCode:0},HostConfig:{ReadonlyRootfs:true,Privileged:false,CapAdd:null,CapDrop:["ALL"],Init:true,
+      SecurityOpt:["no-new-privileges"],Devices:[],
+      Binds:(if $kind=="runtime" then [($volume+":/data:rw")] else null end),NetworkMode:$network,
+      Tmpfs:(if $kind=="relay" then null else {"/tmp":(if $kind=="fixture" then "uid=10001,gid=10001,mode=0700,size=128m" else "mode=1777,size=64m" end)} end),
+      PortBindings:(if $kind=="relay" then {"18443/tcp":[{HostIp:$gateway,HostPort:$port}]} else {} end)},
+      Mounts:(if $kind=="fixture" or $kind=="relay" then [] else [{Type:"volume",Name:$volume,Destination:"/data",RW:true}] end),
+      NetworkSettings:{Networks:(if $kind=="runtime" then {($network):{NetworkID:$netid,IPAddress:"172.30.0.2",IPPrefixLen:24,EndpointID:"runtime-endpoint"}}
+        elif $kind=="relay" then {($backend):{NetworkID:$netid,IPAddress:"172.30.0.3",IPPrefixLen:24,EndpointID:"relay-backend",GwPriority:0},
+          ($ingress):{NetworkID:$ingressid,IPAddress:"172.31.0.2",IPPrefixLen:24,EndpointID:"relay-ingress",GwPriority:1}} else {} end),
+      Ports:(if $kind=="relay" then {"18443/tcp":[{HostIp:$gateway,HostPort:$port}]} elif $kind=="runtime" then {"8080/tcp":null} else {} end)}}]'
+}
+network_members() {
+  # Model Docker's authoritative network view separately from inspect mutations.
+  # It follows actual fake resource lifetimes, so cleanup must observe emptiness.
+  local file="$1" network="$2" kind path members='{}'
+  for kind in runtime relay; do
+    path="$fake/$kind.json"; [ -f "$path" ] || continue
+    members="$(jq -c --argjson members "$members" --arg network "$network" '
+      .[0] | if .NetworkSettings.Networks[$network] then
+      $members+{(.Id):{Name:(.Name|ltrimstr("/")),EndpointID:.NetworkSettings.Networks[$network].EndpointID,
+        IPv4Address:(.NetworkSettings.Networks[$network].IPAddress+"/24"),IPv6Address:""}} else $members end' "$path")" || return 1
+  done
+  jq --argjson members "$members" '.[0].Containers += $members' "$file"
 }
 mg_compose() {
   printf 'compose:%s\n' "$*" >>"$trace"
   [ "$1" = -f ] && [ "$2" = "$MG_ROOT/server/compose.yaml" ] || return 97
   shift 2; [ "$1" = run ] || return 97; shift
-  local name= arg kind=init publish= image="$MEGURI_SYNC_IMAGE"
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --name) name="$2"; shift 2 ;;
-      --publish) publish="$2"; kind=runtime; shift 2 ;;
-      *) shift ;;
-    esac
-  done
   grep -Fxq mg_native_route__cleanup "$hooks" || return 97
-  if [ "$kind" = init ]; then
-    resource_json init "$name" "$init_id" "$image" "$MEGURI_SYNC_OWNER" "$MEGURI_SYNC_NETWORK" false '[]' >"$fake/init.json"
+  local name="$3" cmd
+  if [ "$1" = -T ]; then
+    [ "$*" = "-T --name meguri-init-$MG_RUN_ID --no-deps --pull never --label meguri.mg.run-id=$MG_RUN_ID local-sync init /data/owner $MEGURI_SYNC_ORIGIN" ] || return 97
+    resource_json init "$name" "$init_id" "$MEGURI_SYNC_IMAGE" "$MEGURI_SYNC_OWNER" "$MEGURI_SYNC_NETWORK" false '[]' >"$fake/init.json"
     printf 'init-created\n' >>"$trace"
   else
-    [ "$publish" = "$MG_NR_GATEWAY:$MG_NR_PORT:18443" ] || return 97
-    local cmd
+    [ "$*" = "-d --name $MG_NR_RUNTIME --no-deps --pull never --label meguri.mg.run-id=$MG_RUN_ID local-sync" ] || return 97
     cmd="$(jq -nc --arg origin "$MEGURI_SYNC_ORIGIN" '["serve","/data/owner",$origin,"0.0.0.0:8080","--trusted-peer","127.0.0.1"]')"
-    resource_json runtime "$name" "$runtime_id" "$image" "$MEGURI_SYNC_OWNER" "$MEGURI_SYNC_NETWORK" true "$cmd" >"$fake/runtime.json"
+    resource_json runtime "$name" "$runtime_id" "$MEGURI_SYNC_IMAGE" "$MEGURI_SYNC_OWNER" "$MEGURI_SYNC_NETWORK" true "$cmd" >"$fake/runtime.json"
     printf 'runtime-created\n' >>"$trace"; printf '%s\n' "$runtime_id"
-    [ "${FAIL_AT:-}" != runtime-create ] && [ "${FAIL_AT:-}" != port-collision ] || return 8
+    [ "${FAIL_AT:-}" != runtime-create ] || return 8
   fi
 }
 docker() {
-  local operation="$1 $2" arg name= owner= image= cmd= kind= path= id= run= filter=
+  local operation="$1 $2" arg name= owner= image= cmd= kind= path= id= run= filter= network=
   printf 'docker:%s\n' "$*" >>"$fake/process-trace"
   case "$operation" in
     'image inspect')
@@ -236,20 +249,53 @@ docker() {
       else return 1; fi | jq "${IMAGE_MUTATION:-.}" ;;
     'network create')
       grep -Fxq mg_native_route__cleanup "$hooks" || return 97
-      [[ " $* " = *' --internal '* ]] && [[ " $* " = *' --driver bridge '* ]] || return 97
-      jq -n --arg name "$MG_NR_NETWORK" --arg id "$net_id" --arg run "$MG_RUN_ID" --arg owner "$MG_NR_OWNER" \
-        '[{Id:$id,Name:$name,Driver:"bridge",Internal:true,EnableIPv6:false,Labels:{"meguri.mg.run-id":$run,"meguri.sync.owner":$owner},Containers:{}}]' >"$fake/network.json"
-      printf 'network-created\n' >>"$trace"; printf '%s\n' "$net_id"
-      [ "${FAIL_AT:-}" != network-create ] || return 8 ;;
+      local internal=true file=network subnet=172.30.0.0/24 gateway=172.30.0.1 point=network-create
+      id="$net_id"; name="$MG_NR_NETWORK"
+      if [[ " $* " != *' --internal '* ]]; then
+        internal=false; file=ingress; subnet=172.31.0.0/24; gateway=172.31.0.1
+        id="$ingress_id"; name="$MG_NR_INGRESS"; point=ingress-create
+      fi
+      local expected=(network create --driver bridge)
+      [ "$internal" != true ] || expected+=(--internal)
+      expected+=(--label "meguri.mg.run-id=$MG_RUN_ID" --label "meguri.sync.owner=$MG_NR_OWNER" "$name")
+      [ "$*" = "${expected[*]}" ] || return 97
+      [ "${FAIL_AT:-}" != "$point-before" ] || return 8
+      jq -n --arg name "$name" --arg id "$id" --arg run "$MG_RUN_ID" --arg owner "$MG_NR_OWNER" \
+        --argjson internal "$internal" --arg subnet "$subnet" --arg gateway "$gateway" '
+        [{Id:$id,Name:$name,Driver:"bridge",Internal:$internal,EnableIPv4:true,EnableIPv6:false,
+          IPAM:{Config:[{Subnet:$subnet,Gateway:$gateway}]},
+          Labels:{"meguri.mg.run-id":$run,"meguri.sync.owner":$owner},Containers:{}}]' >"$fake/$file.json"
+      printf '%s-created\n' "$file" >>"$trace"
+      if [ "${PARTIAL_REPLY:-}" = "$point" ]; then printf 'partial\n';
+      elif [ "${LOST_REPLY:-}" != "$point" ]; then printf '%s\n' "$id"; fi
+      [ "${FAIL_AT:-}" != "$point" ] || return 8 ;;
     'network inspect')
-      [ "${INSPECT_FAIL:-}" != network ] || return 8
-      jq "${NETWORK_MUTATION:-.}" "$fake/network.json" ;;
-    'network ls') [ ! -f "$fake/network.json" ] || printf '%s\n' "$net_id" ;;
+      kind=network; name="$MG_NR_NETWORK"
+      [ "$3" != "$MG_NR_INGRESS" ] || { kind=ingress; name="$MG_NR_INGRESS"; }
+      [ "${INSPECT_FAIL:-}" != "$kind" ] || return 8
+      local mutation="${NETWORK_MUTATION:-.}"
+      [ "$kind" != ingress ] || mutation="${INGRESS_MUTATION:-.}"
+      # Endogenous IP/identity drift at the last pre-request or post-request view.
+      if [ "${DRIFT_AT:-}" = "$MG_NR_STAGE" ]; then
+        mutation='.[0].Containers["foreign"]={Name:"foreign"}'
+        [ -z "${DRIFT_MUTATION:-}" ] || mutation="$DRIFT_MUTATION"
+      fi
+      network_members "$fake/$kind.json" "$name" | jq "$mutation" ;;
+    'network ls')
+      for kind in network ingress; do
+        path="$fake/$kind.json"; [ -f "$path" ] || continue
+        name="$(jq -r '.[0].Name' "$path")"
+        [[ " $* " = *"name=^$name$"* ]] && jq -r '.[0].Id' "$path"
+      done; return 0 ;;
     'network rm')
-      [ "${REMOVE_FAIL:-}" != network ] || return 8
-      [ "$3" = "$net_id" ] || return 97
-      [ ! -f "$fake/runtime.json" ] && [ ! -f "$fake/fixture.json" ] && [ ! -f "$fake/init.json" ] || return 97
-      rm "$fake/network.json"; printf 'remove:network\n' >>"$trace" ;;
+      for kind in network ingress; do
+        path="$fake/$kind.json"; [ -f "$path" ] || continue
+        [ "$3" = "$(jq -r '.[0].Id' "$path")" ] || continue
+        [ "${REMOVE_FAIL:-}" != "$kind" ] || return 8
+        [ ! -f "$fake/relay.json" ] && [ ! -f "$fake/runtime.json" ] && [ ! -f "$fake/fixture.json" ] && [ ! -f "$fake/init.json" ] || return 97
+        if [ "${REMOVE_LINGER:-}" != "$kind" ]; then rm "$path"; fi
+        printf 'remove:%s\n' "$kind" >>"$trace"; return
+      done; return 97 ;;
     'volume ls') [ ! -f "$fake/volume.json" ] || jq -r '.[0].Name' "$fake/volume.json" ;;
     'volume create')
       shift 2
@@ -262,12 +308,14 @@ docker() {
     'volume inspect') [ "${INSPECT_FAIL:-}" != volume ] || return 8; jq "${VOLUME_MUTATION:-.}" "$fake/volume.json" ;;
     'volume rm')
       [ "${REMOVE_FAIL:-}" != volume ] || return 8
-      [ ! -f "$fake/runtime.json" ] && [ ! -f "$fake/fixture.json" ] || return 97
+      [ ! -f "$fake/runtime.json" ] && [ ! -f "$fake/fixture.json" ] && [ ! -f "$fake/relay.json" ] || return 97
       rm "$fake/volume.json"; printf 'remove:volume\n' >>"$trace" ;;
     'run -d')
       grep -Fxq mg_native_route__cleanup "$hooks" || return 97
-      # Capture actual argv for semantic hardening assertions, not source grep.
-      printf '%s\0' "$@" >"$fake/fixture.args"
+      kind=fixture; id="$fixture_id"
+      [[ " $* " != *" --name $MG_NR_RELAY "* ]] || { kind=relay; id="$relay_id"; }
+      printf '%s\0' "$@" >"$fake/$kind.args"
+      [ "${FAIL_AT:-}" != "$kind-create-before" ] || return 8
       shift 2
       while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -277,26 +325,34 @@ docker() {
           *) shift;;
         esac
       done
-      cmd="$(jq -nc --arg path "$1" --arg phase "$2" --arg gateway "$3" --arg origin "$4" --arg source "$5" \
-        --arg run "$6" --arg owner "$7" --arg runtime "$8" --arg tool "$9" --arg sha "${10}" --arg name "${11}" \
-        '[$path,$phase,$gateway,$origin,$source,$run,$owner,$runtime,$tool,$sha,$name]')"
-      resource_json fixture "$name" "$fixture_id" "$image" "$owner" "container:$runtime_id" true "$cmd" >"$fake/fixture.json"
-      printf 'fixture-created\n' >>"$trace"; printf '%s\n' "$fixture_id"
-      [ "${FAIL_AT:-}" != fixture-create ] || return 8 ;;
+      cmd="$(printf '%s\0' "$@" | jq -Rsc 'split("\u0000")[:-1]')" || return 1
+      if [ "$kind" = relay ]; then network="$MG_NR_INGRESS"; else network="container:$runtime_id"; fi
+      resource_json "$kind" "$name" "$id" "$image" "$owner" "$network" true "$cmd" >"$fake/$kind.json"
+      printf '%s-created\n' "$kind" >>"$trace"
+      if [ "${PARTIAL_REPLY:-}" = "$kind-create" ]; then printf 'partial\n';
+      elif [ "${LOST_REPLY:-}" != "$kind-create" ]; then printf '%s\n' "$id"; fi
+      [ "${FAIL_AT:-}" != "$kind-create" ] && { [ "$kind" != relay ] || [ "${FAIL_AT:-}" != port-collision ]; } || return 8 ;;
     'container ls')
       [ "${LIST_FAIL:-0}" = 0 ] || return 8
-      for kind in runtime fixture init; do
+      for kind in runtime fixture relay init; do
         path="$fake/$kind.json"; [ -f "$path" ] || continue
         name="$(jq -r '.[0].Name | ltrimstr("/")' "$path")"
         [[ " $* " = *"name=^/$name$"* ]] && jq -r '.[0].Id' "$path"
       done; return 0 ;;
     'inspect '*)
-      for kind in runtime fixture init; do
+      for kind in runtime fixture relay init; do
         path="$fake/$kind.json"; [ -f "$path" ] || continue
         id="$(jq -r '.[0].Id' "$path")"; name="$(jq -r '.[0].Name' "$path")"
         if [ "$2" = "$id" ] || [ "$2" = "${name#/}" ]; then
           [ "${INSPECT_FAIL:-}" != "$kind" ] || return 8
-          case "$kind" in runtime) jq "${RUNTIME_MUTATION:-.}" "$path";; fixture) jq "${FIXTURE_MUTATION:-.}" "$path";; *) cat "$path";; esac
+          case "$kind" in
+            runtime)
+              if [ "${TARGET_DRIFT_AT:-}" = "$MG_NR_STAGE" ]; then
+                jq '.[0].NetworkSettings.Networks |= with_entries(.value.IPAddress="172.30.0.4")' "$path" >"$fake/drift.json"
+                mv "$fake/drift.json" "$path"
+              fi
+              jq "${RUNTIME_MUTATION:-.}" "$path";; fixture) jq "${FIXTURE_MUTATION:-.}" "$path";;
+            relay) jq "${RELAY_MUTATION:-.}" "$path";; *) cat "$path";; esac
           return
         fi
       done; return 1 ;;
@@ -304,7 +360,8 @@ docker() {
     'rm '*)
       for arg in "$@"; do id="$arg"; done
       if [ "${REMOVE_FAIL:-}" = container ] && [ "$id" = "$runtime_id" ]; then return 8; fi
-      for kind in runtime fixture init; do
+      if [ "${REMOVE_FAIL:-}" = relay ] && [ "$id" = "$relay_id" ]; then return 8; fi
+      for kind in runtime fixture relay init; do
         path="$fake/$kind.json"; [ -f "$path" ] || continue
         if [ "$(jq -r '.[0].Id' "$path")" = "$id" ]; then rm "$path"; printf 'remove:%s\n' "$kind" >>"$trace"; return; fi
       done; return 97 ;;
@@ -326,7 +383,7 @@ assert_before() {
 }
 reset_run() {
   rm -rf "$MG_RUN_DIR"; mkdir "$MG_RUN_DIR"
-  rm -f "$fake/network.json" "$fake/runtime.json" "$fake/fixture.json" "$fake/init.json" "$fake/volume.json" "$fake/guest-owned"
+  rm -f "$fake/network.json" "$fake/ingress.json" "$fake/relay.json" "$fake/runtime.json" "$fake/fixture.json" "$fake/init.json" "$fake/volume.json" "$fake/guest-owned"
   : >"$trace"; : >"$hooks"
 }
 @test "native route: exact call traverses real guards and counts only one after owned cleanup" {
@@ -336,8 +393,10 @@ reset_run() {
   [ "$(grep '^count:' "$trace")" = "$(printf 'count:total:1\ncount:passed:1\ncount:failed:0\ncount:skipped:0')" ]
   [ "$(grep -c '^guest-curl$' "$trace")" = 1 ]
   [ "$(grep -c '^port-select$' "$trace")" = 1 ]
+  assert_before remove:relay remove:fixture
   assert_before remove:fixture remove:runtime
-  assert_before remove:runtime remove:network
+  assert_before remove:runtime remove:ingress
+  assert_before remove:ingress remove:network
   assert_before remove:network remove:volume
   assert_before remove:volume status:pass
   assert_before guest-remove release
@@ -354,6 +413,19 @@ reset_run() {
     index("--read-only")!=null and index("--mount")==null and index($tool)!=null and
     index("native-route-fixture")!=null and index("provider-fixture")==null
   ' "$fake/fixture.args"
+  jq -Rse --arg backend "$(jq -r '.[0].Name' "$MG_RUN_DIR/private/native-route/network.json")" \
+    --arg ingress "$(jq -r '.[0].Name' "$MG_RUN_DIR/private/native-route/ingress.json")" --arg tool "$tool_image" \
+    --arg runtime "$runtime_id" --arg netid "$net_id" --arg source "$(mg_native_route__relay_source)" '
+    split("\u0000")[:-1] |
+    def values($f): [range(0;length-1) as $i | select(.[$i]==$f) | .[$i+1]];
+    values("--network")==["name="+$ingress+",gw-priority=1","name="+$backend+",gw-priority=0"] and
+    values("--publish")==["192.168.64.1:24567:18443/tcp"] and values("--user")==["10001:10001"] and
+    values("--cap-drop")==["ALL"] and values("--security-opt")==["no-new-privileges"] and
+    values("--entrypoint")==["node"] and values("-e")==[$source] and
+    index("--read-only")!=null and index("--init")!=null and values("--pull")==["never"] and
+    index("--tmpfs")==null and index("--mount")==null and index("--volume")==null and
+    .[index($tool)+1:]==["-e",$source,"172.30.0.2",$runtime,$netid]
+  ' "$fake/relay.args"
   ! grep -Eq -- '--service-ports|--publish [^ ]*:8080|--privileged|network prune|volume prune|ssh -|security add|trust-settings|keychain' "$fake/process-trace" "$fake/ssh-commands"
 }
 @test "native route: missing duplicate unknown empty and missing operand fail before any lease" {
@@ -474,7 +546,17 @@ reset_run() {
     '.[0].NetworkSettings.Ports["18443/tcp"][0].HostIp="0.0.0.0"' \
     '.[0].NetworkSettings.Networks["foreign"]={NetworkID:"foreign"}' \
     '.[0].HostConfig.Privileged=true' '.[0].HostConfig.ReadonlyRootfs=false' \
-    '.[0].Image="wrong"' '.[0].Config.Cmd[2]="https://wrong"'; do
+    '.[0].Image="wrong"' '.[0].Config.Cmd[2]="https://wrong"' \
+    '.[0].HostConfig.Binds=["/host:/data:rw"]' '.[0].HostConfig.Binds=["wrong:/data:rw"]' \
+    '.[0].HostConfig.Binds=["meguri-sync-data-route-test:/data:ro"]' \
+    '.[0].HostConfig.Binds=["meguri-sync-data-route-test:/data:rw,z"]' \
+    '.[0].HostConfig.Binds=["meguri-sync-data-route-test:/wrong:rw"]' \
+    '.[0].HostConfig.Binds += ["extra:/tmp:rw"]' '.[0].HostConfig.Binds=false' \
+    '.[0].HostConfig.Binds=""' '.[0].HostConfig.Binds += .[0].HostConfig.Binds' \
+    '.[0].Mounts[0].Name="wrong"' '.[0].Mounts[0].RW=false' '.[0].Mounts[0].Type="bind"' \
+    '.[0].Mounts += [{Type:"bind",Source:"/host",Destination:"/tmp",RW:true}]' \
+    '.[0].Mounts += [{Type:"tmpfs",Destination:"/data",RW:true}]' \
+    '.[0].Config.Entrypoint=["wrong"]'; do
     reset_run; RUNTIME_MUTATION="$mutation"
     run invoke --package-receipt "$receipt"
     # Cleanup admits the owned runtime unless its immutable image changed.
@@ -486,13 +568,15 @@ reset_run() {
 }
 @test "native route: port collision fails once and actual registered cleanup handles reached partial creation" {
   local point
-  for point in network-create runtime-create port-collision fixture-create ca-export; do
+  for point in network-create-before network-create ingress-create-before ingress-create runtime-create port-collision \
+    fixture-create-before fixture-create relay-create-before relay-create ca-export; do
     reset_run; FAIL_AT="$point"
     invoke --package-receipt "$receipt"; assert_failed
     [ "$(grep -c '^port-select$' "$trace")" = 1 ]
     grep -Fxq release "$trace"
-    [ ! -f "$fake/network.json" ] && [ ! -f "$fake/runtime.json" ] && [ ! -f "$fake/fixture.json" ] && [ ! -f "$fake/volume.json" ]
-    if [ "$point" != network-create ]; then assert_before remove:runtime remove:network; fi
+    [ ! -f "$fake/network.json" ] && [ ! -f "$fake/ingress.json" ] && [ ! -f "$fake/relay.json" ] && [ ! -f "$fake/runtime.json" ] && [ ! -f "$fake/fixture.json" ] && [ ! -f "$fake/volume.json" ]
+    if grep -Fxq runtime-created "$trace"; then assert_before remove:runtime remove:network; fi
+    ! grep -Fxq guest-curl "$trace"
   done
 }
 @test "native route: cancellation runs actual registered cleanup before creation and after every owned start" {
@@ -500,7 +584,7 @@ reset_run() {
   # Simulate MG's TERM exit at external create/start/export/guest boundaries.
   # Returning from a nested shell preserves resource files; the real hook is
   # evaluated there before the fake lease release, as in MG's exit handler.
-  for point in before network runtime fixture export guest; do
+  for point in before network ingress runtime fixture relay export guest; do
     reset_run
     (
       mg_native_route__port() {
@@ -512,7 +596,10 @@ reset_run() {
       docker() {
         boundary_docker "$@"; local result=$?
         case "$point:$1:$2" in
-          network:network:create|fixture:run:-d|export:exec:--user) finish_hooks; exit 143 ;;
+          network:network:create|export:exec:--user) finish_hooks; exit 143 ;;
+          ingress:network:create) if [ -e "$fake/ingress.json" ]; then finish_hooks; exit 143; fi ;;
+          fixture:run:-d) if [ -e "$fake/fixture.json" ]; then finish_hooks; exit 143; fi ;;
+          relay:run:-d) if [ -e "$fake/relay.json" ]; then finish_hooks; exit 143; fi ;;
         esac
         return "$result"
       }
@@ -528,7 +615,7 @@ reset_run() {
     ) || :
     ! grep -Fxq status:pass "$trace"
     grep -Fxq release "$trace"
-    [ ! -e "$fake/runtime.json" ] && [ ! -e "$fake/fixture.json" ] && [ ! -e "$fake/network.json" ]
+    [ ! -e "$fake/relay.json" ] && [ ! -e "$fake/runtime.json" ] && [ ! -e "$fake/fixture.json" ] && [ ! -e "$fake/network.json" ] && [ ! -e "$fake/ingress.json" ]
     rm -f "$fake/curl-fail"
   done
 }
@@ -608,11 +695,15 @@ reset_run() {
 }
 @test "native route: foreign owners and failed inspect or remove are never hidden by cleanup" {
   local failure
-  for failure in foreign-network foreign-runtime foreign-fixture foreign-volume inspect-network inspect-runtime inspect-volume remove-network remove-container remove-volume; do
+  for failure in foreign-network foreign-ingress foreign-runtime foreign-fixture foreign-relay foreign-volume \
+    inspect-network inspect-ingress inspect-runtime inspect-relay inspect-volume \
+    remove-network remove-ingress remove-relay remove-container remove-volume; do
     reset_run
-    NETWORK_MUTATION=.; RUNTIME_MUTATION=.; FIXTURE_MUTATION=.; VOLUME_MUTATION=.; INSPECT_FAIL=; REMOVE_FAIL=
+    NETWORK_MUTATION=.; INGRESS_MUTATION=.; RUNTIME_MUTATION=.; FIXTURE_MUTATION=.; RELAY_MUTATION=.; VOLUME_MUTATION=.; INSPECT_FAIL=; REMOVE_FAIL=
     case "$failure" in
       foreign-network) NETWORK_MUTATION='.[0].Labels["meguri.sync.owner"]="foreign"' ;;
+      foreign-ingress) INGRESS_MUTATION='.[0].Labels["meguri.sync.owner"]="foreign"' ;;
+      foreign-relay) RELAY_MUTATION='.[0].Config.Labels["meguri.sync.owner"]="foreign"' ;;
       foreign-runtime) RUNTIME_MUTATION='.[0].Config.Labels["meguri.sync.owner"]="foreign"' ;;
       foreign-fixture) FIXTURE_MUTATION='.[0].Config.Labels["meguri.sync.owner"]="foreign"' ;;
       foreign-volume) VOLUME_MUTATION='.[0].Labels["meguri.sync.owner"]="foreign"' ;;
@@ -624,6 +715,10 @@ reset_run() {
     case "$failure" in
       foreign-network|inspect-network|remove-network) [ -e "$fake/network.json" ] ;;
       foreign-runtime|inspect-runtime) [ -e "$fake/runtime.json" ] ;;
+      foreign-ingress|inspect-ingress|remove-ingress) [ -e "$fake/ingress.json" ] ;;
+      foreign-relay|inspect-relay|remove-relay)
+        [ -e "$fake/relay.json" ]; [ -e "$fake/ingress.json" ]; [ -e "$fake/network.json" ]
+        ! grep -Fxq remove:volume "$trace" ;;
       remove-container)
         [ -e "$fake/runtime.json" ]
         assert_before remove:init runtime-created
@@ -798,7 +893,8 @@ run_export() { node "$fake/export-harness.cjs" "$fake/exporter.js" "$tls" "$1" "
   for mutation in '.[0].HostConfig.NetworkMode="container:foreign"' '.[0].Image="foreign"' \
     '.[0].Config.Labels["meguri.mg.run-id"]="old"' '.[0].HostConfig.CapDrop=[]' \
     '.[0].HostConfig.PortBindings={"8080/tcp":[{HostIp:"0.0.0.0",HostPort:"8080"}]}' \
-    '.[0].Mounts=[{Type:"volume",Name:"foreign",Destination:"/data"}]'; do
+    '.[0].Mounts=[{Type:"volume",Name:"foreign",Destination:"/data"}]' \
+    '.[0].HostConfig.Binds=["foreign:/tmp:rw"]'; do
     reset_run; FIXTURE_MUTATION="$mutation"
     invoke --package-receipt "$receipt" || :; assert_failed
     ! grep -Eq '^ca-export$|^guest-curl$' "$trace"
@@ -814,4 +910,255 @@ run_export() { node "$fake/export-harness.cjs" "$fake/exporter.js" "$tls" "$1" "
   invoke --package-receipt "$receipt" || :; assert_failed
   ! grep -Fxq remove:volume "$trace"
   grep -Fxq release "$trace"
+}
+@test "native route: only exact Compose volume bind or empty bind metadata admits structured runtime volume" {
+  local mutation
+  for mutation in '.' '.[0].HostConfig.Binds=[]' '.[0].HostConfig.Binds=null' 'del(.[0].HostConfig.Binds)'; do
+    reset_run; RUNTIME_MUTATION="$mutation"
+    invoke --package-receipt "$receipt"
+    grep -Fxq status:pass "$trace"
+    [ "$(grep -c '^guest-curl$' "$trace")" = 1 ]
+  done
+}
+@test "native route: ingress requires owned noninternal IPv4 bridge without unrelated members" {
+  local mutation
+  for mutation in '.[0].Internal=true' '.[0].EnableIPv4=false' '.[0].EnableIPv6=true' \
+    '.[0].Id="foreign"' '.[0].Name="foreign"' '.[0].Driver="host"' \
+    '.[0].Labels["meguri.sync.owner"]="foreign"' '.[0].Labels["meguri.mg.run-id"]="foreign"' \
+    '.[0].IPAM.Config[0].Subnet="not-an-ip"' '.[0].IPAM.Config[0].Subnet="::/64"' \
+    '.[0].IPAM.Config[0].Gateway="172.30.0.1"' \
+    '.[0].Containers.foreign={Name:"foreign"}'; do
+    reset_run; INGRESS_MUTATION="$mutation"
+    invoke --package-receipt "$receipt" || :
+    assert_failed
+    ! grep -Eq '^runtime-created$|^guest-curl$|^remove:ingress$|^remove:volume$' "$trace"
+    [ -f "$fake/ingress.json" ]
+  done
+}
+@test "native route: relay real guards require actual sole private publication exact identity command and two networks" {
+  local mutation
+  for mutation in '.[0].HostConfig.PortBindings={}' '.[0].NetworkSettings.Ports={"18443/tcp":null}' \
+    '.[0].NetworkSettings.Ports["18443/tcp"][0].HostIp="0.0.0.0"' \
+    '.[0].NetworkSettings.Ports["18443/tcp"][0].HostPort="1"' \
+    '.[0].HostConfig.PortBindings["18443/tcp"][0].HostIp="::"' \
+    '.[0].HostConfig.PortBindings["18443/tcp"][0].HostPort="1"' \
+    '.[0].NetworkSettings.Ports["8080/tcp"]=[{HostIp:"127.0.0.1",HostPort:"24567"}]' \
+    '.[0].HostConfig.PortBindings["8080/tcp"]=[{HostIp:"127.0.0.1",HostPort:"24567"}]' \
+    '.[0].NetworkSettings.Ports["18443/tcp"] += [{HostIp:"127.0.0.1",HostPort:"24567"}]' \
+    '.[0].HostConfig.PortBindings["18443/tcp"] += [{HostIp:"127.0.0.1",HostPort:"24567"}]' \
+    '.[0].Image="foreign"' '.[0].Id="foreign"' '.[0].Name="/foreign"' \
+    '.[0].Config.Labels["meguri.sync.owner"]="foreign"' '.[0].Config.Labels["meguri.mg.run-id"]="foreign"' \
+    '.[0].Config.User="0"' '.[0].HostConfig.ReadonlyRootfs=false' '.[0].HostConfig.Privileged=true' \
+    '.[0].HostConfig.CapAdd=["NET_ADMIN"]' '.[0].HostConfig.CapDrop=[]' '.[0].HostConfig.SecurityOpt=[]' \
+    '.[0].HostConfig.Init=false' '.[0].HostConfig.NetworkMode="bridge"' \
+    '.[0].HostConfig.Binds=["foreign:/tmp:rw"]' '.[0].Mounts=[{Type:"bind",Destination:"/tmp"}]' \
+    '.[0].Config.Entrypoint=["bash"]' '.[0].Config.Cmd[1]+=";arbitrary"' \
+    '.[0].Config.Cmd[2]="172.30.0.99"' '.[0].Config.Cmd[3]="foreign-runtime"' '.[0].Config.Cmd[4]="foreign-network"' \
+    '.[0].NetworkSettings.Networks.foreign={NetworkID:"foreign"}' \
+    '.[0].NetworkSettings.Networks |= with_entries(.value.NetworkID="foreign")' \
+    '.[0].NetworkSettings.Networks |= with_entries(.value.GwPriority=0)'; do
+    reset_run; RELAY_MUTATION="$mutation"
+    invoke --package-receipt "$receipt" || :
+    assert_failed
+    grep -Fq 'first_stage:"relay-start"' "$trace"
+    ! grep -Fxq guest-curl "$trace"
+  done
+}
+@test "native route: relay target comes only from matching literal endogenous backend attachment" {
+  local mutation
+  for mutation in '.[0].NetworkSettings.Networks |= with_entries(.value.IPAddress="localhost")' \
+    '.[0].NetworkSettings.Networks |= with_entries(.value.IPAddress="172.030.0.2")' \
+    '.[0].NetworkSettings.Networks |= with_entries(.value.IPAddress="172.31.0.2")' \
+    '.[0].NetworkSettings.Networks |= with_entries(.value.IPAddress="172.30.0.1")' \
+    '.[0].NetworkSettings.Networks |= with_entries(.value.IPAddress="172.30.0.0")' \
+    '.[0].NetworkSettings.Networks |= with_entries(.value.IPAddress="172.30.0.255")' \
+    '.[0].NetworkSettings.Networks |= with_entries(.value.IPAddress="172.30.0.3")' \
+    '.[0].NetworkSettings.Networks |= with_entries(.value.IPPrefixLen=16)' \
+    '.[0].NetworkSettings.Networks |= with_entries(.value.EndpointID="foreign")'; do
+    reset_run; RUNTIME_MUTATION="$mutation"
+    invoke --package-receipt "$receipt" || :
+    assert_failed
+    grep -Fq 'first_stage:"relay-target"' "$trace"
+    ! grep -Eq '^relay-created$|^guest-curl$' "$trace"
+  done
+  RUNTIME_MUTATION=.
+  for mutation in '.[0].Containers |= with_entries(.value.Name="foreign")' \
+    '.[0].Containers |= with_entries(.value.IPv4Address="172.30.0.3/24")' \
+    '.[0].Containers |= with_entries(.value.EndpointID="foreign")' \
+    '.[0].Containers.foreign={Name:"foreign"}'; do
+    reset_run; NETWORK_MUTATION="$mutation"
+    invoke --package-receipt "$receipt" || :
+    assert_failed
+    ! grep -Eq '^relay-created$|^guest-curl$' "$trace"
+  done
+}
+@test "native route: lost creation replies and relay readiness failure clean once without a guest request" {
+  local point
+  for point in ingress-create relay-create; do
+    reset_run; LOST_REPLY="$point"
+    invoke --package-receipt "$receipt" || :
+    assert_failed
+    ! grep -Fxq guest-curl "$trace"
+    [ ! -e "$fake/relay.json" ] && [ ! -e "$fake/ingress.json" ] && [ ! -e "$fake/network.json" ]
+    ! grep -Fq 'detail:owned_cleanup:false' "$trace"
+  done
+  LOST_REPLY=
+  for point in ingress-create relay-create; do
+    reset_run; PARTIAL_REPLY="$point"
+    invoke --package-receipt "$receipt" || :
+    assert_failed
+    ! grep -Fxq guest-curl "$trace"
+    grep -Fq 'detail:owned_cleanup:false' "$trace"
+    if [ "$point" = ingress-create ]; then [ -e "$fake/ingress.json" ]; ! grep -Fxq remove:ingress "$trace";
+    else [ -e "$fake/relay.json" ]; ! grep -Fxq remove:relay "$trace"; fi
+    ! grep -Fxq remove:network "$trace"
+  done
+  PARTIAL_REPLY=
+  reset_run; touch "$fake/relay-marker-missing"
+  invoke --package-receipt "$receipt" || :
+  assert_failed; grep -Fq 'first_stage:"relay-marker"' "$trace"
+  ! grep -Fxq guest-curl "$trace"
+  assert_before remove:relay remove:fixture
+  [ ! -e "$fake/relay.json" ] && [ ! -e "$fake/ingress.json" ]
+}
+@test "native route: topology drift and uncertain network removals cannot credit or repeat the guest request" {
+  local point
+  for point in guest-health identities-after owned-cleanup; do
+    reset_run; DRIFT_AT="$point"
+    invoke --package-receipt "$receipt" || :
+    assert_failed
+    grep -Fq "first_stage:\"$point\"" "$trace"
+    if [ "$point" = guest-health ]; then ! grep -Fxq guest-curl "$trace";
+    else [ "$(grep -c '^guest-curl$' "$trace")" = 1 ]; fi
+    if [ "$point" = owned-cleanup ]; then
+      [ -e "$fake/ingress.json" ]; ! grep -Fxq remove:ingress "$trace"
+      ! grep -Fxq remove:network "$trace"; ! grep -Fxq remove:volume "$trace"
+    fi
+  done
+  DRIFT_AT=
+  local mutation
+  for mutation in '.[0].Id="foreign"' '.[0].Containers={}' ; do
+    for point in guest-health identities-after; do
+      reset_run; DRIFT_AT="$point"; DRIFT_MUTATION="$mutation"
+      invoke --package-receipt "$receipt" || :
+      assert_failed; grep -Fq "first_stage:\"$point\"" "$trace"
+      if [ "$point" = guest-health ]; then ! grep -Fxq guest-curl "$trace";
+      else [ "$(grep -c '^guest-curl$' "$trace")" = 1 ]; fi
+    done
+  done
+  DRIFT_AT=; DRIFT_MUTATION=
+  for point in guest-health identities-after; do
+    reset_run; TARGET_DRIFT_AT="$point"
+    invoke --package-receipt "$receipt" || :
+    assert_failed; grep -Fq "first_stage:\"$point\"" "$trace"
+    if [ "$point" = guest-health ]; then ! grep -Fxq guest-curl "$trace";
+    else [ "$(grep -c '^guest-curl$' "$trace")" = 1 ]; fi
+  done
+  TARGET_DRIFT_AT=
+  for point in ingress network; do
+    reset_run; REMOVE_LINGER="$point"
+    invoke --package-receipt "$receipt" || :
+    assert_failed
+    [ "$(grep -c '^guest-curl$' "$trace")" = 1 ]
+    [ -e "$fake/$point.json" ]; ! grep -Fxq remove:volume "$trace"
+    grep -Fq 'detail:owned_cleanup:false' "$trace"
+  done
+}
+@test "native route: emitted relay drains buffered response and finishes downstream after graceful upstream close" {
+  run node - "$(mg_native_route__relay_source)" <<'JS'
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const { Duplex } = require('node:stream');
+const { EventEmitter, once } = require('node:events');
+async function main() {
+  const timers = new Set();
+  const server = new EventEmitter();
+  let accept, serverOptions, upstream, stdout = '', stderr = '';
+  server.listen = (options, ready) => {
+    assert.equal(options.host, '0.0.0.0'); assert.equal(options.port, 18443);
+    ready(); return server;
+  };
+  const idleTimeouts = [];
+  const socketTimeout = (ms, callback) => {
+    idleTimeouts.push(ms); assert.equal(typeof callback, 'function');
+  };
+  const net = {
+    isIPv4: target => target === '172.30.0.2',
+    createServer(options, callback) {
+      assert.equal(options.allowHalfOpen, true);
+      serverOptions = options; accept = callback; return server;
+    },
+    createConnection(options) {
+      assert.equal(options.host, '172.30.0.2'); assert.equal(options.port, 18443);
+      assert.equal(options.family, 4); assert.equal(options.allowHalfOpen, true);
+      upstream = new Duplex({ allowHalfOpen: options.allowHalfOpen,
+        read() {}, write(chunk, encoding, callback) { callback(); } });
+      upstream.setTimeout = socketTimeout;
+      return upstream;
+    },
+  };
+  vm.runInNewContext(process.argv[2], {
+    require(name) { assert.equal(name, 'node:net'); return net; },
+    process: {
+      argv: ['node', '172.30.0.2', 'a'.repeat(64), 'b'.repeat(64)],
+      stdout: { write(value) { stdout += value; } },
+      stderr: { write(value) { stderr += value; } },
+      exit(code) { throw Error('unexpected relay exit: ' + code); },
+    },
+    setTimeout(callback, ms) { const timer = { callback, ms }; timers.add(timer); return timer; },
+    clearTimeout(timer) { assert.equal(timers.delete(timer), true); },
+  });
+  assert.equal(stdout, 'MEGURI_NATIVE_RELAY_READY\n');
+  const delivered = [];
+  let releaseWrite, releaseFinish, signalFinish;
+  const finishStarted = new Promise(resolve => { signalFinish = resolve; });
+  // A real Duplex queues end behind this deliberately uncompleted write.
+  // Its default auto-destruction runs only after readable EOF and finish.
+  const client = new Duplex({ allowHalfOpen: serverOptions.allowHalfOpen,
+    read() {},
+    write(chunk, encoding, callback) {
+      releaseWrite = () => { delivered.push(Buffer.from(chunk)); callback(); };
+    },
+    final(callback) { releaseFinish = callback; signalFinish(); },
+  });
+  client.setTimeout = socketTimeout;
+  accept(client);
+  assert.deepEqual(idleTimeouts, [10000, 10000]);
+  const deadline = [...timers].find(timer => timer.ms === 20000);
+  assert.ok(deadline);
+  assert.deepEqual([...timers].map(timer => timer.ms).sort((a, b) => a - b), [20000, 180000]);
+  const upstreamFinished = once(upstream, 'finish');
+  const upstreamClosed = once(upstream, 'close');
+  const clientFinished = once(client, 'finish');
+  const clientClosed = once(client, 'close');
+  client.push(null);
+  await upstreamFinished;
+  const response = Buffer.from('complete synthetic TLS response');
+  upstream.push(response); upstream.push(null);
+  await upstreamClosed;
+  assert.equal(upstream.readableEnded, true); assert.equal(upstream.writableFinished, true);
+  assert.equal(client.destroyed, false); assert.equal(client.writableFinished, false);
+  assert.equal(client.writableLength, response.length);
+  assert.equal(delivered.length, 0); assert.equal(typeof releaseWrite, 'function');
+  assert.equal(timers.has(deadline), true);
+  releaseWrite();
+  await finishStarted;
+  assert.deepEqual(Buffer.concat(delivered), response);
+  assert.equal(client.writableEnded, true); assert.equal(client.writableFinished, false);
+  assert.equal(client.destroyed, false); assert.equal(timers.has(deadline), true);
+  releaseFinish();
+  await clientFinished;
+  await clientClosed;
+  assert.equal(client.writableFinished, true); assert.equal(client.readableEnded, true);
+  assert.equal(timers.has(deadline), false);
+  assert.deepEqual([...timers].map(timer => timer.ms), [180000]);
+  assert.equal(stderr, '');
+}
+// An unresolved event must not silently pass when no real handles remain.
+main().then(() => console.log('MEGURI_NATIVE_RELAY_DRAIN_OK'), error => {
+  console.error(error); process.exitCode = 1;
+});
+JS
+  [ "$status" = 0 ]
+  [ "$output" = MEGURI_NATIVE_RELAY_DRAIN_OK ]
 }
