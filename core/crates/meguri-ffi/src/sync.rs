@@ -667,7 +667,7 @@ impl CloudWorkflow {
     }
     pub fn update_applied(&self, sdk: String, id: u64, added: Vec<String>) -> Result<(), CoreError> {
         callback::enter("CloudWorkflow.update_applied");
-        self.core.sdk_update_applied(&sdk, id, &added).map_err(sdk_callback_error)
+        self.core.registered_sdk_update_applied(&sdk, id, &added).map_err(sdk_callback_error)
     }
     pub fn build_batch(
         &self,

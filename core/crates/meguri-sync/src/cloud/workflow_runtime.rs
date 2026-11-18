@@ -473,9 +473,19 @@ impl Runtime {
     pub fn emitted_update_ids(&self) -> Vec<u64> {
         self.state().actions.emitted.clone()
     }
+    /// Legacy prebound workflow adapters may acknowledge with ordinary host identity.
     pub fn sdk_update_applied(&self, instance: &str, id: u64, added: &[String]) -> Result<(), RuntimeError> {
         let mut s = self.state();
         Self::caller_locked(&s, instance)?;
+        Self::update_applied_locked(&mut s, id, added)
+    }
+    /// Native SDK ACKs require the retained registration guard at consumption.
+    pub fn registered_sdk_update_applied(&self, sdk: &str, id: u64, added: &[String]) -> Result<(), RuntimeError> {
+        let mut s = self.state();
+        Self::sdk_locked(&s, sdk)?;
+        Self::update_applied_locked(&mut s, id, added)
+    }
+    fn update_applied_locked(s: &mut State, id: u64, added: &[String]) -> Result<(), RuntimeError> {
         let action = s.actions.handed_updates.get(&id).ok_or(Error::InvalidData)?;
         if added.iter().any(|n| !action.adds.contains_key(n)) {
             return Err(Error::InvalidData.into());
