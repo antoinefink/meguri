@@ -140,11 +140,13 @@ private actor PolicyPendingEngine: CloudKitEngine {
     private var applyError: (any Error)?
     private var snapshotPause: CloudCallbackGate?
     private var applyPause: CloudCallbackGate?
+    private var cancellationPause: CloudCallbackGate?
     private var received: [CloudPendingUpdate] = []
     init(_ sdk: CloudKitEngineFake) { self.sdk = sdk; instanceID = sdk.instanceID }
     func failNextApply(_ error: any Error) { applyError = error }
     func pauseNextSnapshot(_ gate: CloudCallbackGate) { snapshotPause = gate }
     func pauseNextApply(_ gate: CloudCallbackGate) { applyPause = gate }
+    func pauseNextCancellation(_ gate: CloudCallbackGate) { cancellationPause = gate }
     func receivedUpdates() -> [CloudPendingUpdate] { received }
     func pendingRecordZoneChanges() async -> [String: CloudPendingChange] {
         if let gate = snapshotPause { snapshotPause = nil; await gate.enter() }
@@ -163,7 +165,10 @@ private actor PolicyPendingEngine: CloudKitEngine {
     func prepareFetch(options: CloudFetchOptions) async throws -> CloudKitNetworkEnqueue { try await sdk.prepareFetch(options: options) }
     func sendChanges(zones: [String]) async throws { try await sdk.sendChanges(zones: zones) }
     func fetchChanges(options: CloudFetchOptions) async throws { try await sdk.fetchChanges(options: options) }
-    func cancelOperations() async { await sdk.cancelOperations() }
+    func cancelOperations() async {
+        if let gate = cancellationPause { cancellationPause = nil; await gate.enter() }
+        await sdk.cancelOperations()
+    }
     func release() async { await sdk.release() }
 }
 
@@ -1772,6 +1777,83 @@ extension EventTests {
             let final = try await observePolicyExchange(command)
             #expect(final.captures == after.captures && final.activeID == nil)
             #expect(final.completedIDs == after.completedIDs.union([next.id]))
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func policyFetchInvocationRetiredBySchedulingChangeDoesNotForgeDrain(changeAccount: Bool) async throws {
+        try await withNativePolicyFixture { fixture in
+            let (policy, executor) = try await nativePolicy(fixture)
+            try await prepareCloudKitPendingFixture(fixture, policy: policy, executor: executor)
+            let wrapped = Mutex<PolicyPendingEngine?>(nil)
+            await fixture.factory.wrapNextEngine { sdk in
+                let engine = PolicyPendingEngine(sdk); wrapped.withLock { $0 = engine }; return engine
+            }
+            try await consumePolicySetup(policy.input(.settings(.init(enabled: true, paused: false, automatic: true, media: false))), executor: executor)
+            let engine = try await fixture.engine()
+            let wrapper = try #require(wrapped.withLock { $0 })
+            try #require(wrapper.instanceID == engine.instanceID)
+            let fetch = try #require(try policyCommands(try await policy.input(.foreground))
+                .first { if case .requestFetch = $0.action { true } else { false } })
+            let calls = engine.acceptedNetworkCalls.value
+            let drains = try await fixture.core.fetchDrains()
+            let native = CloudCallbackGate(), cancellation = CloudCallbackGate(), returned = CloudCallbackGate()
+            await engine.pauseNextOperationTask(native)
+            await wrapper.pauseNextCancellation(cancellation)
+            try await withCloudTask(gates: [native, cancellation, returned], operation: {
+                let result = await executor.execute(fetch)
+                #expect((result.error != nil) == changeAccount && !result.deferred)
+                #expect(result.fetchProofOutcome == nil && result.nativeCancellation == nil)
+                #expect(result.originalGuardRefusal == nil && result.dependentFetchRefusal == nil)
+                if !changeAccount { #expect(!result.outputs.isEmpty) }
+                #expect(engine.acceptedNetworkCalls.value == calls)
+                let drainsAfterFetch = try await fixture.core.fetchDrains()
+                #expect(drainsAfterFetch == drains)
+                await returned.enter()
+            }, whileRunning: {
+                try await native.waitForArrival()
+                let changed = try policyCommands(try await policy.input(.settings(.init(enabled: true, paused: false, automatic: false, media: false))))
+                let configure = try #require(changed.first { if case .configureAutomatic = $0.action { true } else { false } })
+                let replacing = Task {
+                    let result = await executor.execute(configure)
+                    _ = await cancellation.operationSucceeded()
+                    return result
+                }
+                do {
+                    // Real configure has retired Core authority before calling
+                    // cancelOperations. Hold that call before it can cancel or
+                    // release the fake's queued owned task. Opening native now
+                    // reaches its real prepare/reportInvocation, before SDK entry.
+                    try await cancellation.waitForArrival()
+                    try await fixture.adapter.waitForStopping(instanceID: engine.instanceID)
+                    #expect(engine.acceptedNetworkCalls.value == calls)
+                    if changeAccount {
+                        try await fixture.core.accountChanged(sdk: nil, status: .available, identity: Data("synthetic-account-B".utf8))
+                    }
+                    await native.open()
+                    try await returned.waitForArrival()
+                    await returned.open(); await cancellation.open()
+                    let result = await replacing.value
+                    #expect((result.error != nil) == changeAccount && !result.deferred)
+                } catch {
+                    await native.open(); await returned.open(); await cancellation.open()
+                    _ = await replacing.value
+                    throw error
+                }
+            })
+            #expect(engine.acceptedNetworkCalls.value == calls)
+            let drainsAfterRetirement = try await fixture.core.fetchDrains()
+            #expect(drainsAfterRetirement == drains)
+            #expect(await engine.recordedTrace().contains(.released))
+            if !changeAccount {
+                let next = try await fixture.engine()
+                #expect(next.instanceID != engine.instanceID && !next.automaticallySync)
+                try await fixture.core.validateSDK(next.instanceID)
+                #expect(await fixture.adapter.retainedInstanceIDs() == [next.instanceID])
+                // Automatic OFF uses the existing P4/P6 work; this request
+                // neither redirects to the replacement nor demands a fetch.
+                #expect(next.acceptedNetworkCalls.value == 0)
+            }
         }
     }
 

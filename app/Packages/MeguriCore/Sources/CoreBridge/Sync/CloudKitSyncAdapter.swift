@@ -191,6 +191,13 @@ struct CloudFetchProofError: Error {
     var error: any Error { outcome.error }
 }
 
+// Only the owned policy fetch's pre-SDK report can issue this marker. Preserve
+// its original error and exact instance across the operation task's drain.
+private struct CloudPolicyFetchInvocationFailure: Error {
+    let error: any Error
+    let original: CloudSDKStopWitness
+}
+
 // Specific to the post-control-read proof wait. No other completion uses it.
 private final class CloudFetchProofWait: Sendable {
     let issuer: CloudFetchProofIssuer?
@@ -1900,8 +1907,16 @@ public actor CloudKitSyncAdapter {
                 let prepared = try await instance.engine.prepareFetch(options: .init(zones: scope, priorityZones: scope, groupID: "meguri-\(id)"))
                 guard current == origin, owned[origin] === instance, !instance.stopping else { throw BridgeError.cloudPolicy(.staleCommand) }
                 guard !quiescing else { throw CancellationError() }
+                let original = instance.stopWitness
                 let operation = try prepared.enqueue(prepare: {
-                    if let execution { invocationOutputs.append(try await execution.reportInvocation(zones: [.root, .collection], kind: .fetch)) }
+                    if let execution {
+                        do { invocationOutputs.append(try await execution.reportInvocation(zones: [.root, .collection], kind: .fetch)) }
+                        catch {
+                            guard reservedFetch, pinnedOrigin == origin,
+                                  (error as? BridgeError) == .cloudConnection(.authorityChanged) else { throw error }
+                            throw CloudPolicyFetchInvocationFailure(error: error, original: original)
+                        }
+                    }
                 }, validate: {
                     try validateSDK()
                     try execution?.validateForEnqueue()
@@ -1910,6 +1925,8 @@ public actor CloudKitSyncAdapter {
                 if let execution { try await execution.validate() }
             }
             catch {
+                let invocationFailure = error as? CloudPolicyFetchInvocationFailure
+                let error = invocationFailure?.error ?? error
                 #if DEBUG
                 DebugCloudDiagnostics.sendFailureCapture?.recordStartEngine(.startEngineRootFetch, error: error)
                 #endif
@@ -1929,6 +1946,15 @@ public actor CloudKitSyncAdapter {
                 if await valid(origin) {
                     _ = try await core.finishFetch(sdk: origin, id: id, successful: false)
                     try await reportOperation(execution, zones: [.root, .collection], kind: .fetch, started: false, error: error)
+                }
+                // Cleanup above retains its own errors. Only this drained
+                // preparation refusal can end without a fetch result or retry.
+                if reservedFetch, pinnedOrigin == origin,
+                   invocationFailure?.original === instance.stopWitness,
+                   instance.retirementFailure == nil, let execution,
+                   await schedulingRetired(instance, execution: execution, error: error),
+                   instance.retirementFailure == nil, !Task.isCancelled {
+                    return false
                 }
                 throw error
             }

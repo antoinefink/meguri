@@ -965,6 +965,9 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: U244/t1mf, 2026-11-17.
     "app/Packages/MeguriKit/Tests/AppModelTests/IssuedStartupAdmissionRegressionTests.swift":
         "1ed9e31a27b7f3f194d055a182f7097377437a5bacb1fa40377e3aad64818482",
+    # Complete public-file review: owned_cleanup_diagnosis, 2026-11-19.
+    "app/Packages/MeguriCore/Tests/CoreBridgeTests/CloudPolicyExecutionTests.swift":
+        "b1bece502d8b3aabcef7c9ee6b5b9ebc6d43bba66812f5fc2f6e5edaf4626895",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "docs/process/review-log/native-owned-provider-ui-20261118.md":
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
