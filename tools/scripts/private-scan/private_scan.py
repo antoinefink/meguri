@@ -1272,7 +1272,7 @@ PUBLIC_ARTIFACTS = {
 # Keys pin exact repository-path UTF-8 bytes; values pin complete file bytes.
 PUBLIC_VENDOR_ARTIFACTS = {
     "757fd5fb3da8ccfca681ebdc23701b14eb3a62c18056c970122d156377c7099e":
-        "0d93e6307d73b7076746e06c68cb665584b71b353889af8cf00261e1a130e76b",
+        "c3ddf502516cc2db653a00d92672ae50e947a5beca4d216c29b561ddfef825ad",
     '7f3eddd9b055b1b5220d7e096440db86572a8f0074cc61166de2a6609b308e78':
         '3e2b6410255d6c7d07c209a11d02c793e6b0a1e1156ac8fc0509f2f375051e0d',
     '6a9d04ca41587836af459446bdc65bf4d7255154cbe98aabcce66a19b4c66043':
