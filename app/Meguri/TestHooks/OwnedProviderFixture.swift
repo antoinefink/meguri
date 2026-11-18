@@ -74,12 +74,9 @@ extension TestHooks {
                 } catch { return false }
             }
             defaults.removePersistentDomain(forName: suite)
-            let synchronized = defaults.synchronize()
+            guard defaults.synchronize() else { return false }
             let domain = defaults.persistentDomain(forName: suite)
-            guard synchronized && domain == nil else {
-                print("ownedProviderCleanup synchronized=\(synchronized) domainNil=\(domain == nil) domainEmpty=\(domain?.isEmpty == true)")
-                return false
-            }
+            guard domain?.isEmpty != false else { return false }
             cleaned = true
             return true
         }
