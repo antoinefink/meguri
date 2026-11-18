@@ -13,7 +13,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         guard build.hasHooks, bundle.hasSuffix(".dev") else { return }
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(
-            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"),
+            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1", directoryHint: .isDirectory),
             ownedProviderFixture: true, now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris",
             locale: "en_US", animations: false).arguments
         app.launch()
@@ -21,80 +21,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         addTeardownBlock { @MainActor in if app.state != .notRunning { app.terminate() } }
         let homeMatches = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "shell.root.sidebar.home"))
         let home = homeMatches.element(boundBy: 0)
-        let homeExists = home.waitForExistence(timeout: 20)
-        if !homeExists {
-            func exists(_ identifier: String) -> Bool {
-                app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", identifier))
-                    .element(boundBy: 0).exists
-            }
-            let allDecksLabelCount = app.staticTexts.matching(NSPredicate(format: "label == %@", "All Decks")).count
-            print("ownedProviderStartup: homeIDCount=\(homeMatches.count)"
-                + " hookError=\(exists("testhooks.error.message"))"
-                + " policySheet=\(exists("home.policy.sheet"))"
-                + " policyEnable=\(exists("home.policy.enable"))"
-                + " homeScreen=\(exists("home.collection.screen"))"
-                + " homeError=\(exists("home.collection.error"))"
-                + " allDecksLabelCount=\(allDecksLabelCount)"
-                + " windowCount=\(app.windows.count)"
-                + " sheetCount=\(app.sheets.count)"
-                + " alertCount=\(app.alerts.count)"
-                + " appState=\(app.state.rawValue)")
-            let hookErrors = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "testhooks.error.message"))
-            let errorIDCount = hookErrors.count
-            let hookMessages: [(code: String, message: String)] = [
-                ("agent-startup", "OwnedProviderFixture is incompatible with setup-only or agent startup"),
-                ("foreground-options", "OwnedProviderFixture requires a normal foreground launch without routes, imports, native replay or integrations"),
-                ("fixture-argument", "OwnedProviderFixture requires exactly this checkout's generated local-review-1 directory"),
-                ("mac-only", "OwnedProviderFixture applies to the Mac only"),
-                ("development-bundle", "OwnedProviderFixture requires a .dev bundle"),
-                ("composition-options", "OwnedProviderFixture requires normal production composition"),
-                ("missing-context", "OwnedProviderFixture requires its prepared owned context"),
-                ("missing-opt-in", "OwnedProviderFixture context requires explicit opt-in"),
-                ("fixture-alias", "OwnedProviderFixture refuses another source or a path alias"),
-                ("fixture-directory", "OwnedProviderFixture source must be an existing directory"),
-                ("defaults-create", "Could not create disposable provider defaults"),
-                ("root-collision", "Owned provider root already exists"),
-                ("root-create", "Could not create private owned provider root")
-            ]
-            let matches = hookMessages.filter {
-                hookErrors.matching(NSPredicate(format: "(label == %@ OR value == %@)", $0.message, $0.message)).count > 0
-            }
-            let code = matches.count == 1 ? matches[0].code : (matches.isEmpty ? "unknown" : "ambiguous")
-            print("ownedProviderHookError: errorIDCount=\(errorIDCount) matchCount=\(matches.count) code=\(code)")
-            let hookCategories: [(code: String, prefixes: [String], suffix: String?)] = [
-                ("parser-unknown-option", ["unknown launch option "], nil),
-                ("parser-duplicate-option", ["launch option "], " is given twice"),
-                ("parser-missing-value", ["launch option "], " needs a value"),
-                ("parser-fixture-absolute", ["-MeguriFixture needs an absolute path, got '"], "'"),
-                ("parser-time-zone", ["-MeguriTimeZone: unknown time zone '"], "'"),
-                ("parser-instant", ["-MeguriNow takes YYYY-MM-DDTHH:MM:SS with an optional Z or ±HH:MM, got '"], "'"),
-                ("parser-locale", ["-MeguriLocale: unknown locale '"], "'"),
-                ("parser-on-off", ["-MeguriOwnedProviderFixture takes on or off, got '",
-                    "-MeguriAnimations takes on or off, got '",
-                    "-MeguriReduceMotion takes on or off, got '",
-                    "-MeguriReduceTransparency takes on or off, got '"], "'"),
-                ("parser-window-size", ["-MeguriWindowSize takes minimum, default, large or <width>x<height>, got '"], "'"),
-                ("parser-appearance", ["-MeguriAppearance takes light or dark, got '"], "'"),
-                ("fixture-bundle", ["FixtureInstaller refuses to run: bundle id '"], "' does not end in '.dev'"),
-                ("fixture-missing", ["-MeguriFixture: no file or directory at "], nil),
-                ("fixture-symlink", ["-MeguriFixture: "], "); put a copy of its target in the fixture"),
-                ("fixture-copy", ["-MeguriFixture: could not install "], nil)
-            ]
-            let categoryMatches = hookCategories.filter { category in
-                category.prefixes.contains { prefix in
-                    if let suffix = category.suffix {
-                        return hookErrors.matching(NSPredicate(
-                            format: "((label BEGINSWITH %@ AND label ENDSWITH %@) OR (value BEGINSWITH %@ AND value ENDSWITH %@))",
-                            prefix, suffix, prefix, suffix)).count > 0
-                    }
-                    return hookErrors.matching(NSPredicate(
-                        format: "(label BEGINSWITH %@ OR value BEGINSWITH %@)", prefix, prefix)).count > 0
-                }
-            }
-            let categoryCode = categoryMatches.count == 1 ? categoryMatches[0].code : (categoryMatches.isEmpty ? "unknown" : "ambiguous")
-            print("ownedProviderHookCategory: matchCount=\(categoryMatches.count) code=\(categoryCode)")
-        }
-        XCTAssertTrue(homeExists)
+        XCTAssertTrue(home.waitForExistence(timeout: 20))
         XCTAssertEqual(homeMatches.count, 1)
         try click(home, app: app, bundle: bundle)
         let homeScreens = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "home.collection.screen"))
