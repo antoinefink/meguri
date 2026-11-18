@@ -154,7 +154,11 @@ fn selected_oversized_actual_decision_keeps_product_publication_but_has_no_obser
     let directory = generated(root.path(), "sender");
     let mut service = Service::open(root.path(), Config::default(), SeededRandom::new(811)).unwrap();
     let mut actual_scope = scope();
-    actual_scope.account = "a".repeat(8 * MAX_CONTROL_BYTES + 1);
+    // ProviderDocument permits 4096 raw account bytes. In decision_current,
+    // JSON escapes each quote: this account alone exceeds the independent
+    // 8192-byte total observation cap while passing the per-string check.
+    actual_scope.account = "\"".repeat(4096);
+    assert_eq!(serde_json::to_vec(&actual_scope.account).unwrap().len(), 8194);
     let mut rig = PublicationRig::open(
         &directory,
         &actual_scope,
