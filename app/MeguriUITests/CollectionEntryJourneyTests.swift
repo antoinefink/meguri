@@ -141,7 +141,20 @@ import notify
             try click(input, app, bundle)
             try app.bringToFront(bundleIdentifier: bundle)
             input.typeText(content)
-            XCTAssertTrue(waitForText(input, content), "Native typing must reach \(name)")
+            // Require the live native AX String, allowing exactly one terminal LF.
+            var characterCount = -1
+            var exactWithTerminalLF = false
+            let typed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                guard input.exists, let value = input.value as? String else {
+                    characterCount = -1; exactWithTerminalLF = false
+                    return false
+                }
+                characterCount = min(value.count, 128)
+                exactWithTerminalLF = value == content + "\n"
+                return value == content || exactWithTerminalLF
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter().wait(for: [typed], timeout: 20), .completed,
+                "Native typing must reach \(name); AX String character count (capped at 128)=\(characterCount), exactWithTerminalLF=\(exactWithTerminalLF)")
         }
         let add = editor.buttons["editor.add.save"].firstMatch
         let addReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in

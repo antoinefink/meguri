@@ -520,7 +520,8 @@ extension ReviewCollectionStartupTests {
             let missingDraft = try NoteEditorDraft(generation: owner.generation, notetype: missing,
                 deck: savingDraft.deck, values: ["D5 mapped front", "D5 mapped back"], tags: ["d5-kept"])
             preparation.replace(with: missingDraft)
-            editor = try #require(await owner.prepareAddNoteEditor(presetDeck: deck.id))
+            let missingHost: FieldEditorHost = try #require(await owner.prepareAddNoteEditor(presetDeck: deck.id))
+            editor = missingHost
             let beforeRepair = try await CoreDeckService().studyState(deckID: deck.id).listCounts.new
             let undoBeforeRepair = try await undo.peekUndo(scope: .global)
             let presentSelection = try await CoreEditorServices().addNotetypeSelection(
