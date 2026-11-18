@@ -908,13 +908,13 @@ PUBLIC_ARTIFACTS = {
         'edba139cde56f1dc7c10598a9de920c034b31d800320ed3e0068480e8fe6fb99',
     # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
     'specs/sync/status-strings.md':
-        '17c562307d81225ae1c55b0acc9c817d51258d2f25bb93839f61e0e645c72034',
+        '24dd422510bcb309b0cd30d0ff4f44e286f441da5a5284b1ef9acde3432b5b4e',
     # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
     'docs/design/screens.md':
-        '583578bab6818dd2b4784bc35d151107f3e6ef6b23b2e4c2f7b02dc6881f73c4',
+        '8075ff26d0014382e34c434f36d8c3dc9974b606fd1d4008df0a953bf39b3ac7',
     # Complete final-content PUBLIC review: Codex incoming_contract_review, 2026-11-17.
     'docs/design/screen-inventory.yaml':
-        '0be4dba8cea3d0613449b1297a88e93d2e03163f0aa2e4c2a42b87538afcd93b',
+        'cad9cab5b364992250a8060399849a90efa81d20109e75e145ff914e24cf0361',
     # Complete final-content PUBLIC review: Codex adoption_empty_decks, 2026-11-17.
     'core/crates/meguri-storage/src/media/inventory.rs':
         'a15fbd849371207df8a52ba993b64e26d339fcb9af56bbe3cb01652f38b7cae9',
@@ -970,7 +970,7 @@ PUBLIC_ARTIFACTS = {
     "docs/process/verification-status.md":
         "6998567136ec63cccc2446d19e66407f77af75c95c69f40d22fc3ffa0ec0b066",
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
-        'e08d22f2441c5f77bb0aa33ad08b315e9650eb81049b6bc047e37b6164fdc6ea',
+        '456aa2d9303b4e4a689f40f4ecfdf3692e5ee75612c8319f6652c3f8a5936b68',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
         '4cf802ffe04f6888219aa637119e12847be828e2590840fd42d35cea9bfa86d7',
     'core/crates/meguri-ffi/src/provider_tests.rs':
@@ -1238,16 +1238,16 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '839287d38bdb1d762a5158155e2ae13b2919b3a26bbb44c05d7c47987eda5a7c',
-    'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': '4c91f1149f3995778b0bf75a329cf9a1f64d0cfc567e36699ac36e8c90ce238c',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '65409c80fcd1cf6b92da941bde842cccd58b396c2cdbc27a6f029f33310f89ad',
+    'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/AccountSyncView.swift': '397f631b73d908088772dbcc94a05539c16e02b49cee0489b39d8c36079755c9',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/CloudSyncStatusButton.swift': '845d547fd3f64035420a1d723cc1bf3f38611a09dd143e9bc1be51bde8c1d2af',
-    'app/Packages/MeguriKit/Sources/Features/Settings/Sync/MeguriSyncSetupViews.swift': '7a44f15263ad7942e0a74b756585833662ccb05340e3cbce785a976a22cbb4f9',
-    'app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncStatusContent.swift': '0e9ebd0d7bd2f126638736ca6268453bf601564b6922895b103cfbde3d5aa0ca',
-    'app/Packages/MeguriKit/Tests/AppModelTests/CloudSyncPresentationTests.swift': 'f1282afea72849d0bb14bd45bd63a8341eff196a60d419c5227fa0ba7971eef2',
-    'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': '01d0e21c21041c0e948521668af58f74c8729f2f48117c4e53db8ad6d2b92ef0',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Sync/MeguriSyncSetupViews.swift': '10614372d7279294c408d3638b01046d06c999d06d51f0daf413b17e2dee17ff',
+    'app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncStatusContent.swift': '9238c2e349fd1c3cb4fcc4d6572209cd4809ccca1440565bf9d26d54f7bcf701',
+    'app/Packages/MeguriKit/Tests/AppModelTests/CloudSyncPresentationTests.swift': '9656d70a62e751fe2e4a121a762ccdd6b23313ceb2822e6f696ca3a55f4f2561',
+    'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': 'ff5bfb4b6ba416f753c155e401091d946e811369878242774bd86108b8b08719',
     'core/crates/meguri-host/src/provider_bootstrap.rs': '038e6199bd9e9d63e307023e182caa3632ace08fee94c21563e61854357553bd',
     'core/crates/meguri-host/Cargo.toml': 'ef2e5f907851eb4d19984c899516e6affe5444516b59d245f4501dde2b744a73',
     'core/crates/meguri-host/examples/real_server_provider.rs': '30c41dac4cce43053fbabf3654565584fe6ebb3a8054c8660b1a8c4695d51ea5',

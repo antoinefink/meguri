@@ -30,7 +30,7 @@ struct SyncServiceSection: View {
                 Text(SyncText.value("sync.service.iCloud")).tag("iCloud" as String?)
                 Text(SyncText.value("sync.service.meguri")).tag("meguri" as String?)
             }
-            .disabled(changing || sync.providerNeedsAttention)
+            .disabled(changing || sync.providerNeedsAttention || collection.meguriSignInPreparing || sync.meguriBusy)
             .accessibilityIdentifier("settings.accountSync.service")
             if changing { ProgressView(SyncText.value("sync.service.changing")) }
             if failed { Text(SyncText.value("sync.service.changeFailed")) }
@@ -62,7 +62,7 @@ struct SyncServiceSection: View {
         } message: { Text(SyncText.value("sync.service.recovery.message")) }
     }
     private func choose(_ value: String?) {
-        guard let value, value != selected else { return }
+        guard !collection.meguriSignInPreparing, !sync.meguriBusy, let value, value != selected else { return }
         if selected != nil { switchSource = sync.providerState?.selection; destination = value }
         else { change(value) }
     }
@@ -178,10 +178,25 @@ struct MeguriSyncSections: View {
     }
     private var sync: SyncCoordinator { collection.sync }
     private var signedIn: Bool { sync.meguriPhase == .setupRequired && sync.meguriRoutine != .authentication }
+    private var processing: Bool { collection.meguriSignInPreparing || sync.meguriBusy }
+    private var plainSignInStatus: Bool {
+        let status = sync.meguriStatus
+        return status.titleKey == "sync.meguri.status.notSetUp.title"
+            || status.titleKey == "sync.meguri.status.signedOut.title"
+                && status.detailKey == "sync.meguri.status.signedOut.detail"
+    }
     var body: some View {
         Section {
-            SyncStatusRows(collection: collection)
-            if sync.meguriBusy {
+            if plainSignInStatus && sync.settings.paused {
+                Text(SyncText.value("sync.meguri.status.paused.title"))
+                Text(SyncText.value("sync.meguri.status.paused.detail"))
+            } else if !plainSignInStatus {
+                SyncStatusRows(collection: collection, showsMeguriProviderLabel: false)
+            }
+            if collection.meguriSignInPreparing {
+                ProgressView(SyncText.value("sync.meguri.signIn.preparing"))
+                    .accessibilityIdentifier("settings.accountSync.meguri.signInProgress")
+            } else if sync.meguriBusy {
                 if let progress = sync.meguriProgress, let total = progress.total, total > 0 {
                     ProgressView(value: Double(progress.completed), total: Double(total))
                 } else { ProgressView() }
@@ -189,47 +204,62 @@ struct MeguriSyncSections: View {
             if signedIn {
                 LabeledContent(SyncText.value("sync.meguri.address"), value: sync.meguriEndpoint)
                 Button(SyncText.value("sync.meguri.signOut")) { signOut = true }
-                    .disabled(sync.meguriBusy || signingOut)
+                    .disabled(processing || signingOut || changing)
                     .accessibilityIdentifier("settings.accountSync.meguri.signOut")
             } else {
-                TextField(SyncText.value("sync.meguri.address"), text: Binding(get: { address }, set: {
-                    address = $0; password = ""; sync.meguriAddressEdited()
-                }))
-                    #if os(iOS)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    #endif
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("settings.accountSync.meguri.address")
-                TextField(SyncText.value("sync.meguri.username"), text: $username)
-                    .textContentType(.username)
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    #endif
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("settings.accountSync.meguri.username")
-                SecureField(SyncText.value("sync.meguri.password"), text: $password)
-                    .textContentType(.password)
-                    #if os(iOS)
-                    .textInputAutocapitalization(.never)
-                    #endif
-                    .autocorrectionDisabled()
-                    .onSubmit(signInAction)
-                    .accessibilityIdentifier("settings.accountSync.meguri.password")
+                Group {
+                    TextField(SyncText.value("sync.meguri.address"), text: Binding(get: { address }, set: {
+                        guard !processing else { return }
+                        address = $0; password = ""; sync.meguriAddressEdited()
+                    }))
+                        #if os(iOS)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("settings.accountSync.meguri.address")
+                    TextField(SyncText.value("sync.meguri.username"), text: Binding(get: { username }, set: {
+                        if !processing { username = $0 }
+                    }))
+                        .textContentType(.username)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("settings.accountSync.meguri.username")
+                    SecureField(SyncText.value("sync.meguri.password"), text: Binding(get: { password }, set: {
+                        if !processing { password = $0 }
+                    }))
+                        .textContentType(.password)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
+                        .onSubmit(signInAction)
+                        .accessibilityIdentifier("settings.accountSync.meguri.password")
+                }
+                .disabled(processing || changing)
+                #if os(macOS)
+                .textFieldStyle(.roundedBorder)
+                #endif
                 Button(SyncText.value("sync.meguri.signIn"), action: signInAction)
-                    .disabled(sync.meguriBusy || sync.settings.paused || address.isEmpty || username.isEmpty || password.isEmpty)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(processing || changing || sync.settings.paused || address.isEmpty || username.isEmpty || password.isEmpty)
                     .accessibilityIdentifier("settings.accountSync.meguri.signIn")
             }
-            if let key = sync.meguriSignInErrorKey { Text(SyncText.value(key)) }
+            if let key = sync.meguriSignInErrorKey {
+                Label(SyncText.value(key), systemImage: "exclamationmark.circle")
+                    .accessibilityIdentifier("settings.accountSync.meguri.signInError")
+            }
             if sync.meguriPhase == .blocked {
                 Button(SyncText.value("sync.meguri.connection.retry")) { sync.loadMeguriConnection() }
-                    .disabled(sync.meguriBusy)
+                    .disabled(processing || changing)
                     .accessibilityIdentifier("settings.accountSync.meguri.retryConnection")
                 Button(SyncText.value("sync.meguri.signOut")) { signOut = true }
-                    .disabled(sync.meguriBusy || signingOut)
+                    .disabled(processing || signingOut || changing)
                     .accessibilityIdentifier("settings.accountSync.meguri.signOut")
             }
-        } header: { Text(SyncText.value("sync.service.meguri")) }
+        } header: { Text(SyncText.value(signedIn ? "sync.service.meguri" : "sync.meguri.signIn.title")) }
           footer: { if !signedIn { Text(SyncText.value("sync.meguri.signIn.footer")) } }
         .disabled(signingOut)
         .onAppear { address = sync.meguriEndpoint }
@@ -272,9 +302,10 @@ struct MeguriSyncSections: View {
             if sync.meguriRoutine != nil || sync.settings.paused {
                 Button(SyncText.value(sync.settings.paused ? "sync.meguri.resume" : "sync.meguri.pause")) {
                     let settings = sync.settings
-                    sync.setDeviceSettings(paused: !settings.paused, automatic: settings.automatic, media: settings.media)
+                    if settings.paused { collection.resumeMeguri() }
+                    else { sync.setDeviceSettings(paused: true, automatic: settings.automatic, media: settings.media) }
                 }
-                .disabled(sync.deviceSettingsSettling)
+                .disabled(sync.deviceSettingsSettling || (sync.settings.paused && processing))
                 .accessibilityIdentifier("settings.accountSync.meguri.pause")
                 if sync.meguriRoutine == .failed,
                    sync.meguriRoundReport?.collection.finalization != nil || sync.meguriRoundReport?.media?.finalization != nil {
@@ -288,7 +319,7 @@ struct MeguriSyncSections: View {
             }
             if !sync.providerNeedsAttention && sync.meguriPhase != .blocked {
                 Button(SyncText.value("sync.meguri.stop")) { stopping = true }
-                    .disabled(sync.meguriBusy || changing)
+                    .disabled(processing || changing)
                     .accessibilityIdentifier("settings.accountSync.meguri.stop")
             }
         }
@@ -322,8 +353,8 @@ struct MeguriSyncSections: View {
     }
     private func signInAction() {
         let secret = password; password = ""
-        guard !sync.meguriBusy, !sync.settings.paused, !address.isEmpty, !username.isEmpty, !secret.isEmpty else { return }
-        sync.signInMeguri(endpoint: address, username: username, password: secret)
+        guard !processing, !changing, !sync.settings.paused, !address.isEmpty, !username.isEmpty, !secret.isEmpty else { return }
+        collection.signInMeguri(endpoint: address, username: username, password: secret)
     }
 }
 

@@ -111,6 +111,7 @@ nonisolated struct SyncCommandResult: Sendable {
     }
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }
+enum MeguriSignInLocalFailure: Error { case busy, attachment, credentialStore }
 
 // Observation and a single replay budget belong to the original wake.
 // Recording either release signal creates no task and grants no admission.
@@ -616,6 +617,22 @@ public final class SyncCoordinator {
         meguriAction = (id, task)
     }
     func waitForMeguriAction() async { await meguriAction?.task.value }
+    var meguriSignInAddressRevision: UInt64 { meguriAddressEditRevision }
+    var meguriSignInAttachmentRevision: UInt64 { hostRevision }
+    var meguriSignInAvailable: Bool {
+        meguriLocalActionAvailable && !settings.paused
+    }
+    var meguriLocalActionAvailable: Bool {
+        !meguriBusy && !meguriCancelling && !closing && !replacing && !suspended && !drained
+            && !providerActionInProgress && !providerHandoffInProgress
+            && providerState?.selection == .meguri && !providerNeedsAttention
+    }
+    var meguriSignInAttached: Bool { provider != nil && setupState == .attached && !backendRetired }
+    func failMeguriSignInPreparation(_ failure: MeguriSignInLocalFailure) {
+        meguriLastError = failure
+        meguriSignInErrorKey = Self.meguriAuthenticationKey(failure)
+    }
+    func clearMeguriSignInPreparationError() { meguriSignInErrorKey = nil }
     public func meguriAddressEdited() {
         meguriAddressEditRevision &+= 1
         meguriAddressDirty = true; meguriReady = false; meguriRoutine = nil; meguriSignInErrorKey = nil
@@ -718,10 +735,12 @@ public final class SyncCoordinator {
     }
     public func signInMeguri(endpoint: String, username: String, password: String) {
         guard !settings.paused else { return }
+        let editRevision = meguriAddressEditRevision
+        let expected = generation, revision = hostRevision
         issueMeguri { _ in
+            guard self.generation == expected, self.hostRevision == revision,
+                  editRevision == self.meguriAddressEditRevision else { return }
             self.meguriSignInErrorKey = nil
-            let editRevision = self.meguriAddressEditRevision
-            let expected = self.generation, revision = self.hostRevision
             do {
                 await self.meguriAddressDrain?.value
                 let owner = try await self.meguriConnection()
@@ -793,7 +812,16 @@ public final class SyncCoordinator {
             return state.selection == .meguri && state.phase != .blocked && state.phase != .handoffRecovery
         } catch { meguriLastError = error; throw error }
     }
-    private static func meguriAuthenticationKey(_ error: any Error) -> String {
+    static func meguriAuthenticationKey(_ error: any Error) -> String {
+        if let failure = error as? MeguriSignInLocalFailure {
+            return switch failure {
+            case .busy: "sync.meguri.error.busy"
+            case .attachment: "sync.meguri.error.localSetup"
+            case .credentialStore: "sync.meguri.error.credentialStore"
+            }
+        }
+        if error is MeguriProviderCredentialFailure { return "sync.meguri.error.credentialStore" }
+        if case BridgeError.busy = error { return "sync.meguri.error.busy" }
         if let failure = error as? MeguriProviderAuthenticationFailure {
             return switch failure {
             case .username, .credentials: "sync.meguri.error.credentials"

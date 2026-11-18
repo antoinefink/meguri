@@ -670,7 +670,9 @@ The `sync.serviceSwitch` sheet. `%@` is the old service's name, `sync.service.iC
 | `sync.meguri.address` | Server Address | text field; while signed in, a read-only row with the address |
 | `sync.meguri.username` | Username | text field |
 | `sync.meguri.password` | Password | secure field |
+| `sync.meguri.signIn.title` | Sign In to Meguri Sync | the Account & Sync sign-in section's single heading |
 | `sync.meguri.signIn` | Sign In | button |
+| `sync.meguri.signIn.preparing` | Preparing Sign-In… | visible progress during explicit local Host preparation and offline connection load |
 | `sync.meguri.signIn.footer` | Signing in doesn’t send or change your collection. | footer under the sign-in fields (MP5) |
 | `sync.meguri.error.address` | Enter a valid server address. Meguri Sync needs an https address. | endpoint normalization refuses the address; no request is sent |
 | `sync.meguri.error.credentials` | The username or password isn’t correct. | sign-in error: credentials refused |
@@ -678,6 +680,9 @@ The `sync.serviceSwitch` sheet. `%@` is the old service's name, `sync.service.iC
 | `sync.meguri.error.network` | Meguri couldn’t reach the server. Check the address and your connection, then try again. | sign-in error: no connection |
 | `sync.meguri.error.server` | The server couldn’t complete sign-in. Try again later. | sign-in error: server failure |
 | `sync.meguri.error.other` | Sign-in didn’t finish. Try again. | any other sign-in error |
+| `sync.meguri.error.busy` | Meguri is finishing another task. Wait, then try signing in again. | typed local busy refusal |
+| `sync.meguri.error.localSetup` | Meguri couldn’t prepare sign-in on this device. Reopen Meguri, then try again. | explicit click could not attach local sign-in setup |
+| `sync.meguri.error.credentialStore` | Meguri can’t read or save your sign-in on this device. Unlock this device, then try again. | typed local credential-store failure; never a credential or network refusal |
 | `sync.meguri.connection.retry` | Try Again | connection blocked: reads the stored sign-in again; no request |
 | `sync.meguri.signOut` | Sign Out… | button, while signed in |
 | `sync.meguri.signOut.title` | Sign Out of Meguri Sync? | alert |
@@ -688,6 +693,8 @@ The `sync.serviceSwitch` sheet. `%@` is the old service's name, `sync.service.iC
 | `sync.meguri.stop` | Stop Using Meguri Sync on This Device… | button; opens `sync.serviceSwitch` to local-only |
 
 - The sign-in error line shows under the fields after a failed attempt, until the next attempt or an address edit. The password field is empty after every attempt.
+- Account & Sync uses one `sync.meguri.signIn.title` heading, native fields in address, username, password order, and one prominent system Sign In button. It omits the repeated service label and the ordinary Not Set Up / Not Signed In title and introductory detail while those fields explain the task. Cancelled, blocked, paused, setup and ongoing sync states remain visible. The shared status popover keeps its service label and T18.4 behavior. Errors are inline native labels with an error SF Symbol and identifier `settings.accountSync.meguri.signInError`; text conveys the error without color.
+- Only an explicit Sign In click may prepare the existing local NoCollection Host if needed, then join offline attachment/load before ordinary authentication. Preparing Sign-In… remains visible during that work. Draft fields and service changes are disabled while processing; a captured address edit, changed attachment or lifecycle cancellation fences an obsolete attempt. Two rapid submits issue one attempt. Sign-in neither creates a collection nor starts a transfer; no preparation happens on view rendering.
 - Decided 2026-11-17 (root, delegated): Sign Out stops Meguri Sync, drains its work and deletes this device's sign-in; only after both succeed does no service stay selected (local-only). It never selects iCloud Sync (MP2). It keeps the collection, media, backups, server data and every unresolved operation's evidence. Until it succeeds, no text says the sign-in was removed: `sync.meguri.signingOut` shows, then the local-only form, or `sync.meguri.signOut.failed` with whatever selection and phase the core then reports. No failure text says the sign-in or the selection is unchanged.
 
 ### T18.4 Status (MP2, MP5)

@@ -400,6 +400,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var lifecycleTask: Task<Void, Never>?
     private var openTask: Task<Void, Never>?
     private var cloudPreparationTask: Task<Void, any Error>?
+    private var meguriSignInPreparationTask: Task<Void, Never>?
+    public private(set) var meguriSignInPreparing = false
     private var cloudActivationCompletion: Task<Void, Never>?
     private var meguriActivationAttachment: (sync: SyncCoordinator, generation: UInt64, noFile: Bool)?
     private var opening = false
@@ -482,7 +484,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         sync.providerChangeAllowed = { [weak self] in
             guard let self else { return false }
-            return !closed && !closing && !opening && !starting && !enabling && !resuming
+            return !closed && !closing && !opening && !starting && !enabling && !resuming && !meguriSignInPreparing
                 && review == nil && navigation.review == nil && !deckNamesReserved
                 && entryOwner?.busy != true && entryOwner?.preview == nil && entryOwner?.pickerPresented != true
                 && exportOwner?.busy != true && exportOwner?.artifact == nil && exportOwner?.providerLease == nil
@@ -664,6 +666,75 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     /// Local native service selection shares ordinary Host admission.
     public func prepareSyncServiceSelection() async throws { try await prepareCloudConnectionHost() }
+    /// Explicit account action only. Preparing a NoCollection Host grants no
+    /// collection choice, transfer or permission to create a collection.
+    public func signInMeguri(endpoint: String, username: String, password: String) {
+        prepareMeguriLocalAction(resumingPause: false) { original in
+            guard original.meguriSignInAvailable else { throw MeguriSignInLocalFailure.busy }
+            original.signInMeguri(endpoint: endpoint, username: username, password: password)
+        }
+    }
+    public func resumeMeguri() {
+        guard meguriSignInPreparationTask == nil else { return }
+        if sync.meguriSignInAttached {
+            let settings = sync.settings
+            sync.setDeviceSettings(paused: false, automatic: settings.automatic, media: settings.media)
+            return
+        }
+        prepareMeguriLocalAction(resumingPause: true) { original in
+            let settings = original.settings
+            original.setDeviceSettings(paused: false, automatic: settings.automatic, media: settings.media)
+        }
+    }
+    /// Sign-in and cold Resume share one local preparation owner. The attached
+    /// coordinator retains its ordinary authentication and settings-write lanes.
+    private func prepareMeguriLocalAction(resumingPause: Bool,
+                                         action: @escaping @MainActor (SyncCoordinator) throws -> Void) {
+        guard meguriSignInPreparationTask == nil else { return }
+        let original = sync
+        guard foreground, !closing, !closed,
+              original.providerState?.selection == .meguri, !original.providerNeedsAttention,
+              original.settings.paused == resumingPause, !original.meguriBusy else { return }
+        guard !opening, !starting, !enabling, !resuming else {
+            original.failMeguriSignInPreparation(.busy); return
+        }
+        let edit = original.meguriSignInAddressRevision
+        let initialGeneration = generation, initialRevision = original.meguriSignInAttachmentRevision
+        original.clearMeguriSignInPreparationError()
+        meguriSignInPreparing = true
+        meguriSignInPreparationTask = Task {
+            defer { meguriSignInPreparing = false; meguriSignInPreparationTask = nil }
+            @MainActor func current() -> Bool {
+                sync === original && foreground && !closing && !closed && !opening && !starting
+                    && !enabling && !resuming && !Task.isCancelled
+                    && edit == original.meguriSignInAddressRevision
+            }
+            do {
+                guard current(), generation == initialGeneration,
+                      original.meguriSignInAttachmentRevision == initialRevision else { return }
+                if !original.meguriSignInAttached { try await prepareCloudConnectionHost() }
+                guard current() else { return }
+                let expected = generation, revision = original.meguriSignInAttachmentRevision
+                // Attachment may have issued its ordinary offline connection
+                // load. Join that actual task before the explicit local action.
+                await original.waitForMeguriAction()
+                guard current(), generation == expected, original.generation == expected,
+                      original.meguriSignInAttachmentRevision == revision else { return }
+                guard original.meguriSignInAttached else { throw MeguriSignInLocalFailure.attachment }
+                guard original.meguriLocalActionAvailable else { throw MeguriSignInLocalFailure.busy }
+                try action(original)
+            } catch {
+                guard current() else { return }
+                let failure: MeguriSignInLocalFailure
+                if let local = error as? MeguriSignInLocalFailure { failure = local }
+                else if case BridgeError.busy = error { failure = .busy }
+                else if error is MeguriProviderCredentialFailure { failure = .credentialStore }
+                else { failure = .attachment }
+                original.failMeguriSignInPreparation(failure)
+            }
+        }
+    }
+    func waitForMeguriSignInPreparation() async { await meguriSignInPreparationTask?.value }
     func prepareCloudConnectionHost() async throws {
         if let cloudPreparationTask { try await cloudPreparationTask.value; return }
         guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
@@ -691,6 +762,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             if case .noCollection = lifecycle { state = .noFile; generation = retainedGeneration }
             sync.setMeguriLocalCollection(false)
             await sync.completeOpenedHost(generation: retainedGeneration)
+            try sync.requireProviderAttachment()
             await sync.prepareConnectionAuthority()
             guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         }
@@ -698,7 +770,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         try await task.value
     }
     var entryAllowed: Bool { !sync.meguriCollectionWorkHeld && (state == .ready || manualOwner?.preview == nil) && manualAllowed && state != .unavailable }
-    var manualAllowed: Bool { !sync.providerHandoffInProgress && cloudPreparationTask == nil && !deckNamesReserved && entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
+    var manualAllowed: Bool { !meguriSignInPreparing && !sync.providerHandoffInProgress && cloudPreparationTask == nil && !deckNamesReserved && entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
     func beginManualActivation() throws {
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         guard manualAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
@@ -1251,13 +1323,14 @@ public final class ReviewCollection: ChangeFanoutSink {
     public func setForeground(_ active: Bool) {
         guard active != foreground else { return }
         foreground = active
-        if !active { invalidateGoToDeck(); syncPresentation.cancelStatusHandoff() }
+        if !active { invalidateGoToDeck(); syncPresentation.cancelStatusHandoff(); meguriSignInPreparationTask?.cancel() }
         resuming = active
         if !active { review?.beginPause(); day?.pause(); countTimer?.invalidate() }
         let previous = lifecycleTask
         lifecycleTask = Task {
             await previous?.value
             if !active {
+                await meguriSignInPreparationTask?.value
                 _ = await goToDeckTask?.value
                 try? await goToDeckReview?.pause()
                 await deckNamesOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
@@ -1333,6 +1406,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         syncPresentation.cancelStatusHandoff()
         if let closeTask { return await closeTask.value }
         if closed { return true }
+        meguriSignInPreparationTask?.cancel()
         let task = Task { await performClose(quitting: quitting) }
         closeTask = task
         let result = await task.value
@@ -1342,6 +1416,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func performClose(quitting: Bool) async -> Bool {
         closing = true
         defer { closing = false }
+        meguriSignInPreparationTask?.cancel()
+        await meguriSignInPreparationTask?.value
         invalidateDeckActions()
         _ = await goToDeckTask?.value
         if let pending = goToDeckReview {

@@ -20,6 +20,7 @@ struct SyncStatusContent: View {
 /// Shared native rows can live in Settings' iCloud group or the status popover.
 struct SyncStatusRows: View {
     let collection: ReviewCollection
+    var showsMeguriProviderLabel = true
     @Environment(\.appClock) private var clock
     private var sync: SyncCoordinator { collection.sync }
     private var presentation: SyncStatusPresentation { .init(state: sync.status?.state, setup: sync.setupState) }
@@ -27,7 +28,7 @@ struct SyncStatusRows: View {
         Group {
             if sync.providerState?.selection == .meguri {
                 VStack(alignment: .leading) {
-                    Text(SyncText.value("sync.service.meguri"))
+                    if showsMeguriProviderLabel { Text(SyncText.value("sync.service.meguri")) }
                     Text(SyncText.value(sync.meguriStatus.titleKey))
                     ForEach(Array(sync.meguriStatus.detailLines(now: clock.now()).enumerated()), id: \.offset) { _, line in
                         Text(line)

@@ -3141,6 +3141,61 @@
         }
       }
     },
+    "sync.meguri.signIn.title": {
+      "comment": "Account & Sync sign-in; sync/status-strings T18.3.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign In to Meguri Sync"
+          }
+        }
+      }
+    },
+    "sync.meguri.signIn.preparing": {
+      "comment": "Account & Sync sign-in; sync/status-strings T18.3.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing Sign-In…"
+          }
+        }
+      }
+    },
+    "sync.meguri.error.busy": {
+      "comment": "Account & Sync sign-in; sync/status-strings T18.3.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri is finishing another task. Wait, then try signing in again."
+          }
+        }
+      }
+    },
+    "sync.meguri.error.localSetup": {
+      "comment": "Account & Sync sign-in; sync/status-strings T18.3.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri couldn’t prepare sign-in on this device. Reopen Meguri, then try again."
+          }
+        }
+      }
+    },
+    "sync.meguri.error.credentialStore": {
+      "comment": "Account & Sync sign-in; sync/status-strings T18.3.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri can’t read or save your sign-in on this device. Unlock this device, then try again."
+          }
+        }
+      }
+    },
     "sync.meguri.signIn": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {

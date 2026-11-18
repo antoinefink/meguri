@@ -5,6 +5,30 @@ import SwiftUI
 import Testing
 
 @MainActor @Suite struct CloudSyncPresentationTests {
+    @Test func meguriSignInErrorsSeparateLocalRecoveryFromAuthenticationAndNetwork() {
+        let cases: [(any Error, String)] = [
+            (MeguriSignInLocalFailure.busy, "busy"),
+            (MeguriSignInLocalFailure.attachment, "localSetup"),
+            (MeguriSignInLocalFailure.credentialStore, "credentialStore"),
+            (BridgeError.busy(runningOperation: "synthetic operation"), "busy"),
+            (MeguriProviderCredentialFailure.access(-1), "credentialStore"),
+            (MeguriProviderCredentialFailure.malformedPayload, "credentialStore"),
+            (MeguriProviderCredentialFailure.wrongConnection, "credentialStore"),
+            (MeguriProviderAuthenticationFailure.username, "credentials"),
+            (MeguriProviderAuthenticationFailure.credentials, "credentials"),
+            (MeguriProviderAuthenticationFailure.network, "network"),
+            (MeguriProviderAuthenticationFailure.redirectRefused, "redirect"),
+            (MeguriProviderAuthenticationFailure.connectionChanged, "other"),
+            (NSError(domain: "synthetic arbitrary error", code: 1), "other")
+        ]
+        for (error, suffix) in cases {
+            let key = SyncCoordinator.meguriAuthenticationKey(error)
+            #expect(key == "sync.meguri.error.\(suffix)")
+            #expect(SyncText.value(key) != key)
+            #expect(!SyncText.value(key).contains("synthetic"))
+        }
+        #expect(SyncText.value("sync.meguri.signIn.title") == "Sign In to Meguri Sync")
+    }
     @Test func meguriSchedulingDeniesEveryPendingWriteButAllowsDurableManualOff() {
         let on = CloudPolicyDeviceSettings(enabled: true, paused: false, automatic: true, media: true)
         let off = CloudPolicyDeviceSettings(enabled: true, paused: false, automatic: false, media: true)

@@ -1156,8 +1156,8 @@ screens:
       session (V20). In the exclusive phase a recovery action shows `sync.recovery.error.busy`
       (R171). In Failed{Corrupt} the toggles, Pause, Review Conflicts (read only) and
       `sync.adopt.action` (V19's conditions) stay usable; Sync Now shows `collectionUnavailable`.
-      (M) Meguri Sync, while it is the selected service (T18.3 to T18.7): (M1) the status row
-      labelled `sync.service.meguri`, one element with the T18.4 title and detail of the first
+      (M) Meguri Sync, while it is the selected service (T18.3 to T18.7): (M1) the status row,
+      one element with the T18.4 title and detail of the first
       condition that applies, then T18.5's or T18.6's lines and controls for a setup stage or a
       blocked media phase. Use This Device’s Collection… and Use Server Collection… are shown
       together, neither the default button; they and Download from Meguri Sync… only start the
@@ -1174,14 +1174,28 @@ screens:
       settings.accountSync.meguri.finishSetup), shown and enabled only while the core exposes a
       permitted recovery command for the retained operation; this contract defines no such command
       and does not claim one exists. No new collection choice shows until it is settled (MP4).
-      (M2) The account. While unconfigured, signed out, cancelled or Sign In Required: the fields
+      (M2) The account. While unconfigured, signed out, cancelled or Sign In Required: one heading
+      `sync.meguri.signIn.title`, without a repeated service label, Not Set Up / Not Signed In
+      title or introductory detail. Keep cancelled, blocked, paused, setup and ongoing sync
+      states visible; the shared status popover keeps its provider label and behavior. The fields
       `sync.meguri.address` (URL keyboard), `sync.meguri.username` (username content type) and the
       secure `sync.meguri.password` (password content type), with no autocapitalization or
       autocorrection, then `sync.meguri.signIn`, disabled until all three hold text and also chosen
-      by Return in Password, with footer `sync.meguri.signIn.footer`. Sign In normalizes the address
+      by Return in Password, with footer `sync.meguri.signIn.footer`. Keep native grouped Form,
+      native text and secure fields in this keyboard order, native rounded-border Mac fields
+      for visible input boundaries, and one prominent system Sign In button. An explicit click
+      prepares the existing NoCollection Host only if needed and joins offline attachment/load
+      before ordinary owner sign-in. Show `sync.meguri.signIn.preparing` progress during local
+      preparation. Disable draft fields and service changes while processing, coalesce rapid
+      submits and fence stale address, attachment and lifecycle ownership after suspension.
+      Rendering never prepares a Host; sign-in never creates a collection or starts a transfer.
+      Local busy, attachment and credential-store failures use their T18.3 recovery lines.
+      Sign In normalizes the address
       locally first (`sync.meguri.error.address`, with no request, when refused), applies an address
       change, which invalidates the stored sign-in (MP2), then only authenticates; a failure shows
-      its T18.3 line under the fields. The password field is emptied after every attempt and on any
+      its T18.3 line under the fields in an inline native error Label with an SF Symbol, identifier
+      settings.accountSync.meguri.signInError and text that does not rely on color. The password
+      field is emptied after every attempt and on any
       address edit. Otherwise the address is a read-only row, with `sync.meguri.signOut` (its alert:
       `.title`, `.message`, destructive `.confirm` and `sync.service.cancel`; `sync.meguri.signingOut`
       while work drains; `.failed` when removal fails, then the selection and connection phase the
@@ -1224,6 +1238,7 @@ screens:
       settings.accountSync.serviceRecovery, settings.accountSync.meguri.status,
       settings.accountSync.meguri.address, settings.accountSync.meguri.username,
       settings.accountSync.meguri.password, settings.accountSync.meguri.signIn,
+      settings.accountSync.meguri.signInError, settings.accountSync.meguri.signInProgress,
       settings.accountSync.meguri.retryConnection, settings.accountSync.meguri.signOut,
       settings.accountSync.meguri.useDevice, settings.accountSync.meguri.useServer,
       settings.accountSync.meguri.download, settings.accountSync.meguri.cancelSetup,
