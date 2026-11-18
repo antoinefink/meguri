@@ -42,3 +42,13 @@ The isolated export `cleanroom/20261118T140750Z-78046` received complete indepen
 `swift-test/20261118T141549Z-89537` passed all 34 presentation methods on clean `69e54cd9`. The four added methods check the actual wake record's single use, generation and sequence, outcome and admission, and cancellation. The focused check does not exercise the signed journey or a review ending without a corresponding Core Available event.
 
 The signed Release personal preview `build-app/20261118T141643Z-89527` passed on the same clean commit. The installed app and widget signatures and executable hashes matched the receipt.
+
+## Retrying when a review finishes during a Busy refusal
+
+The work started on `8f5be15947c3eec991edb3726a4517163fb4c2db` and landed in `be606802fdca002bfa02a5968a8bfa2093b307f7`. The core ends a review only after it drains pending answers and releases review admission. Its SessionEnded event does not require a separate Available event. Both events now share the original wake's single Busy retry. Other events do not gain this retry, and existing automatic settings, provider admission and outcome guards apply.
+
+The isolated export `cleanroom/20261118T142045Z-2488` received complete independent review of both final Swift files. The report SHA-256 is `cbba2611843401e96138d3359019ddac6fe4aaf2009aebac12697d600d0de23c`. Initial privacy scan `142539Z-6362` flagged the existing test-file match. After its exact reviewed digest was refreshed, `private/20261118T142555Z-6852` passed. The static check `static-checks/20261118T142635Z-11334` passed on the product commit range. The similarity check `similarity/20261118T142640Z-11921` passed on clean `77afcdfe9` with the intervening web update.
+
+`swift-test/20261118T142627Z-7913` passed all 37 presentation methods on clean `be606802f`. The three added methods check SessionEnded by itself, one shared retry across both event orders, and unrelated event rejection. They exercise the wake record and event classification without a live provider. The first wrapper stopped at its pre-build commit check when the web update landed. The app and Core trees on `77afcdfe9` are byte-identical to `be606802f`.
+
+The signed Release personal preview `build-app/20261118T142741Z-17717` passed on clean `77afcdfe9`. The installed app and widget signatures and executable hashes matched that receipt. The full signed Mac journey remains open.
