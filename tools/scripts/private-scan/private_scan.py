@@ -970,7 +970,7 @@ PUBLIC_ARTIFACTS = {
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "docs/process/verification-status.md":
-        "b16a5b54323699608495284c2c3df0116b2eaa15c927dc6841c55b1314a49c2a",
+        "8d9b3ae3adb16bc4616b900ce39b2d538780c0c3b096d7c1cd034c7dfb4ab1ee",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "core/crates/meguri-engine/tests/editor_services.rs":
         "b6fb526f02c4f15c0946c9a06be200b0e47a5b836f05266b45af8d06d6bc2471",
