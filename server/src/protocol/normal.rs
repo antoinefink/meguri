@@ -14,7 +14,7 @@ struct Start { #[serde(rename="minUsn")] min:i32, lnewer:bool, graves:Box<RawVal
 #[derive(Deserialize)] struct Empty {}
 fn encode(value:&impl serde::Serialize)->Result<Vec<u8>> {serde_json::to_vec(value).map_err(|_|Error::new("internal_error"))}
 
-pub(crate) async fn handle(service:Arc<Service>,authority:NativeAuthority,key:String,method:String,body:&mut Body)->Result<Response> {
+pub(super) async fn handle(service:Arc<Service>,authority:NativeAuthority,key:String,method:String,body:&mut Body,log:&mut Option<super::NativeLog>)->Result<Response> {
     if key.is_empty() {return Err(Error::new("invalid_request"));}
     // Decompress before acquiring the account barrier. Decode/merge errors are
     // then retired only if the request owns the currently live round.
@@ -26,7 +26,9 @@ pub(crate) async fn handle(service:Arc<Service>,authority:NativeAuthority,key:St
     let owner=service.metadata.owner();
     let capacity=service.collections.clone();let budget=service.temp.clone();
     let identity=authority.clone();
-    let output=service.collection_operation(authority,false,move |root| {
+    let finish=method=="finish";
+    let (output,sanity_result)=service.collection_operation(authority,false,move |root| {
+        let mut sanity_result=None;
         let mut state=slot.0.lock().map_err(|_|Error::new("storage_unavailable"))?;
         if state.as_ref().is_some_and(|r|r.completed.elapsed()>=session::IDLE) {state.take();gate.set_round(None)?;}
         let owns=state.as_ref().is_some_and(|r|r.key==key && r.credential_generation==identity.credential_generation());
@@ -107,6 +109,7 @@ pub(crate) async fn handle(service:Arc<Service>,authority:NativeAuthority,key:St
                     let ok=client==server;
                     let response=encode(&serde_json::json!({"status":if ok {"ok"} else {"bad"},"c":client,"s":server}))?;
                     if ok {r.phase=Phase::Finish;r.completed=Instant::now();} else {state.take();gate.set_round(None)?;}
+                    sanity_result=Some(ok);
                     return Ok(response);
                 },
                 "finish"=> {
@@ -132,7 +135,11 @@ pub(crate) async fn handle(service:Arc<Service>,authority:NativeAuthority,key:St
         if result.is_err() && (owns || method=="start" && state.as_ref().is_some_and(|r|r.key==key)) {
             state.take();gate.set_round(None)?;
         }
-        result
+        result.map(|output|(output,sanity_result))
     }).await?;
+    if let Some(log)=log {
+        log.sanity=sanity_result;
+        if finish {log.milestone=Some("normal_committed");}
+    }
     super::framing::response(&output)
 }

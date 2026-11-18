@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 use meguri_sync_server::{Config, DataRoot, Error, Result, Service, httpapi};
-use std::{net::SocketAddr, path::PathBuf};
+use std::{io::Write, net::SocketAddr, path::PathBuf};
 
 #[tokio::main]
 async fn main() {
     if let Err(error) = run().await {
-        eprintln!("meguri-sync-server: {}", error.code);
+        let field = if error.field == Some("log_level") { " field=log_level" } else { "" };
+        let _ = writeln!(std::io::stderr().lock(), "meguri-sync-server: {}{field}", error.code);
         std::process::exit(1);
     }
 }
@@ -27,6 +28,13 @@ async fn run() -> Result<()> {
         "127.0.0.1:0".parse().unwrap()
     };
     let mut config = Config::new(&args[2], listen)?;
+    if command == "serve" {
+        config.log_level = match std::env::var("MEGURI_SYNC_LOG_LEVEL") {
+            Ok(value) => meguri_sync_server::config::LogLevel::parse(&value)?,
+            Err(std::env::VarError::NotPresent) => meguri_sync_server::config::LogLevel::Off,
+            Err(std::env::VarError::NotUnicode(_)) => return Err(Error::field("log_level")),
+        };
+    }
     let mut rest = if command == "serve" { 4 } else { 3 };
     let mut admin = None;
     let mut reenable = false;

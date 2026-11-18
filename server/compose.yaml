@@ -5,6 +5,8 @@ services:
     image: ${MEGURI_SYNC_IMAGE:?Build the image through MG first}
     pull_policy: never
     init: true
+    environment:
+      MEGURI_SYNC_LOG_LEVEL: "${MEGURI_SYNC_LOG_LEVEL-off}"
     user: "10001:10001"
     read_only: true
     cap_drop: [ALL]

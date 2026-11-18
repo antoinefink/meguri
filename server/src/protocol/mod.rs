@@ -8,7 +8,58 @@ pub(crate) mod media;
 use crate::{Error, Result, Service, collection::schema};
 use axum::{body::Body, extract::{ConnectInfo, Request}, http::{Method, StatusCode}, response::{IntoResponse,Response}};
 use serde::Deserialize;
-use std::{net::SocketAddr, sync::Arc};
+use std::{io::Write, net::SocketAddr, sync::Arc, time::Instant};
+use crate::config::LogLevel;
+
+// Request-local facts only. Populate after the existing operations return, and
+// emit outside their collection/publication locks. No response-body observer:
+// a ready response does not prove receipt or completion on the client.
+#[derive(Clone, Copy)]
+struct NativeLog {
+    level: LogLevel,
+    phase: &'static str,
+    started: Instant,
+    milestone: Option<&'static str>,
+    meta: Option<(i64, i64, i32, bool)>,
+    sanity: Option<bool>,
+}
+impl NativeLog {
+    fn new(level: LogLevel, phase: &'static str) -> Self {
+        Self { level, phase, started: Instant::now(), milestone: None, meta: None, sanity: None }
+    }
+    fn emit(self, status: StatusCode, code: &'static str) {
+        if self.level == LogLevel::Off { return; }
+        if self.level == LogLevel::Info && self.milestone.is_none() && self.sanity.is_none()
+            && (code == "ok" || self.phase == "hostKey") { return; }
+        // Never format an Error, body, header, URI or client-provided string.
+        let code = match code {
+            "ok" | "method_not_allowed" | "authentication_failed" | "stale_authority"
+            | "invalid_collection" | "invalid_request" | "validation_failed"
+            | "unsupported_normal_case" | "invalid_session" | "missing_media"
+            | "permission_denied" | "rate_limited" | "provision_unavailable"
+            | "storage_unavailable" | "admission_closed" | "request_too_large"
+            | "internal_error" => code,
+            _ => "internal_error",
+        };
+        let (level, event) = if self.level == LogLevel::Debug {
+            ("debug", "native_request_complete")
+        } else { ("info", "collection") };
+        let mut line = format!("meguri-sync level={level} event={event} phase={} http={} code={code}", self.phase, status.as_u16());
+        if self.level == LogLevel::Debug {
+            line.push_str(&format!(" elapsed_ms={}", self.started.elapsed().as_millis()));
+        }
+        if let Some(milestone) = self.milestone { line.push_str(&format!(" milestone={milestone}")); }
+        if let Some(ok) = self.sanity { line.push_str(if ok { " sanity=match" } else { " sanity=mismatch" }); }
+        if self.level == LogLevel::Debug {
+            if let Some((modified, scm, usn, empty)) = self.meta {
+                line.push_str(&format!(" mod={modified} scm={scm} usn={usn} empty={empty}"));
+            }
+        }
+        line.push('\n');
+        // One bounded line, no queue, and stderr failures never affect sync.
+        let _ = std::io::stderr().lock().write_all(line.as_bytes());
+    }
+}
 
 fn error(e:Error)->Response {
     let status=match e.code {
@@ -40,25 +91,41 @@ pub(crate) async fn handle(service:Arc<Service>,request:Request)->Response {
     let Some(method)=route else {
         return framing::retain(error(Error::new("route_not_found")),body,None,service);
     };
+    // Obtain the logged name from the static allowlist, never from the URI.
+    let log=METHODS.iter().copied().find(|name| !media_route && *name==method)
+        .map(|phase|NativeLog::new(service.config.log_level,phase));
     let method=method.to_owned();
     if parts.method!=Method::POST {
         let mut response=(StatusCode::METHOD_NOT_ALLOWED,"method_not_allowed").into_response();
         response.headers_mut().insert("allow","POST".parse().expect("static header"));
+        if let Some(log)=log {log.emit(response.status(),"method_not_allowed");}
         return framing::retain(response,body,None,service);
     }
     let permit=match service.native_ingress.enter() {
-        Ok(p)=>p,Err(e)=>return framing::retain(error(e),body,None,service),
+        Ok(p)=>p,Err(e)=>{
+            let code=e.code;let response=error(e);
+            if let Some(log)=log {log.emit(response.status(),code);}
+            return framing::retain(response,body,None,service);
+        },
     };
     let worker=tokio::spawn(async move {
         let mut body=body;
-        let response=dispatch(service.clone(),&parts,&method,&mut body).await.unwrap_or_else(error);
+        let mut log=log;
+        let result=dispatch(service.clone(),&parts,&method,&mut body,&mut log).await;
+        let code=result.as_ref().err().map_or("ok",|e|e.code);
+        let response=result.unwrap_or_else(error);
+        if let Some(log)=log {log.emit(response.status(),code);}
         framing::retain(response,body,Some(permit),service)
     });
-    worker.await.unwrap_or_else(|_|error(Error::new("internal_error")))
+    worker.await.unwrap_or_else(|_|{
+        let response=error(Error::new("internal_error"));
+        if let Some(log)=log {log.emit(response.status(),"internal_error");}
+        response
+    })
 }
 #[derive(Deserialize)]
 struct Empty {}
-async fn dispatch(service:Arc<Service>,parts:&axum::http::request::Parts,method:&str,body:&mut Body)->Result<Response> {
+async fn dispatch(service:Arc<Service>,parts:&axum::http::request::Parts,method:&str,body:&mut Body,log:&mut Option<NativeLog>)->Result<Response> {
     if parts.uri.query().is_some() || parts.headers.contains_key("content-encoding") { return Err(Error::new("invalid_request")); }
     let header=header(parts)?;
     let media_route=parts.uri.path().starts_with("/msync/");
@@ -75,7 +142,7 @@ async fn dispatch(service:Arc<Service>,parts:&axum::http::request::Parts,method:
     let authority=service.validate_hostkey(&header.k).await?;
     if media_route {return media::handle(service,authority,method,body).await;}
     if !matches!(method,"upload"|"download"|"meta") {
-        return normal::handle(service,authority,header.s,method.to_owned(),body).await;
+        return normal::handle(service,authority,header.s,method.to_owned(),body,log).await;
     }
     let capacity=service.collections.acquire()?;
     match method {
@@ -90,6 +157,7 @@ async fn dispatch(service:Arc<Service>,parts:&axum::http::request::Parts,method:
                 full::receive(reader,limit,budget,generation,metadata_reservation)
             }).await?;
             full::publish(service,authority,upload).await?;
+            if let Some(log)=log {log.milestone=Some("upload_published");}
             framing::response(b"OK")
         },
         "meta" | "download" => {
@@ -108,10 +176,16 @@ async fn dispatch(service:Arc<Service>,parts:&axum::http::request::Parts,method:
                 let mut result=result;
                 let id=authority_for_media.account_id().to_owned();
                 result.media_usn=service.publish(authority_for_media,move |c|crate::media::index::cursor(c,&id)).await?;
-                framing::response(&serde_json::to_vec(&result).map_err(|_|Error::new("internal_error"))?)
+                let response=framing::response(&serde_json::to_vec(&result).map_err(|_|Error::new("internal_error"))?)?;
+                if let Some(log)=log {
+                    log.milestone=Some("meta_response_ready");
+                    log.meta=Some((result.modified,result.scm,result.usn,result.empty));
+                }
+                Ok(response)
             } else {
                 let _:Empty=framing::json(&bytes)?;
                 let snapshot=full::snapshot(service.clone(),authority,capacity).await?;
+                if let Some(log)=log {log.milestone=Some("download_snapshot_ready");}
                 framing::download(service,snapshot)
             }
         },

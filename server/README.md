@@ -123,3 +123,55 @@ tools/mg sync-server-local start
 
 Remove the private password file after recovery. Keep failed MG evidence. This
 workflow does not publish, deploy, upgrade, back up or restore a service.
+
+Native collection diagnostics are opt-in for `serve` through
+`MEGURI_SYNC_LOG_LEVEL=off|info|debug` (default `off`). Only these exact lowercase
+values are accepted; empty, whitespace, unknown and non-Unicode values fail
+before opening storage with `validation_failed field=log_level`. Administrative
+commands ignore this setting. Compose passes the same environment variable into
+the container; it is read at process startup and is not stored in the instance.
+
+For an existing instance whose pinned image includes this option, enable it and
+restart through the existing lifecycle commands (the volume is retained):
+
+```sh
+export MEGURI_SYNC_LOG_LEVEL=debug  # or info
+tools/mg sync-server-local stop
+tools/mg sync-server-local start
+```
+
+Read the new container name from `build/sync-server-local/container.json` and
+view its stderr locally with `docker logs --tail 200 <recorded-container-name>`.
+Capture needed diagnostics before stopping: MG removes the stopped container.
+Changing a shell variable or restarting a container without replacing its
+environment does not change the running process. To disable, set
+`MEGURI_SYNC_LOG_LEVEL=off` and repeat stop/start. These commands reuse the pinned
+image; building a new image alone does not upgrade an existing instance.
+
+`info` emits only native collection milestones and fixed failure codes. Milestones
+are `meta_response_ready`, `upload_published`, `download_snapshot_ready` and
+`normal_committed`, plus the existing sanity comparison as `match` or `mismatch`.
+`debug` emits one request completion line for each allowlisted collection method,
+including refused requests: fixed phase name, numeric HTTP status, elapsed
+milliseconds and fixed internal code. A successfully prepared authenticated meta
+also includes the existing server `mod`, `scm`, `usn` and `empty` values, preserving
+integer precision. The sanity result is carried out of the existing collection
+barrier; diagnostics perform no extra database reads. Media and browser requests
+are outside this diagnostic scope; host-key requests emit only at debug.
+
+A completion line describes the handler's HTTP outcome. Milestones describe only
+proved server effects or prepared responses: upload publication and normal finish
+commit have returned successfully; a download snapshot is ready. Neither a 200
+nor a prepared snapshot proves stream delivery or client completion. A failure
+without a milestone does not prove no server change occurred. No identifiers tie
+lines to accounts or clients, so concurrent requests can interleave.
+
+The server can observe that it receives meta requests and the baseline it serves,
+including whether a full upload changed that baseline. It cannot observe the
+phone's local baseline or explain its one-way prompt from meta alone. No
+collection facts are emitted before native authorization. Logs exclude arbitrary
+URLs, query values, client headers/versions, credentials, sessions, account/client
+identifiers, paths, media filenames and note/card contents. Each emitted event is
+a single bounded stderr line outside collection/publication locks; stderr errors
+are ignored. Keep incident diagnostics local and return the setting to `off`
+after diagnosis.

@@ -262,3 +262,152 @@ async fn process_interruption_at_collection_publication_resolves_old_or_new_comp
         // Process-interruption evidence only; no power-loss claim.
     }
 }
+
+// Actual executable/loopback seam, sharing the full/meta fixtures and Child
+// cleanup above. Stderr goes to a private synthetic file, so no pipe can fill.
+// The guard owns both termination and the bounded startup reader, including on
+// assertion failure or timeout; it kills/reaps before joining that reader.
+struct NativeLogProcess {
+    child: Option<Child>,
+    reader: Option<std::thread::JoinHandle<()>>,
+    stderr: std::path::PathBuf,
+}
+impl Drop for NativeLogProcess {
+    fn drop(&mut self) {
+        drop(self.child.take());
+        if let Some(reader) = self.reader.take() { let _ = reader.join(); }
+    }
+}
+impl NativeLogProcess {
+    async fn start(temp: &tempfile::TempDir, level: Option<&std::ffi::OsStr>) -> (Self, String) {
+        use std::{io::{BufRead, Read}, os::unix::fs::OpenOptionsExt, process::{Command, Stdio}};
+        let stderr = temp.path().join("native-stderr");
+        let output = std::fs::OpenOptions::new().create_new(true).write(true).mode(0o600).open(&stderr).unwrap();
+        let mut command = Command::new(binary());
+        command.args(["serve", temp.path().join("owner").to_str().unwrap(), ORIGIN, "127.0.0.1:0"])
+            .env_remove("MEGURI_SYNC_LOG_LEVEL")
+            .env_remove("MEGURI_TEST_KILL_PHASE").env_remove("MEGURI_TEST_SIGNAL_FILE")
+            .stdout(Stdio::piped()).stderr(Stdio::from(output));
+        if let Some(level) = level { command.env("MEGURI_SYNC_LOG_LEVEL", level); }
+        let mut process = Self { child: Some(Child(command.spawn().unwrap())), reader: None, stderr };
+        let stdout = process.child.as_mut().unwrap().0.stdout.take().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        process.reader = Some(std::thread::spawn(move || {
+            let mut line = String::new();
+            let result = std::io::BufReader::new(stdout.take(128)).read_line(&mut line).map(|_| line);
+            let _ = tx.send(result);
+        }));
+        let line = within(rx).await.unwrap().unwrap();
+        process.reader.take().unwrap().join().unwrap();
+        (process, line)
+    }
+    fn stop(mut self) -> String {
+        drop(self.child.take());
+        assert!(self.stderr.metadata().unwrap().len() <= 16 * 1024);
+        std::fs::read_to_string(&self.stderr).unwrap()
+    }
+}
+
+#[tokio::test]
+async fn native_log_levels_capture_runtime_milestones_without_private_input() {
+    const SENTINEL: &str = "synthetic-private-sentinel-84729";
+    for level in [None, Some("off"), Some("info"), Some("debug")] {
+        let h = Harness::new().await;
+        h.setup().await;
+        let key = login(&h).await;
+        let path = fixture(&h);
+        let db = meguri_sync_server::collection::schema::open(&path, true).unwrap();
+        db.execute("UPDATE notes SET data=?1", [SENTINEL]).unwrap();
+        meguri_sync_server::collection::schema::checkpoint(&db).unwrap();
+        drop(db);
+        let upload = std::fs::read(&path).unwrap();
+        let expected = logical(&path);
+        let temp = h.stop().await;
+        let (process, line) = NativeLogProcess::start(&temp, level.map(std::ffi::OsStr::new)).await;
+        let base = format!("http://{}", line.trim().strip_prefix("listening ").unwrap());
+        let client = reqwest::Client::builder().no_proxy().timeout(std::time::Duration::from_secs(15)).build().unwrap();
+        let send = |method: &str, credential: &str, bytes: &[u8]| {
+            client.post(format!("{base}/sync/{method}"))
+                .header("anki-sync", json!({"v":11,"k":credential,"c":SENTINEL,"s":SENTINEL}).to_string())
+                .header("user-agent", SENTINEL)
+                .body(zstd::stream::encode_all(bytes, 0).unwrap()).send()
+        };
+        // Refused before native authorization: no collection facts, even debug.
+        let refused = send("meta", SENTINEL, SENTINEL.as_bytes()).await.unwrap();
+        assert_eq!(refused.status(), 403);
+        assert_eq!(refused.text().await.unwrap(), "authentication_failed");
+        let refused = send(&format!("meta?{SENTINEL}={SENTINEL}"), &key, b"{}").await.unwrap();
+        assert_eq!(refused.status(), 400);
+        assert_eq!(refused.text().await.unwrap(), "invalid_request");
+        let meta_request = serde_json::to_vec(&json!({"v":11,"cv":SENTINEL})).unwrap();
+        let first: Value = serde_json::from_slice(&decoded(send("meta", &key, &meta_request).await.unwrap()).await).unwrap();
+        assert_eq!((first["mod"].as_i64(), first["usn"].as_i64(), first["empty"].as_bool()), (Some(0), Some(0), Some(true)));
+        // Existing empty-normal flow, once with a real sanity mismatch and once
+        // with a proved finish commit. No count query or test hook is added.
+        for mismatch in [true, false] {
+            for (method, body) in [
+                ("start", json!({"minUsn":0,"lnewer":false,"graves":null})),
+                ("applyChanges", json!({"changes":{"models":[],"decks":[[],[]],"tags":[]}})),
+                ("chunk", json!({})),
+                ("applyChunk", json!({"chunk":{"done":true}})),
+            ] {
+                decoded(send(method, &key, &serde_json::to_vec(&body).unwrap()).await.unwrap()).await;
+            }
+            let body = json!({"client":[[0,0,0],u32::from(mismatch),0,0,0,0,0,0]});
+            let sanity: Value = serde_json::from_slice(&decoded(send("sanityCheck2", &key, &serde_json::to_vec(&body).unwrap()).await.unwrap()).await).unwrap();
+            assert_eq!(sanity["status"], if mismatch { "bad" } else { "ok" });
+            if !mismatch { decoded(send("finish", &key, b"{}").await.unwrap()).await; }
+        }
+        let refused = send("upload", &key, SENTINEL.as_bytes()).await.unwrap();
+        assert_eq!(refused.status(), 400);
+        assert_eq!(refused.text().await.unwrap(), "invalid_collection");
+        assert_eq!(decoded(send("upload", &key, &upload).await.unwrap()).await, b"OK");
+        let meta: Value = serde_json::from_slice(&decoded(send("meta", &key, &meta_request).await.unwrap()).await).unwrap();
+        assert_eq!(meta["mod"].as_i64(), Some(9007199254740993));
+        assert_eq!(meta["scm"].as_i64(), Some(9007199254740993));
+        assert_eq!(meta["empty"], false);
+        let download = temp.path().join("logged-download.anki2");
+        std::fs::write(&download, decoded(send("download", &key, b"{}").await.unwrap()).await).unwrap();
+        assert_eq!(logical(&download), expected);
+        let logs = process.stop();
+        for private in [SENTINEL, &key, PASSWORD, "root.admin", temp.path().to_str().unwrap(), "opaque note data", "synthetic-guid"] {
+            assert!(!logs.contains(private));
+        }
+        if level.is_none() || level == Some("off") { assert!(logs.is_empty()); continue; }
+        assert!(logs.ends_with('\n'));
+        assert_eq!(logs.lines().count(), if level == Some("debug") { 18 } else { 10 });
+        for line in logs.lines() {
+            assert!(line.len() < 512);
+            assert!(line.starts_with(if level == Some("debug") {
+                "meguri-sync level=debug event=native_request_complete phase="
+            } else { "meguri-sync level=info event=collection phase=" }));
+        }
+        for milestone in ["meta_response_ready", "normal_committed", "upload_published", "download_snapshot_ready"] {
+            assert!(logs.contains(&format!("milestone={milestone}")));
+        }
+        assert!(logs.contains("phase=sanityCheck2 http=200 code=ok"));
+        assert!(logs.contains(" sanity=mismatch\n"));
+        assert!(logs.contains(" sanity=match\n"));
+        for line in logs.lines().filter(|line| line.contains("code=authentication_failed") || line.contains("code=invalid_request") || line.contains("code=invalid_collection")) {
+            assert!(!line.contains("milestone=") && !line.contains(" mod=") && !line.contains(" scm=") && !line.contains(" usn=") && !line.contains(" empty="));
+        }
+        assert!(logs.contains("phase=meta http=403 code=authentication_failed"));
+        assert!(logs.contains("phase=meta http=400 code=invalid_request"));
+        assert!(logs.contains("phase=upload http=400 code=invalid_collection"));
+        if level == Some("debug") {
+            assert!(logs.lines().all(|line| line.split_whitespace().any(|field| field.strip_prefix("elapsed_ms=").is_some_and(|v| v.parse::<u128>().is_ok()))));
+            assert!(logs.contains(&format!("mod=0 scm={} usn=0 empty=true", first["scm"])));
+            assert!(logs.contains("mod=9007199254740993 scm=9007199254740993 usn=1 empty=false"));
+        } else {
+            assert!(!logs.contains(" mod=") && !logs.contains(" elapsed_ms=") && !logs.contains("phase=chunk"));
+        }
+    }
+    use std::os::unix::ffi::OsStringExt;
+    for value in ["".into(), "INFO".into(), " debug".into(), format!("debug\n{SENTINEL}").into(), std::ffi::OsString::from_vec(vec![0xff])] {
+        let h = Harness::new().await;
+        let temp = h.stop().await;
+        let (process, line) = NativeLogProcess::start(&temp, Some(&value)).await;
+        assert!(line.is_empty());
+        assert_eq!(process.stop(), "meguri-sync-server: validation_failed field=log_level\n");
+    }
+}

@@ -7,6 +7,24 @@ use std::{
 };
 use url::Url;
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum LogLevel {
+    #[default]
+    Off,
+    Info,
+    Debug,
+}
+impl LogLevel {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "off" => Ok(Self::Off),
+            "info" => Ok(Self::Info),
+            "debug" => Ok(Self::Debug),
+            _ => Err(Error::field("log_level")),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Config {
     origin: String,
@@ -15,6 +33,7 @@ pub struct Config {
     pub temp_bytes: NonZeroU64,
     pub native_compressed_bytes: NonZeroU64,
     pub native_decompressed_bytes: NonZeroU64,
+    pub log_level: LogLevel,
 }
 impl Config {
     pub fn new(origin: &str, listen: SocketAddr) -> Result<Self> {
@@ -40,6 +59,7 @@ impl Config {
             temp_bytes: NonZeroU64::new(2 * 1024 * 1024 * 1024).unwrap(),
             native_compressed_bytes: NonZeroU64::new(104_857_600).unwrap(),
             native_decompressed_bytes: NonZeroU64::new(314_572_800).unwrap(),
+            log_level: LogLevel::Off,
         })
     }
     pub fn origin(&self) -> &str {
