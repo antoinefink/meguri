@@ -600,31 +600,44 @@ impl Authority {
         current: impl FnOnce() -> Result<(), E>, finish: impl FnOnce(bool) -> Result<(), E>,
     ) -> Result<bool, E> {
         let mut failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
-        self.close_admission();
+        let cancellation_close = {
+            let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+            state.closures.ordinary_close();
+            self.open.store(false, Ordering::SeqCst);
+            self.writers.store(false, Ordering::SeqCst);
+            state.closures.ordinary.clone()
+        };
         current()?;
         #[cfg(feature = "test-hooks")]
         {
             let hook = self.cancellation_hook.lock().unwrap_or_else(PoisonError::into_inner).take();
             if let Some(hook) = hook { hook(); }
         }
-        let restored = if let Some((before, after)) = retained {
-            self.restore_cancelled_binding_locked(&mut failure, &CancelRestoration {
+        let (restored, discovery_document) = if let Some((before, after)) = retained {
+            let restored = self.restore_cancelled_binding_locked(&mut failure, &CancelRestoration {
                 operation: operation.clone(), before: before.cloned(), after: after.clone(),
                 replacement: replacement.clone(),
-            })?
+            })?;
+            (restored, None)
         } else {
             if let Some(failed) = failure.as_ref() { return Err(failed.error.clone().into()); }
             let doc = sidecar::read_document(&self.path, decode)?.ok_or_else(invalid)?;
             // Even when no predecessor can be restored, a public handoff can
             // retain this candidate. Its evidence must survive cancellation.
             if doc.handoff.is_some() { return Err(invalid().into()); }
-            false
+            (false, Some(doc))
         };
         // Keep setup and qualifiers excluded through removal of the op. There
         // is no provider I/O while this closure holds State/tracking.
         finish(restored)?;
-        if restored {
-            let _state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        // An isolated predecessor needs fresh discovery, not writer authority.
+        // A validated disk read cannot refresh a stale cache or undo a later
+        // close. Reopen only this cancellation's account gate after commit.
+        if Arc::ptr_eq(&state.closures.ordinary, &cancellation_close)
+            && (restored || discovery_document.as_ref().is_some_and(|doc|
+                doc.selection != Selection::Meguri && !doc.settings.paused
+                    && state.document.as_ref().is_ok_and(|cached| cached == doc))) {
             self.open.store(true, Ordering::SeqCst);
         }
         Ok(restored)
