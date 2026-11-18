@@ -8,6 +8,12 @@ final class MacHomeHierarchyTests: XCTestCase {
     func testNormalMeguriSetupControlsAndCancelledServiceSwitch() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
+        let journey: OwnedProviderJourneyInput?
+        do { journey = try OwnedProviderJourneyInput.admit(repositoryRoot: build.repositoryRoot) }
+        catch {
+            XCTFail("Owned provider journey input refused")
+            return
+        }
         let bundle = try build.bundleIdentifier
         XCTAssertTrue(build.hasHooks && bundle.hasSuffix(".dev"), "This case requires the actual hook-enabled .dev app")
         guard build.hasHooks, bundle.hasSuffix(".dev") else { return }
@@ -16,12 +22,29 @@ final class MacHomeHierarchyTests: XCTestCase {
             "This real provider journey requires MEGURI_APP_SIGNING=team")
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(
-            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1", directoryHint: .isDirectory),
-            ownedProviderFixture: true, now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris",
+            fixture: build.repositoryRoot.appending(path: journey == nil
+                ? "build/fixtures/recipes/local-review-1" : "build/fixtures/recipes/owned-sync-review-1", directoryHint: .isDirectory),
+            ownedProviderFixture: true, now: journey == nil ? "2030-01-15T10:00:00+01:00" : nil, timeZone: "Europe/Paris",
             locale: "en_US", animations: false).arguments
+        if let journey {
+            app.launchEnvironment["MEGURI_OWNED_PROVIDER_TRANSPORT_RUN_ID"] = journey.runID
+            app.launchEnvironment["MEGURI_OWNED_PROVIDER_TRANSPORT_MANIFEST_SHA256"] = journey.transportManifestSHA256
+        }
         app.launch()
         // Forced termination is failure cleanup only; success requires native Quit below.
         addTeardownBlock { @MainActor in if app.state != .notRunning { app.terminate() } }
+        var journeyCleanupPending = false
+        if journey != nil {
+            addTeardownBlock { @MainActor in
+                if journeyCleanupPending { XCTFail("Owned provider journey cleanup-pending") }
+            }
+            let ready = app.descendants(matching: .any).matching(identifier: "testhooks.ownedProvider.transport.ready")
+            guard ready.element(boundBy: 0).waitForExistence(timeout: 30) else {
+                XCTFail("Owned provider transport prerequisite failed")
+                return
+            }
+            XCTAssertEqual(ready.count, 1, "Require actual transport installation before service actions")
+        }
         let homeMatches = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "shell.root.sidebar.home"))
         let home = homeMatches.element(boundBy: 0)
         XCTAssertTrue(home.waitForExistence(timeout: 20))
@@ -29,7 +52,8 @@ final class MacHomeHierarchyTests: XCTestCase {
         try click(home, app: app, bundle: bundle)
         let homeScreens = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "home.collection.screen"))
         XCTAssertTrue(homeScreens.element(boundBy: 0).waitForExistence(timeout: 20),
-            "Stage the generated local-review-1 fixture through tools/mg")
+            journey == nil ? "Stage the generated local-review-1 fixture through tools/mg"
+                : "Stage the generated owned-sync-review-1 fixture through tools/mg")
         XCTAssertEqual(homeScreens.count, 1)
         _ = namedRow(app, prefix: "home.deck.row.", path: "Local Review::Cards")
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "home.policy.enable"))
@@ -137,6 +161,151 @@ final class MacHomeHierarchyTests: XCTestCase {
         XCTAssertTrue(sheet.waitForNonExistence(timeout: 10))
         XCTAssertEqual(settings.sheets.count, 0)
         meguriForm()
+        if let journey {
+            // Input actions may be recorded by XCTest; MG retains this mode's
+            // entire raw result privately. SecureField is not a redaction claim.
+            func enter(_ text: String, id: String) throws {
+                let field = unique(settings, id)
+                actionable(field)
+                try click(field, app: app, bundle: bundle)
+                try app.bringToFront(bundleIdentifier: bundle)
+                field.typeKey("a", modifierFlags: .command)
+                try app.bringToFront(bundleIdentifier: bundle)
+                field.typeText(text)
+            }
+            func waitForJourney(_ predicate: @escaping () -> Bool, _ message: String) {
+                let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in predicate() }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 60), .completed, message)
+            }
+            func availableSync() -> Bool {
+                let button = settings.buttons.matching(identifier: "settings.accountSync.meguri.syncNow").element(boundBy: 0)
+                return button.exists && button.isEnabled && button.isHittable && settings.sheets.count == 0
+                    && ["useDevice", "useServer", "finishSetup", "cancelSetup", "retryConnection", "retryMedia"].allSatisfy {
+                        settings.descendants(matching: .any).matching(identifier: "settings.accountSync.meguri.\($0)").count == 0
+                    }
+            }
+            try enter(journey.address, id: "settings.accountSync.meguri.address")
+            try enter(journey.username, id: "settings.accountSync.meguri.username")
+            try enter(journey.password, id: "settings.accountSync.meguri.password")
+            let signIn = unique(settings, "settings.accountSync.meguri.signIn")
+            actionable(signIn)
+            journeyCleanupPending = true
+            try click(signIn, app: app, bundle: bundle)
+            waitForJourney({
+                settings.buttons.matching(identifier: "settings.accountSync.meguri.useDevice").count == 1
+                    && settings.buttons.matching(identifier: "settings.accountSync.meguri.signOut").count == 1
+                    && settings.buttons.matching(identifier: "settings.accountSync.meguri.signIn").count == 0
+            }, "Require actual signed-in setup controls")
+            for id in ["useDevice", "useServer", "signOut"] {
+                let control = unique(settings, "settings.accountSync.meguri.\(id)")
+                XCTAssertEqual(control.elementType, .button)
+                actionable(control)
+            }
+            let useDevice = unique(settings, "settings.accountSync.meguri.useDevice")
+            try click(useDevice, app: app, bundle: bundle)
+            let previews = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.meguriSetup.confirm"))
+            let preview = previews.element(boundBy: 0)
+            XCTAssertTrue(preview.waitForExistence(timeout: 60), "Require the actual setup preview")
+            XCTAssertEqual(previews.count, 1)
+            XCTAssertEqual(settings.sheets.count, 1)
+            let previewCancel = unique(preview, "sync.meguriSetup.cancel")
+            let previewConfirm = unique(preview, "sync.meguriSetup.confirm")
+            for control in [previewCancel, previewConfirm] {
+                XCTAssertEqual(control.elementType, .button)
+                actionable(control)
+            }
+            for caption in [
+                "The server’s collection will be replaced with this device’s collection. Meguri first backs up this device’s collection and keeps a copy of the server’s collection.",
+                "Stop syncing on your other devices until this finishes. Changes they send to the server meanwhile can be replaced.",
+                "Media then syncs both ways. On either side, files can be added, replaced or deleted. Files that no card uses are kept.",
+                "After setup, Meguri Sync syncs this collection and its media automatically."
+            ] {
+                let content = preview.staticTexts.matching(NSPredicate(format: "label == %@", caption))
+                XCTAssertTrue(content.element(boundBy: 0).waitForExistence(timeout: 10), "Require ordinary setup consequence content")
+                XCTAssertEqual(content.count, 1)
+            }
+            try click(previewConfirm, app: app, bundle: bundle)
+            waitForJourney({ availableSync() }, "Setup must finish with available native Sync Now and no unresolved setup sheet")
+            XCTAssertEqual(unique(settings, "settings.accountSync.meguri.syncNow").elementType, .button)
+
+            try app.bringToFront(bundleIdentifier: bundle)
+            settings.typeKey("w", modifierFlags: .command)
+            XCTAssertTrue(settings.waitForNonExistence(timeout: 10), "Close the actual Settings window")
+            let deck = namedRow(app, prefix: "home.deck.row.", path: "Local Review::Cards")
+            actionable(deck)
+            try click(deck, app: app, bundle: bundle)
+            let study = unique(main, "home.deck.study")
+            actionable(study)
+            try click(study, app: app, bundle: bundle)
+            // The native Mac workspace replaces Home during a review; its
+            // window must be scoped by the real review subtree at this phase.
+            let reviewWindows = app.windows.containing(NSPredicate(format: "identifier == %@", "review.session.screen"))
+            let review = reviewWindows.element(boundBy: 0)
+            XCTAssertTrue(review.waitForExistence(timeout: 10))
+            XCTAssertEqual(reviewWindows.count, 1)
+            _ = unique(review, "review.session.screen")
+            let reveal = unique(review, "review.session.reveal")
+            actionable(reveal)
+            try click(reveal, app: app, bundle: bundle)
+            let good = unique(review, "review.session.rate.good")
+            actionable(good)
+            try click(good, app: app, bundle: bundle) // Exactly one native answer.
+            let close = unique(review, "review.session.close")
+            actionable(close)
+            try click(close, app: app, bundle: bundle)
+            XCTAssertTrue(review.waitForNonExistence(timeout: 10))
+            XCTAssertTrue(homeScreens.element(boundBy: 0).waitForExistence(timeout: 10))
+            XCTAssertEqual(homeScreens.count, 1)
+            let recorded = unique(main, "home.session.recorded")
+            waitFor({ recorded.label == "1 answer recorded" }, "Require exactly the existing one-answer presentation")
+
+            try app.bringToFront(bundleIdentifier: bundle)
+            main.typeKey(",", modifierFlags: .command)
+            XCTAssertTrue(settings.waitForExistence(timeout: 10))
+            XCTAssertEqual(settingsWindows.count, 1)
+            waitForJourney({ availableSync() }, "Native Sync Now must be available before the daily action")
+            let syncNow = unique(settings, "settings.accountSync.meguri.syncNow")
+            actionable(syncNow)
+            func successSequence() -> UInt64? {
+                let prefix = "meguri-round-success-sequence:"
+                guard let value = syncNow.value as? String, value.hasPrefix(prefix) else { return nil }
+                let digits = value.dropFirst(prefix.count)
+                guard !digits.isEmpty, digits.utf8.allSatisfy({ (48...57).contains($0) }),
+                      let sequence = UInt64(digits), String(sequence) == String(digits) else { return nil }
+                return sequence
+            }
+            try app.bringToFront(bundleIdentifier: bundle)
+            let baseline = try XCTUnwrap(successSequence(), "Require the exact numeric Meguri round success observation")
+            syncNow.clickOrTap()
+            // A fresh successful round may coalesce with automatic sync. This
+            // does not attribute which request sent Good; MG checks persisted Good.
+            waitForJourney({
+                guard let sequence = successSequence(), sequence > baseline else { return false }
+                return availableSync()
+            }, "Require a fresh successful collection/media round and available controls before Sign Out")
+            let signOut = unique(settings, "settings.accountSync.meguri.signOut")
+            actionable(signOut)
+            try click(signOut, app: app, bundle: bundle)
+            let confirmations = settings.sheets.containing(NSPredicate(format: "label == %@", "Sign Out"))
+            let confirmation = confirmations.element(boundBy: 0)
+            XCTAssertTrue(confirmation.waitForExistence(timeout: 10))
+            XCTAssertEqual(confirmations.count, 1)
+            XCTAssertEqual(settings.sheets.count, 1)
+            let destructive = confirmation.buttons.matching(NSPredicate(format: "label == %@", "Sign Out"))
+            XCTAssertEqual(destructive.count, 1)
+            let signOutConfirm = destructive.element(boundBy: 0)
+            XCTAssertEqual(signOutConfirm.elementType, .button)
+            actionable(signOutConfirm)
+            try click(signOutConfirm, app: app, bundle: bundle)
+            waitForJourney({
+                settings.sheets.count == 0 && picker.exists && picker.isEnabled
+                    && settings.staticTexts["Choose a service to sync this collection."].exists
+                    && ["signOut", "signIn", "syncNow", "status"].allSatisfy {
+                        settings.descendants(matching: .any).matching(identifier: "settings.accountSync.meguri.\($0)").count == 0
+                    }
+            }, "Owned provider journey cleanup-pending")
+            journeyCleanupPending = false
+        }
         try app.bringToFront(bundleIdentifier: bundle)
         settings.typeKey("q", modifierFlags: .command)
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 10), "Native Quit must finish actual close and owned cleanup")

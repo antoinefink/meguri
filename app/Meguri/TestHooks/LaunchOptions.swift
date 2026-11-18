@@ -17,7 +17,7 @@ extension TestHooks {
     /// | `-MeguriNativeReviewFreezeSHA256`, `-MeguriNativeReviewFreezeBytes` | pinned freeze.json SHA256/size; only the compiled checkout's EmptyCollection fixture is allowed, before any case receipt; no Route/Now/TimeZone |
     /// | `-MeguriImportSource` | iOS only: absolute regular synthetic .colpkg copied to Documents/RF2 Import Tests/review.colpkg for the system picker; changes no collection or route |
     /// | `-MeguriFixture` | absolute path of a collection file (installed as `collection.anki2`) or of a collection directory (installed as the collection directory) |
-    /// | `-MeguriOwnedProviderFixture` | `on` or `off` (default): Mac .dev only, isolated normal-provider launch of this checkout's local-review-1 recipe |
+    /// | `-MeguriOwnedProviderFixture` | `on` or `off` (default): Mac .dev only, isolated normal-provider launch of this checkout's local-review-1 recipe (owned-sync-review-1 only with admitted transport input) |
     /// | `-MeguriNow` | `YYYY-MM-DDTHH:MM:SS` with `Z` or `±HH:MM`; without one, the time is local to `-MeguriTimeZone` (or the system zone) |
     /// | `-MeguriTimeZone` | IANA id, e.g. `Asia/Tokyo` |
     /// | `-MeguriLocale` | locale id, e.g. `en_US`; also pass `-AppleLanguages` and `-AppleLocale` for system strings (the UI-test launch helper does) |
@@ -49,6 +49,7 @@ extension TestHooks {
         var nativeReview: NativeReviewInput.Request?
         var fixture: URL?
         var ownedProviderFixture = false
+        private(set) var ownedProviderSource: OwnedProviderFixture.Source = .localReview
         var importSource: URL?
         var now: Date?
         var timeZone: TimeZone?
@@ -75,7 +76,7 @@ extension TestHooks {
         init() {}
 
         /// Parses the launch arguments, without the executable path.
-        init(arguments: [String]) throws(TestHookError) {
+        init(arguments: [String], environment: [String: String] = [:], bundleIdentifier: String = "") throws(TestHookError) {
             var values: [String: String] = [:]
             var index = arguments.startIndex
             while index < arguments.endIndex {
@@ -99,6 +100,21 @@ extension TestHooks {
             if let value = values["OwnedProviderFixture"] {
                 ownedProviderFixture = try Self.onOff(value, "OwnedProviderFixture")
             }
+            // Admit both sanctioned entries before selecting a second identity.
+            // No ambient environment or caller-supplied URL grants that identity.
+            #if os(macOS)
+            do {
+                if try OwnedProviderTransport.Request.admit(environment: environment,
+                    ownedMode: ownedProviderFixture && bundleIdentifier.hasSuffix(".dev")) != nil {
+                    ownedProviderSource = .ownedSyncReview
+                }
+            } catch { throw OwnedProviderTransport.refusal }
+            #else
+            guard environment["MEGURI_OWNED_PROVIDER_TRANSPORT_RUN_ID"] == nil,
+                  environment["MEGURI_OWNED_PROVIDER_TRANSPORT_MANIFEST_SHA256"] == nil else {
+                throw TestHookError("Owned provider transport refused")
+            }
+            #endif
             if ownedProviderFixture {
                 let permitted = ["OwnedProviderFixture", "Fixture", "Now", "TimeZone", "Locale", "Animations",
                     "WindowSize", "Appearance", "ReduceMotion", "ReduceTransparency"]
@@ -106,8 +122,11 @@ extension TestHooks {
                       !arguments.contains("-ShowAnkiServerInterface") else {
                     throw TestHookError("OwnedProviderFixture requires a normal foreground launch without routes, imports, native replay or integrations")
                 }
-                guard values["Fixture"] == OwnedProviderFixture.source.path(percentEncoded: false) else {
-                    throw TestHookError("OwnedProviderFixture requires exactly this checkout's generated local-review-1 directory")
+                guard values["Fixture"] == ownedProviderSource.url.path(percentEncoded: false) else {
+                    throw TestHookError("OwnedProviderFixture requires exactly its admitted checkout recipe directory")
+                }
+                if ownedProviderSource == .ownedSyncReview, values["Now"] != nil {
+                    throw TestHookError("Owned provider transport requires the system clock")
                 }
             }
 
@@ -196,7 +215,7 @@ extension TestHooks {
         func prepareOwnedProviderFixture(bundleIdentifier: String) throws(TestHookError) -> OwnedProviderFixture? {
             guard ownedProviderFixture else { return nil }
             try validateOwnedProviderFixture(bundleIdentifier: bundleIdentifier)
-            return try OwnedProviderFixture()
+            return try OwnedProviderFixture(source: ownedProviderSource)
         }
 
         private func validateOwnedProviderFixture(bundleIdentifier: String) throws(TestHookError) {
@@ -208,7 +227,10 @@ extension TestHooks {
                   integrations == nil, ankiConnectPort == nil, migakuPort == nil else {
                 throw TestHookError("OwnedProviderFixture requires normal production composition")
             }
-            try OwnedProviderFixture.validateSource(fixture)
+            guard ownedProviderSource != .ownedSyncReview || now == nil else {
+                throw TestHookError("Owned provider transport requires the system clock")
+            }
+            try OwnedProviderFixture.validateSource(fixture, source: ownedProviderSource)
             #endif
         }
 
@@ -225,6 +247,9 @@ extension TestHooks {
             if ownedProviderFixture {
                 try validateOwnedProviderFixture(bundleIdentifier: installer.bundleIdentifier)
                 guard ownedProvider != nil else { throw TestHookError("OwnedProviderFixture requires its prepared owned context") }
+                guard ownedProvider?.validatedSource == fixture else {
+                    throw TestHookError("OwnedProviderFixture requires the exact prepared source")
+                }
             } else if ownedProvider != nil {
                 throw TestHookError("OwnedProviderFixture context requires explicit opt-in")
             }
@@ -272,8 +297,8 @@ extension TestHooks {
             }
             if let ownedProvider {
                 configuration.collectionLocation = ownedProvider.collectionLocation
-            }
-            if let fixture {
+                try installer.install(from: ownedProvider.validatedSource, into: configuration.collectionLocation)
+            } else if let fixture {
                 try installer.install(from: fixture, into: configuration.collectionLocation)
             }
             if let now {

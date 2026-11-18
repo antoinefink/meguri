@@ -102,9 +102,10 @@ struct SyncNowButton: View {
             .help(reason ?? SyncText.value("sync.now.command"))
             .accessibilityIdentifier(identifier)
             #if DEBUG
-            // Samples on the button's status-driven render: a noncausal observation,
-            // not an on-demand SDK query.
-            .accessibilityValue(DebugCloudDiagnostics.nativeFetchSequenceValue)
+            // Observe the actual coordinator; never query a transport from a view.
+            .accessibilityValue(collection.sync.providerState?.selection == .meguri
+                ? "meguri-round-success-sequence:\(collection.sync.debugMeguriRoundSuccessSequence)"
+                : DebugCloudDiagnostics.nativeFetchSequenceValue)
             #endif
         if showsUnavailableReason, let reason {
             Text(reason).foregroundStyle(.secondary)

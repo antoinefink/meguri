@@ -53,13 +53,22 @@ enum TestHooks {
         let environment = ProcessInfo.processInfo.environment
         let transportRequested = environment["MEGURI_OWNED_PROVIDER_TRANSPORT_RUN_ID"] != nil
             || environment["MEGURI_OWNED_PROVIDER_TRANSPORT_MANIFEST_SHA256"] != nil
+        var admittedOptions: LaunchOptions?
+        if transportRequested || arguments.contains("-MeguriOwnedProviderFixture") {
+            do throws(TestHookError) {
+                admittedOptions = try LaunchOptions(arguments: Array(arguments.dropFirst()),
+                    environment: environment, bundleIdentifier: bundleIdentifier)
+            } catch {
+                if transportRequested { return Session(error: TestHookError("Owned provider transport refused")) }
+                return Session(error: error)
+            }
+        }
         #if os(macOS)
         var transportRequest: OwnedProviderTransport.Request?
         if transportRequested {
             do {
-                let options = try LaunchOptions(arguments: Array(arguments.dropFirst()))
                 transportRequest = try OwnedProviderTransport.Request.admit(environment: environment,
-                    ownedMode: options.ownedProviderFixture && bundleIdentifier.hasSuffix(".dev"))
+                    ownedMode: admittedOptions?.ownedProviderFixture == true && bundleIdentifier.hasSuffix(".dev"))
             } catch { return Session(error: OwnedProviderTransport.refusal) }
         }
         #else
@@ -68,9 +77,7 @@ enum TestHooks {
         // Reject setup-only environments before they can exclude normal startup.
         if arguments.contains("-MeguriOwnedProviderFixture") {
             do throws(TestHookError) {
-                let options = try LaunchOptions(arguments: Array(arguments.dropFirst()))
-                if options.ownedProviderFixture {
-                    let environment = ProcessInfo.processInfo.environment
+                if admittedOptions?.ownedProviderFixture == true {
                     guard ["MEGURI_CLOUD_AGENT_PATH_PREFLIGHT", "MEGURI_CLOUD_ACCOUNT_SETUP",
                         "MEGURI_CLOUD_AGENT_RUN_DIRECTORY"].allSatisfy({ environment[$0] == nil }) else {
                         throw TestHookError("OwnedProviderFixture is incompatible with setup-only or agent startup")
@@ -93,7 +100,12 @@ enum TestHooks {
         // Performance tests ask for a warmed web content process (R1866).
         WebContentWarmup.shared.listen()
         do throws(TestHookError) {
-            let options = try LaunchOptions(arguments: Array(arguments.dropFirst()))
+            let options: LaunchOptions
+            if let admittedOptions { options = admittedOptions }
+            else {
+                options = try LaunchOptions(arguments: Array(arguments.dropFirst()),
+                    environment: environment, bundleIdentifier: bundleIdentifier)
+            }
             let ownedProvider = try options.prepareOwnedProviderFixture(bundleIdentifier: bundleIdentifier)
             #if os(macOS)
             ownedProvider?.transport.admit(transportRequest)

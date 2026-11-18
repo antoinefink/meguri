@@ -231,6 +231,8 @@ public final class SyncCoordinator {
     public private(set) var settings: CloudPolicyDeviceSettings
     public private(set) var generation: UInt64 = 0
     #if DEBUG
+    /// Content-free observation of owner-valid, complete collection/media rounds.
+    public private(set) var debugMeguriRoundSuccessSequence: UInt64 = 0
     public var debugPolicyStatusValue: String? {
         guard status != nil else { return nil }
         return DebugCloudDiagnostics.policyStatusValue(generation: generation, hostRevision: hostRevision)
@@ -1009,6 +1011,14 @@ public final class SyncCoordinator {
                     guard meguriWake?.id == id, meguriCurrent(owner, expected, revision), meguriRound === round else { return }
                     meguriAccounting = nil
                     reduceMeguriRound(report)
+                    #if DEBUG
+                    // Finalization retries and bootstrap never reach this site.
+                    // The owner/attempt guard above and cancellation check exclude
+                    // retired or cancelled completions, even if they returned facts.
+                    if !Task.isCancelled, meguriRoutine == .idle {
+                        debugMeguriRoundSuccessSequence += 1
+                    }
+                    #endif
                     if meguriRoutine == .fullSyncRequired, let facade = meguriBootstrap {
                         try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
                     }

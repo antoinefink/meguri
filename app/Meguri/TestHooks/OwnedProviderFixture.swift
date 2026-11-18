@@ -6,12 +6,19 @@ extension TestHooks {
     /// One disposable launch's storage. Only the captured successful Core close
     /// may release it; failed installation/open/close deliberately leaves evidence.
     final class OwnedProviderFixture {
-        static var source: URL {
-            var checkout = URL(filePath: #filePath)
-            for _ in 0..<4 { checkout.deleteLastPathComponent() }
-            return checkout.appending(path: "build/fixtures/recipes/local-review-1", directoryHint: .isDirectory)
-        }
+        enum Source: Equatable {
+            case localReview, ownedSyncReview
 
+            var url: URL {
+                var checkout = URL(filePath: #filePath)
+                for _ in 0..<4 { checkout.deleteLastPathComponent() }
+                let recipe = self == .localReview ? "local-review-1" : "owned-sync-review-1"
+                return checkout.appending(path: "build/fixtures/recipes/\(recipe)", directoryHint: .isDirectory)
+            }
+        }
+        static var source: URL { Source.localReview.url }
+
+        let validatedSource: URL
         let collectionLocation: CollectionLocation
         let installationDirectory: URL
         let defaults: UserDefaults
@@ -23,8 +30,8 @@ extension TestHooks {
         private var removedRoot = false
         private var cleaned = false
 
-        static func validateSource(_ fixture: URL?) throws(TestHookError) {
-            let expected = source
+        static func validateSource(_ fixture: URL?, source: Source = .localReview) throws(TestHookError) {
+            let expected = source.url
             guard let fixture, fixture.isFileURL,
                   fixture.path(percentEncoded: false) == expected.path(percentEncoded: false),
                   fixture.standardizedFileURL == expected.standardizedFileURL,
@@ -41,7 +48,7 @@ extension TestHooks {
         }
 
         /// No caller-supplied path or defaults domain can become a cleanup target.
-        init() throws(TestHookError) {
+        init(source: Source = .localReview) throws(TestHookError) {
             let root = FileManager.default.temporaryDirectory.appending(path: "Meguri-OwnedProvider-\(UUID().uuidString)", directoryHint: .isDirectory)
             let suite = "Meguri.OwnedProvider.\(UUID().uuidString)"
             guard let defaults = UserDefaults(suiteName: suite) else {
@@ -58,6 +65,7 @@ extension TestHooks {
             self.root = root
             self.suite = suite
             self.defaults = defaults
+            validatedSource = source.url
             collectionLocation = CollectionLocation(directory: root.appending(path: "Collection", directoryHint: .isDirectory),
                 backupsDirectory: root.appending(path: "Backups", directoryHint: .isDirectory))
             installationDirectory = root.appending(path: "Installation", directoryHint: .isDirectory)
