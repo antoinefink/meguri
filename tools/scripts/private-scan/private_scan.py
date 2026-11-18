@@ -973,7 +973,7 @@ PUBLIC_ARTIFACTS = {
         "b16a5b54323699608495284c2c3df0116b2eaa15c927dc6841c55b1314a49c2a",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "core/crates/meguri-engine/tests/editor_services.rs":
-        "6d96006aeedd56b9fbc6d4f4fb7b374d743bc49050ef1c206a6312b0c8967019",
+        "b6fb526f02c4f15c0946c9a06be200b0e47a5b836f05266b45af8d06d6bc2471",
     'app/Packages/MeguriKit/Sources/AppModel/Collection/SyncCoordinator.swift':
         '456aa2d9303b4e4a689f40f4ecfdf3692e5ee75612c8319f6652c3f8a5936b68',
     'app/Packages/MeguriKit/Tests/AppModelTests/ProviderAdmissionTests.swift':
@@ -1267,6 +1267,9 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudPublicationConfirmationTests.swift': 'b138a276e46e231897282352ec24692aa34d717bdf19b7f6b7a59b702567ecab',
     'app/Packages/MeguriKit/Tests/AppModelTests/Support/CloudServiceAppHarness.swift': 'ca43eb8423fe40f9b19356bce3c4005a1c173e1b8e60dcd3d074bb0eb07b1808',
     "specs/conformance/meguri-sync-mobile-package.md": "4f31ac538c06a2928e97c9c6edfd4378e2bbccaa647e4ff6101ac99b4d90cf9f",
+    # Complete public-file review: owned_diagnostic_review, 2026-11-18.
+    "core/crates/meguri-engine/src/editor/tag_complete.rs":
+        "2c9222832834a1a4251d5388c2e158f15d69be007739c0953c7980e1ba13e768",
 }
 
 

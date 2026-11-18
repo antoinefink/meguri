@@ -105,7 +105,7 @@ import Testing
             "DeckDeletionJob.result", "add_deck", "start_rename_deck", "start_move_decks",
             "start_collapse_decks", "select_deck", "deck_deletion_summary", "start_delete_decks",
             "NoteDeletionJob.result", "add_note", "update_note", "read_note",
-            "check_note_fields", "add_defaults", "notetype_last_deck", "start_delete_notes", "notetype_names", "read_notetype",
+            "check_note_fields", "add_defaults", "notetype_last_deck", "tag_complete", "start_delete_notes", "notetype_names", "read_notetype",
             "add_notetype", "add_stock_notetype", "clone_notetype", "ensure_image_occlusion_notetype",
             "rename_notetype", "set_notetype_css", "set_notetype_field_options", "set_notetype_template_options",
             "TagMutationJob.result", "tag_tree", "flag_names", "set_tags_collapsed",

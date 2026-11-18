@@ -380,6 +380,30 @@ pub trait ReadRows: sealed::Connected {
         rows::get(self.connection(), &RowKey::text(name))
     }
 
+    /// Stream only stored tag names in SQLite unicase order. `check` runs
+    /// before preparing and before each step; Break never steps another row.
+    /// Both callbacks stay synchronous and the statement closes on return.
+    fn visit_tag_names<E: From<StorageError>>(
+        &self,
+        mut check: impl FnMut() -> Result<(), E>,
+        mut each: impl FnMut(String) -> Result<std::ops::ControlFlow<()>, E>,
+    ) -> Result<(), E> {
+        check()?;
+        let mut statement = self.connection()
+            .prepare("SELECT tag FROM tags ORDER BY tag COLLATE unicase")
+            .map_err(StorageError::from)?;
+        let mut rows = statement.query([]).map_err(StorageError::from)?;
+        loop {
+            check()?;
+            let Some(row) = rows.next().map_err(StorageError::from)? else { break };
+            let name = row.get::<_, String>(0).map_err(StorageError::from)?;
+            if each(name)?.is_break() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     /// Every `tags` row, in the table's key order (`unicase`).
     fn tag_rows(&self) -> Result<Vec<Tag>, StorageError> {
         rows::select_where(self.connection(), Table::Tags, "1", &[])?

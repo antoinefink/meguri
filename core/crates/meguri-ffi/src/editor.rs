@@ -1,5 +1,7 @@
-//! Read-only Add Note queries (notes/add-defaults D1–D2).
-use crate::{CoreError, callback, runtime};
+//! Read-only Add Note queries (notes/add-defaults D1–D2, tags/complete C1–C4).
+use std::sync::Arc;
+
+use crate::{CancelToken, CoreError, callback, runtime};
 use meguri_engine::editor;
 use meguri_model::ids::{CardId, DeckId, NotetypeId};
 
@@ -31,4 +33,14 @@ pub fn notetype_last_deck(notetype_id: i64) -> Result<NotetypeLastDeck, CoreErro
     Ok(NotetypeLastDeck {
         deck_id: editor::notetype_last_deck(&runtime::host()?.collection()?, NotetypeId(notetype_id))?.map(|id| id.0),
     })
+}
+
+#[uniffi::export]
+pub fn tag_complete(input: String, limit: u64, cancel: Arc<CancelToken>) -> Result<Vec<String>, CoreError> {
+    callback::enter("tag_complete");
+    cancel.check()?;
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    Ok(editor::tag_complete(&runtime::host()?.collection()?, &input, limit, cancel.engine_token())?)
 }

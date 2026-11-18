@@ -1,4 +1,5 @@
-//! Focused D1/D2 regressions. The committed scenario/golden data stays inactive;
+//! Focused defaults D1/D2 and tag completion C1–C4 regressions.
+//! The committed scenario/golden data stays inactive;
 //! these tests exercise the production queries, including Meguri's presets.
 mod common;
 
@@ -233,4 +234,112 @@ fn missing_defaults_report_errors_in_mode_order_and_preset_can_only_fail_on_note
     put(&h.collection, "addToCur", false);
     assert!(matches!(editor::add_defaults(&h.collection, None, None), Err(EngineError::InvalidArgument { .. })));
     assert!(matches!(editor::add_defaults(&h.collection, None, Some(preset)), Err(EngineError::InvalidArgument { .. })));
+}
+
+fn stored_tag(c: &Collection, name: &str) {
+    raw(c, "INSERT INTO tags(tag, usn, collapsed, config) VALUES (?1, -1, 1, NULL)",
+        &[SqlValue::Text(name.into())]);
+}
+
+fn complete(c: &Collection, input: &str, limit: u64) -> Vec<String> {
+    editor::tag_complete(c, input, limit, &meguri_engine::CancelToken::default()).unwrap()
+}
+
+#[test]
+fn tag_completion_cuts_whole_registry_rows_before_stable_prefix_partition_without_writes() {
+    let h = common::tagging::fresh();
+    // No notes use these rows; Bar is an implicit parent, never a suggestion.
+    for name in ["Grammar::Japan", "Japan", "Japanese::Audio", "Bar::x", "Aardvark"] {
+        stored_tag(&h.collection, name);
+    }
+    // Keep a real undo step and settle opening rollover before the read proof.
+    let nt = notetype(&h, "Completion type");
+    add(&h, input(nt, &["kept undo", "back"]));
+    h.collection.run(
+        OpSpec::named("completion_read_barrier", OpSource::Rollover).stamp(StampMode::Raw),
+        |_| Ok(()),
+    ).unwrap();
+    let before = persisted(&h.collection);
+    let seq = h.collection.last_seq();
+    let undo = format!("{:?}", h.collection.peek_undo(UndoScope::Global).unwrap());
+    assert_eq!(complete(&h.collection, "jap", 1), ["Grammar::Japan"]);
+    assert_eq!(complete(&h.collection, "jap", 2), ["Japan", "Grammar::Japan"]);
+    assert_eq!(complete(&h.collection, "jap", 3), ["Japan", "Japanese::Audio", "Grammar::Japan"]);
+    // Japanese takes the inner 'a' in Japanese, before Audio can be tried.
+    assert_eq!(complete(&h.collection, "a", 500), ["Aardvark", "Bar::x", "Grammar::Japan", "Japan", "Japanese::Audio"]);
+    assert_eq!(complete(&h.collection, "bar", 500), ["Bar::x"]);
+    assert_eq!(complete(&h.collection, "jap::aud", 500), ["Japanese::Audio"]);
+    assert!(complete(&h.collection, "aud::jap", 500).is_empty());
+    assert_eq!(persisted(&h.collection), before);
+    assert_eq!(h.collection.last_seq(), seq);
+    assert_eq!(format!("{:?}", h.collection.peek_undo(UndoScope::Global).unwrap()), undo);
+}
+
+#[test]
+fn tag_completion_simple_folds_without_normalizing_or_rewriting_raw_components() {
+    let h = common::tagging::fresh();
+    let raw_name = " \u{1}q:::::r::o\u{301}::";
+    for name in ["Straße", "Σοφία", "Ｇｒａｍｍａｒ", "Über", "K::ſ", "e\u{301}", "é", "İ", "ı", "Ǆ", "П", "は", raw_name, "a:::b", "German::Verb::modal"] {
+        stored_tag(&h.collection, name);
+    }
+    for (query, expected) in [
+        ("STRAẞE", Some("Straße")), ("strasse", None),
+        ("σοφ", Some("Σοφία")), ("ςοφ", Some("Σοφία")),
+        ("ｇｒａ", Some("Ｇｒａｍｍａｒ")), ("gra", None),
+        ("über", Some("Über")), ("k::s", Some("K::ſ")),
+        ("e\u{301}", Some("e\u{301}")), ("É", Some("é")),
+        ("i", None), ("ǆ", Some("Ǆ")), ("п", Some("П")), ("ハ", None),
+        (raw_name, Some(raw_name)), (" \u{1}q:::::r", Some(raw_name)),
+        ("a:::b", Some("a:::b")), ("q::r::", Some(raw_name)),
+        ("verb::mod", Some("German::Verb::modal")), ("mod::verb", None),
+        ("ger::mod", Some("German::Verb::modal")),
+    ] {
+        let expected: Vec<&str> = expected.into_iter().collect();
+        assert_eq!(complete(&h.collection, query, 500), expected, "{query:?}");
+    }
+    // Repeated empty filters consume separate raw components, including the
+    // empty component between four colons and the trailing empty component.
+    assert_eq!(complete(&h.collection, "::::::", 500), [raw_name]);
+    assert!(complete(&h.collection, " \u{1}q:::::r::ó", 500).is_empty());
+}
+
+#[test]
+fn tag_completion_streams_names_stops_before_unread_rows_and_checks_exact_cancellation() {
+    use std::{cell::Cell, ops::ControlFlow};
+    use meguri_engine::CancelToken;
+
+    let h = common::tagging::fresh();
+    for name in ["_x", "A", "b", "ä"] {
+        stored_tag(&h.collection, name);
+    }
+    // The query reads only names, not unrelated columns in a Tag aggregate.
+    raw(&h.collection, "UPDATE tags SET collapsed = 7, config = X'00' WHERE tag = 'A'", &[]);
+    for limit in [1_u64 << 32, u64::MAX] {
+        assert_eq!(complete(&h.collection, "", limit), ["_x", "A", "b", "ä"]);
+    }
+    // A BLOB key sorts after all TEXT keys. Decoding it would fail: a finite
+    // limit must stop stepping the statement before reaching this sentinel.
+    raw(&h.collection, "INSERT INTO tags(tag, usn, collapsed) VALUES (X'ff', 0, 1)", &[]);
+    assert_eq!(complete(&h.collection, "a", 1), ["A"]);
+    assert_eq!(complete(&h.collection, "", 4), ["_x", "A", "b", "ä"]);
+    assert!(editor::tag_complete(&h.collection, "", 5, &CancelToken::default()).is_err());
+
+    let cancel = CancelToken::new();
+    {
+        let reader = h.collection.reader(ReaderRole::Query).unwrap();
+        let snapshot = reader.snapshot().unwrap();
+        let visits = Cell::new(0);
+        let result: Result<(), EngineError> = snapshot.visit_tag_names(|| cancel.check(), |_| {
+            visits.set(visits.get() + 1);
+            cancel.cancel();
+            Ok(ControlFlow::Continue(()))
+        });
+        assert_eq!(result, Err(EngineError::Cancelled));
+        assert_eq!(visits.get(), 1);
+    }
+    assert_eq!(editor::tag_complete(&h.collection, "", 500, &cancel), Err(EngineError::Cancelled));
+    h.engine.close().unwrap();
+    // Zero must not even acquire a reader/snapshot on this closed collection.
+    assert!(complete(&h.collection, "", 0).is_empty());
+    assert!(editor::tag_complete(&h.collection, "", 1, &CancelToken::default()).is_err());
 }

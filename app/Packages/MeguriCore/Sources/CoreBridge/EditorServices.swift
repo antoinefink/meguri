@@ -30,6 +30,7 @@ public struct NotetypeLastDeck: Sendable, Hashable {
 public protocol EditorServices: Sendable {
     func addDefaults(reviewCard: Int64?, presetDeck: Int64?) async throws(BridgeError) -> AddDefaults
     func notetypeLastDeck(notetypeId: Int64) async throws(BridgeError) -> NotetypeLastDeck
+    func tagComplete(input: String, limit: UInt64, cancel: CancelToken) async throws(BridgeError) -> [String]
 }
 
 public actor CoreEditorServices: EditorServices {
@@ -48,6 +49,14 @@ public actor CoreEditorServices: EditorServices {
     public func notetypeLastDeck(notetypeId: Int64) async throws(BridgeError) -> NotetypeLastDeck {
         try await QueryLane.shared.call(.notetypeLastDeck) {
             NotetypeLastDeck(try MeguriCoreBindings.notetypeLastDeck(notetypeId: notetypeId))
+        }
+    }
+
+    /// C1–C4: pass the query text unchanged. Cancel a superseded request
+    /// through its explicit token; cancellation never returns a partial list.
+    public func tagComplete(input: String, limit: UInt64 = 500, cancel: CancelToken) async throws(BridgeError) -> [String] {
+        try await QueryLane.shared.call(.tagComplete) {
+            try MeguriCoreBindings.tagComplete(input: input, limit: limit, cancel: cancel.raw)
         }
     }
 }
