@@ -64,6 +64,7 @@ private let bootstrapStarts: Set<BridgeCall> = [
 
 // All shared Host lifetimes join the existing serialized EventTests family.
 extension EventTests {
+    #if DEBUG
     @Test @MainActor func ProviderBootstrapNotSelectedHasNoWorkerInEitherDirection() async throws {
         try await withBootstrapCollection { _, _, core in
             let store = BootstrapCredentialStore()
@@ -89,7 +90,9 @@ extension EventTests {
             await owner.cancelAndDrain()
         }
     }
+    #endif
 
+    #if DEBUG
     @Test(arguments: ["endpoint", "delete", "retire", "load"])
     @MainActor func ProviderBootstrapHeldReadCannotStartAfterRetirement(action: String) async throws {
         try await withBootstrapCollection { _, _, core in
@@ -149,6 +152,7 @@ extension EventTests {
             }
         }
     }
+    #endif
 
     @Test @MainActor func ProviderBootstrapFreshHostAttachmentCannotReviveOldFacade() async throws {
         try await withBootstrapCollection { collection, location, core in
@@ -169,6 +173,7 @@ extension EventTests {
         }
     }
 
+    #if DEBUG
     @Test @MainActor func ProviderBootstrapMissingAndMismatchedCredentialsNeverStartFFI() async throws {
         try await withBootstrapCollection { _, _, core in
             let store = BootstrapCredentialStore()
@@ -191,6 +196,7 @@ extension EventTests {
             await owner.cancelAndDrain()
         }
     }
+    #endif
 }
 
 @Suite struct ProviderBootstrapMappingTests {
@@ -252,6 +258,7 @@ private let bootstrapLocalCommands: Set<BridgeCall> = [
 ]
 
 extension EventTests {
+    #if DEBUG
     @Test @MainActor func ProviderBootstrapPendingPreparationIsOfflineAndNilBeforeExplicitPrepare() async throws {
         try await withBootstrapCollection { _, _, core in
             let store = BootstrapCredentialStore()
@@ -275,7 +282,9 @@ extension EventTests {
             await owner.cancelAndDrain()
         }
     }
+    #endif
 
+    #if DEBUG
     @Test @MainActor func ProviderBootstrapPendingLookupJoinsHeldCredentialReadBeforeRetirement() async throws {
         try await withBootstrapCollection { _, _, core in
             let store = BootstrapCredentialStore()
@@ -319,7 +328,9 @@ extension EventTests {
             }
         }
     }
+    #endif
 
+    #if DEBUG
     @Test @MainActor func ProviderBootstrapColdLookupUsesFreshAttachedHostAndCannotReviveRetiredFacade() async throws {
         try await withBootstrapCollection { collection, location, core in
             let store = BootstrapCredentialStore()
@@ -345,4 +356,5 @@ extension EventTests {
             await fresh.cancelAndDrain()
         }
     }
+    #endif
 }

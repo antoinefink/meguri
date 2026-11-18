@@ -92,6 +92,7 @@ private let roundNetworkStarts: Set<BridgeCall> = [
 // Shared Host/event listener lifetimes use the existing serialized suite.
 // No successful worker, ready binding or server reply is fabricated here.
 extension EventTests {
+    #if DEBUG
     @Test(arguments: [false, true])
     @MainActor func ProviderRoundFactoryIsCachedAndCoreAloneRefusesUnreadyWork(selected: Bool) async throws {
         try await withRoundCollection { _, _, core in
@@ -130,7 +131,9 @@ extension EventTests {
             }
         }
     }
+    #endif
 
+    #if DEBUG
     @Test @MainActor func ProviderRoundMissingWrongAndFailedCredentialReadsNeverStart() async throws {
         try await withRoundCollection { _, _, core in
             let store = RoundCredentialStore()
@@ -158,7 +161,9 @@ extension EventTests {
             await owner.cancelAndDrain()
         }
     }
+    #endif
 
+    #if DEBUG
     @Test(arguments: ["endpoint", "delete", "retire", "load", "signIn"])
     @MainActor func ProviderRoundEveryOwnerTransitionJoinsHeldReadAndPermanentlyRetiresOriginal(action: String) async throws {
         try await withRoundCollection { _, _, core in
@@ -251,7 +256,9 @@ extension EventTests {
             }
         }
     }
+    #endif
 
+    #if DEBUG
     @Test @MainActor func ProviderRoundOrdinaryCancellationJoinsReadAndAllowsRetry() async throws {
         try await withRoundCollection { _, _, core in
             let store = RoundCredentialStore()
@@ -291,6 +298,7 @@ extension EventTests {
             }
         }
     }
+    #endif
 
     @Test @MainActor func ProviderRoundFreshReopenedOwnerCannotReviveOldFacade() async throws {
         try await withRoundCollection { collection, location, core in

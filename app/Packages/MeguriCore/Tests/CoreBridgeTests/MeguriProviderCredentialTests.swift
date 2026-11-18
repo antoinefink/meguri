@@ -432,6 +432,7 @@ extension EventTests {
 
 
 extension EventTests {
+    #if DEBUG
     @Test @MainActor func ProviderBootstrapAuthenticationAndFactoryNeverTransfer() async throws {
         try await withProviderOwnerCollection { core in
             let reply = ProviderAuthenticationReply(core)
@@ -458,7 +459,9 @@ extension EventTests {
             }
         }
     }
+    #endif
 
+    #if DEBUG
     @Test @MainActor func ProviderBootstrapCredentialReadFailureStaysActionable() async throws {
         try await withProviderOwnerCollection { core in
             let reply = ProviderAuthenticationReply(core)
@@ -477,7 +480,9 @@ extension EventTests {
             await owner.cancelAndDrain()
         }
     }
+    #endif
 
+    #if DEBUG
     @Test @MainActor func ProviderBootstrapSignInDrainsHeldReadBeforeAuthenticating() async throws {
         try await withProviderOwnerCollection { core in
             let read = CloudCallbackGate()
@@ -518,4 +523,5 @@ extension EventTests {
             }
         }
     }
+    #endif
 }
