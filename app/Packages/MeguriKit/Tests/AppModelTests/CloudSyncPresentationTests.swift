@@ -114,6 +114,45 @@ import Testing
             #expect(presentation.route == route)
         }
     }
+    @Test func meguriLastExchangeDetailsFollowRoutineAndStatusPrecedence() {
+        // Presentation inputs only; no invented ready binding or server result.
+        let completed: Int64 = 1_700_000_000_000
+        let now = Date(timeIntervalSince1970: Double(completed) / 1_000 + 60)
+        let exchange = SyncText.format("sync.meguri.lastExchange", SyncText.instant(completed, now: now))
+        let pending = SyncText.value("sync.meguri.status.pending.detail")
+        for routine in [MeguriRoutineState.idle, .pending] {
+            let presentation = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+                stage: nil, localCollection: true, paused: false, routine: routine, lastExchange: completed)
+            #expect(presentation.detailLines(now: now) == (routine == .idle ? [exchange] : [pending, exchange]))
+            #expect(presentation.route == .round && !presentation.isBusy)
+            let unavailable = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+                stage: nil, localCollection: true, paused: false, routine: routine)
+            #expect(unavailable.detailLines(now: now) == (routine == .idle ? [] : [pending]))
+            var precedence: [(Bool, MeguriProviderConnectionPhase, MeguriSetupStage?, Bool)] = [
+                (true, .setupRequired, nil, false), (false, .blocked, nil, false),
+                (false, .unconfigured, nil, false), (false, .signedOut, nil, false),
+                (false, .cancelled, nil, false), (false, .authenticating, nil, false),
+                (false, .setupRequired, nil, true)
+            ]
+            let stages: [MeguriSetupStage] = [.required, .preparing, .preview, .collection, .media,
+                .mediaBlocked, .acceptanceUnknown, .acceptedLocalIncomplete, .failed]
+            for stage in stages { precedence.append((false, .setupRequired, stage, false)) }
+            for (stopped, connection, stage, paused) in precedence {
+                let hidden = MeguriSyncStatusPresentation(stopped: stopped, connection: connection,
+                    stage: stage, localCollection: true, paused: paused, routine: routine, lastExchange: completed)
+                let expected = hidden.detailKey.map { [SyncText.value($0)] } ?? []
+                #expect(hidden.detailLines(now: now) == expected)
+            }
+        }
+        let otherRoutines: [MeguriRoutineState?] = [nil, .unreported, .exchanging, .waiting, .mediaBlocked,
+            .authentication, .acceptanceUnknown, .fullSyncRequired, .network, .server, .cancelled, .failed]
+        for routine in otherRoutines {
+            let hidden = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+                stage: nil, localCollection: true, paused: false, routine: routine, lastExchange: completed)
+            let expected = hidden.detailKey.map { [SyncText.value($0)] } ?? []
+            #expect(hidden.detailLines(now: now) == expected)
+        }
+    }
     @Test func meguriOnlyBusyStartRefusalWaitsWithoutClaimingUnsentChanges() {
         // Exercise the same typed-outcome classifier used at both production
         // phase starts, without manufacturing a ready binding or server result.

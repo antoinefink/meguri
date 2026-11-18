@@ -29,7 +29,9 @@ struct SyncStatusRows: View {
                 VStack(alignment: .leading) {
                     Text(SyncText.value("sync.service.meguri"))
                     Text(SyncText.value(sync.meguriStatus.titleKey))
-                    if let key = sync.meguriStatus.detailKey { Text(SyncText.value(key)) }
+                    ForEach(Array(sync.meguriStatus.detailLines(now: clock.now()).enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                    }
                     if sync.meguriStage == .media, let progress = sync.meguriMediaProgress {
                         Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: progress.awaiting)))
                     }

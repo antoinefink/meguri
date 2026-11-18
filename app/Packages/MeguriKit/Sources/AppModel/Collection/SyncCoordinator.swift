@@ -229,7 +229,9 @@ public final class SyncCoordinator {
     public private(set) var setupState: SetupState = .configurationUnavailable
     public private(set) var status: CloudPolicyStatus?
     public private(set) var settings: CloudPolicyDeviceSettings
-    public private(set) var generation: UInt64 = 0
+    public private(set) var generation: UInt64 = 0 {
+        didSet { if generation != oldValue { meguriLastExchange = nil } }
+    }
     #if DEBUG
     /// Content-free observation of owner-valid, complete collection/media rounds.
     public private(set) var debugMeguriRoundSuccessSequence: UInt64 = 0
@@ -445,7 +447,9 @@ public final class SyncCoordinator {
     private var closeTask: Task<Bool, Never>?
     private var attachmentTask: Task<Void, Never>?
     private var attachmentFailure: (any Error)?
-    private var hostRevision: UInt64 = 0
+    private var hostRevision: UInt64 = 0 {
+        didSet { if hostRevision != oldValue { meguriLastExchange = nil } }
+    }
     private(set) var failureRevision: UInt64 = 0
     private var commandSequence: UInt64 = 0
     private var timerSequence: UInt64 = 0
@@ -473,7 +477,9 @@ public final class SyncCoordinator {
     private var providerAttachmentPending = false
     private var retryingProviderAttachment = false
     private let meguriCredentialStore: (any MeguriProviderCredentialStore)?
-    private var meguriConnectionOwner: MeguriProviderConnectionOwner?
+    private var meguriConnectionOwner: MeguriProviderConnectionOwner? {
+        didSet { if meguriConnectionOwner !== oldValue { meguriLastExchange = nil } }
+    }
     public private(set) var meguriPhase: MeguriProviderConnectionPhase = .unconfigured
     public private(set) var meguriEndpoint = ""
     public private(set) var meguriStage: MeguriSetupStage?
@@ -485,6 +491,8 @@ public final class SyncCoordinator {
     public private(set) var meguriFailureKey: String?
     public private(set) var meguriSignInErrorKey: String?
     public private(set) var meguriRoutine: MeguriRoutineState?
+    /// Device-local observation for this attachment, not cross-device convergence.
+    public private(set) var meguriLastExchange: Int64?
     public private(set) var meguriRoundReport: MeguriRoundReport?
     public private(set) var meguriLastCommand: MeguriBootstrapCommandResult?
     public private(set) var meguriCollectionCommand: MeguriBootstrapCommandResult?
@@ -512,7 +520,8 @@ public final class SyncCoordinator {
     public var meguriStatus: MeguriSyncStatusPresentation {
         .init(stopped: providerNeedsAttention, connection: meguriAuthenticating ? .authenticating : meguriPhase,
             stage: meguriStage, localCollection: meguriHasLocalCollection, paused: settings.paused,
-            routine: meguriRoutine, failureKey: meguriFailureKey)
+            routine: meguriRoutine, failureKey: meguriFailureKey,
+            lastExchange: meguriCanRun && !meguriCancelling ? meguriLastExchange : nil)
     }
     var beginMeguriActivation: (@MainActor () throws -> Void)?
     var finishMeguriActivation: (@MainActor (Bool) async -> SyncCoordinator?)?
@@ -526,8 +535,12 @@ public final class SyncCoordinator {
     private var meguriOperation: MeguriBootstrapOperation?
     private var meguriActiveFacade: MeguriProviderBootstrapService?
     private var meguriAction: (id: UUID, task: Task<Void, Never>)?
-    private var meguriRound: CoreMeguriRoundService?
-    private var meguriReady = false
+    private var meguriRound: CoreMeguriRoundService? {
+        didSet { if meguriRound !== oldValue { meguriLastExchange = nil } }
+    }
+    private var meguriReady = false {
+        didSet { if !meguriReady { meguriLastExchange = nil } }
+    }
     private var meguriWakePending = false
     private var meguriWakeManual = false
     private var meguriReachabilityRecoveryRevision: UInt64 = 0
@@ -1026,6 +1039,12 @@ public final class SyncCoordinator {
                     guard meguriWake?.id == id, meguriCurrent(owner, expected, revision), meguriRound === round else { return }
                     meguriAccounting = nil
                     reduceMeguriRound(report)
+                    // Only this actual routine round can supply a new instant.
+                    // Pending/skipped work retains the earlier complete exchange.
+                    if meguriRoutine == .idle, !Task.isCancelled, !meguriCancelling,
+                       editRevision == meguriAddressEditRevision, meguriCanRun {
+                        meguriLastExchange = Int64(clock.now().timeIntervalSince1970 * 1_000)
+                    }
                     #if DEBUG
                     // Finalization retries and bootstrap never reach this site.
                     // The owner/attempt guard above and cancellation check exclude

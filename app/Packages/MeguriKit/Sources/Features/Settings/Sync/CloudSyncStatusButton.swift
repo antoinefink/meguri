@@ -5,6 +5,7 @@ import SwiftUI
 /// The same quiet control is injected into the platform toolbar and review.
 public struct CloudSyncStatusButton: View {
     let collection: ReviewCollection
+    @Environment(\.appClock) private var clock
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -46,7 +47,9 @@ public struct CloudSyncStatusButton: View {
             }
             .accessibilityLabel(SyncText.value(meguri ? "sync.meguri.button.label" : "sync.button.label"))
             .accessibilityValue(SyncText.value(titleKey).replacingOccurrences(of: "…", with: ""))
-            .help([SyncText.value(titleKey), detailKey.map(SyncText.value)].compactMap { $0 }.joined(separator: "\n"))
+            .help(meguri
+                ? ([SyncText.value(titleKey)] + collection.sync.meguriStatus.detailLines(now: clock.now())).joined(separator: "\n")
+                : [SyncText.value(titleKey), detailKey.map(SyncText.value)].compactMap { $0 }.joined(separator: "\n"))
             .accessibilityIdentifier("sync.status.button")
             .disabled(collection.syncPresentation.statusHandoffPending)
             .popover(isPresented: presented(compact: false)) {

@@ -335,6 +335,14 @@ public struct MeguriSyncStatusPresentation {
     public let titleKey: String
     public let detailKey: String?
     public let route: MeguriSyncNowRoute
+    private let lastExchange: Int64?
+    public func detailLines(now: Date) -> [String] {
+        var lines = detailKey.map { [SyncText.value($0)] } ?? []
+        if let lastExchange {
+            lines.append(SyncText.format("sync.meguri.lastExchange", SyncText.instant(lastExchange, now: now)))
+        }
+        return lines
+    }
     public var isBusy: Bool {
         switch titleKey {
         case "sync.meguri.status.signingIn.title", "sync.meguri.status.preparing.title",
@@ -363,7 +371,8 @@ public struct MeguriSyncStatusPresentation {
          (SyncText.value("sync.counts.reviews"), reviews.formatted(.number))]
     }
     public init(stopped: Bool, connection: MeguriProviderConnectionPhase, stage: MeguriSetupStage?,
-                localCollection: Bool, paused: Bool, routine: MeguriRoutineState?, failureKey: String? = nil) {
+                localCollection: Bool, paused: Bool, routine: MeguriRoutineState?, failureKey: String? = nil,
+                lastExchange: Int64? = nil) {
         if stopped || connection == .blocked {
             route = .disabled("sync.meguri.now.unavailable.stopped")
         } else if paused {
@@ -415,6 +424,8 @@ public struct MeguriSyncStatusPresentation {
             }
         } else { pair = ("signedIn", "sync.meguri.status.setupUnavailable") }
         titleKey = "sync.meguri.status.\(pair.0).title"; detailKey = pair.1
+        // Waiting has the same title as pending, but proves no completed work.
+        self.lastExchange = pair.0 == "on" || (pair.0 == "pending" && routine == .pending) ? lastExchange : nil
     }
     public static func canDiscard(_ receipt: MeguriBootstrapReceipt) -> Bool {
         receipt.acceptance == .notSent && receipt.phase != .needsDecision
