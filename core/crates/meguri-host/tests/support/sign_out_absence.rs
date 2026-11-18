@@ -276,12 +276,23 @@ pub(super) fn adopt(dir: &Path, service: &mut Service<SeededRandom>) -> CoreHost
     let config = config(dir, Arc::new(Account));
     let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
     let host = process.prepare_cloud_connection(config).unwrap();
+    // This new installation has no saved consent. Retain the original Host's
+    // read-only discovery through the exact preview and explicit confirmation.
+    let discovery = host.provider_authority().begin_discovery().unwrap();
     let preview = actual_preview(&host, service);
     host.confirm_cloud_adoption(&preview).unwrap();
+    // As in the native no-file flow, accept setup only after confirmation has
+    // durably accepted the adoption; discovery alone never admits writers.
+    host.cloud_runtime().unwrap().provider_accept_icloud_connection().unwrap();
+    host.refresh_provider_admission();
+    drop(discovery);
     for _ in 0..64 {
         if host.cloud_runtime().unwrap().adoption_op().unwrap().is_none() {
             assert!(host.collection().is_ok());
             assert_eq!(host.engine().slot_holder(), None);
+            // Initial activation supplies the real binding/publication facts.
+            // Refresh now so pending setup qualifies that completed target.
+            host.refresh_provider_admission();
             assert!(matches!(
                 service
                     .request(
