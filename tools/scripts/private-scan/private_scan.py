@@ -1243,7 +1243,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/MeguriSyncSetupViews.swift': '7a44f15263ad7942e0a74b756585833662ccb05340e3cbce785a976a22cbb4f9',
     'app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncStatusContent.swift': '0e9ebd0d7bd2f126638736ca6268453bf601564b6922895b103cfbde3d5aa0ca',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudSyncPresentationTests.swift': '11766d5d2ac1a18ba84f91fbb5753fb714ed38b1934278b785b377afbb7d8fff',
-    'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': 'f099b680942f4551a56746e0f7978b568bf3eec10a4dff0e64f416902f16dc78',
+    'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': '01d0e21c21041c0e948521668af58f74c8729f2f48117c4e53db8ad6d2b92ef0',
     'core/crates/meguri-host/src/provider_bootstrap.rs': '038e6199bd9e9d63e307023e182caa3632ace08fee94c21563e61854357553bd',
     'core/crates/meguri-host/Cargo.toml': 'ef2e5f907851eb4d19984c899516e6affe5444516b59d245f4501dde2b744a73',
     'core/crates/meguri-host/examples/real_server_provider.rs': '30c41dac4cce43053fbabf3654565584fe6ebb3a8054c8660b1a8c4695d51ea5',

@@ -12,10 +12,20 @@ import Testing
 @MainActor
 @Suite(.serialized) struct ReviewCollectionStartupTests {
     @Test func providerHandoffRefusesAnActiveRealReviewWithoutWaitingForNetwork() async throws {
-        try await withStartupActivityOwner { fixture, deckID in
+        try await withStartupActivityOwner { fixture, _ in
+            let suffix = UUID().uuidString
+            let deck = try await CoreDeckService().addDeck(name: "Synthetic handoff review \(suffix)")
+            let type = try await CoreNotetypeService().addNotetype(.init(name: "Synthetic handoff QA \(suffix)", cloze: false,
+                fields: ["Q", "A"], templates: [.init(name: "Face", front: "{{Q}}", back: "{{A}}", browserFront: "", browserBack: "")], css: nil))
+            let note = try await CoreNoteService().addNote(.init(notetypeId: type.id, fields: ["Question", "Answer"],
+                tags: [], deckId: deck.id, guid: nil, updateAddDefaults: false))
+            try #require(note.cards.count == 1)
+            let cardID = try #require(note.cards.first)
             fixture.owner.reviewSessionClient = CoreReviewSessionClient()
-            await fixture.owner.startStudy(deckID: deckID)
+            await fixture.owner.startStudy(deckID: deck.id)
             let review = try #require(fixture.owner.review)
+            try #require(review.phase == .question)
+            try #require(review.item?.cardId == cardID)
             let session = try #require(review.sessionID)
             #expect(!(await fixture.owner.sync.changeProvider(to: .meguri)))
             #expect(review.sessionID == session && fixture.owner.reviewIsActive)
