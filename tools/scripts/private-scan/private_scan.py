@@ -1273,9 +1273,9 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "app/Packages/MeguriKit/Sources/Features/Editor/FieldEditorHost.swift":
         "da01854da3e0a19fd458a77ed70d173ee755c1a9f4f421caa4b2ef8974ff66e1",
-    # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
+    # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "app/Packages/MeguriKit/Tests/AppModelTests/FieldEditorTests.swift":
-        "ded7b2b835f4312c3367e6069134979a6040db2f418967bdc2ebcf2b185a97ce",
+        "f4cfb32a6987d170f6b435e40cb8ca839ac1887c14b753ca97bfb0f1ca959a30",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "docs/process/review-log/U190-U195-field-runtime-cleanroom-20261118.md":
         "f1432c094aa8dc1498d33b196e56b0b15fb1b8ab73c23ee7bac34c15f302d455",
@@ -1284,7 +1284,7 @@ PUBLIC_ARTIFACTS = {
         "cd93e7106d0b0d827813f0efd8c73e1539c1ad1e2fc1f1594e40a150001b6788",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "app/Packages/MeguriKit/Tests/AppModelTests/ManualTransferSettingsTests.swift":
-        "9a03055a44d4af641a1ee28188b8f62815e34556050b6d78c9e5277e0cc7f3cb",
+        "797f2c54583e226dabcf48f3b7992503b60542ad79337612e37ab7b9f1628668",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "docs/process/review-log/U195-add-coordinator-cleanroom-20261118.md":
         "14622ebedb2c73a88ac7e4f6285ff2d1d1f9a548825d660f324d7b6dee345601",

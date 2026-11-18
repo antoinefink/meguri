@@ -633,6 +633,8 @@ extension ReviewCollectionStartupTests {
         do {
             await owner.start(); await owner.startEmpty()
             try #require(owner.state == .ready)
+            if owner.policy != .ok { await owner.enableFsrs() }
+            try #require(owner.policy == .ok && owner.canBeginAddAction)
             model.endpointDraft = "https://example.test/prefix/"
             model.username = "Synthetic User"; model.password = "transient"; await model.login()
             try #require(await flow.open { draft, _ in

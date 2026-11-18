@@ -386,9 +386,14 @@ extension ReviewCollectionStartupTests {
             try #require(await flow.requestClose())
             #expect(!flow.isPresented && flow.runtime == nil && flow.draft === next)
             editor = nil
+            let surface = ReviewCoordinatorTests.Surface()
+            owner.makeReviewSurface = { [surface] _ in surface }
             await owner.startStudy(deckID: deck.id)
-            let item = try #require(owner.review?.item)
+            let review = try #require(owner.review)
+            try #require(review.phase == .question)
+            let item = try #require(review.item)
             #expect(added.cards.contains(item.cardId))
+            #expect(surface.presented == [item.cardId])
             await owner.finishReview()
             // The real durable write succeeds even when its new next-draft
             // host never starts. Retire only that host, retaining newer input
