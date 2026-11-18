@@ -145,17 +145,36 @@ fn actual_registered_local_work_blocks_admission_until_it_drains() {
     let config = config(root.path(), true);
     let host = CoreHost::open(config.clone()).unwrap();
     let der = TestRoot::generate().der();
+    let deadline = meguri_engine::monotonic::now() + std::time::Duration::from_secs(20);
     let (entered, entry) = std::sync::mpsc::channel();
+    // Keep the sole sender on this stack so unwinding also releases the worker.
     let (release, exit) = std::sync::mpsc::channel();
-    let mut events = host.engine().stream().subscribe();
+    let events = host.engine().stream().subscribe();
     let job = host.engine().jobs().start("synthetic local admission owner", host.engine().generation(), None,
-        move |_| { entered.send(()).unwrap(); exit.recv().unwrap(); Ok(()) });
-    entry.recv().unwrap();
-    let refused = install(&host, &config, &der);
-    release.send(()).unwrap();
-    while let Some(event) = events.recv() {
-        if matches!(event.kind, meguri_engine::EventKind::JobFinished { id, .. } if id == job.id) { break; }
-    }
+        move |_| {
+            entered.send(()).unwrap();
+            exit.recv_timeout(deadline.saturating_sub(meguri_engine::monotonic::now())).unwrap();
+            Ok(())
+        });
+    let ready = entry.recv_timeout(deadline.saturating_sub(meguri_engine::monotonic::now()));
+    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| install(&host, &config, &der)));
+    let released = release.send(());
+    drop(release);
+    let finished = loop {
+        let remaining = deadline.saturating_sub(meguri_engine::monotonic::now());
+        if remaining.is_zero() { break None; }
+        let Some(event) = events.recv_timeout(remaining) else { break None; };
+        if let meguri_engine::EventKind::JobFinished { id, outcome } = &event.kind {
+            if *id == job.id { break Some(outcome.clone()); }
+        }
+    };
+    let refused = match refused {
+        Ok(refused) => refused,
+        Err(panic) => std::panic::resume_unwind(panic),
+    };
+    ready.expect("local worker entry deadline");
+    released.expect("release actual local worker");
+    assert_eq!(finished, Some(meguri_engine::jobs::JobOutcome::Succeeded), "local worker finish deadline or failure");
     assert!(matches!(refused, Err(EngineError::Busy { .. })));
     install(&host, &config, &der).unwrap();
     host.close().unwrap();
