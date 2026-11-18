@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: MIT
+name: Publish Meguri Sync
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/meguri-sync-image.yml'
+      - 'server/**'
+      - 'core/Cargo.toml'
+      - 'core/rust-toolchain.toml'
+      - 'core/crates/meguri-model/**'
+      - 'docker/compose.yml'
+      - 'docker/dev.Dockerfile*'
+      - 'docker/sync-web*'
+      - 'tools/mg'
+      - 'tools/mg.d/host.sh'
+      - 'tools/mg.d/meguri-sync.sh'
+      - 'tools/mg.d/sync-package.sh'
+      - 'tools/mg.d/sync-web.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/master'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the audited runtime image
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          tools/mg sync-web-image
+          tools/mg sync-web-deps --install
+          receipt="$(tools/mg sync-server-package)"
+          image_id="$(jq -er 'select(.status == "pass") | .details.package.image_id' "$receipt")"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image_id")" = "linux/$ARCH"
+          docker tag "$image_id" "meguri-sync:$ARCH"
+          docker save "meguri-sync:$ARCH" | gzip > "$RUNNER_TEMP/meguri-sync-$ARCH.tar.gz"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: meguri-sync-${{ matrix.arch }}
+          path: ${{ runner.temp }}/meguri-sync-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+          retention-days: 3
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: meguri-sync-registry
+      queue: max
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY_IMAGE: ghcr.io/${{ github.repository_owner }}/meguri-sync
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: meguri-sync-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/meguri-sync-images
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the multi-architecture image
+        shell: bash
+        run: |
+          image="${REGISTRY_IMAGE,,}"
+          release="$image:sha-$GITHUB_SHA"
+          for arch in amd64 arm64; do
+            docker load --input "$RUNNER_TEMP/meguri-sync-images/meguri-sync-$arch.tar.gz"
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}} {{index .Config.Labels "org.opencontainers.image.revision"}}' "meguri-sync:$arch")" = "linux/$arch $GITHUB_SHA"
+            docker tag "meguri-sync:$arch" "$release-$arch"
+            docker push "$release-$arch"
+          done
+
+          docker buildx imagetools create --tag "$release" "$release-amd64" "$release-arm64"
+          docker buildx imagetools inspect --raw "$release" | jq -e '
+            [.manifests[].platform | [.os, .architecture]] | sort == [["linux","amd64"],["linux","arm64"]]
+          '
+
+          # Slow builds and reruns still publish their commit tag. Advance latest
+          # only when master still has the same server and packaging inputs.
+          git fetch --depth=1 origin master
+          if git diff --quiet "$GITHUB_SHA" FETCH_HEAD -- \
+            .github/workflows/meguri-sync-image.yml server \
+            core/Cargo.toml core/rust-toolchain.toml core/crates/meguri-model \
+            docker/compose.yml 'docker/dev.Dockerfile*' 'docker/sync-web*' \
+            tools/mg tools/mg.d/host.sh tools/mg.d/meguri-sync.sh \
+            tools/mg.d/sync-package.sh tools/mg.d/sync-web.sh; then
+            docker buildx imagetools create --tag "$image:latest" "$release"
+          else
+            status=$?
+            test "$status" -eq 1
+            echo "Server or packaging inputs advanced on master. Published $release."
+          fi
