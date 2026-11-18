@@ -18,6 +18,7 @@ setup() {
   mkdir -p "$fake/bin" "$MG_ROOT/server/tools" "$MG_RUN_DIR" "$MG_STATE"
   touch "$trace" "$hooks"
   cp "$REPO_ROOT/server/tools/package-smoke.mjs" "$MG_ROOT/server/tools/package-smoke.mjs"
+  cp "$REPO_ROOT/server/tools/package-ready.py" "$MG_ROOT/server/tools/package-ready.py"
   commit="$(printf '%040d' 1)"; runtime_id="$(printf '%064d' 2)"; fixture_id="$(printf '%064d' 3)"
   init_id="$(printf '%064d' 4)"; net_id="$(printf '%064d' 5)"
   runtime_image="sha256:$(printf '%064d' 6)"; tool_image="sha256:$(printf '%064d' 7)"
@@ -105,9 +106,14 @@ SH
 # the function below; nothing can reach a real Docker executable.
 case "$1" in
   logs)
+    [ "$#" = 3 ] && [ "$2" = --follow ] || exit 97
     if [ "$3" = "$NR_TEST_RUNTIME_ID" ]; then printf 'listening 0.0.0.0:8080\n';
-    elif [ ! -e "$NR_TEST_FAKE/marker-missing" ]; then printf 'MEGURI_NATIVE_ROUTE_READY\n'; fi ;;
-  inspect) cat "$NR_TEST_FAKE/runtime.json" ;;
+    elif [ "$3" = "$NR_TEST_FIXTURE_ID" ]; then
+      if [ ! -e "$NR_TEST_FAKE/marker-missing" ]; then printf 'MEGURI_NATIVE_ROUTE_READY\n'; fi
+    else exit 97; fi ;;
+  inspect)
+    [ "$#" = 2 ] && [ "$2" = "$NR_TEST_RUNTIME_ID" ] || exit 97
+    cat "$NR_TEST_FAKE/runtime.json" ;;
   *) exit 97 ;;
 esac
 SH
@@ -451,7 +457,9 @@ reset_run() {
   for mutation in '.[0].Internal=false' '.[0].Id="wrong"' '.[0].Labels["meguri.sync.owner"]="foreign"' \
     '.[0].Labels["meguri.mg.run-id"]="foreign"' '.[0].Driver="host"' '.[0].EnableIPv6=true'; do
     reset_run; NETWORK_MUTATION="$mutation"
-    invoke --package-receipt "$receipt"; assert_failed
+    # The same rejected network cannot pass the registered cleanup guard.
+    run invoke --package-receipt "$receipt"
+    [ "$status" = 1 ]; assert_failed
     ! grep -q runtime-created "$trace"
     ! grep -Fxq remove:network "$trace"
   done
@@ -468,7 +476,11 @@ reset_run() {
     '.[0].HostConfig.Privileged=true' '.[0].HostConfig.ReadonlyRootfs=false' \
     '.[0].Image="wrong"' '.[0].Config.Cmd[2]="https://wrong"'; do
     reset_run; RUNTIME_MUTATION="$mutation"
-    invoke --package-receipt "$receipt"; assert_failed
+    run invoke --package-receipt "$receipt"
+    # Cleanup admits the owned runtime unless its immutable image changed.
+    if [ "$mutation" = '.[0].Image="wrong"' ]; then [ "$status" = 1 ];
+    else [ "$status" = 0 ]; fi
+    assert_failed
     ! grep -q fixture-created "$trace"
   done
 }
