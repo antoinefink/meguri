@@ -272,7 +272,25 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
         ),
         Input::AdoptionConfirm(preview) => value(device.host.confirm_cloud_adoption(&preview)?),
         Input::AdoptionReply(work, reply) => {
-            device.host.cloud_adoption_reply(&work, reply)?;
+            let mut diagnostic = meguri_sync::cloud::adoption::AdoptionDiagnosticRecorder::new(&work.task);
+            let result = device.host.cloud_adoption_reply_with_diagnostic(
+                &work,
+                reply,
+                &mut meguri_sync::cloud::policy::PolicyWork::default(),
+                &mut diagnostic,
+            );
+            if result.is_err()
+                && let Some(snapshot) = diagnostic.snapshot()
+            {
+                eprintln!(
+                    "cloud-adoption-failure task={:?} last_entered_stage={:?} primary_category={:?} cleanup_category={:?}",
+                    snapshot.task,
+                    snapshot.last_entered_stage,
+                    snapshot.primary_category,
+                    snapshot.cleanup_category,
+                );
+            }
+            result?;
             value(())
         }
         Input::AdoptionLocal(work) => {
