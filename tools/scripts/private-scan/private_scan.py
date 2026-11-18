@@ -971,9 +971,9 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "docs/process/review-log/native-owned-provider-ui-20261118.md":
         "931d40dc291fa292c80c1f61405743827c81de3e6b952c5c07923c7a2d0ee160",
-    # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
+    # Complete public-file review: owned_diagnostic_review, 2026-11-19.
     "docs/process/verification-status.md":
-        "3a07819f735544dd960e0f6ab13897373ae7454ae494fc72cef81fd996ae741d",
+        "8089c37cff384dff6db64973b3a7d4a1f71ae37815b81b8983275aea5563332c",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "core/crates/meguri-engine/tests/editor_services.rs":
         "b6fb526f02c4f15c0946c9a06be200b0e47a5b836f05266b45af8d06d6bc2471",
