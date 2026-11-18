@@ -1482,7 +1482,7 @@ impl CloudPublicationQueue for RefusingQueue {
 fn rejected_retired_sdk_account_events_preserve_actual_owner_preview_and_admission() {
     for rejected_status in [CloudAccountStatus::NoAccount, CloudAccountStatus::CouldNotDetermine] {
         let cache = Arc::new(CachedIdentity(Mutex::new(None)));
-        let fixture = Fixture::with_identity(keys(), Some(cache));
+        let fixture = Fixture::previously_confirmed_with_identity(keys(), Some(cache));
         fixture
             .workflow
             .account_changed(

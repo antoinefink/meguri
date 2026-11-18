@@ -33,6 +33,7 @@ fn fixture() -> Fixture {
         identity: Arc::new(Account),
         files: Arc::new(NativeFiles),
     });
+    prepare_prior_icloud_fixture_configuration(&config);
     let host = Arc::new(CoreHost::open(config).unwrap());
     let core = host.cloud_runtime().unwrap().clone();
     Fixture {

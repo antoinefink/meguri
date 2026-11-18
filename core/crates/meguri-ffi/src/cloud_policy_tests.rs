@@ -636,11 +636,7 @@ fn unbound_fixture_with_clock(
         random.clone(),
         Arc::new(meguri_storage::space::StatvfsSpace),
     );
-    config.publication_binding = meguri_engine::device_state::AccountBinding::Connected {
-        account: "synthetic-account-A".into(),
-        configuration: "synthetic-u114".into(),
-        environment: "development".into(),
-    };
+    config.publication_binding = synthetic_connected_fixture_binding();
     config.cloud = Some(r::CloudInputs {
         scope: c::BuildScope {
             container: c::ContainerId::new("synthetic-u114").unwrap(),
@@ -649,6 +645,7 @@ fn unbound_fixture_with_clock(
         identity,
         files: Arc::new(NativeFiles),
     });
+    prepare_prior_icloud_fixture_configuration(&config);
     let host = Arc::new(CoreHost::open(config).unwrap());
     let core = host.cloud_runtime().unwrap().clone();
     core.retain_adapter_inspection();

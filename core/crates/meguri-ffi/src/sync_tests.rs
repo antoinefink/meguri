@@ -84,7 +84,7 @@ fn sdk_callback_fence_mapping_preserves_real_error_provenance() {
 
 #[test]
 fn retired_sdk_callbacks_and_pending_returns_report_typed_fence_without_mutation() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, incoming) = fixture.baseline();
     let workflow = &fixture.workflow;
     workflow.retire_sdk(sdk.instance_id.clone(), false).unwrap();
@@ -173,6 +173,18 @@ fn prepare_prior_icloud_fixture_configuration(config: &HostConfig) {
     )
     .unwrap();
 }
+fn synthetic_connected_fixture_binding() -> meguri_engine::device_state::AccountBinding {
+    meguri_engine::device_state::AccountBinding::Connected {
+        account: "synthetic-account-A".into(),
+        configuration: "synthetic-u114".into(),
+        environment: "development".into(),
+    }
+}
+enum FixtureAdmission {
+    NoConsent,
+    PriorConsent,
+    PreviouslyConfirmedBinding,
+}
 struct Fixture {
     _directory: tempfile::TempDir,
     workflow: CloudWorkflow,
@@ -183,6 +195,14 @@ impl Fixture {
     fn new(keys: Arc<Keys>) -> Self {
         Self::with_identity(keys, None)
     }
+    // SDK baseline callers model an earlier confirmed service. Discovery and
+    // confirmation tests keep the ordinary LocalOnly opening binding.
+    fn previously_confirmed(keys: Arc<Keys>) -> Self {
+        Self::previously_confirmed_with_identity(keys, None)
+    }
+    fn previously_confirmed_with_identity(keys: Arc<Keys>, identity: Option<Arc<CachedIdentity>>) -> Self {
+        Self::with_recipe_and_admission(keys, identity, true, None, false, FixtureAdmission::PreviouslyConfirmedBinding)
+    }
     fn with_identity(keys: Arc<Keys>, identity: Option<Arc<CachedIdentity>>) -> Self {
         Self::with_collection(keys, identity, true)
     }
@@ -190,7 +210,7 @@ impl Fixture {
         Self::with_collection(keys, None, false)
     }
     fn without_prior_icloud_consent(keys: Arc<Keys>, local: bool) -> Self {
-        Self::with_recipe_and_admission(keys, None, local, None, false, false)
+        Self::with_recipe_and_admission(keys, None, local, None, false, FixtureAdmission::NoConsent)
     }
     fn with_collection(keys: Arc<Keys>, identity: Option<Arc<CachedIdentity>>, local: bool) -> Self {
         Self::with_recipe(keys, identity, local, None)
@@ -205,7 +225,7 @@ impl Fixture {
         recipe: Option<&str>,
         alias: bool,
     ) -> Self {
-        Self::with_recipe_and_admission(keys, identity, local, recipe, alias, true)
+        Self::with_recipe_and_admission(keys, identity, local, recipe, alias, FixtureAdmission::PriorConsent)
     }
     fn with_recipe_and_admission(
         keys: Arc<Keys>,
@@ -213,7 +233,7 @@ impl Fixture {
         local: bool,
         recipe: Option<&str>,
         alias: bool,
-        prior_icloud_consent: bool,
+        admission: FixtureAdmission,
     ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let data = directory.path().join("collection");
@@ -252,7 +272,10 @@ impl Fixture {
             files: Arc::new(NativeFiles),
         });
         config.cloud_key_bytes = Some(Arc::new(ForeignKeyBytes(keys)));
-        if prior_icloud_consent {
+        if matches!(admission, FixtureAdmission::PreviouslyConfirmedBinding) {
+            config.publication_binding = synthetic_connected_fixture_binding();
+        }
+        if !matches!(admission, FixtureAdmission::NoConsent) {
             prepare_prior_icloud_fixture_configuration(&config);
         }
         let host = Arc::new(if local {
@@ -346,6 +369,7 @@ impl Fixture {
                 confirm_root.then(|| b"old-cursor".to_vec()),
             )
             .unwrap();
+        self.workflow.host.refresh_provider_admission();
         self.workflow
             .core
             .reconcile_binding(&collection, &media, Duration::from_secs(1))
@@ -413,7 +437,7 @@ impl Drop for Fixture {
 
 #[test]
 fn fetched_applies_to_real_collection_and_redelivery_does_not_write_again() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     assert_eq!(fixture.incoming_value(), None);
@@ -495,7 +519,7 @@ fn blocked_record(erev: u64) -> CloudRecord {
 
 #[test]
 fn native_fetched_drains_502_exactly_once_in_operations_of_at_most_500() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, _) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let records: Vec<_> = (0..502)
@@ -547,7 +571,7 @@ fn native_fetched_drains_502_exactly_once_in_operations_of_at_most_500() {
 
 #[test]
 fn native_deferred_reference() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, _) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let record = blocked_record(2);
@@ -572,7 +596,7 @@ fn native_deferred_reference() {
 
 #[test]
 fn native_fetched_advances_ready_content_after_500_notes_park_on_references() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let mut records: Vec<_> = (0..500)
@@ -645,7 +669,7 @@ fn incoming_deck(fixture: &Fixture, id: i64, parent_id: i64, name: &[u8]) -> Clo
 
 #[test]
 fn native_fetched_retries_a_parked_reference_when_its_real_parent_arrives() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, _) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let child = incoming_deck(&fixture, 116_002, 116_001, b"RemoteParent\x1fRemoteChild");
@@ -695,7 +719,7 @@ fn native_fetched_retries_a_parked_reference_when_its_real_parent_arrives() {
 #[test]
 fn failed_rollback_tracking_transaction_stops_the_sdk_and_retains_intent_and_cursor() {
     use c::testing::{ApplyInterruption, TrackingFault};
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let before = workflow.durable_snapshot().unwrap();
@@ -740,7 +764,7 @@ fn failed_rollback_tracking_transaction_stops_the_sdk_and_retains_intent_and_cur
 
 #[test]
 fn native_fetched_refuses_retired_sdk_between_bounded_operations_without_tracking_stop() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, _) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let before = workflow.durable_snapshot().unwrap();
@@ -803,7 +827,7 @@ fn native_fetched_keeps_a_real_commit_completed_error_fatal_and_retains_replay_i
             meguri_model::faultpoint::disarm("storage.commit.after");
         }
     }
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     let before = workflow.durable_snapshot().unwrap();
@@ -847,7 +871,7 @@ fn native_fetched_keeps_a_real_commit_completed_error_fatal_and_retains_replay_i
 fn native_fetched_keeps_rolled_back_and_cancelled_work_without_a_retry_grant() {
     use c::testing::ApplyInterruption;
     for interruption in [ApplyInterruption::Error, ApplyInterruption::Cancel] {
-        let fixture = Fixture::new(Keys::new([]));
+        let fixture = Fixture::previously_confirmed(Keys::new([]));
         let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
         let workflow = &fixture.workflow;
         let seq = workflow.host.collection().unwrap().last_seq();
@@ -893,7 +917,7 @@ fn native_fetched_keeps_rolled_back_and_cancelled_work_without_a_retry_grant() {
 
 #[test]
 fn legacy_drain_still_returns_the_actual_rolled_back_engine_error() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, incoming) = fixture.baseline_with_accepted_epoch();
     let workflow = &fixture.workflow;
     workflow
@@ -911,7 +935,7 @@ fn legacy_drain_still_returns_the_actual_rolled_back_engine_error() {
 
 #[test]
 fn durable_snapshot_distinguishes_real_same_name_queued_content() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, _) = fixture.baseline();
     let workflow = &fixture.workflow;
     let first = blocked_record(2);
@@ -939,7 +963,7 @@ fn durable_snapshot_distinguishes_real_same_name_queued_content() {
 
 #[test]
 fn fetched_rejects_wrong_zone_and_retired_sdk_before_any_mutation() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, incoming) = fixture.baseline();
     let workflow = &fixture.workflow;
     let before = workflow.durable_snapshot().unwrap().tracking_content;
@@ -970,7 +994,7 @@ fn fetched_rejects_wrong_zone_and_retired_sdk_before_any_mutation() {
 
 #[test]
 fn failed_inbox_commit_never_admits_apply_or_later_cursor() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, _, incoming) = fixture.baseline();
     let workflow = &fixture.workflow;
     let before = workflow.durable_snapshot().unwrap();
@@ -1002,7 +1026,7 @@ fn failed_inbox_commit_never_admits_apply_or_later_cursor() {
 
 #[test]
 fn root_fetch_does_not_apply_an_already_ready_collection_entry() {
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     let (sdk, root, incoming) = fixture.baseline();
     let workflow = &fixture.workflow;
     // Receive only: root delivery must not happen to drain this queued work.

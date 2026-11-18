@@ -1706,7 +1706,7 @@ fn assert_foreign_builds_ignore_adoption_wait(fixture: &Fixture, runtimes: &[r::
 #[test]
 fn adoption_policy_ready_wait_tracks_review_without_treating_ready_work_as_waiting() {
     use c::entity_codec as codec;
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::previously_confirmed(Keys::new([]));
     fixture.baseline_with_accepted_epoch();
     let connection = fixture.workflow.connection().unwrap();
     adoption_fetch_ready(&connection);
@@ -1819,6 +1819,8 @@ fn adoption_transport_wait_retains_exact_page_or_payload_until_explicit_resume_a
         for payload in [false, true] {
             let fixture = if initial {
                 Fixture::without_collection(Keys::new([]))
+            } else if bound {
+                Fixture::previously_confirmed(Keys::new([]))
             } else {
                 Fixture::new(Keys::new([]))
             };
@@ -2002,7 +2004,11 @@ fn adoption_transport_failure_during_account_unavailability_still_requires_expli
             let identity = Arc::new(CachedIdentity(Mutex::new(Some(r::IdentityStatus::Available(
                 account.clone(),
             )))));
-            let fixture = Fixture::with_collection(Keys::new([]), Some(identity.clone()), !initial);
+            let fixture = if bound {
+                Fixture::previously_confirmed_with_identity(Keys::new([]), Some(identity.clone()))
+            } else {
+                Fixture::with_collection(Keys::new([]), Some(identity.clone()), !initial)
+            };
             if bound {
                 fixture.baseline();
             }
