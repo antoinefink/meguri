@@ -17,6 +17,13 @@ fn defaults_open_without_undo_or_bootstrap_changes() {
     let clock = Arc::new(FixedClock::new(1_894_701_600_000, UtcOffset::UTC));
     let random = Arc::new(SeededRandom::new(5));
     bootstrap::create(&path, clock.as_ref(), random.as_ref()).unwrap();
+    // B2: statistics include base config, before preset/deck/stock writes.
+    // Inspect the actual factory output before ordinary open can do any work.
+    {
+        let raw = meguri_storage::raw::PlainDatabase::open(&path).unwrap();
+        assert!(!raw.rows("SELECT tbl FROM sqlite_stat1 WHERE tbl = 'config'", &[]).unwrap().is_empty());
+        assert!(raw.rows("SELECT tbl FROM sqlite_stat1 WHERE tbl IN ('decks', 'deck_config', 'notetypes')", &[]).unwrap().is_empty());
+    }
     let engine = Engine::new(EngineConfig::default()).unwrap();
     let collection = engine.open_raw(&path, OpenConfig::new(clock, random)).unwrap();
     let r = collection.reader(meguri_storage::ReaderRole::Query).unwrap();

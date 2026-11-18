@@ -42,7 +42,13 @@ impl ProcessCore {
                 });
             }
         }
-        self.prepare_host(config, false)
+        self.prepare_host(config, false, true)
+    }
+
+    /// Explicit local creation prepares the same providers but never recovers
+    /// a remote adoption before the creation boundary has checked its evidence.
+    pub fn prepare_empty_collection(&self, config: HostConfig) -> Result<CoreHost, EngineError> {
+        self.prepare_host(config, false, false)
     }
 
     pub fn new(config: EngineConfig) -> Result<Self, EngineError> {
@@ -62,9 +68,9 @@ impl ProcessCore {
     /// opening the existing file failed; callers show engine.state(). No request
     /// is made here. Initial activation reuses these providers exactly once.
     pub fn open_for_manual_import(&self, config: HostConfig) -> Result<CoreHost, EngineError> {
-        self.prepare_host(config, true)
+        self.prepare_host(config, true, false)
     }
-    fn prepare_host(&self, config: HostConfig, open_existing: bool) -> Result<CoreHost, EngineError> {
+    fn prepare_host(&self, config: HostConfig, open_existing: bool, recover_initial: bool) -> Result<CoreHost, EngineError> {
         {
             let mut opened = self.opened.lock().unwrap_or_else(PoisonError::into_inner);
             if *opened || config.engine.job_workers != self.job_workers {
@@ -83,7 +89,7 @@ impl ProcessCore {
             }
         }
         let mut reset = Reset(self, false);
-        let (mut host, paths, options) = CoreHost::compose_on(self, config)?;
+        let (mut host, paths, options) = CoreHost::compose_on(self, config, open_existing || recover_initial)?;
         // Active means host-owned lifecycle, including NoCollection/Failed.
         host.set_close_state(CloseState::Active);
         if !open_existing && let Some(runtime) = &host.cloud {
@@ -94,7 +100,7 @@ impl ProcessCore {
                 host.engine.generation(),
             );
             host.no_collection_identity_owner = Some(live);
-            if let Err(error) = runtime.recover_initial_cloud_adoption(&host.engine, &host.initial_open) {
+            if recover_initial && let Err(error) = runtime.recover_initial_cloud_adoption(&host.engine, &host.initial_open) {
                 host.close()?;
                 return Err(EngineError::CollectionUnavailable {
                     reason: error.to_string(),
@@ -194,7 +200,7 @@ impl ProcessCore {
         if paths.collection() != inspection.facts().destination {
             return Err(EntryError::StaleConfirmation);
         }
-        let (host, _, options) = CoreHost::compose_on(self, config)?;
+        let (host, _, options) = CoreHost::compose_on(self, config, true)?;
         let outcome = inspection.activate_initial(slot, options, cancel, progress);
         let activated = outcome.is_ok() || outcome.as_ref().is_err_and(|e| e.candidate_active());
         if !activated {
@@ -276,6 +282,60 @@ pub struct CoreHost {
 }
 
 impl CoreHost {
+    /// Runs only on the process job pool. Keep this exact Host, its providers,
+    /// credentials and binding fences; no close/recompose or transfer occurs.
+    pub fn create_empty(&self, job: &meguri_engine::JobContext) -> Result<(), EngineError> {
+        fn lease<T>(lock: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, EngineError> {
+            match lock.try_lock() {
+                Ok(guard) => Ok(guard),
+                Err(std::sync::TryLockError::Poisoned(error)) => Ok(error.into_inner()),
+                Err(std::sync::TryLockError::WouldBlock) => Err(EngineError::Busy {
+                    running_op: "new collection original host".into(),
+                }),
+            }
+        }
+        let identity = self.no_collection_identity_owner.as_ref().map(|owner| lease(owner)).transpose()?;
+        let closed = lease(&self.closed)?;
+        if !matches!(*closed, CloseState::Active) || identity.as_ref().is_some_and(|owner| !**owner) {
+            return Err(EngineError::CollectionUnavailable { reason: "new collection host is closed".into() });
+        }
+        self.engine.create_empty_raw(&self.provider_collection_path, self.initial_open.clone(), || {
+            job.cancel.check()?;
+            // Missing collection SQL alone does not make old media/tracking
+            // disposable. Reject these owners before ordinary open can touch them,
+            // including builds with no configured cloud runtime.
+            for name in ["collection.media", "collection.media.db", "meguri-media.db", "media.trash", "media.staging",
+                meguri_sync::cloud::TRACKING_FILE] {
+                for suffix in ["", "-wal", "-shm", "-journal"] {
+                    match self.provider_collection_path.parent().expect("composed collection directory")
+                        .join(format!("{name}{suffix}")).symlink_metadata() {
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(meguri_storage::StorageError::from(error).into()),
+                        Ok(_) => return Err(EngineError::Busy { running_op: "new collection retained media or tracking".into() }),
+                    }
+                }
+            }
+            self.require_meguri_round_join()?;
+            if self.review.active_session().is_some() {
+                return Err(EngineError::SessionActive);
+            }
+            let provider = self.provider.snapshot()?;
+            if provider.handoff.is_some() || provider.binding.is_some() || provider.legacy_binding_pending
+                || provider.meguri_binding.is_some() || provider.meguri_bootstrap.is_some()
+                || !self.manual_transfer_history().active().is_ok_and(|active| active.is_none())
+                || self.engine.jobs().running().iter().any(|running| running.id != job.id)
+            {
+                return Err(EngineError::Busy { running_op: "new collection retained provider work".into() });
+            }
+            if let Some(runtime) = &self.cloud {
+                runtime.require_empty_collection_creation()
+                    .map_err(|_| EngineError::Busy { running_op: "iCloud original owner or recovery".into() })?;
+            }
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     fn set_close_state_locked(&self, state: &mut CloseState, next: CloseState) {
         *state = next;
         self.original_liveness.publish(next.compact());
@@ -402,7 +462,7 @@ impl CoreHost {
     }
 
     fn open_on(process: &ProcessCore, config: HostConfig) -> Result<Self, EngineError> {
-        let (host, paths, options) = Self::compose_on(process, config)?;
+        let (host, paths, options) = Self::compose_on(process, config, true)?;
         let result = host.engine.open_raw(&paths.collection(), options);
         if let Err(error) = result {
             if let Err(cleanup) = host.close() {
@@ -420,6 +480,7 @@ impl CoreHost {
     fn compose_on(
         process: &ProcessCore,
         mut config: HostConfig,
+        read_startup_identity: bool,
     ) -> Result<(Self, CollectionPaths, OpenConfig), EngineError> {
         wiring::validate()?;
         let paths = CollectionPaths::new(&config.collection_directory, &config.backups_directory)?;
@@ -502,10 +563,11 @@ impl CoreHost {
             .backups_directory(paths.backups.clone())
             .disk_space_provider(config.disk_space_provider.clone());
         options.publication_binding = config.publication_binding.clone();
-        // The platform provider is the sole current-account authority. Call it
-        // before engine ownership/recovery and outside Runtime/tracking locks.
+        // The platform provider is the sole current-account authority. Read it
+        // before ownership/recovery, except for explicit local creation, which
+        // requires no account. Runtime/tracking locks never span that read.
         let mut startup_identity_read_failed = false;
-        options.startup_publication_binding = config.cloud.as_ref().map(|inputs| {
+        options.startup_publication_binding = config.cloud.as_ref().filter(|_| read_startup_identity).map(|inputs| {
             use meguri_engine::device_state::AccountBinding;
             use meguri_sync::cloud::runtime::IdentityStatus;
             match inputs.identity.read_identity(&inputs.scope) {
@@ -961,7 +1023,7 @@ mod resource_liveness_tests {
         let root = tempfile::tempdir().unwrap();
         let config = config_for_prepared(root.path());
         let process = ProcessCore::new(config.engine.clone()).unwrap();
-        let (host, paths, options) = CoreHost::compose_on(&process, config).unwrap();
+        let (host, paths, options) = CoreHost::compose_on(&process, config, true).unwrap();
         let collection = host.engine.open_raw(&paths.collection(), options).unwrap();
         sample_locked(&host, &collection, ResourceMode::DisposalOnly);
         // Use the same canonical transition helper as all activation paths.
@@ -982,7 +1044,7 @@ mod resource_liveness_tests {
         let prepared_root = tempfile::tempdir().unwrap();
         let prepared_config = config_for_prepared(prepared_root.path());
         let prepared_process = ProcessCore::new(prepared_config.engine.clone()).unwrap();
-        let (prepared, paths, options) = CoreHost::compose_on(&prepared_process, prepared_config).unwrap();
+        let (prepared, paths, options) = CoreHost::compose_on(&prepared_process, prepared_config, true).unwrap();
         let prepared_collection = prepared.engine.open_raw(&paths.collection(), options).unwrap();
         let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _restore = RestoreCloseState(&prepared, true);

@@ -10,7 +10,7 @@ import OSLog
 @Observable
 @MainActor
 public final class ReviewCollection: ChangeFanoutSink {
-    public enum State: Equatable { case unopened, loading, noFile, ready, unavailable, failed(String) }
+    public enum State: Equatable { case unopened, loading, noFile, ready, unavailable, creationRecovery, failed(String) }
     public private(set) var state: State = .unopened
     public private(set) var lifecycle: CollectionLifecycle = .noCollection
     #if DEBUG
@@ -556,6 +556,85 @@ public final class ReviewCollection: ChangeFanoutSink {
         openTask = task
         await task.value
     }
+    public var canStartEmpty: Bool {
+        state == .noFile && lifecycle == .noCollection && foreground && sceneActive && applicationActive
+            && !closed && !closing && !resuming && entryAllowed
+            && navigation.sheet == nil && navigation.review == nil
+            && entryOwner?.preview == nil && entryOwner?.pickerPresented != true
+            && entryOwner?.requiresRecovery != true
+            && exportOwner?.artifact == nil && exportOwner?.providerLease == nil
+            && manualOwner?.preview == nil && manualOwner?.mediaPreview == nil
+            && !sync.meguriBusy && !sync.deviceSettingsSettling
+    }
+    /// Reserve synchronously before yielding, just like entry confirmation.
+    /// Close/background already join openTask, including host completion.
+    public func startEmpty() async {
+        guard canStartEmpty else { return }
+        do { try beginEntryActivation() }
+        catch { return }
+        state = .loading; error = nil
+        let task = Task { await createEmptyCollection() }
+        openTask = task
+        await task.value
+    }
+    private func createEmptyCollection() async {
+        do {
+            try await drainEntryActivation()
+            let location = try await prepareEntry()
+            try Task.checkCancellation()
+            guard foreground, sceneActive, applicationActive, !closing, !closed else {
+                throw BridgeError.unavailable(reason: "collection creation is no longer foreground")
+            }
+            let seed = try await configuration.nativeReviewInput?.reopenSeed() ?? UInt64.random(in: 0...UInt64.max)
+            let job = try await collection.startCreateEmpty(location, randomSeed: seed)
+            let updates = Task { for await update in job.progress { progress = update } }
+            let outcome = await job.outcome()
+            await updates.value
+            progress = nil
+            switch outcome {
+            case .succeeded:
+                _ = await finishEntryActivation(candidateActive: true)
+                if state != .ready {
+                    state = .creationRecovery
+                    error = "Meguri couldn’t finish starting an empty collection."
+                }
+                return
+            case .cancelled: throw BridgeError.cancelled
+            case .failed(let error): throw error
+            }
+        } catch {
+            progress = nil
+            await reconcileEmptyCreationFailure(error)
+        }
+    }
+    // Also exercised with real retained lifecycles by the focused regression.
+    func reconcileEmptyCreationFailure(_ failure: any Error) async {
+        // Tracking can fail after Rust retained/opened the Host. Complete
+        // only the actual ready lifecycle; never invent a generation.
+        let actual = try? await collection.lifecycle()
+        let ready: Bool = { if case .ready? = actual { true } else { false } }()
+        _ = await finishEntryActivation(candidateActive: ready)
+        // Keep reconciled NoCollection/Ready usable. A failed or unknown
+        // lifecycle may retain a published file and Host: ordinary startOpen
+        // cannot reserve that Host, and creation must never be repeated there.
+        if state != .noFile && state != .ready { state = .creationRecovery }
+        error = Self.emptyCreationExplanation(failure)
+    }
+    static func emptyCreationExplanation(_ error: any Error) -> String {
+        if let bridge = error as? BridgeError {
+            switch bridge {
+            case .cancelled: return "Starting an empty collection was cancelled."
+            case .busy, .unavailable, .sessionActive:
+                return "Meguri couldn’t start an empty collection while the collection is busy or unavailable."
+            case .insufficientSpace:
+                return "There isn’t enough free space to start an empty collection."
+            case .open:
+                return "Meguri couldn’t open the collection while starting empty."
+            default: break
+            }
+        }
+        return "Meguri couldn’t finish starting an empty collection."
+    }
     private func openCollection() async {
         opening = true; state = .loading; error = nil; closed = false; releasedManualHostState = nil
         defer { opening = false }
@@ -917,6 +996,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         sync.receiveLifecycle(value)
         let wasReady: Bool = { if case .ready = lifecycle { true } else { false } }()
         lifecycle = value
+        // Late create events may update observed lifecycle, but cannot restore
+        // Retry against the retained Host. Recovery ends with an explicit close.
+        if state == .creationRecovery { return }
         switch value {
         case .ready(let next):
             if generation != next {
@@ -1337,6 +1419,16 @@ public final class ReviewCollection: ChangeFanoutSink {
             }
             await openTask?.value
             guard !closed, state != .unopened else { resuming = false; return }
+            if state == .creationRecovery {
+                // There may be no writer to resume/suspend. Preserve the bounded
+                // create error and retained resources until the drained close.
+                if !active {
+                    if case .ready? = try? await collection.lifecycle() { try? await collection.flushForBackground() }
+                    _ = await sync.cancelAndDrain()
+                }
+                resuming = false
+                return
+            }
             if state == .noFile {
                 // A retained NoCollection Host has cloud callbacks to drain,
                 // even though there is no local writer to flush or suspend.
@@ -1438,7 +1530,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         // failed open whose absent host still has a historical failed lifecycle.
         // Other presentation states need a fresh no-collection read after joins.
         let noCollectionCleanup: Bool
-        if state == .noFile || state == .unopened {
+        // Core close also supports a failed creation owner, drains its jobs and
+        // flushes a writer if one survived. Preflush requires an open collection
+        // and would otherwise prevent the recovery screen's Quit instruction.
+        if state == .noFile || state == .unopened || state == .creationRecovery {
             noCollectionCleanup = true
         } else {
             do { noCollectionCleanup = try await collection.lifecycle() == .noCollection }

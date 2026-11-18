@@ -189,9 +189,13 @@ public struct HomeView: View {
                     #else
                     collection.navigation.present(.accountSync)
                     #endif
-                })
+                }, canStartEmpty: collection.canStartEmpty,
+                startEmptyAction: { Task { await collection.startEmpty() } })
         case .unavailable:
             LoadingStateView(Text("Collection is busy…", bundle: .module))
+        case .creationRecovery:
+            EmptyStateView(Text("Couldn’t Start Empty", bundle: .module), systemImage: "exclamationmark.triangle",
+                description: Text("Quit and reopen Meguri before trying again. Any collection file already created will be kept.", bundle: .module))
         case .failed(let message):
             ErrorStateView(Text("Couldn’t Open Collection", bundle: .module), message: Text(verbatim: message),
                 retryIdentifier: "home.collection.retry", retry: { Task { await collection.start() } })
@@ -340,10 +344,12 @@ struct HomeCollectionEmptyContent: View {
     var connectAction: () -> Void = {}
     var canPresentAccountSync: Bool = true
     var accountSyncAction: (() -> Void)? = nil
+    var canStartEmpty: Bool = false
+    var startEmptyAction: (() -> Void)? = nil
 
     var body: some View {
         EmptyStateView(Text("No Collection", bundle: .module), systemImage: "rectangle.stack",
-            description: Text("Import or sync a collection to start studying.", bundle: .module)) {
+            description: Text("Import, sync or start an empty collection.", bundle: .module)) {
             Button(SyncText.value(connectTitleKey), action: connectAction)
                 .disabled(connectUnavailableReason != nil || !canPresentConnect)
                 .help(SyncText.value(connectUnavailableReason ?? connectTitleKey))
@@ -358,6 +364,11 @@ struct HomeCollectionEmptyContent: View {
                 Button(SyncText.value("sync.settings.section"), action: accountSyncAction)
                     .disabled(!canPresentAccountSync)
                     .accessibilityIdentifier("home.collection.accountSync")
+            }
+            if let startEmptyAction {
+                Button(action: startEmptyAction) { Text("Start Empty", bundle: .module) }
+                    .disabled(!canStartEmpty)
+                    .accessibilityIdentifier("home.collection.startEmpty")
             }
         }
     }

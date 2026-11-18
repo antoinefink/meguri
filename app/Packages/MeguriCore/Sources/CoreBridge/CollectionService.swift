@@ -74,6 +74,15 @@ public actor CoreCollectionService: CollectionService {
         let job = try await startOpen(location, randomSeed: randomSeed)
         try await job.value()
     }
+    public func startCreateEmpty(_ location: CollectionLocation, randomSeed: UInt64) async throws(BridgeError) -> CoreJob {
+        let clock = clock, diskSpace = diskSpace
+        try await CoreEventStream.shared.start()
+        let handle = try await MaintenanceLane.shared.call(.startCreateEmpty) {
+            try MeguriCoreBindings.startCreateEmpty(location: location.raw, clock: clock,
+                diskSpace: diskSpace, randomSeed: randomSeed)
+        }
+        return try await Jobs.trackDraining(handle)
+    }
     /// Retains the original process Host without bootstrapping an absent file.
     public func prepareCloudConnectionHost(_ location: CollectionLocation, randomSeed: UInt64) async throws(BridgeError) -> UInt64 {
         let clock = clock, diskSpace = diskSpace

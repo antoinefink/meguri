@@ -528,6 +528,33 @@ impl Runtime {
             Ok(_) => Ok(false),
         }
     }
+    /// Read-only admission for explicit first-local creation. The Host holds
+    /// its original NoCollection identity lease and Engine is Opening, so no
+    /// new identity completion/adoption can enter behind these observations.
+    /// Existing tracking is recovery evidence, never an empty-store default.
+    pub fn require_empty_collection_creation(&self) -> Result<(), RuntimeError> {
+        let s = self.state();
+        if s.store.is_some() || s.bound.is_some() || s.cloud.generation.is_some()
+            || s.adapter.sdk.is_some() || s.adapter.identity_read.is_some()
+            || s.incoming.running || s.scan_running || !s.policy.flights.is_empty()
+            || s.publication.preview.is_some() || s.publication.resume.is_some()
+            || s.publication.running.is_some() || s.publication.submitted
+            || s.suspended_adoption_cleanup.is_some()
+        {
+            return Err(PublicationError::Busy.into());
+        }
+        with_tracking_access(|| {
+            for suffix in ["", "-wal", "-shm", "-journal"] {
+                let path = self.directory.join(format!("{}{}", super::open::TRACKING_FILE, suffix));
+                match path.symlink_metadata() {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(storage_io(e)),
+                    Ok(_) => return Err(PublicationError::Busy.into()),
+                }
+            }
+            Ok(())
+        })
+    }
     fn write_adoption(&self, op: &AdoptOp) -> Result<(), RuntimeError> {
         let mut s = self.state();
         with_tracking_access(|| Ok(s.store.as_mut().ok_or(Error::Database)?.update_adoption(op)?))

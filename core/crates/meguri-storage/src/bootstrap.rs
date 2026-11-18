@@ -61,13 +61,16 @@ pub fn create<E: From<StorageError>>(
     for entry in config {
         crate::rows::insert(&conn, Table::Config, &entry.to_cells()).map_err(E::from)?;
     }
+    conn.execute_batch("ANALYZE;")
+        .map_err(StorageError::from)
+        .map_err(E::from)?;
     let mut scope = scope;
     fill(&mut scope)?;
     meguri_model::faultpoint!("storage.bootstrap.in_transaction")
         .map_err(io)
         .map_err(E::from)?;
     scope.commit().map_err(E::from)?;
-    conn.execute_batch("ANALYZE; PRAGMA wal_checkpoint(TRUNCATE);")
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
         .map_err(StorageError::from)
         .map_err(E::from)?;
     conn.close().map_err(|(_, e)| E::from(StorageError::from(e)))?;

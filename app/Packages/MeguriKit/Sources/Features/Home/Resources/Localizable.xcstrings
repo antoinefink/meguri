@@ -1,6 +1,36 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Couldn’t Start Empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t Start Empty"
+          }
+        }
+      }
+    },
+    "Quit and reopen Meguri before trying again. Any collection file already created will be kept.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quit and reopen Meguri before trying again. Any collection file already created will be kept."
+          }
+        }
+      }
+    },
+    "Start Empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start Empty"
+          }
+        }
+      }
+    },
     "This path has too many new parent decks. Choose a shorter path.": {
       "localizations": {
         "en": {
@@ -313,12 +343,12 @@
         }
       }
     },
-    "Import or sync a collection to start studying.": {
+    "Import, sync or start an empty collection.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Import or sync a collection to start studying."
+            "value": "Import, sync or start an empty collection."
           }
         }
       }

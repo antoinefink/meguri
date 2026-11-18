@@ -85,6 +85,50 @@ impl meguri_engine::DiskSpaceProvider for ForeignSpace {
 }
 
 #[uniffi::export]
+pub fn start_create_empty(
+    location: CollectionLocation,
+    clock: Arc<dyn HostClock>,
+    disk_space: Arc<dyn DiskSpaceProvider>,
+    random_seed: u64,
+) -> Result<JobHandle, CoreError> {
+    callback::enter("start_create_empty");
+    let host = runtime::retained_host();
+    if let Some(host) = &host
+        && host.cloud_connection_directory() != Path::new(&location.collection_directory)
+    {
+        return Err(CoreError::Busy { running_op: "another collection host".into() });
+    }
+    // Reserve only when absent. A prepared NoCollection Host must keep its
+    // exact providers and ownership; reserve_open alone intentionally refuses it.
+    let reservation = if host.is_none() { Some(runtime::reserve_open()?) } else { None };
+    let manual_transfer_directory = location.manual_transfer_directory.clone();
+    let mut config = HostConfig::new(
+        location.collection_directory.into(),
+        location.backups_directory.into(),
+        location.app_group_snapshot.into(),
+        Arc::new(ForeignClock(clock)),
+        Arc::new(SeededRandom::new(random_seed)),
+        Arc::new(ForeignSpace(disk_space)),
+    );
+    config.manual_transfer_directory = manual_transfer_directory.into();
+    if let Some((inputs, key_bytes)) = crate::sync::platform_inputs() {
+        config.cloud = Some(inputs);
+        config.cloud_key_bytes = key_bytes;
+    }
+    let engine = runtime::engine()?;
+    Ok(jobs::wrap(engine.jobs().start("create empty collection", engine.generation(), None, move |job| {
+        job.cancel.check()?;
+        let host = match reservation {
+            Some(reservation) => reservation.prepare_empty(config).map_err(meguri_engine::EngineError::from)?,
+            None => host.expect("retained creation host"),
+        };
+        // No late cancellation override: once published, normal open completes
+        // and its actual outcome wins. The complete live file is never removed.
+        host.create_empty(job)
+    })))
+}
+
+#[uniffi::export]
 pub fn start_open(
     location: CollectionLocation,
     clock: Arc<dyn HostClock>,
@@ -165,6 +209,83 @@ mod tests {
     use meguri_engine::EngineError;
     use meguri_model::clock::FixedClock;
     use std::sync::Mutex;
+
+    #[test]
+    fn start_empty_creates_default_once_with_absent_or_retained_no_collection_host() {
+        use meguri_engine::{EventKind, JobId, JobOutcome, LifecycleState, LongOp};
+        use meguri_model::ids::DeckId;
+        use meguri_storage::{ReadRows, ReaderRole, Table};
+        struct Clock;
+        impl HostClock for Clock {
+            fn now_ms(&self) -> i64 { 1_894_701_600_000 }
+            fn offset_from_utc(&self, _: i64) -> i32 { 0 }
+            fn zone_id(&self) -> String { "UTC".into() }
+        }
+        struct Space;
+        impl DiskSpaceProvider for Space {
+            fn available_bytes(&self, _: String) -> DiskCapacity { DiskCapacity::Available { bytes: u64::MAX } }
+        }
+        let engine = runtime::engine().unwrap();
+        let events = engine.stream().subscribe();
+        let wait = |job: JobHandle| loop {
+            let event = events.recv_timeout(std::time::Duration::from_secs(20)).unwrap();
+            if let EventKind::JobFinished { id, outcome } = &event.kind && *id == JobId(job.id) { break outcome.clone(); }
+        };
+        for retained in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let directory = root.path().join("collection");
+            std::fs::create_dir(&directory).unwrap();
+            let file = directory.join("collection.anki2");
+            let location = CollectionLocation {
+                collection_directory: directory.to_string_lossy().into_owned(),
+                backups_directory: root.path().join("backups").to_string_lossy().into_owned(),
+                app_group_snapshot: root.path().join("widget").to_string_lossy().into_owned(),
+                manual_transfer_directory: root.path().join("manual").to_string_lossy().into_owned(),
+            };
+            if retained {
+                prepare_cloud_connection_host(location.clone(), Arc::new(Clock), Arc::new(Space), 41).unwrap();
+                assert!(!file.exists(), "Account & Sync preparation creates nothing");
+            }
+            if retained {
+                let slot = engine.acquire_slot(LongOp::OneWaySync).unwrap();
+                assert!(matches!(wait(start_create_empty(location.clone(), Arc::new(Clock), Arc::new(Space), 42).unwrap()), JobOutcome::Failed { .. }));
+                assert!(!file.exists());
+                drop(slot);
+                let wal = directory.join("collection.anki2-wal");
+                std::fs::write(&wal, b"owned synthetic sidecar").unwrap();
+                assert!(matches!(wait(start_create_empty(location.clone(), Arc::new(Clock), Arc::new(Space), 42).unwrap()), JobOutcome::Failed { .. }));
+                assert_eq!(std::fs::read(&wal).unwrap(), b"owned synthetic sidecar");
+                assert!(!file.exists());
+                // Refusal does not claim this unknown sidecar is no collection.
+                runtime::close().unwrap();
+                std::fs::remove_file(wal).unwrap();
+                prepare_cloud_connection_host(location.clone(), Arc::new(Clock), Arc::new(Space), 41).unwrap();
+            }
+            let before = runtime::retained_host();
+            assert_eq!(wait(start_create_empty(location.clone(), Arc::new(Clock), Arc::new(Space), 42).unwrap()), JobOutcome::Succeeded);
+            let host = runtime::host().unwrap();
+            if let Some(before) = before { assert!(Arc::ptr_eq(&before, &host)); }
+            let collection = host.collection().unwrap();
+            let generation = collection.generation();
+            assert_eq!(engine.state(), LifecycleState::Ready { generation });
+            let publication = meguri_engine::device_state::DeviceState::for_collection(&file).settled_publication().unwrap().unwrap();
+            assert_eq!(publication.binding, meguri_engine::device_state::AccountBinding::LocalOnly);
+            {
+                let reader = collection.reader(ReaderRole::Query).unwrap();
+                assert_eq!(reader.deck(DeckId(1)).unwrap().unwrap().name, "Default");
+                assert_eq!(reader.ids_after(Table::Decks, None, 10).unwrap(), vec![1]);
+                assert_eq!(reader.ids_after(Table::Notetypes, None, 10).unwrap().len(), 6);
+                assert!(reader.cards_after(None, 1).unwrap().is_empty());
+            }
+            let bytes = std::fs::read(&file).unwrap();
+            assert!(matches!(wait(start_create_empty(location, Arc::new(Clock), Arc::new(Space), 43).unwrap()), JobOutcome::Failed { .. }));
+            assert_eq!(std::fs::read(file).unwrap(), bytes);
+            assert_eq!(engine.generation(), generation);
+            assert!(Arc::ptr_eq(&host, &runtime::host().unwrap()));
+            drop(collection); drop(host);
+            runtime::close().unwrap();
+        }
+    }
 
     struct Capacity {
         answer: Mutex<DiskCapacity>,

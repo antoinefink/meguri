@@ -902,6 +902,75 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
 }
 
 @MainActor extension ReviewCollectionStartupTests {
+    @Test(.timeLimit(.minutes(1)))
+    func startEmptyRefusalKeepsNoFileAndTrackingFailureKeepsReady() async throws {
+        try await withNativeMeguriNoFileOwner { app in
+            let originalSync = app.sync
+            let generation = app.owner.generation
+            let location = app.owner.configuration.collectionLocation
+            // Test-owned retained media refuses creation before publication.
+            let obstruction = location.directory.appending(path: "collection.media")
+            try FileManager.default.createDirectory(at: obstruction, withIntermediateDirectories: false)
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                try #require(app.owner.canStartEmpty)
+                await app.owner.startEmpty()
+                #expect(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
+                #expect(try await CoreCollectionService().lifecycle() == .noCollection)
+                #expect(app.owner.generation == generation && app.owner.sync === originalSync)
+                #expect(app.owner.error == "Meguri couldn’t start an empty collection while the collection is busy or unavailable.")
+                #expect(!FileManager.default.fileExists(atPath: location.collectionFile.path))
+                try #require(app.owner.canStartEmpty)
+
+                try FileManager.default.removeItem(at: obstruction)
+                await app.owner.startEmpty() // A later explicit action, never generic Retry.
+                try #require(app.owner.state == .ready)
+                let readyGeneration = app.owner.generation
+                #expect(readyGeneration > generation && app.owner.error == nil)
+                #expect(FileManager.default.fileExists(atPath: location.collectionFile.path))
+
+                // Reconcile a drained listener failure with a real Ready Host.
+                try app.owner.beginEntryActivation()
+                try await app.owner.drainEntryActivation()
+                await app.owner.reconcileEmptyCreationFailure(BridgeError.internal("synthetic diagnostic detail"))
+                #expect(app.owner.state == .ready)
+                #expect(app.owner.lifecycle == .ready(generation: readyGeneration))
+                #expect(try await CoreCollectionService().lifecycle() == .ready(generation: readyGeneration))
+                #expect(app.owner.generation == readyGeneration && app.owner.sync === originalSync)
+                #expect(app.owner.error == "Meguri couldn’t finish starting an empty collection.")
+                #expect(!app.owner.canStartEmpty)
+                await app.owner.startEmpty()
+                #expect(calls.withLock { $0.filter { $0 == .startCreateEmpty }.count } == 2)
+                #expect(calls.withLock { !$0.contains(.startOpen) && !$0.contains(.providerStartLogin) })
+                #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
+            }
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func startEmptyOpensRealDefaultDeckWithoutProviderTransfer(coldSelected: Bool) async throws {
+        try await withNativeMeguriNoFileOwner(coldSelected: coldSelected) { app in
+            try #require(app.owner.canStartEmpty)
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                async let first: Void = app.owner.startEmpty()
+                async let repeated: Void = app.owner.startEmpty()
+                _ = await (first, repeated)
+                try #require(app.owner.state == .ready, "\(app.owner.error ?? "Creation did not become ready")")
+                #expect(app.owner.lifecycle == .ready(generation: app.owner.generation))
+                #expect(app.owner.generation > 0)
+                #expect(app.owner.decks.count == 1 && app.owner.decks.first?.name == "Default")
+                #expect(!app.owner.canStartEmpty)
+                #expect(calls.withLock { $0.filter { $0 == .startCreateEmpty }.count } == 1)
+                #expect(calls.withLock { !$0.contains(.startOpen) && !$0.contains(.providerStartLogin) })
+                #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
+                let generation = app.owner.generation
+                await app.owner.startEmpty()
+                #expect(app.owner.generation == generation)
+            }
+        }
+    }
+
     @Test(.timeLimit(.minutes(1))) func coldMeguriPausedResumePersistsAfterAttachmentAndReload() async throws {
         try await withNativeMeguriNoFileOwner(coldSelected: true, coldPaused: true) { app in
             let sync = app.sync

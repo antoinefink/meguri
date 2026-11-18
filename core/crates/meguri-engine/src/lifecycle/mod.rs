@@ -4,6 +4,7 @@
 //! the whole process (meguri-ffi holds it); it owns the change stream, the
 //! thread registry and the job registry, and at most one open collection.
 
+mod creation;
 pub mod generation;
 pub mod state;
 pub mod wait;

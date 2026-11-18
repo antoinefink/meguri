@@ -86,6 +86,13 @@ fn reserve_open_on(runtime: Arc<Runtime>) -> Result<OpenReservation, CoreError> 
     Ok(OpenReservation { runtime, pending: true })
 }
 impl OpenReservation {
+    pub(crate) fn prepare_empty(mut self, config: meguri_host::HostConfig) -> Result<Arc<meguri_host::CoreHost>, CoreError> {
+        let backups = config.backups_directory.clone();
+        let host = Arc::new(self.runtime.process.prepare_empty_collection(config)?);
+        *self.runtime.host.lock().unwrap_or_else(PoisonError::into_inner) = HostState::Open(host.clone(), backups);
+        self.pending = false;
+        Ok(host)
+    }
     pub(crate) fn prepare_cloud(mut self, config: meguri_host::HostConfig) -> Result<(), CoreError> {
         let backups = config.backups_directory.clone();
         let host = Arc::new(self.runtime.process.prepare_cloud_connection(config)?);
