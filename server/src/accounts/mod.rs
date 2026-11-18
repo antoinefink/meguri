@@ -25,6 +25,13 @@ pub struct AccountSummary {
     pub identity: Identity,
     pub enabled: bool,
     pub provisioning_state: String,
+    pub storage: Option<AccountStorage>,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct AccountStorage {
+    pub collection_bytes: u64,
+    pub media_bytes: u64,
+    pub total_bytes: u64,
 }
 #[derive(Clone)]
 pub(crate) struct Account {
@@ -160,14 +167,6 @@ impl Service {
                 Ok(check_browser(c, &authority, "authentication_failed")?.identity)
             })
             .await
-    }
-    pub async fn accounts(&self, authority: BrowserAuthority) -> Result<Vec<AccountSummary>> {
-        self.metadata.run(move |c| {
-            admission(c)?; check_admin(c,&authority,"authentication_failed")?;
-            let mut query=c.prepare("SELECT id,username,role,enabled,provisioning_state FROM accounts ORDER BY username,id")?;
-            let rows=query.query_map([], |r| Ok(AccountSummary { identity:Identity {id:r.get(0)?,username:r.get(1)?,role:r.get(2)?},enabled:r.get(3)?,provisioning_state:r.get(4)? }))?;
-            rows.collect::<std::result::Result<Vec<_>,_>>().map_err(Into::into)
-        }).await
     }
     pub(crate) fn name_attempt(&self, ip: IpAddr, name: &str) -> Result<String> {
         // Invalid names still consume a bounded digest bucket; never retain the

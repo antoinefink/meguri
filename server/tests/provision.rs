@@ -507,6 +507,13 @@ async fn revoked_reserved_invitation_remains_blocked_and_username_reserved() {
         )
         .unwrap();
     assert_eq!(state, "provisioning");
+    let response = h.get("/api/admin/accounts", Some(&admin)).await;
+    assert_eq!(response.status(), 200);
+    let list = response.json::<Value>().await.unwrap();
+    let reserved = list["data"]["accounts"].as_array().unwrap().iter()
+        .find(|a| a["username"] == "reserved").unwrap();
+    assert_eq!(reserved["provisioning_state"], "provisioning");
+    assert!(reserved["storage"].is_null());
 }
 
 #[cfg(feature = "test-hooks")]

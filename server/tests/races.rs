@@ -1201,3 +1201,22 @@ async fn original_admin_disable_acknowledges_before_either_capability_can_commit
         );
     }
 }
+
+#[tokio::test]
+async fn delayed_account_storage_list_revalidates_original_admin_session() {
+    let h = Harness::new().await;
+    h.setup().await;
+    let admin = h.login("root.admin", PASSWORD).await;
+    let pause = h.service.hooks.arm("accounts_before_return");
+    let client = h.client.clone();
+    let base = h.base.clone();
+    let cookie = admin.clone();
+    let list = tokio::spawn(async move {
+        client.get(format!("{base}/api/admin/accounts")).header("cookie", cookie).send().await.unwrap()
+    });
+    pause.arrived().await;
+    assert_eq!(h.post("/api/logout", json!({}), Some(&admin)).await.status(), 200);
+    pause.resume();
+    error(list.await.unwrap(), 401, "authentication_failed").await;
+    h.stop().await;
+}

@@ -7,6 +7,61 @@ pub struct CapabilityLink {
     pub expires_at: String,
 }
 impl Service {
+    pub async fn accounts(&self, authority: BrowserAuthority) -> Result<Vec<AccountSummary>> {
+        let actor = authority.clone();
+        let rows = self.metadata.run(move |c| {
+            let tx = c.transaction()?;
+            admission(&tx)?;
+            check_admin(&tx, &actor, "authentication_failed")?;
+            let mut query = tx.prepare("SELECT id,username,role,enabled,provisioning_state FROM accounts ORDER BY username,id")?;
+            let accounts = query.query_map([], |r| Ok(AccountSummary {
+                identity: Identity { id: r.get(0)?, username: r.get(1)?, role: r.get(2)? },
+                enabled: r.get(3)?, provisioning_state: r.get(4)?, storage: None,
+            }))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(accounts.into_iter().map(|account| {
+                let media = if account.provisioning_state == "ready" {
+                    crate::media::index::storage_bytes(&tx, &account.identity.id).ok()
+                } else { None };
+                (account, media)
+            }).collect::<Vec<_>>())
+        }).await?;
+        let mut accounts = Vec::with_capacity(rows.len());
+        for (mut account, media) in rows {
+            if let Some(media_bytes) = media {
+                // No metadata writer or other account barrier is held here.
+                // Move the guard into the blocking job so cancellation cannot
+                // release publication ownership before the snapshot closes.
+                if let Ok(gate) = self.barriers.get(&account.identity.id) {
+                    let guard = gate.enter().await;
+                    let id = account.identity.id.clone();
+                    account.storage = self.metadata.files(move |root| {
+                        let _publication = (gate, guard);
+                        let path = root.collection_path(&id)?;
+                        let mut c = crate::collection::schema::open(&path, false)?;
+                        let tx = c.transaction()?;
+                        // Establish one read snapshot before reading both PRAGMAs.
+                        tx.query_row("SELECT count(*) FROM sqlite_schema", [], |r| r.get::<_, i64>(0))?;
+                        let pages: u64 = tx.pragma_query_value(None, "page_count", |r| r.get(0))?;
+                        let page_size: u64 = tx.pragma_query_value(None, "page_size", |r| r.get(0))?;
+                        let collection_bytes = pages.checked_mul(page_size)
+                            .filter(|n| *n > 0).ok_or(Error::new("storage_unavailable"))?;
+                        let total_bytes = collection_bytes.checked_add(media_bytes)
+                            .ok_or(Error::new("storage_unavailable"))?;
+                        Ok(AccountStorage { collection_bytes, media_bytes, total_bytes })
+                    }).await.ok();
+                }
+            }
+            accounts.push(account);
+        }
+        self.pause("accounts_before_return").await;
+        // Slow filesystem reads must not return data under revoked authority.
+        self.metadata.run(move |c| {
+            admission(c)?;
+            check_admin(c, &authority, "authentication_failed")?;
+            Ok(())
+        }).await?;
+        Ok(accounts)
+    }
     pub async fn invitation(&self, authority: BrowserAuthority) -> Result<CapabilityLink> {
         self.create_capability(authority, None).await
     }

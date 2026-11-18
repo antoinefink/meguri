@@ -119,16 +119,16 @@
         "sha256": "45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418"
       },
       "src/accounts.tsx": {
-        "bytes": 8551,
-        "sha256": "eb1c083f135400d14e1d44433b49527830be53f57474a962583bde23399365ac"
+        "bytes": 9312,
+        "sha256": "1f275369e73f55839205dd05016349add98d350e339e6e8bd3046064310a10f2"
       },
       "src/api.ts": {
-        "bytes": 4625,
-        "sha256": "b8888cfdc117dea1386cb73a2078028271e59489ce3c4b5c6ef8ff33982fb0ad"
+        "bytes": 4714,
+        "sha256": "e91452dfd81eadc35c905261d2d501c01e84da14c424ff6ec9085272aac47934"
       },
       "src/app.tsx": {
-        "bytes": 11651,
-        "sha256": "4e3224e691b9887c4e5aa8dee485118fb5308e20b15d15ccb0d885cb0915e8fd"
+        "bytes": 12463,
+        "sha256": "4d77e6929b7b62893dd6c436c86865bc53ce885bd32933fb58670b5a6a68b5f3"
       },
       "src/bootstrap.ts": {
         "bytes": 1000,
@@ -147,8 +147,8 @@
         "sha256": "e4601ed02978054d2b34a10ebabe3a32184f7ec75c31da9b51f248e139536ea1"
       },
       "src/style.css": {
-        "bytes": 7246,
-        "sha256": "73f23c7c83c63be975c6a5156e8adb5020a89cfcc4b9f8aaaaa0c40bfe0ec5e5"
+        "bytes": 7776,
+        "sha256": "3fef8a9053c040b755bcc36ec2edd1fc8a159cd2b220ed4c6c6d480ccfa3b04d"
       },
       "src/ui.tsx": {
         "bytes": 4952,
@@ -159,8 +159,8 @@
         "sha256": "036fe75a617cc7a806cb828d9908a5470a20bb7c731ea70cbbe730499a4a169f"
       },
       "tests/browser/accounts.spec.ts": {
-        "bytes": 17653,
-        "sha256": "be42910c8967a1916982559640f5ea76db8d2fb22bececcaddca1744c51bd944"
+        "bytes": 19895,
+        "sha256": "430ae2c48ad6f123095322cc16f4c0dc877ff32985f118bb32a137096a786193"
       },
       "tests/policy.test.ts": {
         "bytes": 1397,
@@ -184,7 +184,7 @@
       },
       "upstream-records.json": {
         "bytes": 6238,
-        "sha256": "e04eceba6bc281397bf6379e28e6232ac93143f1de536de20fe1c46c500e3037"
+        "sha256": "d01a9499a2330268d6c0a7aa495216e2163ed49946a12441c1e16574f8800c2f"
       },
       "vite.config.ts": {
         "bytes": 1520,

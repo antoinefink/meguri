@@ -186,12 +186,35 @@ async fn download(h: &Harness, key: &str, names: &[&str]) -> BTreeMap<String, Ve
 }
 
 #[tokio::test]
-async fn authenticated_minimal_stored_zip_media_upload_is_accepted() {
+async fn authenticated_media_upload_storage_tracks_live_blobs_per_account() {
     let h = Harness::new().await;
-    h.setup().await;
+    let identity = h.setup().await;
+    let admin = h.login("root.admin", PASSWORD).await;
+    let member = h.member(&admin, "media.member").await;
+    let member_key = h.service.native_login(IP, "media.member", PASSWORD.into()).await.unwrap().1;
     let key = login(&h).await;
-    let upload = addition("one.bin", &[0xff]);
-    assert_eq!(media(&h, &key, "uploadChanges", &upload).await, json!([1,1]));
+    async fn assert_sizes(h: &Harness, admin: &str, id: &str, member_id: &str, bytes: u64) {
+        let response = h.get("/api/admin/accounts", Some(admin)).await;
+        assert_eq!(response.status(), 200);
+        let list = response.json::<Value>().await.unwrap();
+        let accounts = list["data"]["accounts"].as_array().unwrap();
+        for (id, expected) in [(id, bytes), (member_id, 5)] {
+            let storage = &accounts.iter().find(|a| a["id"] == id).unwrap()["storage"];
+            assert_eq!(storage["media_bytes"], expected);
+            assert_eq!(storage["total_bytes"].as_u64().unwrap(), storage["collection_bytes"].as_u64().unwrap() + expected);
+        }
+    }
+    // Same live name in another account must never contribute to this account.
+    assert_eq!(media(&h, &member_key, "uploadChanges", &addition("one.bin", b"other")).await, json!([1,1]));
+    let id = identity["id"].as_str().unwrap();
+    let member_id = member["id"].as_str().unwrap();
+    assert_sizes(&h, &admin, id, member_id, 0).await;
+    assert_eq!(media(&h, &key, "uploadChanges", &addition("one.bin", &[0xff])).await, json!([1,1]));
+    assert_sizes(&h, &admin, id, member_id, 1).await;
+    assert_eq!(media(&h, &key, "uploadChanges", &addition("one.bin", b"replace")).await, json!([1,2]));
+    assert_sizes(&h, &admin, id, member_id, 7).await;
+    assert_eq!(media(&h, &key, "uploadChanges", &deletion("one.bin")).await, json!([1,3]));
+    assert_sizes(&h, &admin, id, member_id, 0).await;
     let _ = h.stop().await;
 }
 

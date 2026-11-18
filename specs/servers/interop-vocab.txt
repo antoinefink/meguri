@@ -12,6 +12,9 @@ X-Forwarded-For
 setup_required
 server_url
 provisioning_state
+collection_bytes
+media_bytes
+total_bytes
 expires_at
 current_password
 new_password

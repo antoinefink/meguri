@@ -17,6 +17,12 @@ function checkLink(link: GeneratedLink, path: "/invite" | "/reset"): GeneratedLi
   } catch { throw new Error("Invalid link result"); }
   return link;
 }
+function storageValue(bytes: number): string {
+  const units = ["B", "kB", "MB", "GB", "TB", "PB", "EB"];
+  let unit = 0;
+  while (bytes >= 1000 && unit < units.length - 1) { bytes /= 1000; unit++; }
+  return `${new Intl.NumberFormat("en", { maximumSignificantDigits: 3 }).format(bytes)} ${units[unit]}`;
+}
 function AccountRow({ account, me, sessionLoss, disabled }: { account: Account; me: Me; sessionLoss: () => void; disabled: (id: string) => void }) {
   const [confirm, setConfirm] = useState(false), [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<OutcomeValue | null>(null), [link, setLink] = useState<GeneratedLink | null>(null);
@@ -49,6 +55,11 @@ function AccountRow({ account, me, sessionLoss, disabled }: { account: Account; 
   return <li className="account-row" aria-label={`Account ${account.username}`}>
     <div className="account-info"><h2>{account.username}{account.id === me.id ? " (you)" : ""}</h2>
       <p>{account.role === "admin" ? "Administrator" : "Member"} · {account.enabled ? "Enabled" : "Disabled"} · {account.provisioning_state === "ready" ? "Ready" : "Provisioning"}</p>
+      {account.storage ? <dl className="account-storage" role="group" aria-label="Storage on server">
+        <div><dt>Collection</dt><dd>{storageValue(account.storage.collection_bytes)}</dd></div>
+        <div><dt>Media</dt><dd>{storageValue(account.storage.media_bytes)}</dd></div>
+        <div><dt>Total</dt><dd>{storageValue(account.storage.total_bytes)}</dd></div>
+      </dl> : account.provisioning_state === "ready" && <p>Storage unavailable</p>}
     </div>
     <div className="actions" role="group" aria-label={`Actions for ${account.username}`}>
       <Button ref={resetTrigger} variant="outline" aria-disabled={busy || confirm} onClick={() => { if (!confirm) void perform("reset"); }}>Create reset link<span className="sr-only"> for {account.username}</span></Button>

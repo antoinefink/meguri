@@ -8,6 +8,22 @@ const fixture: { setup_token: string } = JSON.parse(readFileSync("/fixture/fixtu
 const initialPassword = " Synthetic initial password ";
 const replacedPassword = "é".repeat(6);
 const resetPassword = "Synthetic reset password 2026";
+const memberUsername = "member." + "long".repeat(14) + "x"; // Maximum 64-character username.
+async function accountShell(page: Page, username: string, admin: boolean) {
+  const navigation = page.getByRole("navigation", { name: "Account", exact: true });
+  const names = admin ? ["Connection", "Password", "Accounts"] : ["Connection", "Password"];
+  await expect(navigation.getByRole("link")).toHaveCount(names.length);
+  for (const name of names) {
+    const link = navigation.getByRole("link", { name, exact: true });
+    await expect(link).toBeVisible();
+    await expect(link.locator('svg[aria-hidden="true"][focusable="false"]')).toHaveCount(1);
+  }
+  const identity = page.getByRole("group", { name: "Signed-in account", exact: true });
+  await expect(identity.getByText(username, { exact: true })).toBeVisible();
+  await expect(identity.getByText("Signed in as", { exact: true })).toBeVisible();
+  await expect(identity.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+}
+
 async function openCapability(page: Page, url: string) {
   try { await page.goto(url); } catch { throw new Error("Could not open the synthetic capability page"); }
 }
@@ -144,6 +160,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   const logout = await page.context().request.post(`${baseURL}/api/logout`, { data: {}, headers: { Origin: baseURL } });
   expect(logout.ok()).toBe(true);
   await signIn(page, "root.admin", initialPassword);
+  await accountShell(page, "root.admin", true);
   await audit(page, "connection-wide");
   await page.getByRole("link", { name: "Accounts", exact: true }).click();
   await expect(page.getByRole("heading", { name: "root.admin (you)" })).toBeVisible();
@@ -171,18 +188,21 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await expect(member.getByRole("alert")).toContainText("username is unavailable");
   expect(await member.getByLabel("New password", { exact: true }).inputValue() === initialPassword).toBe(true);
   await audit(member, "invite-conflict-narrow");
-  await member.getByLabel("Username", { exact: true }).fill("member.one");
+  await member.getByLabel("Username", { exact: true }).fill(memberUsername);
   await member.getByRole("button", { name: "Create your account", exact: true }).click();
   await expect(member.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
-  await member.getByLabel("Username", { exact: true }).fill("member.one");
+  await member.getByLabel("Username", { exact: true }).fill(memberUsername);
   await member.getByLabel("Password", { exact: true }).fill("incorrect");
   await member.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(member.getByRole("alert")).toBeFocused();
-  await expect(member.getByLabel("Username", { exact: true })).toHaveValue("member.one");
+  await expect(member.getByLabel("Username", { exact: true })).toHaveValue(memberUsername);
   await expect(member.getByLabel("Password", { exact: true })).toHaveValue("");
   await member.getByLabel("Password", { exact: true }).fill(initialPassword);
   await member.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(member.getByRole("heading", { name: "Connect your devices" })).toBeVisible();
+  await accountShell(member, memberUsername, false);
+  await expect(member.getByText("Collection", { exact: true })).toHaveCount(0);
+  await expect(member.getByText("Total", { exact: true })).toHaveCount(0);
   await expect(member.getByRole("link", { name: "Accounts", exact: true })).toHaveCount(0);
   const denial = await context.request.get(`${baseURL}/api/admin/accounts`);
   expect(denial.status()).toBe(403); expect((await denial.json()).error.code).toBe("permission_denied");
@@ -196,23 +216,32 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await fillPassword(member, replacedPassword);
   await member.getByRole("button", { name: "Replace password and sign out" }).click();
   await expect(member.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
-  await signIn(member, "member.one", replacedPassword);
+  await signIn(member, memberUsername, replacedPassword);
+  await member.setViewportSize({ width: 1280, height: 900 });
+  await accountShell(member, memberUsername, false);
+  expect(await member.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await member.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Refresh accounts", exact: true }).click();
-  const memberRow = page.getByRole("listitem", { name: "Account member.one", exact: true });
+  const memberRow = page.getByRole("listitem", { name: `Account ${memberUsername}`, exact: true });
   await expect(memberRow).toBeVisible();
-  await memberRow.getByRole("button", { name: "Create reset link for member.one", exact: true }).click();
+  for (const label of ["Collection", "Media", "Total"]) await expect(memberRow.getByText(label, { exact: true })).toBeVisible();
+  await expect(memberRow.locator("dd")).toHaveCount(3);
+  await expect(memberRow.locator("dd").nth(0)).toHaveText(/^[1-9][\d,.]* (B|kB|MB|GB)$/);
+  await expect(memberRow.locator("dd").nth(1)).toHaveText("0 B");
+  await expect(memberRow.locator("dd").nth(2)).toHaveText(await memberRow.locator("dd").nth(0).innerText());
+  await memberRow.getByRole("button", { name: `Create reset link for ${memberUsername}`, exact: true }).click();
   const firstReset = await memberRow.getByLabel("One-time link", { exact: true }).inputValue();
   await memberRow.getByRole("button", { name: "Copy One-time link", exact: true }).click();
   await expect(memberRow.getByRole("status").filter({ hasText: /Copied\.|text is selected/ })).toBeVisible();
-  await memberRow.getByRole("button", { name: "Create reset link for member.one", exact: true }).click();
+  await memberRow.getByRole("button", { name: `Create reset link for ${memberUsername}`, exact: true }).click();
   await expect(memberRow.getByLabel("One-time link", { exact: true })).not.toHaveValue(firstReset);
   await expect(memberRow.getByRole("status").filter({ hasText: /Copied\.|text is selected/ })).toHaveCount(0);
   const reset = await memberRow.getByLabel("One-time link", { exact: true }).inputValue();
   expect(reset).not.toBe(firstReset);
   await openCapability(member, reset);
   await expect(member.getByRole("heading", { name: "Check your account" })).toBeVisible();
-  await expect(member.getByText("You are signed in as member.one (member).", { exact: true })).toBeVisible();
-  await member.getByRole("button", { name: "Sign out member.one", exact: true }).click();
+  await expect(member.getByText(`You are signed in as ${memberUsername} (member).`, { exact: true })).toBeVisible();
+  await member.getByRole("button", { name: `Sign out ${memberUsername}`, exact: true }).click();
   await expect(member.getByRole("heading", { name: "Reset your password" })).toBeVisible();
   await expect(member.getByLabel("Username", { exact: true })).toHaveCount(0);
   await member.setViewportSize({ width: 1280, height: 900 });
@@ -232,16 +261,19 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await expect(adminRow.getByRole("alert")).toContainText("sole enabled, ready administrator");
   await adminRow.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(adminRow.getByRole("button", { name: "Disable root.admin", exact: true })).toBeFocused();
-  await signIn(member, "member.one", resetPassword);
+  await signIn(member, memberUsername, resetPassword);
   await context.request.post(`${baseURL}/api/logout`, { data: {}, headers: { Origin: baseURL! } });
   await member.getByRole("link", { name: "Password", exact: true }).click();
   await expect(member.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
   await expect(member.getByLabel("Username", { exact: true })).toHaveValue("");
-  await memberRow.getByRole("button", { name: "Disable member.one", exact: true }).click();
+  await memberRow.getByRole("button", { name: `Disable ${memberUsername}`, exact: true }).click();
   await expect(memberRow.getByRole("button", { name: "Cancel", exact: true })).toBeFocused();
-  await memberRow.getByRole("button", { name: "Confirm disable member.one", exact: true }).click();
+  await memberRow.getByRole("button", { name: `Confirm disable ${memberUsername}`, exact: true }).click();
   await expect(memberRow.getByText(/Member · Disabled · Ready/)).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
+  await accountShell(page, "root.admin", true);
+  await expect(memberRow.getByText(memberUsername, { exact: true })).toBeVisible();
+  await expect(memberRow.locator("dd").nth(1)).toHaveText("0 B");
   await audit(page, "accounts-narrow");
   await page.setViewportSize({ width: 1280, height: 900 });
   await audit(page, "accounts-wide");

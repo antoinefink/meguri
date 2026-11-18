@@ -49,6 +49,19 @@ pub(crate) fn count(c:&Connection,id:&str)->Result<u32> {
     let n:i64=c.query_row("SELECT count(*) FROM media_names WHERE account_id=?1 AND blob IS NOT NULL",[id],|r|r.get(0))?;
     n.try_into().map_err(|_|integrity())
 }
+/// Unique account-local blobs still referenced by live names. Historical blobs
+/// and tombstones consume no synced-content storage in the administrator view.
+pub(crate) fn storage_bytes(c: &Connection, id: &str) -> Result<u64> {
+    let mut query = c.prepare("SELECT size FROM media_blobs WHERE account_id=?1 AND blob IN (SELECT blob FROM media_names WHERE account_id=?1 AND blob IS NOT NULL)")?;
+    let mut rows = query.query([id])?;
+    let mut bytes = 0u64;
+    while let Some(row) = rows.next()? {
+        let size: u64 = row.get(0)?;
+        if !(1..=104_857_600).contains(&size) { return Err(integrity()); }
+        bytes = bytes.checked_add(size).ok_or_else(integrity)?;
+    }
+    Ok(bytes)
+}
 pub(crate) fn apply(c:&Connection,id:&str,changes:&[(String,Option<Content>)],effective:&[bool])->Result<i32> {
     let mut usn=cursor(c,id)?;
     let increment:i32=effective.iter().filter(|v|**v).count().try_into().map_err(|_|integrity())?;
@@ -65,4 +78,19 @@ pub(crate) fn apply(c:&Connection,id:&str,changes:&[(String,Option<Content>)],ef
     }
     c.execute("UPDATE accounts SET media_usn=?2 WHERE id=?1",params![id,usn])?;
     Ok(usn)
+}
+
+#[cfg(test)]
+#[test]
+fn storage_counts_shared_live_blobs_once_but_not_distinct_equal_sizes() {
+    let c = Connection::open_in_memory().unwrap();
+    c.execute_batch("
+        CREATE TABLE media_blobs(account_id TEXT, blob TEXT, size INTEGER);
+        CREATE TABLE media_names(account_id TEXT, name TEXT, blob TEXT);
+        INSERT INTO media_blobs VALUES('a','shared',7),('a','equal-size',7),('a','historical',99),('b','shared',50);
+        INSERT INTO media_names VALUES('a','one','shared'),('a','alias','shared'),('a','two','equal-size'),('a','deleted',NULL),('b','one','shared');
+    ").unwrap();
+    assert_eq!(storage_bytes(&c, "a").unwrap(), 14);
+    assert_eq!(storage_bytes(&c, "b").unwrap(), 50);
+    assert_eq!(storage_bytes(&c, "empty").unwrap(), 0);
 }

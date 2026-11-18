@@ -57,7 +57,12 @@ async fn actual_http_setup_invite_login_admin_me_logout_and_restart() {
     assert_eq!(accounts[0]["username"], "member.one");
     assert_eq!(accounts[1]["role"], "admin");
     for a in accounts {
-        assert_eq!(a.as_object().unwrap().len(), 5);
+        assert_eq!(a.as_object().unwrap().len(), 6);
+        let storage = &a["storage"];
+        assert_eq!(storage.as_object().unwrap().len(), 3);
+        assert!(storage["collection_bytes"].as_u64().unwrap() > 0);
+        assert_eq!(storage["media_bytes"], 0);
+        assert_eq!(storage["total_bytes"], storage["collection_bytes"]);
     }
     let native = h
         .service
@@ -232,6 +237,8 @@ async fn reset_replaces_links_revokes_both_credential_kinds_and_retains_disabled
     assert_eq!(m["enabled"], false);
     assert_eq!(m["role"], "member");
     assert_eq!(m["id"], id);
+    assert!(m["storage"]["collection_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(m["storage"]["media_bytes"], 0); // Unreferenced sentinel is excluded.
 }
 #[tokio::test]
 async fn sole_admin_password_change_revocation_and_logout_idempotence() {
@@ -536,4 +543,44 @@ async fn capability_and_session_lifetimes_are_independent_and_exclusive() {
         200
     );
     assert_eq!(h.get("/api/me", Some(&replacement)).await.status(), 200);
+}
+
+#[tokio::test]
+async fn admin_storage_reads_committed_sqlite_pages_and_preserves_unmeasurable_rows() {
+    let h = Harness::new().await;
+    h.setup().await;
+    let admin = h.login("root.admin", PASSWORD).await;
+    let member = h.member(&admin, "member").await;
+    let id = member["id"].as_str().unwrap();
+    let path = h.path().join("state/accounts").join(id).join("generations/initial/collection.anki2");
+    let c = meguri_sync_server::collection::schema::open(&path, true).unwrap();
+    c.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+    c.execute_batch("CREATE TABLE storage_fixture(value BLOB); INSERT INTO storage_fixture VALUES(zeroblob(200000));").unwrap();
+    let pages: u64 = c.pragma_query_value(None, "page_count", |r| r.get(0)).unwrap();
+    let size: u64 = c.pragma_query_value(None, "page_size", |r| r.get(0)).unwrap();
+    let expected = pages * size;
+    assert!(expected > std::fs::metadata(&path).unwrap().len(), "committed WAL pages must be counted");
+    c.execute_batch("BEGIN; INSERT INTO storage_fixture VALUES(zeroblob(200000));").unwrap();
+    let response = h.get("/api/admin/accounts", Some(&admin)).await;
+    assert_eq!(response.status(), 200);
+    let list = response.json::<Value>().await.unwrap();
+    assert_eq!(list["data"]["accounts"][0]["storage"], json!({
+        "collection_bytes": expected, "media_bytes": 0, "total_bytes": expected
+    }));
+    c.execute_batch("ROLLBACK;").unwrap();
+    drop(c);
+    // A bad active manifest affects only that row, not list authority/actions.
+    let manifest = h.path().join("state/accounts").join(id).join("current-collection");
+    let saved = std::fs::read(&manifest).unwrap();
+    std::fs::write(&manifest, b"invalid synthetic manifest").unwrap();
+    let response = h.get("/api/admin/accounts", Some(&admin)).await;
+    assert_eq!(response.status(), 200);
+    let list = response.json::<Value>().await.unwrap();
+    assert_eq!(list["data"]["accounts"][0]["id"], id);
+    assert!(list["data"]["accounts"][0]["storage"].is_null());
+    assert!(list["data"]["accounts"][1]["storage"].is_object());
+    error(h.get("/api/admin/accounts", None).await, 401, "authentication_failed").await;
+    std::fs::write(&manifest, saved).unwrap();
+    h.reset_link(&admin, id).await;
+    h.stop().await;
 }
