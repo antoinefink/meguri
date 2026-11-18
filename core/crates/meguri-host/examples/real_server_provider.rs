@@ -307,7 +307,8 @@ fn row(record: &impl Record) -> Value {
         Cell::Blob(v) => json!(["blob", v]),
     }).collect::<Vec<_>>())
 }
-fn daily_facts(host: &CoreHost, fixture: &Fixture, initial: &Value) -> Result<Value> {
+enum DailyRole { Sender, Receiver }
+fn daily_facts(host: &CoreHost, fixture: &Fixture, initial: &Value, role: DailyRole) -> Result<Value> {
     fsrs_ok(host)?;
     require(host.review().active_session().is_none(), "no-active-review")?;
     let collection = checked(host.collection(), "daily-collection")?;
@@ -342,10 +343,18 @@ fn daily_facts(host: &CoreHost, fixture: &Fixture, initial: &Value) -> Result<Va
     require(decks.len() == original_decks.len() && decks.iter().all(|d| original_decks.iter().any(|v|
         v["id"] == json!(d.id.0) && v["name"] == json!(d.name) && v["kind"] == json!(d.kind.to_bytes().as_ref()))), "original-decks")?;
     // Answering changes real deck statistics. Retain those resulting full rows,
-    // along with every actual card/revlog USN; never compare collection next-USN.
+    // along with every actual card/revlog USN.
     let fsrs = checked(reader.config_entry("fsrs"), "daily-fsrs-config")?
         .ok_or_else(|| failure("daily-fsrs-config", "missing"))?;
     require(fsrs.is_blob, "daily-fsrs-config-blob")?;
+    require(fsrs.entry.key == "fsrs", "daily-fsrs-config")?;
+    if matches!(role, DailyRole::Receiver) {
+        // N5.7 stamps even an unchanged config value on receipt. In this
+        // fixed-clock fixture, the same committed snapshot holds next-USN.
+        let server_usn = checked(reader.col(), "daily-fsrs-config")?.usn.0.checked_sub(1);
+        require(server_usn.is_some_and(|usn| usn >= 0 && fsrs.entry.usn.0 == usn)
+            && fsrs.entry.mtime.0 == daily_time(fixture)?.div_euclid(1000), "daily-fsrs-config")?;
+    }
     let result = json!({"format":1,"notes":notes.iter().map(row).collect::<Vec<_>>(),
         "cards":cards.iter().map(row).collect::<Vec<_>>(),"revlogs":logs.iter().map(row).collect::<Vec<_>>(),
         "decks":decks.iter().map(row).collect::<Vec<_>>(),"fsrs":row(&fsrs.entry),"fsrs_ok":true});
@@ -353,6 +362,35 @@ fn daily_facts(host: &CoreHost, fixture: &Fixture, initial: &Value) -> Result<Va
     let mut result = result;
     result["media"] = media_facts(host, true)?;
     Ok(result)
+}
+fn daily_fsrs_cells(facts: &Value) -> Option<&[Value]> {
+    let cells = facts.get("fsrs")?.as_array()?;
+    if cells.len() != 4 || cells[0] != json!(["text", b"fsrs"]) { return None; }
+    for cell in &cells[1..3] {
+        let cell = cell.as_array()?;
+        if cell.len() != 2 || cell[0] != "integer" || cell[1].as_i64().is_none() { return None; }
+    }
+    let blob = cells[3].as_array()?;
+    if blob.len() != 2 || blob[0] != "blob"
+        || !blob[1].as_array()?.iter().all(|b| b.as_u64().is_some_and(|n| n <= 255)) { return None; }
+    Some(cells.as_slice())
+}
+fn daily_sent_fsrs_matches(actual: &Value, before: &Value) -> bool {
+    let (Some(actual), Some(before)) = (daily_fsrs_cells(actual), daily_fsrs_cells(before)) else { return false; };
+    // N5.1 sends USN 0 while retaining the actual pre-round key, bytes and mtime.
+    actual[0] == before[0] && actual[1] == json!(["integer", 0])
+        && actual[2] == before[2] && actual[3] == before[3]
+}
+fn daily_contract_matches(actual: &Value, expected: &Value) -> bool {
+    const KEYS: [&str; 8] = ["format", "notes", "cards", "revlogs", "decks", "fsrs", "fsrs_ok", "media"];
+    let exact_keys = |v: &Value| v.as_object().is_some_and(|o|
+        o.len() == KEYS.len() && KEYS.iter().all(|k| o.contains_key(*k)));
+    if !exact_keys(actual) || !exact_keys(expected) { return false; }
+    if !KEYS.iter().filter(|k| **k != "fsrs").all(|k| actual.get(*k) == expected.get(*k)) { return false; }
+    let (Some(actual), Some(expected)) = (daily_fsrs_cells(actual), daily_fsrs_cells(expected)) else { return false; };
+    // Sender and receiver stamps have separate local postconditions. Every
+    // other cell and group must remain exactly equal across devices.
+    actual[0] == expected[0] && actual[3] == expected[3]
 }
 // PUBLIC provider-client-equality-v1 is one compact line, below 8KiB by its
 // fixed schema (only booleans, fixed labels, usize counts and fixed-width masks).
@@ -598,25 +636,38 @@ fn execute_daily(args: &Args, fixture: &Fixture, config: &HostConfig) -> Result<
     let initial = read_json(&expected_dir.join("expected-facts.json"))?;
     let send = args.phase == "review-send";
     let reopen = args.phase == "review-reopen";
+    let mut before_send = None;
     if !reopen {
         require(facts(&host)? == initial, "daily-initial-unreviewed")?;
-        if send { review_once(&host, fixture)?; daily_facts(&host, fixture, &initial)?; }
+        if send {
+            review_once(&host, fixture)?;
+            before_send = Some(daily_facts(&host, fixture, &initial, DailyRole::Sender)?);
+        }
         let ca = checked(fs::read(args.fixture.with_file_name("ca.der")), "fixture-ca")?;
         run_daily(&host, config, fixture, &ca)?;
         settle(&host)?;
     }
     require(round_witness(&host)? == witness, "retained-binding-epoch-settings")?;
-    let actual = daily_facts(&host, fixture, &initial)?;
-    if !send {
+    let actual = daily_facts(&host, fixture, &initial, if send { DailyRole::Sender } else { DailyRole::Receiver })?;
+    if send {
+        require(before_send.as_ref().is_some_and(|before| daily_sent_fsrs_matches(&actual, before)),
+            "exact-daily-row-and-media-equality")?;
+    } else {
         let expected = read_json(&expected_dir.join("expected-daily.json"))?;
-        if args.phase == "review-receive" && actual != expected { daily_equality_diagnostic(&actual, &expected); }
-        require(actual == expected, "exact-daily-row-and-media-equality")?;
+        let matches = daily_contract_matches(&actual, &expected);
+        if args.phase == "review-receive" && !matches { daily_equality_diagnostic(&actual, &expected); }
+        require(matches, "exact-daily-row-and-media-equality")?;
+    }
+    if reopen {
+        require(actual == read_json(&args.root.join("received-daily-facts.json"))?, "exact-daily-row-and-media-equality")?;
     }
     if reopen { require(read_json(&args.root.join("daily-witness.json"))? == witness, "persisted-daily-witness")?; }
     checked(host.close(), "daily-close")?;
     drop(host);
+    if let Some(before) = before_send { write_json(&args.output.join("pre-send-daily-facts.json"), &before)?; }
     if send { write_json(&args.output.join("expected-daily.json"), &actual)?; }
     if args.phase == "review-receive" { write_json(&args.root.join("daily-witness.json"), &witness)?; }
+    if args.phase == "review-receive" { write_json(&args.root.join("received-daily-facts.json"), &actual)?; }
     let checks = if send { vec!["cold-ready", "original-binding-epoch-settings", "initial-unreviewed", "fsrs-ok", "rendered-question-and-answer", "good-answer-ended", "one-good-revlog", "second-card-unreviewed", "media-replaced", "owned-collection-merged", "owned-media-complete", "retained-binding-epoch-settings", "exported-full-daily-facts", "closed"] }
         else if reopen { vec!["cold-ready", "original-binding-epoch-settings", "persisted-daily-witness", "fsrs-ok", "no-active-review", "exact-daily-row-and-media-equality", "closed"] }
         else { vec!["cold-ready", "original-binding-epoch-settings", "initial-unreviewed", "owned-collection-merged", "owned-media-complete", "retained-binding-epoch-settings", "fsrs-ok", "one-good-revlog", "second-card-unreviewed", "exact-daily-row-and-media-equality", "closed"] };
