@@ -20,6 +20,7 @@ COPY conformance/fixtures/meguri-sync-server/media.json /opt/reference/neutral/m
 COPY conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json /opt/reference/neutral/candidate-complete-selection.json
 COPY conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json /opt/reference/neutral/candidate-final-additions.json
 COPY conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json /opt/reference/neutral/candidate-retained-final-selection.json
+COPY conformance/recordings/scenarios/meguri-sync-server/candidate-mobile-final-selection.json /opt/reference/neutral/candidate-mobile-final-selection.json
 COPY conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json /opt/reference/neutral/final-fixture-recipes.json
 COPY conformance/fixtures/meguri-sync-server/recovery.json /opt/reference/neutral/recovery-fixture.json
 COPY conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-selection.json /opt/reference/neutral/recovery-selection.json
