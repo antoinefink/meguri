@@ -1241,7 +1241,7 @@ PUBLIC_ARTIFACTS = {
     'app/Packages/MeguriKit/Tests/AppModelTests/ReviewCollectionStartupTests.swift': 'f099b680942f4551a56746e0f7978b568bf3eec10a4dff0e64f416902f16dc78',
     'core/crates/meguri-host/src/provider_bootstrap.rs': '038e6199bd9e9d63e307023e182caa3632ace08fee94c21563e61854357553bd',
     'core/crates/meguri-host/Cargo.toml': 'ef2e5f907851eb4d19984c899516e6affe5444516b59d245f4501dde2b744a73',
-    'core/crates/meguri-host/examples/real_server_provider.rs': 'b9903dbc79d57743768a5b8a1c98ce5718472558137057802d9c0394c89edc5f',
+    'core/crates/meguri-host/examples/real_server_provider.rs': 'd0330568327a4450d7e3765e54d273fa6e3769ef0a9877df84625f52b3e18d84',
     'server/tools/package-smoke.mjs': '98e1fef1aa34ea8178168204f9ec796f1655288c4fe3b6badff47e93c71bd88b',
     'tools/mg.d/meguri-provider-test.sh': 'bf637fbb25533a5cb354c079f4ee89d1518693e8e3b47c4c6d12b5c5467921f0',
     'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
