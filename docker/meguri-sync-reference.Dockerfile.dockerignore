@@ -26,6 +26,7 @@
 !conformance/recordings/scenarios/meguri-sync-server/candidate-complete-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/candidate-final-additions.json
 !conformance/recordings/scenarios/meguri-sync-server/candidate-retained-final-selection.json
+!conformance/recordings/scenarios/meguri-sync-server/candidate-mobile-final-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/final-fixture-recipes.json
 !conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-selection.json
 !conformance/recordings/scenarios/meguri-sync-server/desktop-recovery-dirty-selection.json
