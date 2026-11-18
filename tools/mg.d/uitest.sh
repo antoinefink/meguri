@@ -271,7 +271,8 @@ mg_ui_test__review_capture() {
 }
 
 mg_ui_test() {
-  local platform=iphone device="" config=Debug suites="" only=() build_args=() s result since udid
+  local MG_UI_MAC_PROFILE_SELECTOR=""
+  local platform=iphone device="" config=Debug suites="" suite_count=0 only=() build_args=() s result since udid
   local physical="" inventory="" run_args="" MG_UI_PHYSICAL_DEVICE=""
   local review="" MG_UI_REVIEW_READY="" MG_UI_REVIEW_PLATFORM=""
   local TEST_RUNNER_MEGURI_NATIVE_REVIEW_CASE TEST_RUNNER_MEGURI_NATIVE_REVIEW_PLATFORM
@@ -308,6 +309,7 @@ mg_ui_test() {
       --suite)
         [ "$#" -ge 2 ] && printf '%s' "$2" | grep -Eq '^[A-Z][A-Za-z0-9]*(/[A-Za-z0-9_]+)?$' ||
           { mg_ui_test__usage "--suite takes a test class of MeguriUITests, or Class/testMethod, e.g. NavigationLayoutTests"; return 0; }
+        suite_count=$((suite_count + 1))
         suites="$suites $2" && shift 2
         ;;
       *) mg_ui_test__usage "unknown argument '$1'"; return 0 ;;
@@ -338,6 +340,11 @@ mg_ui_test() {
   MG_UI_REVIEW_PLATFORM="$platform"
   MG_UI_MEDIA_PLATFORM="$platform"
   for s in $suites; do only[${#only[@]}]="-only-testing:MeguriUITests/$s"; done
+  if [ "$platform" = mac ] && [ "$config" = Debug ] && [ -z "$device" ] &&
+      [ -z "$physical" ] && [ -z "$inventory" ] && [ "$suite_count" -eq 1 ] &&
+      [ "$suites" = " MacHomeHierarchyTests/testNormalMeguriSetupControlsAndCancelledServiceSwitch" ]; then
+    MG_UI_MAC_PROFILE_SELECTOR=MacHomeHierarchyTests/testNormalMeguriSetupControlsAndCancelledServiceSwitch
+  fi
   mg_detail suites "$(printf '%s\n' $suites | jq -R . | jq -sc .)"
   mg_detail platform "$(jq -n --arg p "$platform" '$p')"
   mg_detail config "$(jq -n --arg c "$config" '$c')"
