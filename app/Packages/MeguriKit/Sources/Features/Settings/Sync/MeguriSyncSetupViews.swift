@@ -269,7 +269,7 @@ struct MeguriSyncSections: View {
                 Button(SyncText.value("sync.meguri.media.retry")) { sync.retryMeguriMedia() }
                     .accessibilityIdentifier("settings.accountSync.meguri.retryMedia")
             }
-            if sync.meguriRoutine != nil {
+            if sync.meguriRoutine != nil || sync.settings.paused {
                 Button(SyncText.value(sync.settings.paused ? "sync.meguri.resume" : "sync.meguri.pause")) {
                     let settings = sync.settings
                     sync.setDeviceSettings(paused: !settings.paused, automatic: settings.automatic, media: settings.media)
