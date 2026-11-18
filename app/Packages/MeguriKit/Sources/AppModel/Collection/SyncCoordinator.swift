@@ -975,7 +975,7 @@ public final class SyncCoordinator {
     }
     private var meguriCanRun: Bool {
         meguriReady && meguriRound != nil && providerState?.selection == .meguri && settings.enabled
-            && !settings.paused && desiredProviderSettings?.paused != true && !meguriAddressDirty && !meguriBusy
+            && !settings.paused && desiredProviderSettings?.paused != true && meguriPauseDrain == nil && !meguriAddressDirty && !meguriBusy
             && !closing && !suspended && !replacing && !providerActionInProgress && !providerHandoffInProgress
             && !providerNeedsAttention && !entryActivationHeld
     }
@@ -1420,9 +1420,15 @@ public final class SyncCoordinator {
                     if committed.paused, state.selection == .meguri, meguriPauseDrain == nil {
                         // This join cannot live in providerSettingsTask: a
                         // confirmation's replacement joins that settings task.
+                        let expected = generation
                         meguriPauseDrain = Task {
                             await self.drainMeguriProduct()
                             self.meguriPauseDrain = nil
+                            guard self.provider === provider, attachment == self.hostRevision,
+                                  expected == self.generation else { return }
+                            // A rapid Resume may have committed before the old
+                            // wake released its slot. Recheck after the join.
+                            self.requestMeguriWake(automatic: true)
                         }
                     }
                 } catch {
