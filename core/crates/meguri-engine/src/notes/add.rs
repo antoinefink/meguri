@@ -24,6 +24,81 @@ pub struct Added {
     pub cards: Vec<CardId>,
 }
 
+/// Identity of a field as loaded, in stored ordinal order. An absent stored
+/// id is significant; it is never replaced with the ordinal or a generated id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AddFieldIdentity {
+    pub ord: u32,
+    pub id: Option<i64>,
+    pub name: String,
+}
+
+/// Add-screen authority captured with the flushed draft and field check.
+/// `notetype_base` is the existing AggregateDigest exposed by read_notetype,
+/// not an id comparison. It also invalidates consent after template edits.
+#[derive(Clone, Debug)]
+pub struct AddScreenNote {
+    pub expected_generation: crate::Generation,
+    pub notetype_id: NotetypeId,
+    pub kind: i32,
+    pub field_layout: Vec<AddFieldIdentity>,
+    pub notetype_base: crate::notetypes::AggregateDigest,
+    pub fields: Vec<String>,
+    pub tags: Vec<String>,
+    pub deck_id: DeckId,
+}
+
+/// A5/D5: never reinterpret a draft using a successor collection, changed
+/// layout, or fallback deck. Refusals roll back the op, preserving undo/redo.
+/// Field-check refusals and missing-cloze consent remain the screen's job.
+pub fn add_for_screen(collection: &Collection, input: AddScreenNote) -> Result<OpResult<Added>, EngineError> {
+    // Compare the captured expectation with THIS handle, then submit on this
+    // same handle. The executor checks its generation again after queue wait.
+    if input.expected_generation != collection.generation() {
+        return Err(EngineError::StaleGeneration {
+            planned: input.expected_generation,
+            current: collection.generation(),
+        });
+    }
+    collection.run(super::op_spec(ADD_NOTE, OpSource::UserUndoable, 1), move |context| {
+        let (scope, random) = context.scope_and_random();
+        // These are the first reads in the real writer transaction, before
+        // normalization, tag registration, row generation or defaults writes.
+        let nt = scope.notetype(input.notetype_id)?.ok_or_else(|| EngineError::NotFound {
+            table: meguri_storage::Table::Notetypes,
+            key: input.notetype_id.0.to_string(),
+        })?;
+        let layout: Vec<_> = nt.fields.iter().map(|field| AddFieldIdentity {
+            ord: field.ord,
+            id: field.config.id,
+            name: field.name.clone(),
+        }).collect();
+        if nt.config.kind != input.kind || layout != input.field_layout
+            || crate::notetypes::AggregateDigest::of(&nt) != input.notetype_base
+        {
+            return Err(EngineError::Stale {
+                table: meguri_storage::Table::Notetypes,
+                key: input.notetype_id.0.to_string(),
+            });
+        }
+        let deck = scope.deck(input.deck_id)?.ok_or_else(|| EngineError::NotFound {
+            table: meguri_storage::Table::Decks,
+            key: input.deck_id.0.to_string(),
+        })?;
+        if !matches!(deck.kind.kind, meguri_model::proto::deck::DeckKind::Normal(_)) {
+            return Err(EngineError::DeckRefused(crate::decks::Refusal::FilteredDeck));
+        }
+        add_in(scope, random, &AddNote {
+            notetype_id: input.notetype_id,
+            fields: input.fields,
+            tags: input.tags,
+            deck_id: input.deck_id,
+            guid: None,
+            update_add_defaults: true,
+        })
+    })
+}
+
 pub fn add(collection: &Collection, input: AddNote, source: OpSource) -> Result<OpResult<Added>, EngineError> {
     collection.run(super::op_spec(ADD_NOTE, source, 1), move |context| {
         let (scope, random) = context.scope_and_random();

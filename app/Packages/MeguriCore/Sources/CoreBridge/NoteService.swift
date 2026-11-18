@@ -28,6 +28,31 @@ public struct AddNoteRequest: Sendable, Hashable {
     var raw: MeguriCoreBindings.AddNoteRequest { .init(notetypeId: notetypeId, fields: fields, tags: tags, deckId: deckId, guid: guid, updateAddDefaults: updateAddDefaults) }
 }
 
+/// Capture the draft's generation and the note type used for its final field
+/// check before presenting cloze consent. On refusal keep the flushed draft;
+/// refresh/reselect under D5 and require another user Add. Never auto-retry.
+public struct AddScreenNoteRequest: Sendable, Hashable {
+    public let expectedGeneration: UInt64
+    public let notetype: NotetypeRecord
+    public let fields: [String]
+    public let tags: [String]
+    public let deckId: Int64
+
+    public init(expectedGeneration: UInt64, notetype: NotetypeRecord, fields: [String], tags: [String], deckId: Int64) {
+        self.expectedGeneration = expectedGeneration
+        self.notetype = notetype
+        self.fields = fields
+        self.tags = tags
+        self.deckId = deckId
+    }
+
+    var raw: MeguriCoreBindings.AddScreenNoteRequest {
+        .init(expectedGeneration: expectedGeneration, notetypeId: notetype.id, kind: notetype.kind,
+              fieldLayout: notetype.fields.map { .init(ord: $0.ord, id: $0.id, name: $0.name) },
+              notetypeBase: Data(notetype.base), fields: fields, tags: tags, deckId: deckId)
+    }
+}
+
 public struct UpdateNoteRequest: Sendable, Hashable {
     public let id: Int64
     public let fields: [String]
@@ -150,6 +175,7 @@ public final class CoreNoteDeletionJob: Sendable {
 public protocol NoteService: Sendable {
     func startAddNotes(_ requests: [AddNoteRequest]) async throws(BridgeError) -> CoreNoteAdditionJob
     func addNote(_ request: AddNoteRequest) async throws(BridgeError) -> NoteMutation
+    func addNoteForScreen(_ request: AddScreenNoteRequest) async throws(BridgeError) -> NoteMutation
     func updateNote(_ request: UpdateNoteRequest) async throws(BridgeError) -> NoteMutation
     func readNote(id: Int64) async throws(BridgeError) -> NoteRecord
     func checkNoteFields(notetypeId: Int64, fields: [String], ownNote: Int64?) async throws(BridgeError) -> FieldCheck
@@ -159,6 +185,14 @@ public actor CoreNoteService: NoteService {
     public init() {}
     public func addNote(_ request: AddNoteRequest) async throws(BridgeError) -> NoteMutation {
         try await InteractiveLane.shared.call(.addNote) { NoteMutation(try MeguriCoreBindings.addNote(request: request.raw)) }
+    }
+    /// staleGeneration identifies collection replacement; stale(notetypes, id)
+    /// identifies changed kind/layout/aggregate; notFound and deckRefused keep
+    /// missing selections and a filtered deck distinguishable locally.
+    public func addNoteForScreen(_ request: AddScreenNoteRequest) async throws(BridgeError) -> NoteMutation {
+        try await InteractiveLane.shared.call(.addNoteForScreen) {
+            NoteMutation(try MeguriCoreBindings.addNoteForScreen(request: request.raw))
+        }
     }
     public func updateNote(_ request: UpdateNoteRequest) async throws(BridgeError) -> NoteMutation {
         try await InteractiveLane.shared.call(.updateNote) { NoteMutation(try MeguriCoreBindings.updateNote(request: request.raw)) }

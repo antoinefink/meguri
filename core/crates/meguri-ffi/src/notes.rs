@@ -24,6 +24,62 @@ impl From<AddNoteRequest> for notes::AddNote {
         }
     }
 }
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct AddFieldIdentity {
+    pub ord: u32,
+    pub id: Option<i64>,
+    pub name: String,
+}
+
+/// Dedicated native Add entry. Legacy add_note deliberately keeps A1's
+/// fallback semantics and caller-controlled update_add_defaults flag.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct AddScreenNoteRequest {
+    pub expected_generation: u64,
+    pub notetype_id: i64,
+    pub kind: i32,
+    pub field_layout: Vec<AddFieldIdentity>,
+    pub notetype_base: Vec<u8>,
+    pub fields: Vec<String>,
+    pub tags: Vec<String>,
+    pub deck_id: i64,
+}
+
+#[uniffi::export]
+pub fn add_note_for_screen(request: AddScreenNoteRequest) -> Result<NoteMutation, CoreError> {
+    callback::enter("add_note_for_screen");
+    // Resolve once at actual lane execution. Never check global generation
+    // and reacquire a potentially different collection for the mutation.
+    let collection = runtime::host()?.collection()?;
+    let expected_generation = meguri_engine::Generation(request.expected_generation);
+    if collection.generation() != expected_generation {
+        return Err(meguri_engine::EngineError::StaleGeneration {
+            planned: expected_generation,
+            current: collection.generation(),
+        }.into());
+    }
+    let base: [u8; 32] = request.notetype_base.try_into().map_err(|_| CoreError::InvalidArgument {
+        message: "expected note type aggregate digest must contain 32 bytes".into(),
+    })?;
+    let result = notes::add_for_screen(&collection, notes::AddScreenNote {
+        expected_generation,
+        notetype_id: NotetypeId(request.notetype_id),
+        kind: request.kind,
+        field_layout: request.field_layout.into_iter().map(|field| notes::AddFieldIdentity {
+            ord: field.ord,
+            id: field.id,
+            name: field.name,
+        }).collect(),
+        notetype_base: meguri_engine::notetypes::AggregateDigest(base),
+        fields: request.fields,
+        tags: request.tags,
+        deck_id: DeckId(request.deck_id),
+    })?;
+    Ok(NoteMutation::with_cards(
+        MutationSummary::of(&result), result.value.id, result.value.cards, true,
+    ))
+}
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct UpdateNoteRequest {
     pub id: i64,

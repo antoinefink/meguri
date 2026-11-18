@@ -18,6 +18,62 @@ private final class MutationDiskCapacity: DiskSpaceProviding {
 }
 
 extension EventTests {
+    @Test @MainActor func guardedAddUsesCapturedGenerationAndRealNoteWriter() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let directory = root.appending(path: "collection")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root.appending(path: "backups"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let location = CoreBridge.CollectionLocation(collectionDirectory: directory,
+            backupsDirectory: root.appending(path: "backups"), appGroupSnapshot: root.appending(path: "widget.snapshot"),
+            manualTransferDirectory: root.appending(path: "ManualTransfers"))
+        try await MaintenanceLane.shared.bootstrapCollection(location)
+        let service = CoreCollectionService(clock: MutationClock(), diskSpace: MutationDiskCapacity())
+        let notes = CoreNoteService(), types = CoreNotetypeService(), undo = CoreUndoService()
+        do {
+            try await service.open(location, randomSeed: 83)
+            if try await Core.fsrsPolicyStatus() != .ok {
+                let admission = try await Core.enableFsrs()
+                try await admission.value()
+            }
+            let generation = try await service.waitAvailable(timeoutMilliseconds: 0)
+            let type = try await types.addStockNotetype(kind: .basic, name: "Guarded Add bridge")
+            let snapshot = try await types.readNotetype(id: type.id)
+            let deck = try await CoreDeckService().addDeck(name: "Guarded Add destination")
+            let captured = CoreBridge.AddScreenNoteRequest(expectedGeneration: generation, notetype: snapshot,
+                fields: ["<b>captured front</b>", "back"], tags: ["GuardedAdd"], deckId: deck.id)
+            let saved = try await notes.addNoteForScreen(captured)
+            #expect(saved.summary.generation == generation && saved.summary.undoName == "Add Note")
+            #expect(saved.cards.count == 1 && saved.written)
+            let row = try await notes.readNote(id: saved.id)
+            #expect(row.notetypeId == snapshot.id && row.fields == captured.fields)
+            #expect(saved.summary.changes.notes.contains { $0.id == row.id && $0.change == .added })
+            #expect(saved.summary.changes.cards.contains { saved.cards.contains($0.id) && $0.change == .added })
+            let undoing = try await undo.startUndo(scope: .global)
+            _ = try await undoing.value()
+            await #expect(throws: BridgeError.noteNotFound(id: row.id)) { try await notes.readNote(id: row.id) }
+            let redoing = try await undo.startRedo(scope: .global)
+            _ = try await redoing.value()
+            #expect(try await notes.readNote(id: row.id) == row)
+            try await service.close()
+            try await service.open(location, randomSeed: 83)
+            let successor = try await service.waitAvailable(timeoutMilliseconds: 0)
+            #expect(successor != generation)
+            // The ids/layout remain valid across reopen. An FFI implementation
+            // that reacquires the successor and forgets the capture would add.
+            let priorUndo = try await undo.peekUndo(scope: .global)
+            await #expect(throws: BridgeError.staleGeneration(planned: generation, current: successor)) {
+                try await notes.addNoteForScreen(captured)
+            }
+            #expect(try await notes.readNote(id: row.id) == row)
+            #expect(try await undo.peekUndo(scope: .global) == priorUndo)
+            try await service.close()
+        } catch {
+            try? await service.close()
+            throw error
+        }
+    }
+
     @Test @MainActor func typedMutationsUndoMediaAndControlUseTheOpenedHostOffMain() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let collection = root.appending(path: "collection")

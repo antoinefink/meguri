@@ -8,7 +8,7 @@ pub mod fields;
 pub mod guid;
 pub mod update;
 
-pub use add::{AddNote, Added, add, add_in, bulk_add, bulk_add_in};
+pub use add::{AddFieldIdentity, AddNote, AddScreenNote, Added, add, add_for_screen, add_in, bulk_add, bulk_add_in};
 pub use check::{FieldCheck, FieldState, check};
 pub use delete::{delete, delete_controlled, delete_in};
 pub use update::{UpdateNote, Updated, update, update_in};
