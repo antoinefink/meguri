@@ -29,3 +29,21 @@ SHA-256
 The whole-ledger admission still names an older snapshot.
 
 The full integration gate remains open.
+
+## Verification
+
+Privacy, provenance and scoped similarity passed on the fix. Provenance receipt
+`static-checks/20261118T115901Z-90297` and similarity receipt
+`similarity/20261118T115904Z-90295` are bound to `3e28381e4`.
+
+The first corrected amd64 package build completed Docker compilation and image
+inventory. Its receipt `sync-server-package/20261118T115913Z-92463` stays failed
+because master advanced before the final source identity check.
+
+The existing deployment checkout ran the clean frozen fix commit. The amd64
+package `sync-server-package/20261118T120942Z-16447` and exact-image smoke
+`sync-server-package-test/20261118T120942Z-16187` passed. Each browser phase
+reported six checks and each protocol phase seven. The additional browser
+journey passed over private HTTPS. The production host loaded the package with
+the expected OCI config digest and root filesystem layer. The private origin
+served health and setup, with its backend port unpublished.
