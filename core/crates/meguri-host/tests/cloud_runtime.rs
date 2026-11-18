@@ -140,6 +140,9 @@ struct Fixture {
 }
 impl Fixture {
     fn new(state: BindingState) -> Self {
+        Self::with_prior_icloud(state, false)
+    }
+    fn with_prior_icloud(state: BindingState, prior_icloud: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
         let directory = root.path().join("collection");
         std::fs::create_dir_all(&directory).unwrap();
@@ -157,6 +160,19 @@ impl Fixture {
             options.random.as_ref(),
         )
         .unwrap();
+        if prior_icloud {
+            // Migrate the established choice before the first open persists provider defaults.
+            CoreHost::migrate_provider_configuration(
+                &options.manual_transfer_directory,
+                meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+                    enabled: true,
+                    paused: false,
+                    automatic: true,
+                    media: true,
+                }),
+            )
+            .unwrap();
+        }
         let host = CoreHost::open(options.clone()).unwrap();
         assert!(host.cloud_runtime().is_none());
         let collection = host.collection().unwrap();
@@ -299,7 +315,7 @@ fn incomplete(runtime: &Runtime) {
 #[test]
 fn durable_identity_darwin_retained_fd_collection_runtime_bind_and_reopen_preserve_pending_ack() {
     // Generated collection only. CoreHost wires the production OpenStep; no tuple injection.
-    let fixture = Fixture::new(BindingState::Active);
+    let fixture = Fixture::with_prior_icloud(BindingState::Active, true);
     let host = fixture.open();
     let collection = host.collection().unwrap();
     let evidence = collection.open_evidence().unwrap().cloud_file.unwrap();
@@ -331,6 +347,7 @@ fn durable_identity_darwin_retained_fd_collection_runtime_bind_and_reopen_preser
     assert!(runtime.status().unwrap().scan_required);
     assert_eq!(runtime.stored_state_for_testing().unwrap().durable_file, Some(recorded));
     runtime.refresh_identity().unwrap();
+    assert!(runtime.status().unwrap().identity_verified);
     runtime
         .reconcile_notes(&reopened.collection().unwrap(), BUDGET)
         .unwrap();
