@@ -5,6 +5,11 @@ import XCTest
 /// Production Mac outlines over the public generated recipe, with no screen route.
 @MainActor
 final class MacHomeHierarchyTests: XCTestCase {
+    @MainActor
+    private final class JourneyCleanupState {
+        var pending = false
+    }
+
     func testNormalMeguriSetupControlsAndCancelledServiceSwitch() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
@@ -33,10 +38,10 @@ final class MacHomeHierarchyTests: XCTestCase {
         app.launch()
         // Forced termination is failure cleanup only; success requires native Quit below.
         addTeardownBlock { @MainActor in if app.state != .notRunning { app.terminate() } }
-        var journeyCleanupPending = false
+        let journeyCleanup = JourneyCleanupState()
         if journey != nil {
             addTeardownBlock { @MainActor in
-                if journeyCleanupPending { XCTFail("Owned provider journey cleanup-pending") }
+                if journeyCleanup.pending { XCTFail("Owned provider journey cleanup-pending") }
             }
             let ready = app.descendants(matching: .any).matching(identifier: "testhooks.ownedProvider.transport.ready")
             guard ready.element(boundBy: 0).waitForExistence(timeout: 30) else {
@@ -189,7 +194,7 @@ final class MacHomeHierarchyTests: XCTestCase {
             try enter(journey.password, id: "settings.accountSync.meguri.password")
             let signIn = unique(settings, "settings.accountSync.meguri.signIn")
             actionable(signIn)
-            journeyCleanupPending = true
+            journeyCleanup.pending = true
             try click(signIn, app: app, bundle: bundle)
             waitForJourney({
                 settings.buttons.matching(identifier: "settings.accountSync.meguri.useDevice").count == 1
@@ -304,7 +309,7 @@ final class MacHomeHierarchyTests: XCTestCase {
                         settings.descendants(matching: .any).matching(identifier: "settings.accountSync.meguri.\($0)").count == 0
                     }
             }, "Owned provider journey cleanup-pending")
-            journeyCleanupPending = false
+            journeyCleanup.pending = false
         }
         try app.bringToFront(bundleIdentifier: bundle)
         settings.typeKey("q", modifierFlags: .command)
