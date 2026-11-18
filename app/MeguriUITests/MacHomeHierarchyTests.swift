@@ -11,6 +11,9 @@ final class MacHomeHierarchyTests: XCTestCase {
         let bundle = try build.bundleIdentifier
         XCTAssertTrue(build.hasHooks && bundle.hasSuffix(".dev"), "This case requires the actual hook-enabled .dev app")
         guard build.hasHooks, bundle.hasSuffix(".dev") else { return }
+        let appInfo = try build.appInfo
+        XCTAssertEqual(appInfo["MeguriCloudSchemaConfigured"] as? Bool, true,
+            "This real provider journey requires MEGURI_APP_SIGNING=team")
         let app = XCUIApplication()
         app.launchArguments = MeguriLaunch(
             fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1", directoryHint: .isDirectory),
@@ -92,40 +95,7 @@ final class MacHomeHierarchyTests: XCTestCase {
             try click(option, app: app, bundle: bundle)
         }
         func meguriForm() {
-            let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in picker.value as? String == "Meguri Sync" }, object: nil)
-            let result = XCTWaiter.wait(for: [expectation], timeout: 10)
-            if result != .completed {
-                let pickerMatches = settings.descendants(matching: .any)
-                    .matching(NSPredicate(format: "identifier == %@", "settings.accountSync.service"))
-                print("ownedProviderSelection: pickerIDCount=\(pickerMatches.count)")
-                print("ownedProviderSelection: labelMeguri=\(pickerMatches.matching(NSPredicate(format: "label == %@", "Meguri Sync")).count) labelICloud=\(pickerMatches.matching(NSPredicate(format: "label == %@", "iCloud Sync")).count)")
-                print("ownedProviderSelection: titleMeguri=\(pickerMatches.matching(NSPredicate(format: "title == %@", "Meguri Sync")).count) titleICloud=\(pickerMatches.matching(NSPredicate(format: "title == %@", "iCloud Sync")).count)")
-                print("ownedProviderSelection: valueMeguri=\(pickerMatches.matching(NSPredicate(format: "value == %@", "Meguri Sync")).count) valueICloud=\(pickerMatches.matching(NSPredicate(format: "value == %@", "iCloud Sync")).count)")
-                print("ownedProviderSelection: pickerMenuCount=\(picker.menus.count) pickerMenuItemCount=\(picker.menuItems.count)")
-                func idCount(_ id: String) -> Int {
-                    settings.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", id)).count
-                }
-                let addressCount = idCount("settings.accountSync.meguri.address")
-                let usernameCount = idCount("settings.accountSync.meguri.username")
-                let passwordCount = idCount("settings.accountSync.meguri.password")
-                let signInMatches = settings.descendants(matching: .any)
-                    .matching(NSPredicate(format: "identifier == %@", "settings.accountSync.meguri.signIn"))
-                let signInCount = signInMatches.count
-                let signInEnabled = signInCount == 1 ? (signInMatches.element(boundBy: 0).isEnabled ? 1 : 0) : -1
-                let providerRecoveryActionCount = idCount("settings.accountSync.serviceRecovery")
-                let connectionRetryCount = idCount("settings.accountSync.meguri.retryConnection")
-                print("ownedProviderSelection: addressCount=\(addressCount) usernameCount=\(usernameCount) passwordCount=\(passwordCount) signInCount=\(signInCount) signInEnabled=\(signInEnabled)")
-                print("ownedProviderSelection: providerRecoveryActionCount=\(providerRecoveryActionCount) connectionRetryCount=\(connectionRetryCount) settingsSheetCount=\(settings.sheets.count)")
-                func statusCount(_ text: String) -> Int {
-                    settings.staticTexts.matching(NSPredicate(format: "label == %@ OR title == %@ OR value == %@", text, text, text)).count
-                }
-                print("ownedProviderSelection: changeFailedCount=\(statusCount("Changing the sync service didn’t finish."))")
-                print("ownedProviderSelection: changingCount=\(statusCount("Changing Sync Service…"))")
-                print("ownedProviderSelection: providerBlockedCount=\(statusCount("Meguri can’t read this device’s sync settings, so no service syncs."))")
-                print("ownedProviderSelection: providerRecoveryTextCount=\(statusCount("Changing the sync service didn’t finish. No service syncs until you choose what to do."))")
-                print("ownedProviderSelection: noServiceFooterCount=\(statusCount("Choose a service to sync this collection."))")
-            }
-            XCTAssertEqual(result, .completed, "The real Picker must retain Meguri selection")
+            waitFor({ picker.value as? String == "Meguri Sync" }, "The real Picker must retain Meguri selection")
             actionable(picker)
             for name in ["address", "username", "password"] {
                 let field = unique(settings, "settings.accountSync.meguri.\(name)")
