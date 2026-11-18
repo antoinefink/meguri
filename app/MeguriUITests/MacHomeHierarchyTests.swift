@@ -21,7 +21,26 @@ final class MacHomeHierarchyTests: XCTestCase {
         addTeardownBlock { @MainActor in if app.state != .notRunning { app.terminate() } }
         let homeMatches = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "shell.root.sidebar.home"))
         let home = homeMatches.element(boundBy: 0)
-        XCTAssertTrue(home.waitForExistence(timeout: 20))
+        let homeExists = home.waitForExistence(timeout: 20)
+        if !homeExists {
+            func exists(_ identifier: String) -> Bool {
+                app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", identifier))
+                    .element(boundBy: 0).exists
+            }
+            let allDecksLabelCount = app.staticTexts.matching(NSPredicate(format: "label == %@", "All Decks")).count
+            print("ownedProviderStartup: homeIDCount=\(homeMatches.count)"
+                + " hookError=\(exists("testhooks.error.message"))"
+                + " policySheet=\(exists("home.policy.sheet"))"
+                + " policyEnable=\(exists("home.policy.enable"))"
+                + " homeScreen=\(exists("home.collection.screen"))"
+                + " homeError=\(exists("home.collection.error"))"
+                + " allDecksLabelCount=\(allDecksLabelCount)"
+                + " windowCount=\(app.windows.count)"
+                + " sheetCount=\(app.sheets.count)"
+                + " alertCount=\(app.alerts.count)"
+                + " appState=\(app.state.rawValue)")
+        }
+        XCTAssertTrue(homeExists)
         XCTAssertEqual(homeMatches.count, 1)
         try click(home, app: app, bundle: bundle)
         let homeScreens = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "home.collection.screen"))
