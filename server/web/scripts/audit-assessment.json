@@ -40,8 +40,8 @@
         "sha256": "2b51afdda8f3ad8177e5ebc39f8c789e8711836ea31fade22dcd81458104fb33"
       },
       "index.html": {
-        "bytes": 377,
-        "sha256": "3e49e61ef5d19d79a98698db546a6979b07b4f1a4c50ed3fcf2f8de0b431d3d4"
+        "bytes": 592,
+        "sha256": "e77b7ef10a80ed58d51839243cc84cd8b279c87aded129808beabffc5beb24b3"
       },
       "notices/acquisition-records.json": {
         "bytes": 13879,
@@ -91,8 +91,8 @@
         "sha256": "d5782bedad3aa48984bb8cd8df6c93b41306f6235330bff14a3be5e4d8ca9649"
       },
       "scripts/embed.mjs": {
-        "bytes": 3218,
-        "sha256": "f5c2736c1ebb4da6c09ba2520400d8ae2dd586a1d0e298e4516f7b4dd5ad785b"
+        "bytes": 3260,
+        "sha256": "42a55dea7fdb06ceac621cea3690c739243a45e2eec7663dc624a5fa11cd54c5"
       },
       "scripts/fixture.mjs": {
         "bytes": 7400,
@@ -117,6 +117,18 @@
       "scripts/run.sh": {
         "bytes": 6463,
         "sha256": "45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418"
+      },
+      "src/apple-touch-icon.png": {
+        "bytes": 50588,
+        "sha256": "99b018fd248f79257b07351374ba7b8799e4b81968486c389784990f26388b87"
+      },
+      "src/favicon-512.png": {
+        "bytes": 430567,
+        "sha256": "bce67ed2a7000451ec6d87fdff4730f482b9d8011408e4678e399076531a260c"
+      },
+      "src/favicon-64.png": {
+        "bytes": 10081,
+        "sha256": "742e4ffc139cd94812762af5365279ed018ce2fd722606ad7a86037dfea2d66d"
       },
       "src/accounts.tsx": {
         "bytes": 9275,
@@ -241,8 +253,8 @@
         "sha256": "9bf76b2caf14890359cd8e0278ba632bb7528afd76905e6ed2043c27adc5f024"
       },
       "server/src/webassets/mod.rs": {
-        "bytes": 3948,
-        "sha256": "6f3313413d68fea7a764d441c595d3747192e5ae8582c744cf581393879c7938"
+        "bytes": 4110,
+        "sha256": "a6cd3e2ecffdc2b42b4b513cb8b2e4759093dec7343668b9e17bf65a040bea89"
       },
       "server/tools/package-context.py": {
         "bytes": 4232,

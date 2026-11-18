@@ -17,7 +17,7 @@ const names = ["index.html", ...(await readdir(resolve(input, "assets"))).sort()
 const inventory = [], rows = [];
 let scripts = 0;
 for (const name of names) {
-  if (name !== "index.html" && !/^assets\/[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.(js|css)$/.test(name)) throw new Error("Unexpected build artifact; no maps or remote assets allowed");
+  if (name !== "index.html" && !/^assets\/[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.(js|css|png)$/.test(name)) throw new Error("Unexpected build artifact; no maps or remote assets allowed");
   const source = resolve(input, name), stat = await lstat(source);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Expected a regular build file");
   const bytes = await readFile(source);
@@ -29,7 +29,7 @@ for (const name of names) {
   }
   const targetName = name.replaceAll("/", "_");
   await copyFile(source, resolve(embedded, targetName));
-  const mime = name.endsWith(".html") ? "text/html; charset=utf-8" : name.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8";
+  const mime = name.endsWith(".html") ? "text/html; charset=utf-8" : name.endsWith(".css") ? "text/css; charset=utf-8" : name.endsWith(".png") ? "image/png" : "text/javascript; charset=utf-8";
   const row = `Asset { path: ${JSON.stringify("/" + name)}, content_type: ${JSON.stringify(mime)}, bytes: include_bytes!(concat!(env!("OUT_DIR"), "/embedded/${targetName}")) }`;
   if (name === "index.html") rows.unshift(`static INDEX: Asset = ${row};`); else rows.push(row);
   inventory.push({ path: "/" + name, sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length });

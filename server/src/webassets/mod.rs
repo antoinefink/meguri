@@ -40,7 +40,7 @@ fn hashed_asset_path(path: &str) -> bool {
         return false;
     }
     let Some((stem, extension)) = name.rsplit_once('.') else { return false };
-    if !matches!(extension, "js" | "css") {
+    if !matches!(extension, "js" | "css" | "png") {
         return false;
     }
     // Vite hashes may themselves contain '-' or '_'. Find a separator leaving
@@ -59,6 +59,7 @@ mod tests {
     static FILES: &[Asset] = &[
         Asset { path: "/assets/main-Ab12_-34.js", content_type: "text/javascript; charset=utf-8", bytes: b"script" },
         Asset { path: "/assets/main-Ab123456.css", content_type: "text/css; charset=utf-8", bytes: b"style" },
+        Asset { path: "/assets/favicon-Ab123456.png", content_type: "image/png", bytes: b"icon" },
     ];
     #[test]
     fn every_navigation_path_and_only_those_paths_gets_shell() {
@@ -74,7 +75,7 @@ mod tests {
         for asset in FILES {
             assert_eq!(select(asset.path, &SHELL, FILES).unwrap().bytes, asset.bytes);
         }
-        for path in ["/assets/missing-Ab123456.js", "/assets/main.js", "/assets/main-Ab123456.js.map", "/assets/../login", "/assets/%2e%2e/login", "/assets/main-Ab123456.css?x", "/assets//main-Ab123456.css", "/assets/evil\\main-Ab123456.js", "/login#token=x", "/login?x", "/assets/main-1234567.js", "//login"] {
+        for path in ["/assets/missing-Ab123456.js", "/assets/main.js", "/assets/main-Ab123456.js.map", "/assets/favicon-Ab123456.svg", "/assets/favicon.png", "/assets/../login", "/assets/%2e%2e/login", "/assets/main-Ab123456.css?x", "/assets//main-Ab123456.css", "/assets/evil\\main-Ab123456.js", "/login#token=x", "/login?x", "/assets/main-1234567.js", "//login"] {
             assert!(select(path, &SHELL, FILES).is_none());
         }
     }

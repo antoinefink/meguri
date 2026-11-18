@@ -129,11 +129,16 @@ async fn compiled_navigation_and_assets_use_exact_get_head_routes_without_claimi
     let paths: Vec<_> = shell.split('"').filter(|value| value.starts_with("/assets/")).collect();
     assert!(paths.iter().any(|path| path.ends_with(".js")));
     assert!(paths.iter().any(|path| path.ends_with(".css")));
+    assert!(paths.iter().any(|path| path.ends_with(".png")));
     for path in paths {
         let response = h.get(path, None).await;
         headers(&response);
         assert_eq!(response.status(), 200);
-        let mime = if path.ends_with(".js") { "text/javascript; charset=utf-8" } else { "text/css; charset=utf-8" };
+        let mime = match path.rsplit_once('.').unwrap().1 {
+            "js" => "text/javascript; charset=utf-8",
+            "css" => "text/css; charset=utf-8",
+            _ => "image/png",
+        };
         assert_eq!(response.headers()["content-type"], mime);
         let length = response.headers()["content-length"].clone();
         let bytes = response.bytes().await.unwrap();

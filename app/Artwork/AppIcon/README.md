@@ -15,4 +15,9 @@ The system supplies the icon shape and appearance treatments.
 The app selects `AppIcon` through `app/Config/Meguri.xcconfig`.
 Keep originals and review exports here, outside the app's synchronized resource folder.
 
+Antoine supplied `Pomegranate-transparent.png` on 2026-11-18: a 946 × 946 image with a transparent background, kept without changes.
+SHA-256: `740fbc128ec58d78a7d0046c017987ca397469957248fd00a772c9df91b91255`.
+
+Meguri Sync web icons in `server/web/src/` are scaled with `sips`: `favicon-64.png` and `favicon-512.png` from `Pomegranate-transparent.png`, and the opaque `apple-touch-icon.png` (180 × 180, masked by iOS) from `Pomegranate-original.png`.
+
 Antoine approved the default icon preview on 2026-11-18.
