@@ -233,7 +233,32 @@ final class MacHomeHierarchyTests: XCTestCase {
             waitForJourney({ availableSync() }, "Setup must finish with available native Sync Now and no unresolved setup sheet")
             XCTAssertEqual(unique(settings, "settings.accountSync.meguri.syncNow").elementType, .button)
 
+            waitForJourney({ availableSync() }, "Native Sync Now must be available before the daily action")
+            let syncNow = unique(settings, "settings.accountSync.meguri.syncNow")
+            actionable(syncNow)
+            func successSequence() -> UInt64? {
+                let prefix = "meguri-round-success-sequence:"
+                guard let value = syncNow.value as? String, value.hasPrefix(prefix) else { return nil }
+                let digits = value.dropFirst(prefix.count)
+                guard !digits.isEmpty, digits.utf8.allSatisfy({ (48...57).contains($0) }),
+                      let sequence = UInt64(digits), String(sequence) == String(digits) else { return nil }
+                return sequence
+            }
             try app.bringToFront(bundleIdentifier: bundle)
+            let baseline = try XCTUnwrap(successSequence(), "Require the exact numeric Meguri round success observation")
+            syncNow.clickOrTap()
+            waitForJourney({
+                guard let sequence = successSequence(), sequence > baseline else { return false }
+                return availableSync()
+            }, "Require a fresh successful collection/media round and available controls before review")
+            let automatic = unique(settings, "settings.accountSync.meguri.automatic")
+            XCTAssertTrue(automatic.isEnabled, "Require the ready binding's native Sync Automatically control")
+            XCTAssertTrue(automatic.value as? String == "1" || automatic.value as? NSNumber == NSNumber(value: 1),
+                "Sync Automatically must report the exact native ON value after bootstrap")
+
+            try app.bringToFront(bundleIdentifier: bundle)
+            waitForJourney({ availableSync() }, "Require the settled pre-review round before closing Settings")
+            let preReviewSequence = try XCTUnwrap(successSequence(), "Require the exact settled pre-review success sequence")
             settings.typeKey("w", modifierFlags: .command)
             XCTAssertTrue(settings.waitForNonExistence(timeout: 10), "Close the actual Settings window")
             let deck = namedRow(app, prefix: "home.deck.row.", path: "Local Review::Cards")
@@ -269,24 +294,11 @@ final class MacHomeHierarchyTests: XCTestCase {
             main.typeKey(",", modifierFlags: .command)
             XCTAssertTrue(settings.waitForExistence(timeout: 10))
             XCTAssertEqual(settingsWindows.count, 1)
-            waitForJourney({ availableSync() }, "Native Sync Now must be available before the daily action")
-            let syncNow = unique(settings, "settings.accountSync.meguri.syncNow")
-            actionable(syncNow)
-            func successSequence() -> UInt64? {
-                let prefix = "meguri-round-success-sequence:"
-                guard let value = syncNow.value as? String, value.hasPrefix(prefix) else { return nil }
-                let digits = value.dropFirst(prefix.count)
-                guard !digits.isEmpty, digits.utf8.allSatisfy({ (48...57).contains($0) }),
-                      let sequence = UInt64(digits), String(sequence) == String(digits) else { return nil }
-                return sequence
-            }
-            try app.bringToFront(bundleIdentifier: bundle)
-            let baseline = try XCTUnwrap(successSequence(), "Require the exact numeric Meguri round success observation")
-            syncNow.clickOrTap()
-            // A fresh successful round may coalesce with automatic sync. This
-            // does not attribute which request sent Good; MG checks persisted Good.
+            // Foreground or review completion may supply the automatic opportunity.
+            // A higher sequence attributes neither a trigger nor a request count;
+            // MG separately checks the exact persisted Good without a manual sync.
             waitForJourney({
-                guard let sequence = successSequence(), sequence > baseline else { return false }
+                guard let sequence = successSequence(), sequence > preReviewSequence else { return false }
                 return availableSync()
             }, "Require a fresh successful collection/media round and available controls before Sign Out")
             let signOut = unique(settings, "settings.accountSync.meguri.signOut")
