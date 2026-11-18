@@ -33,7 +33,7 @@
       "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/page.tsx",
       "adapted_into": "src/app.tsx",
       "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links replace sample navigation and panels.",
-      "adapted_sha256": "4d77e6929b7b62893dd6c436c86865bc53ce885bd32933fb58670b5a6a68b5f3"
+      "adapted_sha256": "2e784565dde9f5b7dbaa767ceeeb08df8f61220e0e11ff56d4443c9a22afd0c6"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
@@ -41,7 +41,7 @@
       "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
       "adapted_into": "src/app.tsx",
       "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links replace sample navigation and panels.",
-      "adapted_sha256": "4d77e6929b7b62893dd6c436c86865bc53ce885bd32933fb58670b5a6a68b5f3"
+      "adapted_sha256": "2e784565dde9f5b7dbaa767ceeeb08df8f61220e0e11ff56d4443c9a22afd0c6"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/ui/sidebar.tsx",

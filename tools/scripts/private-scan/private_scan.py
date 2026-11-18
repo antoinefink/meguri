@@ -835,7 +835,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '57ada607c20402e1f59ecc238d7c9de48f607cca670d903f3eed30189d3bdb8a',
+        '441d3c8f3df9667eebb1a6051013fa846cc3875f67f557d5047c5e10d479cbb0',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1018,11 +1018,11 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/sync-web.sh':
         'e96c97800779b5d2deae7b36bb0912e43cedf4e8c3b6d40b6c3f81d0206747f1',
     'server/web/upstream-records.json':
-        'd01a9499a2330268d6c0a7aa495216e2163ed49946a12441c1e16574f8800c2f',
+        '38b04bec948d0e2cdab5b73cb39bf6a0147578de19e27b05aefb8a2013a79216',
     'server/web/src/style.css':
-        '44744bdf30fb05f52184838f5ce2fc52a745ee1bb96557cfe703e5170e265aed',
+        'd0bfcf6df83d3b55e8d9e14f83996c39ff18ef60109a7a2fe76b752b4a5d30f3',
     'server/web/src/app.tsx':
-        '4d77e6929b7b62893dd6c436c86865bc53ce885bd32933fb58670b5a6a68b5f3',
+        '2e784565dde9f5b7dbaa767ceeeb08df8f61220e0e11ff56d4443c9a22afd0c6',
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
@@ -1105,7 +1105,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        'd9d3c5be056dd56eda6414ea3ed58a9e6eded6467c07c13e0f4cf80d08f333d6',
+        'decbec9c744427fed7768c0acb974819a0c14c6cd888f3ed5cfcbccf7213c6cb',
     "specs/conformance/meguri-sync-server.md":
         '4c0e7651ab72236ad31320925e8c1c163c6dc7f1904e9c0c3e52df50e8f9e479',
     "conformance/schema/meguri-sync-server.schema.json":

@@ -11,6 +11,26 @@ import type { FormMode } from "./forms";
 import { Accounts } from "./accounts";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, CopyValue, Outcome, Sidebar, SidebarContent, SidebarGroup, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "./ui";
 import type { OutcomeValue } from "./ui";
+import pomegranate from "./favicon-64.png";
+
+function Brand({ auth = false }: { auth?: boolean }) {
+  return <p className={auth ? "brand auth-brand" : "brand"}>
+    <img src={pomegranate} alt="" width={28} height={28} />
+    <span>Meguri Sync</span>
+  </p>;
+}
+
+// Original decorative identity and sign-out drawings; no account menu.
+function IdentityIcon() {
+  return <svg className="identity-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true" focusable="false">
+    <circle cx="12" cy="8" r="3.5" /><path d="M5 21v-2a7 7 0 0 1 14 0v2" />
+  </svg>;
+}
+function SignOutIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <path d="M9 4H4v16h5m8-12 4 4-4 4M8 12h13" />
+  </svg>;
+}
 
 // Original, decorative line drawings for the three existing destinations.
 function NavigationIcon({ path }: { path: string }) {
@@ -126,9 +146,32 @@ export function App() {
   const links: [string, string][] = [["/connection", "Connection"], ["/settings", "Password"], ...(me?.role === "admin" ? [["/accounts", "Accounts"] as [string, string]] : [])];
   return <div className={accountShell ? "account-layout" : "auth-layout"}>
     <a className="skip-link" href="#main" onClick={event => { event.preventDefault(); main.current?.focus(); }}>Skip to content</a>
-    {accountShell && <Sidebar><SidebarHeader><p className="brand">Meguri Sync</p></SidebarHeader><SidebarContent><SidebarGroup aria-label="Account"><SidebarMenu>{links.map(([path, label]) => <SidebarMenuItem key={path}><SidebarMenuButton href={path} aria-current={page.path === path ? "page" : undefined} onClick={event => intercept(event, path)}><NavigationIcon path={path} />{label}</SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></SidebarGroup></SidebarContent><div className="sidebar-footer" role="group" aria-label="Signed-in account"><div className="footer-identity"><p className="muted">Signed in as</p><p className="identity">{me.username}</p></div><Button variant="outline" aria-disabled={signingOut} onClick={() => void logout()}>{signingOut ? "Signing out…" : "Sign out"}</Button></div></Sidebar>}
+    {accountShell && <Sidebar>
+      <SidebarHeader><Brand /></SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup aria-label="Account"><SidebarMenu>
+          {links.map(([path, label]) => <SidebarMenuItem key={path}>
+            <SidebarMenuButton href={path} aria-current={page.path === path ? "page" : undefined} onClick={event => intercept(event, path)}>
+              <NavigationIcon path={path} />{label}
+            </SidebarMenuButton>
+          </SidebarMenuItem>)}
+        </SidebarMenu></SidebarGroup>
+      </SidebarContent>
+      <div className="sidebar-footer" role="group" aria-label="Signed-in account">
+        <IdentityIcon />
+        <div className="footer-identity">
+          <p className="identity">{me.username}</p>
+          <p className="muted">{me.role === "admin" ? "Administrator" : "Member"}</p>
+        </div>
+        <Button className="sign-out" variant="outline" disabled={signingOut}
+          title={signingOut ? "Signing out…" : "Sign out"}
+          aria-label={signingOut ? "Signing out…" : "Sign out"} onClick={() => void logout()}>
+          <SignOutIcon />
+        </Button>
+      </div>
+    </Sidebar>}
     <SidebarInset id="main" ref={main} tabIndex={-1}>
-      {!accountShell && <p className="brand auth-brand">Meguri Sync</p>}
+      {!accountShell && <Brand auth />}
       <Outcome value={notice} />{content}
     </SidebarInset>
   </div>;

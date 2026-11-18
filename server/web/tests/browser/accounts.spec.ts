@@ -9,7 +9,31 @@ const initialPassword = " Synthetic initial password ";
 const replacedPassword = "é".repeat(6);
 const resetPassword = "Synthetic reset password 2026";
 const memberUsername = "member." + "long".repeat(14) + "x"; // Maximum 64-character username.
+async function brand(page: Page) {
+  const lockup = page.locator(".brand");
+  await expect(lockup).toHaveCount(1);
+  await expect(lockup.getByText("Meguri Sync", { exact: true })).toBeVisible();
+  const image = lockup.locator('img[alt=""]');
+  await expect(image).toBeVisible();
+  await expect(image).toHaveAttribute("width", "28");
+  await expect(image).toHaveAttribute("height", "28");
+  await expect(image).toHaveJSProperty("complete", true);
+  await expect(image).toHaveJSProperty("naturalWidth", 64);
+  await expect(image).toHaveJSProperty("naturalHeight", 64);
+  const src = await image.evaluate(element => (element as HTMLImageElement).currentSrc);
+  const icon = page.locator('link[rel="icon"][sizes="64x64"][type="image/png"]');
+  await expect(icon).toHaveCount(1);
+  const href = await icon.getAttribute("href");
+  expect(href).toBeTruthy();
+  expect(src).toBe(new URL(href!, page.url()).href);
+  expect(new URL(src).origin).toBe(new URL(page.url()).origin);
+  expect(new URL(src).pathname).toMatch(/^\/assets\/favicon-64-[^/]+\.png$/);
+  const response = await page.request.get(src);
+  expect(response.ok()).toBe(true);
+  expect(await response.body()).toEqual(readFileSync("src/favicon-64.png"));
+}
 async function accountShell(page: Page, username: string, admin: boolean) {
+  await brand(page);
   const navigation = page.getByRole("navigation", { name: "Account", exact: true });
   const names = admin ? ["Connection", "Password", "Accounts"] : ["Connection", "Password"];
   await expect(navigation.getByRole("link")).toHaveCount(names.length);
@@ -20,8 +44,31 @@ async function accountShell(page: Page, username: string, admin: boolean) {
   }
   const identity = page.getByRole("group", { name: "Signed-in account", exact: true });
   await expect(identity.getByText(username, { exact: true })).toBeVisible();
-  await expect(identity.getByText("Signed in as", { exact: true })).toBeVisible();
-  await expect(identity.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  await expect(identity.getByText(admin ? "Administrator" : "Member", { exact: true })).toBeVisible();
+  await expect(identity.locator(':scope > svg[aria-hidden="true"][focusable="false"]')).toBeVisible();
+  const signOut = identity.getByRole("button", { name: "Sign out", exact: true });
+  await expect(signOut).toBeVisible();
+  await expect(signOut).toBeEnabled();
+  await expect(signOut).toHaveAttribute("title", "Sign out");
+  await expect(signOut.locator('svg[aria-hidden="true"][focusable="false"]')).toBeVisible();
+  const target = await signOut.boundingBox();
+  expect(target?.width).toBeGreaterThanOrEqual(44);
+  expect(target?.height).toBeGreaterThanOrEqual(44);
+  await signOut.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(signOut).toBeFocused();
+  await expect(signOut).toHaveCSS("outline-style", "solid");
+  await page.getByRole("main").focus();
+  expect(await identity.evaluate(element => {
+    const sidebar = element.closest("aside")!.getBoundingClientRect();
+    return [element, ...element.querySelectorAll<HTMLElement>("p, button, .footer-identity")].every(child => {
+      const bounds = child.getBoundingClientRect();
+      return bounds.left >= sidebar.left && bounds.right <= sidebar.right
+        && child.scrollWidth <= child.clientWidth && child.scrollHeight <= child.clientHeight;
+    });
+  })).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
 async function openCapability(page: Page, url: string) {
@@ -47,6 +94,7 @@ async function signIn(page: Page, username: string, password: string) {
   await expect(page.getByRole("heading", { name: "Connect your devices" })).toBeVisible();
 }
 async function audit(page: Page, name: string) {
+  await brand(page);
   const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
   expect(result.violations.map(item => ({ id: item.id, impact: item.impact }))).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
