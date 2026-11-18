@@ -29,6 +29,11 @@ type MediaFeedApplyCommit = (
     bool,
 );
 
+enum MediaFeedAuthority<'a> {
+    Ordinary(Option<&'a Authority>),
+    Transition(&'a MediaRecoveryAuthority),
+}
+
 struct PendingMediaApply {
     incoming: workflow::Saved,
     inbox: Option<i64>,
@@ -428,11 +433,11 @@ impl Runtime {
         apply_commit: Option<MediaFeedApplyCommit>,
         notification: Option<&Authority>,
     ) -> Result<usize, RuntimeError> {
-        self.consume_media_feed_inner_with_work(
+        self.project_and_commit_media_feed(
             collection,
             media,
             apply_commit,
-            notification,
+            MediaFeedAuthority::Ordinary(notification),
             &mut PolicyWork::default(),
         )
     }
@@ -442,20 +447,52 @@ impl Runtime {
         media: &MediaService,
         work: &mut PolicyWork,
     ) -> Result<usize, RuntimeError> {
-        self.consume_media_feed_inner_with_work(collection, media, None, None, work)
+        self.project_and_commit_media_feed(collection, media, None, MediaFeedAuthority::Ordinary(None), work)
     }
-    fn consume_media_feed_inner_with_work(
+    // Only the exact durable replacing operation can consume its predecessor's
+    // journal without ordinary provider admission. This allocates no new intent.
+    fn consume_recovery_media_feed(
+        &self,
+        collection: &Collection,
+        media: &MediaService,
+        a: &MediaRecoveryAuthority,
+        apply_commit: Option<MediaFeedApplyCommit>,
+    ) -> Result<usize, RuntimeError> {
+        if a.1.is_none() {
+            return self.consume_media_feed_inner(collection, media, apply_commit, None);
+        }
+        self.project_and_commit_media_feed(
+            collection,
+            media,
+            apply_commit,
+            MediaFeedAuthority::Transition(a),
+            &mut PolicyWork::default(),
+        )
+    }
+    fn project_and_commit_media_feed(
         &self,
         collection: &Collection,
         media: &MediaService,
         apply_commit: Option<MediaFeedApplyCommit>,
-        notification: Option<&Authority>,
+        authority: MediaFeedAuthority<'_>,
         work: &mut PolicyWork,
     ) -> Result<usize, RuntimeError> {
-        let a = self.media_authority(collection, false)?;
-        if notification.is_some_and(|issued| issued != &a) {
-            return Err(RuntimeError::StaleIncarnation);
-        }
+        let (a, recovery) = match authority {
+            MediaFeedAuthority::Ordinary(notification) => {
+                let a = self.media_authority(collection, false)?;
+                if notification.is_some_and(|issued| issued != &a) {
+                    return Err(RuntimeError::StaleIncarnation);
+                }
+                (a, None)
+            }
+            MediaFeedAuthority::Transition(authority) => {
+                if authority.1.is_none() {
+                    return Err(Error::RecoveryRefused.into());
+                }
+                self.validate_media_recovery_file(collection, authority)?;
+                (authority.0.clone(), Some(authority))
+            }
+        };
         media.check_generation(a.generation)?;
         media
             .store()
@@ -463,6 +500,9 @@ impl Runtime {
             .map_err(|error| work.media_error(error))?;
         let (mut feed_state, intents) = {
             let state = self.state();
+            if let Some(authority) = recovery {
+                Self::check_media_recovery_locked(&state, authority)?;
+            }
             with_tracking_access(|| -> Result<_, Error> {
                 let store = state.store.as_ref().ok_or(Error::Database)?;
                 Ok((store.media_ledger(a.binding)?, store.apply_intents(a.binding)?))
@@ -560,6 +600,9 @@ impl Runtime {
             flags.media_changed = None;
             let tracked = {
                 let state = self.state();
+                if let Some(authority) = recovery {
+                    Self::check_media_recovery_locked(&state, authority)?;
+                }
                 with_tracking_access(|| {
                     let store = state.store.as_ref().ok_or(Error::Database)?;
                     let binding = store.binding(a.binding)?.ok_or(Error::BindingNotFound)?;
@@ -678,9 +721,17 @@ impl Runtime {
             feed_state.adoption = false;
         }
         feed_state.feed = Some((feed.status.feed_id.0, feed.status.counter));
+        if let Some(authority) = recovery {
+            // Providers stay outside State/tracking; the locked check below
+            // then pins the original operation row through the atomic commit.
+            self.validate_media_recovery_file(collection, authority)?;
+        }
         media.check_generation(a.generation)?;
         let now_ms = self.media_now()?;
         let mut state = self.state();
+        if let Some(authority) = recovery {
+            Self::check_media_recovery_locked(&state, authority)?;
+        }
         let bound = state.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         if bound.binding.id != a.binding
             || bound.open_counter != a.open
@@ -713,7 +764,13 @@ impl Runtime {
             let changed_work = changed_work?;
             Ok((changed_work, store.media_floor(feed.status.feed_id.0)?))
         })?;
-        self.notify_media_pending_locked(&mut state, changed_work)?;
+        if recovery.is_some() {
+            // notify_media_pending_locked may emit immediately. A later
+            // ordinary admitted handler owns that notification.
+            state.media.pending_notification |= changed_work;
+        } else {
+            self.notify_media_pending_locked(&mut state, changed_work)?;
+        }
         drop(state);
         if let Some(retained_floor) = retained_floor {
             media
@@ -2068,6 +2125,9 @@ impl Runtime {
         if intent.native_file != a.file {
             return Err(RuntimeError::FileIdentityUnavailable);
         }
+        if a.1.is_some() {
+            self.validate_media_recovery_file(collection, a)?;
+        }
         let _job = media.try_job(MediaJobKind::CheckMedia)?;
         let mut apply = intent.media.clone().ok_or(Error::InvalidData)?;
         let mut moved_ran = false;
@@ -2180,7 +2240,7 @@ impl Runtime {
                                 .map_err(media_error)
                         })?;
                         if removed {
-                            self.consume_media_feed(collection, media)?;
+                            self.consume_recovery_media_feed(collection, media, a, None)?;
                             meguri_model::faultpoint!("cloud.media.after_trash").map_err(Error::from)?;
                             #[cfg(feature = "test-hooks")]
                             self.incoming_hooks
@@ -2261,6 +2321,9 @@ impl Runtime {
         moved_ran: bool,
         snapshot: &meguri_engine::Snapshot<'_>,
     ) -> Result<(), RuntimeError> {
+        if a.1.is_some() {
+            self.validate_media_recovery_file(collection, a)?;
+        }
         let apply = intent.media.as_ref().ok_or(Error::InvalidData)?;
         let received = codec::receive(
             &self.with_media_recovery(a, |s| {
@@ -2544,9 +2607,10 @@ impl Runtime {
         #[cfg(feature = "test-hooks")]
         self.incoming_hooks
             .hit(crate::cloud::testing::IncomingStage::MediaSettlementBeforeCommit);
-        self.consume_media_feed_inner(
+        self.consume_recovery_media_feed(
             collection,
             media,
+            a,
             Some((
                 a.clone(),
                 intent.clone(),
@@ -2554,10 +2618,9 @@ impl Runtime {
                 updates,
                 apply.installed || apply.local_wins,
             )),
-            None,
         )?;
         if apply.abandoned {
-            self.consume_media_feed(collection, media)?;
+            self.consume_recovery_media_feed(collection, media, a, None)?;
         }
         Ok(())
     }
@@ -2570,6 +2633,9 @@ impl Runtime {
         a: &MediaRecoveryAuthority,
         intent: &ApplyIntent,
     ) -> Result<bool, RuntimeError> {
+        if a.1.is_some() {
+            self.validate_media_recovery_file(collection, a)?;
+        }
         self.with_media_recovery(a, |_| Ok(()))?;
         if intent.binding != a.binding || intent.native_file != a.file {
             return Err(RuntimeError::StaleIncarnation);
