@@ -178,7 +178,12 @@ public struct HomeView: View {
                     ? "sync.action.resume" : "sync.connect.action",
                 connectUnavailableReason: collection.cloudPreviewEntryUnavailableReason(.connect),
                 canPresentConnect: collection.navigation.sheet == nil || collection.navigation.sheet == .accountSync,
-                connectAction: { collection.presentCloudSync(.connect) })
+                connectAction: { collection.presentCloudSync(.connect) },
+                canPresentAccountSync: collection.navigation.sheet == nil,
+                accountSyncAction: {
+                    guard collection.navigation.sheet == nil else { return }
+                    collection.navigation.present(.accountSync)
+                })
         case .unavailable:
             LoadingStateView(Text("Collection is busy…", bundle: .module))
         case .failed(let message):
@@ -327,10 +332,12 @@ struct HomeCollectionEmptyContent: View {
     var connectUnavailableReason: String? = nil
     var canPresentConnect: Bool = true
     var connectAction: () -> Void = {}
+    var canPresentAccountSync: Bool = true
+    var accountSyncAction: (() -> Void)? = nil
 
     var body: some View {
         EmptyStateView(Text("No Collection", bundle: .module), systemImage: "rectangle.stack",
-            description: Text("Import a collection to start studying.", bundle: .module)) {
+            description: Text("Import or sync a collection to start studying.", bundle: .module)) {
             Button(SyncText.value(connectTitleKey), action: connectAction)
                 .disabled(connectUnavailableReason != nil || !canPresentConnect)
                 .help(SyncText.value(connectUnavailableReason ?? connectTitleKey))
@@ -340,6 +347,11 @@ struct HomeCollectionEmptyContent: View {
             }
             if let importAction {
                 HomeCollectionImportButton(canPresent: canPresent, action: importAction)
+            }
+            if let accountSyncAction {
+                Button(SyncText.value("sync.settings.section"), action: accountSyncAction)
+                    .disabled(!canPresentAccountSync)
+                    .accessibilityIdentifier("home.collection.accountSync")
             }
         }
     }

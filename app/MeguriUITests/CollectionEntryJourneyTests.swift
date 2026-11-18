@@ -12,6 +12,59 @@ import notify
 /// --suite CollectionEntryJourneyTests. First-run picker hierarchy attachments
 /// are required evidence; provider navigation uses visible system labels only.
 @MainActor final class CollectionEntryJourneyTests: XCTestCase {
+    func testNoFileHomeAccountSyncSheetReturnsToCollectionChoices() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        guard build.hasHooks, bundle.hasSuffix(".dev") else { throw XCTSkip("Requires development source setup") }
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "app/Fixtures/CollectionEntry/EmptyCollection"),
+            now: "2030-01-15T10:00:00Z", timeZone: "UTC", locale: "en_US", animations: false).arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+
+        let accountSyncButtons = app.buttons.matching(identifier: "home.collection.accountSync")
+        let accountSync = try XCTUnwrap(waitForHittable(accountSyncButtons), app.debugDescription)
+        XCTAssertEqual(accountSyncButtons.count, 1)
+        XCTAssertEqual(accountSync.label, "Account & Sync")
+        XCTAssertTrue(accountSync.isEnabled)
+        XCTAssertTrue(app.staticTexts["No Collection"].exists)
+        XCTAssertTrue(app.staticTexts["Import or sync a collection to start studying."].exists)
+        let importCollection = app.buttons["home.collection.import"].firstMatch
+        let connect = app.buttons["home.collection.connect"].firstMatch
+        XCTAssertTrue(importCollection.exists && importCollection.isEnabled && importCollection.isHittable)
+        XCTAssertTrue(connect.exists && connect.isHittable)
+        XCTAssertEqual(connect.label, "Connect to iCloud…")
+        XCTAssertFalse(element(app, "settings.accountSync.content").exists)
+        try click(accountSync, app, bundle)
+
+        let content = element(app, "settings.accountSync.content")
+        XCTAssertTrue(content.waitForExistence(timeout: 10), app.debugDescription)
+        let service = content.descendants(matching: .any).matching(identifier: "settings.accountSync.service")
+        XCTAssertTrue(service.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(service.count, 1, "The standard form must contain its existing Sync Service picker")
+        #if os(macOS)
+        XCTAssertEqual(service.firstMatch.elementType, .popUpButton)
+        XCTAssertEqual(app.sheets.containing(.button, identifier: "settings.accountSync.done").count, 1)
+        #endif
+        let doneButtons = app.buttons.matching(identifier: "settings.accountSync.done")
+        let done = try XCTUnwrap(waitForHittable(doneButtons), app.debugDescription)
+        XCTAssertEqual(doneButtons.count, 1)
+        try click(done, app, bundle)
+
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: content)], timeout: 10), .completed)
+        _ = try XCTUnwrap(waitForHittable(accountSyncButtons), app.debugDescription)
+        XCTAssertTrue(element(app, "home.collection.screen").exists)
+        XCTAssertTrue(app.staticTexts["No Collection"].exists, "Opening Account & Sync must leave Home without a collection")
+        XCTAssertFalse(app.staticTexts["No Decks"].exists)
+        XCTAssertTrue(importCollection.exists && importCollection.isEnabled && importCollection.isHittable)
+        XCTAssertTrue(connect.exists && connect.isHittable)
+        XCTAssertEqual(connect.label, "Connect to iCloud…")
+        XCTAssertFalse(element(app, "settings.accountSync.done").exists)
+    }
+
     func testPickerImportCreatesDurableReview() throws {
         try exercisePickedPackage(hasLocalCollection: false)
     }

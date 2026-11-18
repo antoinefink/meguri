@@ -313,12 +313,12 @@
         }
       }
     },
-    "Import a collection to start studying.": {
+    "Import or sync a collection to start studying.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Import a collection to start studying."
+            "value": "Import or sync a collection to start studying."
           }
         }
       }
