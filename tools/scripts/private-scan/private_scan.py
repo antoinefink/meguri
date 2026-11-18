@@ -835,7 +835,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '441d3c8f3df9667eebb1a6051013fa846cc3875f67f557d5047c5e10d479cbb0',
+        'a3694dfce7347c5c8481e3ee4ba5135649e101642efadd3bfe3d55713755dbca',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1018,9 +1018,9 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/sync-web.sh':
         'e96c97800779b5d2deae7b36bb0912e43cedf4e8c3b6d40b6c3f81d0206747f1',
     'server/web/upstream-records.json':
-        '38b04bec948d0e2cdab5b73cb39bf6a0147578de19e27b05aefb8a2013a79216',
+        'bf0800b18e97502d4058d66aa7c666930de66f710e1d1aca564d08ddeecbf0d4',
     'server/web/src/style.css':
-        'd0bfcf6df83d3b55e8d9e14f83996c39ff18ef60109a7a2fe76b752b4a5d30f3',
+        '76b61dbe9ea87cbb18c1e1f1e77a01dd2ef7ecce598367ac0456386ee0b582d7',
     'server/web/src/app.tsx':
         '2e784565dde9f5b7dbaa767ceeeb08df8f61220e0e11ff56d4443c9a22afd0c6',
     'server/web/scripts/run.sh':

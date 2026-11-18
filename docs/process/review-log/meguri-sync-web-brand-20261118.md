@@ -19,3 +19,20 @@ forms and storage values continue through the existing routes.
 | server/web/tests/browser/accounts.spec.ts | db919b0920a25f63451a6a3bf873cc478a2af9e12a6ae6e39327954ecbf46924 |
 | server/web/upstream-records.json | 38b04bec948d0e2cdab5b73cb39bf6a0147578de19e27b05aefb8a2013a79216 |
 | specs/servers/meguri-sync-web.md | decbec9c744427fed7768c0acb974819a0c14c6cd888f3ed5cfcbccf7213c6cb |
+
+## Layout refinement
+
+Starting commit `69e54cd92`. Session `s-20261118T141726Z-6fd0f144`.
+Filtered export `20261118T142232Z-3733` and independent review `20261118T142341Z-4890`.
+The review cleared the complete files and public ledger record.
+Ledger SHA-256 through LF `be6daec52faf5fc5d98a5cfa459eeddba6c15b70a408adb04e1c94b1ad4b54fc`.
+
+The footer gives ordinary account names more room. The narrow menu uses smaller gaps.
+The browser journey captures the standard sign-in and account pages.
+
+| Path | SHA-256 |
+| --- | --- |
+| server/web/scripts/audit-assessment.json | a3694dfce7347c5c8481e3ee4ba5135649e101642efadd3bfe3d55713755dbca |
+| server/web/src/style.css | 76b61dbe9ea87cbb18c1e1f1e77a01dd2ef7ecce598367ac0456386ee0b582d7 |
+| server/web/tests/browser/accounts.spec.ts | 2f4c795eec9d7a9fd2ebc5b8c14e6ef07f06c7a355f289faa509070c22d78cb3 |
+| server/web/upstream-records.json | bf0800b18e97502d4058d66aa7c666930de66f710e1d1aca564d08ddeecbf0d4 |

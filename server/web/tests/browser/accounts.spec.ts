@@ -44,6 +44,13 @@ async function accountShell(page: Page, username: string, admin: boolean) {
   }
   const identity = page.getByRole("group", { name: "Signed-in account", exact: true });
   await expect(identity.getByText(username, { exact: true })).toBeVisible();
+  if (username === "root.admin") {
+    expect(await identity.getByText(username, { exact: true }).evaluate(element => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      return range.getClientRects().length;
+    })).toBe(1);
+  }
   await expect(identity.getByText(admin ? "Administrator" : "Member", { exact: true })).toBeVisible();
   await expect(identity.locator(':scope > svg[aria-hidden="true"][focusable="false"]')).toBeVisible();
   const signOut = identity.getByRole("button", { name: "Sign out", exact: true });
@@ -93,7 +100,7 @@ async function signIn(page: Page, username: string, password: string) {
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Connect your devices" })).toBeVisible();
 }
-async function audit(page: Page, name: string) {
+async function audit(page: Page, name?: string) {
   await brand(page);
   const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
   expect(result.violations.map(item => ({ id: item.id, impact: item.impact }))).toEqual([]);
@@ -140,15 +147,17 @@ async function audit(page: Page, name: string) {
       platformFonts = (await session.send("CSS.getPlatformFontsForNode", { nodeId })).fonts;
     } finally { await session.detach(); }
   } catch { /* Canvas metrics above remain available on engines without CDP. */ }
-  writeFileSync(`/out/browser-artifacts/${name}-fonts.json`, JSON.stringify({ ...fontEvidence, platformFonts, borders }, null, 2) + "\n");
+  if (name) writeFileSync(`/out/browser-artifacts/${name}-fonts.json`, JSON.stringify({ ...fontEvidence, platformFonts, borders }, null, 2) + "\n");
   await page.evaluate(() => {
     if (document.activeElement?.matches(".skip-link")) document.querySelector<HTMLElement>("main")?.focus({ preventScroll: true });
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   });
-  await page.screenshot({ path: `/out/browser-artifacts/${name}.png`, fullPage: true });
+  if (name) await page.screenshot({ path: `/out/browser-artifacts/${name}.png`, fullPage: true });
 }
 test("setup, invitation, member settings, reset and admin actions over private HTTPS", async ({ page, browser, baseURL }) => {
   if (!baseURL) throw new Error("Missing HTTPS fixture origin");
+  const desktopViewport = page.viewportSize();
+  if (!desktopViewport) throw new Error("Missing desktop viewport");
   const external: string[] = [];
   let bootstrapSawFragment = false;
   function observe(target: Page) {
@@ -172,6 +181,11 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await expect(page.getByRole("button", { name: "Set up Meguri Sync", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  await audit(page);
+  await page.goto("/login");
+  await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Username", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
   await audit(page, "anonymous-login-wide");
   // Hold the actual authenticated Rust response across same-document Back navigation.
   await page.goto("/reset");
@@ -212,6 +226,12 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await audit(page, "connection-wide");
   await page.getByRole("link", { name: "Accounts", exact: true }).click();
   await expect(page.getByRole("heading", { name: "root.admin (you)" })).toBeVisible();
+  await accountShell(page, "root.admin", true);
+  await audit(page, "accounts-wide");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await accountShell(page, "root.admin", true);
+  await audit(page, "accounts-narrow");
+  await page.setViewportSize(desktopViewport);
   await page.getByRole("button", { name: "Create invitation", exact: true }).click();
   const invite = await page.getByLabel("One-time link", { exact: true }).inputValue();
   expect(new URL(invite).pathname).toBe("/invite");
@@ -326,9 +346,9 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await accountShell(page, "root.admin", true);
   await expect(memberRow.getByText(memberUsername, { exact: true })).toBeVisible();
   await expect(amounts.nth(1)).toHaveText("0 B");
-  await audit(page, "accounts-narrow");
+  await audit(page);
   await page.setViewportSize({ width: 1280, height: 900 });
-  await audit(page, "accounts-wide");
+  await audit(page);
   await openCapability(page, `/setup#token=${fixture.setup_token}`);
   await expect(page.getByRole("heading", { name: "Signed in as root.admin" })).toBeVisible();
   expect(new URL(page.url()).hash).toBe("");

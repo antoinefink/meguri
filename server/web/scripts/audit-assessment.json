@@ -159,8 +159,8 @@
         "sha256": "e4601ed02978054d2b34a10ebabe3a32184f7ec75c31da9b51f248e139536ea1"
       },
       "src/style.css": {
-        "bytes": 8344,
-        "sha256": "d0bfcf6df83d3b55e8d9e14f83996c39ff18ef60109a7a2fe76b752b4a5d30f3"
+        "bytes": 8352,
+        "sha256": "76b61dbe9ea87cbb18c1e1f1e77a01dd2ef7ecce598367ac0456386ee0b582d7"
       },
       "src/ui.tsx": {
         "bytes": 4952,
@@ -171,8 +171,8 @@
         "sha256": "036fe75a617cc7a806cb828d9908a5470a20bb7c731ea70cbbe730499a4a169f"
       },
       "tests/browser/accounts.spec.ts": {
-        "bytes": 22602,
-        "sha256": "db919b0920a25f63451a6a3bf873cc478a2af9e12a6ae6e39327954ecbf46924"
+        "bytes": 23550,
+        "sha256": "2f4c795eec9d7a9fd2ebc5b8c14e6ef07f06c7a355f289faa509070c22d78cb3"
       },
       "tests/policy.test.ts": {
         "bytes": 1397,
@@ -195,8 +195,8 @@
         "sha256": "0f6fbb47172ca2349b43fecc3ebffff18b1345bddbd54b27d629978306382ba0"
       },
       "upstream-records.json": {
-        "bytes": 6238,
-        "sha256": "38b04bec948d0e2cdab5b73cb39bf6a0147578de19e27b05aefb8a2013a79216"
+        "bytes": 6419,
+        "sha256": "bf0800b18e97502d4058d66aa7c666930de66f710e1d1aca564d08ddeecbf0d4"
       },
       "vite.config.ts": {
         "bytes": 1520,

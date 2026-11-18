@@ -48,7 +48,7 @@
       "sha256": "2ba1a9b9422f4172373f4cd0587b675d2331a41f4fa68f65dab2b23ca98fd9d2",
       "path": "apps/v4/registry/new-york-v4/ui/sidebar.tsx",
       "adapted_into": "src/ui.tsx",
-      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery.",
+      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery. Local sidebar CSS reduces footer padding/gaps to give ordinary usernames more room and tightens narrow menu padding/icon gaps; long usernames and narrow menus still wrap naturally.",
       "adapted_sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
     },
     {
