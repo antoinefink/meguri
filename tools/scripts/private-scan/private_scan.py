@@ -1272,7 +1272,7 @@ PUBLIC_ARTIFACTS = {
         "2c9222832834a1a4251d5388c2e158f15d69be007739c0953c7980e1ba13e768",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "app/Packages/MeguriKit/Sources/Features/Editor/FieldEditorHost.swift":
-        "ca6f212676ef466aa1f6153ed83f2be4a6252cff4c5dd292dae5e826567ca7f0",
+        "4d14f67f8e1860c14b8da31c63ea0821118fe92cff1fbff6c93f98686c9f3aa1",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "app/Packages/MeguriKit/Tests/AppModelTests/FieldEditorTests.swift":
         "77f14ea15c23c869c9f484b932da2f86baa9c402be06987dafe5d3ffb2534687",

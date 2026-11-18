@@ -213,7 +213,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         } catch { fail(error, load: expected); throw error }
     }
 
-    fileprivate func receive(_ scriptMessage: WKScriptMessage, reply: @escaping (Any?, String?) -> Void) {
+    fileprivate func receive(_ scriptMessage: WKScriptMessage, reply: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         guard !closed, scriptMessage.name == "meguriEditor", scriptMessage.webView === webView, scriptMessage.frameInfo.isMainFrame,
               scriptMessage.frameInfo.securityOrigin.protocol == "meguri-editor",
               scriptMessage.frameInfo.securityOrigin.host == "editor", webView.url == EditorDocument.url else {
@@ -357,7 +357,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
            navigation === documentNavigation { fail(error, load: expected) }
     }
     public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                        decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
         let allowed = allowsDocumentNavigation && navigationAction.targetFrame?.isMainFrame == true &&
             navigationAction.request.url == EditorDocument.url && navigationAction.navigationType == .other
         if allowed { allowsDocumentNavigation = false }
@@ -368,7 +368,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
 private final class EditorMessageRelay: NSObject, WKScriptMessageHandlerWithReply {
     weak var owner: FieldEditorHost?
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
-                               replyHandler: @escaping (Any?, String?) -> Void) {
+                               replyHandler: @escaping @MainActor @Sendable (Any?, String?) -> Void) {
         guard let owner else { replyHandler(nil, "Editor closed"); return }
         owner.receive(message, reply: replyHandler)
     }
