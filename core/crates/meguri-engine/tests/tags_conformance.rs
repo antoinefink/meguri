@@ -626,9 +626,10 @@ fn every_tags_scenario_has_play_or_explicit_pending_coverage() {
         "reparent/rules",
         "tree/structure",
     ];
-    // Only these five prepared cases await the tag_complete adapter (U84).
-    let pending: [&str; 5] = [
+    // Only these six prepared cases await the tag_complete adapter (U84).
+    let pending: [&str; 6] = [
         "complete/components",
+        "complete/filter-sequence",
         "complete/folding",
         "complete/order-limit",
         "complete/registry",
@@ -643,7 +644,7 @@ fn every_tags_scenario_has_play_or_explicit_pending_coverage() {
         .collect();
     expected.sort();
     let names: Vec<&str> = files.iter().map(|file| file.rel.as_str()).collect();
-    assert_eq!(names, expected, "the exact 24 tags scenario IDs");
+    assert_eq!(names, expected, "the exact 25 tags scenario IDs");
 
     let this =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tags_conformance.rs")).unwrap();
