@@ -63,7 +63,7 @@ class MobileSDKPublicSurface(unittest.TestCase):
             result['stage']='retain_distribution_version'
             retain_identity('distribution_version',distribution_version)
             result['stage']='assert_distribution_version'
-            self.assertEqual(distribution_version,'26.9.4')
+            self.assertEqual(distribution_version,'26.09.4')
             result['stage']='read_build_version'
             build_version=buildinfo.version
             result['stage']='retain_build_version'
