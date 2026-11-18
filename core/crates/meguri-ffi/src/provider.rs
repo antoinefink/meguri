@@ -74,6 +74,23 @@ impl ProviderOwner {
         Ok(())
     }
 }
+#[cfg(feature = "test-hooks")]
+#[uniffi::export]
+impl ProviderOwner {
+    pub fn install_meguri_fixture_transport_for_testing(
+        &self, collection_path: String, installation_directory: String,
+        origin: String, ca_der: Vec<u8>,
+    ) -> Result<(), CoreError> {
+        callback::enter("ProviderOwner.install_meguri_fixture_transport_for_testing");
+        self.validate()?;
+        self.host.install_meguri_fixture_transport(
+            self.generation,
+            std::path::Path::new(&collection_path), std::path::Path::new(&installation_directory),
+            &origin, &ca_der,
+        )?;
+        Ok(())
+    }
+}
 #[derive(uniffi::Object)]
 pub struct ProviderDiscovery { _inner: p::Discovery }
 #[derive(uniffi::Object)]

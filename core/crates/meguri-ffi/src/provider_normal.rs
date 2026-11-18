@@ -129,8 +129,11 @@ impl ProviderConnection {
         if c.reference != self.inner.reference || c.revision != self.inner.revision || c.endpoint != self.inner.endpoint {
             return Err(ProviderRoundRefusal::ConnectionChanged);
         }
-        MeguriAccess::new(self.inner.clone(), &credentials.username, HostKey::new(credentials.hostkey))
-            .map_err(|error| match error {
+        #[cfg(feature = "test-hooks")]
+        let access = self.owner.host.meguri_access_for_testing(self.inner.clone(), &credentials.username, HostKey::new(credentials.hostkey));
+        #[cfg(not(feature = "test-hooks"))]
+        let access = MeguriAccess::new(self.inner.clone(), &credentials.username, HostKey::new(credentials.hostkey));
+        access.map_err(|error| match error {
                 meguri_host::MeguriBootstrapError::Username => ProviderRoundRefusal::AccountChanged,
                 _ => ProviderRoundRefusal::ConnectionChanged,
             })

@@ -291,3 +291,191 @@ fn ffi_failed_pause_refresh_stays_blocked_and_explicit_retry_publishes_the_pause
     host.review().end(session_id).unwrap();
     host.close().unwrap();
 }
+
+#[cfg(feature = "test-hooks")]
+mod fixture_transport_tests {
+    use super::*;
+    use super::super::{bootstrap::{ProviderBootstrapDirection, ProviderBootstrapFailure,
+        ProviderBootstrapOutcome, ProviderBootstrapReadiness}, normal::{ProviderRoundRefusal, ProviderRoundStart}};
+    use std::path::Path;
+
+    const ORIGIN: &str = "https://127.0.0.1:18443/";
+    const OTHER_ORIGIN: &str = "https://127.0.0.1:18444/";
+
+    fn install(owner: &ProviderOwner, root: &Path, der: &[u8]) -> Result<(), CoreError> {
+        owner.install_meguri_fixture_transport_for_testing(
+            root.join("collection/collection.anki2").to_str().unwrap().into(),
+            root.join("installation").to_str().unwrap().into(), ORIGIN.into(), der.to_vec())
+    }
+
+    // Inert constructor/refusal inputs only; no authentication is performed.
+    fn credentials(connection: &ProviderConnection) -> ProviderCredentials {
+        ProviderCredentials { connection: connection.information().unwrap(),
+            username: "synthetic-user".into(), hostkey: "inert-constructor-input".into() }
+    }
+
+    fn assert_idle(host: &meguri_host::CoreHost) {
+        assert!(host.engine().jobs().running().is_empty());
+        assert!(host.manual_transfer_history().active().unwrap().is_none());
+    }
+
+    fn bootstrap_refusal(connection: &ProviderConnection, credentials: ProviderCredentials) -> ProviderBootstrapFailure {
+        let job = connection.start_bootstrap_prepare(credentials, ProviderBootstrapDirection::UseServerCollection).unwrap();
+        assert!(job.handle.is_none());
+        assert!(job.result.retained_operation().unwrap().is_none());
+        assert_idle(&connection.owner.host);
+        match job.result.outcome().unwrap() {
+            ProviderBootstrapOutcome::Refused { failure, accounting: None } => failure,
+            _ => panic!("expected synchronous bootstrap refusal without accounting"),
+        }
+    }
+
+    fn assert_round_refusals(connection: &ProviderConnection, credentials: ProviderCredentials, expected: ProviderRoundRefusal) {
+        match connection.start_collection_round(credentials.clone()).unwrap() {
+            ProviderRoundStart::Refused { refusal } => assert_eq!(refusal, expected),
+            _ => panic!("expected synchronous collection refusal without a handle"),
+        }
+        assert_idle(&connection.owner.host);
+        match connection.start_media_round(credentials).unwrap() {
+            ProviderRoundStart::Refused { refusal } => assert_eq!(refusal, expected),
+            _ => panic!("expected synchronous media refusal without a handle"),
+        }
+        assert_idle(&connection.owner.host);
+    }
+
+    fn assert_not_selected(connection: &ProviderConnection) {
+        assert_eq!(connection.owner.snapshot().unwrap().selection, Some(ProviderSelection::LocalOnly));
+        assert!(matches!(connection.bootstrap_readiness().unwrap(), ProviderBootstrapReadiness::NotSelected));
+        let credentials = credentials(connection);
+        assert!(matches!(bootstrap_refusal(connection, credentials.clone()), ProviderBootstrapFailure::NotSelected));
+        assert_round_refusals(connection, credentials, ProviderRoundRefusal::NotSelected);
+    }
+
+    fn assert_early_input_guards(connection: &ProviderConnection) {
+        for field in 0..3 {
+            let mut credentials = credentials(connection);
+            match field {
+                0 => credentials.connection.reference.push('x'),
+                1 => credentials.connection.revision += 1,
+                _ => credentials.connection.endpoint = "https://foreign.synthetic.example/".into(),
+            }
+            // Identity mismatches must win even over an invalid username.
+            credentials.username = "!".into();
+            assert!(matches!(bootstrap_refusal(connection, credentials.clone()), ProviderBootstrapFailure::ConnectionChanged));
+            assert_round_refusals(connection, credentials, ProviderRoundRefusal::ConnectionChanged);
+        }
+        let mut credentials = credentials(connection);
+        credentials.username = "!".into();
+        assert!(matches!(bootstrap_refusal(connection, credentials.clone()), ProviderBootstrapFailure::Username));
+        assert_round_refusals(connection, credentials, ProviderRoundRefusal::AccountChanged);
+    }
+
+    #[test]
+    fn ffi_fixture_installer_binds_exact_paths_is_one_shot_and_does_not_survive_host_close() {
+        let root = tempfile::tempdir().unwrap();
+        let config = configuration(root.path());
+        let host = Arc::new(meguri_host::CoreHost::open(config.clone()).unwrap());
+        let original = owner(host.clone());
+        let der = meguri_testkit::sync_stub::TestRoot::generate().der();
+
+        assert!(install(&original, root.path(), b"invalid DER").is_err());
+        assert!(original.install_meguri_fixture_transport_for_testing(
+            config.collection_directory.to_str().unwrap().into(),
+            config.manual_transfer_directory.to_str().unwrap().into(), ORIGIN.into(), der.clone()).is_err());
+        assert!(original.install_meguri_fixture_transport_for_testing(
+            config.collection_directory.join("collection.anki2").to_str().unwrap().into(),
+            root.path().join("wrong-installation").to_str().unwrap().into(), ORIGIN.into(), der.clone()).is_err());
+        assert_idle(&host);
+        install(&original, root.path(), &der).unwrap();
+        assert!(install(&original, root.path(), &der).is_err());
+
+        let foreign_root = tempfile::tempdir().unwrap();
+        let foreign_host = super::host(foreign_root.path());
+        let foreign = owner(foreign_host.clone());
+        assert!(install(&foreign, root.path(), &der).is_err());
+        assert!(foreign.install_meguri_fixture_transport_for_testing(
+            foreign_root.path().join("collection/collection.anki2").to_str().unwrap().into(),
+            config.manual_transfer_directory.to_str().unwrap().into(), ORIGIN.into(), der.clone()).is_err());
+        assert_idle(&foreign_host);
+        install(&foreign, foreign_root.path(), &der).unwrap();
+        foreign_host.close().unwrap();
+
+        assert_idle(&host);
+        host.close().unwrap();
+        assert!(install(&original, root.path(), &der).is_err());
+        // Reopening the very same installation still creates a new policy owner.
+        let reopened = Arc::new(meguri_host::CoreHost::open(config).unwrap());
+        let current = owner(reopened.clone());
+        let connection = current.configure_meguri(OTHER_ORIGIN.into()).unwrap();
+        assert_not_selected(&connection);
+        reopened.close().unwrap();
+    }
+
+    #[test]
+    fn ffi_fixture_policy_absence_preserves_local_only_and_input_refusals() {
+        let root = tempfile::tempdir().unwrap();
+        let host = host(root.path());
+        let connection = owner(host.clone()).configure_meguri("https://ordinary.synthetic.example/".into()).unwrap();
+        // LocalOnly admission prevents dispatch to this synthetic public name.
+        assert_not_selected(&connection);
+        assert_early_input_guards(&connection);
+        host.close().unwrap();
+    }
+
+    #[test]
+    fn ffi_fixture_origin_mismatch_reaches_all_access_factories_after_early_guards() {
+        let root = tempfile::tempdir().unwrap();
+        let host = host(root.path());
+        let original = owner(host.clone());
+        let der = meguri_testkit::sync_stub::TestRoot::generate().der();
+        install(&original, root.path(), &der).unwrap();
+        let connection = original.clone().configure_meguri(OTHER_ORIGIN.into()).unwrap();
+        assert_eq!(original.snapshot().unwrap().selection, Some(ProviderSelection::LocalOnly));
+        let credentials = credentials(&connection);
+        assert!(matches!(bootstrap_refusal(&connection, credentials.clone()), ProviderBootstrapFailure::Unavailable));
+        assert_round_refusals(&connection, credentials.clone(), ProviderRoundRefusal::ConnectionChanged);
+        assert_early_input_guards(&connection);
+        assert_idle(&host);
+        host.close().unwrap();
+        assert!(install(&original, root.path(), &der).is_err());
+        assert!(connection.start_bootstrap_prepare(credentials.clone(), ProviderBootstrapDirection::UseServerCollection).is_err());
+        assert_round_refusals(&connection, credentials, ProviderRoundRefusal::Interrupted);
+    }
+
+    #[test]
+    fn ffi_fixture_matching_origin_keeps_admission_and_replacement_keeps_policy_but_fences_stale_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let host = host(root.path());
+        let original = owner(host.clone());
+        let der = meguri_testkit::sync_stub::TestRoot::generate().der();
+        install(&original, root.path(), &der).unwrap();
+        let connection = original.clone().configure_meguri(ORIGIN.into()).unwrap();
+        assert_not_selected(&connection);
+        let stale_credentials = credentials(&connection);
+
+        {
+            let slot = host.engine().acquire_slot(meguri_engine::LongOp::Restore).unwrap();
+            slot.enter_exclusive(true).unwrap().replace(|live| {
+                let candidate = live.with_file_name("synthetic-replacement.anki2");
+                std::fs::copy(live, &candidate).map_err(meguri_storage::StorageError::from)?;
+                std::fs::rename(candidate, live).map_err(meguri_storage::StorageError::from)?;
+                Ok(())
+            }).unwrap();
+        }
+        assert_ne!(host.cloud_connection_generation().unwrap(), original.generation);
+        assert!(install(&original, root.path(), &der).is_err());
+        assert!(connection.information().is_err());
+        assert!(connection.start_bootstrap_prepare(stale_credentials.clone(), ProviderBootstrapDirection::UseServerCollection).is_err());
+        assert_round_refusals(&connection, stale_credentials, ProviderRoundRefusal::Interrupted);
+
+        let current = owner(host.clone());
+        let matching = current.clone().configured_meguri().unwrap().unwrap();
+        assert_not_selected(&matching);
+        let changed = current.configure_meguri(OTHER_ORIGIN.into()).unwrap();
+        let credentials = credentials(&changed);
+        // This mismatch proves that the original policy survived replacement.
+        assert!(matches!(bootstrap_refusal(&changed, credentials.clone()), ProviderBootstrapFailure::Unavailable));
+        assert_round_refusals(&changed, credentials, ProviderRoundRefusal::ConnectionChanged);
+        host.close().unwrap();
+    }
+}

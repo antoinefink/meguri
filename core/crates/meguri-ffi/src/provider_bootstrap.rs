@@ -248,7 +248,10 @@ impl ProviderConnection {
         let expected = information(&self.inner);
         if credentials.connection.reference != expected.reference || credentials.connection.revision != expected.revision
             || credentials.connection.endpoint != expected.endpoint { return Err(MeguriBootstrapError::ConnectionChanged); }
-        MeguriAccess::new(self.inner.clone(), &credentials.username, HostKey::new(credentials.hostkey))
+        #[cfg(feature = "test-hooks")]
+        { self.owner.host.meguri_access_for_testing(self.inner.clone(), &credentials.username, HostKey::new(credentials.hostkey)) }
+        #[cfg(not(feature = "test-hooks"))]
+        { MeguriAccess::new(self.inner.clone(), &credentials.username, HostKey::new(credentials.hostkey)) }
     }
     fn same_host(&self, owner: &ProviderOwner, connection: &MeguriConnection) -> Result<(), CoreError> {
         // Retained operation capabilities survive their own activation on the
