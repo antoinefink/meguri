@@ -12,9 +12,17 @@ struct PresentationHost: ViewModifier {
     let isActive: Bool
     var host: AppNavigation.SheetHost = .main
 
+    private var hostedSheet: SheetRoute? {
+        guard isActive, navigation.sheetHost == host else { return nil }
+        #if os(macOS)
+        if features.nativeMacWorkspace, case .add = navigation.sheet { return nil }
+        #endif
+        return navigation.sheet
+    }
+
     func body(content: Content) -> some View {
         content
-            .sheet(item: Binding(get: { isActive && navigation.sheetHost == host ? navigation.sheet : nil }, set: { if $0 == nil, isActive, navigation.sheetHost == host { navigation.dismissSheet() } })) { sheet in
+            .sheet(item: Binding(get: { hostedSheet }, set: { if $0 == nil, hostedSheet != nil { navigation.dismissSheet() } })) { sheet in
                 features.sheet(sheet, navigation)
                     #if os(macOS)
                     .accessibilityHidden(false)

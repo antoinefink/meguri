@@ -30,8 +30,35 @@ public final class AppNavigation {
     /// selected deck; leaving the page (Home, a pop) deselects the deck.
     private var showsDeckPage = false
     public enum SheetHost: Equatable { case main, settings }
-    public var sheetHost: SheetHost = .main
-    public var sheet: SheetRoute?
+    private var presentedSheetHost: SheetHost = .main
+    public var sheetHost: SheetHost {
+        get { presentedSheetHost }
+        set {
+            guard addSheetRequest == nil || !presentedSheet.isAddNote || newValue == .main else { return }
+            presentedSheetHost = newValue
+        }
+    }
+    private var presentedSheet: SheetRoute?
+    public var sheet: SheetRoute? {
+        get { presentedSheet }
+        set {
+            if presentedSheet.isAddNote || newValue.isAddNote, let addSheetRequest {
+                addSheetRequest(newValue)
+            } else {
+                presentedSheet = newValue
+            }
+        }
+    }
+    // Installed only by the production editor composition. Isolated shell
+    // fixtures retain their existing presentation behavior.
+    @ObservationIgnored var addSheetRequest: (@MainActor (SheetRoute?) -> Void)?
+    @ObservationIgnored var retainedAddPresentation: AddNotePresentation?
+
+    func commitAddSheet(_ route: SheetRoute?) {
+        guard route == nil || route.isAddNote else { return }
+        if route != nil { sheetHost = .main }
+        presentedSheet = route
+    }
     public private(set) var review: ReviewPresentation?
     /// The sidebar layout's columns. The sidebar's own toggle, ⌃⌘S and the
     /// iPad edge swipe write it (R20).
@@ -304,6 +331,10 @@ public final class AppNavigation {
     // MARK: Sheets (R25)
 
     public func present(_ sheet: SheetRoute) {
+        if self.sheet.isAddNote || Optional(sheet).isAddNote, addSheetRequest != nil {
+            self.sheet = sheet
+            return
+        }
         if self.sheet != sheet { sheetHost = .main }
         self.sheet = sheet
     }
@@ -350,6 +381,13 @@ public final class AppNavigation {
         let state = make()
         featureStates[key] = state
         return state
+    }
+}
+
+extension Optional where Wrapped == SheetRoute {
+    var isAddNote: Bool {
+        if case .add = self { return true }
+        return false
     }
 }
 

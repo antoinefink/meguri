@@ -1,5 +1,6 @@
 import AppModel
 import CoreBridge
+import Editor
 import SwiftUI
 
 /// The root of the window (KTD10): the tab layout at compact width, the
@@ -74,7 +75,8 @@ struct RootView: View {
         #if os(macOS)
         .focusedSceneValue(\.nativeCommandContext, collection.map { NativeCommandContext(collection: $0, host: .main) })
         // Hide only the presenting shell; sheets and alerts own their AX tree.
-        .accessibilityHidden(launchSheet || launchAlert || linkRefusal != nil || navigation.sheet != nil)
+        .accessibilityHidden(launchSheet || launchAlert || linkRefusal != nil || hasModalSheet)
+        .background(AddNoteWindowGuard(navigation: navigation))
         #endif
         .modifier(PresentationHost(
             navigation: navigation, features: features, configuration: configuration,
@@ -161,7 +163,15 @@ struct RootView: View {
             return .handled
         }
         .modifier(ReviewLifecycle(collection: collection))
+        .modifier(AddNoteRequestFeedback(collection: collection))
         .modifier(LaunchEnvironment(configuration: configuration))
+    }
+
+    private var hasModalSheet: Bool {
+        #if os(macOS)
+        if features.nativeMacWorkspace, case .add = navigation.sheet { return false }
+        #endif
+        return navigation.sheet != nil
     }
 
     private func updateReviewObscuration() {

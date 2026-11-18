@@ -10,7 +10,7 @@ import WebKit
 /// data bridge is in a named content world and admits its main frame only.
 /// This component deliberately offers no Add/Edit/Browse persistence command.
 @Observable @MainActor
-public final class FieldEditorHost: NSObject, WKNavigationDelegate {
+public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteFieldRuntime {
     public let draft: NoteEditorDraft
     public let webView: WKWebView
     public private(set) var editable = false
@@ -394,3 +394,15 @@ private struct FieldEditorMount: UIViewRepresentable {
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
 #endif
+
+// The collection retains this actual host through the AppModel runtime boundary.
+// A remounted form reads it; it must not create/dispose a host on appear/disappear.
+extension ReviewCollection {
+    @discardableResult public func prepareAddNoteEditor(presetDeck: Int64? = nil) async -> FieldEditorHost? {
+        let flow = addNoteFlow
+        guard await flow.open(presetDeck: presetDeck, makeRuntime: { draft, current in
+            try FieldEditorHost(draft: draft, isCurrent: current)
+        }) else { return nil }
+        return flow.runtime as? FieldEditorHost
+    }
+}

@@ -27,8 +27,19 @@ public struct NotetypeLastDeck: Sendable, Hashable {
     }
 }
 
+public struct AddNotetypeSelection: Sendable, Hashable {
+    public let generation: UInt64
+    public let notetype: NotetypeRecord?
+
+    init(_ value: MeguriCoreBindings.AddNotetypeSelection) {
+        generation = value.generation
+        notetype = value.notetype.map(NotetypeRecord.init)
+    }
+}
+
 public protocol EditorServices: Sendable {
     func addDefaults(reviewCard: Int64?, presetDeck: Int64?) async throws(BridgeError) -> AddDefaults
+    func addNotetypeSelection(expectedGeneration: UInt64, selectedId: Int64) async throws(BridgeError) -> AddNotetypeSelection
     func notetypeLastDeck(notetypeId: Int64) async throws(BridgeError) -> NotetypeLastDeck
     func tagComplete(input: String, limit: UInt64, cancel: CancelToken) async throws(BridgeError) -> [String]
 }
@@ -41,6 +52,15 @@ public actor CoreEditorServices: EditorServices {
     public func addDefaults(reviewCard: Int64? = nil, presetDeck: Int64? = nil) async throws(BridgeError) -> AddDefaults {
         try await QueryLane.shared.call(.addDefaults) {
             AddDefaults(try MeguriCoreBindings.addDefaults(reviewCard: reviewCard, presetDeck: presetDeck))
+        }
+    }
+
+    /// D5: retain a present type, otherwise resolve SQLite's stored-name first
+    /// and its aggregate in the same generation-checked Query snapshot.
+    public func addNotetypeSelection(expectedGeneration: UInt64, selectedId: Int64) async throws(BridgeError) -> AddNotetypeSelection {
+        try await QueryLane.shared.call(.addNotetypeSelection) {
+            AddNotetypeSelection(try MeguriCoreBindings.addNotetypeSelection(
+                expectedGeneration: expectedGeneration, selectedId: selectedId))
         }
     }
 

@@ -12,8 +12,13 @@ struct DeckMenu: View {
             Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
                 Text("Study", bundle: .module)
             }
-            .disabled(!collection.canStudy)
+            .disabled(!collection.canStudy || collection.navigation.sheet != nil || collection.addNotePresentation.opening)
             .accessibilityIdentifier("home.deckMenu.study.\(deck.id)")
+            Button { collection.navigation.present(.add(deck: DeckID(deck.id))) } label: {
+                Text("Add Note", bundle: .module)
+            }
+            .disabled(!collection.addNotePresentation.canPresent(presetDeck: deck.id))
+            .accessibilityIdentifier("home.deckMenu.addNote.\(deck.id)")
             Button { collection.openDeckPage(deckID: deck.id) } label: { Text("Overview", bundle: .module) }
                 .disabled(collection.review != nil || collection.navigation.sheet != nil)
                 .accessibilityIdentifier("home.deckMenu.overview.\(deck.id)")

@@ -128,6 +128,7 @@ public final class ManualTransferCoordinator {
     private var previewUsername: String?
     private var recoveryPreview = false
     private var cancellationCauses: [String: ManualTransferCancellation] = [:]
+    private var editorDecision: (operation: ManualTransferOperation, decision: ReviewCollection.EditorReplacementDecision)?
     private var waiters: [CheckedContinuation<Void, Never>] = []
     public var busy: Bool { stage != .ready && stage != .awaitingConfirmation && stage != .awaitingMediaConsent }
     public var canLogin: Bool {
@@ -291,7 +292,7 @@ public final class ManualTransferCoordinator {
     public func prepare() async {
         guard canPrepare, let owner, let credentials else { return }
         clearFailureDiagnostics()
-        do { try owner.beginManualActivation() } catch { message = "Finish the current review or file operation first."; return }
+        do { try owner.beginManualActivation(discovery: true) } catch { message = "Finish the current review or file operation first."; return }
         revision &+= 1
         defer { finishWaiters() }
         stage = .buildingDecision; message = nil; result = nil
@@ -316,14 +317,51 @@ public final class ManualTransferCoordinator {
     public func confirm() async {
         guard canConfirm, let owner, let credentials, let prepared = preview else { return }
         clearFailureDiagnostics()
-        do { try owner.beginManualActivation() } catch { message = "Finish the current review or file operation first."; return }
         let before = owner.generation
         revision &+= 1
+        let expected = revision
         defer { finishWaiters() }
-        stage = .applyingDecision; preview = nil; message = nil
+        stage = .applyingDecision; message = nil
         let operation = ManualTransferOperation(); self.operation = operation
+        let current = {
+            self.owner === owner && self.revision == expected && self.operation === operation &&
+                self.preview === prepared && operation.cancellation == nil && !Task.isCancelled
+        }
+        let decision = ReviewCollection.EditorReplacementDecision()
+        editorDecision = (operation, decision)
+        defer { if editorDecision?.operation === operation { editorDecision = nil } }
+        let admission = await owner.prepareEditorReplacement(operation: "One-Way Sync", decision: decision, current: current)
+        defer { if let admission { owner.finishEditorReplacement(admission.id) } }
+        guard let admission, admission.accepted else {
+            // Keep Editing cancels only this unconfirmed candidate. Recovery
+            // previews retain their existing durable decision, as on dismissal.
+            if !recoveryPreview {
+                do {
+                    try await service.discard(prepared, interrupted: operation.cancellation == .system, operation: ManualTransferOperation())
+                    recordCancellation(operation.cancellation ?? .user, id: prepared.record.id)
+                } catch { await report(error, operation: operation) }
+            }
+            if self.operation === operation {
+                preview = nil; previewUsername = nil; recoveryPreview = false
+                self.operation = nil; progress = nil; stage = .ready
+            }
+            await owner.releaseEmptyManualHost()
+            await refreshHistory()
+            return
+        }
+        let reservation = admission.id
+        do {
+            guard current(), owner.editorReplacementIsCurrent(reservation) else { throw CancellationError() }
+            try owner.beginManualActivation(replacement: reservation)
+        } catch {
+            message = "Finish the current review or file operation first."
+            self.operation = nil; stage = .awaitingConfirmation
+            return
+        }
+        preview = nil
         var activated = false
         do {
+            try decision.admitEffect()
             let value = try await service.confirm(endpoint: endpoint, credentials: credentials, preview: prepared, operation: operation, progress: receiver(revision))
             result = value; activated = value.generation != nil
             message = value.collectionComplete
@@ -376,7 +414,7 @@ public final class ManualTransferCoordinator {
     public func recover(_ entry: ManualTransferHistory) async {
         guard let collection = owner, !busy, preview == nil, collection.manualAllowed else { return }
         do {
-            try collection.beginManualActivation()
+            try collection.beginManualActivation(discovery: true)
         } catch { return }
 
         revision &+= 1
@@ -454,6 +492,7 @@ public final class ManualTransferCoordinator {
     }
     public func cancelAndDrain() async {
         password = ""
+        if let held = editorDecision, held.operation === operation { held.decision.cancel() }
         if stage == .testingConnection { revision &+= 1; connectionTestTask?.cancel() }
         await operation?.cancel(.system)
         if busy { await withCheckedContinuation { waiters.append($0) } }
@@ -479,6 +518,7 @@ public final class ManualTransferCoordinator {
         for waiter in pending { waiter.resume() }
     }
     public func cancel() async {
+        if let held = editorDecision, held.operation === operation { held.decision.cancel() }
         if stage == .testingConnection {
             revision &+= 1; connectionTestTask?.cancel()
             connectionTestResult = "Connection test cancelled."

@@ -215,6 +215,24 @@ import WebKit
 
 // Reuse the existing serialized real-host suite; do not introduce another
 // parallel owner of CoreBridge's process-wide host or alter its fixtures.
+@MainActor private final class FailedAddStartup: AddNoteFieldRuntime {
+    static let failure = BridgeError.unavailable(reason: "Synthetic field startup failure.")
+    let draft: NoteEditorDraft
+    let isCurrent: @MainActor () -> Bool
+    var beforeFailure: (@MainActor () async throws -> Void)?
+    private(set) var starts = 0
+    private(set) var flushes = 0
+    private(set) var disposals = 0
+    init(_ draft: NoteEditorDraft, isCurrent: @escaping @MainActor () -> Bool) {
+        self.draft = draft; self.isCurrent = isCurrent
+    }
+    func start() async throws { starts += 1; try await beforeFailure?(); throw Self.failure }
+    func flush(hold: Bool) throws { flushes += 1; throw Self.failure }
+    func release() {}
+    func setFocus(_ ord: Int) { draft.setFocus(ord) }
+    func dispose() { disposals += 1 }
+}
+
 extension ReviewCollectionStartupTests {
     @Test @MainActor func preparedAddDraftFlushFeedsOneDurableU27WriteAndExistingStudy() async throws {
         let temp = try #require(realpath(FileManager.default.temporaryDirectory.path, nil))
@@ -243,6 +261,8 @@ extension ReviewCollectionStartupTests {
             await owner.loadCounts()
             try #require(await owner.openDeckPage(deckID: deck.id).value)
             #expect(try await CoreDeckService().studyState(deckID: deck.id).listCounts.new == 0)
+            await owner.refreshDeckPage(try #require(owner.deckPageRefreshRequest))
+            #expect(owner.emptyDeckPageID == deck.id)
             let preparation = owner.addNoteDraft
             await preparation.prepare(presetDeck: deck.id)
             let draft = try #require(preparation.draft)
@@ -282,38 +302,315 @@ extension ReviewCollectionStartupTests {
                     try await draft.accept([.init(ord: 0, html: "", unchanged: true)], ifCurrent: { true })
                 }
             }
-            let host = try FieldEditorHost(draft: draft, isCurrent: { owner.state == .ready && owner.generation == draft.generation })
+            // An invalid explicit deck must not become a write to Default.
+            #expect(await owner.prepareAddNoteEditor(presetDeck: -195) == nil)
+            #expect(preparation.draft === draft)
+            let flow = owner.addNoteFlow
+            let undoBeforeStartup = try await CoreUndoService().peekUndo(scope: .global)
+            var rejectedStartup: FailedAddStartup?
+            #expect(await flow.open(presetDeck: deck.id) { draft, current in
+                draft.setTags(["startup-retained"])
+                draft.setMode(.html, ord: 0)
+                let failed = FailedAddStartup(draft, isCurrent: current)
+                rejectedStartup = failed
+                return failed
+            } == false)
+            let failed = try #require(rejectedStartup)
+            let retainedDraft = failed.draft, retainedFields = failed.draft.fields, retainedTags = failed.draft.tags
+            #expect(retainedDraft.isBlank && flow.draft === retainedDraft)
+            #expect(!flow.isPresented && flow.runtime == nil && !flow.canSave && !failed.isCurrent())
+            #expect(failed.starts == 1 && failed.disposals == 1)
+            #expect(flow.failure == FailedAddStartup.failure && flow.error == String(describing: FailedAddStartup.failure))
+            #expect(await flow.save() == nil)
+            // An unpreset retry must mount a fresh real host above this exact
+            // blank draft, rather than accept the failed presentation or defaults.
+            let host = try #require(await owner.prepareAddNoteEditor())
             editor = host
-            try await host.start()
+            await flow.selectionRefreshCompletion?.value
+            #expect(host.draft === retainedDraft && flow.runtime === host && host.editable && flow.isPresented)
+            #expect(retainedDraft.fields == retainedFields && retainedDraft.tags == retainedTags)
+            #expect(failed.starts == 1 && failed.disposals == 1 && !failed.isCurrent())
+            #expect(flow.lastAdded == nil && flow.history.isEmpty)
+            #expect(try await CoreDeckService().studyState(deckID: deck.id).empty)
+            #expect(try await CoreUndoService().peekUndo(scope: .global) == undoBeforeStartup)
+            let savingDraft = try #require(flow.draft)
+            #expect(flow.runtime === host && savingDraft === host.draft)
+            // Reentering the action model preserves the actual editor owner.
+            #expect(await owner.prepareAddNoteEditor(presetDeck: deck.id) === host)
+            #expect(await flow.save() == nil)
+            #expect(flow.refusal == .empty && flow.draft === savingDraft && !host.held)
             try await host.setMode(.html, ord: 0)
             try #require(try await FieldEditorTests.replaceSource(host, ord: 0, value: "<b>Daily note</b>"))
-            try await host.flush(hold: true)
-            let check = try await CoreNoteService().checkNoteFields(notetypeId: draft.notetype.id, fields: draft.values, ownNote: nil)
-            try #require(check.state == .normal)
-            let added = try await CoreNoteService().addNote(.init(notetypeId: draft.notetype.id, fields: draft.values,
-                tags: draft.tags, deckId: draft.deck.id, guid: nil, updateAddDefaults: true))
-            #expect(added.written && !added.cards.isEmpty && added.summary.generation == draft.generation)
+            savingDraft.setTags(["daily", "source::native"])
+            // Hold an actual fresh field check. A changed deck identity must
+            // invalidate this attempt, preserve the exact draft and release
+            // input; a second activation while held must submit no write.
+            let other = try await CoreDeckService().addDeck(name: "Other Add")
+            let hold = FieldEditorTests.HeldResult()
+            defer { hold.release(); flow.afterCheckingFields = nil }
+            flow.afterCheckingFields = { await hold.suspend() }
+            let obsolete = Task { await flow.save() }
+            try await hold.wait()
+            #expect(host.held && flow.saving)
+            #expect(await flow.save() == nil)
+            try savingDraft.selectDeck(.init(id: other.id, fullName: other.name, filtered: false))
+            let keptValues = savingDraft.values, keptTags = savingDraft.tags
+            hold.release()
+            #expect(await obsolete.value == nil)
+            #expect(!hold.expired && flow.draft === savingDraft && flow.runtime === host)
+            #expect(flow.error != nil && flow.failure != nil && !host.held && !flow.saving)
+            #expect(savingDraft.values == keptValues && savingDraft.tags == keptTags && savingDraft.deck.id == other.id)
+            #expect(try await CoreDeckService().studyState(deckID: deck.id).listCounts.new == 0)
+            #expect(try await CoreDeckService().studyState(deckID: other.id).listCounts.new == 0)
+            flow.afterCheckingFields = nil
+            try savingDraft.selectDeck(.init(id: deck.id, fullName: deck.name, filtered: false))
+            let added = try #require(await flow.save())
+            #expect(added.written && !added.cards.isEmpty && added.summary.generation == savingDraft.generation)
+            #expect(flow.lastAdded == added && flow.history == [added.id])
             let record = try await CoreNoteService().readNote(id: added.id)
-            #expect(record.fields == draft.values && record.notetypeId == draft.notetype.id)
+            #expect(record.fields == keptValues && record.tags == keptTags && record.notetypeId == savingDraft.notetype.id)
             let defaults = try await CoreEditorServices().addDefaults(reviewCard: nil, presetDeck: deck.id)
-            #expect(defaults.deckId == deck.id && defaults.notetypeId == draft.notetype.id)
-            let next = try draft.nextAfterAcknowledgedAdd()
-            #expect(next.unchangedSinceLastAdd && next.deck.id == deck.id)
-            host.dispose(); editor = nil
-            await owner.loadCounts()
+            #expect(defaults.deckId == deck.id && defaults.notetypeId == savingDraft.notetype.id)
+            let next = try #require(flow.draft)
+            #expect(next !== savingDraft && next.unchangedSinceLastAdd && next.deck.id == deck.id && next.tags == keptTags)
+            #expect(next.values == savingDraft.fields.map { $0.definition.sticky ? $0.target : "" })
+            #expect(flow.runtime?.draft === next)
             #expect(try await CoreDeckService().studyState(deckID: deck.id).listCounts.new == UInt32(added.cards.count))
+            #expect(owner.deckPage(deck.id)?.counts.new == UInt32(added.cards.count))
+            #expect(owner.emptyDeckPageID == nil)
             #expect(navigation.selectedDeck?.rawValue == deck.id)
+            try #require(await flow.requestClose())
+            #expect(!flow.isPresented && flow.runtime == nil && flow.draft === next)
+            editor = nil
             await owner.startStudy(deckID: deck.id)
             let item = try #require(owner.review?.item)
             #expect(added.cards.contains(item.cardId))
             await owner.finishReview()
+            // The real durable write succeeds even when its new next-draft
+            // host never starts. Retire only that host, retaining newer input
+            // on the exact successor for Close and an explicit fresh-host retry.
+            let remountInput = try NoteEditorDraft(generation: owner.generation, notetype: savingDraft.notetype,
+                deck: savingDraft.deck, values: savingDraft.fields.indices.map { $0 == 0 ? "Remount durable input" : "" })
+            preparation.replace(with: remountInput)
+            var rejectedRemount: FailedAddStartup?
+            #expect(await flow.open { draft, current in
+                if draft === remountInput { return try FieldEditorHost(draft: draft, isCurrent: current) }
+                let failed = FailedAddStartup(draft, isCurrent: current)
+                failed.beforeFailure = {
+                    try await draft.accept([.init(ord: 0, html: "New next-draft input", unchanged: false)], ifCurrent: current)
+                    draft.setTags(["next-startup-retained"])
+                    draft.setMode(.html, ord: 0)
+                }
+                rejectedRemount = failed
+                return failed
+            })
+            editor = try #require(flow.runtime as? FieldEditorHost)
+            let beforeRemount = try await CoreDeckService().studyState(deckID: deck.id).listCounts.new
+            let undoBeforeRemount = try await CoreUndoService().peekUndo(scope: .global)
+            let remountAdded = try #require(await flow.save())
+            let remountFailed = try #require(rejectedRemount)
+            let remountDraft = remountFailed.draft
+            let remountFields = remountDraft.fields, remountTags = remountDraft.tags
+            #expect(remountAdded.written && remountAdded.summary.generation == remountInput.generation)
+            #expect(remountInput.submissionAcknowledged && remountDraft !== remountInput && flow.draft === remountDraft)
+            #expect(remountDraft.values[0] == "New next-draft input" && remountTags == ["next-startup-retained"])
+            #expect(remountDraft.notetype == remountInput.notetype && remountDraft.deck == remountInput.deck)
+            #expect(!flow.isPresented && flow.runtime == nil && !flow.canSave && !remountFailed.isCurrent())
+            #expect(remountFailed.starts == 1 && remountFailed.disposals == 1 && remountFailed.flushes == 0)
+            #expect(flow.lastAdded == remountAdded && flow.history == [remountAdded.id, added.id])
+            #expect(flow.failure == FailedAddStartup.failure && flow.error == String(describing: FailedAddStartup.failure))
+            let remountRecord = try await CoreNoteService().readNote(id: remountAdded.id)
+            #expect(remountRecord.fields == remountInput.values && remountRecord.tags == remountInput.tags)
+            let undoAfterRemount = try await CoreUndoService().peekUndo(scope: .global)
+            #expect(undoAfterRemount != undoBeforeRemount)
+            #expect(await flow.save() == nil)
+            #expect(await flow.requestClose())
+            #expect(flow.draft === remountDraft && remountDraft.fields == remountFields && remountDraft.tags == remountTags)
+            let remountRetry = try #require(await owner.prepareAddNoteEditor())
+            editor = remountRetry
+            await flow.selectionRefreshCompletion?.value
+            #expect(flow.draft === remountDraft && remountRetry.draft === remountDraft && flow.runtime === remountRetry)
+            #expect(flow.isPresented && remountRetry.editable && flow.canSave)
+            #expect(remountDraft.fields == remountFields && remountDraft.tags == remountTags)
+            #expect(remountFailed.starts == 1 && remountFailed.disposals == 1 && remountFailed.flushes == 0 && !remountFailed.isCurrent())
+            #expect(flow.lastAdded == remountAdded && flow.history == [remountAdded.id, added.id])
+            #expect(try await CoreNoteService().readNote(id: remountAdded.id) == remountRecord)
+            #expect(try await CoreDeckService().studyState(deckID: deck.id).listCounts.new == beforeRemount + UInt32(remountAdded.cards.count))
+            #expect(try await CoreUndoService().peekUndo(scope: .global) == undoAfterRemount)
+            flow.generationEnded(); preparation.replace(with: nil); editor = nil
+            // Hold a real committed reply at exactly the ownership boundary.
+            // Each case writes once; revocation cannot turn that write into nil,
+            // revive a disposed host or erase newer/different retained input.
+            for change in ["revoked", "newer", "replacement", "currentNewer"] {
+                let submitted = try NoteEditorDraft(generation: owner.generation, notetype: savingDraft.notetype,
+                    deck: savingDraft.deck, values: savingDraft.fields.indices.map { $0 == 0 ? "Late ack \(change)" : "" })
+                preparation.replace(with: submitted)
+                let lateHost = try #require(await owner.prepareAddNoteEditor(presetDeck: deck.id))
+                editor = lateHost
+                let committed = FieldEditorTests.HeldResult()
+                var reply: NoteMutation?
+                defer { committed.release(); flow.afterAddingNote = nil }
+                flow.afterAddingNote = { actual in reply = actual; await committed.suspend() }
+                let before = try await CoreDeckService().studyState(deckID: deck.id).listCounts.new
+                let save = Task { await flow.save() }
+                try await committed.wait()
+                let actual = try #require(reply)
+                let durable = try await CoreNoteService().readNote(id: actual.id)
+                #expect(actual.written && actual.summary.generation == submitted.generation)
+                #expect(durable.fields == submitted.values && durable.notetypeId == submitted.notetype.id)
+                #expect(await flow.save() == nil)
+                if change != "currentNewer" { flow.generationEnded() }
+                var retained: NoteEditorDraft?
+                if change == "newer" || change == "currentNewer" {
+                    try await submitted.accept([.init(ord: 0, html: "New input \(change)", unchanged: false)], ifCurrent: { true })
+                    submitted.setTags(["newer-input"])
+                    submitted.markDirty(1)
+                    retained = submitted
+                } else if change == "replacement" {
+                    let successorDraft = try NoteEditorDraft(generation: owner.generation, notetype: submitted.notetype,
+                        deck: submitted.deck, values: submitted.values, tags: ["successor"])
+                    preparation.replace(with: successorDraft); retained = successorDraft
+                }
+                let retainedValues = retained?.values, retainedTags = retained?.tags, retainedPending = retained?.pendingFields
+                committed.release()
+                #expect(await save.value == actual)
+                #expect(!committed.expired && !flow.saving && flow.draft === retained)
+                #expect(retained?.values == retainedValues && retained?.tags == retainedTags && retained?.pendingFields == retainedPending)
+                if change == "currentNewer" {
+                    #expect(flow.runtime === lateHost && flow.isPresented && lateHost.editable && !lateHost.held)
+                    #expect(flow.lastAdded == actual && flow.history == [actual.id])
+                } else {
+                    #expect(flow.runtime == nil && !flow.isPresented && !lateHost.editable && !flow.canSave)
+                    #expect(flow.lastAdded == nil && flow.history.isEmpty)
+                    #expect(await flow.save() == nil)
+                }
+                if change == "revoked" {
+                    #expect(submitted.submissionAcknowledged)
+                    // Even explicit stale presentation of this exact object
+                    // cannot send its already committed revision again.
+                    preparation.replace(with: submitted)
+                    #expect(await owner.prepareAddNoteEditor(presetDeck: deck.id) == nil)
+                    #expect(!flow.isPresented && flow.runtime == nil && !flow.canSave)
+                    #expect(await flow.save() == nil)
+                } else if change == "replacement" { #expect(submitted.submissionAcknowledged) }
+                else { #expect(!submitted.submissionAcknowledged) }
+                #expect(try await CoreNoteService().readNote(id: actual.id) == durable)
+                #expect(try await CoreDeckService().studyState(deckID: deck.id).listCounts.new == before + UInt32(actual.cards.count))
+                flow.afterAddingNote = nil
+                flow.generationEnded(); preparation.replace(with: nil); editor = nil
+            }
+            // D5 must disagree with both ID order and D1's remembered type.
+            // Undo removes an actually stored selected type without raw SQL.
+            let types = CoreNotetypeService(), undo = CoreUndoService()
+            let zulu = try await types.addStockNotetype(kind: .basic, name: "Zulu D5")
+            let alpha = try await types.addNotetype(.init(name: "aARdvark D5", cloze: false,
+                fields: ["Back", "Prompt"], templates: [.init(name: "Prompt", front: "{{Back}}", back: "{{Prompt}}",
+                    browserFront: "", browserBack: "")], css: nil))
+            #expect(zulu.id < alpha.id)
+            let chosen = try await types.readNotetype(id: alpha.id)
+            let removed = try await types.addStockNotetype(kind: .basic, name: "Removed D5")
+            let missing = try await types.readNotetype(id: removed.id)
+            let remove = try await undo.startUndo(scope: .global)
+            _ = try await remove.value()
+            let names = try await types.notetypeNames()
+            #expect(!names.contains { $0.id == removed.id })
+            #expect(names.map(\.id) == names.map(\.id).sorted() && names.first?.id != alpha.id)
+            let defaultsBeforeRepair = try await CoreEditorServices().addDefaults(reviewCard: nil, presetDeck: deck.id)
+            #expect(defaultsBeforeRepair.notetypeId != alpha.id)
+            let missingDraft = try NoteEditorDraft(generation: owner.generation, notetype: missing,
+                deck: savingDraft.deck, values: ["D5 mapped front", "D5 mapped back"], tags: ["d5-kept"])
+            preparation.replace(with: missingDraft)
+            editor = try #require(await owner.prepareAddNoteEditor(presetDeck: deck.id))
+            let beforeRepair = try await CoreDeckService().studyState(deckID: deck.id).listCounts.new
+            let undoBeforeRepair = try await undo.peekUndo(scope: .global)
+            let presentSelection = try await CoreEditorServices().addNotetypeSelection(
+                expectedGeneration: owner.generation, selectedId: zulu.id)
+            #expect(presentSelection.generation == owner.generation)
+            #expect(presentSelection.notetype == (try await types.readNotetype(id: zulu.id)))
+            #expect(await flow.save() == nil)
+            let repaired = try #require(flow.draft)
+            #expect(repaired !== missingDraft && repaired.notetype == chosen && repaired.notetype.base == chosen.base)
+            #expect(repaired.values == ["D5 mapped back", "D5 mapped front"])
+            #expect(repaired.tags == missingDraft.tags && repaired.deck == missingDraft.deck)
+            #expect(flow.runtime?.draft === repaired && flow.error != nil && flow.history.isEmpty && flow.lastAdded == nil)
+            #expect(try await CoreDeckService().studyState(deckID: deck.id).listCounts.new == beforeRepair)
+            #expect(try await undo.peekUndo(scope: .global) == undoBeforeRepair)
+            #expect(try await CoreEditorServices().addDefaults(reviewCard: nil, presetDeck: deck.id) == defaultsBeforeRepair)
+            let explicitAdd = try #require(await flow.save())
+            let repairedRecord = try await CoreNoteService().readNote(id: explicitAdd.id)
+            #expect(repairedRecord.notetypeId == alpha.id && repairedRecord.fields == repaired.values && repairedRecord.tags == repaired.tags)
+            #expect(flow.history == [explicitAdd.id] && flow.lastAdded == explicitAdd)
+            #expect(try await CoreDeckService().studyState(deckID: deck.id).listCounts.new == beforeRepair + UInt32(explicitAdd.cards.count))
+            // A real relevant change with a still-valid selection must keep
+            // the exact successor, runtime and last-add comparison intact.
+            let validDraft = try #require(flow.draft)
+            let validHost = try #require(flow.runtime)
+            let validFields = validDraft.fields, validTags = validDraft.tags
+            let validObservation = FieldEditorTests.HeldResult()
+            defer { validObservation.release(); flow.afterReadingSelection = nil }
+            flow.afterReadingSelection = { await validObservation.suspend() }
+            let liveType = try await types.addStockNotetype(kind: .basic, name: "Removed live D5")
+            try await validObservation.wait()
+            let validRefresh = try #require(flow.selectionRefreshCompletion)
+            validObservation.release()
+            await validRefresh.value
+            #expect(!validObservation.expired && flow.draft === validDraft && flow.runtime === validHost)
+            #expect(validDraft.fields == validFields && validDraft.tags == validTags && validDraft.unchangedSinceLastAdd)
+            #expect(flow.history == [explicitAdd.id] && flow.lastAdded == explicitAdd)
+            flow.afterReadingSelection = nil
+            try #require(await flow.requestClose())
+            editor = nil
+            let liveNotetype = try await types.readNotetype(id: liveType.id)
+            let original = "<span  class='original'>live front</span><br/>"
+            let liveDraft = try NoteEditorDraft(generation: owner.generation, notetype: liveNotetype,
+                deck: savingDraft.deck, values: [original, "before held observation"], tags: ["live-kept"])
+            preparation.replace(with: liveDraft)
+            let liveHost = try #require(await owner.prepareAddNoteEditor(presetDeck: deck.id))
+            editor = liveHost
+            try await liveHost.setMode(.html, ord: 1)
+            let liveObservation = FieldEditorTests.HeldResult()
+            defer { liveObservation.release(); flow.afterReadingSelection = nil }
+            flow.afterReadingSelection = { await liveObservation.suspend() }
+            let removeLive = try await undo.startUndo(scope: .global)
+            _ = try await removeLive.value()
+            try await liveObservation.wait()
+            let liveRefresh = try #require(flow.selectionRefreshCompletion)
+            #expect(flow.draft === liveDraft && flow.runtime === liveHost && !liveHost.held)
+            try #require(try await FieldEditorTests.replaceSource(liveHost, ord: 1, value: "<b>latest live back</b>"))
+            liveDraft.setTags(["live-kept", "latest-input"])
+            let zuluRecord = try await types.readNotetype(id: zulu.id)
+            _ = try await types.renameNotetype(id: zulu.id, base: zuluRecord.base, name: "Zulu renamed D5")
+            let beforeLiveRefresh = try await CoreDeckService().studyState(deckID: deck.id).listCounts.new
+            let undoBeforeLiveRefresh = try await undo.peekUndo(scope: .global)
+            let defaultsBeforeLiveRefresh = try await CoreEditorServices().addDefaults(reviewCard: nil, presetDeck: deck.id)
+            liveObservation.release()
+            await liveRefresh.value
+            let liveRepaired = try #require(flow.draft)
+            #expect(!liveObservation.expired && liveRepaired !== liveDraft && liveRepaired.notetype == chosen)
+            #expect(liveRepaired.values == ["<b>latest live back</b>", original])
+            #expect(liveRepaired.tags == ["live-kept", "latest-input"] && liveRepaired.deck == liveDraft.deck)
+            #expect(flow.runtime?.draft === liveRepaired && flow.runtime !== liveHost && flow.canSave)
+            #expect(flow.lastAdded == explicitAdd && flow.history == [explicitAdd.id] && flow.error != nil)
+            #expect(try await CoreDeckService().studyState(deckID: deck.id).listCounts.new == beforeLiveRefresh)
+            #expect(try await undo.peekUndo(scope: .global) == undoBeforeLiveRefresh)
+            #expect(try await CoreEditorServices().addDefaults(reviewCard: nil, presetDeck: deck.id) == defaultsBeforeLiveRefresh)
+            flow.afterReadingSelection = nil
+            // End this test-owned unsaved presentation before the cold reopen.
+            flow.generationEnded(); preparation.replace(with: nil)
+            editor = nil
             try #require(await owner.close())
-            // Cold reopen proves U27 durability rather than a draft echo.
+            // Cold reopen reads the durable coordinator write from the collection.
             try await core.open(location, randomSeed: 190196)
             #expect(try await CoreNoteService().readNote(id: added.id).fields == record.fields)
+            let reopened = try await core.waitAvailable(timeoutMilliseconds: 0)
+            #expect(reopened != savingDraft.generation)
+            await #expect(throws: BridgeError.staleGeneration(planned: savingDraft.generation, current: reopened)) {
+                try await CoreEditorServices().addNotetypeSelection(expectedGeneration: savingDraft.generation, selectedId: alpha.id)
+            }
             try await core.close()
         } catch {
-            editor?.dispose(); _ = await owner.close(); try? await core.close(); throw error
+            editor?.dispose(); owner.addNoteFlow.runtime?.dispose()
+            _ = await owner.close(); try? await core.close(); throw error
         }
     }
 }

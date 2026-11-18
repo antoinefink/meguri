@@ -1243,7 +1243,7 @@ PUBLIC_ARTIFACTS = {
         'd972f70a91c8c85032dfabcbc4d9ffb38564a5654a158610bc0c6dbe4d38d6e7',
     'core/crates/meguri-sync/tests/owned_round_admission.rs': '41cb97aab264f4ccc175dd5831089725d9afaf4f37f4620e2344b931451205c3',
     'app/MeguriSnapshotTests/MacSettingsSearchTests.swift': '8845d36966d566ed0a329c88a186a50d74b45c03f5474a4abb517f4f3eb3e43a',
-    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': '5eaeb9880a84ccb19eefed8b9d6e9873ec5e0af5fdc52ab61e4ac2eda72ec729',
+    'app/Packages/MeguriKit/Sources/AppModel/Collection/ReviewCollection.swift': 'ffd341dffbd5cf3342c1f6fea498bdd6b3b689b3011845d408ad7d4223fcb0ff',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/Resources/Sync.xcstrings': 'b53985ac1a2fc0896b0fc126f348614f962491d763da1bdedab3e309ab0e46f0',
     'app/Packages/MeguriKit/Sources/AppModel/Sync/SyncPresentation.swift': '0276bfab84c7453a688cc34bb313911fb8febb46544d23066540c410d3422c2f',
     'app/Packages/MeguriKit/Sources/Features/Settings/Settings.swift': '2fd10e5c3b0cce3f6dbe8c525b697131ab41445ec5695c2bfdf4ae2f7f359460',
@@ -1272,13 +1272,22 @@ PUBLIC_ARTIFACTS = {
         "2c9222832834a1a4251d5388c2e158f15d69be007739c0953c7980e1ba13e768",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "app/Packages/MeguriKit/Sources/Features/Editor/FieldEditorHost.swift":
-        "49ac124ec5127a47f9322a1bb82b046a59770aff674073c33c86cce2380ba0c9",
+        "ca6f212676ef466aa1f6153ed83f2be4a6252cff4c5dd292dae5e826567ca7f0",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "app/Packages/MeguriKit/Tests/AppModelTests/FieldEditorTests.swift":
-        "3ce97b6a8cd4064da1ce5b7ac76ff3daac287e1c1ebf4a3bc61353ab0688f461",
+        "77f14ea15c23c869c9f484b932da2f86baa9c402be06987dafe5d3ffb2534687",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "docs/process/review-log/U190-U195-field-runtime-cleanroom-20261118.md":
         "f1432c094aa8dc1498d33b196e56b0b15fb1b8ab73c23ee7bac34c15f302d455",
+    # Complete public-file review: owned_diagnostic_review, 2026-11-18.
+    "app/Packages/MeguriKit/Sources/AppModel/Editor/AddNoteFlow.swift":
+        "cd93e7106d0b0d827813f0efd8c73e1539c1ad1e2fc1f1594e40a150001b6788",
+    # Complete public-file review: owned_diagnostic_review, 2026-11-18.
+    "app/Packages/MeguriKit/Tests/AppModelTests/ManualTransferSettingsTests.swift":
+        "9a03055a44d4af641a1ee28188b8f62815e34556050b6d78c9e5277e0cc7f3cb",
+    # Complete public-file review: owned_diagnostic_review, 2026-11-18.
+    "docs/process/review-log/U195-add-coordinator-cleanroom-20261118.md":
+        "14622ebedb2c73a88ac7e4f6285ff2d1d1f9a548825d660f324d7b6dee345601",
 }
 
 

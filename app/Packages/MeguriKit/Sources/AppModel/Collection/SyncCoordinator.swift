@@ -564,7 +564,19 @@ public final class SyncCoordinator {
             lastExchange: meguriCanRun && !meguriCancelling ? meguriLastExchange : nil,
             settling: deviceSettingsSettling)
     }
-    var beginMeguriActivation: (@MainActor () throws -> Void)?
+    var prepareEditorReplacement: (@MainActor (String, ReviewCollection.EditorReplacementDecision, @MainActor () -> Bool) async -> ReviewCollection.EditorReplacementAdmission?)?
+    var editorReplacementIsCurrent: (@MainActor (UUID) -> Bool)?
+    var finishEditorReplacement: (@MainActor (UUID) -> Void)?
+    var finishCloudEditorReplacement: (@MainActor (UUID) async -> Void)?
+    private var ownEditorReplacement: (owner: UUID, reservation: UUID, decision: ReviewCollection.EditorReplacementDecision)?
+    private var meguriEditorDecision: (owner: UUID, decision: ReviewCollection.EditorReplacementDecision)?
+    private func cancelOwnEditorDecision() {
+        if let held = ownEditorReplacement, held.owner == ownOwner { held.decision.cancel() }
+    }
+    private func cancelMeguriEditorDecision(_ owner: UUID?) {
+        if let held = meguriEditorDecision, held.owner == owner { held.decision.cancel() }
+    }
+    var beginMeguriActivation: (@MainActor (UUID) throws -> Void)?
     var finishMeguriActivation: (@MainActor (Bool) async -> SyncCoordinator?)?
     private var meguriHasLocalCollection = false
     private var meguriChoiceAllowed = false
@@ -638,6 +650,7 @@ public final class SyncCoordinator {
         meguriAddressDirty = true; meguriReady = false; meguriRoutine = nil; meguriSignInErrorKey = nil
         meguriWakePending = false
         let original = meguriConnectionOwner, previous = meguriAddressDrain
+        cancelMeguriEditorDecision(meguriAction?.id)
         let wake = meguriWake
         wake?.task.cancel()
         meguriAddressDrain = Task {
@@ -918,6 +931,7 @@ public final class SyncCoordinator {
     public func cancelMeguriPreparation() {
         guard meguriCancellation == nil, let original = meguriAction, let facade = meguriActiveFacade else { return }
         meguriCancelling = true
+        cancelMeguriEditorDecision(original.id)
         meguriCancellation = Task {
             await facade.stop(.user)
             await original.task.value
@@ -942,9 +956,37 @@ public final class SyncCoordinator {
     }
     public func confirmMeguriPreview() {
         guard let preview = meguriPreview, let facade = meguriBootstrap, !settings.paused,
+              let owner = meguriConnectionOwner,
+              let prepareEditorReplacement, let finishEditorReplacement,
               let beginMeguriActivation, let finishMeguriActivation else { return }
         issueMeguri { id in
-            do { try beginMeguriActivation() }
+            let expected = self.generation, revision = self.hostRevision
+            self.meguriActiveFacade = facade
+            let current = {
+                self.meguriAction?.id == id && self.meguriBootstrap === facade && self.meguriPreview === preview &&
+                    self.meguriCurrent(owner, expected, revision) && !self.meguriCancelling &&
+                    !self.settings.paused && !Task.isCancelled
+            }
+            let decision = ReviewCollection.EditorReplacementDecision()
+            self.meguriEditorDecision = (id, decision)
+            defer { if self.meguriEditorDecision?.owner == id { self.meguriEditorDecision = nil } }
+            let admission = await prepareEditorReplacement("Meguri Sync", decision, current)
+            defer { if let admission { finishEditorReplacement(admission.id) } }
+            guard let admission, admission.accepted else {
+                do {
+                    let result = try await facade.discard(preview)
+                    guard self.meguriAction?.id == id, self.meguriCurrent(owner, expected, revision),
+                          self.meguriPreview === preview else { return }
+                    self.retainMeguri(result); self.applyMeguriOutcome(result.outcome)
+                    if case .refused = result.outcome { return }
+                    self.meguriPreview = nil; self.meguriOperation = nil
+                    self.meguriStage = .required; self.meguriChoiceAllowed = true
+                } catch { if current() { self.meguriLastError = error } }
+                return
+            }
+            let reservation = admission.id
+            guard current() else { return }
+            do { try beginMeguriActivation(reservation) }
             catch { self.meguriLastError = error; return }
             let before = self.generation
             self.meguriActiveFacade = facade; self.meguriStage = .collection
@@ -954,6 +996,7 @@ public final class SyncCoordinator {
             self.meguriCollectionError = nil
             var candidateActive = false
             do {
+                try decision.admitEffect()
                 let result = try await facade.confirm(preview, progress: self.progressForMeguri(id))
                 self.retainMeguriCollectionResult(result)
                 if case .refused(.transfer(let failure), _) = result.outcome { candidateActive = failure.candidateActive }
@@ -985,15 +1028,36 @@ public final class SyncCoordinator {
     }
     public func finishMeguriSetup() {
         guard meguriCanFinish, let operation = meguriOperation, let facade = meguriBootstrap,
+              let owner = meguriConnectionOwner,
+              let prepareEditorReplacement, let finishEditorReplacement,
               let beginMeguriActivation, let finishMeguriActivation else { return }
         issueMeguri { id in
-            do { try beginMeguriActivation() } catch { self.meguriLastError = error; return }
+            let expected = self.generation, revision = self.hostRevision
+            self.meguriActiveFacade = facade
+            let current = {
+                self.meguriAction?.id == id && self.meguriBootstrap === facade &&
+                    self.meguriCurrent(owner, expected, revision) && !self.meguriCancelling &&
+                    !self.settings.paused && !Task.isCancelled
+            }
+            let decision = ReviewCollection.EditorReplacementDecision()
+            self.meguriEditorDecision = (id, decision)
+            defer { if self.meguriEditorDecision?.owner == id { self.meguriEditorDecision = nil } }
+            let admission = await prepareEditorReplacement("Meguri Sync", decision, {
+                current() && self.meguriOperation === operation
+            })
+            defer { if let admission { finishEditorReplacement(admission.id) } }
+            guard let admission, admission.accepted else { return }
+            let reservation = admission.id
+            guard current(), self.meguriOperation === operation else { return }
+            do { try beginMeguriActivation(reservation) } catch { self.meguriLastError = error; return }
             let before = self.generation
             self.meguriActiveFacade = facade; self.meguriStage = .collection
             self.meguriCollectionError = nil
             var candidateActive = false
             do {
+                try decision.admitEffect()
                 let preparation = try await facade.prepareRecovery(operation, progress: self.progressForMeguri(id))
+                guard current() else { throw CancellationError() }
                 self.meguriRecoveryPreparation = preparation
                 self.retainMeguri(preparation)
                 let result: MeguriBootstrapCommandResult
@@ -1232,6 +1296,7 @@ public final class SyncCoordinator {
     private func drainMeguriProduct() async {
         meguriWakePending = false; meguriWakeManual = false; meguriReadyWakePending = false
         let wake = meguriWake, action = meguriAction, facade = meguriActiveFacade, round = meguriRound
+        cancelMeguriEditorDecision(action?.id)
         wake?.task.cancel()
         await facade?.stop(.system)
         if meguriAuthenticating { await meguriConnectionOwner?.cancelAndDrain() }
@@ -1643,6 +1708,7 @@ public final class SyncCoordinator {
         initialOwnResumeRead = nil
         guard initialOwnDrain == nil, let own = backend?.own else { return }
         let original = ownTask
+        cancelOwnEditorDecision()
         original?.cancel()
         initialOwnDrain = Task {
             await own.interruptAndDrain()
@@ -1765,6 +1831,7 @@ public final class SyncCoordinator {
         if suspended { pendingPreviewCancellation = true; return }
         if readingPreview {
             let originalTask = ownTask, original = backend?.own
+            cancelOwnEditorDecision()
             originalTask?.cancel()
             await original?.cancelPreview()
             await originalTask?.value
@@ -2118,7 +2185,15 @@ public final class SyncCoordinator {
                 }
                 var resumeProof: CloudOriginalCommandProofYield?
                 switch intent {
-                case .adoption: _ = try await connection.confirmAdoption(handle)
+                case .adoption:
+                    guard try await prepareOwnEditorReplacement(backend, generation: expected, revision: revision) else {
+                        try await connection.cancelPreview(handle)
+                        return
+                    }
+                    // The original task still owns this exact consumed preview.
+                    // No acceptance or provider/settings write precedes the guard.
+                    try ownEditorReplacement?.decision.admitEffect()
+                    _ = try await connection.confirmAdoption(handle)
                 case .publication:
                     await observePublicationConfirmation?()
                     guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused,
@@ -2274,6 +2349,19 @@ public final class SyncCoordinator {
         return (id, task)
     }
     private func finishOwnWork() {
+        if let held = ownEditorReplacement, held.owner == ownOwner {
+            let original = ownTask
+            let finish = finishCloudEditorReplacement
+            ownEditorReplacement = nil
+            Task {
+                // Never join our own task from inside its activation callback.
+                // Add remains excluded through the original terminal and the
+                // actual replacement/collection-host completion, if one exists.
+                await original?.value
+                await waitForReplacement()
+                await finish?(held.reservation)
+            }
+        }
         if let id = ownOwner {
             for wait in proofWaits.values.filter({ $0.owner == .own(id) }) {
                 proofWaits.removeValue(forKey: wait.proof.id); wait.proof.finish(CancellationError())
@@ -2317,6 +2405,9 @@ public final class SyncCoordinator {
         let earlierInitialCancellation = initialAdoptionCancelled
         initialAdoptionCancelled = true
         do {
+            // Only the current own task can hold this editor decision. Wake
+            // it before the executor joins its original activation callback.
+            cancelOwnEditorDecision()
             try await own.cancel(confirmation?.recovery.operation ?? operation, confirmation: confirmation)
             await originalTask?.value
             guard !closing, expected == generation, revision == hostRevision else { return }
@@ -2377,31 +2468,86 @@ public final class SyncCoordinator {
               ownTask?.isCancelled == false, expected == generation, revision == hostRevision else { throw CancellationError() }
         activatingInitialAdoption = true
     }
-    private func didActivateInitialAdoption(generation expected: UInt64) async {
+    private func prepareOwnEditorReplacement(_ original: any SyncCoordinatorBackend,
+                                            generation expected: UInt64, revision: UInt64) async throws -> Bool {
+        guard let taskOwner = ownOwner else { throw CancellationError() }
+        let current = {
+            self.ownOwner == taskOwner && self.latestOwnOwner == taskOwner && self.ownTask?.isCancelled == false &&
+                self.backend === original && self.generation == expected && self.hostRevision == revision &&
+                !self.closing && !self.suspended && !self.replacing && !self.settings.paused &&
+                !self.cancellingConnectionOperation && !Task.isCancelled
+        }
+        guard current() else { throw CancellationError() }
+        if let held = ownEditorReplacement {
+            guard held.owner == taskOwner, editorReplacementIsCurrent?(held.reservation) == true else { throw CancellationError() }
+            return true
+        }
+        // Standalone coordinators have no collection editor. Production owners
+        // always configure this seam, without constructing an absent Add flow.
+        guard let prepareEditorReplacement else { return true }
+        let decision = ReviewCollection.EditorReplacementDecision()
+        ownEditorReplacement = (taskOwner, decision.id, decision)
+        guard let admission = await prepareEditorReplacement("iCloud Adoption", decision, current) else { return false }
+        guard admission.accepted else { return false }
+        guard current(), editorReplacementIsCurrent?(admission.id) == true else {
+            throw CancellationError()
+        }
+        return true
+    }
+    private func willActivateAdoption(_ original: any SyncCoordinatorBackend,
+                                      generation expected: UInt64, revision: UInt64) async throws {
+        guard try await prepareOwnEditorReplacement(original, generation: expected, revision: revision) else { throw CancellationError() }
+        if initialAdoptionEnabledBefore != nil {
+            try willActivateInitialAdoption(generation: expected, revision: revision)
+        } else {
+            // The existing replacement join must protect this local activation
+            // too, rather than cancelling its original task on its own event.
+            activatingInitialAdoption = true
+        }
+    }
+    private func didActivateAdoption(generation expected: UInt64, initial: Bool) async {
         defer { activatingInitialAdoption = false }
-        if case .ready(let actual) = try? await CoreCollectionService().lifecycle(), actual > expected {
+        if initial, case .ready(let actual) = try? await CoreCollectionService().lifecycle(), actual > expected {
             initialActivationReturned = true
         }
     }
     private func runOwnWork(_ backend: any SyncCoordinatorBackend, generation expected: UInt64, revision: UInt64,
                             onFailure: (@MainActor (CloudConnectionFailure?) -> Void)? = nil) async {
         guard let own = backend.own else { return }
+        let executorOwner = ownOwner
         do {
             while !closing, !Task.isCancelled, revision == hostRevision {
                 await waitForInputs()
                 guard !closing, !Task.isCancelled, !replacing, !suspended,
                       expected == generation, revision == hostRevision, self.backend === backend else { return }
                 let performCore: @MainActor @Sendable (@escaping @Sendable () async throws -> Void) async throws -> Void = { [self] operation in
-                    try await self.performOwnCore(operation, backend: backend, generation: expected, revision: revision)
+                    try await self.performOwnCore(operation, backend: backend, generation: expected, revision: revision,
+                        beforeEffect: {
+                            guard self.activatingInitialAdoption else { return }
+                            guard self.ownOwner == executorOwner, self.latestOwnOwner == executorOwner,
+                                  self.ownTask?.isCancelled == false, self.backend === backend,
+                                  self.generation == expected, self.hostRevision == revision,
+                                  !self.closing, !self.replacing, !self.suspended, !self.settings.paused,
+                                  !self.cancellingConnectionOperation, !Task.isCancelled else { throw CancellationError() }
+                            if let held = self.ownEditorReplacement {
+                                guard held.owner == executorOwner,
+                                      self.editorReplacementIsCurrent?(held.reservation) == true else { throw CancellationError() }
+                                try held.decision.admitEffect()
+                            } else if self.prepareEditorReplacement != nil { throw CancellationError() }
+                        })
                 }
                 let progress: CloudConnectionProgress
                 if initialAdoptionEnabledBefore != nil {
                     guard !initialAdoptionCancelled, !settings.paused, !suspended, !awaitingInitialOwnProof else { return }
                     progress = try await own.runNext(admission: initialOwnAdmission,
                         performCore: performCore,
-                        beforeActivation: { [self] in try await self.willActivateInitialAdoption(generation: expected, revision: revision) },
-                        afterActivation: { [self] in await self.didActivateInitialAdoption(generation: expected) })
-                } else { progress = try await own.runNext(performCore: performCore) }
+                        beforeActivation: { [self] in try await self.willActivateAdoption(backend, generation: expected, revision: revision) },
+                        afterActivation: { [self] in await self.didActivateAdoption(generation: expected, initial: true) })
+                } else {
+                    progress = try await own.runNext(performCore: performCore,
+                        beforeActivation: { [self] in try await self.willActivateAdoption(backend, generation: expected, revision: revision) },
+                        afterActivation: { [self] in await self.didActivateAdoption(generation: expected, initial: false) })
+                }
                 // Activation can deliver CollectionReplaced before this call
                 // returns. Finish this original task without touching successor
                 // state; replacementTask joins it, closes, then attaches once.
@@ -2433,7 +2579,8 @@ public final class SyncCoordinator {
         }
     }
     private func performOwnCore(_ operation: @escaping @Sendable () async throws -> Void,
-                                backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64) async throws {
+                                backend: any SyncCoordinatorBackend, generation: UInt64, revision: UInt64,
+                                beforeEffect: @MainActor () throws -> Void = {}) async throws {
         let id = UUID()
         try await withCheckedThrowingContinuation {
             enqueue(.ownCore(id, backend: backend, generation: generation, revision: revision, acknowledged: $0))
@@ -2441,7 +2588,7 @@ public final class SyncCoordinator {
         // Run on the original executor task, retaining its job cancellation and
         // exact outcome. Only local Core work borrows the input lane's phase.
         let outcome: Result<Void, any Error>
-        do { try await operation(); outcome = .success(()) }
+        do { try beforeEffect(); try await operation(); outcome = .success(()) }
         catch { outcome = .failure(error) }
         await withCheckedContinuation { enqueue(.ownCoreReturned(acknowledged: $0)) }
         enqueue(.corePhaseFinished(id))
@@ -2481,6 +2628,8 @@ public final class SyncCoordinator {
         if initialAdoptionEnabledBefore != nil, !initialAdoptionCancelled { resumeConnection() }
     }
     @discardableResult func backgroundAfterLocalFlush(deadlineMilliseconds: Int64?) async -> Bool {
+        cancelOwnEditorDecision()
+        cancelMeguriEditorDecision(meguriAction?.id)
         await replacementTask?.value
         guard !replacing else { return false }
         if initialAdoptionEnabledBefore != nil { initialOwnAdmission.setOpen(false) }
@@ -2516,6 +2665,7 @@ public final class SyncCoordinator {
         else {
             cancelCommands(.expiry)
             latestOwnOwner = nil
+            cancelOwnEditorDecision()
             ownTask?.cancel()
             receive(.backgroundExpiring)
         }
@@ -2524,6 +2674,8 @@ public final class SyncCoordinator {
     // The application's existing quit owner supplies its completion. No native
     // library terminates the application or invents a quit owner.
     func quitAfterLocalFlush(completion: @escaping @MainActor () -> Void) async {
+        cancelOwnEditorDecision()
+        cancelMeguriEditorDecision(meguriAction?.id)
         guard backend != nil else { completion(); return }
         quitCompletion = completion
         receive(.quitRequested)
@@ -3391,7 +3543,7 @@ public final class SyncCoordinator {
         // for that call cannot wait for this replacement task. All transport
         // work and unrelated replacements use the ordinary cancel/drain path.
         if activatingInitialAdoption { await ownTask?.value }
-        else { ownTask?.cancel() }
+        else { cancelOwnEditorDecision(); ownTask?.cancel() }
         do {
             await providerSettingsTask?.value
             meguriWakePending = false
@@ -3565,6 +3717,8 @@ public final class SyncCoordinator {
         providerRecoveryDrain = nil
         entryActivationHeld = true
         closing = true
+        cancelOwnEditorDecision()
+        cancelMeguriEditorDecision(meguriAction?.id)
         cancelCommands(.replacement)
         cancelAccountTask(shutdown: true)
         revokeProofWaits()
@@ -3607,6 +3761,8 @@ public final class SyncCoordinator {
             return true
         }
         closing = true
+        cancelOwnEditorDecision()
+        cancelMeguriEditorDecision(meguriAction?.id)
         // Cancellation belongs to the original commands, before revoking an
         // inner proof can report CancellationError as a provider failure.
         if entryActivation { cancelCommands(.replacement) } else { cancelCommandsForShutdown() }

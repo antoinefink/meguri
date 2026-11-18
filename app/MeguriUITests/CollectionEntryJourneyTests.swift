@@ -89,6 +89,103 @@ import notify
         XCTAssertFalse(element(app, "settings.accountSync.done").exists)
     }
 
+    func testStartEmptyAddNoteAndStudyGeneratedCard() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        guard build.hasHooks, bundle.hasSuffix(".dev") else { throw XCTSkip("Requires development fixture hooks") }
+        let app = XCUIApplication()
+        // The existing installer copies this public empty directory into the
+        // development container; all writes belong to that installed copy.
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "app/Fixtures/CollectionEntry/EmptyCollection"),
+            now: "2030-01-15T10:00:00Z", timeZone: "UTC", locale: "en_US", animations: false).arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+
+        let startEmpty = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "home.collection.startEmpty")),
+            app.debugDescription)
+        XCTAssertTrue(startEmpty.isEnabled)
+        try click(startEmpty, app, bundle)
+        // First-local creation persists Default with ID 1, without cards.
+        let defaultDeck = deckRows(app, identifier: "home.deck.row.1")
+        try waitForAdmission(defaultDeck, app, bundle)
+        let deck = try XCTUnwrap(waitForHittable(defaultDeck), app.debugDescription)
+        try click(deck, app, bundle)
+        let deckPage = element(app, "home.deck.page.1")
+        XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
+        let counts = ["new", "learning", "due"].map {
+            deckPage.descendants(matching: .any)["home.deck.counts.\($0)"].firstMatch
+        }
+        for count in counts { XCTAssertTrue(waitForText(count, "0")) }
+        let emptyAddButtons = deckPage.buttons.matching(identifier: "home.deck.empty.addNote")
+        let emptyAdd = try XCTUnwrap(waitForHittable(emptyAddButtons), app.debugDescription)
+        XCTAssertEqual(emptyAddButtons.count, 1)
+        XCTAssertEqual(emptyAdd.label, "Add Note")
+        XCTAssertTrue(emptyAdd.isEnabled)
+        try click(emptyAdd, app, bundle)
+
+        let editor = element(app, "editor.add")
+        XCTAssertTrue(editor.waitForExistence(timeout: 10))
+        let fields = editor.descendants(matching: .any)["editor.fields"].firstMatch
+        XCTAssertTrue(fields.waitForExistence(timeout: 10))
+        let front = "Meguri empty deck native question QZ71"
+        let back = "Meguri empty deck native answer QZ83"
+        for (name, content) in [("Front", front), ("Back", back)] {
+            // Production declares a named multiline textbox. Require its
+            // native AX input, rather than the separate field-label button.
+            let inputs = fields.descendants(matching: .textView).matching(NSPredicate(format: "label == %@", name))
+            let input = try XCTUnwrap(waitForHittable(inputs), "Expected an actionable \(name) multiline text view")
+            XCTAssertEqual(inputs.count, 1)
+            XCTAssertTrue(input.isEnabled)
+            try click(input, app, bundle)
+            try app.bringToFront(bundleIdentifier: bundle)
+            input.typeText(content)
+            XCTAssertTrue(waitForText(input, content), "Native typing must reach \(name)")
+        }
+        let add = editor.buttons["editor.add.save"].firstMatch
+        let addReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            add.exists && add.isEnabled && add.isHittable
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [addReady], timeout: 20), .completed,
+            "The real field-change events must make Add actionable")
+        XCTAssertEqual(add.label, "Add")
+        try click(add, app, bundle)
+        XCTAssertTrue(waitForText(element(app, "editor.add.result"), "1 card added"))
+        XCTAssertFalse(element(app, "editor.add.error").exists)
+        let closeEditor = try XCTUnwrap(waitForHittable(editor.buttons.matching(identifier: "editor.add.close")),
+            app.debugDescription)
+        XCTAssertTrue(closeEditor.isEnabled)
+        // The ordinary Close runs the held-flush guard on the post-save draft.
+        try click(closeEditor, app, bundle)
+        XCTAssertTrue(editor.waitForNonExistence(timeout: 20))
+        let addedToDeck = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            deckPage.exists && zip(counts, ["1", "0", "0"]).allSatisfy { count, expected in
+                count.exists && (count.value as? String) == expected
+            } && !emptyAddButtons.firstMatch.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [addedToDeck], timeout: 20), .completed,
+            "The saved card must refresh Default and remove its empty-deck Add CTA")
+
+        let study = deckPage.buttons["home.deck.study"].firstMatch
+        try waitForStudyReady(study, app)
+        try click(study, app, bundle)
+        let renderedFront = app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", front, front)).firstMatch
+        let renderedBack = app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", back, back)).firstMatch
+        XCTAssertTrue(renderedFront.waitForExistence(timeout: 20), "Study must render the newly typed question")
+        XCTAssertFalse(renderedBack.exists)
+        let reveal = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "review.session.reveal")),
+            app.debugDescription)
+        XCTAssertTrue(reveal.isEnabled)
+        try click(reveal, app, bundle)
+        XCTAssertTrue(renderedBack.waitForExistence(timeout: 20), "Show Answer must render the newly typed answer")
+        let closeReview = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "review.session.close")),
+            app.debugDescription)
+        XCTAssertTrue(closeReview.isEnabled)
+        try click(closeReview, app, bundle)
+        try waitForStudyReady(study, app)
+    }
+
     func testPickerImportCreatesDurableReview() throws {
         try exercisePickedPackage(hasLocalCollection: false)
     }

@@ -36,6 +36,8 @@ public final class CollectionEntryCoordinator {
     private let service: any CollectionEntryService
     private let recordDiagnostic: FieldDiagnosticRecorder
     private var operation: CollectionEntryOperation?
+    private var editorDecision: (operation: CollectionEntryOperation, decision: ReviewCollection.EditorReplacementDecision)?
+    private var cancelledActivation: CollectionEntryOperation?
     private var task: Task<Void, Never>?
     private var revision: UInt64 = 0
     private var selectedSource: URL?
@@ -94,25 +96,39 @@ public final class CollectionEntryCoordinator {
     }
     public func confirm() {
         guard stage == .awaitingApproval, let preview, let owner else { return }
-        do {
-            try owner.configuration.nativeReviewInput?.willActivate(preview)
-            try owner.beginEntryActivation()
-        }
-        catch {
-            recordDiagnostic(.init(component: .collectionImport, operation: .activate, stage: .admission, outcome: .refused, failure: .other))
-            self.preview = nil; Task { try? await preview.discard() }; report(error); return
-        }
         revision &+= 1
         let expected = revision
         stage = .applyingPackage; message = nil; failure = nil; progress = nil; preparedMedia = nil; recoveryFinished = false
         self.preview = nil
         let operation = CollectionEntryOperation(); self.operation = operation
         let actualPrepared = PreparedMediaSnapshot()
+        let decision = ReviewCollection.EditorReplacementDecision()
+        editorDecision = (operation, decision)
         task = Task {
+            defer { if editorDecision?.operation === operation { editorDecision = nil } }
+            let current = {
+                self.owner === owner && self.revision == expected && self.operation === operation &&
+                    self.cancelledActivation !== operation && !Task.isCancelled
+            }
+            let admission = await owner.prepareEditorReplacement(operation: "Import Collection", decision: decision, current: current)
+            defer { if let admission { owner.finishEditorReplacement(admission.id) } }
+            guard let admission, admission.accepted else {
+                try? await preview.discard()
+                if expected == revision { stage = .awaitingFile; self.operation = nil; task = nil; progress = nil }
+                return
+            }
+            let reservation = admission.id
             var activationObserved = false
             var completingHost = false
+            var admitted = false
             do {
+                guard current(), owner.editorReplacementIsCurrent(reservation) else { throw CancellationError() }
+                try owner.configuration.nativeReviewInput?.willActivate(preview)
+                try owner.beginEntryActivation(replacement: reservation, entry: self)
+                admitted = true
                 try await owner.drainEntryActivation()
+                guard current(), owner.editorReplacementIsCurrent(reservation) else { throw CancellationError() }
+                try decision.admitEffect()
                 let activated = try await service.activate(preview, operation: operation, progress: progressReceiver(expected, prepared: actualPrepared))
                 activationObserved = true
                 recordDiagnostic(.init(component: .collectionImport, operation: .activate, stage: .activation, outcome: .succeeded))
@@ -140,7 +156,7 @@ public final class CollectionEntryCoordinator {
                     outcome: entryFailure?.activationOutcomeUncertain == true ? .unknown : .failed, failure: .other))
                 // Keep the existing activation admission closed when recovery
                 // is required. Host setup is not a media-recovery operation.
-                if entryFailure?.requiresRecovery != true {
+                if admitted, entryFailure?.requiresRecovery != true {
                     await owner.finishEntryActivation(candidateActive: false)
                 }
                 // Keep the recovery explanation visible even when the backend
@@ -150,7 +166,7 @@ public final class CollectionEntryCoordinator {
                     if requiresRecovery {
                         // Native host setup may have released admission on its
                         // failed finish. Reassert the same owner's fence.
-                        try? owner.beginEntryActivation()
+                        try? owner.beginEntryActivation(replacement: reservation, entry: self)
                         owner.navigation.present(.collectionEntry)
                     }
                 }
@@ -161,7 +177,8 @@ public final class CollectionEntryCoordinator {
     }
     public func waitForCompletion() async { await task?.value }
     public func cancelAndDrain() async {
-        if canCancel { await operation?.cancel() }
+        if let held = editorDecision, held.operation === operation { held.decision.cancel() }
+        if canCancel { cancelledActivation = operation; await operation?.cancel() }
         // After commit, finish the same job and preserve its retained host.
         await task?.value
         if !requiresRecovery { await discardPreview() }
@@ -195,6 +212,7 @@ public final class CollectionEntryCoordinator {
         let expected = revision
         let old = preview; preview = nil
         let running = task; let operation = self.operation
+        if let held = editorDecision, held.operation === operation { held.decision.cancel() }
         stage = .refused; needsReinspection = true
         message = Self.explanation(CollectionEntryFailure(issue: .staleConfirmation), fallback: "")
         task = Task {

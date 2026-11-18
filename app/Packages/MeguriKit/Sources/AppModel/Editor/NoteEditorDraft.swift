@@ -35,6 +35,7 @@ public final class NoteEditorDraft {
     public private(set) var fieldCheck: FieldCheck?
     public private(set) var fieldCheckError: String?
     private var revision: UInt64 = 0
+    private var acknowledgedRevision: UInt64?
     // Internal suspension seam holds an actual Core conversion result, never
     // substitutes conversion or grants permission to mutate the draft.
     var afterConvertingFields: (@MainActor () async -> Void)?
@@ -78,6 +79,7 @@ public final class NoteEditorDraft {
             next.fields[index].collapsed = fields[index].collapsed
         }
         next.lastAddedValues = values
+        next.focusedField = fields.indices.first
         return next
     }
 
@@ -128,6 +130,8 @@ public final class NoteEditorDraft {
         revision &+= 1
     }
 
+    public func setTags(_ tags: [String]) { self.tags = tags; revision &+= 1 }
+
     public func setFocus(_ ord: Int?) { focusedField = ord }
     public func setMode(_ mode: Mode, ord: Int) {
         guard fields.indices.contains(ord) else { return }; fields[ord].mode = mode; revision &+= 1
@@ -140,7 +144,42 @@ public final class NoteEditorDraft {
         self.deck = deck; revision &+= 1
     }
 
-    fileprivate var preparationRevision: UInt64 { revision }
+    var preparationRevision: UInt64 { revision }
+    // Only the actual durable reply disarms the submitted revision. A newer
+    // revision in this identity is separate input and remains recoverable.
+    var submissionAcknowledged: Bool { acknowledgedRevision == revision }
+    func acknowledgeSubmission(revision: UInt64) { acknowledgedRevision = revision }
+
+    /// Rebind only after a held flush. D5 maps a missing type by A3.1;
+    /// a deck-only repair preserves the last-add comparison.
+    func replacingSelection(notetype: NotetypeRecord, deck: DeckNameEntry) throws -> NoteEditorDraft {
+        let changedType = notetype.id != self.notetype.id
+        var mapped = values
+        if changedType {
+            mapped = Array(repeating: "", count: notetype.fields.count)
+            var used: Set<Int> = [], filled: Set<Int> = []
+            for (index, field) in notetype.fields.enumerated() {
+                if let old = fields.indices.first(where: {
+                    fields[$0].definition.name == field.name && !fields[$0].target.isEmpty
+                }) {
+                    mapped[index] = fields[old].target; used.insert(old); filled.insert(index)
+                }
+            }
+            var remaining = fields.indices.filter { !used.contains($0) && !fields[$0].target.isEmpty }.makeIterator()
+            for index in mapped.indices where !filled.contains(index) {
+                if let old = remaining.next() { mapped[index] = fields[old].target }
+            }
+        }
+        let next = try NoteEditorDraft(generation: generation, notetype: notetype, deck: deck, values: mapped, tags: tags)
+        if !changedType {
+            next.lastAddedValues = lastAddedValues
+            for index in fields.indices {
+                next.fields[index].mode = fields[index].mode
+                next.fields[index].collapsed = fields[index].collapsed
+            }
+        }
+        return next
+    }
 
     /// B4 display values are derived from targets, with the original baseline
     /// supplied on recovery for changed fields (F7).
@@ -166,8 +205,7 @@ public final class NoteEditorDraft {
     }
 }
 
-/// Prepared Add state belongs to Navigation, never to a SwiftUI presentation.
-/// Production entry remains disconnected until writer/admission fences exist.
+/// Prepared Add state belongs to the collection, never to a SwiftUI presentation.
 @Observable @MainActor
 public final class AddNoteDraft {
     public private(set) var draft: NoteEditorDraft?
@@ -178,8 +216,10 @@ public final class AddNoteDraft {
     var afterReadingLifecycle: (@MainActor () async -> Void)?
     init(owner: ReviewCollection) { self.owner = owner }
 
+    func replace(with draft: NoteEditorDraft?) { self.draft = draft; error = nil }
+
     public func prepare(presetDeck: Int64? = nil) async {
-        guard !preparing, let owner, owner.state == .ready, owner.foreground, !owner.resuming,
+        guard !preparing, let owner, !owner.addNoteFlow.isPresented, owner.state == .ready, owner.foreground, !owner.resuming,
               owner.lifecycle == .ready(generation: owner.generation) else { return }
         preparing = true
         defer { preparing = false }
@@ -191,13 +231,23 @@ public final class AddNoteDraft {
             guard try await CoreCollectionService().lifecycle() == .ready(generation: generation), current() else {
                 throw BridgeError.unavailable(reason: "The collection changed. Your draft has been kept.")
             }
+            if let presetDeck {
+                let names = try await CoreDeckService().allDeckNames()
+                guard current(), names.generation == generation,
+                      names.decks.contains(where: { $0.id == presetDeck && !$0.filtered }) else {
+                    throw BridgeError.unavailable(reason: "The selected deck is no longer a normal deck. Choose a deck again.")
+                }
+            }
             // D3: an existing nonblank draft keeps its content and type. Only a
             // valid deck preset may change its deck. No default query is made.
             if let draft, draft.generation == generation, !draft.isBlank {
                 let names = try await CoreDeckService().allDeckNames()
                 guard current(), names.generation == generation else { throw BridgeError.staleGeneration(planned: generation, current: owner.generation) }
                 guard self.draft === draft else { return }
-                if let preset = names.decks.first(where: { $0.id == presetDeck && !$0.filtered }) {
+                if let presetDeck {
+                    guard let preset = names.decks.first(where: { $0.id == presetDeck && !$0.filtered }) else {
+                        throw BridgeError.unavailable(reason: "The selected deck changed. Choose a deck again.")
+                    }
                     try draft.selectDeck(preset)
                 }
                 error = nil; return
@@ -209,7 +259,8 @@ public final class AddNoteDraft {
             let names = try await CoreDeckService().allDeckNames()
             guard current(), names.generation == generation,
                   try await CoreCollectionService().lifecycle() == .ready(generation: generation),
-                  let deck = names.decks.first(where: { $0.id == selection.deckId && !$0.filtered }) else {
+                  let deck = names.decks.first(where: { $0.id == selection.deckId && !$0.filtered }),
+                  presetDeck == nil || deck.id == presetDeck else {
                 throw BridgeError.unavailable(reason: "The Add selection changed. Your draft has been kept.")
             }
             await afterReadingLifecycle?()
@@ -231,6 +282,6 @@ public final class AddNoteDraft {
 
 extension ReviewCollection {
     public var addNoteDraft: AddNoteDraft {
-        navigation.featureState(AddNoteDraft.self) { AddNoteDraft(owner: self) }
+        addNoteFlow.preparation
     }
 }

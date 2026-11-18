@@ -32,6 +32,35 @@ public final class ReviewCollection: ChangeFanoutSink {
               canSaveDeckState, case .ready(let current) = lifecycle, current == generation else { return nil }
         return selectedDeckDetail.page
     }
+    public struct DeckPageRefreshRequest: Sendable, Hashable {
+        public let deckID: Int64
+        fileprivate let generation: UInt64
+        fileprivate let intent: UInt64
+        fileprivate let counts: UInt64
+        fileprivate let tree: UInt64
+        fileprivate let selection: UInt64
+    }
+    private var selectedDeckEmptiness: (request: DeckPageRefreshRequest, empty: Bool)?
+    /// Only the visible Home page queries storage; rows keep the normal count refresh.
+    public var deckPageRefreshRequest: DeckPageRefreshRequest? {
+        guard navigation.section == .home, canSaveDeckState, foreground,
+              lifecycle == .ready(generation: generation) else { return nil }
+        let id: Int64
+        if let destination = navigation.path(.home).last {
+            guard case .deckPage(let deck) = destination else { return nil }
+            id = deck.rawValue
+        } else {
+            guard let deck = navigation.homeDeckPage else { return nil }
+            id = deck.rawValue
+        }
+        return DeckPageRefreshRequest(deckID: id, generation: generation, intent: navigation.intentRevision,
+            counts: countsRevision, tree: deckTreeRevision, selection: selectionRevision)
+    }
+    public var emptyDeckPageID: Int64? {
+        guard let proof = selectedDeckEmptiness, proof.empty,
+              proof.request == deckPageRefreshRequest else { return nil }
+        return proof.request.deckID
+    }
     public private(set) var review: ReviewCoordinator?
     public private(set) var previousRecord: ReviewRecord?
     public private(set) var policy: FsrsPolicyStatus?
@@ -81,6 +110,113 @@ public final class ReviewCollection: ChangeFanoutSink {
     private let collection: CoreCollectionService
     private let providerDirectory: URL
     private let entryService: any CollectionEntryService
+    private var addFlowOwner: AddNoteFlow?
+    /// One initiating candidate owns this decision, including cancellation
+    /// before its editor question exists. Durable effects keep their old join.
+    @MainActor final class EditorReplacementDecision {
+        let id = UUID()
+        private(set) var cancelled = false
+        private var admitted = false
+        var revokeQuestion: (@MainActor () -> Void)?
+        private var finished = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        @discardableResult func cancel() -> Bool {
+            guard !admitted, !finished else { return false }
+            cancelled = true; revokeQuestion?()
+            return true
+        }
+        func admitEffect() throws {
+            guard !cancelled, !finished, !Task.isCancelled else { throw CancellationError() }
+            admitted = true; revokeQuestion = nil
+        }
+        func finish() {
+            finished = true; revokeQuestion = nil
+            let pending = waiters; waiters.removeAll()
+            for waiter in pending { waiter.resume() }
+        }
+        func waitForFinish() async {
+            if finished { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+    }
+    private struct EditorReplacement {
+        let id: UUID
+        let generation: UInt64
+        let editor: AddNoteFlow?
+        let decision: EditorReplacementDecision
+        var handle: UUID?
+    }
+    private var editorReplacement: EditorReplacement?
+    struct EditorReplacementAdmission {
+        let id: UUID
+        let accepted: Bool
+    }
+
+    /// Reserve this collection before the editor guard yields. The consumer's
+    /// predicate binds its task, operation and accepted candidate, not just a generation.
+    func prepareEditorReplacement(operation: String, decision: EditorReplacementDecision,
+                                  current: @MainActor () -> Bool) async -> EditorReplacementAdmission? {
+        guard editorReplacement == nil, addFlowOwner?.isPresented != true || foreground, !closed, !closing, !opening,
+              addFlowOwner?.opening != true, !decision.cancelled, current(), !Task.isCancelled else { return nil }
+        let id = decision.id, editor = addFlowOwner, expected = generation
+        editorReplacement = EditorReplacement(id: id, generation: expected, editor: editor, decision: decision,
+            handle: editor == nil ? nil : id)
+        if let editor {
+            guard let handle = await editor.prepareForReplacement(operation: operation, decision: decision) else {
+                return EditorReplacementAdmission(id: id, accepted: false)
+            }
+            guard editorReplacement?.id == id else { editor.finishReplacement(handle); return nil }
+            editorReplacement?.handle = handle
+        }
+        guard !opening, editorReplacementIsCurrent(id), current() else {
+            return EditorReplacementAdmission(id: id, accepted: false)
+        }
+        return EditorReplacementAdmission(id: id, accepted: true)
+    }
+    func editorReplacementIsCurrent(_ id: UUID) -> Bool {
+        guard let held = editorReplacement, held.id == id, held.generation == generation,
+              held.editor === addFlowOwner, !held.decision.cancelled, !closed, !closing, !Task.isCancelled else { return false }
+        return held.editor == nil || (held.handle != nil && held.editor?.isPresented == false && held.editor?.opening == false)
+    }
+    func finishEditorReplacement(_ id: UUID) {
+        guard let held = editorReplacement, held.id == id else { return }
+        if let handle = held.handle { held.editor?.finishReplacement(handle) }
+        editorReplacement = nil
+        held.decision.finish()
+    }
+    private func cancelPendingEditorReplacement() -> EditorReplacementDecision? {
+        guard let decision = editorReplacement?.decision, decision.cancel() else { return nil }
+        return decision
+    }
+    public var addNoteFlow: AddNoteFlow {
+        if let addFlowOwner { return addFlowOwner }
+        let flow = AddNoteFlow(owner: self); addFlowOwner = flow
+        return flow
+    }
+    // Accepted Add work may finish while background/close waits for it. New
+    // actions require foreground admission separately from runtime ownership.
+    func ownsAddGeneration(_ expected: UInt64) -> Bool {
+        !closed && generation == expected && state == .ready && lifecycle == .ready(generation: expected)
+    }
+    var canBeginAddAction: Bool {
+        let allowsSheet: Bool
+        switch navigation.sheet {
+        case nil, .add: allowsSheet = true
+        default: allowsSheet = false
+        }
+        return editorReplacement == nil && ownsAddGeneration(generation) && foreground && !resuming && !closing && !opening && !starting && !enabling &&
+            !deckNamesReserved && !meguriSignInPreparing && !sync.providerHandoffInProgress &&
+            !sync.meguriCollectionWorkHeld && entryOwner?.busy != true && entryOwner?.preview == nil &&
+            entryOwner?.pickerPresented != true && manualOwner?.busy != true && manualOwner?.preview == nil &&
+            exportOwner?.busy != true && allowsSheet
+    }
+    func refreshAfterAdding(generation expected: UInt64) async {
+        guard ownsAddGeneration(expected) else { return }
+        countsRevision &+= 1
+        await loadCounts()
+        guard ownsAddGeneration(expected), let request = deckPageRefreshRequest else { return }
+        await refreshDeckPage(request)
+    }
     private var entryOwner: CollectionEntryCoordinator?
     public var entry: CollectionEntryCoordinator {
         if let entryOwner { return entryOwner }
@@ -445,9 +581,26 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     private func configureSyncOwnership() {
         sync.configureProviderDirectory(providerDirectory)
-        sync.beginMeguriActivation = { [weak self] in
-            guard let self else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
-            try self.beginManualActivation()
+        let originalSync = sync
+        sync.prepareEditorReplacement = { [weak self, weak originalSync] operation, decision, current in
+            guard let self, let originalSync, self.sync === originalSync else { return nil }
+            return await self.prepareEditorReplacement(operation: operation, decision: decision) {
+                self.sync === originalSync && current()
+            }
+        }
+        sync.finishEditorReplacement = { [weak self] id in self?.finishEditorReplacement(id) }
+        sync.editorReplacementIsCurrent = { [weak self, weak originalSync] id in
+            guard let self, let originalSync, self.sync === originalSync else { return false }
+            return self.editorReplacementIsCurrent(id)
+        }
+        sync.finishCloudEditorReplacement = { [weak self] id in
+            guard let self else { return }
+            await self.cloudActivationCompletion?.value
+            self.finishEditorReplacement(id)
+        }
+        sync.beginMeguriActivation = { [weak self, weak originalSync] reservation in
+            guard let self, let originalSync, self.sync === originalSync else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+            try self.beginManualActivation(replacement: reservation)
             self.meguriActivationAttachment = (self.sync, self.generation,
                 self.state == .noFile && self.lifecycle == .noCollection)
         }
@@ -848,17 +1001,37 @@ public final class ReviewCollection: ChangeFanoutSink {
         cloudPreparationTask = task
         try await task.value
     }
-    var entryAllowed: Bool { !sync.meguriCollectionWorkHeld && (state == .ready || manualOwner?.preview == nil) && manualAllowed && state != .unavailable }
-    var manualAllowed: Bool { !meguriSignInPreparing && !sync.providerHandoffInProgress && cloudPreparationTask == nil && !deckNamesReserved && entryOwner?.busy != true && exportOwner?.busy != true && !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed) }
-    func beginManualActivation() throws {
+    var entryAllowed: Bool { allowsEntryActivation() }
+    var manualAllowed: Bool { allowsManualActivation() }
+    private func allowsManualActivation(entry: CollectionEntryCoordinator? = nil) -> Bool {
+        !meguriSignInPreparing && !sync.providerHandoffInProgress && cloudPreparationTask == nil && !deckNamesReserved &&
+            (entryOwner?.busy != true || (entry != nil && entryOwner === entry)) && exportOwner?.busy != true &&
+            !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed)
+    }
+    private func allowsEntryActivation(entry: CollectionEntryCoordinator? = nil) -> Bool {
+        !sync.meguriCollectionWorkHeld && (state == .ready || manualOwner?.preview == nil) &&
+            allowsManualActivation(entry: entry) && state != .unavailable
+    }
+    func beginManualActivation(replacement: UUID? = nil, discovery: Bool = false) throws {
+        if let replacement, !editorReplacementIsCurrent(replacement) { throw BridgeError.busy(runningOperation: "Add Note") }
+        guard !closed, !closing, addFlowOwner?.opening != true,
+              editorReplacement?.id == replacement,
+              discovery || addFlowOwner?.isPresented != true else { throw BridgeError.busy(runningOperation: "Add Note") }
         guard review == nil, !starting else { throw BridgeError.sessionActive }
         guard manualAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
         opening = true
         day?.pause(); countTimer?.invalidate(); countsTask?.cancel()
     }
-    func beginEntryActivation() throws {
+    func beginEntryActivation(replacement: UUID? = nil, entry: CollectionEntryCoordinator? = nil) throws {
+        if let replacement, !editorReplacementIsCurrent(replacement) { throw BridgeError.busy(runningOperation: "Add Note") }
+        guard !closed, !closing, addFlowOwner?.opening != true,
+              editorReplacement?.id == replacement,
+              addFlowOwner?.isPresented != true else { throw BridgeError.busy(runningOperation: "Add Note") }
         guard review == nil, !starting else { throw BridgeError.sessionActive }
-        guard entryAllowed else { throw BridgeError.busy(runningOperation: "collection preparation") }
+        guard (replacement == nil && entry == nil && entryAllowed) ||
+                (replacement != nil && entryOwner === entry && allowsEntryActivation(entry: entry)) else {
+            throw BridgeError.busy(runningOperation: "collection preparation")
+        }
         opening = true
         day?.pause(); countTimer?.invalidate(); countsTask?.cancel()
         sync.beginEntryActivation()
@@ -953,6 +1126,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         case .rolledOver, .timeZoneChanged: refreshCounts()
         case .changes(let changes):
             refreshCounts()
+            if event.generation == generation,
+               changes.wholeCollection || !changes.notetypes.isEmpty || !changes.decks.isEmpty {
+                addFlowOwner?.selectionChanged(generation: event.generation)
+            }
             if changes.wholeCollection || !changes.mediaAdded.isEmpty || !changes.mediaRemoved.isEmpty {
                 scheduleMediaRefresh(names: changes.mediaAdded, generation: event.generation)
             }
@@ -963,6 +1140,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             endGoToDeckGeneration()
             exportOwner?.generationChanged()
             invalidateDeckActions()
+            addFlowOwner?.generationEnded()
             generation = next; day?.pause()
             invalidateMedia()
             review?.generationEnded(); review = nil; navigation.endReview()
@@ -1002,6 +1180,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         switch value {
         case .ready(let next):
             if generation != next {
+                addFlowOwner?.generationEnded()
                 endGoToDeckGeneration()
                 invalidateDeckActions(); invalidateMedia(); exportOwner?.generationChanged()
             }
@@ -1192,6 +1371,39 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         let detail = currentSelectedDeckDetail
         return detail?.id == id ? detail : nil
+    }
+
+    public func refreshDeckPage(_ request: DeckPageRefreshRequest) async {
+        let current = { self.deckPageRefreshRequest == request && !Task.isCancelled }
+        guard current() else { return }
+        selectedDeckEmptiness = nil
+        do {
+            let service = CoreDeckService()
+            let before = try await service.allDeckNames()
+            guard current(), before.generation == request.generation,
+                  let entry = before.decks.first(where: { $0.id == request.deckID }) else { return }
+            let state = try await service.studyState(deckID: request.deckID)
+            guard current(), state.deck == request.deckID else { return }
+            // studyState has no generation. Bracket it with actual stored deck
+            // identity snapshots and a final ready-generation check.
+            let after = try await service.allDeckNames()
+            guard current(), after.generation == request.generation,
+                  after.decks.first(where: { $0.id == request.deckID }) == entry else { return }
+            let actualLifecycle = try await CoreCollectionService().lifecycle()
+            guard current(), actualLifecycle == .ready(generation: request.generation) else { return }
+            selectedDeckEmptiness = (request: request, empty: state.empty && !entry.filtered)
+            // A hidden empty deck needs a page projection. Tree counts remain
+            // owned by loadCounts, including after a real card is added.
+            if deck(request.deckID) == nil, navigation.homeDeckPage?.rawValue == request.deckID {
+                let page = DeckPageDetail(id: entry.id, name: entry.fullName, counts: state.listCounts)
+                selectedDeckDetail = (page: page, generation: request.generation, intent: request.intent)
+            }
+        } catch {
+            if current() {
+                selectedDeckEmptiness = nil
+                self.error = "Couldn’t refresh the deck. Try again."
+            }
+        }
     }
 
     /// Rename refreshes page authority without selecting another deck or changing navigation.
@@ -1405,11 +1617,13 @@ public final class ReviewCollection: ChangeFanoutSink {
     public func setForeground(_ active: Bool) {
         guard active != foreground else { return }
         foreground = active
+        let cancelledEditor = active ? nil : cancelPendingEditorReplacement()
         if !active { invalidateGoToDeck(); syncPresentation.cancelStatusHandoff(); meguriSignInPreparationTask?.cancel() }
         resuming = active
         if !active { review?.beginPause(); day?.pause(); countTimer?.invalidate() }
         let previous = lifecycleTask
         lifecycleTask = Task {
+            await cancelledEditor?.waitForFinish()
             await previous?.value
             if !active {
                 await meguriSignInPreparationTask?.value
@@ -1449,6 +1663,7 @@ public final class ReviewCollection: ChangeFanoutSink {
                     await refreshMedia()
                     if reviewIsActive, resolver != nil { try await review?.resume() }
                     await sync.foregroundAfterLocalResume()
+                    await addFlowOwner?.resumeInput()
                     resuming = false
                     deferredSuspend = nil
                     refreshCounts()
@@ -1456,6 +1671,9 @@ public final class ReviewCollection: ChangeFanoutSink {
                 } else {
                     do { try await review?.pause() }
                     catch { self.error = String(describing: error) }
+                    guard await addFlowOwner?.flushForBackground() != false else {
+                        throw BridgeError.unavailable(reason: "The note editor could not flush. Your draft has been kept.")
+                    }
                     try await collection.flushForBackground()
                     didFlushLocally?()
                     guard await sync.backgroundAfterLocalFlush(deadlineMilliseconds: backgroundLeaseExpired ? nil : backgroundDeadlineMilliseconds) else {
@@ -1508,6 +1726,15 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func performClose(quitting: Bool) async -> Bool {
         closing = true
         defer { closing = false }
+        if let cancelledEditor = cancelPendingEditorReplacement() {
+            // Its guard joins accepted Add work and releases the same host;
+            // its candidate cleanup owns the reservation until completion.
+            await cancelledEditor.waitForFinish()
+            if addFlowOwner?.isPresented == true { return false }
+        }
+        // The editor guard precedes cancellation, Core flush and Core close.
+        // Keep Editing cancels quit without retiring the collection owner.
+        guard await addFlowOwner?.requestClose() != false else { return false }
         meguriSignInPreparationTask?.cancel()
         await meguriSignInPreparationTask?.value
         invalidateDeckActions()

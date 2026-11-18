@@ -179,27 +179,33 @@ pub fn read_notetype(id: i64) -> Result<NotetypeRecord, CoreError> {
         .ok_or_else(|| CoreError::InvalidArgument {
             message: "unknown note type".into(),
         })?;
-    Ok(NotetypeRecord {
-        id,
-        name: n.name.clone(),
-        kind: n.config.kind,
-        original_stock_kind: n.config.original_stock_kind,
-        cloze_fields: if n.config.kind == 1 {
-            n.templates.first().map(|template| {
-                let parsed = meguri_template::ParsedTemplate::parse(&template.config.q_format);
-                if parsed.structure_error().is_some() { return Vec::new(); }
-                let names = parsed.cloze_references();
-                n.fields.iter().filter(|field| names.iter().any(|name|
-                    meguri_text::fold::compare_folded(name, &field.name).is_eq()
-                )).map(|field| field.ord).collect()
-            }).unwrap_or_default()
-        } else { Vec::new() },
-        sort_field: n.config.sort_field_idx,
-        css: n.config.css.clone(),
-        base: AggregateDigest::of(&n).0.to_vec(),
-        fields: n.fields.iter().map(NotetypeField::from).collect(),
-        templates: n.templates.iter().map(NotetypeTemplate::from).collect(),
-    })
+    Ok(NotetypeRecord::from(&n))
+}
+
+impl From<&meguri_model::notetype::Notetype> for NotetypeRecord {
+    fn from(n: &meguri_model::notetype::Notetype) -> Self {
+        Self {
+            id: n.id.0,
+            name: n.name.clone(),
+            kind: n.config.kind,
+            original_stock_kind: n.config.original_stock_kind,
+            cloze_fields: if n.config.kind == 1 {
+                n.templates.first().map(|template| {
+                    let parsed = meguri_template::ParsedTemplate::parse(&template.config.q_format);
+                    if parsed.structure_error().is_some() { return Vec::new(); }
+                    let names = parsed.cloze_references();
+                    n.fields.iter().filter(|field| names.iter().any(|name|
+                        meguri_text::fold::compare_folded(name, &field.name).is_eq()
+                    )).map(|field| field.ord).collect()
+                }).unwrap_or_default()
+            } else { Vec::new() },
+            sort_field: n.config.sort_field_idx,
+            css: n.config.css.clone(),
+            base: AggregateDigest::of(n).0.to_vec(),
+            fields: n.fields.iter().map(NotetypeField::from).collect(),
+            templates: n.templates.iter().map(NotetypeTemplate::from).collect(),
+        }
+    }
 }
 #[uniffi::export]
 pub fn add_notetype(request: AddNotetypeRequest) -> Result<NotetypeMutation, CoreError> {

@@ -1,9 +1,10 @@
-//! Read-only Add Note queries (notes/add-defaults D1–D2, tags/complete C1–C4).
+//! Read-only Add Note queries (notes/add-defaults D1–D2/D5, tags/complete C1–C4).
 use std::sync::Arc;
 
-use crate::{CancelToken, CoreError, callback, runtime};
+use crate::{CancelToken, CoreError, callback, notetypes::NotetypeRecord, runtime};
 use meguri_engine::editor;
 use meguri_model::ids::{CardId, DeckId, NotetypeId};
+use meguri_storage::{ReadRows, ReaderRole};
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct AddDefaults {
@@ -55,4 +56,37 @@ pub fn editor_field_html(html: Vec<String>, for_display: bool) -> Result<Vec<Str
     } else {
         meguri_text::iri::editor_target(value)
     }).collect())
+}
+
+/// D5 uses stored name order only when the selected identity disappeared.
+/// Identity, complete aggregate and generation all come from this snapshot.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct AddNotetypeSelection {
+    pub generation: u64,
+    pub notetype: Option<NotetypeRecord>,
+}
+
+#[uniffi::export]
+pub fn add_notetype_selection(expected_generation: u64, selected_id: i64) -> Result<AddNotetypeSelection, CoreError> {
+    callback::enter("add_notetype_selection");
+    let collection = runtime::host()?.collection()?;
+    let reader = collection.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
+    let expected = meguri_engine::Generation(expected_generation);
+    if snapshot.generation() != expected {
+        return Err(meguri_engine::EngineError::StaleGeneration {
+            planned: expected, current: snapshot.generation(),
+        }.into());
+    }
+    let selected = match snapshot.notetype(NotetypeId(selected_id))? {
+        Some(notetype) => Some(notetype),
+        None => match snapshot.first_notetype_id_by_name()? {
+            Some(id) => snapshot.notetype(id)?,
+            None => None,
+        },
+    };
+    Ok(AddNotetypeSelection {
+        generation: snapshot.generation().0,
+        notetype: selected.as_ref().map(NotetypeRecord::from),
+    })
 }

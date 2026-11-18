@@ -42,8 +42,22 @@ public struct HomeView: View {
                 }
             }
         }
+        .task(id: collection.deckPageRefreshRequest) {
+            guard let request = collection.deckPageRefreshRequest, request.deckID == deckID else { return }
+            await collection.refreshDeckPage(request)
+        }
         .navigationTitle(deckID == nil ? String(localized: "Decks", bundle: .module) : "")
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if deckID.flatMap({ collection.deck($0) })?.filtered != true {
+                    Button { collection.navigation.present(.add(deck: deckID.map { DeckID($0) })) } label: {
+                        Label { Text("Add Note", bundle: .module) } icon: { Image(systemName: "plus") }
+                    }
+                    .help(Text("Add Note", bundle: .module))
+                    .disabled(!collection.addNotePresentation.canPresent(presetDeck: deckID))
+                    .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
+                }
+            }
             #if os(macOS)
             ToolbarItemGroup(placement: .primaryAction) {
                 if collection.review == nil, collection.navigation.review == nil {
@@ -55,7 +69,7 @@ public struct HomeView: View {
                     .accessibilityIdentifier("home.collection.goToDeck")
                 }
                 Button { collection.deckActions.present(.create) } label: {
-                    Label { Text("Create Deck", bundle: .module) } icon: { Image(systemName: "plus") }
+                    Label { Text("Create Deck", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
                 }
                 .help(Text("Create Deck", bundle: .module))
                 .disabled(!collection.deckActions.canPresent(.create))
@@ -74,7 +88,7 @@ public struct HomeView: View {
             ToolbarItem(placement: .primaryAction) {
                 if showsCollectionActions {
                     Button { collection.deckActions.present(.create) } label: {
-                        Label { Text("Create Deck", bundle: .module) } icon: { Image(systemName: "plus") }
+                        Label { Text("Create Deck", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
                     }
                     .disabled(!collection.deckActions.canPresent(.create))
                     .accessibilityIdentifier("home.collection.createDeck")
@@ -258,9 +272,16 @@ public struct HomeView: View {
                 .buttonStyle(.borderedProminent)
                 .frame(minHeight: ControlMetrics.minimumTarget)
                 .contentShape(Rectangle())
-                .disabled(!collection.canStudy)
+                .disabled(!collection.canStudy || collection.navigation.sheet != nil || collection.addNotePresentation.opening)
                 .accessibilityIdentifier("home.deck.study")
                 .padding(.top)
+                if collection.emptyDeckPageID == deck.id {
+                    Button { collection.navigation.present(.add(deck: DeckID(deck.id))) } label: {
+                        Label { Text("Add Note", bundle: .module) } icon: { Image(systemName: "plus") }
+                    }
+                    .disabled(!collection.addNotePresentation.canPresent(presetDeck: deck.id))
+                    .accessibilityIdentifier("home.deck.empty.addNote")
+                }
             }
             .padding(.vertical)
             .listRowSeparator(.hidden)

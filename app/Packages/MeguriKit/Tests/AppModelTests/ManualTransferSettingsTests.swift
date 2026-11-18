@@ -447,6 +447,7 @@ private actor SettingsTransferService: ManualTransferService {
     private let suspendPreparation: Bool
     private let preparationRecord: ManualTransferRecord?
     private let mediaResult: ManualTransferRecord?
+    private let discardTerminal: ReplacementDiscardTerminal?
     private var historyRecords: [ManualTransferRecord] = []
     private var loginFailure: ManualTransferFailure?
     private var preparationFailure: ManualTransferFailure?
@@ -456,7 +457,8 @@ private actor SettingsTransferService: ManualTransferService {
          normalizedEndpoint: String? = nil, rejectNormalization: Bool = false,
          recoveryRecord: ManualTransferRecord? = nil, suspension: SettingsLoginSuspension? = nil,
          preparationRecord: ManualTransferRecord? = nil, loginFailure: ManualTransferFailure? = nil,
-         preparationFailure: ManualTransferFailure? = nil, mediaResult: ManualTransferRecord? = nil) {
+         preparationFailure: ManualTransferFailure? = nil, mediaResult: ManualTransferRecord? = nil,
+         discardTerminal: ReplacementDiscardTerminal? = nil) {
         self.normalizedEndpoint = normalizedEndpoint; self.rejectNormalization = rejectNormalization
         self.recoveryRecord = recoveryRecord; self.suspension = suspension
         self.historyUnavailable = historyUnavailable
@@ -464,6 +466,7 @@ private actor SettingsTransferService: ManualTransferService {
         self.preparationRecord = preparationRecord; self.loginFailure = loginFailure
         self.preparationFailure = preparationFailure
         self.mediaResult = mediaResult
+        self.discardTerminal = discardTerminal
         (entered, enteredContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
     func waitUntilPreparing() async {
@@ -527,7 +530,10 @@ private actor SettingsTransferService: ManualTransferService {
         throw BridgeError.unavailable(reason: "No scripted recovery")
     }
     func cancelPreparation(_ entry: ManualTransferHistory, operation: ManualTransferOperation) { calls.append("cancelPreparation") }
-    func discard(_ preview: PreparedManualTransfer, interrupted: Bool, operation: ManualTransferOperation) { calls.append("discard") }
+    func discard(_ preview: PreparedManualTransfer, interrupted: Bool, operation: ManualTransferOperation) async {
+        calls.append("discard")
+        await discardTerminal?.hold()
+    }
     func saveCopy(_ entry: ManualTransferHistory, index: UInt32, to: URL, operation: ManualTransferOperation) { calls.append("saveCopy") }
 }
 
@@ -546,6 +552,149 @@ private func decisionRecord(phase: ManualTransferPhase = .preview, acceptance: M
         copies: [.init(name: "local.colpkg", length: 10, sha256: Data(repeating: 0x11, count: 32), verifiedPackage: true, instantMs: nil, server: false),
                  .init(name: "served.raw", length: 20, sha256: Data(repeating: 0x22, count: 32), verifiedPackage: false, instantMs: 1_900_000_003_456, server: true)],
         nextEligibleMs: nil))
+}
+
+private actor ReplacementDiscardTerminal {
+    private var arrived = false
+    private var released = false
+    private(set) var expired = false
+    private var pending: CheckedContinuation<Void, Never>?
+    private var timeout: Task<Void, Never>?
+    func hold() async {
+        arrived = true
+        guard !released else { return }
+        timeout = Task {
+            do { try await Task.sleep(for: .seconds(20)) } catch { return }
+            expired = true; release()
+        }
+        await withCheckedContinuation { pending = $0 }
+    }
+    func wait() async throws {
+        let clock = ContinuousClock(), deadline = ContinuousClock.now.advanced(by: .seconds(20))
+        while !arrived {
+            guard clock.now < deadline else { release(); throw ReplacementObservationTimeout() }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard !expired else { throw ReplacementObservationTimeout() }
+    }
+    func release() {
+        released = true; timeout?.cancel(); timeout = nil
+        let result = pending; pending = nil; result?.resume()
+    }
+}
+
+private struct ReplacementObservationTimeout: Error {}
+
+@MainActor private func observeReplacement(_ condition: @MainActor () -> Bool) async throws {
+    let clock = ContinuousClock(), deadline = ContinuousClock.now.advanced(by: .seconds(20))
+    while !condition() {
+        guard clock.now < deadline else { throw ReplacementObservationTimeout() }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+}
+
+@MainActor private final class ReplacementFields: AddNoteFieldRuntime {
+    let draft: NoteEditorDraft
+    private var flushes = 0
+    private var observedFlushes = 0
+    private(set) var disposed = false
+    private(set) var releases = 0
+    init(_ draft: NoteEditorDraft) { self.draft = draft }
+    func start() {}
+    func flush(hold: Bool) { flushes += 1 }
+    func release() { releases += 1 }
+    func setFocus(_ ord: Int) { draft.setFocus(ord) }
+    func dispose() { disposed = true }
+    func waitForFlush() async throws {
+        try await observeReplacement { self.flushes > self.observedFlushes }
+        observedFlushes = flushes
+    }
+}
+
+extension ReviewCollectionStartupTests {
+    @Test(arguments: [false, true])
+    func keepEditingRefusesManualEffectAndJoinsCandidateDisposalBeforeReleasingAdd(cancelWhilePrompted: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            sync: SyncCoordinator(directory: root, configuration: nil, defaults: nil),
+            providerDirectory: root.appending(path: "synthetic-installation"))
+        let terminal = ReplacementDiscardTerminal()
+        let service = SettingsTransferService(preparationRecord: decisionRecord(), discardTerminal: terminal)
+        let model = ManualTransferCoordinator(owner: owner, service: service, keychain: SettingsTransferKeys(), defaults: nil)
+        let flow = owner.addNoteFlow
+        var fields: ReplacementFields?
+        var pending: Task<Void, Never>?
+        var cancellation: Task<Void, Never>?
+        var closingEditor: Task<Bool, Never>?
+        var cancellationJoined = false
+        do {
+            await owner.start(); await owner.startEmpty()
+            try #require(owner.state == .ready)
+            model.endpointDraft = "https://example.test/prefix/"
+            model.username = "Synthetic User"; model.password = "transient"; await model.login()
+            try #require(await flow.open { draft, _ in
+                let runtime = ReplacementFields(draft); fields = runtime; return runtime
+            })
+            let runtime = try #require(fields)
+            try await runtime.draft.accept([.init(ord: 0, html: "Retained input", unchanged: false)], ifCurrent: { true })
+            let values = runtime.draft.values, generation = owner.generation
+            // Read-only preparation keeps the Ready editor and asks no question.
+            await model.prepare()
+            try #require(model.canConfirm && flow.isPresented && flow.discardConfirmation == nil)
+            let confirmation = Task { await model.confirm() }; pending = confirmation
+            try await runtime.waitForFlush()
+            try await observeReplacement { flow.discardConfirmation != nil }
+            let question = try #require(flow.discardConfirmation)
+            #expect(owner.manualAllowed && owner.lifecycle == .ready(generation: generation))
+            #expect(await service.calls.filter { $0 == "confirm" }.isEmpty)
+            if cancelWhilePrompted {
+                cancellation = Task { await model.cancelAndDrain(); cancellationJoined = true }
+            } else { flow.answerDiscard(question, discard: false) }
+            try await terminal.wait()
+            #expect(flow.discardConfirmation == nil)
+            if cancelWhilePrompted {
+                #expect(!cancellationJoined)
+            }
+            #expect(flow.isPresented && flow.draft === runtime.draft && runtime.draft.values == values)
+            #expect(!runtime.disposed && runtime.releases == 1)
+            #expect(!owner.canBeginAddAction && owner.manualAllowed)
+            #expect(await service.calls.filter { $0 == "confirm" }.isEmpty)
+            await terminal.release()
+            try await observeReplacement { model.stage == .ready }
+            await confirmation.value; pending = nil
+            if cancelWhilePrompted {
+                try await observeReplacement { cancellationJoined }
+                await cancellation?.value; cancellation = nil
+                // Cancellation joined without an answer. A late callback is stale.
+                flow.answerDiscard(question, discard: true)
+            }
+            #expect(await terminal.expired == false)
+            #expect(model.preview == nil && model.stage == .ready && owner.generation == generation)
+            #expect(owner.canBeginAddAction && flow.canSave && runtime.draft.values == values)
+            let close = Task { await flow.requestClose() }
+            closingEditor = close
+            try await runtime.waitForFlush()
+            try await observeReplacement { flow.discardConfirmation != nil }
+            flow.answerDiscard(try #require(flow.discardConfirmation), discard: true)
+            try #require(await close.value)
+            closingEditor = nil
+            #expect(await owner.close())
+        } catch {
+            await model.cancel()
+            if let question = flow.discardConfirmation { flow.answerDiscard(question, discard: false) }
+            await terminal.release()
+            // The fake runtime has no pending external input to recover.
+            if let draft = flow.draft {
+                try? await draft.accept(draft.fields.indices.map { .init(ord: $0, html: "", unchanged: true) }, ifCurrent: { true })
+            }
+            await pending?.value; await cancellation?.value; _ = await closingEditor?.value
+            _ = await owner.close()
+            throw error
+        }
+    }
 }
 
 extension ManualTransferSettingsTests {

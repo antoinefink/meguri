@@ -1,5 +1,6 @@
 import AppModel
 import DesignSystem
+import Editor
 import Home
 import Review
 import Settings
@@ -17,6 +18,7 @@ struct ShellFeatures {
     var availableSections: [AppSection] = AppSection.sidebar
     var syncStatus: () -> AnyView = { AnyView(EmptyView()) }
     var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
+    var addPanel: () -> AnyView = { AnyView(EmptyView()) }
     var sectionRoot: (AppSection, AppNavigation) -> AnyView
     var deckPage: (DeckID, AppNavigation) -> AnyView
     /// The rows of the sidebar's "Decks" group, each tagged
@@ -29,7 +31,9 @@ struct ShellFeatures {
     /// Real features share the app-owned collection; unbound standard remains
     /// available to isolated shell fixtures that replace every review slot.
     static func standard(collection: ReviewCollection) -> ShellFeatures {
+        collection.configureAddNotePresentation()
         var features = standard
+        features.addPanel = { AnyView(AddNoteView(collection: collection)) }
         #if os(macOS)
         features.nativeMacWorkspace = true
         features.availableSections = [.home]
@@ -64,7 +68,7 @@ struct ShellFeatures {
                 )
             case .cloudSync(let entry): AnyView(CloudConnectionView(collection: collection, entry: entry))
             case .accountSync: AnyView(AccountSyncSheet(collection: collection))
-            case .add: AnyView(SheetPlaceholder(sheet: route, navigation: navigation))
+            case .add: AnyView(AddNoteView(collection: collection))
             }
         }
         features.deckExists = { collection.deck($0.rawValue) != nil }
