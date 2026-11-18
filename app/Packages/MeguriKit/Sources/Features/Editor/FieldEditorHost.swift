@@ -97,7 +97,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         loadID += 1
         let expected = loadID
         activeLoad = expected; nextSequence = 1
-        let work = Task {
+        let work = Task { [self] in
             try requireCurrent(expected)
             interval = Signposts.begin(IntervalNames.editorOpenToEditable)
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
@@ -158,6 +158,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         do {
             let result = try await call(["type": "flush", "loadId": expected, "hold": hold], load: expected)
             try requireCurrent(expected)
+            guard let result else { throw EditorRuntimeError.invalidMessage }
             let message = try EditorBridgeMessage(result, ordinals: Set(draft.fields.indices))
             guard message.type == "flush", message.loadID == expected else { throw EditorRuntimeError.invalidMessage }
             try await enqueue(message, load: expected)
@@ -201,7 +202,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         }
     }
 
-    private func call(_ message: [String: Any], load expected: UInt64) async throws -> Any {
+    private func call(_ message: [String: Any], load expected: UInt64) async throws -> Any? {
         try requireCurrent(expected)
         // Structured arguments preserve quotes, </script>, Unicode and HTML.
         // No part of field content is ever evaluated as JavaScript source.
@@ -258,7 +259,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         pending[sequence] = Pending(message: message, complete: complete)
         guard draining == nil else { return }
         drainingLoad = expected
-        draining = Task {
+        draining = Task { [self] in
             defer {
                 if drainingLoad == expected { draining = nil; drainingLoad = nil; processing = nil }
             }
