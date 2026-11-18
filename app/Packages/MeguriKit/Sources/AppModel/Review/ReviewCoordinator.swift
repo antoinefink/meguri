@@ -412,6 +412,8 @@ public final class ReviewCoordinator {
         case .finished(let id, _) where id == sessionID:
             terminalChanged(.finished)
         case .changes(let change):
+            // Incoming sync changes cannot acknowledge a local answer commit.
+            guard change.source != .syncIncoming, change.source != .cloudIncoming else { break }
             // Review commits are ordered. Retain accepted-vs-durable distinction.
             for card in change.cards where !change.revlogAdded.isEmpty {
                 if let index = record.answers.firstIndex(where: { $0.cardID == card.id && !$0.durable }) {

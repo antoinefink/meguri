@@ -1,6 +1,7 @@
 import CardRendering
 @testable import CoreBridge
 import Foundation
+import enum MeguriCoreBindings.OpSource
 import Testing
 @testable import AppModel
 #if DEBUG
@@ -165,6 +166,31 @@ extension ReviewCollectionStartupTests {
         fixture.model.commitFailed(cardID: 1, error: .internal("injected disk failure"))
         await fixture.model.settled()
         #expect(fixture.model.phase == .question)
+        #expect(fixture.surface.presented.last == 1)
+        #expect(fixture.model.record.answers.isEmpty)
+        #expect(fixture.model.notice?.contains("injected disk failure") == true)
+        _ = await fixture.model.end()
+    }
+
+    @Test(arguments: [MeguriCoreBindings.OpSource.syncIncoming, .cloudIncoming])
+    func incomingChangesCannotMakeLocalAnswerDurable(source: MeguriCoreBindings.OpSource) async throws {
+        let fixture = Fixture()
+        await fixture.model.start()
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.model.rate(.good); await fixture.model.settled()
+        #expect(fixture.model.item?.cardId == 2)
+        #expect(fixture.model.record.answers.map(\.cardID) == [1])
+        #expect(fixture.model.record.answers.first?.durable == false)
+
+        fixture.model.receive(Self.answerCommitted(source: source))
+        #expect(fixture.model.record.answers.map(\.cardID) == [1])
+        #expect(fixture.model.record.answers.first?.durable == false)
+
+        fixture.client.currentHead = Self.head(1)
+        fixture.model.commitFailed(cardID: 1, error: .internal("injected disk failure"))
+        await fixture.model.settled()
+        #expect(fixture.model.phase == .question)
+        #expect(fixture.model.item?.cardId == 1)
         #expect(fixture.surface.presented.last == 1)
         #expect(fixture.model.record.answers.isEmpty)
         #expect(fixture.model.notice?.contains("injected disk failure") == true)
@@ -828,9 +854,9 @@ extension ReviewCollectionStartupTests {
         #expect(await fixture.model.end())
     }
 
-    private static func answerCommitted() -> CoreEvent {
+    private static func answerCommitted(source: MeguriCoreBindings.OpSource = .userUndoable) -> CoreEvent {
         CoreEvent(.init(seq: 1, generation: 1, causeSeq: nil, kind: .changes(changes: .init(
-            wholeCollection: false, source: .userUndoable,
+            wholeCollection: false, source: source,
             cards: [.init(id: 1, noteId: 1, kind: .updated, memoryStateOnly: false)],
             notes: [], notetypes: [], decks: [], deckConfigs: [], configKeys: [], tags: [],
             revlogAdded: [1], revlogRemoved: [], mediaAdded: [], mediaRemoved: [],
