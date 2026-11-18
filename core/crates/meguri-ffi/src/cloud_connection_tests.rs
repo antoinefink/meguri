@@ -47,7 +47,7 @@ fn local_facts_require_no_account_and_preserve_host_guards() {
 }
 #[test]
 fn absent_local_information_does_not_bootstrap_collection_or_sidecar() {
-    let (fixture, _process, _config, identity, keys) = held_no_collection_host();
+    let (fixture, _process, _config, identity, keys) = no_collection_host_with_admission(false);
     let host = &fixture.workflow.host;
     let connection = fixture.workflow.connection().unwrap();
     let directory = host.cloud_connection_directory();
@@ -95,7 +95,7 @@ fn absent_local_information_does_not_bootstrap_collection_or_sidecar() {
 }
 #[test]
 fn recovery_discovery_absent_tracking_checks_both_runtime_reads_without_bootstrap() {
-    let fixture = Fixture::without_collection(keys());
+    let fixture = Fixture::without_prior_icloud_consent(keys(), false);
     let core = &fixture.workflow.core;
     let directory = fixture.workflow.host.cloud_connection_directory();
     let entries = recovery_discovery_entries(directory);
@@ -127,7 +127,7 @@ fn recovery_discovery_absent_store_rejects_present_tracking_entries_without_chan
         if entry == "symlink" {
             continue;
         }
-        let (fixture, _process, _config, identity, keys) = held_no_collection_host();
+        let (fixture, _process, _config, identity, keys) = no_collection_host_with_admission(false);
         let host = &fixture.workflow.host;
         let core = &fixture.workflow.core;
         let connection = fixture.workflow.connection().unwrap();
@@ -323,6 +323,17 @@ fn held_no_collection_host() -> (
     Arc<HeldNoCollectionAccount>,
     Arc<Keys>,
 ) {
+    no_collection_host_with_admission(true)
+}
+// Read-only discovery callers retain absent consent; held account-read and
+// adoption protocols explicitly represent an already selected iCloud service.
+fn no_collection_host_with_admission(prior_icloud_consent: bool) -> (
+    Fixture,
+    meguri_host::ProcessCore,
+    HostConfig,
+    Arc<HeldNoCollectionAccount>,
+    Arc<Keys>,
+) {
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(directory.path().join("collection")).unwrap();
     std::fs::create_dir_all(directory.path().join("backups")).unwrap();
@@ -351,6 +362,9 @@ fn held_no_collection_host() -> (
         files: Arc::new(CountedNoCollectionFiles(identity.file_calls.clone())),
     });
     config.cloud_key_bytes = Some(Arc::new(ForeignKeyBytes(keys.clone())));
+    if prior_icloud_consent {
+        prepare_prior_icloud_fixture_configuration(&config);
+    }
     let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
     let host = Arc::new(process.prepare_cloud_connection(config.clone()).unwrap());
     let core = host.cloud_runtime().unwrap().clone();
@@ -1205,6 +1219,7 @@ fn reopen_bound_preparation(fixture: &mut Fixture) {
         identity: fixture.workflow.identity.as_ref().unwrap().clone(),
         files: Arc::new(NativeFiles),
     });
+    prepare_prior_icloud_fixture_configuration(&config);
     let host = Arc::new(CoreHost::open(config).unwrap());
     let core = host.cloud_runtime().unwrap().clone();
     core.retain_adapter_inspection();
@@ -1629,6 +1644,7 @@ fn server_retry_duration_uses_reply_clock_and_survives_actual_host_restart() {
         identity: Arc::new(Account),
         files: Arc::new(NativeFiles),
     });
+    prepare_prior_icloud_fixture_configuration(&config);
     let host = Arc::new(CoreHost::open(config).unwrap());
     let workflow = CloudWorkflow {
         core: host.cloud_runtime().unwrap().clone(),

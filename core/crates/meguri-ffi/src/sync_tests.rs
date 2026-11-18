@@ -24,7 +24,7 @@ fn observed_preparation_preserves_original_missing_binding_error_and_fresh_witne
     };
     // The ordinary local Host has its real provider authority and no cloud
     // binding. No adapter baseline or provider readiness is manufactured.
-    let fixture = Fixture::new(Keys::new([]));
+    let fixture = Fixture::without_prior_icloud_consent(Keys::new([]), true);
     let workflow = Arc::new(CloudWorkflow {
         host: fixture.workflow.host.clone(),
         core: fixture.workflow.core.clone(),
@@ -154,6 +154,25 @@ impl CloudKeyByteProvider for Keys {
             .expect("unexpected secure draw")
     }
 }
+// Positive protocol fixtures represent a prior iCloud selection. Import only
+// consent through the real migration path before Host composition; do not set a
+// publication binding, sample a provider or manufacture runtime verification.
+// Existing metadata (including a later service choice) wins on reopen.
+fn prepare_prior_icloud_fixture_configuration(config: &HostConfig) {
+    let scope = &config.cloud.as_ref().expect("synthetic cloud inputs").scope;
+    assert_eq!(scope.container.as_str(), "synthetic-u114");
+    assert_eq!(scope.environment, c::Environment::Development);
+    CoreHost::migrate_provider_configuration(
+        &config.manual_transfer_directory,
+        meguri_sync::provider::LegacyInput::Settings(meguri_sync::provider::LegacySettings {
+            enabled: true,
+            paused: false,
+            automatic: true,
+            media: true,
+        }),
+    )
+    .unwrap();
+}
 struct Fixture {
     _directory: tempfile::TempDir,
     workflow: CloudWorkflow,
@@ -170,6 +189,9 @@ impl Fixture {
     fn without_collection(keys: Arc<Keys>) -> Self {
         Self::with_collection(keys, None, false)
     }
+    fn without_prior_icloud_consent(keys: Arc<Keys>, local: bool) -> Self {
+        Self::with_recipe_and_admission(keys, None, local, None, false, false)
+    }
     fn with_collection(keys: Arc<Keys>, identity: Option<Arc<CachedIdentity>>, local: bool) -> Self {
         Self::with_recipe(keys, identity, local, None)
     }
@@ -182,6 +204,16 @@ impl Fixture {
         local: bool,
         recipe: Option<&str>,
         alias: bool,
+    ) -> Self {
+        Self::with_recipe_and_admission(keys, identity, local, recipe, alias, true)
+    }
+    fn with_recipe_and_admission(
+        keys: Arc<Keys>,
+        identity: Option<Arc<CachedIdentity>>,
+        local: bool,
+        recipe: Option<&str>,
+        alias: bool,
+        prior_icloud_consent: bool,
     ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let data = directory.path().join("collection");
@@ -220,6 +252,9 @@ impl Fixture {
             files: Arc::new(NativeFiles),
         });
         config.cloud_key_bytes = Some(Arc::new(ForeignKeyBytes(keys)));
+        if prior_icloud_consent {
+            prepare_prior_icloud_fixture_configuration(&config);
+        }
         let host = Arc::new(if local {
             CoreHost::open(config).unwrap()
         } else {
