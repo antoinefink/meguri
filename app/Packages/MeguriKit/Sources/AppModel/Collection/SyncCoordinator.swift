@@ -2167,6 +2167,7 @@ public final class SyncCoordinator {
         preview = nil; readyPreviewOwner = nil
         let resumePreparation: ResumePreparation? = intent == .resume ? ResumePreparation() : nil
         startOwnTask(backend: backend, generation: expected, revision: revision, resumePreparation: resumePreparation) { [self] in
+            let confirmationOwner = ownOwner
             var publicationAccepted = false
             var publicationResultDelivered = false
             defer {
@@ -2223,12 +2224,45 @@ public final class SyncCoordinator {
                       self.backend === backend, backend.connection === connection else { return }
                 if intent != .resume && (closing || suspended || replacing) { return }
                 connectionFailure = nil
-                if let provider { providerState = try await provider.acceptICloudConnection() }
                 // Durable confirmation succeeded. Enable only now; subsequent
                 // status comes from policy. Adoption/publication keep their
                 // recoverable operation if later work fails.
-                try await persistSettings(.init(enabled: true, paused: settings.paused,
-                    automatic: settings.automatic, media: settings.media))
+                if intent == .adoption, let provider {
+                    let settingsRevision = providerSettingsRevision
+                    let acceptedSettings = CloudPolicyDeviceSettings(enabled: true, paused: settings.paused,
+                        automatic: settings.automatic, media: settings.media)
+                    @MainActor func requireCurrentAdoption() throws {
+                        guard let confirmationOwner, ownOwner == confirmationOwner, latestOwnOwner == confirmationOwner,
+                              ownTask?.isCancelled == false, !Task.isCancelled,
+                              expected == generation, revision == hostRevision,
+                              self.backend === backend, backend.connection === connection, self.provider === provider,
+                              settingsRevision == providerSettingsRevision,
+                              !closing, !suspended, !replacing, !settings.paused,
+                              !cancellingConnectionOperation, !providerActionInProgress, !providerHandoffInProgress else {
+                            throw CancellationError()
+                        }
+                        if let held = ownEditorReplacement {
+                            guard held.owner == confirmationOwner,
+                                  editorReplacementIsCurrent?(held.reservation) == true else { throw CancellationError() }
+                            try held.decision.admitEffect()
+                        } else if prepareEditorReplacement != nil { throw CancellationError() }
+                    }
+                    try requireCurrentAdoption()
+                    let state = try await provider.acceptICloudConnection()
+                    try requireCurrentAdoption()
+                    guard state.selection == .iCloud, state.permitsICloudStartup,
+                          let committed = state.settings, committed == acceptedSettings else {
+                        throw BridgeError.unavailable(reason: "Provider settings require recovery")
+                    }
+                    // Acceptance already persisted consent while CloudAdopt owns
+                    // the slot; project it without another generic provider save.
+                    providerState = state
+                    saveSettings(committed)
+                } else {
+                    if let provider { providerState = try await provider.acceptICloudConnection() }
+                    try await persistSettings(.init(enabled: true, paused: settings.paused,
+                        automatic: settings.automatic, media: settings.media))
+                }
                 guard !Task.isCancelled, !closing, !suspended, !replacing, !settings.paused else { return }
                 if intent == .resume {
                     guard let resumeProof, let admission = CloudOriginalCommandProofYield.admission else { throw CancellationError() }

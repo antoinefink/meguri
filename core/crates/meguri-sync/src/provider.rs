@@ -531,6 +531,7 @@ impl Authority {
         self.update_publication_locked(&mut failure, None, false, |_, doc| {
             if doc.handoff.is_some() || doc.selection == Selection::Meguri { return Err(invalid()); }
             doc.selection = Selection::ICloud; doc.settings.enabled = true;
+            doc.icloud_settings = doc.settings;
             doc.legacy_binding_pending = true;
             Ok(())
         })?;
