@@ -627,7 +627,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
         try sync.releaseEntryActivation()
         sync.setMeguriLocalCollection(true)
-        await sync.completeOpenedHost(generation: value)
+        await sync.completeOpenedHost(generation: value, startupForeground: loadRecord ? { [weak self] in
+            guard let self else { return false }
+            return self.foreground && !self.closed && !self.closing && self.state == .ready
+        } : nil)
         if loadRecord {
             do { previousRecord = try await records.load() }
             catch { self.error = "Couldn’t read the previous session record. \(error)" }

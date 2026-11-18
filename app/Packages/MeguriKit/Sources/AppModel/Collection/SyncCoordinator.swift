@@ -577,13 +577,19 @@ public final class SyncCoordinator {
         }
     }
     public func loadMeguriConnection() {
+        loadMeguriConnection(startupForeground: nil)
+    }
+    private func loadMeguriConnection(startupForeground: (@MainActor () -> Bool)?) {
+        let expected = generation, revision = hostRevision
         issueMeguri { _ in
-            do { try await self.readMeguriConnection() }
+            guard self.generation == expected, self.hostRevision == revision else { return }
+            do { try await self.readMeguriConnection(startupForeground: startupForeground) }
             catch { self.meguriLastError = error }
         }
     }
-    // Offline attachment/readiness only. This never wakes a round.
-    private func readMeguriConnection() async throws {
+    // Offline attachment/readiness only. A valid cold foreground attachment
+    // can ask issueMeguri's completion to schedule its automatic opportunity.
+    private func readMeguriConnection(startupForeground: (@MainActor () -> Bool)? = nil) async throws {
         // A local reload must not turn a deliberate draft edit into an
         // unchanged-address authentication attempt.
         guard !meguriAddressDirty else { return }
@@ -609,6 +615,12 @@ public final class SyncCoordinator {
             guard meguriPhase == .setupRequired else { return }
             meguriBootstrap = facade
             try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+            if meguriCurrent(owner, expected, revision), editRevision == meguriAddressEditRevision,
+               meguriBootstrap === facade, meguriReady, startupForeground?() == true {
+                // No suspension from this check through issueMeguri clearing
+                // busy and requesting the wake; its normal gates still apply.
+                meguriReadyWakePending = true
+            }
         } catch {
             let phase = await owner.phase
             if meguriCurrent(owner, expected, revision) { meguriPhase = phase; meguriLastError = error }
@@ -1133,7 +1145,8 @@ public final class SyncCoordinator {
         return successor
     }
 
-    private func attachProvider(to backend: any SyncCoordinatorBackend) async throws {
+    private func attachProvider(to backend: any SyncCoordinatorBackend,
+                                startupForeground: (@MainActor () -> Bool)? = nil) async throws {
         guard providerDirectory != nil else { return }
         let expected = generation, revision = hostRevision
         let current: CoreProviderService
@@ -1149,7 +1162,7 @@ public final class SyncCoordinator {
         }
         self.settings = settings
         if providerNeedsAttention { operationFailed = true }
-        if state.selection == .meguri, !meguriBusy { loadMeguriConnection() }
+        if state.selection == .meguri, !meguriBusy { loadMeguriConnection(startupForeground: startupForeground) }
     }
 
     public convenience init(directory: URL, clock: AppClock = .system,
@@ -1245,7 +1258,7 @@ public final class SyncCoordinator {
     }
 
     /// Only ReviewCollection.completeOpenedHost calls this, after FFI retention.
-    func completeOpenedHost(generation: UInt64) async {
+    func completeOpenedHost(generation: UInt64, startupForeground: (@MainActor () -> Bool)? = nil) async {
         while let original = replacementTask { await original.value }
         guard !closing, !Task.isCancelled else { return }
         if let original = attachmentTask {
@@ -1281,7 +1294,7 @@ public final class SyncCoordinator {
                     backend = nil
                     return
                 }
-                try await attachProvider(to: value)
+                try await attachProvider(to: value, startupForeground: startupForeground)
                 guard !closing, !Task.isCancelled, !replacing,
                       revision == hostRevision, generation == self.generation else { return }
                 drained = false
