@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    "docs/process/review-log/meguri-sync-local-sign-in-recovery-20261118.md":
+        "3f81b8c9ba8d4c6d8bc4912d58bfa7fb1a346f2e825d2f601e0ffa097c8603a7",
     "docs/process/review-log/app-icon-20261118.md":
         "3c02ff0da56dff510620c4c77ebb5b3919b0f47672b20699f05b7f669ff5b63e",
     'docker/sync-web.Dockerfile.dockerignore':

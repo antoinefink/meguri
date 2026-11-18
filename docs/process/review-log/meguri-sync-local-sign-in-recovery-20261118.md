@@ -72,3 +72,90 @@ The production server package `sync-server-package/20261118T145512Z-50357` passe
 The two jobs establish the native local review path and the packaged server's separate CoreHost path. The combined signed app-to-server journey and live use of the Automatic toggle remain open. The configured profile file for the dedicated Mac test VM is unavailable.
 
 The same native method passed once on each simulated device in the dedicated VM. iPhone receipt `ui-test/20261118T145940Z-71735` and iPad receipt `ui-test/20261118T150207Z-71727` are clean at `16ccabb4654f44502f9073932aca740cd9b4ceea`. The intervening verification record leaves the app, Core and server trees byte-identical to `274b4f88`. These three local journeys and six CoreHost phases do not close the original integration gate.
+
+## Collection entry and signed Mac follow-up
+
+The existing Mac native journey `ui-test/20261118T151016Z-89490` passed its one selected `CollectionEntryJourneyTests/testNativeExportCancelSaveReplaceReimportAndDurableReview` method on clean `972e27aa6b92a2fca87e9165de7f135e0fe41211`. It uses the production picker, generated collection data and the dedicated Mac test VM. It checks import, export cancel/save/replace, reimport and a review that survives app restart.
+
+The configured development profile was restored and matched Xcode's installed copy. Signed `ui-test/20261118T151451Z-97617`, on clean `972e27aa6` with exact AMD64 package `sync-server-package/20261118T150644Z-82900`, reached native XCTest. Its one case failed at the first replacement disclosure assertion after sign-in and opening the actual preview. The retained hierarchy shows those native StaticText rows expose their text as accessibility values. The test had searched labels alone. The receipt also reports cleanup pending, so it supplies no credential-cleanup proof.
+
+Filtered correction `cleanroom/20261118T152454Z-8221` changed only the locator in the signed test. The test still requires all four exact disclosures to exist once in the real preview. The independently reviewed complete file SHA-256 is `921f49f62f649ec2ed1cd3085d513440abb461a1cd48ae03a0a2f815672f1e1d`. The correction landed in `6de3f21e4286b9a5be3b8c51c2fd6e2e108c9288`.
+
+The correction passed `private/20261118T152639Z-10543`, `static-checks/20261118T152729Z-13080` and `similarity/20261118T152743Z-13765`. AMD64 attempt `sync-server-package/20261118T152712Z-11961` stopped before XCTest when the cached frontend dependency lacked the x64 Rolldown binding. The native package `sync-server-package/20261118T152810Z-14347` passed on the correction commit.
+
+Signed `ui-test/20261118T152946Z-14343` on clean `6de3f21e` passed the setup disclosures and proceeded through confirmed bootstrap, Study, Reveal, Good and Close. Its single case then failed when the test compared the label of the unique recorded-answer element with the exact one-answer caption. The passing native local review test reads the same control's label or value. The signed receipt again reports cleanup pending.
+
+Filtered correction `cleanroom/20261118T153457Z-29116` kept the exact caption on the same unique element and accepted either field. Final file SHA-256 `e7801959c3ce0d82e99fd2aa336ecf2215008df475cd86cfde8162dff958fb14` passed complete independent source review. Commit `7b155c317c10f037d6ee38f2dc21a2f9cf9c642a` changes only that assertion.
+
+The answer-caption correction passed privacy `153627Z-30102`, static checks `153715Z-33176` and similarity `153717Z-33601`. The new exact native image package `sync-server-package/20261118T153700Z-31474` passed on clean `7b155c317`.
+
+The signed Mac UI receipt `ui-test/20261118T153838Z-31470` passed its one
+selected case on clean `7b155c317` with that exact packaged server. It exercised
+sign-in, the explicit upload choice, Study, Reveal, Good and Close, then used
+Sync Now and observed a fresh successful round. The public
+`owned-synthetic-card-good-committed` marker required actual server readback of
+the same one synthetic answer and checked cleanup. The manual action can
+coalesce with automatic work. The receipt does not ascribe delivery to either
+trigger. It does not cover opening the app without a local collection.
+
+Opt-in diagnostics landed on `47cc21b45` after a complete seven-file public
+review. The existing native normal, full, authorization and session checks
+passed 48 methods with zero skips in `sync-server-test/20261118T160635Z-95217`.
+The new case drives the actual server process and checks all three log levels,
+milestones, exact integer stamps and absence of synthetic private inputs.
+Privacy `160515Z-92007`, static `160633Z-94488` and similarity
+`160634Z-95017` passed. The AMD64 preparation `161044Z-97530` stopped on
+the old Compose fingerprint without starting npm or the package test.
+The complete policy review on `b02daad32` verified that only this runtime
+Compose fingerprint changed. Privacy `161421Z-1689` and static
+`161459Z-2899` passed on the exact change.
+
+The signed journey test change `a4da1fff3` moves the manual round check
+before Study and checks the native Automatic setting. After Good and Close it
+observes a fresh round without invoking Sync Now. The unchanged MG producer
+still requires the exact persisted answer and cleanup. Complete independent
+review cleared file SHA-256
+`dbc79cecca8d6f66cb7192930d16f3e03112ec0411ef7871ddf83949699bf3d2`.
+Privacy `161705Z-4299`, static `161741Z-5489` and similarity
+`161741Z-5536` passed on the changed sources.
+
+## AMD64 release image with diagnostics
+
+On clean `a4da1fff3`, the AMD64 package
+`sync-server-package/20261118T161946Z-9612` passed. Its fixed source manifest,
+runtime image and exported inventory match, including the x86-64 executable.
+The encompassing `sync-server-package-test/20261118T161945Z-9082` stopped at
+browser seed before the protocol or restart checks. The deployed service was
+not changed.
+
+The first different-platform check `sync-web-verify/20261118T162951Z-18523`
+passed nine frontend cases, then stopped before Chromium because the global
+ARM64 override also constrained the retained AMD64 runtime. With that override
+unset, `sync-web-verify/20261118T163305Z-26020` passed all ten cases. It used
+the host-native ARM64 browser tool, the same exact AMD64 runtime and linked
+input and inventory digests, and confirmed owned cleanup. This establishes
+the exact image's browser journey. The earlier combined package smoke and
+its unrun protocol/restart checks keep their original outcomes.
+
+## Automatic delivery after a signed Mac review
+
+The first current attempt `ui-test/20261118T162502Z-12721` stopped before
+XCTest at approved profile validation. The configured Downloads file was
+absent. The single byte-identical cached Xcode profile matched the prior
+signed CloudAgent Mac app. The successful invocation scoped that existing
+cache path to the one command and used the same validation. Both receipts
+remain recorded. The configured Downloads path still needs attention for
+future invocations without that override.
+
+`ui-test/20261118T162825Z-15174` passed its one selected signed Mac VM case
+on clean `a4da1fff3` with exact AMD64 package `161946Z-9612`. The app
+completed bootstrap, performed a manual round before study and exposed
+Automatic as on. After one Good answer and Close, it observed another
+successful round. The test invoked no manual sync after Good, then signed
+out and quit. The unchanged wrapper verified the same answer on the
+disposable server, completed its cleanup, and returned
+`owned-synthetic-card-good-committed`.
+
+This verifies delivery through an automatic opportunity with the setting on.
+The specific trigger, changing the toggle on a live binding, fresh-device
+download through the signed UI, and the full integration gate remain open.
