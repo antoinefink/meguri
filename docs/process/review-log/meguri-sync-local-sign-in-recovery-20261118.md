@@ -52,3 +52,13 @@ The isolated export `cleanroom/20261118T142045Z-2488` received complete independ
 `swift-test/20261118T142627Z-7913` passed all 37 presentation methods on clean `be606802f`. The three added methods check SessionEnded by itself, one shared retry across both event orders, and unrelated event rejection. They exercise the wake record and event classification without a live provider. The first wrapper stopped at its pre-build commit check when the web update landed. The app and Core trees on `77afcdfe9` are byte-identical to `be606802f`.
 
 The signed Release personal preview `build-app/20261118T142741Z-17717` passed on clean `77afcdfe9`. The installed app and widget signatures and executable hashes matched that receipt. The full signed Mac journey remains open.
+
+## Choosing Sync Automatically for Meguri Sync
+
+This work started on `2e7bdea172667f5b8a1d74fc03362ca458390317` and landed in `7e2df75dfb509d6c8621030910ca04db4d6eff24`. A ready Meguri binding shows the native Sync Automatically toggle in Account & Sync. It uses the existing label and footer defined in `sync/status-strings#T14`, with behavior from `sync/meguri-provider#MP5`. The setting uses the existing device-local Core save. Once off, automatic scheduling stops and Sync Now remains available under the usual admission checks. A successful change to on requests an ordinary automatic wake.
+
+The isolated exports were `cleanroom/20261118T143303Z-22932` and `cleanroom/20261118T144037Z-26079`. Review identified that a Core settings save closes ordinary admission, including for an automatic-only change. The toggle is unavailable while the original wake owns work, and new rounds cannot start while the settings save settles. Pause keeps its existing drain. Complete independent review of the four final Swift files is recorded with SHA-256 `43f53d0805e541bb9478df1522b86c1d12fc7fa94f8b0bbd3e9f5782c2efaa64`.
+
+Privacy scan `144535Z-31095` flagged the existing test-file match. Its exact complete reviewed digest was refreshed. `private/20261118T144553Z-31509`, `static-checks/20261118T144635Z-34755`, and `similarity/20261118T144638Z-35664` passed.
+
+`swift-test/20261118T144624Z-32580` passed all 41 presentation methods on clean `7e2df75df`. They cover the scheduling predicate, ordinary route availability and refusal without a ready binding. The signed Release personal preview `build-app/20261118T144708Z-32570` passed on the same clean commit. The installed app and widget signatures and executable hashes matched that receipt. The signed Mac journey and exercising this toggle on an actual ready test-server binding remain open.
