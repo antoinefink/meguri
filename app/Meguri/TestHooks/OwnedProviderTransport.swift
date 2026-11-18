@@ -1,5 +1,6 @@
 #if MEGURI_TEST_HOOKS && os(macOS)
 import AppModel
+import CoreBridge
 import CoreFoundation
 import CryptoKit
 import Darwin
