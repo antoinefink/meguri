@@ -112,6 +112,59 @@ import Testing
             #expect(presentation.route == route)
         }
     }
+    @Test func meguriLocalRoundCredentialFailuresOfferExistingConnectionRecovery() {
+        // Exercise the production local transition without fabricating a ready
+        // binding or a server result. ProviderRoundOwnerTests covers admission.
+        let cases: [(any Error, MeguriProviderConnectionPhase, String, MeguriSyncNowRoute)] = [
+            (MeguriRoundAdmissionFailure.credentialsMissing, .signedOut, "signedOut", .account("sync.meguri.setup.continue")),
+            (MeguriProviderCredentialFailure.access(-25308), .blocked, "connectionBlocked", .disabled("sync.meguri.now.unavailable.stopped")),
+            (MeguriProviderCredentialFailure.malformedPayload, .blocked, "connectionBlocked", .disabled("sync.meguri.now.unavailable.stopped")),
+            (MeguriProviderCredentialFailure.wrongConnection, .blocked, "connectionBlocked", .disabled("sync.meguri.now.unavailable.stopped"))
+        ]
+        for (error, phase, status, route) in cases {
+            let sync = SyncCoordinator(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+                configuration: nil, defaults: nil)
+            let settings = sync.settings
+            #expect(sync.applyMeguriRoundCredentialFailure(error))
+            #expect(sync.meguriPhase == phase)
+            #expect(sync.meguriRoutine == nil && sync.meguriSignInErrorKey == nil)
+            #expect(sync.meguriStatus.titleKey == "sync.meguri.status.\(status).title")
+            #expect(sync.meguriStatus.detailKey == "sync.meguri.status.\(status).detail")
+            #expect(sync.meguriStatus.route == route && !sync.meguriStatus.isBusy)
+            #expect(sync.settings.enabled == settings.enabled && sync.settings.paused == settings.paused)
+            #expect(sync.settings.automatic == settings.automatic && sync.settings.media == settings.media)
+            sync.syncNow(); sync.retryMeguriRoundMedia()
+            #expect(!sync.meguriBusy && sync.meguriRoundReport == nil && sync.meguriLastCommand == nil)
+        }
+        #expect(SyncText.value("sync.meguri.status.signedOut.detail") == "Sign in to your Meguri Sync server to continue.")
+        #expect(SyncText.value("sync.meguri.connection.retry") == "Try Again")
+    }
+    @Test func meguriLocalRoundCredentialRecoveryDoesNotClassifyOtherErrorsOrEditedAddresses() {
+        let errors: [any Error] = [MeguriRoundAdmissionFailure.connectionUnavailable,
+            MeguriRoundAdmissionFailure.retired, MeguriRoundAdmissionFailure.busy,
+            MeguriBootstrapAdmissionFailure.credentialsMissing, MeguriProviderAuthenticationFailure.credentials,
+            BridgeError.internal("Synthetic failure"), CancellationError()]
+        let sync = SyncCoordinator(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            configuration: nil, defaults: nil)
+        for error in errors {
+            #expect(!sync.applyMeguriRoundCredentialFailure(error))
+            #expect(sync.meguriPhase == .unconfigured && sync.meguriRoutine == nil)
+        }
+        sync.meguriAddressEdited()
+        #expect(!sync.applyMeguriRoundCredentialFailure(MeguriRoundAdmissionFailure.credentialsMissing))
+        #expect(!sync.applyMeguriRoundCredentialFailure(MeguriProviderCredentialFailure.wrongConnection))
+        #expect(sync.meguriPhase == .unconfigured)
+    }
+    @Test func meguriCancelledRoundCannotPublishLocalCredentialRecovery() async {
+        let sync = SyncCoordinator(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
+            configuration: nil, defaults: nil)
+        await Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            #expect(!sync.applyMeguriRoundCredentialFailure(MeguriRoundAdmissionFailure.credentialsMissing))
+            #expect(!sync.applyMeguriRoundCredentialFailure(MeguriProviderCredentialFailure.malformedPayload))
+        }.value
+        #expect(sync.meguriPhase == .unconfigured && sync.meguriRoutine == nil)
+    }
     @Test func meguriSetupPresentationCannotGrantOpaqueRecoveryOrReadyAuthority() {
         let local = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
             stage: .required, localCollection: true, paused: false, routine: nil)

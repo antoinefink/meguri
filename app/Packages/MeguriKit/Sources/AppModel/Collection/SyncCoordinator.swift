@@ -1007,6 +1007,7 @@ public final class SyncCoordinator {
         if !automatic { meguriWakeManual = true }
         guard meguriWake == nil, let round = meguriRound, let owner = meguriConnectionOwner else { return }
         let id = UUID(), expected = generation, revision = hostRevision
+        let editRevision = meguriAddressEditRevision
         // Reserve the product task before the first actor/credential suspension.
         let task = Task {
             defer { if meguriWake?.id == id { meguriWake = nil } }
@@ -1043,13 +1044,35 @@ public final class SyncCoordinator {
                     if meguriRoutine != .idle && meguriRoutine != .pending && !recoveredNetwork { meguriWakePending = false }
                 } catch {
                     meguriLastError = error
-                    guard meguriWake?.id == id, meguriCurrent(owner, expected, revision) else { return }
-                    meguriRoutine = error is CancellationError ? .cancelled : .failed
+                    guard meguriWake?.id == id, meguriCurrent(owner, expected, revision), meguriRound === round,
+                          editRevision == meguriAddressEditRevision else { return }
+                    if !applyMeguriRoundCredentialFailure(error) {
+                        meguriRoutine = error is CancellationError ? .cancelled : .failed
+                    }
                     meguriWakePending = false
                 }
             }
         }
         meguriWake = (id, task)
+    }
+    // Only fullRound's typed, pre-network secure-read failures use this local
+    // recovery. The caller checks the original owner, round and attempt first.
+    @discardableResult func applyMeguriRoundCredentialFailure(_ error: any Error) -> Bool {
+        guard !Task.isCancelled, !meguriAddressDirty else { return false }
+        let phase: MeguriProviderConnectionPhase
+        switch error {
+        case MeguriRoundAdmissionFailure.credentialsMissing: phase = .signedOut
+        case MeguriProviderCredentialFailure.access(_),
+             MeguriProviderCredentialFailure.malformedPayload,
+             MeguriProviderCredentialFailure.wrongConnection: phase = .blocked
+        default: return false
+        }
+        meguriPhase = phase
+        // Reopen only through explicit sign-in or a checked local load. Keep
+        // the connection, binding and all retained result/recovery evidence.
+        meguriReady = false; meguriRound = nil; meguriRoutine = nil
+        meguriWakePending = false; meguriWakeManual = false; meguriReadyWakePending = false
+        return true
     }
     private func reduceMeguriRound(_ report: MeguriRoundReport) {
         guard case .collection(let collection) = meguriCollectionFinalization ?? report.collection.outcome else { meguriRoutine = .failed; return }
