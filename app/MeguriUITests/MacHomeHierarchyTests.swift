@@ -256,9 +256,15 @@ final class MacHomeHierarchyTests: XCTestCase {
             XCTAssertTrue(automatic.value as? String == "1" || automatic.value as? NSNumber == NSNumber(value: 1),
                 "Sync Automatically must report the exact native ON value after bootstrap")
 
+            actionable(automatic)
+            try click(automatic, app: app, bundle: bundle)
             try app.bringToFront(bundleIdentifier: bundle)
-            waitForJourney({ availableSync() }, "Require the settled pre-review round before closing Settings")
-            let preReviewSequence = try XCTUnwrap(successSequence(), "Require the exact settled pre-review success sequence")
+            waitForJourney({
+                availableSync() && automatic.exists && automatic.isEnabled && automatic.isHittable
+                    && (automatic.value as? String == "0" || automatic.value as? NSNumber == NSNumber(value: 0))
+            }, "Require settled native OFF and available controls before closing Settings")
+            XCTAssertEqual(picker.value as? String, "Meguri Sync")
+            let offSequence = try XCTUnwrap(successSequence(), "Require the exact settled OFF success sequence before review")
             settings.typeKey("w", modifierFlags: .command)
             XCTAssertTrue(settings.waitForNonExistence(timeout: 10), "Close the actual Settings window")
             let deck = namedRow(app, prefix: "home.deck.row.", path: "Local Review::Cards")
@@ -294,12 +300,22 @@ final class MacHomeHierarchyTests: XCTestCase {
             main.typeKey(",", modifierFlags: .command)
             XCTAssertTrue(settings.waitForExistence(timeout: 10))
             XCTAssertEqual(settingsWindows.count, 1)
-            // Foreground or review completion may supply the automatic opportunity.
+            waitForJourney({
+                availableSync() && automatic.exists && automatic.isEnabled && automatic.isHittable
+                    && (automatic.value as? String == "0" || automatic.value as? NSNumber == NSNumber(value: 0))
+            }, "Require native OFF retained with available controls after review")
+            XCTAssertEqual(picker.value as? String, "Meguri Sync")
+            // This observes no completed round before re-enabling, not zero HTTP requests.
+            XCTAssertEqual(try XCTUnwrap(successSequence()), offSequence,
+                "The successful-round sequence must remain at the settled OFF value")
+            actionable(automatic)
+            try click(automatic, app: app, bundle: bundle)
             // A higher sequence attributes neither a trigger nor a request count;
             // MG separately checks the exact persisted Good without a manual sync.
             waitForJourney({
-                guard let sequence = successSequence(), sequence > preReviewSequence else { return false }
-                return availableSync()
+                guard let sequence = successSequence(), sequence > offSequence else { return false }
+                return availableSync() && automatic.exists && automatic.isEnabled && automatic.isHittable
+                    && (automatic.value as? String == "1" || automatic.value as? NSNumber == NSNumber(value: 1))
             }, "Require a fresh successful collection/media round and available controls before Sign Out")
             let signOut = unique(settings, "settings.accountSync.meguri.signOut")
             actionable(signOut)
