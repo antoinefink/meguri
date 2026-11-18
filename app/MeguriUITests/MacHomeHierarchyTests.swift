@@ -39,6 +39,28 @@ final class MacHomeHierarchyTests: XCTestCase {
                 + " sheetCount=\(app.sheets.count)"
                 + " alertCount=\(app.alerts.count)"
                 + " appState=\(app.state.rawValue)")
+            let hookErrors = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "testhooks.error.message"))
+            let errorIDCount = hookErrors.count
+            let hookMessages: [(code: String, message: String)] = [
+                ("agent-startup", "OwnedProviderFixture is incompatible with setup-only or agent startup"),
+                ("foreground-options", "OwnedProviderFixture requires a normal foreground launch without routes, imports, native replay or integrations"),
+                ("fixture-argument", "OwnedProviderFixture requires exactly this checkout's generated local-review-1 directory"),
+                ("mac-only", "OwnedProviderFixture applies to the Mac only"),
+                ("development-bundle", "OwnedProviderFixture requires a .dev bundle"),
+                ("composition-options", "OwnedProviderFixture requires normal production composition"),
+                ("missing-context", "OwnedProviderFixture requires its prepared owned context"),
+                ("missing-opt-in", "OwnedProviderFixture context requires explicit opt-in"),
+                ("fixture-alias", "OwnedProviderFixture refuses another source or a path alias"),
+                ("fixture-directory", "OwnedProviderFixture source must be an existing directory"),
+                ("defaults-create", "Could not create disposable provider defaults"),
+                ("root-collision", "Owned provider root already exists"),
+                ("root-create", "Could not create private owned provider root")
+            ]
+            let matches = hookMessages.filter {
+                hookErrors.matching(NSPredicate(format: "label == %@", $0.message)).count > 0
+            }
+            let code = matches.count == 1 ? matches[0].code : (matches.isEmpty ? "unknown" : "ambiguous")
+            print("ownedProviderHookError: errorIDCount=\(errorIDCount) matchCount=\(matches.count) code=\(code)")
         }
         XCTAssertTrue(homeExists)
         XCTAssertEqual(homeMatches.count, 1)
