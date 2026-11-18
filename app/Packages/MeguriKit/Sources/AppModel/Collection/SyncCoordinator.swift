@@ -1695,6 +1695,7 @@ public final class SyncCoordinator {
             do { providerState = try await provider.state() }
             catch { meguriLastError = error }
             recordConnectionFailure(error)
+            if case BridgeError.busy = error { connectionFailure = .busy }
             return false
         }
     }
