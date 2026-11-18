@@ -80,8 +80,8 @@ import WebKit
         let original = "<span  class='original'>kept</span><br/>"
         let draft = try NoteEditorDraft(generation: 1, notetype: Self.type(),
             deck: .init(id: 9, fullName: "Daily", filtered: false), values: ["", original, "sticky"])
-        var current = true
-        let host = try FieldEditorHost(draft: draft, isCurrent: { current })
+        let owner = CurrentOwner()
+        let host = try FieldEditorHost(draft: draft, isCurrent: { owner.isCurrent })
         let hold = HeldResult()
         var replacement: FieldEditorHost?
         defer { hold.release(); replacement?.dispose(); host.dispose() }
@@ -98,7 +98,7 @@ import WebKit
         let actualDrain = try #require(host.processingCompletion)
         #expect(draft.fields == accepted && draft.pendingFields == [1])
         switch invalidation {
-        case "owner": current = false
+        case "owner": owner.isCurrent = false
         case "dispose": host.dispose()
         case "failed": try await Self.failPayload(host)
         default: host.webViewWebContentProcessDidTerminate(host.webView)
@@ -157,6 +157,10 @@ import WebKit
             try { await window.webkit.messageHandlers.meguriEditor.postMessage({type:'invalid'}); }
             catch { }
             """, contentWorld: .world(name: "Meguri.FieldEditor.v1"))
+    }
+
+    @MainActor private final class CurrentOwner {
+        var isCurrent = true
     }
 
     // A bounded suspension of an actual result, shared only by tests in this
