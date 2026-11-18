@@ -24,3 +24,22 @@ asset lookup and package inventory retain the hashed local asset contract.
 | server/web/upstream-records.json | e939291e8440f4de76d7d1c905246df0cbeb2bad4efd9b864e92bcf500646124 |
 | specs/servers/meguri-sync-web.md | 87a994f10aed9aa8ce279ef37bdcf59838c69fb7707d3f85a5d49a78dcf5bead |
 | tools/tests/sync_package_context_test.py | f8aea685104a88da5e0bb52e15eb251798705d55c1cc7ea24928e678f05641a6 |
+
+## Verification
+
+- The staged privacy scan passed in `private/20261118T145452Z-48224`.
+  The IBM font and OFL text were admitted by the exact independently reviewed
+  whole-file hashes above.
+- `static-checks/20261118T145514Z-51753`,
+  `similarity/20261118T145513Z-51150`, and
+  `selftest/20261118T145513Z-51393` passed.
+- `sync-server-test/20261118T145623Z-57952` passed all four selected asset
+  and HTTP route checks. `sync-web-verify/20261118T145513Z-51328` passed all
+  nine frontend tests and the private HTTPS browser journey. The browser
+  used the local WOFF2 bytes directly and made no external requests. The
+  sign-in and 390 px Accounts renders were inspected.
+- `sync-server-package/20261118T145512Z-50357` exported the same font bytes
+  at `/assets/IBMPlexSans-Variable-DKYrB2Yq.woff2` and the exact notices.
+  `sync-server-package-test/20261118T145512Z-50096` passed all four checks,
+  including the browser journey against the exact production image.
+- The full integration gate remains pending.
