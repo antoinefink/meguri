@@ -9,9 +9,10 @@ import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import { once } from 'node:events';
 import assert from 'node:assert/strict';
 const phase = process.argv[2];
-// The route-only phase has its own parser and lifecycle. It never enters the
-// account/browser/provider branches below, and never mounts the service data.
-if (phase === 'native-route-fixture') {
+// The accountless diagnostic remains health-only. The explicit owned journey
+// shares its route/TLS lifecycle, with disposable local API setup before ready.
+if (phase === 'native-route-fixture' || phase === 'native-owned-journey-fixture') {
+  const journey = phase === 'native-owned-journey-fixture';
   let nativeProxy;
   try {
     assert.equal(process.argv.length, 12);
@@ -26,6 +27,7 @@ if (phase === 'native-route-fixture') {
     assert(/^[1-9][0-9]{3,4}$/.test(url.port) && Number(url.port) >= 1024 && Number(url.port) <= 65535);
     assert.equal(origin, `https://${gateway}:${url.port}`);
     assert(/^[0-9a-f]{40}$/.test(source)); assert(/^[A-Za-z0-9_-]{1,100}$/.test(run));
+    if (journey) assert(/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(run));
     assert(/^[0-9a-f]{32}$/.test(owner)); assert(/^[0-9a-f]{64}$/.test(runtime));
     assert(/^sha256:[0-9a-f]{64}$/.test(tool)); assert(/^[0-9a-f]{64}$/.test(scriptSha));
     assert(/^meguri-native-fixture-[A-Za-z0-9_-]{1,100}$/.test(fixture));
@@ -60,8 +62,18 @@ if (phase === 'native-route-fixture') {
     await writeFile('/tmp/native-route/binding.json', JSON.stringify({ gateway, origin, source, run, owner,
       runtime, tool, scriptSha, fixture, caSha: createHash('sha256').update(root).digest('hex'), caBytes: root.length }),
       { mode: 0o600, flag: 'wx' });
+    // Exact first-party protocol methods (protocol/mod.rs and media.rs).
+    // No API/setup/browser path is exposed by the journey's public proxy.
+    const sync = new Set(['hostKey', 'meta', 'upload', 'download', 'start', 'applyGraves',
+      'applyChanges', 'chunk', 'applyChunk', 'sanityCheck2', 'finish', 'abort']);
+    const media = new Set(['begin', 'mediaChanges', 'uploadChanges', 'downloadFiles', 'mediaSanity']);
     nativeProxy = createServer({ key: await readFile('/tmp/native-route/leaf-key.pem'), cert: leaf }, (incoming, outgoing) => {
-      if (incoming.method !== 'GET' || incoming.url !== '/health') { outgoing.writeHead(404); outgoing.end(); return; }
+      const path = incoming.url;
+      const allowed = incoming.method === 'GET' && path === '/health'
+        || journey && incoming.method === 'POST' && (
+          path.startsWith('/sync/') && sync.has(path.slice(6))
+          || path.startsWith('/msync/') && media.has(path.slice(7)));
+      if (!allowed) { outgoing.writeHead(404); outgoing.end(); return; }
       const headers = { ...incoming.headers, 'x-forwarded-for': '127.0.0.1', 'x-forwarded-proto': 'https' };
       delete headers['x-forwarded-host'];
       const upstream = httpRequest({ hostname: '127.0.0.1', port: 8080, method: incoming.method, path: incoming.url, headers }, response => {
@@ -71,6 +83,42 @@ if (phase === 'native-route-fixture') {
       incoming.on('aborted', () => upstream.destroy()); outgoing.on('close', () => upstream.destroy()); incoming.pipe(upstream);
     });
     nativeProxy.listen(18443, '0.0.0.0'); await once(nativeProxy, 'listening');
+    if (journey) {
+      // The image-owned volume is mounted read-only only in this phase. Setup
+      // and identity checks go to the actual API over the internal loopback;
+      // no setup token, cookie or response is logged or passed as an argument.
+      const local = (path, body, cookie = '') => new Promise((resolve, reject) => {
+        const req = httpRequest({ hostname: '127.0.0.1', port: 8080, path,
+          method: body === undefined ? 'GET' : 'POST', headers: {
+            Origin: origin, 'x-forwarded-proto': 'https',
+            ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+            ...(cookie ? { Cookie: cookie } : {}),
+          } }, response => {
+          const chunks = [];
+          response.on('data', chunk => chunks.push(chunk)); response.on('error', reject);
+          response.on('end', () => resolve({ status: response.statusCode,
+            headers: response.headers, bytes: Buffer.concat(chunks) }));
+        });
+        req.setTimeout(30000, () => req.destroy(new Error('Request deadline')));
+        req.on('error', reject); req.end(body === undefined ? undefined : JSON.stringify(body));
+      });
+      const username = `owned.${randomBytes(12).toString('hex')}`;
+      const password = randomBytes(32).toString('base64url');
+      const token = (await readFile('/data/owner/state/setup-token', 'utf8')).trim();
+      assert.equal((await local('/api/setup', { token, username, password })).status, 201);
+      const login = await local('/api/login', { username, password });
+      assert.equal(login.status, 200);
+      assert.equal(login.headers['set-cookie'].length, 1);
+      const cookie = login.headers['set-cookie'][0].split(';')[0];
+      const me = await local('/api/me', undefined, cookie); assert.equal(me.status, 200);
+      const account = JSON.parse(me.bytes).data;
+      assert.equal(account.username, username); assert.equal(account.role, 'admin');
+      assert.equal(typeof account.id, 'string'); assert(account.id.length > 0);
+      assert.equal((await local('/api/logout', {}, cookie)).status, 200);
+      await writeFile('/tmp/native-route/journey.json', JSON.stringify({
+        run_id: run, username, password, account_id: account.id,
+      }) + '\n', { mode: 0o600, flag: 'wx' });
+    }
     await new Promise(resolve => {
       const stop = () => {
         process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop); resolve();

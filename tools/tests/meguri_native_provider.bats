@@ -387,6 +387,7 @@ reset_run() {
   : >"$trace"; : >"$hooks"
 }
 @test "native route: exact call traverses real guards and counts only one after owned cleanup" {
+  MG_RUN_ID=20261118T123456Z-12345
   run invoke --package-receipt "$receipt"
   [ "$status" = 0 ]
   grep -Fxq status:pass "$trace"
@@ -403,6 +404,16 @@ reset_run() {
   ! grep -q 'refused-wrapper-command\|forbidden-process' "$trace"
   [ ! -e "$fake/guest-owned" ] && [ ! -e "$fake/network.json" ] && [ ! -e "$fake/volume.json" ]
   [[ "$output" != *192.168.64.1* && "$output" != *CERTIFICATE* && "$output" != *synthetic-private* ]]
+  local private="$MG_RUN_DIR/private/native-route" owner
+  owner="$(jq -r .owner "$private/ca-binding.json")"
+  jq -e --arg name "meguri-native-net-20261118t123456z-12345-$owner" --arg run "$MG_RUN_ID" --arg owner "$owner" '
+    .[0] | .Name==$name and .Labels["meguri.mg.run-id"]==$run and .Labels["meguri.sync.owner"]==$owner
+  ' "$private/network.json"
+  jq -e --arg name "meguri-native-ingress-20261118t123456z-12345-$owner" --arg run "$MG_RUN_ID" --arg owner "$owner" '
+    .[0] | .Name==$name and .Labels["meguri.mg.run-id"]==$run and .Labels["meguri.sync.owner"]==$owner
+  ' "$private/ingress.json"
+  jq -e --arg run "$MG_RUN_ID" '.run==$run' "$private/ca-binding.json"
+  sed -n 's/^detail:route://p' "$trace" | jq -e --arg run "$MG_RUN_ID" '.run==$run'
   # Hardening assertions consume the actual executed argv, not implementation.
   jq -Rse --arg runtime "$runtime_id" --arg tool "$tool_image" '
     split("\u0000")[:-1] |
@@ -424,7 +435,7 @@ reset_run() {
     values("--entrypoint")==["node"] and values("-e")==[$source] and
     index("--read-only")!=null and index("--init")!=null and values("--pull")==["never"] and
     index("--tmpfs")==null and index("--mount")==null and index("--volume")==null and
-    .[index($tool)+1:]==["-e",$source,"172.30.0.2",$runtime,$netid]
+    .[index($tool)+1:]==["-e",$source,"172.30.0.2",$runtime,$netid,"native-route-fixture"]
   ' "$fake/relay.args"
   ! grep -Eq -- '--service-ports|--publish [^ ]*:8080|--privileged|network prune|volume prune|ssh -|security add|trust-settings|keychain' "$fake/process-trace" "$fake/ssh-commands"
 }
@@ -1100,7 +1111,7 @@ async function main() {
   vm.runInNewContext(process.argv[2], {
     require(name) { assert.equal(name, 'node:net'); return net; },
     process: {
-      argv: ['node', '172.30.0.2', 'a'.repeat(64), 'b'.repeat(64)],
+      argv: ['node', '172.30.0.2', 'a'.repeat(64), 'b'.repeat(64), 'native-route-fixture'],
       stdout: { write(value) { stdout += value; } },
       stderr: { write(value) { stderr += value; } },
       exit(code) { throw Error('unexpected relay exit: ' + code); },
@@ -1161,4 +1172,361 @@ main().then(() => console.log('MEGURI_NATIVE_RELAY_DRAIN_OK'), error => {
 JS
   [ "$status" = 0 ]
   [ "$output" = MEGURI_NATIVE_RELAY_DRAIN_OK ]
+}
+
+@test "native journey: emitted relay admits multiple connections and enforces fixed phase caps in memory" {
+  run node - "$(mg_native_route__relay_source)" <<'JS'
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const { EventEmitter } = require('node:events');
+const source = process.argv[2];
+function fixture(phase) {
+  let accept, stdout = '', stderr = '';
+  const timers = new Set(), upstreams = [], idles = [];
+  const failure = new Error('owned-relay-exit');
+  class Socket extends EventEmitter {
+    constructor() { super(); this.readableEnded = true; this.writableFinished = true; }
+    pipe(other) { return other; }
+    destroy() { this.destroyed = true; }
+    setTimeout(ms, callback) { idles.push({ ms, callback }); }
+  }
+  const server = new EventEmitter();
+  server.listen = (options, ready) => {
+    assert.equal(options.host, '0.0.0.0'); assert.equal(options.port, 18443); ready();
+  };
+  const net = {
+    isIPv4: target => target === '172.30.0.2',
+    createServer(options, callback) { assert.equal(options.allowHalfOpen, true); accept = callback; return server; },
+    createConnection(options) {
+      assert.equal(options.host, '172.30.0.2'); assert.equal(options.port, 18443);
+      assert.equal(options.family, 4); assert.equal(options.allowHalfOpen, true);
+      const socket = new Socket(); upstreams.push(socket); return socket;
+    },
+  };
+  vm.runInNewContext(source, {
+    require(name) { assert.equal(name, 'node:net'); return net; },
+    process: { argv: ['node', '172.30.0.2', 'a'.repeat(64), 'b'.repeat(64), phase],
+      stdout: { write(value) { stdout += value; } }, stderr: { write(value) { stderr += value; } },
+      exit(code) { assert.equal(code, 1); throw failure; } },
+    setTimeout(callback, ms) { const t = { callback, ms }; timers.add(t); return t; },
+    clearTimeout(t) { assert.equal(timers.delete(t), true); },
+  });
+  assert.equal(stdout, 'MEGURI_NATIVE_RELAY_READY\n');
+  return {
+    timers, idles, upstreams, failure,
+    connect() { const c = new Socket(); accept(c); return c; },
+    close(c, u) { c.emit('close', false); u.emit('close', false); },
+    failed() { assert.equal(stderr, 'MEGURI_NATIVE_RELAY_FAILED\n'); },
+  };
+}
+const journey = 'native-owned-journey-fixture';
+let f = fixture(journey);
+const clients = Array.from({ length: 16 }, () => f.connect());
+assert.equal(f.upstreams.length, 16);
+assert.deepEqual(f.idles.map(x => x.ms), Array(32).fill(30000));
+assert.equal([...f.timers].filter(x => x.ms === 90000).length, 16);
+assert.equal([...f.timers].filter(x => x.ms === 900000).length, 1);
+// An upstream's graceful close alone must not free active capacity or deadline.
+f.upstreams[0].emit('close', false);
+assert.throws(() => f.connect(), e => e === f.failure); f.failed();
+f = fixture(journey);
+// Cumulative admission survives fully drained connections; the 129th fails.
+for (let i = 0; i < 128; i++) { const c = f.connect(); f.close(c, f.upstreams[i]); }
+assert.deepEqual([...f.timers].map(x => x.ms), [900000]);
+assert.throws(() => f.connect(), e => e === f.failure); f.failed();
+for (const direction of ['receive', 'send']) {
+  f = fixture(journey);
+  const first = f.connect(), second = f.connect();
+  const sockets = direction === 'receive' ? [first, second] : f.upstreams;
+  sockets[0].emit('data', { length: 16777216 });
+  f.close(first, f.upstreams[0]);
+  sockets[1].emit('data', { length: 16777216 });
+  assert.throws(() => sockets[1].emit('data', { length: 1 }), e => e === f.failure); f.failed();
+}
+for (const ms of [90000, 900000]) {
+  f = fixture(journey); f.connect();
+  assert.throws(() => [...f.timers].find(t => t.ms === ms).callback(), e => e === f.failure); f.failed();
+}
+f = fixture(journey); f.connect();
+assert.throws(() => f.idles[0].callback(), e => e === f.failure); f.failed();
+f = fixture('native-route-fixture');
+const diagnostic = f.connect();
+assert.deepEqual(f.idles.map(x => x.ms), [10000, 10000]);
+assert.deepEqual([...f.timers].map(x => x.ms).sort((a, b) => a - b), [20000, 180000]);
+diagnostic.emit('data', { length: 65536 }); f.close(diagnostic, f.upstreams[0]);
+assert.throws(() => f.connect(), e => e === f.failure); f.failed();
+for (const side of ['receive', 'send']) {
+  f = fixture('native-route-fixture'); const c = f.connect();
+  assert.throws(() => (side === 'receive' ? c : f.upstreams[0]).emit('data', { length: 65537 }), e => e === f.failure);
+  f.failed();
+}
+console.log('MEGURI_NATIVE_RELAY_CAPS_OK');
+JS
+  [ "$status" = 0 ]
+  [ "$output" = MEGURI_NATIVE_RELAY_CAPS_OK ]
+}
+
+@test "native journey: shared execute resets ingress relay and staging ownership before a partial failure" {
+  MG_NR_PRIVATE="$MG_RUN_DIR/private/native-route"; MG_NR_OWNER=0123456789abcdef0123456789abcdef
+  MG_NR_RECEIPT="$receipt"; MG_NR_PHASE=native-owned-journey-fixture
+  MG_NR_INGRESS=stale; MG_NR_RELAY=stale; MG_NR_TARGET=stale
+  MG_NR_INGRESS_ID=stale; MG_NR_RELAY_ID=stale
+  MG_NR_INGRESS_ATTEMPT=1; MG_NR_RELAY_ATTEMPT=1; MG_NR_HOST_STAGE_ATTEMPT=1; MG_NR_GUEST_STAGE_ATTEMPT=1
+  mg_native_route__route_metadata() {
+    [ "$MG_NR_INGRESS" = "meguri-native-ingress-$MG_RUN_ID-$MG_NR_OWNER" ] &&
+      [ "$MG_NR_RELAY" = "meguri-native-relay-$MG_RUN_ID-$MG_NR_OWNER" ] &&
+      [ -z "$MG_NR_INGRESS_ID$MG_NR_RELAY_ID$MG_NR_TARGET" ] &&
+      [ "$MG_NR_INGRESS_ATTEMPT$MG_NR_RELAY_ATTEMPT$MG_NR_HOST_STAGE_ATTEMPT$MG_NR_GUEST_STAGE_ATTEMPT" = 0000 ] &&
+      [ "$MG_NR_CLEANED$MG_NR_UI_OK" = 00 ] || return 97
+    printf 'initialized\n'; return 1
+  }
+  run mg_native_route__execute
+  [ "$status" = 1 ]; [ "$output" = initialized ]
+  MG_NR_PHASE=provider-fixture
+  run mg_native_route__execute
+  [ "$status" = 1 ]; [ -z "$output" ]
+}
+
+@test "native journey: actual fixture inspector pins both the sole raw ro bind and structured volume" {
+  invoke --package-receipt "$receipt"
+  grep -Fxq status:pass "$trace"
+  MG_NR_PHASE=native-owned-journey-fixture
+  cp "$MG_NR_PRIVATE/fixture.json" "$fake/fixture-base.json"
+  jq --arg volume "meguri-sync-data-$MG_RUN_ID" '
+    .[0].Config.Cmd[1]="native-owned-journey-fixture" |
+    .[0].HostConfig.Binds=[($volume+":/data:ro")] |
+    .[0].Mounts=[{Type:"volume",Name:$volume,Destination:"/data",RW:false}]
+  ' "$fake/fixture-base.json" >"$fake/journey-fixture.json"
+  cp "$fake/journey-fixture.json" "$fake/fixture.json"
+  run mg_native_route__container fixture
+  [ "$status" = 0 ]
+  local mutation
+  for mutation in '.[0].HostConfig.Binds=null' '.[0].HostConfig.Binds=[]' \
+    '.[0].HostConfig.Binds[0]|=sub(":ro$";":rw")' \
+    '.[0].HostConfig.Binds+=["foreign:/elsewhere:ro"]' \
+    '.[0].HostConfig.Mounts=[{Type:"volume",Source:"foreign",Target:"/elsewhere",ReadOnly:true}]' \
+    '.[0].Mounts[0].RW=true' '.[0].Mounts[0].Name="foreign"' \
+    '.[0].Mounts[0].Destination="/elsewhere"' '.[0].Mounts[0].Type="bind"' \
+    '.[0].Mounts+=[{Type:"volume",Name:"foreign",Destination:"/elsewhere",RW:false}]' \
+    '.[0].HostConfig.NetworkMode="host"' '.[0].Config.Cmd[1]="provider-fixture"'; do
+    jq "$mutation" "$fake/journey-fixture.json" >"$fake/fixture.json"
+    run mg_native_route__container fixture
+    [ "$status" != 0 ]
+  done
+  cp "$fake/journey-fixture.json" "$fake/fixture.json"
+  MG_NR_PHASE=native-route-fixture
+  run mg_native_route__container fixture
+  [ "$status" != 0 ]
+  MG_NR_PHASE=provider-fixture
+  run mg_native_route__container fixture
+  [ "$status" != 0 ]
+}
+
+journey_review_setup() {
+  MG_NR_PRIVATE="$MG_RUN_DIR/private/native-route"
+  mkdir -p "$MG_NR_PRIVATE"; chmod 0700 "$MG_NR_PRIVATE"
+  MG_NR_PHASE=native-owned-journey-fixture; MG_NR_LOCKED_PHASE="$MG_NR_PHASE"
+  MG_NR_UI_OK=1; MG_NR_CLEANED=0; MG_NR_FIXTURE_ID="$fixture_id"
+  local path
+  for path in producer.json producer-review-before.json producer-review-after.json review-expected.json \
+    producer-review-before.err producer-review-after.err review-readback.stdout review-readback.stderr; do
+    rm -f "$MG_NR_PRIVATE/$path"
+  done
+  rm -f "$fake/readback-called" "$fake/readback-producer-change"
+  : >"$fake/review-calls"
+  (umask 077
+    jq -nc --arg run "$MG_RUN_ID" '{run_id:$run,username:("owned."+("0"*24)),password:("a"*43),account_id:("b"*43)}' \
+      >"$MG_NR_PRIVATE/producer.json"
+    cp "$MG_NR_PRIVATE/producer.json" "$fake/review-producer"
+    printf '%s\n' '{"card_id":123,"note_id":456}' >"$MG_NR_PRIVATE/review-expected.json"
+  )
+  MG_NR_PRODUCER_SHA="$(shasum -a 256 "$MG_NR_PRIVATE/producer.json" | awk '{print $1}')"
+  printf 'owned-review-verified\n' >"$fake/review.stdout"
+  printf '0\n' >"$fake/review.exit"
+  mg_native_route__locked() {
+    printf 'locked\n' >>"$fake/review-calls"
+    [ "$(grep -c '^locked$' "$fake/review-calls")" != "${REVIEW_LOCK_FAIL_AT:-0}" ] || return 1
+    [ "$MG_NR_CLEANED" = 0 ] && [ "$MG_NR_PHASE" = "$MG_NR_LOCKED_PHASE" ]
+  }
+  # Re-export's Docker process boundary only. No actual engine or credentials.
+  docker() {
+    # node -e receives exactly its image-owned script and the run ID.
+    [ "$#" = 8 ] && [ "$1 $2 $3 $4 $5 $6" = "exec --user 10001:10001 $fixture_id node -e" ] &&
+      [ "$8" = "$MG_RUN_ID" ] || return 97
+    printf 'producer-export\n' >>"$fake/review-calls"
+    if [ -e "$fake/readback-called" ] && [ -e "$fake/readback-producer-change" ]; then
+      printf '{}\n'
+    else cat "$fake/review-producer"; fi
+  }
+  cat >"$fake/bin/docker" <<'SH'
+#!/usr/bin/env bash
+[ "$#" = 7 ] && [ "$1 $2 $3 $4 $5 $6 $7" = "exec -i --user 10001:10001 $NR_TEST_FIXTURE_ID /smoke/native owned-review-readback" ] || exit 97
+printf 'readback\n' >>"$NR_TEST_FAKE/review-calls"
+touch "$NR_TEST_FAKE/readback-called"
+cat >"$NR_TEST_FAKE/readback.stdin"
+printf 'synthetic-private-readback-stderr\n' >&2
+cat "$NR_TEST_FAKE/review.stdout"
+exit "$(cat "$NR_TEST_FAKE/review.exit")"
+SH
+  chmod +x "$fake/bin/docker"
+}
+
+@test "native journey: real stage preserves caller recipe binding across both fixture deliveries" {
+  journey_review_setup
+  MG_NR_OWNER=0123456789abcdef0123456789abcdef
+  local products="$fake/products" guest="$fake/guest-source"
+  local stage="$MG_ROOT/build/fixtures/owned-meguri-provider/$MG_RUN_ID"
+  local recipe="$MG_ROOT/build/fixtures/recipes/owned-sync-review-1"
+  mkdir -p "$products/Meguri.app/Contents/MacOS" "$MG_ROOT/build/fixtures" "$guest/build/fixtures"
+  (umask 077
+    printf 'public synthetic executable\n' >"$products/Meguri.app/Contents/MacOS/Meguri"
+    printf 'public synthetic dylib\n' >"$products/Meguri.app/Contents/MacOS/Meguri.debug.dylib"
+    jq -nc --arg run "$MG_RUN_ID" --arg owner "$MG_NR_OWNER" \
+      '{run:$run,owner:$owner,origin:"https://192.168.64.1:24567"}' >"$MG_NR_PRIVATE/ca-binding.json"
+    printf '%s\n' '-----BEGIN CERTIFICATE-----' 'UHVibGljIGZha2UgYm91bmRhcnkgQ0E=' '-----END CERTIFICATE-----' \
+      >"$MG_NR_PRIVATE/root-ca.pem"
+  )
+  rm "$MG_NR_PRIVATE/producer.json"
+  mg_app_products() { [ "$*" = 'mac Debug' ] || return 97; printf '%s\n' "$products"; }
+  # Stand in for the guest process/copy boundaries; run the actual file checks
+  # against a separate local root and let each fixture call mutate its output.
+  mg_mac_vm_ssh_in() {
+    local script identity
+    script="$(cat)" || return 1
+    if [ "$1" = "python3 -B -I - $(mg_mac_vm_q reserve "$MG_ROOT" "$MG_RUN_ID" "$MG_NR_OWNER")" ]; then
+      python3 -B -I - reserve "$guest" "$MG_RUN_ID" "$MG_NR_OWNER" <<<"$script"
+    else
+      identity="$(jq -er .identity "$MG_NR_PRIVATE/stage-guest.json")" || return 1
+      [ "$1" = "python3 -B -I - $(mg_mac_vm_q check "$MG_ROOT" "$MG_RUN_ID" "$MG_NR_OWNER" "$identity" "$MG_NR_TRANSPORT_SHA" "$MG_NR_CREDENTIALS_SHA")" ] || return 97
+      python3 -B -I - check "$guest" "$MG_RUN_ID" "$MG_NR_OWNER" "$identity" "$MG_NR_TRANSPORT_SHA" "$MG_NR_CREDENTIALS_SHA" <<<"$script"
+    fi
+  }
+  mg_vm_fixture() {
+    case "$1" in "$stage/transport.json"|"$stage/credentials.json") ;; *) return 97 ;; esac
+    MG_VM_FIXTURE="$1"
+    printf '%s\n' "$MG_VM_FIXTURE" >>"$fake/stage-deliveries"
+    cp "$1" "$guest/build/fixtures/owned-meguri-provider/$MG_RUN_ID/${1##*/}"
+  }
+  MG_VM_FIXTURE="$recipe"
+  mg_native_route__journey_stage
+  [ "$MG_VM_FIXTURE" = "$recipe" ]
+  [ "$(cat "$fake/stage-deliveries")" = "$(printf '%s\n' "$stage/transport.json" "$stage/credentials.json")" ]
+  cmp -s "$stage/transport.json" "$guest/build/fixtures/owned-meguri-provider/$MG_RUN_ID/transport.json"
+  cmp -s "$stage/credentials.json" "$guest/build/fixtures/owned-meguri-provider/$MG_RUN_ID/credentials.json"
+  [ "$MG_NR_HOST_STAGE_ATTEMPT$MG_NR_GUEST_STAGE_ATTEMPT" = 11 ]
+}
+
+@test "native journey: readback uses exact private expected stdin and checks producer bytes around one owned exec" {
+  journey_review_setup
+  run mg_native_route__journey_verify_review "$MG_NR_PRIVATE/review-expected.json"
+  [ "$status" = 0 ]; [ -z "$output" ]
+  cmp -s "$MG_NR_PRIVATE/review-expected.json" "$fake/readback.stdin"
+  cmp -s "$MG_NR_PRIVATE/producer.json" "$MG_NR_PRIVATE/producer-review-before.json"
+  cmp -s "$MG_NR_PRIVATE/producer.json" "$MG_NR_PRIVATE/producer-review-after.json"
+  [ "$(cat "$fake/review-calls")" = "$(printf 'locked\nproducer-export\nlocked\nreadback\nlocked\nproducer-export\nlocked')" ]
+  [ "$(cat "$MG_NR_PRIVATE/review-readback.stdout")" = owned-review-verified ]
+  grep -Fxq synthetic-private-readback-stderr "$MG_NR_PRIVATE/review-readback.stderr"
+  [ "$MG_NR_CLEANED" = 0 ]; [ "$MG_NR_UI_OK" = 1 ]
+}
+
+@test "native journey: readback refuses wrong phase UI state cleanup and alternate caller path before any export" {
+  local condition
+  for condition in phase ui cleanup alternate; do
+    journey_review_setup
+    local expected="$MG_NR_PRIVATE/review-expected.json"
+    case "$condition" in
+      phase) MG_NR_PHASE=native-route-fixture ;;
+      ui) MG_NR_UI_OK=0 ;;
+      cleanup) MG_NR_CLEANED=1 ;;
+      alternate) expected="$MG_NR_PRIVATE/./review-expected.json" ;;
+    esac
+    run mg_native_route__journey_verify_review "$expected"
+    [ "$status" != 0 ]; [ -z "$output" ]
+    [ ! -s "$fake/review-calls" ]; [ ! -e "$fake/readback-called" ]
+  done
+}
+
+@test "native journey: readback rejects substituted unbounded or nonprivate expected IDs before owned exec" {
+  local condition path
+  for condition in symlink hardlink fifo directory mode oversized empty duplicate shape negative float bool; do
+    journey_review_setup; path="$MG_NR_PRIVATE/review-expected.json"
+    case "$condition" in
+      symlink) mv "$path" "$MG_NR_PRIVATE/expected-alternate"; ln -s expected-alternate "$path" ;;
+      hardlink) ln "$path" "$MG_NR_PRIVATE/expected-link" ;;
+      fifo) rm "$path"; mkfifo "$path" ;;
+      directory) rm "$path"; mkdir "$path" ;;
+      mode) chmod 0644 "$path" ;;
+      oversized) python3 -c 'print(" "*257)' >"$path" ;;
+      empty) : >"$path" ;;
+      duplicate) printf '%s' '{"card_id":123,"card_id":123,"note_id":456}' >"$path" ;;
+      shape) printf '%s' '{"card_id":123,"note_id":456,"extra":1}' >"$path" ;;
+      negative) printf '%s' '{"card_id":-1,"note_id":456}' >"$path" ;;
+      float) printf '%s' '{"card_id":123.0,"note_id":456}' >"$path" ;;
+      bool) printf '%s' '{"card_id":true,"note_id":456}' >"$path" ;;
+    esac
+    run mg_native_route__journey_verify_review "$path"
+    [ "$status" != 0 ]; [ -z "$output" ]; [ ! -e "$fake/readback-called" ]
+    if [ "$condition" = directory ]; then rmdir "$path"; fi
+    rm -f "$MG_NR_PRIVATE/expected-alternate" "$MG_NR_PRIVATE/expected-link"
+  done
+}
+
+@test "native journey: readback rejects exit failure nonexact stdout and producer changes without retry or public output" {
+  local condition
+  for condition in exit empty no-lf extra repeated producer-before producer-after; do
+    journey_review_setup
+    case "$condition" in
+      exit) printf '1\n' >"$fake/review.exit" ;;
+      empty) : >"$fake/review.stdout" ;;
+      no-lf) printf '%s' owned-review-verified >"$fake/review.stdout" ;;
+      extra) printf 'owned-review-verified\nextra\n' >"$fake/review.stdout" ;;
+      repeated) printf 'owned-review-verified\nowned-review-verified\n' >"$fake/review.stdout" ;;
+      producer-before) printf '{}\n' >"$fake/review-producer" ;;
+      producer-after) touch "$fake/readback-producer-change" ;;
+    esac
+    run mg_native_route__journey_verify_review "$MG_NR_PRIVATE/review-expected.json"
+    [ "$status" != 0 ]; [ -z "$output" ]
+    if [ "$condition" = producer-before ]; then
+      [ ! -e "$fake/readback-called" ]
+    else [ "$(grep -c '^readback$' "$fake/review-calls")" = 1 ]; fi
+    [ "$MG_NR_CLEANED" = 0 ]; [ "$MG_NR_UI_OK" = 1 ]
+  done
+}
+
+@test "native journey: readback fails on identity drift at every before and after phase boundary" {
+  local point
+  for point in 1 2 3 4; do
+    journey_review_setup; REVIEW_LOCK_FAIL_AT="$point"
+    run mg_native_route__journey_verify_review "$MG_NR_PRIVATE/review-expected.json"
+    [ "$status" != 0 ]; [ -z "$output" ]
+    [ "$(grep -c '^locked$' "$fake/review-calls")" = "$point" ]
+    if [ "$point" -le 2 ]; then [ ! -e "$fake/readback-called" ];
+    else [ "$(grep -c '^readback$' "$fake/review-calls")" = 1 ]; fi
+    [ "$MG_NR_CLEANED" = 0 ]
+  done
+}
+
+@test "native journey: uncertain unstage still removes certain owned containers in original order preserving first failure" {
+  MG_NR_PRIVATE="$MG_RUN_DIR/private/native-route"; mkdir -p "$MG_NR_PRIVATE"
+  MG_NR_PHASE=native-owned-journey-fixture; MG_NR_CLEANED=0; MG_NR_CLEAN_OK=0
+  MG_NR_FIRST=journey-ui; MG_NR_STAGE=owned-cleanup; MG_NR_OWNER=0123456789abcdef0123456789abcdef
+  MG_NR_RELAY_ATTEMPT=1; MG_NR_FIXTURE_ATTEMPT=1; MG_NR_RUNTIME_ATTEMPT=1
+  MG_NR_INIT_ATTEMPT=0; MG_NR_INGRESS_ATTEMPT=0; MG_NR_NETWORK_ATTEMPT=0
+  MG_NR_RELAY=relay; MG_NR_FIXTURE=fixture; MG_NR_RUNTIME=runtime
+  MG_NR_RELAY_ID="$relay_id"; MG_NR_FIXTURE_ID="$fixture_id"; MG_NR_RUNTIME_ID="$runtime_id"
+  MG_NR_INGRESS=ingress; MG_NR_INGRESS_ID=; MG_NR_NETWORK=backend; MG_NR_NETWORK_ID=
+  MG_NR_TOOL_IMAGE="$tool_image"; MG_NR_RUNTIME_IMAGE="$runtime_image"
+  mg_native_route__journey_unstage() { printf 'unstage\n' >>"$trace"; return 1; }
+  mg_native_route__guest_cleanup() { printf 'guest-cleanup\n' >>"$trace"; }
+  mg_native_route__remove_container() { printf 'certain-remove:%s\n' "$1" >>"$trace"; }
+  if mg_native_route__cleanup; then return 1; fi
+  [ "$MG_NR_FIRST" = journey-ui ]; [ "$MG_NR_CLEANED$MG_NR_CLEAN_OK" = 10 ]
+  assert_before unstage guest-cleanup
+  assert_before guest-cleanup certain-remove:relay
+  assert_before certain-remove:relay certain-remove:fixture
+  assert_before certain-remove:fixture certain-remove:runtime
+  if mg_native_route__cleanup; then return 1; fi
+  [ "$(grep -c '^unstage$' "$trace")" = 1 ]
+  [ "$(grep -c '^certain-remove:' "$trace")" = 3 ]
+  ! grep -q '^detail:first_stage:' "$trace"
 }

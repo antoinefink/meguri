@@ -4,7 +4,7 @@
 # host Xcode only, with no screen or simulator fallback.
 
 mg_job ui-test host mg_ui_test \
-  "XCUITest suites of MeguriUITests: --suite <class>[/<test>]... [--platform iphone|ipad|mac] [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile]; --list-physical-devices inventories connected iOS devices; functional assertions only, no performance receipt"
+  "XCUITest suites of MeguriUITests: --suite <class>[/<test>]... [--platform iphone|ipad|mac] [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile]; --owned-meguri-sync-receipt <exact-result.json> opts the single signed Mac Debug setup case into disposable owned sync; --list-physical-devices inventories connected iOS devices; functional assertions only, no performance receipt"
 
 mg_ui_test__usage() {
   mg_failure usage "ui-test: $1" "tools/mg --list"
@@ -271,9 +271,15 @@ mg_ui_test__review_capture() {
 }
 
 mg_ui_test() {
+  if [ "${TEST_RUNNER_MEGURI_OWNED_PROVIDER_JOURNEY_RUN_ID+set}" = set ] ||
+      [ "${TEST_RUNNER_MEGURI_OWNED_PROVIDER_JOURNEY_CREDENTIALS_SHA256+set}" = set ]; then
+    mg_failure owned-provider-ambient "Owned journey inputs require the explicit receipt option"
+    mg_status error; return 0
+  fi
   local MG_UI_MAC_PROFILE_SELECTOR=""
   local platform=iphone device="" config=Debug suites="" suite_count=0 only=() build_args=() s result since udid
   local physical="" inventory="" run_args="" MG_UI_PHYSICAL_DEVICE=""
+  local owned="" key
   local review="" MG_UI_REVIEW_READY="" MG_UI_REVIEW_PLATFORM=""
   local TEST_RUNNER_MEGURI_NATIVE_REVIEW_CASE TEST_RUNNER_MEGURI_NATIVE_REVIEW_PLATFORM
   local TEST_RUNNER_MEGURI_NATIVE_REVIEW_FREEZE_SHA256 TEST_RUNNER_MEGURI_NATIVE_REVIEW_FREEZE_BYTES
@@ -285,6 +291,11 @@ mg_ui_test() {
   while [ "$#" -gt 0 ]; do
     [ "$1" = --list-physical-devices ] || run_args=1
     case "$1" in
+      --owned-meguri-sync-receipt)
+        [ "$#" -ge 2 ] && [ -z "$owned" ] && [ -n "$2" ] && [[ "$2" != --* ]] ||
+          { mg_ui_test__usage "--owned-meguri-sync-receipt requires one exact package receipt"; return 0; }
+        owned="$2" && shift 2
+        ;;
       --list-physical-devices)
         [ -z "$inventory" ] || { mg_ui_test__usage "duplicate --list-physical-devices"; return 0; }
         inventory=1 && shift
@@ -315,6 +326,28 @@ mg_ui_test() {
       *) mg_ui_test__usage "unknown argument '$1'"; return 0 ;;
     esac
   done
+  if [ -n "$owned" ]; then
+    case "$-" in *x*|*v*)
+      mg_failure owned-provider-trace "Owned provider mode refuses shell tracing"; mg_status error; return 0 ;;
+    esac
+    [ "$platform/$config" = mac/Debug ] && [ -z "$device$physical$inventory" ] &&
+      [ "$suite_count" -eq 1 ] &&
+      [ "$suites" = " MacHomeHierarchyTests/testNormalMeguriSetupControlsAndCancelledServiceSwitch" ] &&
+      [ "${MEGURI_APP_SIGNING:-}" = team ] &&
+      [[ "$MG_RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$ ]] || {
+        mg_ui_test__usage "owned sync requires team-signed Mac Debug, the single exact setup method and no device or inventory"; return 0;
+      }
+    mg_native_route__ambient || {
+      mg_failure owned-provider-ambient "Owned provider ambient authority refused"; mg_status error; return 0;
+    }
+    for key in $(compgen -e); do
+      case "$key" in TEST_RUNNER_*|MEGURI_OWNED_PROVIDER_*|MEGURI_MAC_UI_ALLOW_HOST)
+        mg_failure owned-provider-ambient "Owned provider ambient authority refused"; mg_status error; return 0 ;;
+      esac
+    done
+    local MG_APP_TEST_SCHEME=Meguri MG_APP_TEST_PLAN=UI
+    export MG_APP_TEST_SCHEME MG_APP_TEST_PLAN
+  fi
   if [ -n "$inventory" ]; then
     [ -z "$run_args" ] || { mg_ui_test__usage "--list-physical-devices cannot be combined with run arguments"; return 0; }
     mg_ui_test__physical_inventory || return 0
@@ -344,6 +377,10 @@ mg_ui_test() {
       [ -z "$physical" ] && [ -z "$inventory" ] && [ "$suite_count" -eq 1 ] &&
       [ "$suites" = " MacHomeHierarchyTests/testNormalMeguriSetupControlsAndCancelledServiceSwitch" ]; then
     MG_UI_MAC_PROFILE_SELECTOR=MacHomeHierarchyTests/testNormalMeguriSetupControlsAndCancelledServiceSwitch
+  fi
+  if [ -n "$owned" ]; then
+    mg_ui_test__owned "$owned"
+    return 0
   fi
   mg_detail suites "$(printf '%s\n' $suites | jq -R . | jq -sc .)"
   mg_detail platform "$(jq -n --arg p "$platform" '$p')"
@@ -446,6 +483,284 @@ mg_ui_test() {
   mg_app_xcodebuild_test "$MG_RUN_DIR/$platform" "$platform" "id=$udid" "$config" "${only[@]}"
   result=$?
   mg_ui_test__report "$MG_RUN_DIR/$platform" "$result"
+}
+
+# All existing build/VM helpers retain their diagnostics in private state for
+# this explicit mode. Only fixed failure IDs and checked case counts escape.
+mg_ui_test__owned() {
+  local receipt="$1" private="$MG_RUN_DIR/private" previous_umask
+  previous_umask="$(umask)"; umask 077
+  case "$MG_RUN_DIR" in "$MG_ROOT/build/mg/ui-test/$MG_RUN_ID") ;; *)
+    mg_failure owned-provider-run "Owned provider run identity refused"; mg_status fail; umask "$previous_umask"; return ;;
+  esac
+  if ! mkdir -m 700 "$private"; then
+    mg_failure owned-provider-private "Owned provider private storage refused"; mg_status fail; umask "$previous_umask"; return
+  fi
+  MG_NR_CASE_TOTAL=0; MG_NR_CASE_PASSED=0; MG_NR_CASE_FAILED=0; MG_NR_CASE_SKIPPED=0
+  MG_NR_UI_ATTEMPT=0; MG_NR_UI_OK=0; MG_NR_FIRST=; MG_NR_STAGE=preparation
+  MG_NR_CLEAN_PENDING=0; MG_NR_REVIEW_OK=0; MG_NR_PRIVATE_RC=1
+  if mg_ui_test__owned_private "$private" "$receipt" >"$private/control.log" 2>&1; then
+    MG_NR_PRIVATE_RC=0
+  else
+    MG_NR_PRIVATE_RC=$?
+    MG_NR_FIRST="${MG_NR_FIRST:-$MG_NR_STAGE}"
+  fi
+  if ! printf '%s\n' "$MG_NR_PRIVATE_RC" >"$private/return-code" 2>>"$private/control.log"; then
+    MG_NR_PRIVATE_RC=1; MG_NR_FIRST="${MG_NR_FIRST:-private-return}"
+  fi
+  # Drain the unchanged VM/profile/lease exit actions while their raw output
+  # and MG state still have this private boundary, including early failures.
+  mg_ui_test__owned_finish "$private" >>"$private/control.log" 2>&1
+  umask "$previous_umask"
+  mg_count total "$MG_NR_CASE_TOTAL"; mg_count passed "$MG_NR_CASE_PASSED"
+  mg_count failed "$MG_NR_CASE_FAILED"; mg_count skipped "$MG_NR_CASE_SKIPPED"
+  if [ "$MG_NR_PRIVATE_RC" = 0 ] && [ -z "$MG_NR_FIRST" ] &&
+      [ "$MG_NR_REVIEW_OK/$MG_NR_UI_OK/$MG_NR_CLEAN_OK/$MG_NR_CLEAN_PENDING" = 1/1/1/0 ] &&
+      [ "$MG_NR_CASE_TOTAL/$MG_NR_CASE_PASSED/$MG_NR_CASE_FAILED/$MG_NR_CASE_SKIPPED" = 1/1/0/0 ] &&
+      [ -z "${MG_MAC_VM_TESTING:-}${MG_MAC_VM_LOST:-}" ]; then
+    mg_detail committed_review '"owned-synthetic-card-good-committed"'
+    mg_status pass
+    return 0
+  fi
+  mg_failure "owned-provider-${MG_NR_FIRST:-$MG_NR_STAGE}" "Owned provider journey failed; private evidence retained"
+  if [ "$MG_NR_CLEAN_PENDING" = 1 ] || { [ "$MG_NR_UI_ATTEMPT" = 1 ] && [ "$MG_NR_UI_OK" != 1 ]; }; then
+    mg_failure owned-provider-cleanup-pending "Owned provider cleanup pending; no credential cleanup assertion"
+  fi
+  mg_status fail
+}
+
+mg_ui_test__owned_finish() {
+  local MG_RUN_DIR="$1" MG_STATE="$1/state"
+  mg__run_exit_cmds
+}
+
+# Fixed synthetic input only. Both hosts run the same bounded admission and
+# immutable queries; only private files receive IDs, hashes or diagnostics.
+mg_ui_test__owned_review_fixture() {
+  local phase="$1" script binding="$MG_NR_PRIVATE/review-$1.binding"
+  case "$phase" in prepare|delivered|pre-ui|after) ;; *) return 1 ;; esac
+  script="$(cat <<'PY'
+import hashlib, json, os, pathlib, signal, sqlite3, stat, sys
+signal.alarm(10)
+try:
+    root = sys.argv[1]
+    if root != os.path.abspath(root) or root == '/': raise ValueError()
+    parts = pathlib.PurePath(root).parts[1:] + ('build', 'fixtures', 'recipes', 'owned-sync-review-1')
+    parents = [(os.open('/', os.O_RDONLY | os.O_DIRECTORY), '/')]
+    for part in parts:
+        fd, path = parents[-1]
+        parents.append((os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                dir_fd=fd), os.path.join(path, part)))
+    directory = parents[-1][0]
+    name = 'collection.anki2'
+    path = os.path.join(parents[-1][1], name)
+    def identity(s):
+        return (s.st_dev, s.st_ino, s.st_mode, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+    def closed_bytes():
+        for suffix in ('-wal', '-shm', '-journal'):
+            try: os.stat(name + suffix, dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError: pass
+            else: raise ValueError()
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        with os.fdopen(fd, 'rb') as source:
+            before = os.fstat(source.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= 8*1024*1024:
+                raise ValueError()
+            data = source.read(8*1024*1024 + 1)
+            if len(data) != before.st_size or identity(os.fstat(source.fileno())) != identity(before):
+                raise ValueError()
+        if identity(os.stat(name, dir_fd=directory, follow_symlinks=False)) != identity(before):
+            raise ValueError()
+        return identity(before), hashlib.sha256(data).hexdigest()
+    before = closed_bytes()
+    db = sqlite3.connect(pathlib.Path(path).as_uri() + '?mode=ro&immutable=1', uri=True, timeout=0)
+    try:
+        db.execute('PRAGMA query_only=ON')
+        db.execute('PRAGMA trusted_schema=OFF')
+        db.execute('PRAGMA temp_store=MEMORY')
+        db.set_progress_handler(lambda: 1, 100000)
+        tables = db.execute("SELECT type,sql FROM sqlite_master WHERE name IN ('cards','notes','revlog')").fetchall()
+        if len(tables) != 3 or any(t != 'table' or not sql.lstrip().upper().startswith('CREATE TABLE ') for t,sql in tables):
+            raise ValueError()
+        if db.execute('SELECT (SELECT count(*) FROM cards),(SELECT count(*) FROM notes),(SELECT count(*) FROM revlog)').fetchone() != (1,1,0):
+            raise ValueError()
+        rows = db.execute("""SELECT c.id,n.id FROM cards c JOIN notes n ON n.id=c.nid
+            WHERE typeof(c.id)='integer' AND c.id>0 AND typeof(c.nid)='integer'
+              AND typeof(n.id)='integer' AND n.id>0
+              AND typeof(c.queue)='integer' AND c.queue=0
+              AND typeof(c.type)='integer' AND c.type=0
+              AND typeof(c.reps)='integer' AND c.reps=0""").fetchall()
+        if len(rows) != 1 or any(type(v) is not int or v <= 0 for v in rows[0]): raise ValueError()
+    finally:
+        db.close()
+    if closed_bytes() != before: raise ValueError()
+    for fd, path in parents:
+        s, current = os.fstat(fd), os.stat(path, follow_symlinks=False)
+        if (s.st_dev,s.st_ino,s.st_mode) != (current.st_dev,current.st_ino,current.st_mode): raise ValueError()
+    for fd, path in reversed(parents): os.close(fd)
+    print(json.dumps(dict(zip(('card_id','note_id'), rows[0])), separators=(',',':')))
+    print(before[1])
+except Exception:
+    raise SystemExit(1) from None
+PY
+)" || return 1
+  python3 -B -I - "$MG_ROOT" <<<"$script" >"$binding" || return 1
+  if [ "$phase" = prepare ]; then
+    sed -n '1p' "$binding" >"$MG_NR_PRIVATE/review-expected.json" &&
+      sed -n '2p' "$binding" >"$MG_NR_PRIVATE/review-source.sha256" || return 1
+    MG_NR_REVIEW_SOURCE_SHA="$(cat "$MG_NR_PRIVATE/review-source.sha256")"
+    [[ "$MG_NR_REVIEW_SOURCE_SHA" =~ ^[0-9a-f]{64}$ ]] || return 1
+  else
+    cmp -s "$MG_NR_PRIVATE/review-prepare.binding" "$binding" || return 1
+    (set -o pipefail
+      sed -n '1p' "$binding" | cmp -s "$MG_NR_PRIVATE/review-expected.json" - &&
+      sed -n '2p' "$binding" | cmp -s "$MG_NR_PRIVATE/review-source.sha256" -) || return 1
+  fi
+  case "$phase" in delivered|pre-ui)
+    [ "$MG_VM_FIXTURE" = "$MG_ROOT/build/fixtures/recipes/owned-sync-review-1" ] || return 1
+    mg_mac_vm_ssh_in "python3 -B -I - $(mg_mac_vm_q "$MG_ROOT")" <<<"$script" \
+      >"$MG_NR_PRIVATE/review-$phase-guest.binding" || return 1
+    cmp -s "$binding" "$MG_NR_PRIVATE/review-$phase-guest.binding" || return 1
+    ;;
+  esac
+}
+
+mg_ui_test__owned_private() {
+  local MG_RUN_DIR="$1" MG_STATE="$1/state" receipt="$2" input rc=0 app
+  mkdir -m 700 "$MG_STATE" || return 1
+  MG_NR_PHASE=native-owned-journey-fixture; MG_NR_RECEIPT="$receipt"
+  MG_NR_CLEANED=0; MG_NR_CLEAN_OK=0; MG_NR_GUEST_ATTEMPT=0; MG_NR_GUEST_ID=
+  MG_NR_NETWORK_ATTEMPT=0; MG_NR_INIT_ATTEMPT=0; MG_NR_RUNTIME_ATTEMPT=0; MG_NR_FIXTURE_ATTEMPT=0
+  MG_NR_NETWORK_ID=; MG_NR_RUNTIME_ID=; MG_NR_FIXTURE_ID=; MG_NR_CA_SHA=; MG_NR_CA_BYTES=
+  MG_NR_INGRESS_ATTEMPT=0; MG_NR_RELAY_ATTEMPT=0; MG_NR_INGRESS_ID=; MG_NR_RELAY_ID=; MG_NR_TARGET=
+  MG_NR_INGRESS=; MG_NR_RELAY=
+  MG_NR_HOST_STAGE_ATTEMPT=0; MG_NR_GUEST_STAGE_ATTEMPT=0; MG_NR_TRANSPORT_SHA=; MG_NR_CREDENTIALS_SHA=
+  MG_NR_PRIVATE="$MG_RUN_DIR/native-route"; MG_NR_STAGING="$MG_NR_PRIVATE/guest"
+  mg_native_route__stage source-before
+  MG_NR_COMMIT="$(mg_meguri_provider__commit)" &&
+    MG_NR_SCRIPT_SHA="$(shasum -a 256 "$MG_ROOT/server/tools/package-smoke.mjs" | awk '{print $1}')" &&
+    mg_native_route__source || return 1
+  input="$(mg_app_input_digest)"; [[ "$input" =~ ^[0-9a-f]{64}$ ]] || return 1
+  MG_NR_REVIEW_APP_INPUT="$input"
+  mg_native_route__stage package-receipt
+  mg_sync_package__receipt "$receipt" || return 1
+  # The shared receipt guard also resolves canonical parents. Here the caller
+  # must spell the exact run itself, never latest, a symlink or another alias.
+  [ "$receipt" = "$MG_ROOT/build/mg/sync-server-package/$(jq -er .run_id "$receipt")/result.json" ] &&
+    [ ! -L "$receipt" ] && [ ! -L "$(dirname "$receipt")" ] || return 1
+  MG_NR_RUNTIME_IMAGE="$(jq -er .details.package.image_id "$receipt")" &&
+    MG_NR_TOOL_IMAGE="$(jq -er .details.package.client_image_id "$receipt")" || return 1
+  mg_native_route__stage vm-selection
+  # Reuse the normal Mac build/profile and its one VM lease. No host admission,
+  # inventory, recursive job or second lease acquisition exists in this mode.
+  mg_mac_vm_probe || return 1
+  MG_MAC_RUNNER=vm
+  mg_native_route__stage build
+  mg_app_build mac Debug || return 1
+  mg_native_route__stage vm-delivery
+  mg_mac_ui_take || return 1
+  mg_app_mac_agent_profile_check && [ "$input" = "$(mg_app_input_digest)" ] || return 1
+  app="$(mg_app_products mac Debug)/Meguri.app"
+  codesign --verify --strict "$app" || return 1
+  mg_native_route__stage ownership-plan
+  MG_NR_OWNER="$(mg_meguri_provider__nonce)"; [[ "$MG_NR_OWNER" =~ ^[0-9a-f]{32}$ ]] || return 1
+  MG_NR_NETWORK="meguri-native-net-$MG_RUN_ID-$MG_NR_OWNER"
+  MG_NR_GUEST="/tmp/meguri-native-route-$MG_RUN_ID-$MG_NR_OWNER"
+  MG_NR_RUNTIME="meguri-native-runtime-$MG_RUN_ID"; MG_NR_FIXTURE="meguri-native-fixture-$MG_RUN_ID"
+  mkdir -m 700 "$MG_NR_PRIVATE" "$MG_NR_STAGING" "$MG_NR_PRIVATE/ui" || return 1
+  mg_on_exit mg_ui_test__owned_cleanup
+  mg_native_route__stage review-fixture-prepare
+  mg_ui_test__owned_review_fixture prepare || return 1
+  mg_native_route__stage review-fixture-delivery
+  mg_vm_fixture "$MG_ROOT/build/fixtures/recipes/owned-sync-review-1" &&
+    mg_ui_test__owned_review_fixture delivered && mg_native_route__source &&
+    [ "$input" = "$(mg_app_input_digest)" ] || return 1
+  if ! mg_native_route__execute; then
+    mg_native_route__failure; rc=1
+  elif [ -n "$MG_NR_FIRST" ] || [ "$MG_NR_UI_OK" != 1 ] ||
+      [ "$MG_NR_CASE_TOTAL/$MG_NR_CASE_PASSED/$MG_NR_CASE_FAILED/$MG_NR_CASE_SKIPPED" != 1/1/0/0 ]; then
+    mg_native_route__stage review-ui-result
+    mg_native_route__failure; rc=1
+  else
+    mg_native_route__stage review-arrival
+    if mg_ui_test__owned_review_fixture after && mg_native_route__source &&
+        [ "$input" = "$(mg_app_input_digest)" ] &&
+        [ -z "${MG_MAC_VM_TESTING:-}${MG_MAC_VM_LOST:-}" ] &&
+        mg_native_route__journey_verify_review "$MG_NR_PRIVATE/review-expected.json"; then
+      MG_NR_REVIEW_OK=1
+    else
+      mg_native_route__failure; rc=1
+    fi
+  fi
+  mg_ui_test__owned_cleanup || { MG_NR_CLEAN_PENDING=1; rc=1; }
+  mg_native_route__stage source-after
+  if ! mg_native_route__source || [ "$input" != "$(mg_app_input_digest)" ] ||
+      ! mg_ui_test__owned_review_fixture after; then
+    mg_native_route__failure; rc=1
+  fi
+  [ "$rc" = 0 ] && [ -z "$MG_NR_FIRST" ] &&
+    [ "$MG_NR_REVIEW_OK/$MG_NR_CLEAN_OK/$MG_NR_CLEAN_PENDING" = 1/1/0 ] &&
+    [ -z "${MG_MAC_VM_TESTING:-}${MG_MAC_VM_LOST:-}" ]
+}
+
+mg_ui_test__owned_cleanup() {
+  local MG_STATE="$MG_NR_PRIVATE/../state"
+  mg_native_route__stage owned-cleanup
+  # An unjoined original UI worker still owns its inputs and server. Preserve
+  # the VM lease fence and everything else; do not guess that it has exited.
+  if [ -n "${MG_MAC_VM_TESTING:-}${MG_MAC_VM_LOST:-}" ]; then
+    MG_NR_CLEAN_PENDING=1
+    mg_native_route__failure
+    return 1
+  fi
+  mg_native_route__cleanup >>"$MG_NR_PRIVATE/cleanup.log" 2>&1 || {
+    MG_NR_CLEAN_PENDING=1; mg_native_route__failure; return 1;
+  }
+}
+
+mg_ui_test__owned_run() {
+  local script prefix="$MG_NR_PRIVATE/ui/case" result key summary
+  mg_native_route__stage review-fixture-pre-ui
+  mg_ui_test__owned_review_fixture pre-ui && mg_native_route__source &&
+    [ "$MG_NR_REVIEW_APP_INPUT" = "$(mg_app_input_digest)" ] || return 1
+  script="$(mg_native_route__journey_file_script)" || return 1
+  mg_mac_vm_ssh_in "python3 -B -I - $(mg_mac_vm_q output "$MG_ROOT" "$MG_RUN_ID" "$MG_NR_OWNER")" <<<"$script" \
+    >"$MG_NR_PRIVATE/ui/guest-output.json" || return 1
+  local TEST_RUNNER_MEGURI_OWNED_PROVIDER_JOURNEY_RUN_ID="$MG_RUN_ID"
+  local TEST_RUNNER_MEGURI_OWNED_PROVIDER_JOURNEY_CREDENTIALS_SHA256="$MG_NR_CREDENTIALS_SHA"
+  export TEST_RUNNER_MEGURI_OWNED_PROVIDER_JOURNEY_RUN_ID TEST_RUNNER_MEGURI_OWNED_PROVIDER_JOURNEY_CREDENTIALS_SHA256
+  for key in $(compgen -e); do
+    case "$key" in
+      TEST_RUNNER_MEGURI_OWNED_PROVIDER_JOURNEY_RUN_ID|TEST_RUNNER_MEGURI_OWNED_PROVIDER_JOURNEY_CREDENTIALS_SHA256) ;;
+      TEST_RUNNER_*) return 1 ;;
+    esac
+  done
+  MG_NR_UI_ATTEMPT=1
+  mg_vm_xcodebuild_test "$prefix" UI macosx "platform=macOS,arch=arm64" Debug \
+    -parallel-testing-enabled NO \
+    -only-testing:MeguriUITests/MacHomeHierarchyTests/testNormalMeguriSetupControlsAndCancelledServiceSwitch
+  result=$?
+  # The helper's errors and all raw XCTest content stay in private state/logs.
+  # Its original exit/result/uncertain-worker guards remain authoritative.
+  [ -z "${MG_MAC_VM_RUN_ERROR:-}${MG_MAC_VM_RUN_QUEUED:-}${MG_MAC_VM_LOST:-}" ] || return 1
+  xcrun xcresulttool get test-results summary --path "$prefix.xcresult" >"$MG_NR_PRIVATE/ui/summary.json" 2>/dev/null || return 1
+  xcrun xcresulttool get test-results tests --path "$prefix.xcresult" >"$MG_NR_PRIVATE/ui/tests.json" 2>/dev/null || return 1
+  summary="$(jq -cse 'if length!=1 then error("summary") else .[0] end |
+    select(all(.passedTests,.failedTests,.skippedTests;
+      type=="number" and .>=0 and .==floor)) |
+    {total:(.passedTests+.failedTests+.skippedTests),passed:.passedTests,failed:.failedTests,skipped:.skippedTests}' \
+    "$MG_NR_PRIVATE/ui/summary.json")" || return 1
+  MG_NR_CASE_TOTAL="$(jq -r .total <<<"$summary")"; MG_NR_CASE_PASSED="$(jq -r .passed <<<"$summary")"
+  MG_NR_CASE_FAILED="$(jq -r .failed <<<"$summary")"; MG_NR_CASE_SKIPPED="$(jq -r .skipped <<<"$summary")"
+  [ "$result" = 0 ] && jq -se 'length==1 and (.[0] |
+    .result=="Passed" and .passedTests==1 and .failedTests==0 and .skippedTests==0)' \
+    "$MG_NR_PRIVATE/ui/summary.json" >/dev/null || return 1
+  jq -se 'length==1 and (.[0] |
+    [.. | objects | select(.nodeType?=="Test Case")] as $cases |
+    ($cases|length)==1 and $cases[0].result=="Passed" and
+    ($cases[0].nodeIdentifier | test("^(MeguriUITests/)?MacHomeHierarchyTests/testNormalMeguriSetupControlsAndCancelledServiceSwitch(\\(\\))?$")))' \
+    "$MG_NR_PRIVATE/ui/tests.json" >/dev/null || return 1
+  MG_NR_UI_OK=1
 }
 
 # mg_ui_test__report <prefix> <test result 0|1|2|3|4> [physical <selectors>]: counts and failing tests
