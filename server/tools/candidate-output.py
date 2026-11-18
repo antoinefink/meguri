@@ -125,7 +125,7 @@ def asset_rows(data):
                 "invalid frontend asset row")
         path = row["path"]
         require(isinstance(path, str) and (path == "/index.html" or re.fullmatch(
-            r"/assets/[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.(js|css)", path)),
+            r"/assets/[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.(js|css|png|woff2)", path)),
             "invalid original frontend asset path")
         name = path[1:].replace("/", "_")
         require(name not in mapped, "duplicate or ambiguous frontend asset mapping")

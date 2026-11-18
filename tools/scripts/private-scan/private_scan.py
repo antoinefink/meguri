@@ -835,7 +835,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        'a3694dfce7347c5c8481e3ee4ba5135649e101642efadd3bfe3d55713755dbca',
+        '513ab0531c26508fba8d4e60b164ebe34453ba77f00b022b9a9f93db8dde6300',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -954,7 +954,7 @@ PUBLIC_ARTIFACTS = {
     'tools/tests/sync_package.bats':
         '74610b07a76e2f63324db8652d9feee0ac2989dfda017156ab64589d6bc3ff78',
     'tools/tests/sync_package_context_test.py':
-        'd3f64f6e4c3120af2bc5467a5f85f0326504b22335d6200678d8e4395ddd1723',
+        'f8aea685104a88da5e0bb52e15eb251798705d55c1cc7ea24928e678f05641a6',
     "core/crates/meguri-ffi/src/sync_tests.rs":
         "461fb731a22379b6bbe009cd968526c3e706f6e08ae769ff014bc82c63a85135",
     # Complete public-file review: incoming_contract_review, 2026-11-17.
@@ -1017,10 +1017,14 @@ PUBLIC_ARTIFACTS = {
         '9d5a1f79a08e96ac1699a4d7d1ba3ebb2c44a47d53ff1f5c1cda53c58c6c7d35',
     'tools/mg.d/sync-web.sh':
         'e96c97800779b5d2deae7b36bb0912e43cedf4e8c3b6d40b6c3f81d0206747f1',
+    'server/web/THIRD_PARTY_NOTICES.txt':
+        '793118f2c4b41d07e802a9d465a3eb7424d68add574e1bf7695580e539e15ab9',
+    'server/web/src/IBMPlexSans-Variable.woff2':
+        'e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d',
     'server/web/upstream-records.json':
-        'bf0800b18e97502d4058d66aa7c666930de66f710e1d1aca564d08ddeecbf0d4',
+        'e939291e8440f4de76d7d1c905246df0cbeb2bad4efd9b864e92bcf500646124',
     'server/web/src/style.css':
-        '76b61dbe9ea87cbb18c1e1f1e77a01dd2ef7ecce598367ac0456386ee0b582d7',
+        '317e57fe355f0a14593689c92f99e1e81322614f819997fed7a96b8361180477',
     'server/web/src/app.tsx':
         '2e784565dde9f5b7dbaa767ceeeb08df8f61220e0e11ff56d4443c9a22afd0c6',
     'server/web/scripts/run.sh':
@@ -1030,7 +1034,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/notices/rolldown-THIRD-PARTY-LICENSE.txt':
         'a877291d800ed43692f3f9ae09d8e01cc6f7293ad39d43896059c188ffbb8b7c',
     'server/web/DEPENDENCIES.md':
-        'f8d9de7b39e2f8d9deaa25d1333314e25998cd365b162d3973eae3afa655c4e2',
+        '008ba5ed27984c5cab72e56055f9a63e212b2688456cc33deced3ed12737df5b',
     'server/build.rs':
         'a4dba10f1d809a0c05836778c7c075b2e2243d7c4aeeff12ddc6f9eec3cfc6e4',
     'docker/sync-web.Dockerfile':
@@ -1105,7 +1109,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        'decbec9c744427fed7768c0acb974819a0c14c6cd888f3ed5cfcbccf7213c6cb',
+        '87a994f10aed9aa8ce279ef37bdcf59838c69fb7707d3f85a5d49a78dcf5bead',
     "specs/conformance/meguri-sync-server.md":
         '4c0e7651ab72236ad31320925e8c1c163c6dc7f1904e9c0c3e52df50e8f9e479',
     "conformance/schema/meguri-sync-server.schema.json":
@@ -1206,7 +1210,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/root.rs':
         'bae80427f23487936d206ea04d9f9ae81db6b920939b752d7a29f2517ac0b9cc',
     'server/tools/candidate-output.py':
-        '2de16a176ed948d55660034cd1945cafffda9359bc24921dbbece29b2c585f3b',
+        '873c3ce682b93f23caa118b0d0b7f07792d7111e80a4ee1a51a0fe7631dd46f8',
     'docs/process/review-log/meguri-sync-U5.md':
         '6cc7dc20556c191e0644282d73259eb8ff8e23f7f98dbd76f107ae80b7eb9494',
 

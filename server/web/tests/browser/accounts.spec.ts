@@ -2,13 +2,47 @@
 // Real service only. Parent provides a fresh synthetic Rust root behind HTTPS.
 import { readFileSync, writeFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Page, Response } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 const fixture: { setup_token: string } = JSON.parse(readFileSync("/fixture/fixture.json", "utf8"));
 const initialPassword = " Synthetic initial password ";
 const replacedPassword = "é".repeat(6);
 const resetPassword = "Synthetic reset password 2026";
 const memberUsername = "member." + "long".repeat(14) + "x"; // Maximum 64-character username.
+const fontResponses = new WeakMap<Page, Response[]>();
+async function loadedFont(page: Page) {
+  const evidence = await page.evaluate(async () => {
+    const text = "Meguri Sync 0123456789 ilMW";
+    const faces = await document.fonts.load('normal 650 16px "IBM Plex Sans"', text);
+    await document.fonts.ready;
+    return {
+      faces: faces.map(face => ({ family: face.family.replaceAll('"', '').replaceAll("'", ''),
+        status: face.status, style: face.style, weight: face.weight, display: face.display })),
+      checked: document.fonts.check('normal 650 16px "IBM Plex Sans"', text),
+      families: Array.from(document.querySelectorAll("body, h1, h2, h3, p, a, label, button, input"))
+        .filter(element => element.getClientRects().length)
+        .map(element => getComputedStyle(element).fontFamily.split(",")[0]!.trim().replaceAll('"', '').replaceAll("'", '')),
+      resources: performance.getEntriesByType("resource").map(entry => entry.name)
+        .filter(url => new URL(url).pathname.endsWith(".woff2")),
+    };
+  });
+  expect(evidence.faces).toEqual([{ family: "IBM Plex Sans", status: "loaded", style: "normal", weight: "100 700", display: "swap" }]);
+  expect(evidence.checked).toBe(true);
+  expect(evidence.families.length).toBeGreaterThan(0);
+  expect(new Set(evidence.families)).toEqual(new Set(["IBM Plex Sans"]));
+  expect(evidence.resources).toHaveLength(1);
+  const url = new URL(evidence.resources[0]!);
+  expect(url.origin).toBe(new URL(page.url()).origin);
+  expect(url.pathname).toMatch(/^\/assets\/IBMPlexSans-Variable-[A-Za-z0-9_-]{8,}\.woff2$/);
+  expect(url.search + url.hash).toBe("");
+  // Use the browser's actual font response, including when served from cache.
+  const response = fontResponses.get(page)?.filter(item => item.url() === url.href).at(-1);
+  expect(response).toBeDefined();
+  expect(response!.request().resourceType()).toBe("font");
+  expect(response!.status()).toBe(200);
+  expect(response!.headers()["content-type"]).toBe("font/woff2");
+  expect(await response!.body()).toEqual(readFileSync("src/IBMPlexSans-Variable.woff2"));
+}
 async function brand(page: Page) {
   const lockup = page.locator(".brand");
   await expect(lockup).toHaveCount(1);
@@ -101,6 +135,7 @@ async function signIn(page: Page, username: string, password: string) {
   await expect(page.getByRole("heading", { name: "Connect your devices" })).toBeVisible();
 }
 async function audit(page: Page, name?: string) {
+  await loadedFont(page);
   await brand(page);
   const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
   expect(result.violations.map(item => ({ id: item.id, impact: item.impact }))).toEqual([]);
@@ -161,6 +196,11 @@ test("setup, invitation, member settings, reset and admin actions over private H
   const external: string[] = [];
   let bootstrapSawFragment = false;
   function observe(target: Page) {
+    const fonts: Response[] = [];
+    fontResponses.set(target, fonts);
+    target.on("response", response => {
+      if (response.request().resourceType() === "font") fonts.push(response);
+    });
     target.on("request", request => {
       const url = new URL(request.url());
       if (url.origin !== baseURL) external.push(url.origin);
@@ -355,6 +395,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
   expect(await member.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
   const missing = await context.request.get(`${baseURL}/assets/missing-abcdefgh.js`); expect(missing.status()).toBe(404);
+  const missingFont = await context.request.get(`${baseURL}/assets/missing-abcdefgh.woff2`); expect(missingFont.status()).toBe(404);
   const apiMissing = await context.request.get(`${baseURL}/api/unknown`); expect(apiMissing.status()).toBe(404);
   const unknown = await context.request.get(`${baseURL}/unknown`); expect(unknown.status()).toBe(404);
   expect(bootstrapSawFragment).toBe(false); expect(external).toEqual([]);

@@ -5,6 +5,23 @@ React DOM 19.3.1 (browser mounting). The resolved runtime graph contains only
 those packages and scheduler 0.28.0. Adapted shadcn components are local source;
 their MIT notice is retained in THIRD_PARTY_NOTICES.txt.
 
+The browser UI self-hosts the unmodified official Roman complete variable font
+from `@ibm/plex-sans-variable@0.2.0`, IBM commit
+`ceee82fa88781b8310b198fd302480efaeac609e`. Source archive:
+`https://registry.npmjs.org/@ibm/plex-sans-variable/-/plex-sans-variable-0.2.0.tgz`.
+The supplied seed was matched against npm SHA-512
+`S8xew9E8CPPKFvitbu2gDtwNFVWwwhClheaIBeykDYg7DrVK3cV5Xq5MjMrWPP5Os0xyiRFjMOmtGBLzz3urTQ==`.
+Archive entry `package/fonts/complete/woff2/IBM Plex Sans Var-Roman.woff2`
+is retained as `src/IBMPlexSans-Variable.woff2` (230368 bytes), SHA-256
+`e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d`.
+The full exact `package/fonts/complete/woff2/license.txt` is appended to
+`THIRD_PARTY_NOTICES.txt`, SHA-256
+`91c25c350d3cac39da2736d74f7ba37ef648f5237a4e330a240615bc8d8c4360`.
+Both upstream payloads retain their exact bytes. Vite emits a hashed same-origin
+WOFF2 URL compiled into the Rust artifact with MIME `font/woff2`; no local font
+lookup, external font request or npm dependency is added. Existing source,
+notice, manifest membership and content-hash checks also cover this asset.
+
 Direct development dependencies: TypeScript 7.0.2 checks types using its native
 CLI; @types/node, @types/react and @types/react-dom supply declarations; Vite
 builds the browser assets; Tailwind CSS and @tailwindcss/vite compile styles;
@@ -114,7 +131,7 @@ font resolution. The manager confirmed the cache warnings stopped, while
 generic matches remained LiberationMono. The fixture image now adds Debian
 fonts-dejavu-core alongside fonts-liberation; the existing image probe also
 records up to 40 unique font-family entries. Actual resolution awaits manager
-verification. The product font stack is unchanged; the user's Mac renders sans normally.
+verification. Those system-font observations precede the local IBM Plex Sans face.
 The existing mount, read-only root, capability and network limits are retained.
 
 The unit/check lanes retain Node TAP in /out/unit-results.tap; the browser lane

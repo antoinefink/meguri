@@ -9,7 +9,7 @@
       "path": "LICENSE.md",
       "adapted_into": "THIRD_PARTY_NOTICES.txt",
       "adaptation": "Notice retained verbatim.",
-      "adapted_sha256": "2b51afdda8f3ad8177e5ebc39f8c789e8711836ea31fade22dcd81458104fb33"
+      "adapted_sha256": "793118f2c4b41d07e802a9d465a3eb7424d68add574e1bf7695580e539e15ab9"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/login-01/page.tsx",

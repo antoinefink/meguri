@@ -143,11 +143,15 @@ class FinalPackageProof(unittest.TestCase):
         inputs_hash = self.store(inputs)
         self.payloads = {
             'index.html': b'<!doctype html><script src="/assets/study-abcdefgh.js"></script>\n',
+            'assets_font-abcdefgh.woff2': b'synthetic WOFF2 payload, not a usable font\n',
+            'assets_icon-abcdefgh.png': b'synthetic PNG payload, not a usable image\n',
             'assets_study-abcdefgh.js': b'document.title = "Synthetic public study fixture";\n',
         }
         self.asset_manifest = [dict(path=path, sha256=self.store(self.payloads[name]),
                                     bytes=len(self.payloads[name])) for path, name in
                                [('/index.html', 'index.html'),
+                                ('/assets/font-abcdefgh.woff2', 'assets_font-abcdefgh.woff2'),
+                                ('/assets/icon-abcdefgh.png', 'assets_icon-abcdefgh.png'),
                                 ('/assets/study-abcdefgh.js', 'assets_study-abcdefgh.js')]]
         assets = self.store(self.asset_manifest)
         runtime = {self.helper.EXECUTABLE: executable,
@@ -291,15 +295,17 @@ class FinalPackageProof(unittest.TestCase):
             self.helper.retain_package(directory, retained)
 
     def test_package_admission_requires_every_transitive_payload_and_exact_length(self):
-        path = self.artifacts / self.asset_manifest[0]['sha256']
-        original = path.read_bytes()
-        path.unlink()
-        with self.assertRaises(FileNotFoundError):
-            self.helper.final_peer(self.peer, self.artifacts, self.invocation)
-        path.write_bytes(b'X' + original[1:])
-        with self.assertRaisesRegex(ValueError, 'identity or length'):
-            self.helper.final_peer(self.peer, self.artifacts, self.invocation)
-        path.write_bytes(original)
+        for row in self.asset_manifest:
+            with self.subTest(path=row['path']):
+                path = self.artifacts / row['sha256']
+                original = path.read_bytes()
+                path.unlink()
+                with self.assertRaises(FileNotFoundError):
+                    self.helper.final_peer(self.peer, self.artifacts, self.invocation)
+                path.write_bytes(b'X' + original[1:])
+                with self.assertRaisesRegex(ValueError, 'identity or length'):
+                    self.helper.final_peer(self.peer, self.artifacts, self.invocation)
+                path.write_bytes(original)
         rows = copy.deepcopy(self.asset_manifest)
         rows[0]['bytes'] += 1
         manifest = json.dumps(rows).encode()
@@ -330,7 +336,9 @@ class FinalPackageProof(unittest.TestCase):
 
     def test_manifest_rejects_duplicate_mapping_and_nonoriginal_paths(self):
         for path in ['/index.html', '/assets/../study-abcdefgh.js', '/assets/study.js',
-                     '/assets/study-abcdefgh.js.map', '/assets/nested/study-abcdefgh.js']:
+                     '/assets/study-abcdefgh.js.map', '/assets/nested/study-abcdefgh.js',
+                     '/assets/font.woff2', '/assets/nested/font-abcdefgh.woff2',
+                     '/assets/font-abcdefgh.woff', '/assets/icon-abcdefgh.svg']:
             rows = copy.deepcopy(self.asset_manifest)
             rows[1]['path'] = path
             with self.subTest(path=path), self.assertRaises(ValueError):
