@@ -274,6 +274,15 @@ mg__run_job() {
 # ignores while its job runs, and once the `docker` CLI wrapping the compose
 # plugin gets a signal, the plugin exits without stopping the container.
 mg__remove_run_containers() {
+  # Only these exact reference invocations use retained execution. Their
+  # parent-only nonce record is mandatory, even if creation never returned.
+  if [ "${MG_JOB:-}" = sync-server-reference ]; then
+    case "${#args[@]}:${args[*]-}" in
+      0:|1:|1:selftest|1:identity)
+        mg_sync_reference__cancel_cleanup
+        return $? ;;
+    esac
+  fi
   # This fixed utility owns a tunnel-first lifecycle. Its refusal must never
   # fall through to the ordinary run-label sweep, even if job traps were killed.
   if [ "${MG_JOB:-}" = sync-server-mobile-smoke ]; then
