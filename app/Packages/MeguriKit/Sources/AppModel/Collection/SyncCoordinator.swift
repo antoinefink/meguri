@@ -112,6 +112,28 @@ nonisolated struct SyncCommandResult: Sendable {
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }
 
+// Observation and a single replay budget belong to the original wake. Neither
+// an Available event nor this record can create a task or grant admission.
+@MainActor final class MeguriWakeAvailability {
+    private let generation: UInt64
+    private(set) var revision: UInt64 = 0
+    private var replayed = false
+
+    init(generation: UInt64) { self.generation = generation }
+
+    func observe(sequence: UInt64, generation: UInt64) {
+        guard generation == self.generation else { return }
+        revision = max(revision, sequence)
+    }
+
+    func consume(collectionOutcome: MeguriRoundPhaseOutcome, since snapshot: UInt64, allowed: Bool) -> Bool {
+        guard allowed, !Task.isCancelled, !replayed, revision > snapshot,
+              case .refused(.busy) = collectionOutcome else { return false }
+        replayed = true
+        return true
+    }
+}
+
 // Retained by the exact original command task. Intent is recorded before
 // cancellation, and never upgraded by a later close or replacement.
 @MainActor final class SyncCommandTaskContext {
@@ -545,7 +567,7 @@ public final class SyncCoordinator {
     private var meguriWakeManual = false
     private var meguriReachabilityRecoveryRevision: UInt64 = 0
     private var meguriReadyWakePending = false
-    private var meguriWake: (id: UUID, task: Task<Void, Never>)?
+    private var meguriWake: (id: UUID, task: Task<Void, Never>, availability: MeguriWakeAvailability)?
     private var meguriAddressDrain: Task<Void, Never>?
     private var meguriPauseDrain: Task<Void, Never>?
     private var meguriCancellation: Task<Void, Never>?
@@ -1021,6 +1043,7 @@ public final class SyncCoordinator {
         guard meguriWake == nil, let round = meguriRound, let owner = meguriConnectionOwner else { return }
         let id = UUID(), expected = generation, revision = hostRevision
         let editRevision = meguriAddressEditRevision
+        let availability = MeguriWakeAvailability(generation: expected)
         // Reserve the product task before the first actor/credential suspension.
         let task = Task {
             defer { if meguriWake?.id == id { meguriWake = nil } }
@@ -1031,6 +1054,7 @@ public final class SyncCoordinator {
                 meguriWakePending = false; meguriWakeManual = false
                 guard manual || settings.automatic else { return }
                 meguriRoutine = .exchanging
+                let availabilityRevision = availability.revision
                 do {
                     let report = try await round.fullRound()
                     // Retain actual terminal effects before checking retirement.
@@ -1060,7 +1084,14 @@ public final class SyncCoordinator {
                     // round consumes the latest revision before suspending.
                     let recoveredNetwork = meguriRoutine == .network && reachable == true
                         && meguriReachabilityRecoveryRevision != recoveryRevision
-                    if meguriRoutine != .idle && meguriRoutine != .pending && !recoveredNetwork { meguriWakePending = false }
+                    // Available may arrive while a not-started collection Busy
+                    // is still returning. Replay once in this wake, only for
+                    // that original outcome; a Media Busy or terminal cannot qualify.
+                    let missedAvailability = availability.consume(collectionOutcome: report.collection.outcome,
+                        since: availabilityRevision, allowed: settings.automatic && meguriCanRun && !meguriCancelling
+                            && editRevision == meguriAddressEditRevision)
+                    if missedAvailability { meguriWakePending = true }
+                    else if meguriRoutine != .idle && meguriRoutine != .pending && !recoveredNetwork { meguriWakePending = false }
                 } catch {
                     meguriLastError = error
                     guard meguriWake?.id == id, meguriCurrent(owner, expected, revision), meguriRound === round,
@@ -1072,7 +1103,7 @@ public final class SyncCoordinator {
                 }
             }
         }
-        meguriWake = (id, task)
+        meguriWake = (id, task, availability)
     }
     // Only fullRound's typed, pre-network secure-read failures use this local
     // recovery. The caller checks the original owner, round and attempt first.
@@ -1455,7 +1486,9 @@ public final class SyncCoordinator {
                     requestMeguriWake(automatic: true)
                 }
             case .sessionEnded: requestMeguriWake(automatic: true)
-            case .available: if meguriWake == nil { requestMeguriWake(automatic: true) }
+            case .available:
+                if let wake = meguriWake { wake.availability.observe(sequence: event.seq, generation: event.generation) }
+                else { requestMeguriWake(automatic: true) }
             default: break
             }
         }

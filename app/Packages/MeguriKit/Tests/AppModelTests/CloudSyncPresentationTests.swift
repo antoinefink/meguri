@@ -190,6 +190,64 @@ import Testing
             #expect(presentation.route == route)
         }
     }
+    @Test func meguriInFlightAvailabilityReplaysBusyCollectionOnlyOnceInTheOriginalWake() {
+        // Exercise the production wake record with local start outcomes only;
+        // no Ready binding, collection terminal or server result is manufactured.
+        let wake = MeguriWakeAvailability(generation: 7)
+        let beforeFullRound = wake.revision
+        // The slot released, but the refused start has not returned to Swift.
+        wake.observe(sequence: 40, generation: 7)
+        wake.observe(sequence: 41, generation: 7)
+        #expect(wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
+        let beforeAdditionalRound = wake.revision
+        #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeAdditionalRound, allowed: true))
+        wake.observe(sequence: 42, generation: 7)
+        #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeAdditionalRound, allowed: true))
+        // A later wake has its own budget and cannot inherit this observation.
+        let laterWake = MeguriWakeAvailability(generation: 7)
+        #expect(!laterWake.consume(collectionOutcome: .refused(.busy), since: laterWake.revision, allowed: true))
+    }
+    @Test func meguriAvailabilityMustBeNewDuringThisAttemptAndFromItsGeneration() {
+        let wake = MeguriWakeAvailability(generation: 7)
+        wake.observe(sequence: 40, generation: 7)
+        let beforeFullRound = wake.revision
+        wake.observe(sequence: 100, generation: 8)
+        wake.observe(sequence: 101, generation: 6)
+        wake.observe(sequence: 40, generation: 7)
+        wake.observe(sequence: 39, generation: 7)
+        #expect(wake.revision == beforeFullRound)
+        #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
+        wake.observe(sequence: 41, generation: 7)
+        #expect(wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
+    }
+    @Test func meguriAvailabilityCannotReplayOtherStartOutcomesOrBypassAdmission() {
+        let outcomes: [MeguriRoundPhaseOutcome] = [.pending,
+            .refused(.notSelected), .refused(.paused), .refused(.notReady), .refused(.bindingChanged),
+            .refused(.connectionChanged), .refused(.accountChanged), .refused(.publicationChanged),
+            .refused(.interrupted), .refused(.storage)]
+        for outcome in outcomes {
+            let wake = MeguriWakeAvailability(generation: 7)
+            let beforeFullRound = wake.revision
+            wake.observe(sequence: 40, generation: 7)
+            #expect(!wake.consume(collectionOutcome: outcome, since: beforeFullRound, allowed: true))
+        }
+        let wake = MeguriWakeAvailability(generation: 7)
+        let beforeFullRound = wake.revision
+        wake.observe(sequence: 40, generation: 7)
+        // The caller combines the unchanged owner/attempt/facade guards with
+        // automatic consent, readiness, edit, pause and cancellation admission.
+        #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: false))
+        #expect(wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
+    }
+    @Test func meguriCancelledWakeCannotConsumeAvailability() async {
+        let wake = MeguriWakeAvailability(generation: 7)
+        let beforeFullRound = wake.revision
+        wake.observe(sequence: 40, generation: 7)
+        await Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            #expect(!wake.consume(collectionOutcome: .refused(.busy), since: beforeFullRound, allowed: true))
+        }.value
+    }
     @Test func meguriLocalRoundCredentialFailuresOfferExistingConnectionRecovery() {
         // Exercise the production local transition without fabricating a ready
         // binding or a server result. ProviderRoundOwnerTests covers admission.
