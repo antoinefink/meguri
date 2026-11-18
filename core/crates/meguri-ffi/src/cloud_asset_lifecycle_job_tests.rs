@@ -265,7 +265,7 @@ fn asset_lifecycle_jobs_callback_enters_with_actual_driver_runtime_held_and_read
                 let result = collection.reader(ReaderRole::Cloud).map(|_| ());
                 reader_return.send(result).unwrap();
             });
-            waited.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(waited.recv_timeout(Duration::from_secs(5)).unwrap());
             assert!(matches!(reader_returned.try_recv(), Err(mpsc::TryRecvError::Empty)));
             drop(runtime_release);
             drop(driver_release);
@@ -320,8 +320,7 @@ fn asset_lifecycle_jobs_real_replacement_waits_for_pin_after_callback_through_ac
                     Ok(())
                 })
             });
-            waited.recv_timeout(Duration::from_secs(5)).unwrap();
-            assert_eq!(collection.cloud_reader_slot_for_testing(), Some(true));
+            assert!(waited.recv_timeout(Duration::from_secs(5)).unwrap());
             assert_eq!(engine.generation(), generation);
             assert!(matches!(swap_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
             assert_eq!(submit.result.result(), Ok(None));

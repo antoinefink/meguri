@@ -326,7 +326,7 @@ impl Collection {
     }
 
     #[cfg(feature = "test-hooks")]
-    pub fn observe_cloud_reader_wait_for_testing(&self, sender: std::sync::mpsc::Sender<()>) {
+    pub fn observe_cloud_reader_wait_for_testing(&self, sender: std::sync::mpsc::Sender<bool>) {
         self.core.readers.observe_cloud_wait_for_testing(sender);
     }
 
