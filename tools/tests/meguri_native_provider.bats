@@ -12,6 +12,7 @@ setup() {
   source "$MG_TOOLS/mg.d/meguri-provider-test.sh"
   source "$MG_TOOLS/mg.d/mac-vm.sh"
   source "$MG_TOOLS/mg.d/meguri-native-provider.sh"
+  export -f mg_mac_vm_q mvl_q
   MG_ROOT="$BATS_TEST_TMPDIR/source"; MG_RUN_DIR="$BATS_TEST_TMPDIR/run"; MG_RUN_ID=route-test
   MG_JOB=meguri-native-route; MG_SIM_RUNNER=; MG_STATE="$BATS_TEST_TMPDIR/state"
   fake="$BATS_TEST_TMPDIR/fake"; trace="$BATS_TEST_TMPDIR/trace"; hooks="$BATS_TEST_TMPDIR/hooks"
@@ -80,6 +81,11 @@ case "$1" in
     [ ! -e "$NR_TEST_FAKE/guest-create-fail" ] || exit 8
     printf '1:42\n' ;;
   *'/bin/rmdir'*)
+    # Decode only helper-style quoting, then require its exact round trip.
+    cleanup="${1#"/bin/sh -c '"}"
+    cleanup="${cleanup%\'}"
+    cleanup="${cleanup//\'\\\'\'/\'}"
+    [ "$1" = "/bin/sh -c $(mg_mac_vm_q "$cleanup")" ] || exit 97
     printf 'guest-remove\n' >>"$NR_TEST_TRACE"
     [ ! -e "$NR_TEST_FAKE/guest-remove-fail" ] || exit 8
     [ ! -e "$NR_TEST_FAKE/guest-create-fail" ] || exit 8
@@ -697,8 +703,11 @@ LINES
       [ "$(cat "$MG_RUN_DIR/private/native-route/control.log")" = "$expected"$'\nMEGURI_NATIVE_LOG_FOLLOWER_EOF\nnative fixture startup failed' ]
     else
       grep -Fxq status:pass "$trace"
-      [ "$(cat "$MG_RUN_DIR/private/native-route/control.log")" = "$expected" ]
+      [ "$(grep -Fi 'MEGURI_NATIVE_' "$MG_RUN_DIR/private/native-route/control.log")" = "$expected" ]
     fi
+    ! grep -Fiq 'synthetic-private' "$MG_RUN_DIR/private/native-route/control.log" \
+      "$MG_RUN_DIR/private/native-route/cleanup.log" "$trace"
+    ! printf '%s\n' "$output" | grep -Fiq 'synthetic-private'
     ! grep -Eq 'MEGURI_NATIVE_(FIXTURE_STAGE|LOG_FOLLOWER)' "$trace"
     [[ "$output" != *MEGURI_NATIVE_* && "$output" != *synthetic-private* ]]
   done

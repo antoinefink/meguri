@@ -485,7 +485,7 @@ mg_native_route__guest_cleanup() {
 for f in * .[!.]* ..?*; do [ -e \"\$f\" ] || [ -L \"\$f\" ] || continue; case \"\$f\" in owner|root-ca.pem|health.sh|body|status|curl.err|expected) test -f \"\$f\" && test ! -L \"\$f\" || exit 1;; *) exit 1;; esac; done;
 for f in root-ca.pem health.sh body status curl.err expected; do if [ -e \"\$f\" ]; then /bin/rm \"\$f\" || exit 1; fi; done;
 /bin/rm owner && cd / && /bin/rmdir $q && test ! -e $q && test ! -L $q"
-  mg_mac_vm_ssh "$command" >"$MG_NR_PRIVATE/guest-cleanup.stdout" 2>"$MG_NR_PRIVATE/guest-cleanup.stderr"
+  mg_mac_vm_ssh "/bin/sh -c $(mg_mac_vm_q "$command")" >"$MG_NR_PRIVATE/guest-cleanup.stdout" 2>"$MG_NR_PRIVATE/guest-cleanup.stderr"
 }
 mg_native_route__cleanup() {
   if [ "$MG_NR_CLEANED" = 1 ]; then [ "$MG_NR_CLEAN_OK" = 1 ]; return; fi
