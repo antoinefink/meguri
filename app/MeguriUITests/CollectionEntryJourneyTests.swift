@@ -1185,8 +1185,11 @@ import notify
         XCTAssertTrue(entry.waitForExistence(timeout: 20))
         try click(entry, app, bundle)
         XCTAssertTrue(element(app, "onboarding.collectionImport.choose").waitForExistence(timeout: 10))
-        XCTAssertTrue(app.descendants(matching: .any)["onboarding.collectionImport.content"].firstMatch.staticTexts.matching(NSPredicate(
-            format: "label CONTAINS %@ OR value CONTAINS %@", "collection-only .colpkg", "collection-only .colpkg")).firstMatch.waitForExistence(timeout: 10))
+        let explanation = app.descendants(matching: .any)["onboarding.collectionImport.content"].firstMatch.staticTexts
+            .matching(identifier: "onboarding.collectionImport.explanation").element
+        let explanationText = "Import a latest-format .colpkg file, including its media. Older formats are not supported. No account or network connection is needed."
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format:
+            "exists == true AND (label == %@ OR value == %@)", explanationText, explanationText), object: explanation)], timeout: 10), .completed)
         try click(element(app, "onboarding.collectionImport.choose"), app, bundle)
         try pick(source, app, bundle)
         let confirm = element(app, "onboarding.collectionImport.confirm")
