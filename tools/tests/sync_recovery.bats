@@ -132,7 +132,7 @@ elif args[0] == 'create':
       HostConfig=dict(NetworkMode=options['--network'][0],PortBindings={},PublishAllPorts=False,
         Init=options['--init'][0],ReadonlyRootfs=options['--read-only'][0],CapDrop=options['--cap-drop'],
         CapAdd=None,SecurityOpt=options['--security-opt'],Memory=2147483648 if options['--memory']==['2g'] else 0,
-        PidsLimit=int(options['--pids-limit'][0]),AutoRemove=False,RestartPolicy=dict(Name='no',MaximumRetryCount=0),
+        OomKillDisable=False,PidsLimit=int(options['--pids-limit'][0]),AutoRemove=False,RestartPolicy=dict(Name='no',MaximumRetryCount=0),
         Privileged=False,Devices=[],DeviceRequests=None,VolumesFrom=None,Links=None,ExtraHosts=None,
         PidMode='',IpcMode='private',UTSMode='',UsernsMode='',Binds=None,
         Mounts=[dict(Type=mount['type'],Source=mount['src'],Target=mount['dst'])],Tmpfs=tmpfs),
@@ -325,6 +325,153 @@ reference_inspection_fixture() {
   done
 }
 
+@test "reference OOM killer enabled comparison admits only stable false null and their transition" {
+  local variant mutation phase before after plan damaged
+  mg_job() { :; }
+  source "$REPO_ROOT/tools/mg.d/meguri-sync-reference.sh"
+  for variant in false null false-null null-false; do
+    case "$variant" in
+      false) mutation="c['HostConfig']['OomKillDisable']=False"; phase=both ;;
+      null) mutation="c['HostConfig']['OomKillDisable']=None"; phase=both ;;
+      false-null) mutation="c['HostConfig']['OomKillDisable']=None"; phase=after ;;
+      null-false) mutation="c['HostConfig']['OomKillDisable']=None"; phase=before ;;
+    esac
+    reference_execution_fixture "oom-enabled-$variant"
+    reference_execute identity '' "$mutation" "$phase"
+    [ "$(cat "$REF/status")" = pass ] && [ -z "$output" ]
+    [ ! -e "$REF/failures" ] && [ ! -e "$REF/container.json" ]
+    jq -se '[.[] | select(.[0]=="start")] | length==1' "$REF/docker.jsonl"
+    jq -se '[.[] | select(.[0]=="rm")] | length==1' "$REF/docker.jsonl"
+    python3 - "$REF" "$variant" <<'PY'
+import hashlib, json, pathlib, sys
+root, variant = pathlib.Path(sys.argv[1]), sys.argv[2]
+execution, = [item['value'] for item in map(json.loads, (root/'details.jsonl').read_text().splitlines())
+              if item['key'] == 'reference_execution']
+assert execution['measurements_valid'] and execution['absence_verified']
+assert all(execution[key] == 0 for key in ('attach_exit','actual_exit','cleanup_exit','execution_exit'))
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(',',':'), ensure_ascii=True, allow_nan=False).encode('ascii')
+expected = {'false':(False,False), 'null':(None,None),
+            'false-null':(False,None), 'null-false':(None,False)}[variant]
+for phase, oom in zip(('before','after'), expected):
+    raw = (root/('inspection-'+phase+'.json')).read_bytes()
+    c = json.loads(raw)[0]
+    measured = execution[phase]
+    assert c['HostConfig']['OomKillDisable'] is oom
+    assert measured['inspection_sha256'] == hashlib.sha256(raw).hexdigest()
+    complete = {key:c[key] for key in ('Config','HostConfig','Path','Args')}
+    assert measured['configuration_sha256'] == hashlib.sha256(canonical(complete)).hexdigest()
+    assert measured['property_fingerprints'] == {
+        **{section:{name:hashlib.sha256(canonical(value)).hexdigest() for name,value in c[section].items()}
+           for section in ('Config','HostConfig')},
+        **{name:hashlib.sha256(canonical(c[name])).hexdigest() for name in ('Path','Args')}}
+    # Known independent property preimages; false/null raw hashes stay distinct.
+    assert measured['property_fingerprints']['HostConfig']['OomKillDisable'] == hashlib.sha256(
+        b'false' if oom is False else b'null').hexdigest()
+    complete['HostConfig'] = dict(c['HostConfig'], OomKillDisable=False)
+    assert measured['oom_killer_enabled_configuration_sha256'] == hashlib.sha256(
+        b'meguri-oom-killer-enabled-configuration-v1\x00' + canonical(complete)).hexdigest()
+    assert measured['oom_killer_enabled_configuration_sha256'] != measured['configuration_sha256']
+b, a = execution['before'], execution['after']
+transition = variant in ('false-null','null-false')
+assert (b['configuration_sha256'] != a['configuration_sha256']) == transition
+assert (b['property_fingerprints']['HostConfig']['OomKillDisable'] !=
+        a['property_fingerprints']['HostConfig']['OomKillDisable']) == transition
+assert b['oom_killer_enabled_configuration_sha256'] == a['oom_killer_enabled_configuration_sha256']
+assert b['inspection_sha256'] != a['inspection_sha256']
+assert 'NOT_PUBLIC' not in json.dumps(execution) and 'private-fixture-value' not in json.dumps(execution)
+PY
+    before="$(jq -cs 'map(select(.key=="reference_execution"))[0].value.before' "$REF/details.jsonl")"
+    after="$(jq -cs 'map(select(.key=="reference_execution"))[0].value.after' "$REF/details.jsonl")"
+    plan="$(jq -c '.container | {id:.Id,image:.Image,name:(.Name|ltrimstr("/")),nonce:.Config.Labels.nonce,
+      run:.Config.Labels.run,mode:.Config.Cmd[0],output:.HostConfig.Mounts[0].Source,user:.Config.User,creation_floor:.Created[0:19]}' <<<"$before")"
+    run mg_sync_reference__check "$before" "$plan" null before
+    [ "$status" -eq 0 ]
+    run mg_sync_reference__check "$after" "$plan" "$before" after
+    [ "$status" -eq 0 ]
+    damaged="$(jq -c '.oom_killer_enabled_configuration_sha256=("a"*64)' <<<"$after")"
+    run mg_sync_reference__check "$damaged" "$plan" "$before" after
+    [ "$status" -ne 0 ]
+    case "$variant" in false-null|null-false)
+      # Effective equivalence must never accept a claim of raw equality.
+      damaged="$(jq -c --arg hash "$(jq -r .configuration_sha256 <<<"$before")" '.configuration_sha256=$hash' <<<"$after")"
+      run mg_sync_reference__check "$damaged" "$plan" "$before" after
+      [ "$status" -ne 0 ]
+      damaged="$(jq -c --arg hash "$(jq -r .property_fingerprints.HostConfig.OomKillDisable <<<"$before")" \
+        '.property_fingerprints.HostConfig.OomKillDisable=$hash' <<<"$after")"
+      run mg_sync_reference__check "$damaged" "$plan" "$before" after
+      [ "$status" -ne 0 ] ;;
+    esac
+  done
+}
+
+@test "reference OOM killer disabled absent and malformed values refuse before and after start" {
+  local phase value mutation index=0
+  for phase in before after; do
+    for value in True 0 1 -1 "'false'" "'null'" "''" '[]' '[False]' '{}' "{'enabled':False}" absent; do
+      index=$((index+1))
+      mutation="c['HostConfig']['OomKillDisable']=$value"
+      [ "$value" != absent ] || mutation="del c['HostConfig']['OomKillDisable']"
+      reference_execution_fixture "oom-refuse-$index"
+      reference_execute identity '' "$mutation" "$phase"
+      [ "$(cat "$REF/status")" = fail ] && [ ! -e "$REF/container.json" ]
+      if [ "$phase" = before ]; then [ ! -e "$REF/started" ]; else [ -e "$REF/started" ]; fi
+      jq -se --arg phase "$phase" '[.[] | select(.[0]=="start")] |
+        length==(if $phase=="before" then 0 else 1 end)' "$REF/docker.jsonl"
+      jq -se --arg phase "$phase" --arg value "$value" 'map(select(.key=="reference_execution"))[0].value |
+        (.measurements_valid|not) and .absence_verified and .cleanup_exit==0 and .execution_exit!=0 and
+        (if $phase=="before" then .actual_exit==null and .attach_exit==null and .after==null
+         else .attach_exit==0 and (if $value=="absent" then .actual_exit==null else .actual_exit==0 end) end) and
+        (if $value=="absent" then .[$phase]==null else
+          .[$phase].validation_failure=="check" and (.[$phase]|has("container")|not) and
+          .[$phase].oom_killer_enabled_configuration_sha256==null and
+          (.[$phase].configuration_sha256|test("^[0-9a-f]{64}$")) and
+          (.[$phase].property_fingerprints.HostConfig.OomKillDisable|test("^[0-9a-f]{64}$")) end)' "$REF/details.jsonl"
+      ! rg 'private-fixture-value|NOT_PUBLIC|"enabled"' "$REF/details.jsonl"
+    done
+  done
+}
+
+@test "reference OOM false null equivalence refuses simultaneous other configuration changes" {
+  local mutation index=0
+  # Establish existing unprojected fields in both observations. Wide integers
+  # reach the real byte producer, never a jq numeric round trip.
+  local baseline="c['HostConfig']['OomKillDisable']=None if c['State']['Status']=='exited' else False; c['HostConfig']['LogConfig']={'Type':'json-file','Config':{'synthetic-log-key':'original'}}; c['HostConfig']['NanoCpus']=9007199254740992; c['Config']['Healthcheck']={'Interval':9007199254740992,'Test':['NONE']}; c['Config']['AttachStdin']=False"
+  reference_execution_fixture oom-other-baseline
+  reference_execute identity '' "$baseline" both
+  [ "$(cat "$REF/status")" = pass ] && [ -e "$REF/started" ]
+  [ ! -e "$REF/container.json" ] && [ ! -e "$REF/failures" ]
+  jq -se 'map(select(.key=="reference_execution"))[0].value |
+    .measurements_valid and .absence_verified and .actual_exit==0 and .attach_exit==0 and .cleanup_exit==0 and
+    .before.oom_killer_enabled_configuration_sha256==.after.oom_killer_enabled_configuration_sha256' "$REF/details.jsonl"
+  for mutation in \
+    "c['HostConfig']['LogConfig']['Config']['synthetic-log-key']='changed'" \
+    "c['HostConfig']['NanoCpus']=9007199254740993" \
+    "c['Config']['Healthcheck']['Interval']=9007199254740993" \
+    "c['Config']['AttachStdin']=0" "c['Config']['AttachStdin']='false'" "c['Config']['AttachStdin']=None" \
+    "c['Config']['Volumes']={}" "c['Config']['Env'].append('UNEXPECTED=synthetic-oom-change')" \
+    "c['Path']='synthetic-oom-change'" "c['Args'].append('synthetic-oom-change')" \
+    "del c['HostConfig']['LogConfig']" "del c['Config']['Healthcheck']" \
+    "c['HostConfig']['CpuShares']=0" "c['Config']['Shell']=[]"; do
+    index=$((index+1))
+    reference_execution_fixture "oom-other-change-$index"
+    reference_execute identity '' "$baseline; exec(\"$mutation\" if c['State']['Status']=='exited' else '')" both
+    [ "$(cat "$REF/status")" = fail ] && [ -e "$REF/started" ]
+    [ ! -e "$REF/container.json" ]
+    jq -se '[.[] | select(.[0]=="start")] | length==1' "$REF/docker.jsonl"
+    jq -se '[.[] | select(.[0]=="rm")] | length==1' "$REF/docker.jsonl"
+    jq -se 'map(select(.key=="reference_execution"))[0].value |
+      (.measurements_valid|not) and .absence_verified and .cleanup_exit==0 and .execution_exit!=0 and
+      .attach_exit==0 and .actual_exit==0 and (.before|has("container")) and
+      (.after|has("container")|not) and .after.validation_failure=="check" and
+      .before.property_fingerprints.HostConfig.OomKillDisable=="fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa" and
+      .after.property_fingerprints.HostConfig.OomKillDisable=="74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b" and
+      .before.configuration_sha256!=.after.configuration_sha256 and
+      .before.oom_killer_enabled_configuration_sha256!=.after.oom_killer_enabled_configuration_sha256' "$REF/details.jsonl"
+    ! rg 'private-fixture-value|NOT_PUBLIC|synthetic-log-key|synthetic-oom-change' "$REF/details.jsonl"
+  done
+}
+
 @test "reference absent versus null changes retain distinct raw hashes and fail terminal identity" {
   local field phase index=0 before after measured_after plan damaged
   mg_job() { :; }
@@ -404,7 +551,7 @@ execution, = [item['value'] for item in map(json.loads, details.splitlines())
 assert not execution['measurements_valid'] and execution['execution_exit'] != 0
 published = execution[phase]
 assert set(published) == {'inspection_sha256', 'configuration_sha256',
-                          'property_fingerprints', 'validation_failure'}
+                          'property_fingerprints', 'oom_killer_enabled_configuration_sha256', 'validation_failure'}
 assert published['validation_failure'] == 'check'
 raw = (root/('inspection-'+phase+'.json')).read_bytes()
 assert marker in raw.decode()
@@ -413,6 +560,11 @@ c = json.loads(raw)[0]
 complete = json.dumps({key:c[key] for key in ('Config','HostConfig','Path','Args')},
                       sort_keys=True, separators=(',',':'), ensure_ascii=True, allow_nan=False).encode('ascii')
 assert published['configuration_sha256'] == hashlib.sha256(complete).hexdigest()
+effective = {key:c[key] for key in ('Config','HostConfig','Path','Args')}
+effective['HostConfig'] = dict(c['HostConfig'], OomKillDisable=False)
+assert published['oom_killer_enabled_configuration_sha256'] == hashlib.sha256(
+    b'meguri-oom-killer-enabled-configuration-v1\x00' + json.dumps(effective,
+        sort_keys=True, separators=(',',':'), ensure_ascii=True, allow_nan=False).encode('ascii')).hexdigest()
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',',':'),
                                     ensure_ascii=True, allow_nan=False).encode('ascii')).hexdigest()
@@ -636,7 +788,7 @@ full = (b'{"Args":["synthetic"],"Config":{"Cmd":[],"Entrypoint":[],"Env":[],"Hea
         +token+b',"Test":["NONE"]},"Image":"","Labels":{},"User":"","WorkingDir":""},'
         b'"HostConfig":{"AutoRemove":false,"Binds":null,"CapAdd":null,"CapDrop":[],"DeviceRequests":null,'
         b'"Devices":[],"ExtraHosts":null,"Init":true,"IpcMode":"private","Links":null,"Memory":2147483648,'
-        b'"Mounts":[],"NetworkMode":"none","PidMode":"","PidsLimit":128,"PortBindings":{},"Privileged":false,'
+        b'"Mounts":[],"NetworkMode":"none","OomKillDisable":false,"PidMode":"","PidsLimit":128,"PortBindings":{},"Privileged":false,'
         b'"PublishAllPorts":false,"ReadonlyRootfs":true,"RestartPolicy":{"MaximumRetryCount":0,"Name":"no"},'
         b'"SecurityOpt":[],"Tmpfs":{},"UTSMode":"","UsernsMode":"","VolumesFrom":null},"Path":"python"}')
 (root/('full-'+index+'.json')).write_bytes(full)
@@ -845,7 +997,13 @@ PY
   [ "$status" -eq 0 ]
   run mg_sync_reference__check "$after" "$plan" "$before" after
   [ "$status" -eq 0 ]
-  for filter in 'del(.property_fingerprints)' 'del(.property_fingerprints.Config.Env)' \
+  for filter in 'del(.oom_killer_enabled_configuration_sha256)' \
+    '.oom_killer_enabled_configuration_sha256=null' '.oom_killer_enabled_configuration_sha256=true' \
+    '.oom_killer_enabled_configuration_sha256=0' '.oom_killer_enabled_configuration_sha256="false"' \
+    '.oom_killer_enabled_configuration_sha256=[]' '.oom_killer_enabled_configuration_sha256={}' \
+    'del(.property_fingerprints.HostConfig.OomKillDisable)' \
+    '.property_fingerprints.HostConfig.OomKillDisable=("a"*64)' \
+    'del(.property_fingerprints)' 'del(.property_fingerprints.Config.Env)' \
     'del(.property_fingerprints.Config.User)' 'del(.property_fingerprints.HostConfig.Memory)' \
     '.property_fingerprints.HostConfig={}' '.property_fingerprints.Config.Env="bad"' \
     '.property_fingerprints.Extra={}' '.property_fingerprints.Path=null' \

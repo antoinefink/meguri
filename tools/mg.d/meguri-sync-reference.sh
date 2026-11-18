@@ -95,8 +95,8 @@ PY
 mg_sync_reference__inspect() {
   local measured rc=0 stage pipeline_status
   # Parent-only diagnostics: hash each complete property, including all nested
-  # values, but emit only static top-level Docker schema names. These never
-  # replace the complete raw configuration fingerprint or excuse a difference.
+  # values, but emit only static top-level Docker schema names. Preserve these
+  # raw diagnostics separately from the one named effective comparison below.
   measured="$(
     # Check both processes explicitly, including valid output followed by a
     # failing Docker exit. Only validated projection/fixed metadata is captured.
@@ -153,7 +153,7 @@ try:
     # and present-null must remain different inventories and raw configurations.
     required_config = set("""Entrypoint Cmd User Image WorkingDir Labels Env""".split())
     required_host = set("""NetworkMode PortBindings PublishAllPorts Init ReadonlyRootfs
-        CapDrop CapAdd SecurityOpt Memory PidsLimit AutoRemove RestartPolicy
+        CapDrop CapAdd SecurityOpt Memory OomKillDisable PidsLimit AutoRemove RestartPolicy
         Privileged Devices DeviceRequests VolumesFrom Links ExtraHosts PidMode
         IpcMode UTSMode UsernsMode Binds Tmpfs Mounts""".split())
     inventory = {}
@@ -190,8 +190,18 @@ try:
     stage = "canonical"
     # Full configuration and individual properties share an exact integer,
     # sorted-key ASCII encoding, without whitespace or a trailing newline.
-    configuration_hash = hashlib.sha256(canonical(
-        {name: record[name] for name in ("Config", "HostConfig", "Path", "Args")})).hexdigest()
+    configuration = {name: record[name] for name in ("Config", "HostConfig", "Path", "Args")}
+    configuration_hash = hashlib.sha256(canonical(configuration)).hexdigest()
+    # Docker documents oom-kill-disable as discarded on cgroup v2; Moby uses
+    # false by default and nil when unsupported. Only these two present values
+    # represent the required enabled OOM killer here. This is no observation of
+    # the installed daemon/cgroup. Do not mutate the original record or hashes.
+    oom_killer_enabled_hash = None
+    host = record["HostConfig"]
+    if host["OomKillDisable"] is False or host["OomKillDisable"] is None:
+        effective = dict(configuration, HostConfig=dict(host, OomKillDisable=False))
+        oom_killer_enabled_hash = hashlib.sha256(
+            b"meguri-oom-killer-enabled-configuration-v1\x00" + canonical(effective)).hexdigest()
     stage = "shape"
     config, host = record["Config"], record["HostConfig"]
     labels, env = config["Labels"], config["Env"]
@@ -231,7 +241,8 @@ try:
                    error_present=(state.get("Error") != "")))
     stage = "canonical"
     encoded = canonical(dict(inspection_sha256=hashlib.sha256(raw).hexdigest(),
-        configuration_sha256=configuration_hash, property_fingerprints=inventory, container=container))
+        configuration_sha256=configuration_hash, property_fingerprints=inventory,
+        oom_killer_enabled_configuration_sha256=oom_killer_enabled_hash, container=container))
 except (ValueError, TypeError, KeyError, OverflowError, RecursionError, OSError):
     # Only author-owned finite stages escape, never input names or exceptions.
     print(stage)
@@ -260,6 +271,13 @@ mg_sync_reference__check() {
     def timestamp: type=="string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$");
     def instant: rtrimstr("Z") | split(".") | .[0]+"."+(((.[1] // "")+"000000000")[0:9]);
     def digest: type=="string" and test("^[0-9a-f]{64}$");
+    # Exact canonical false/null hashes; missing, true, integers, strings and
+    # containers cannot satisfy this property-specific admission in either phase.
+    def oom_killer_enabled:
+      (.property_fingerprints.HostConfig.OomKillDisable as $oom |
+        $oom=="fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa" or
+        $oom=="74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b") and
+      (.oom_killer_enabled_configuration_sha256 | digest);
     def properties($limit): type=="object" and length>0 and length<=$limit and
       all(to_entries[]; (.key | test("^[A-Z][A-Za-z0-9]{0,39}$")) and (.value | digest));
     def inventory: type=="object" and keys==["Args","Config","HostConfig","Path"] and
@@ -271,6 +289,7 @@ mg_sync_reference__check() {
     def host_names: "Binds ContainerIDFile LogConfig NetworkMode PortBindings RestartPolicy AutoRemove VolumeDriver VolumesFrom ConsoleSize CapAdd CapDrop CgroupnsMode Dns DnsOptions DnsSearch ExtraHosts GroupAdd IpcMode Cgroup Links OomScoreAdj PidMode Privileged PublishAllPorts ReadonlyRootfs SecurityOpt StorageOpt Tmpfs UTSMode UsernsMode ShmSize Sysctls Runtime Isolation CpuShares Memory NanoCpus CgroupParent BlkioWeight BlkioWeightDevice BlkioDeviceReadBps BlkioDeviceWriteBps BlkioDeviceReadIOps BlkioDeviceWriteIOps CpuPeriod CpuQuota CpuRealtimePeriod CpuRealtimeRuntime CpusetCpus CpusetMems Devices DeviceCgroupRules DeviceRequests KernelMemory KernelMemoryTCP MemoryReservation MemorySwap MemorySwappiness OomKillDisable PidsLimit Ulimits CpuCount CpuPercent IOMaximumIOps IOMaximumBandwidth Mounts MaskedPaths ReadonlyPaths Init Annotations" | split(" ");
     .container as $c | $c.HostConfig as $h |
     (.inspection_sha256 | digest) and (.configuration_sha256 | digest) and
+    oom_killer_enabled and
     (.property_fingerprints | inventory) and
     ((.property_fingerprints.Config | keys) - config_names == []) and
     ((.property_fingerprints.HostConfig | keys) - host_names == []) and
@@ -306,8 +325,17 @@ mg_sync_reference__check() {
        $c.State.Status=="created" and $c.State.Running==false and $c.State.OOMKilled==false and $c.State.ExitCode==0 and
        $c.State.StartedAt=="0001-01-01T00:00:00Z" and $c.State.FinishedAt=="0001-01-01T00:00:00Z"
      else
-       .configuration_sha256==$before.configuration_sha256 and
-       .property_fingerprints==$before.property_fingerprints and
+       ($before | oom_killer_enabled) and
+       .oom_killer_enabled_configuration_sha256==$before.oom_killer_enabled_configuration_sha256 and
+       (if .property_fingerprints.HostConfig.OomKillDisable==$before.property_fingerprints.HostConfig.OomKillDisable then
+          .configuration_sha256==$before.configuration_sha256 and
+          .property_fingerprints==$before.property_fingerprints
+        else
+          # A false/null transition is effective equality, never raw equality.
+          .configuration_sha256!=$before.configuration_sha256 and
+          (.property_fingerprints | del(.HostConfig.OomKillDisable))==
+            ($before.property_fingerprints | del(.HostConfig.OomKillDisable))
+        end) and
        ($c | del(.State,.NetworkSettings))==($before.container | del(.State,.NetworkSettings)) and
        $c.State.Status=="exited" and $c.State.Running==false and
        ($c.State.OOMKilled | type=="boolean") and
@@ -384,7 +412,8 @@ mg_sync_reference__retained() {
     --argjson before_valid "$before_valid" --argjson cleanup "$cleanup_rc" --argjson valid "$valid" --argjson rc "$rc" \
     'def published($checked):
        if .==null or $checked then . else
-         {inspection_sha256,configuration_sha256,property_fingerprints,validation_failure:"check"}
+         {inspection_sha256,configuration_sha256,property_fingerprints,
+          oom_killer_enabled_configuration_sha256,validation_failure:"check"}
        end;
     {image_id:$image,container_id:($plan.id // null),invocation_sha256:$invocation,
       before:($before | published($before_valid)),after:($after | published($valid)),
