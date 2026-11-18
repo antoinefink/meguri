@@ -302,8 +302,8 @@ docker() {
       done; return 1 ;;
     'stop '*) [ "${REMOVE_FAIL:-}" != stop ] || return 8; printf 'stop:%s\n' "$4" >>"$trace" ;;
     'rm '*)
-      [ "${REMOVE_FAIL:-}" != container ] || return 8
       for arg in "$@"; do id="$arg"; done
+      if [ "${REMOVE_FAIL:-}" = container ] && [ "$id" = "$runtime_id" ]; then return 8; fi
       for kind in runtime fixture init; do
         path="$fake/$kind.json"; [ -f "$path" ] || continue
         if [ "$(jq -r '.[0].Id' "$path")" = "$id" ]; then rm "$path"; printf 'remove:%s\n' "$kind" >>"$trace"; return; fi
@@ -623,7 +623,11 @@ reset_run() {
     assert_failed; grep -Fxq release "$trace"
     case "$failure" in
       foreign-network|inspect-network|remove-network) [ -e "$fake/network.json" ] ;;
-      foreign-runtime|inspect-runtime|remove-container) [ -e "$fake/runtime.json" ] ;;
+      foreign-runtime|inspect-runtime) [ -e "$fake/runtime.json" ] ;;
+      remove-container)
+        [ -e "$fake/runtime.json" ]
+        assert_before remove:init runtime-created
+        assert_before runtime-created "stop:$runtime_id" ;;
       foreign-fixture) [ -e "$fake/fixture.json" ] ;;
       foreign-volume|inspect-volume|remove-volume) [ -e "$fake/volume.json" ] ;;
     esac

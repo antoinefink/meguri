@@ -1252,7 +1252,7 @@ PUBLIC_ARTIFACTS = {
     'tools/mg.d/meguri-native-provider.sh': '9c981bea8a60f4cfaed0e6e8642630c4ffe4eea6227ce50e126cb267f25bf12e',
     'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
     'tools/tests/meguri_provider_real_server.bats': '08ede8953f4bd60ee36a9ae0824347d1b5340cb48a412b95523241a1dd661cbe',
-    'tools/tests/meguri_native_provider.bats': '8851882890be8dd7465cee4a2c354a0aa6ac3efd9dd2c7fc3d8b18c9069d4879',
+    'tools/tests/meguri_native_provider.bats': '8723f02630c36ccad85c7bc25a5688c46e6f4cd619883885e066c34e301bc400',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudPreviewActivityTests.swift': '9ad2c7dfb1e320bf428f622df4137fc660375692936788bc8202c11e43dbeded',
     'app/Packages/MeguriKit/Tests/AppModelTests/InitialCloudAdoptionTests.swift': '48ab986acd174f5306188c85a4d44d1232baea6097f2cb1c27a2794392841796',
     'app/Packages/MeguriKit/Tests/AppModelTests/CloudPublicationConfirmationTests.swift': 'b138a276e46e231897282352ec24692aa34d717bdf19b7f6b7a59b702567ecab',
