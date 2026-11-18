@@ -224,11 +224,13 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await page.getByRole("button", { name: "Refresh accounts", exact: true }).click();
   const memberRow = page.getByRole("listitem", { name: `Account ${memberUsername}`, exact: true });
   await expect(memberRow).toBeVisible();
-  for (const label of ["Collection", "Media", "Total"]) await expect(memberRow.getByText(label, { exact: true })).toBeVisible();
-  await expect(memberRow.locator("dd")).toHaveCount(3);
-  await expect(memberRow.locator("dd").nth(0)).toHaveText(/^[1-9][\d,.]* (B|kB|MB|GB)$/);
-  await expect(memberRow.locator("dd").nth(1)).toHaveText("0 B");
-  await expect(memberRow.locator("dd").nth(2)).toHaveText(await memberRow.locator("dd").nth(0).innerText());
+  const storage = memberRow.getByRole("list", { name: "Storage on server", exact: true });
+  for (const label of ["Collection", "Media", "Total"]) await expect(storage.getByText(label, { exact: true })).toBeVisible();
+  const amounts = storage.getByRole("listitem").locator("span:last-child");
+  await expect(amounts).toHaveCount(3);
+  await expect(amounts.nth(0)).toHaveText(/^[1-9][\d,.]* (B|kB|MB|GB)$/);
+  await expect(amounts.nth(1)).toHaveText("0 B");
+  await expect(amounts.nth(2)).toHaveText(await amounts.nth(0).innerText());
   await memberRow.getByRole("button", { name: `Create reset link for ${memberUsername}`, exact: true }).click();
   const firstReset = await memberRow.getByLabel("One-time link", { exact: true }).inputValue();
   await memberRow.getByRole("button", { name: "Copy One-time link", exact: true }).click();
@@ -275,7 +277,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await expect(memberRow).toBeVisible();
   await accountShell(page, "root.admin", true);
   await expect(memberRow.getByText(memberUsername, { exact: true })).toBeVisible();
-  await expect(memberRow.locator("dd").nth(1)).toHaveText("0 B");
+  await expect(amounts.nth(1)).toHaveText("0 B");
   await audit(page, "accounts-narrow");
   await page.setViewportSize({ width: 1280, height: 900 });
   await audit(page, "accounts-wide");

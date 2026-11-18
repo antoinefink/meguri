@@ -55,11 +55,11 @@ function AccountRow({ account, me, sessionLoss, disabled }: { account: Account; 
   return <li className="account-row" aria-label={`Account ${account.username}`}>
     <div className="account-info"><h2>{account.username}{account.id === me.id ? " (you)" : ""}</h2>
       <p>{account.role === "admin" ? "Administrator" : "Member"} · {account.enabled ? "Enabled" : "Disabled"} · {account.provisioning_state === "ready" ? "Ready" : "Provisioning"}</p>
-      {account.storage ? <dl className="account-storage" role="group" aria-label="Storage on server">
-        <div><dt>Collection</dt><dd>{storageValue(account.storage.collection_bytes)}</dd></div>
-        <div><dt>Media</dt><dd>{storageValue(account.storage.media_bytes)}</dd></div>
-        <div><dt>Total</dt><dd>{storageValue(account.storage.total_bytes)}</dd></div>
-      </dl> : account.provisioning_state === "ready" && <p>Storage unavailable</p>}
+      {account.storage ? <ul className="account-storage" aria-label="Storage on server">
+        <li><span>Collection</span><span>{storageValue(account.storage.collection_bytes)}</span></li>
+        <li><span>Media</span><span>{storageValue(account.storage.media_bytes)}</span></li>
+        <li><span>Total</span><span>{storageValue(account.storage.total_bytes)}</span></li>
+      </ul> : <p>Storage unavailable</p>}
     </div>
     <div className="actions" role="group" aria-label={`Actions for ${account.username}`}>
       <Button ref={resetTrigger} variant="outline" aria-disabled={busy || confirm} onClick={() => { if (!confirm) void perform("reset"); }}>Create reset link<span className="sr-only"> for {account.username}</span></Button>

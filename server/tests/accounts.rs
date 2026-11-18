@@ -556,9 +556,9 @@ async fn admin_storage_reads_committed_sqlite_pages_and_preserves_unmeasurable_r
     let c = meguri_sync_server::collection::schema::open(&path, true).unwrap();
     c.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
     c.execute_batch("CREATE TABLE storage_fixture(value BLOB); INSERT INTO storage_fixture VALUES(zeroblob(200000));").unwrap();
-    let pages: u64 = c.pragma_query_value(None, "page_count", |r| r.get(0)).unwrap();
-    let size: u64 = c.pragma_query_value(None, "page_size", |r| r.get(0)).unwrap();
-    let expected = pages * size;
+    let pages: i64 = c.pragma_query_value(None, "page_count", |r| r.get(0)).unwrap();
+    let size: i64 = c.pragma_query_value(None, "page_size", |r| r.get(0)).unwrap();
+    let expected = u64::try_from(pages * size).unwrap();
     assert!(expected > std::fs::metadata(&path).unwrap().len(), "committed WAL pages must be counted");
     c.execute_batch("BEGIN; INSERT INTO storage_fixture VALUES(zeroblob(200000));").unwrap();
     let response = h.get("/api/admin/accounts", Some(&admin)).await;

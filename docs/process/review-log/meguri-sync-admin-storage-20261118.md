@@ -50,3 +50,20 @@ Independent review `20261118T131553Z-99128` cleared the four exact files.
 | server/src/media/index.rs | `1ca6c74ff37ee54935caff68f2d33c04df4f34482d9cfb214c9d1a5ccd55013f` |
 | server/web/tests/browser/accounts.spec.ts | `c781843e58425b1fbd35ea7cb86c1d6c3a68cea75834c33893486e1bb7f1f565` |
 | server/web/scripts/audit-assessment.json | `37e14baecea0ed68a947c246dbaa86dddcb0551811067aa1b7c0cc20686b65f1` |
+
+## Browser accessibility and fixture repair
+
+Server test `20261118T131842Z-4583` found two signed-read errors in the direct
+SQLite test fixture. Browser run `20261118T131844Z-5002` compiled the server and
+caught the axe `dlitem` violation. Filtered export `20261118T132224Z-16005`
+and full-content review `20261118T132436Z-19518` cover the fixes. The storage
+list uses native list markup. All unavailable measurements share one message
+as specified in W3.
+
+| File | SHA-256 |
+| --- | --- |
+| server/tests/accounts.rs | `7dcfbdcd68c04fb9b2976ca6c5adbab58cc8b3829f90714c67dc5343f812b404` |
+| server/web/scripts/audit-assessment.json | `57ada607c20402e1f59ecc238d7c9de48f607cca670d903f3eed30189d3bdb8a` |
+| server/web/src/accounts.tsx | `9ae8c5ef1390d255f14a0351cf4da350fc22f46dbb28f4663f9f7fec6d591d35` |
+| server/web/src/style.css | `44744bdf30fb05f52184838f5ce2fc52a745ee1bb96557cfe703e5170e265aed` |
+| server/web/tests/browser/accounts.spec.ts | `3281b1fe21e3bc27330fa47e3cf7292b01c7cdfd6fd44fca2295eb7a6bd16296` |

@@ -119,8 +119,8 @@
         "sha256": "45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418"
       },
       "src/accounts.tsx": {
-        "bytes": 9312,
-        "sha256": "1f275369e73f55839205dd05016349add98d350e339e6e8bd3046064310a10f2"
+        "bytes": 9275,
+        "sha256": "9ae8c5ef1390d255f14a0351cf4da350fc22f46dbb28f4663f9f7fec6d591d35"
       },
       "src/api.ts": {
         "bytes": 4714,
@@ -147,8 +147,8 @@
         "sha256": "e4601ed02978054d2b34a10ebabe3a32184f7ec75c31da9b51f248e139536ea1"
       },
       "src/style.css": {
-        "bytes": 7776,
-        "sha256": "3fef8a9053c040b755bcc36ec2edd1fc8a159cd2b220ed4c6c6d480ccfa3b04d"
+        "bytes": 7796,
+        "sha256": "44744bdf30fb05f52184838f5ce2fc52a745ee1bb96557cfe703e5170e265aed"
       },
       "src/ui.tsx": {
         "bytes": 4952,
@@ -159,8 +159,8 @@
         "sha256": "036fe75a617cc7a806cb828d9908a5470a20bb7c731ea70cbbe730499a4a169f"
       },
       "tests/browser/accounts.spec.ts": {
-        "bytes": 19968,
-        "sha256": "c781843e58425b1fbd35ea7cb86c1d6c3a68cea75834c33893486e1bb7f1f565"
+        "bytes": 20037,
+        "sha256": "3281b1fe21e3bc27330fa47e3cf7292b01c7cdfd6fd44fca2295eb7a6bd16296"
       },
       "tests/policy.test.ts": {
         "bytes": 1397,

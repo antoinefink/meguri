@@ -67,9 +67,9 @@ main:focus { outline: none; }
 .account-row { padding: 1.25rem; }
 .account-row + .account-row { border-top: 1px solid var(--border); }
 .account-info { margin-bottom: .9rem; }
-.account-storage { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; margin: .6rem 0 0; color: var(--muted); font-size: .9rem; }
-.account-storage > div { display: flex; flex-wrap: wrap; gap: .25rem .5rem; }
-.account-storage dd { margin: 0; overflow-wrap: anywhere; }
+.account-storage { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; list-style: none; padding: 0; margin: .6rem 0 0; color: var(--muted); font-size: .9rem; }
+.account-storage > li { display: flex; flex-wrap: wrap; gap: .25rem .5rem; }
+.account-storage span { overflow-wrap: anywhere; }
 .account-info p { color: var(--muted); font-size: .9rem; margin-top: .25rem; }
 .link-result, .confirmation { margin-top: 1.25rem; padding: 1rem; border: 1px solid var(--border); border-radius: .5rem; background: #f8f8f6; }
 .confirmation { display: grid; gap: .85rem; }

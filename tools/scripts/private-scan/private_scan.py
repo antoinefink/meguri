@@ -835,7 +835,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '37e14baecea0ed68a947c246dbaa86dddcb0551811067aa1b7c0cc20686b65f1',
+        '57ada607c20402e1f59ecc238d7c9de48f607cca670d903f3eed30189d3bdb8a',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1020,7 +1020,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/upstream-records.json':
         'd01a9499a2330268d6c0a7aa495216e2163ed49946a12441c1e16574f8800c2f',
     'server/web/src/style.css':
-        '3fef8a9053c040b755bcc36ec2edd1fc8a159cd2b220ed4c6c6d480ccfa3b04d',
+        '44744bdf30fb05f52184838f5ce2fc52a745ee1bb96557cfe703e5170e265aed',
     'server/web/src/app.tsx':
         '4d77e6929b7b62893dd6c436c86865bc53ce885bd32933fb58670b5a6a68b5f3',
     'server/web/scripts/run.sh':
@@ -1180,7 +1180,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/tests.rs':
         '2fca66030368d01fbdf61c1bf5596834c2a0fb570c9df1b18855055c7ae54084',
     'server/tests/accounts.rs':
-        '07099dc333f7beec973c5cb3856f362cf5097130124387ec11ba15d06b95aea8',
+        '7dcfbdcd68c04fb9b2976ca6c5adbab58cc8b3829f90714c67dc5343f812b404',
     'server/tests/http_contract.rs':
         'b3af9669195af18792f1c9b44e8de582f7fb12ac658430f7bdf3ba469d8fcb7a',
     'server/tests/provision.rs':
