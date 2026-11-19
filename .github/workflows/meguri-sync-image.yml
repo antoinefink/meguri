@@ -46,9 +46,14 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
         run: |
-          tools/mg sync-web-image
-          tools/mg sync-web-deps --install
-          receipt="$(tools/mg sync-server-package)"
+          # The capability-restricted tool containers need to own their bind-mounted output.
+          mg() {
+            sudo -n env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
+              GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" "$@"
+          }
+          mg sync-web-image
+          mg sync-web-deps --install
+          receipt="$(mg sync-server-package)"
           image_id="$(jq -er 'select(.status == "pass") | .details.package.image_id' "$receipt")"
           test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image_id")" = "linux/$ARCH"
           docker tag "$image_id" "meguri-sync:$ARCH"

@@ -24,3 +24,22 @@ Focused evidence on the workflow before commit:
 The Actions run is the end-to-end check of native Linux runner builds, artifact
 transfer and GHCR publication. This change does not establish an app integration
 gate pass.
+
+## First GitHub-hosted run
+
+Starting commit `c93b0913f7d43628df039a3ea2dbdaac37eb7537`.
+[Run 44469364135](https://github.com/antoinefink/meguri/actions/runs/44469364135)
+failed on AMD64 and ARM64 at `sync-web-image`. The resolver's `tee` could
+not write `/out/font-resolution.txt`. The hosted runner owns the MG run
+directory. The resolver runs as UID 0 with all capabilities dropped and
+therefore needs write permission through the directory's owner or mode.
+
+The workflow runs the three MG packaging commands as UID 0 on the hosted
+VMs. MG creates their output directories with matching ownership. Git
+trusts only the checkout path for those commands, and the resolver keeps
+its existing capability restrictions.
+
+An independent reviewer read the complete revised workflow and reported
+no blocking findings. The public workflow's reviewed SHA-256 is
+`65679526d734f271348260bf52c82f865fba3a20fbd2198ca6ff06d998db4110`.
+The next run of the same workflow is the regression check on both runners.
