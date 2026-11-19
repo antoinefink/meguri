@@ -104,7 +104,7 @@ struct SettingsCollectionFilesSection: View {
                 Label { Text("From a file", bundle: .module) } icon: { Image(systemName: "square.and.arrow.down") }
             }
             CollectionActionRow {
-                Button { if let present { present(.collectionExport) } else { collection?.collectionExport.present() } } label: {
+                Button { if let present { present(.collectionExport) } else { collection?.collectionExport.start() } } label: {
                     Text("Export Collection", bundle: .module)
                         #if !os(macOS)
                         // Borderless draws no bezel: the label carries the touch target.
@@ -127,7 +127,9 @@ struct SettingsCollectionFilesSection: View {
             }
         } header: { Text("Collection Files", bundle: .module) }
         footer: {
-            Text("Save every deck, note, card and saved review in a .colpkg file, including images, audio and other media. No account or connection is needed.", bundle: .module)
+            // N17.3: one line under the Export row says what the file holds.
+            Text("Export saves all decks, cards, review history and media in one file.", bundle: .module)
+                .accessibilityIdentifier("settings.root.exportCollection.detail")
         }
     }
 

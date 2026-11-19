@@ -265,6 +265,64 @@ extension ReviewCollectionStartupTests {
         }
         #expect(await owner.close())
     }
+    /// N17.3: one continuous export; a cancel or a finished save discards the prepared file.
+    @Test func continuousExportOpensTheSaveDialogAndLeavesNoPreparedFile() async throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
+        await owner.start()
+        let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+        owner.entry.inspect(source); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion()
+        try #require(owner.state == .ready)
+        let coordinator = owner.collectionExport
+        // Preparation, then the hand-off that acquires the provider's lease.
+        func reachSaveDialog() async throws {
+            coordinator.start()
+            #expect(owner.navigation.sheet == .collectionExport && coordinator.continuous)
+            await coordinator.waitForCompletion(); await coordinator.waitForCompletion()
+            try #require(coordinator.destinationPresented && coordinator.providerLease != nil, "\(coordinator.message ?? "no save dialog")")
+            #expect(coordinator.plainProgressTitle == "Saving…")
+        }
+        func expectFinished() {
+            #expect(coordinator.stage == .idle && coordinator.artifact == nil && coordinator.providerLease == nil)
+            #expect(!coordinator.continuous && owner.navigation.sheet == nil && coordinator.message == nil)
+        }
+        do {
+            // Cancelling the save dialog discards the file and closes the sheet.
+            try await reachSaveDialog()
+            coordinator.nativeCancelled(); await coordinator.waitForCompletion()
+            expectFinished()
+            // A finished save does the same.
+            try await reachSaveDialog()
+            let saved = root.appending(path: "saved.colpkg")
+            coordinator.save(to: saved); await coordinator.waitForCompletion()
+            #expect(files.fileExists(atPath: saved.path))
+            expectFinished()
+            // A failed save keeps the sheet, its message and the file for another try.
+            try await reachSaveDialog()
+            coordinator.save(to: root.appending(path: "missing-parent/out.colpkg")); await coordinator.waitForCompletion()
+            #expect(coordinator.stage == .failed && coordinator.artifact != nil && coordinator.canChooseAgain)
+            #expect(owner.navigation.sheet == .collectionExport && coordinator.message != nil)
+            await coordinator.cancel()
+            expectFinished()
+            // Cancel during preparation opens no save dialog.
+            coordinator.start()
+            #expect(coordinator.plainProgressTitle == "Preparing Export…")
+            await coordinator.cancel()
+            #expect(!coordinator.destinationPresented)
+            expectFinished()
+            #expect(await owner.close())
+        } catch {
+            coordinator.nativeCancelled(); await coordinator.waitForCompletion()
+            await coordinator.cancel(); await coordinator.discard(); _ = await owner.close(); throw error
+        }
+    }
     @Test func noCollectionExplainsExportWithoutStartingWork() async throws {
         var configuration = LaunchConfiguration()
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

@@ -33,6 +33,14 @@ public final class CollectionExportCoordinator {
         return !busy && providerLease == nil && !stale && !discardRequested && owner.generation == artifact.metadata.sourceGeneration
     }
     public var canRetryCompletion: Bool { !busy && completionRetryNeeded && providerLease != nil }
+    /// N17.3: one plain line; the phase detail stays in diagnostics.
+    public var plainProgressTitle: String {
+        switch stage {
+        case .saving: "Saving…"
+        case .discarding: "Cancelling…"
+        default: destinationPresented ? "Saving…" : "Preparing Export…"
+        }
+    }
     public var progressTitle: String {
         if stage == .discarding { return "Removing prepared export…" }
         if stage == .saving { return "Saving collection…" }
@@ -54,6 +62,46 @@ public final class CollectionExportCoordinator {
         guard canPresent else { return }
         owner?.navigation.present(.collectionExport)
     }
+
+    // MARK: One continuous export (N17.3)
+
+    /// Set by `start()`: preparation hands straight to the system save dialog,
+    /// and a finished or cancelled save discards the prepared file and closes.
+    public private(set) var continuous = false
+    /// Whether the save dialog can be shown again for the retained file.
+    public var canChooseAgain: Bool { continuous && canSave && stage != .saved }
+    /// Export Collection: prepare at once, with progress, then ask where to save.
+    public func start() {
+        guard canPresent else { return }
+        continuous = true
+        owner?.navigation.present(.collectionExport)
+        guard artifact != nil || stage != .idle else { prepare(); return }
+        // A file left by an earlier, interrupted export is never offered again.
+        Task {
+            await discard()
+            if stage == .idle, continuous { prepare() }
+        }
+    }
+    /// Cancel at any step: stop the work, discard the prepared file, close.
+    public func cancel() async {
+        guard !destinationPresented else { return }
+        // First, so a preparation that finishes meanwhile opens no save dialog.
+        continuous = false
+        await cancelAndDrain()
+        if providerLease == nil { await discard() }
+        if owner?.navigation.sheet == .collectionExport { owner?.navigation.dismissSheet() }
+    }
+    /// After the save dialog: a clean save or a cancel ends the export. A
+    /// failure keeps the sheet, its message and the file for another try.
+    private func finishContinuous(cancelled: Bool) async {
+        guard continuous, providerLease == nil, !completionRetryNeeded, !publicationUncertain, !stale,
+              cancelled ? stage == .ready : (stage == .saved && message == nil) else { return }
+        task = nil
+        await discard()
+        guard stage == .idle else { return }
+        continuous = false
+        if owner?.navigation.sheet == .collectionExport { owner?.navigation.dismissSheet() }
+    }
     public func prepare() {
         guard canPrepare, let owner else { return }
         stale = false; message = nil; publicationUncertain = false; stage = .preparing; progress = nil
@@ -72,6 +120,7 @@ public final class CollectionExportCoordinator {
                 report(error, destination: false)
             }
             self.operation = nil; task = nil; progress = nil
+            if continuous, stage == .ready, canSave { chooseDestination() }
         }
     }
     private func progressReceiver() -> @Sendable (CoreProgress) -> Void {
@@ -121,6 +170,7 @@ public final class CollectionExportCoordinator {
             }
             await finishProvider()
             self.operation = nil; task = nil
+            await finishContinuous(cancelled: false)
         }
     }
     /// Files has completed its independent copy. This is not a cloud-upload receipt.
@@ -141,10 +191,11 @@ public final class CollectionExportCoordinator {
             recordDiagnostic(.init(component: .collectionExport, operation: .publish, stage: .publication,
                 outcome: saved ? .succeeded : .cancelled))
             if saved {
-                message = stale ? "A copy of the earlier collection was saved. Prepare a new export for the current collection." : nil
+                message = stale ? "A copy of the earlier collection was saved. Export again to save the current collection." : nil
             }
             await finishProvider()
             task = nil
+            await finishContinuous(cancelled: !saved)
         }
     }
     public func nativeFailed(_ error: any Error) {
@@ -212,8 +263,8 @@ public final class CollectionExportCoordinator {
         guard artifact != nil || stage == .preparing || destinationPresented else { return }
         stale = true
         message = stage == .saved
-            ? "The earlier collection was saved. Discard the prepared export to export the current collection."
-            : "The collection was replaced. Discard this export and prepare a new one."
+            ? "The earlier collection was saved. Export again to save the current collection."
+            : "The collection was replaced. Export again to save the current collection."
         if !busy && stage != .saved { stage = .failed }
         let operation = operation
         Task { await operation?.cancel() }
@@ -224,7 +275,7 @@ public final class CollectionExportCoordinator {
         if publicationUncertain {
             message = "The new file may already be saved. Check the destination before trying again. The completed export is retained."
         } else if stale {
-            message = "The collection was replaced. Discard this export and prepare a new one."
+            message = "The collection was replaced. Export again to save the current collection."
         } else if destination {
             message = "The file could not be saved. The completed export is retained; choose another destination and try again."
         } else if let cause = (error as? CollectionExportFailure)?.cause ?? (error as? BridgeError),

@@ -20,7 +20,7 @@ struct NativeCommandContext {
             collection.entry.present()
         case .collectionExport:
             guard fileActionsAvailable, collection.collectionExport.canPresent else { return }
-            collection.collectionExport.present()
+            collection.collectionExport.start()
         case .manualTransfer:
             // Reopening must also admit an active operation or authoritative
             // preview. Only the workflow's explicit actions start work.

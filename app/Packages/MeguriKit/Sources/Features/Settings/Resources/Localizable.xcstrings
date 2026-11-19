@@ -1,6 +1,46 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Preparing Export…": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Preparing Export…" } }
+      }
+    },
+    "Saving…": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Saving…" } }
+      }
+    },
+    "Cancelling…": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Cancelling…" } }
+      }
+    },
+    "Choose Another Location": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose Another Location" } }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Cancel" } }
+      }
+    },
+    "A copy of the earlier collection was saved. Export again to save the current collection.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "A copy of the earlier collection was saved. Export again to save the current collection." } }
+      }
+    },
+    "The earlier collection was saved. Export again to save the current collection.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The earlier collection was saved. Export again to save the current collection." } }
+      }
+    },
+    "Export saves all decks, cards, review history and media in one file.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Export saves all decks, cards, review history and media in one file." } }
+      }
+    },
     "Close": {
       "comment": "Closes the sync sheet while confirmed work remains owned by the coordinator.",
       "localizations": {
@@ -328,12 +368,12 @@
         }
       }
     },
-    "The collection was replaced. Discard this export and prepare a new one.": {
+    "The collection was replaced. Export again to save the current collection.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The collection was replaced. Discard this export and prepare a new one."
+            "value": "The collection was replaced. Export again to save the current collection."
           }
         }
       }
