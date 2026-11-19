@@ -854,6 +854,7 @@ vm_session_result() {
 # reached (VM_QUEUE_REASON; U19c).
 test_in_vm() {
   local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=() rc policy_report sdk=iphonesimulator build_dest="generic/platform=iOS Simulator"
+  local copy_started copy_rc
   local signing="${MEGURI_APP_SIGNING-adhoc}" signing_args=()
   local unit_command="env -u TEST_RUNNER_MEGURI_INITIAL_ADOPTION_FIXTURE -u TEST_RUNNER_MEGURI_CLOUD_SERVICE_CLI xcodebuild"
   local DD_TESTS="$WORK/DerivedData-tests"
@@ -923,7 +924,14 @@ test_in_vm() {
     VM_PRODUCTS_BLOCKED=""
   fi
   profile_cache_check "$log" || return 70
-  if ! mvl_copy_in "$VM_SSH" "$VM_NAME" "$WORK" "$DD_TESTS/Build/Products" 2>>"$log"; then
+  # Measure each whole-Products transfer, including failures. SECONDS keeps
+  # this diagnostic to whole seconds without a process or product scan.
+  copy_started=$SECONDS
+  mvl_copy_in "$VM_SSH" "$VM_NAME" "$WORK" "$DD_TESTS/Build/Products" 2>>"$log"
+  copy_rc=$?
+  printf 'xcode_project_check: Products copy elapsed_s=%s exit=%s path=%s\n' \
+    "$((SECONDS - copy_started))" "$copy_rc" "$DD_TESTS/Build/Products" >>"$log"
+  if [ "$copy_rc" -ne 0 ]; then
     echo "xcode_project_check: $MVL_REASON" >>"$log"
     [ -z "$MVL_UNREACHABLE" ] || { VM_QUEUE_REASON="$MVL_REASON" && return 72; }
     return 70

@@ -1268,6 +1268,31 @@ PY
   assert_mac_debug_sentinels
 }
 
+@test "each Xcode Products copy records elapsed seconds and its result in its lane log" {
+  fake_vm
+  add_test_inputs
+  check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  python3 - "$BATS_TEST_TMPDIR/work/logs" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+copies = 0
+roots = set()
+for log in Path(sys.argv[1]).glob("*.log"):
+    text = log.read_text()
+    paths = re.findall(r"^mac-vm: copying (.+/Build/Products) into the VM$", text, re.M)
+    timings = re.findall(r"^xcode_project_check: Products copy elapsed_s=([0-9]+) exit=([0-9]+) path=(.+)$", text, re.M)
+    assert len(paths) == len(timings), log
+    for path, (elapsed, code, measured_path) in zip(paths, timings):
+        assert measured_path == path and code == "0", (log, timings)
+        copies += 1
+        roots.add(Path(path).parent.parent.name)
+assert copies > 1, copies
+assert roots == {"DerivedData-tests", "DerivedData-tests-profile"}, roots
+PY
+}
+
 @test "VM runs read current baselines, fixtures, scripts, workspace manifest and color catalog, not earlier copies" {
   fake_vm
   add_test_inputs
@@ -1353,6 +1378,8 @@ PY
   FAKE_VM_FORK_FAIL="DerivedData-tests(-profile)?/Build/Products' && mkdir -p" check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
   no_vm_failure
   tap_line 'ok [0-9]+ iphone-app-hosted # SKIP queued: copying .*/DerivedData-tests/Build/Products into the VM meguri-mac failed \(tar and ssh exit codes: [0-9]+ 1: zsh:2: fork failed: resource temporarily unavailable\); see log.txt \(user step mac-vm\)'
+  grep -Eq '^xcode_project_check: Products copy elapsed_s=[0-9]+ exit=1 path=.*/DerivedData-tests/Build/Products$' \
+    "$BATS_TEST_TMPDIR/work/logs/iphone-app-hosted.log"
   not_called '^vm-xcodebuild '
 }
 
