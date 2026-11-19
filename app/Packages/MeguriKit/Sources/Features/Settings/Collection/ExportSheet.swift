@@ -97,9 +97,6 @@ struct CollectionExportContent: View {
             }
         }
         .presentationSizing(.form)
-        #if os(iOS)
-        .presentationDetents([.medium])
-        #endif
         .interactiveDismissDisabled()
     }
 }

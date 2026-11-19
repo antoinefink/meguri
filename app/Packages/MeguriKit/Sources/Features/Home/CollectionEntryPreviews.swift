@@ -19,7 +19,9 @@ public enum CollectionEntryPreview: PreviewStates {
     private static func presentation(_ state: PreviewState) -> CollectionEntryPresentation {
         switch state {
         case .empty:
-            .init()
+            // The first import: no collection to replace, so no consequence line.
+            .init(facts: .init(notes: 6, cards: 11, reviews: 6, replacingExisting: false, mediaCount: 0, mediaDecodedBytes: 0),
+                  fileName: "review.colpkg")
         case .typical:
             .init(facts: .init(notes: 1_204, cards: 3_410, reviews: 18_250, replacingExisting: true, mediaCount: 212, mediaDecodedBytes: 48_300_000),
                   fileName: "Japanese.colpkg")

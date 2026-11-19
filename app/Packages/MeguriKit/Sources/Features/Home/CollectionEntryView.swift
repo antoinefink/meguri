@@ -104,7 +104,9 @@ struct CollectionEntryPresentation {
     }
     /// package/container P16.4 asks for the media size and for what happens to
     /// media already here; one footnote carries both.
-    static func mediaNote(_ facts: Facts, device: String = deviceName) -> String {
+    static func mediaNote(_ facts: Facts, device: String = deviceName) -> String? {
+        // A file without media has nothing to merge.
+        guard facts.mediaCount > 0 else { return nil }
         let size = Int64(clamping: facts.mediaDecodedBytes).formatted(.byteCount(style: .file))
         return "Its media (\(size)) is merged with the media on this \(device); files already here are kept."
     }
@@ -235,8 +237,10 @@ struct CollectionEntryContent: View {
                                 .accessibilityIdentifier("onboarding.collectionImport.preview.safety")
                         }
                     } footer: {
-                        Text(verbatim: CollectionEntryPresentation.mediaNote(facts))
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.media")
+                        if let note = CollectionEntryPresentation.mediaNote(facts) {
+                            Text(verbatim: note)
+                                .accessibilityIdentifier("onboarding.collectionImport.preview.media")
+                        }
                     }
                 }
                 if let message = presentation.message {
@@ -310,21 +314,26 @@ struct CollectionEntryContent: View {
                         .disabled((presentation.busy && !presentation.canCancel) || presentation.requiresRecovery)
                         .accessibilityIdentifier("onboarding.collectionImport.cancel")
                 }
-                if presentation.facts != nil, !presentation.busy {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Import", action: actions.confirm)
-                            .buttonStyle(.borderedProminent)
-                            .keyboardShortcut(.defaultAction)
-                            .accessibilityIdentifier("onboarding.collectionImport.confirm")
+                if let facts = presentation.facts, !presentation.busy {
+                    if facts.replacingExisting {
+                        // package/transfer-sheets X3: replacing a collection is a
+                        // destructive action and never the default; Return confirms nothing.
+                        ToolbarItem(placement: .destructiveAction) {
+                            Button("Import", role: .destructive, action: actions.confirm)
+                                .accessibilityIdentifier("onboarding.collectionImport.confirm")
+                        }
+                    } else {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Import", action: actions.confirm)
+                                .buttonStyle(.borderedProminent)
+                                .keyboardShortcut(.defaultAction)
+                                .accessibilityIdentifier("onboarding.collectionImport.confirm")
+                        }
                     }
                 }
             }
         }
         .presentationSizing(.form)
-        #if os(iOS)
-        // Recovery receipts need the room; the ordinary steps do not.
-        .presentationDetents(presentation.showsRetainedDetails ? [.large] : [.medium])
-        #endif
         .interactiveDismissDisabled(presentation.busy || presentation.requiresRecovery)
     }
 

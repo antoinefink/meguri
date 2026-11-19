@@ -17,14 +17,16 @@ import Testing
         #expect(CollectionEntryPresentation.count(7, "review", "reviews") == "7 reviews")
     }
 
-    @Test func consequenceShowsOnlyWhenACollectionIsReplaced() {
+    @Test func consequenceShowsOnlyWhenACollectionIsReplaced() throws {
         let replacing = CollectionEntryPresentation.Facts(notes: 6, cards: 11, reviews: 7, replacingExisting: true)
         #expect(CollectionEntryPresentation.consequence(replacing, device: "iPhone")
             == "This replaces the collection on this iPhone. Meguri keeps a backup of the current one.")
         let first = CollectionEntryPresentation.Facts(notes: 6, cards: 11, reviews: 7, replacingExisting: false)
         #expect(CollectionEntryPresentation.consequence(first, device: "iPhone") == nil)
         // package/container P16.4: the media size and what happens to media already here.
-        let note = CollectionEntryPresentation.mediaNote(first, device: "Mac")
+        #expect(CollectionEntryPresentation.mediaNote(first, device: "Mac") == nil)
+        let media = CollectionEntryPresentation.Facts(notes: 6, cards: 11, reviews: 7, replacingExisting: false, mediaCount: 3, mediaDecodedBytes: 2_000_000)
+        let note = try #require(CollectionEntryPresentation.mediaNote(media, device: "Mac"))
         #expect(note.contains("merged") && note.contains("kept") && note.contains("Mac"))
     }
 
