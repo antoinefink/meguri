@@ -271,7 +271,12 @@ import notify
         XCTAssertEqual(add.label, "Add")
         try click(add, app, bundle)
         // N17.1: the confirmation names the deck; the sheet stays open on a cleared form.
+        #if os(macOS)
         XCTAssertTrue(waitForText(element(app, "editor.add.result"), "Added to Default"))
+        #else
+        // On touch the confirmation is the navigation bar's subtitle.
+        XCTAssertTrue(app.navigationBars.staticTexts["Added to Default"].firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+        #endif
         XCTAssertTrue(editor.exists)
         XCTAssertFalse(element(app, "editor.add.error").exists)
         let closeEditor = try XCTUnwrap(waitForHittable(editor.buttons.matching(identifier: "editor.add.close")),

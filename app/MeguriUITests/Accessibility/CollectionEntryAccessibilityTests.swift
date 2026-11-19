@@ -28,8 +28,12 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
                         // N17.2: one plain line names the step; it is the bar's own label.
                         XCTAssertEqual(value.label, "Importing…")
                     }
-                    if state == "typical" || state == "overflow" {
+                    if state == "empty" || state == "typical" || state == "overflow" {
                         XCTAssertEqual(app.buttons["onboarding.collectionImport.confirm"].firstMatch.label, "Import")
+                        // Only a replacement says what it replaces.
+                        if state == "empty" {
+                            XCTAssertFalse(app.descendants(matching: .any)["onboarding.collectionImport.preview.safety"].firstMatch.exists)
+                        }
                         for removed in ["preview.destination", "preview.media.files", "preview.media.bytes", "explanation", "choose"] {
                             XCTAssertFalse(app.descendants(matching: .any)["onboarding.collectionImport.\(removed)"].firstMatch.exists, removed)
                         }
