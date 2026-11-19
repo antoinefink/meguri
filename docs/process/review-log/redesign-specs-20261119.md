@@ -45,7 +45,7 @@ finding number:
 - F8: "connected" is defined once.
 - F11, R1: the update hold applies while a publish or adopt op exists.
 
-- F5: with a blocked provider, studying, backups, import and export still work.
+Accepted as written, and open for Antoine to change later: the unguarded
 interval of an upload to an empty Meguri Sync server, undo history cleared
 by the automatic FSRS step, repeated silent re-enabling with a log entry,
 and conflict copies other than media having no interface beyond a count.
