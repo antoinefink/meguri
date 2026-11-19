@@ -212,6 +212,26 @@ const PRESERVED: &[&str] = &[
 ];
 
 #[test]
+fn content_witness_moves_with_a_row_that_no_collection_stamp_records() {
+    let (_directory, path) = empty_collection();
+    let collection = managed(&path);
+    seed(&collection);
+    let reader = collection.open_reader(ReaderRole::Query).unwrap();
+    let before = reader.content_witness().unwrap();
+    let facts = reader.transfer_facts().unwrap();
+    assert_eq!(reader.content_witness().unwrap(), before);
+    // A row stamped again with no pending mark and no change of col.mod.
+    exec(collection.writer(), "UPDATE decks SET mtime_secs = (SELECT max(mtime_secs) + 5 FROM decks) WHERE id = (SELECT min(id) FROM decks)");
+    assert_eq!(reader.transfer_facts().unwrap(), facts);
+    assert_ne!(reader.content_witness().unwrap(), before);
+    let stamped = reader.content_witness().unwrap();
+    // A row added with no pending mark moves a count.
+    exec(collection.writer(), "INSERT INTO tags (tag, usn, collapsed) VALUES ('witness', 0, 0)");
+    assert_eq!(reader.transfer_facts().unwrap(), facts);
+    assert_ne!(reader.content_witness().unwrap(), stamped);
+}
+
+#[test]
 fn upload_transforms_only_the_copy_includes_wal_and_finalises_transformed_statistics() {
     let (directory, path) = empty_collection();
     let collection = managed(&path);
@@ -243,6 +263,11 @@ fn upload_transforms_only_the_copy_includes_wal_and_finalises_transformed_statis
     assert_eq!(sync_reader.transfer_facts().unwrap(), seeded_facts());
     assert_eq!(&fs::read(stage.path()).unwrap()[18..20], &[1, 1]);
     assert_eq!(listing(stage.directory()), ["collection.anki2".to_owned()].into());
+
+    // The witness reads no usn and no collection stamp: the collection and the
+    // candidate prepared from it give the same value, graves and all.
+    let witness = sync_reader.content_witness().unwrap();
+    assert_eq!(meguri_storage::one_way::closed_content_witness(&stage.path()).unwrap(), Some(witness));
 
     // Immutable read cannot change the prepared header or create sidecars.
     let uri = format!("file:{}?mode=ro&immutable=1", stage.path().display());
