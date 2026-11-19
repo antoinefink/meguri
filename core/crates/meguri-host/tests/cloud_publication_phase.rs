@@ -4786,7 +4786,11 @@ fn resume_media_fixture(disabled: bool, ready_only: bool, reselected: bool) {
         runtime.validate_cloud_media_work(&collection, &work).unwrap();
         let files = std::fs::read(&path).unwrap();
         disable_device_sync(&host);
-        assert!(runtime.cloud_media_work(&collection, &media).unwrap().is_none());
+        assert!(!host.provider_authority().snapshot().unwrap().settings.enabled);
+        assert!(matches!(
+            runtime.cloud_media_work(&collection, &media),
+            Err(cloud::runtime::RuntimeError::IdentityUnverified)
+        ));
         assert!(runtime.validate_cloud_media_work(&collection, &work).is_err());
         assert!(
             runtime

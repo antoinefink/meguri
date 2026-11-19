@@ -997,7 +997,7 @@ PUBLIC_ARTIFACTS = {
     "core/crates/meguri-sync/src/provider.rs":
         "793880794f47d8c5a5c2da40314556eb63b2a21d3a5a00e4d41948cf0948354f",
     "core/crates/meguri-host/tests/cloud_publication_phase.rs":
-        "9c5b08115ee7c9969554a0f6d68628cca262a7def0aee665866f0ebab78de622",
+        "fc861d0bc2dc02b4020455251f3dbe2e0a0cb476f047f54ed0727329cae63e46",
     "docs/process/review-log/cancellation-provider-restoration-20261117.md":
         "f73b989f4c5183f5ecf435af4aaa63105666afad147b7ac9cf4b044ef030a55c",
     'specs/sync/one-way.md':
