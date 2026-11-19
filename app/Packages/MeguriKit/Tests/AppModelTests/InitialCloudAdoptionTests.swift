@@ -30,21 +30,24 @@ extension ReviewCollectionStartupTests {
     @Test func intentionalCloseRefusesOriginalReadWithoutStickyFailureAndFencesLateProvider() async throws {
         let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
         let provider = SyncOwnerGate()
+        let entered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let returned = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         defer {
-            provider.release(); returned.continuation.finish()
+            provider.release(); entered.continuation.finish(); returned.continuation.finish()
             harness.factory.beforeAccountReturn = nil
             harness.release(); harness.removeTemporaryStorage()
         }
         do {
-            try await harness.prepareStoppedResume(discover: false)
+            // Keep the real ready discovery's ownership while the selection stays disabled.
+            try await harness.prepareStoppedResume()
             let original = try #require(harness.backends.last)
             harness.factory.beforeAccountReturn = {
+                entered.continuation.yield(())
                 await provider.hold() // deliberately ignores task cancellation
                 returned.continuation.yield(())
             }
             await harness.sync.accountChanged()
-            await provider.waitUntilHeld()
+            try await initialCloudSignal(entered.stream, stage: "intentional-close-provider-entry")
             #expect(await harness.sync.cancelAndDrain())
             #expect(original.closeCount == 1)
             #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
@@ -76,37 +79,43 @@ extension ReviewCollectionStartupTests {
     func originalProviderFailurePreparedBeforeCloseRemainsSticky(cancellation: Bool) async throws {
         let harness = try InitialCloudHarness(fixture: InitialCloudFixture.load())
         let provider = SyncOwnerGate(), command = SyncOwnerGate()
+        let providerEntered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        let commandEntered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let waiting = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         var held = false
         defer {
             provider.release(); command.release(); waiting.continuation.finish()
+            providerEntered.continuation.finish(); commandEntered.continuation.finish()
             harness.factory.beforeAccountReturn = nil
             harness.backends.last?.beforeReturn = nil
             harness.sync.observeAccountPolicyDrain = nil
             harness.release(); harness.removeTemporaryStorage()
         }
         do {
-            try await harness.prepareStoppedResume(discover: false)
+            // Keep the real ready discovery's ownership while the selection stays disabled.
+            try await harness.prepareStoppedResume()
             let backend = try #require(harness.backends.last)
             harness.factory.beforeAccountReturn = {
+                providerEntered.continuation.yield(())
                 await provider.hold()
                 if cancellation { throw CancellationError() }
                 throw BridgeError.internal("synthetic-original-resolver")
             }
             await harness.sync.accountChanged()
-            await provider.waitUntilHeld()
+            try await initialCloudSignal(providerEntered.stream, stage: "sticky-failure-provider-entry")
             backend.beforeReturn = { value, result in
                 guard case .statusChanged = value.action, !held else { return }
                 held = true
                 #expect(result.error == nil)
                 await withTaskCancellationHandler {
+                    commandEntered.continuation.yield(())
                     await command.hold()
                 } onCancel: {
                     Task { @MainActor in command.release() }
                 }
             }
             harness.sync.setDeviceSettings(paused: false, automatic: false, media: false)
-            await command.waitUntilHeld()
+            try await initialCloudSignal(commandEntered.stream, stage: "sticky-failure-command-entry")
             harness.sync.observeAccountPolicyDrain = { phase in
                 if case .waiting = phase { waiting.continuation.yield(()) }
             }
