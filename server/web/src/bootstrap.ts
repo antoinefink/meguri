@@ -5,7 +5,7 @@ export function takeFragment(location: Pick<Location, "hash" | "pathname" | "sea
   if (fragment) history.replaceState(null, "", location.pathname + location.search);
   const params = new URLSearchParams(fragment.slice(1));
   fragment = "";
-  const tokens = params.getAll("token");
+  const tokens = params.getAll(location.pathname === "/oauth/consent" ? "request" : "token");
   return tokens.length === 1 && /^[A-Za-z0-9_-]{43}$/.test(tokens[0] ?? "") ? tokens[0]! : "";
 }
 let token = takeFragment(window.location, window.history);
@@ -14,5 +14,5 @@ void import("./mount").then(({ mount }) => {
   mount();
 }).catch(() => {
   token = "";
-  document.getElementById("root")!.textContent = "Meguri could not load. Reload this page. If a link was cleared, reopen the original invitation or reset link.";
+  document.getElementById("root")!.textContent = "Meguri could not load. Reload this page. If a link was cleared, reopen the original invitation or reset link. For a client connection, return to the client and start again.";
 });

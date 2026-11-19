@@ -253,8 +253,9 @@ async function connectionLayout(page: Page, username: string, admin: boolean) {
       await audit(page, `connection-${admin ? "admin" : "member"}-${width}`);
     }
     const main = page.getByRole("main");
-    await expect(main.locator('[data-slot="card"]')).toHaveCount(1);
-    await expect(main.getByRole("heading", { name: "Connection details", exact: true })).toBeVisible();
+    await expect(main.locator('[data-slot="card"]')).toHaveCount(2);
+    await expect(main.getByRole("heading", { name: "Connection details", exact: true, level: 2 })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "MCP connections", exact: true, level: 2 })).toBeVisible();
     await expect(main.getByLabel("Server URL", { exact: true })).not.toHaveValue("");
     await expect(main.getByLabel("Username", { exact: true })).toHaveValue(username);
     await expect(main.getByText("Sign in to a compatible client with your username and account password.", { exact: true })).toBeVisible();

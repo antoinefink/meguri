@@ -16,9 +16,10 @@ const descriptions: Record<FormMode, string> = {
   reset: "Choose a new password for the account associated with this link. This does not enable a disabled account.",
   settings: "Replacing your password signs out every browser and native client using this account."
 };
-export function CredentialsForm({ mode, token, clearToken, onLogin, onSuccess, onSessionLoss, link }: {
+export function CredentialsForm({ mode, token, clearToken, onLogin, onSuccess, onSessionLoss, link, compactLoginCopy }: {
   mode: FormMode; token: string; clearToken: () => void; onLogin: (me: Me) => void;
   onSuccess: (message: string) => void; onSessionLoss: () => void; link: (path: string, label: string) => ReactNode;
+  compactLoginCopy?: { description: ReactNode };
 }) {
   const prefix = useId();
   const [username, setUsername] = useState("");
@@ -30,6 +31,7 @@ export function CredentialsForm({ mode, token, clearToken, onLogin, onSuccess, o
   const [outcome, setOutcome] = useState<OutcomeValue | null>(null);
   const claim = mode === "setup" || mode === "invite" || mode === "reset";
   const creation = mode !== "login";
+  const compactLogin = mode === "login" && compactLoginCopy !== undefined;
   const hasUsername = mode !== "reset" && mode !== "settings";
   const secret = token || manualToken;
   const errors = outcome?.fields ?? {};
@@ -82,18 +84,18 @@ export function CredentialsForm({ mode, token, clearToken, onLogin, onSuccess, o
   }
   const inputProps = (name: string) => ({ id: `${prefix}-${name}`, name, readOnly: busy, ...(errors[name] ? { error: errors[name] } : {}) });
   return <Card className={mode === "settings" ? "settings-card" : "auth-card"}>
-    <CardHeader><CardTitle>{titles[mode]}</CardTitle><CardDescription>{descriptions[mode]}</CardDescription></CardHeader>
+    <CardHeader><CardTitle>{titles[mode]}</CardTitle><CardDescription className={compactLogin ? "mcp-sign-in-description" : undefined}>{compactLogin ? compactLoginCopy.description : descriptions[mode]}</CardDescription></CardHeader>
     <CardContent><form onSubmit={submit} noValidate aria-busy={busy}>
       <FieldGroup>
         <Outcome value={outcome} prefix={prefix} />
         {mode === "setup" && <TextField {...inputProps("token")} label="One-time setup code" type="password" autoComplete="off" spellCheck={false} value={secret} onChange={e => { clearToken(); setManualToken(e.target.value); }} hint="Find the code in the server’s first-start console or Docker logs, or in the protected state/setup-token file." />}
         {claim && mode !== "setup" && <p id={`${prefix}-token`} tabIndex={-1} className={errors.token ? "error" : "muted"}>{errors.token ?? (secret ? "Secure link received. It has been removed from the address bar." : "Open the original invitation or reset link to continue.")}</p>}
-        {hasUsername && <TextField {...inputProps("username")} label="Username" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={e => setUsername(e.target.value)} hint="3–64 letters, numbers, dots, underscores or hyphens." />}
+        {hasUsername && <TextField {...inputProps("username")} label="Username" autoComplete="username" autoCapitalize="none" spellCheck={false} value={username} onChange={e => setUsername(e.target.value)} {...(!compactLogin ? { hint: "3–64 letters, numbers, dots, underscores or hyphens." } : {})} />}
         {mode === "settings" && <TextField {...inputProps("current_password")} label="Current password" type="password" autoComplete="current-password" value={current} onChange={e => setCurrent(e.target.value)} />}
         <TextField {...inputProps(passwordField)} label={creation ? "New password" : "Password"} type="password" autoComplete={creation ? "new-password" : "current-password"} value={password} onChange={e => setPassword(e.target.value)} {...(creation ? { hint: "Use a long password or passphrase. Spaces and letter case are preserved." } : {})} />
         {creation && <TextField {...inputProps("confirmation")} label="Confirm new password" type="password" autoComplete="new-password" value={confirmation} onChange={e => setConfirmation(e.target.value)} />}
         <Button type="submit" aria-disabled={busy}>{busy ? "Submitting…" : mode === "settings" ? "Replace password and sign out" : titles[mode]}</Button>
-        {mode === "login" && <FieldDescription>Need access or a password reset? Ask your server administrator for a link.</FieldDescription>}
+        {mode === "login" && !compactLogin && <FieldDescription>Need access or a password reset? Ask your server administrator for a link.</FieldDescription>}
         {claim && link("/login", "Go to sign in")}
       </FieldGroup>
     </form></CardContent>

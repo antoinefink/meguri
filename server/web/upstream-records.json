@@ -16,16 +16,16 @@
       "sha256": "9abc004ff5446fc599b684eff842a6c8eb13d65030779d90162567f6903e3c6e",
       "path": "apps/v4/registry/new-york-v4/blocks/login-01/page.tsx",
       "adapted_into": "src/forms.tsx",
-      "adaptation": "Centered card, header/content and FieldGroup composition retained; username/password and capability forms replace email, social login and signup.",
-      "adapted_sha256": "35611dcca44e02851d1e29ae225d867828a5e99a38bf585b7092a51c76d7568d"
+      "adaptation": "Centered card, header/content and FieldGroup composition retained; username/password and capability forms replace email, social login and signup. Optional compact login copy supplies verified connecting-client context only for consent.",
+      "adapted_sha256": "abef1bdecf89ce85548f905e008d2b1cdcb9de9a948ca4eb85b48a2e6bf307bb"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/login-01/components/login-form.tsx",
       "sha256": "a62a24aef1e3be9cb204c7b3bd563cc2f8cdd5d7c4ff07693af2128a4773a91a",
       "path": "apps/v4/registry/new-york-v4/blocks/login-01/components/login-form.tsx",
       "adapted_into": "src/forms.tsx",
-      "adaptation": "Centered card, header/content and FieldGroup composition retained; username/password and capability forms replace email, social login and signup.",
-      "adapted_sha256": "35611dcca44e02851d1e29ae225d867828a5e99a38bf585b7092a51c76d7568d"
+      "adaptation": "Centered card, header/content and FieldGroup composition retained; username/password and capability forms replace email, social login and signup. Optional compact login copy supplies verified connecting-client context only for consent.",
+      "adapted_sha256": "abef1bdecf89ce85548f905e008d2b1cdcb9de9a948ca4eb85b48a2e6bf307bb"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/sidebar-01/page.tsx",
@@ -33,7 +33,7 @@
       "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/page.tsx",
       "adapted_into": "src/app.tsx",
       "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links including own Collection replace sample navigation and panels. Narrow screens use a compact brand/account row before equal-width text-only navigation; desktop keeps its sidebar and account footer.",
-      "adapted_sha256": "af8641725a4c838aec5c45b516d6522d643c1880644a369025a3a634054747ee"
+      "adapted_sha256": "7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
@@ -41,7 +41,7 @@
       "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
       "adapted_into": "src/app.tsx",
       "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links including own Collection replace sample navigation and panels. Narrow screens use a compact brand/account row before equal-width text-only navigation; desktop keeps its sidebar and account footer.",
-      "adapted_sha256": "af8641725a4c838aec5c45b516d6522d643c1880644a369025a3a634054747ee"
+      "adapted_sha256": "7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/ui/sidebar.tsx",
