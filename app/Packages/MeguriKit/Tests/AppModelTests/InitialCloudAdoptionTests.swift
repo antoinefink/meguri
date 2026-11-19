@@ -3,6 +3,7 @@ import Foundation
 import CloudKit
 @testable import Instrumentation
 import func MeguriCoreBindings.testCloudPolicyExchangeObservation
+import Observation
 import Synchronization
 import Testing
 @testable import AppModel
@@ -199,13 +200,18 @@ extension ReviewCollectionStartupTests {
             let connection = try #require(original.connection)
             let executor = try #require(original.own)
             // Exercise the native executor itself: discovery grants no activation.
-            guard case .ready(let handle, let summary) = try await executor.preview() else {
-                throw CloudOwnTransportFailure.unexpectedReply
+            do {
+                let provider = try await CoreProviderService.attached()
+                let discovery = try await provider.beginICloudDiscovery()
+                defer { withExtendedLifetime(discovery) {} }
+                guard case .ready(let handle, let summary) = try await executor.preview() else {
+                    throw CloudOwnTransportFailure.unexpectedReply
+                }
+                #expect(summary.initialAdoptionRequired && !summary.localCollectionPresent)
+                #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
+                #expect(!harness.collectionExists && harness.owner.review == nil)
+                try await connection.cancelPreview(handle)
             }
-            #expect(summary.initialAdoptionRequired && !summary.localCollectionPresent)
-            #expect(!harness.sync.settings.enabled && harness.persistedEnabled == false)
-            #expect(!harness.collectionExists && harness.owner.review == nil)
-            try await connection.cancelPreview(handle)
             let before = harness.owner.generation
             var observedAcceptance = false
             harness.sync.observeInitialAdoptionPreview = { _ in
@@ -975,7 +981,16 @@ extension ReviewCollectionStartupTests {
             // observe the pending operation instead of waiting on its own gate.
             harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
             try await initialCloudSignal(entered.stream, stage: "resume-preissued-status")
+            try #require(harness.sync.settings.paused)
+            let unpaused = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            defer { unpaused.continuation.finish() }
+            // Buffer will-change; read the assigned value on the MainActor after the signal.
+            withObservationTracking { _ = harness.sync.settings.paused } onChange: { [continuation = unpaused.continuation] in
+                continuation.yield(())
+            }
             harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            try await initialCloudSignal(unpaused.stream, stage: "resume-settings-unpaused")
+            try #require(!harness.sync.settings.paused)
             harness.sync.observeResumePolicyDrain = { stage in
                 switch stage {
                 case .waiting:
@@ -994,6 +1009,7 @@ extension ReviewCollectionStartupTests {
                 }
             }
             await harness.sync.confirmResume()
+            try #require(waited)
             await harness.sync.waitForInputs()
             #expect(waited && returned && admitted == !pauseDuringDrain)
             #expect(harness.sync.preview == nil && harness.sync.connectionFailure == nil)
