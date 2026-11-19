@@ -1200,15 +1200,17 @@ extension ReviewCollectionStartupTests {
             harness.factory.beforeAccountReturn = {
                 trace.record("fixture.beforeAccountReturn.entry")
                 guard !holdArmed else { return }
+                let settings = harness.sync.settings
+                try #require(settings.media, "\(trace.diagnostic)")
                 holdArmed = true
-                harness.sync.setDeviceSettings(paused: false, automatic: false, media: false)
-                harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+                harness.sync.setDeviceSettings(paused: settings.paused, automatic: settings.automatic, media: false)
                 try await initialCloudSignal(nativeEntry.stream, stage: "first-proof-issued-status-entry") {
                     await trace.diagnostic
                 }
             }
             backend.beforeReturn = { command, result in
-                guard case .statusChanged = command.action, holdArmed, heldCommand == nil else { return }
+                guard case .statusChanged(let status) = command.action,
+                      status.mediaPaused, holdArmed, heldCommand == nil else { return }
                 #expect(result.error == nil && !result.deferred)
                 heldCommand = command
                 if !released {
@@ -1241,6 +1243,8 @@ extension ReviewCollectionStartupTests {
                         harness.configureBackend = configure
                         observe(sync)
                     })
+                    harness.sync.beginConnectionPreview()
+                    await harness.sync.waitForConnectionPreview()
                 }
             case .resume:
                 try await harness.prepareStoppedResume()
