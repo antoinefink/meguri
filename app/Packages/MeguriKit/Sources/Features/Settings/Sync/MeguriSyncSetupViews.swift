@@ -323,11 +323,6 @@ struct MeguriSyncSections: View {
                     .accessibilityIdentifier("settings.accountSync.meguri.stop")
             }
         }
-        .sheet(isPresented: Binding(get: { sync.meguriPreview != nil }, set: { if !$0 { sync.discardMeguriPreview() } })) {
-            if let preview = sync.meguriPreview {
-                MeguriSetupPreviewSheet(collection: collection, preview: preview)
-            }
-        }
         .sheet(isPresented: $stopping) {
             SyncServiceSwitchSheet(collection: collection, source: .meguri, destination: "localOnly", changing: changing,
                 failed: changeFailed, cancel: { stopping = false }, confirm: {

@@ -175,6 +175,13 @@ public struct AccountSyncView: View {
         }
         .formStyle(.grouped)
         .navigationTitle(SyncText.value("sync.settings.section"))
+        .sheet(isPresented: Binding(
+            get: { sync.providerState?.selection == .meguri && sync.meguriPreview != nil },
+            set: { _ in })) {
+                if sync.providerState?.selection == .meguri, let preview = sync.meguriPreview {
+                    MeguriSetupPreviewSheet(collection: collection, preview: preview)
+                }
+            }
         .alert(SyncText.value("sync.settings.stop.title"), isPresented: $confirmingStop) {
             Button(SyncText.value("sync.settings.stop.confirm"), role: .destructive) {
                 Task { await sync.stopUsingICloud() }
