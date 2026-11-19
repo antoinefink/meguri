@@ -841,14 +841,14 @@ Sync Now (the popover button, File › Sync Now and `Y`) follows the first row t
 
 Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`: `settings.root`, `settings.accountSync`, `sync.connect`, `sync.status`, `sync.serviceSwitch`; `docs/design/native-interface-contract.md` N15). The text of the Sync section of Settings, the Service control, setup without a Connect step, the sheet that asks which collection to keep, the three kinds of problem and Troubleshooting, for both services. The behaviour is `sync/policy#P25`, `sync/cloudkit-recovery#V27` and `sync/meguri-provider#MP6`; T19 is shown when they are implemented, and T2 to T18 stay the shipped text until then. Where T2 to T18 differ, T19 wins. T19 adds no state and changes no condition.
 
-A key that T19.8 lists is unused: no view shows it. It stays in the catalog with its value, since keys never change once shipped (T1).
+**Unused keys, stated once** (decided 2026-11-19 (review F12)). A key that a decision withdraws is removed from the String Catalog when the change ships, and its name is never reused; this holds for T19.8's keys and for the keys other specs mark withdrawn on 2026-11-19 (`review/reviewer-strings` S17, `decks/deck-options-strings`, the FSRS sheet's and the Add toast's). T1's "keys never change once shipped" means that a key's name and meaning are never changed or reused, not that a dead key stays. The exceptions, which stay in the catalog though no view shows them, are listed in T19.8 with their reason.
 
 ### T19.1 Rules
 
 - T1 and T18.1 apply, with the changes below.
 - Meguri's settings section for sync is "Sync". A sentence says "Sync settings". This replaces T1's "Account & Sync" for every key of T19; T1's rule that "Settings" alone is the system's stands.
 - The services are named "Meguri Sync" and "iCloud". Where iCloud is a choice, a heading or a row label, `sync.service.beta` follows it as a separate secondary label, never joined into one string; VoiceOver reads `sync.service.iCloud.accessibility`. Inside a sentence iCloud has no label.
-- A **needs you** text is exactly one sentence, with at most one action. A **waiting** text has no action. An **issues** entry is a row of a list that opens.
+- A **needs you** text is exactly one sentence, with at most one action. A **waiting** text has no action, except Try Again on the two acceptance-unknown rows of T19.5 (decided 2026-11-19 (review F4)). An **issues** entry is a row of a list that opens.
 - Both services use the same status words (T3's titles and "Last synced").
 - No text offers or names the user's Pause, Resume, Connect, Sign Out, Stop Using, a media setting, Review Conflicts or Show Details. No text says that cards and media sync together.
 
@@ -874,8 +874,8 @@ The values are in the order Off, Meguri Sync, iCloud. A choice made while the va
 | Key | English | Shown |
 |---|---|---|
 | `sync.switch.title.off` | Turn Off Sync | sheet title, new value Off |
-| `sync.switch.next.iCloud.setup` | Next, Meguri sets up iCloud. It asks before it replaces a collection. | new value iCloud, in place of `sync.switch.next.iCloud` |
-| `sync.switch.next.meguri.setup` | Next, sign in to your Meguri Sync server. Meguri asks before it replaces a collection. | new value Meguri Sync, in place of `sync.switch.next.meguri` |
+| `sync.switch.next.iCloud.setup` | Next, Meguri sets up iCloud. It asks before it replaces a collection with your cards. | new value iCloud, in place of `sync.switch.next.iCloud` |
+| `sync.switch.next.meguri.setup` | Next, sign in to your Meguri Sync server. Meguri asks before it replaces a collection with your cards. | new value Meguri Sync, in place of `sync.switch.next.meguri` |
 | `sync.switch.confirm.off` | Turn Off Sync | destructive button, new value Off |
 
 - New value Off shows `sync.switch.next.localOnly` and, when the old service is Meguri Sync, `sync.switch.signOut`. The old service's pending, held and media lines show for Off as for a switch (MP3 step 1), with `sync.service.iCloud` or `sync.service.meguri` as the old service's name.
@@ -883,12 +883,14 @@ The values are in the order Off, Meguri Sync, iCloud. A choice made while the va
 
 ### T19.3 Setup and the collection to keep (V27.2, V27.4; MP6.3)
 
+"With your cards" (decided 2026-11-19 (review F12)): a collection that holds no user content (V27.1) can be replaced with no question, so no text promises a question before every replacement.
+
 Under the sign-in fields, in place of `sync.meguri.signIn.footer`:
 
 | Key | English | Shown |
 |---|---|---|
-| `sync.meguri.signIn.footer.setup` | After you sign in, Meguri sets up syncing with this server, then syncs automatically. It asks before it replaces a collection. | Sync Automatically reads on (P25.3) |
-| `sync.meguri.signIn.footer.setup.manual` | After you sign in, Meguri sets up syncing with this server. It asks before it replaces a collection. | Sync Automatically reads off |
+| `sync.meguri.signIn.footer.setup` | After you sign in, Meguri sets up syncing with this server, then syncs automatically. It asks before it replaces a collection with your cards. | Sync Automatically reads on (P25.3) |
+| `sync.meguri.signIn.footer.setup.manual` | After you sign in, Meguri sets up syncing with this server. It asks before it replaces a collection with your cards. | Sync Automatically reads off |
 
 Progress uses the existing keys: `sync.connect.reading`, `sync.connect.downloading`, `sync.connect.downloadingMedia`, T13.1's and T13.2's step lines, and T18.5's stages.
 
@@ -901,6 +903,7 @@ What setup did, when it asked nothing. One line under the status title in the Sy
 | `sync.setup.done.resumed.iCloud` | This collection syncs with iCloud again. | V27.2 row 3 |
 | `sync.setup.done.uploaded.meguri` | This device’s collection was uploaded to your Meguri Sync server. | MP6.3 row 3 |
 | `sync.setup.done.downloaded.meguri` | The collection on your Meguri Sync server was downloaded to this device. | MP6.3 rows 1 and 2 |
+| `sync.setup.done.created.iCloud` | A new, empty collection was created on this device and syncs with iCloud. | V27.2 row 1 (decided 2026-11-19 (review F6)) |
 | `sync.setup.done.backup` | The collection that was on this device is in Backups. | V27.2 row 5 and MP6.3 row 2: it follows the downloaded line (T1 "followed by") |
 
 - While the setup's media still transfers, T5's or T18.6's lines show with it; no line says the setup finished before its media did (MP5, R2050).
@@ -1041,7 +1044,7 @@ The same four rules make the main status. The first condition that applies decid
 | Condition (T18.4, T18.5, T18.6) | Kind | Text | Action |
 |---|---|---|---|
 | provider phase handoff recovery | needs you | `sync.needsYou.switchUnfinished`: Changing the sync service didn’t finish, so nothing syncs. | `sync.service.recovery.action`, with the `sync.service.recovery.title` alert (T18.2) |
-| provider phase blocked | needs you | `sync.service.blocked` | `sync.action.copyDebugInfo` (MP6.5) |
+| provider phase blocked | needs you | `sync.needsYou.blocked`: Meguri can’t read this device’s sync settings, so nothing syncs, and Export Collection still saves everything. (decided 2026-11-19 (review F5); the Service control stays enabled, MP6.5) | `sync.action.copyDebugInfo` (MP6.5) |
 | connection blocked | needs you | `sync.needsYou.meguri.signInStore`: Meguri can’t read or save your Meguri Sync sign-in on this device. | `sync.meguri.connection.retry` |
 | connection unconfigured, signed out or cancelled | needs you | `sync.meguri.status.signedOut.detail` | `sync.meguri.signIn`: the fields of T18.3 |
 | connection authenticating | none | `sync.meguri.status.signingIn.title` | |
@@ -1049,7 +1052,7 @@ The same four rules make the main status. The first condition that applies decid
 | setup preparing | none | `sync.meguri.status.preparing.title`, `sync.meguri.setup.preparing` | `sync.meguri.cancel` |
 | setup preview | none; `sync.keepCollection` is open | | |
 | setup transferring the collection, transferring media | none | T18.5 | |
-| setup acceptance unknown | waiting | `sync.meguri.setup.acceptanceUnknown` | |
+| setup acceptance unknown | waiting | `sync.meguri.setup.acceptanceUnknown` | `sync.recovery.tryAgain`: runs MP6.9's settling step (decided 2026-11-19 (review F4)) |
 | setup or round media blocked | issues | `sync.meguri.media.notTransferred` as the row that opens Affected Files (T18.6), in place of `sync.issues.row`; `sync.meguri.media.blocked` as the status detail | `sync.meguri.media.retry`, in the list |
 | the server accepted the upload, local activation unfinished | needs you while the core permits Finish Setup, otherwise waiting | `sync.needsYou.meguri.finishSetup`: The server accepted this device’s collection, but setup didn’t finish on this device. | `sync.meguri.setup.finish` |
 | setup failed, `activationInterrupted` | needs you while the core permits Finish Setup, otherwise waiting | `sync.needsYou.meguri.activation`: Replacing this device’s collection didn’t finish, and your backup is kept. | `sync.meguri.setup.finish` |
@@ -1064,7 +1067,7 @@ The same four rules make the main status. The first condition that applies decid
 | round with pending work | none | `sync.status.pending.title`, `sync.status.pending.detail` | |
 | round exchanging the collection | none | `sync.status.syncing.title` | |
 | round exchanging media | none | `sync.status.syncingMedia.title` | |
-| round failed, acceptance unknown | waiting | `sync.meguri.round.acceptanceUnknown` | |
+| round failed, acceptance unknown | waiting | `sync.meguri.round.acceptanceUnknown` | `sync.recovery.tryAgain`: runs MP6.9's settling step (decided 2026-11-19 (review F4)) |
 | round failed, full sync required | needs you | `sync.needsYou.meguri.chooseCollection`: Choose which collection to keep before syncing continues. | `sync.decision.action`: opens `sync.keepCollection` (MP6.3 row 4) |
 | round failed, network | waiting | `sync.meguri.round.network` | |
 | round failed, server | waiting | `sync.meguri.round.server` | |
@@ -1079,7 +1082,7 @@ The same four rules make the main status. The first condition that applies decid
 | Key | English | Use |
 |---|---|---|
 | `sync.settings.account` | Account | row, Meguri Sync only: its value is the username; it opens the page with Server Address and Username, and the sign-in fields while not signed in (T18.3) |
-| `sync.settings.automatic` (T14) | Sync Automatically | switch, shown while a service is connected |
+| `sync.settings.automatic` (T14) | Sync Automatically | switch, shown while a service is selected; disabled, showing its stored value, until the service is connected (`sync/policy#P25.3`; decided 2026-11-19 (review F8)) |
 | `sync.settings.automatic.footer` (T14) | | its footer |
 | `sync.now.command` (T6) | Sync Now | button |
 | `sync.settings.troubleshooting` | Troubleshooting | row; opens the page; also its title |
@@ -1095,6 +1098,12 @@ The same four rules make the main status. The first condition that applies decid
 - `sync.settings.privacy` (T14) stays the Sync section's footer while iCloud is the service.
 - The two replace entries show for the selected service once it is set up. Each opens its preview and changes nothing; the preview's destructive button is the confirmation (N11.8). While the entry cannot run, it is disabled with its T13.6 or T18.5 reason under it.
 - The section shows no media toggle, no Pause, no Sign Out, no Stop Using row and no Advanced group.
+- Replaced media (decided 2026-11-19 (review F7); V27.7), in Troubleshooting, only while replaced-media copies exist:
+
+| Key | English | Use |
+|---|---|---|
+| `sync.trouble.replacedMedia` | Show Replaced Media | row; opens the copies' folder in the Files app, or in Finder on Mac |
+| `sync.trouble.replacedMedia.footer` | Media files that sync replaced are kept here for 30 days. | the row's footer |
 
 ### T19.7 Sync Now (T6, T18.7)
 
@@ -1121,7 +1130,7 @@ The same four rules make the main status. The first condition that applies decid
 | T10 | `sync.decision.sheetTitle`, `sync.decision.title.restore`, `.title.import`, `.title.none`, `sync.decision.message`, `.replace`, `.replace.caption`, `.keepLocal`, `.keepLocal.caption`, `.notNow` |
 | T12 | `sync.connect.action`, every `sync.connect.two.*`, every `sync.connect.continue.*` |
 | T13.1, T13.2 | `sync.adopt.action`, `sync.publish.action` |
-| T13.4, T13.6 | every `sync.conflicts.*`, `sync.recovery.error.conflictNotFound`, `sync.recovery.error.recoveryInvalid`: not shown until a review screen exists (V27.7), and kept for it |
+| T13.4, T13.6 | every `sync.conflicts.*`, `sync.recovery.error.conflictNotFound`, `sync.recovery.error.recoveryInvalid`: not shown (V27.7). Exception to the removal rule: they stay in the catalog, because V17.3's and V17.4's operations stay in the core and a later review screen uses these texts |
 | T14 | `sync.settings.section`, `sync.settings.media`, `.media.footer`, `sync.settings.pause`, `.resumePause`, `sync.settings.stop`, `.stop.title`, `.stop.message`, `.stop.confirm`, every `sync.keepLocal.*`, `sync.settings.conflicts`, `sync.settings.advanced` |
 | T18.2 | `sync.service.label`, `sync.service.recovery`, `sync.switch.title.localOnly`, `sync.switch.confirm.localOnly`, `sync.switch.next.iCloud`, `sync.switch.next.meguri` |
 | T18.3 | `sync.meguri.signIn.footer`, `sync.meguri.signOut`, `.signOut.title`, `.signOut.message`, `.signOut.confirm`, `sync.meguri.signingOut`, `sync.meguri.signOut.failed`, `sync.meguri.stop` |
@@ -1129,6 +1138,7 @@ The same four rules make the main status. The first condition that applies decid
 | T18.5 | `sync.meguri.setup.choose`, `.useDevice`, `.useServer`, `.download.detail`, `.download`, `.review`, `sync.meguri.setup.error.cancelled`, `sync.meguri.preview.title.download`, `.direction.download`, `.confirm.download` |
 | T18.7 | `sync.meguri.now.unavailable.paused`, `.signIn`, `.stopped`, `sync.meguri.pause`, `sync.meguri.resume`, `sync.meguri.now.chooseCollection` |
 
+- Every key of the table above is removed from the catalog when T19 ships, except the T13.4 and T13.6 row (decided 2026-11-19 (review F12)). A T18.2 key added to this list: `sync.service.blocked` as the needs-you sentence, replaced by `sync.needsYou.blocked`; it stays the line under the picker.
 - Still used, though their flow changed: `sync.connect.upload.*` and `sync.connect.useICloud.*` (T19.3, one direction only); `sync.service.iCloud` (the old service's name in the `sync.serviceSwitch` lines); `sync.decision.action`, `.action.label` and `.unsentInBackup`; the `useDevice` and `useServer` preview keys of T18.5 (Troubleshooting); `sync.status.needsAttention.title`; the T9.1 texts that T19.4 names.
 
 ### T19.9 Tests

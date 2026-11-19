@@ -463,7 +463,7 @@ Its rows, in this order, each only under its condition:
 1. **Service**: a standard `Picker` labelled Service with Off, Meguri Sync and iCloud, in that order. iCloud has the secondary label Beta after its name, in the picker and wherever the service is a heading or a row label; the label is text, not colour alone, and VoiceOver reads "iCloud, Beta". The picker shows the service the core reports, never the value just tapped (MP6.1).
 2. **Account**, for Meguri Sync only: the username as its value; it pushes the page with Server Address and Username, and the sign-in fields while not signed in (MP2's labelled fields and one prominent Sign In, N6's credential rules). iCloud has no account row: the status says when the Apple account needs the user, and Meguri never asks for an Apple password (R117).
 3. **Status**: the status symbol, title and detail of T19.4 or T19.5. A needs you status has its one action as a button in this row. An issues row under it pushes the issues list. A waiting status has no button.
-4. **Sync Automatically**: a `Toggle`, shown while a service is connected, with its footer.
+4. **Sync Automatically**: a `Toggle` with its footer, shown while a service is selected. Until the service is connected (selected, with its setup completed: a ready binding, `sync/policy` P25.3) it is disabled and shows its stored value (decided 2026-11-19 (review F8)).
 5. **Sync Now**: a button, through `syncNowAvailability()` (N11.8); disabled with its reason as N11.8 says.
 6. **Troubleshooting**: a `NavigationLink`, shown while a service is selected.
 
@@ -486,6 +486,7 @@ Its rows, in this order, each only under its condition:
 - **Issues**: one row with their count, in the Sync section and the popover, which opens a list. Each row of the list has its text and the items it concerns.
 - The sync status button (N11.8) uses the needs-attention symbol only for needs you. With only waiting or issues rows it keeps the symbol of the state underneath; an issues count is never shown by colour alone. During review the button shows only as N16.2 says.
 - iCloud's conflict copies have no entry in the status, the popover or the Sync section.
+- While the provider is blocked the Service control stays enabled, study, backups, import and export keep working, and the status names Export Collection as the way to save everything (MP6.5; decided 2026-11-19 (review F5)).
 - During a review session on iPhone and iPad, a status action that needs Settings presents the Sync section in a sheet over the review, as N11.8 says for Account & Sync.
 
 ### N15.5 Troubleshooting
@@ -499,6 +500,7 @@ One page inside Sync, for both services, with these rows:
 5. Sync Log, a page of real recorded attempts under N7's rules: nothing fabricated, missing fields as "Not recorded", no secrets or card content
 6. Copy Debug Info
 7. for iCloud, one plain line with the number of saved conflict copies, with no action, while there are any
+8. Show Replaced Media, only while replaced-media copies exist: it opens their folder in the Files app, or in Finder on Mac. Its footer says the copies are kept for 30 days (V27.7; decided 2026-11-19 (review F7))
 
 - Each replace entry opens its preview sheet and changes nothing; the preview's destructive button is the confirmation (N11.8, N8).
 - Opening the page may start iCloud's read-only preview reads (N11.8); it starts no Meguri Sync request (N8, MP2).
@@ -513,7 +515,7 @@ One page inside Sync, for both services, with these rows:
 - **N11.8**, bullet 8: the sheet that opens by itself is N15.3's; its Cancel takes the place of the earlier dismiss button.
 - **N11.8**, bullets 1, 2, 7, 9 and 10 are unchanged.
 - **N12.4**, first bullet: "Account & Sync offers iCloud Sync and Meguri Sync" becomes N15.2's Service row. Second bullet: MP2's native controls and N11.8's safety rules stay; N11.8's iCloud controls are replaced as above. The other bullets are unchanged.
-- **Plan text**: R122 (the media setting); R117's Enable and Pause controls; R2046's "explicit connection action" and "a paused connection"; R125's "advanced recovery actions", for their place only (their previews, backups and confirmations stay); R2054's Review Conflicts action in the needs-attention state and Settings, which is not met until a review screen exists; U161's Account & Sync layout.
+- **Plan text**: R122 (the media setting); R117's Enable and Pause controls; R2046's "explicit connection action" and "a paused connection"; R125's "advanced recovery actions", for their place only (their previews, backups and confirmations stay); R2054's Review Conflicts action in the needs-attention state and Settings, which is met by N15.3's sheet together with Show Replaced Media (decided 2026-11-19 (review F7)); R1650 and R2018, for the 30-day removal of replaced-media copies; U161's Account & Sync layout.
 - **Screen contracts**: `settings.accountSync`, `sync.status`, `sync.connect`, `sync.publicationChoice`, `sync.serviceSwitch` and `sync.meguriSetup` need new versions for this section; `sync.reviewConflicts` is not shown; `sync.keepCollection` is new.
 
 ## N16. Round 3 review decisions (2026-11-19)
@@ -625,8 +627,8 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsShee
 ### N18.1 FSRS is always on
 
 - No FSRS sheet, prompt, notice, setting, menu command or option exists on any platform. The screen `home.fsrsSheet` is removed, with its view, strings and snapshots.
-- A collection that opens with FSRS off opens as usual, and Meguri turns FSRS on in the background: after the open-time sync when a service syncs at open, at once otherwise. Nothing about it is shown and nothing is asked. Study entry points show their normal loading state until it is done; a study entry point never waits for the network.
-- When that step fails, the collection stays open: study is refused with "Meguri couldn’t prepare this collection for study." and Try Again at the study entry points, while browsing, adding notes, import, export and sync stay available. A failure at open and a later one behave the same. No route studies with FSRS off.
+- A collection that opens with FSRS off opens as usual, and Meguri turns FSRS on in the background: at once with sync Off, Sync Automatically off or a service that needs the person; otherwise after a collection exchange, or when study is started (`sched/app-coordination` F5.1; decided 2026-11-19 (review F2)). Nothing about it is shown and nothing is asked. Study entry points show their normal loading state until it is done; a study entry point never waits for the network.
+- When that step fails, the collection stays open: study is refused with "Meguri couldn’t prepare this collection for study." (`study.prepare.failed`) and Try Again at the study entry points, while browsing, adding notes, import, export and sync stay available. A failure at open and a later one behave the same. No route studies with FSRS off.
 - When another client turns FSRS off, Meguri turns it on again each time and says nothing; each time is written to the diagnostic log.
 - The change syncs like any other change. Its risks for the owner are in `sched/fsrs-policy` A1.6.
 - Replaces: R702's and R703's sheet, U51's `FsrsEnabledSheet`, AE29's "after the one-time sheet".
@@ -640,12 +642,13 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsShee
   3. **Start Empty**: "Begin with a new, empty collection on this device."
 - The explanations and the title block's line are spec-writer wording (2026-11-19), open to Antoine's edit; the three titles are decided. Apple's title capitalisation (N16).
 - The choices are rows of one system inset grouped list, each a button over its whole row with the system's disclosure indicator. No choice is prominent or the default; Return activates the focused row. No symbol is required. The four equal buttons, and the two that led to the same sync flow, are gone.
-- **Set Up Sync** presents N15.2's Sync section in a sheet, with its Service control at Off. Choosing a service there is the consent to set it up (V27.2 rows 1 and 2, MP6.3 row 1); the sheet closes when a collection is open, and Cancel returns to the welcome screen with the service Off. The row is never disabled for an iCloud account state: that state shows in the Sync section, where Meguri Sync can still be chosen. iCloud carries its Beta label there (N15.2).
+- **Set Up Sync** presents N15.2's Sync section in a sheet, with its Service control at Off. Choosing a service there is the consent to set it up (V27.2 rows 1 and 2, MP6.3 row 1); the sheet closes when a collection is open, and Cancel returns to the welcome screen with the service Off. With iCloud chosen and no collection anywhere, Meguri creates an empty collection and publishes it, and the sheet closes onto the empty deck list (V27.2 row 1; decided 2026-11-19 (review F6)). The row is never disabled for an iCloud account state: that state shows in the Sync section, where Meguri Sync can still be chosen. iCloud carries its Beta label there (N15.2).
 - **Import a Collection File** opens the system file picker at once (N17.2). With no collection to replace, the confirmation's Import is the prominent default.
 - **Start Empty** creates the collection with the Default deck and the stock note types (R161), local only, and opens it; N18.1 applies with no prompt. A failure shows its cause in one line on the welcome screen, which stays.
 - iPhone, and the iPhone Duo folded or held tall: the title block above the choices, in one scrolling column. iPad and Mac: the same order in one centred column no wider than the readable width; the Mac window shows no clipped control at its minimum size.
 - iPhone Duo opened wide: the title block is centred in one half and the choices' list fills the other; nothing sits on or crosses the fold (R9). The sheets and the file picker that a choice opens follow their own rules for that position.
 - At the accessibility text sizes each row's explanation wraps under its title, and the screen scrolls. VoiceOver: the title is a header; each row reads its title, then its explanation, as one button.
+- String Catalog keys (decided 2026-11-19 (review F12)): `onboarding.welcome.title`, `onboarding.welcome.message`, and for each choice its title and explanation: `onboarding.welcome.sync.title`, `.sync.detail`, `onboarding.welcome.import.title`, `.import.detail`, `onboarding.welcome.startEmpty.title`, `.startEmpty.detail`. The explanation lines are accepted as specified.
 - Identifiers: `onboarding.welcome.sync`, `onboarding.welcome.import`, `onboarding.welcome.startEmpty`. `onboarding.welcome.connect` is retired.
 - Mac: Meguri › Settings… and Quit stay available. On iPhone and iPad Settings is not reachable from the welcome screen except through Set Up Sync's sheet.
 - Not decided here: N15 is built when its spec sections are approved. Until then Set Up Sync opens the sync settings that exist.

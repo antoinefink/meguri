@@ -4,7 +4,7 @@ Spec: sync/meguri-provider
 Requirements: Antoine's explicit 2026-11-16 two-service decision; existing-unit mapping in docs/process/review-log/meguri-provider-contract-20261116.md#implementation-mapping
 Anki: none (original Meguri provider policy)
 Scenarios: none (focused and cross-layer acceptance in docs/process/review-log/meguri-provider-contract-20261116.md#follow-on-acceptance)
-Status: Reviewed for implementation 2026-11-16 (delegated decision; MP1–MP5). MP6 (2026-11-19, Antoine's round 2 decisions) and the four lines that begin "Changed 2026-11-19 (MP6" in MP2, MP3, MP4 and MP5 are not reviewed; do not implement them until the contract review of MP6 is recorded here.
+Status: Reviewed for implementation 2026-11-16 (delegated decision; MP1–MP5). MP6 (2026-11-19, Antoine's round 2 decisions) and the lines that begin "Changed 2026-11-19 (MP6" in MP1 to MP5 are not reviewed; do not implement them until the contract review of MP6 is recorded here.
 Review: docs/process/review-log/meguri-provider-contract-20261116.md#contract-review
 
 Antoine explicitly requested iCloud Sync and Meguri Sync using Meguri's own server on 2026-11-16. Root adopted MP1–MP5 after independent contract review and closure of the media-exclusion finding. This is delegated routine implementation authority, not technical acceptance or owner approval of every detailed clause. It changes no existing CloudKit record/recovery wire contract and does not authorize legacy Anki transfers or AnkiWeb work.
@@ -15,7 +15,7 @@ There are two services: **iCloud Sync** and **Meguri Sync**. Local-only use rema
 
 Store selected provider, pause/automatic settings and connection references in device-local state, outside the transferable collection. Import, export and bootstrap always include collection and media; these flows offer no media-scope or media-off choice. Store the active provider binding and handoff intent durably through existing guarded metadata seams. The binding names the provider, opaque account reference, collection/publication generation and admission revision. Never treat a UI picker value as admission authority. Present-but-invalid metadata blocks network work; absence alone permits migration defaults.
 
-An upgrade preserves the existing iCloud choice, pause state, binding, pending work and publication fence. Devices with no established choice remain local-only. Never infer an account or upload permission from collection stamps. A backup restore, package import, collection replacement or account change invalidates incompatible provider admission before work resumes.
+An upgrade preserves the existing iCloud choice, pause state, binding, pending work and publication fence. Changed 2026-11-19 (MP6.2; decided 2026-11-19 (review F10)): "pause/automatic settings" above and "pause state" here are the Sync Automatically setting alone; an upgrade turns a stored pause into Sync Automatically off (`sync/policy#P25.2`). Devices with no established choice remain local-only. Never infer an account or upload permission from collection stamps. A backup restore, package import, collection replacement or account change invalidates incompatible provider admission before work resumes.
 
 ## MP2. Native Settings and credentials
 
@@ -62,13 +62,17 @@ Reuse `sync/anki-transfers#M2–M5`, `sync/one-way#O4–O7` and `engine/collecti
 
 For download, use owned staging and verified finalization, force the local safety backup before activation, then record intent, atomic replacement and actual resulting generation. Failed backup prevents activation. For upload, take the local safety backup, download and retain the server collection copy even for zero cards, refresh facts after that download's stamp changes, and require final destructive confirmation. Bind confirmation to actual preview/operation, account/endpoint, source generation and artifacts. Changed facts require a refreshed decision.
 
-The protocol does not lock the interval between server copy and upload. Explicitly warn that another client's later edits can be replaced, and instruct the user to stop sync on other clients during replacement. Retained backup and fresh metadata are **not** conditional-write guarantees. Never auto-upload a full collection after a mismatch. If strict cross-client exclusion is required, that is a genuine missing server capability; do not invent a lease or silently claim this flow supplies it.
+Changed 2026-11-19 (MP6.3; decided 2026-11-19 (review F10)): "require final destructive confirmation" holds for an upload that replaces a server collection holding user content, or one not proved to hold none (MP6.3 row 4), and for every upload after an endpoint or account change, an import, a restore or a lost baseline (MP6.3). An upload to a server proved to hold no user content, on a first binding, has no confirmation (MP6.3 row 3). The safety backup, the retained server copy, the refresh of facts and the binding of the operation are unchanged for both.
+
+The protocol does not lock the interval between server copy and upload. Explicitly warn that another client's later edits can be replaced, and instruct the user to stop sync on other clients during replacement. Retained backup and fresh metadata are **not** conditional-write guarantees. Never auto-upload a full collection after a mismatch. If strict cross-client exclusion is required, that is a genuine missing server capability; do not invent a lease or silently claim this flow supplies it. Changed 2026-11-19 (MP6.3; decided 2026-11-19 (review F10)): the warning is shown in MP6.3 row 4's sheet; row 3 shows none, since nothing known is replaced.
 
 Changed 2026-11-19 (MP6.3): the table's first two rows are replaced by MP6.3's table. A side proved to hold no user content is replaced with no question; two collections get one sheet, which is this section's final destructive confirmation.
 
 Persist intent before dispatch and exact `OK` before local upload activation. A lost acknowledgement stays “Server acceptance unknown”; preserve candidate, backups and exclusion until existing evidence-based recovery settles it. Report remote acceptance separately from failed local activation. Never clear an iCloud publication fence because a Meguri operation succeeded.
 
 ## MP5. Routine sync, reviews and media
+
+Changed 2026-11-19 (MP6.3; decided 2026-11-19 (review F10)), for the paragraph below: the disclosure of automatic synchronization is the text under the sign-in fields, and the sheet where one is shown; "Sign-in alone establishes no baseline" stands, and "transfers nothing" is replaced by MP6.3, where a Sign In made to set the service up continues into setup.
 
 Only a completed collection-and-media bootstrap establishes the provider's ready binding. Its explicit confirmation discloses subsequent automatic synchronization of both. Persist completion against the actual binding and resulting generation, then enable Meguri automatic sync without another setup step. Until then, Sync Now continues the explicit setup/recovery flow and performs no speculative normal exchange. Sign-in alone establishes no baseline and transfers nothing.
 
@@ -97,7 +101,8 @@ Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`: `settings.accountS
 ### MP6.2 Sync Automatically; no Pause
 
 - Meguri Sync has no Pause and no Resume. The one device-local Sync Automatically setting of `sync/policy#P25.3` applies to whichever service is selected: on unless the user turned it off; off stops automatic scheduling, and Sync Now still runs a round with its media.
-- A device whose Meguri Sync was paused when it updates gets Sync Automatically off and `sync/policy#P25.2`'s update hold: network admission for collection and media stays closed, pending work is kept, and the first Sync Now, turning Sync Automatically on or a choice in the Service control opens it again for the same valid binding. The status shows Sync Automatically off, never Paused.
+- A device whose Meguri Sync was paused when it updates gets Sync Automatically off (`sync/policy#P25.2`; decided 2026-11-19 (review F11): no hidden hold applies to Meguri Sync). Pending work is kept, nothing is scheduled automatically, and Sync Now runs a round for the same valid binding. The status shows Sync Automatically off, never Paused.
+- **Connected** is `sync/policy#P25.3`'s term: Meguri Sync is selected and MP5's ready binding exists. Until then the Sync Automatically control is disabled and shows its stored value (decided 2026-11-19 (review F8)).
 - Media is never a separate choice or scope (MP1, MP5; `sync/policy#P25.1`).
 
 ### MP6.3 Setup runs after sign-in
@@ -118,6 +123,8 @@ Choosing Meguri Sync and signing in is the consent to set it up. There is no fur
 | 6 | a baseline is proved for this exact binding and generation | | routine sync (MP5) | none |
 
 - **Proof is checked again where it is used.** Row 2 tests the local collection again inside the replacement's exclusive phase; user content found there stops the activation with the collection unchanged and returns to preparation, which then gives row 4. Row 3 reads the server facts again immediately before dispatch; any change from the retained copy stops the upload and returns to preparation.
+- **A changed endpoint or account** (decided 2026-11-19 (review F3)). Row 3 applies only to a first binding. When this device's provider binding metadata (MP1) records another endpoint or another account than the one signed in to, an empty server is not enough to upload: the sheet of `sync/cloudkit-recovery#V27.4` is shown in its one-direction form (upload this device's collection, or Cancel), naming the server and account, before any upload.
+- **After an import, a restore or a lost baseline** (decided 2026-11-19 (review F9)). On a device that has, or had, a Meguri Sync binding, a package import, a backup restore, a collection replacement or a baseline that cannot be proved always leads to row 4's sheet, whatever the two sides hold. Rows 2 and 3 are never taken there.
 - **Row 3 and other clients.** MP4's warning stands: the protocol does not lock the interval between the last read of the server facts and the server's acceptance. Row 3 shows no warning first, because nothing known is replaced; an upload from another client inside that interval is replaced and is not in the retained copy. Row 4's sheet keeps the warning.
 - **The sheet is MP4's final destructive confirmation.** Each button is bound to the preview shown, the account and endpoint, the source generation and the artifacts; changed facts reload the sheet and need a new choice. It shows both sides' counts and last change, this device's unsent work when the server collection is kept, the local safety backup and the retained server copy, MP4's other-clients warning when this device's collection is kept, and MP5's media reconciliation line. Neither button is the default.
 - **Media.** Rows 2 and 3 complete with media as MP5 requires. The side they overwrite is proved to hold no media file, so the reconciliation can replace or delete nothing of the user's there; MP5's disclosure of replacements and deletions is shown in row 4's sheet, where it can apply.
@@ -138,6 +145,7 @@ Choosing Meguri Sync and signing in is the consent to set it up. There is no fur
 
 - **Handoff recovery** (MP3 step 5) is shown as needs you: one sentence and the action Keep on This Device Only…, which after its confirmation leaves the service Off. From Off the user chooses a service again.
 - **A blocked provider phase** (MP1: present but invalid metadata) is shown as needs you with the action Copy Debug Info. The core has no command that repairs or discards that metadata, and this section adds none: discarding it could release an upload exclusion (MP3).
+- **What still works while blocked** (decided 2026-11-19 (review F5)). The Service control stays enabled: the user can choose the other service or Off, through MP6.4's one confirmation; an upload exclusion that is held survives that change (MP3). Study, backups, import and export keep working, since none of them needs a provider. The documented way out is Export Collection (`package/file-export`), which saves the whole collection with its media whatever the provider's state; the needs-you sentence names it (`sync/status-strings#T19.5`). Copy Debug Info stays.
 
 ### MP6.6 Status words
 
@@ -153,5 +161,17 @@ Replace This Device's Collection… and Replace the Meguri Sync Collection… ar
 - **Emptiness of the server needs a download** (MP6.3). MP4 forbids trusting `meta.empty` or zero cards, so preparation downloads the server collection before it can decide that there is no question. On a large server collection the question appears after that download.
 - **Row 3's unlocked interval** (MP6.3) is MP4's known gap, now without a warning shown first. Closing it needs a server capability that does not exist.
 - **Cancel removes the sign-in** (MP6.3, MP6.4), because Off always does. Decided 2026-11-19 (`docs/design/decisions.md`, `sync.connect`, by Claude at Antoine's request): cancelling the sheet leaves the service Off, which for Meguri Sync removes the saved sign-in. The reading not taken keeps the sign-in after a cancelled sheet, so that the user need not type the password again; it would leave a signed-in account behind an Off control.
-- **A blocked provider has no way out but a report** (MP6.5). The decision asks for one action; Copy Debug Info is the only one that is safe today.
-- **Acceptance unknown** (setup or round) is shown as waiting (`sync/status-strings#T19.5`), because no user action settles it today (`sync/status-strings#T18.5`: no control). If nothing settles it automatically either, that state has no way out; this section does not change that.
+- **A blocked provider** (MP6.5): the status action is Copy Debug Info; the Service control and Export Collection are the ways out (decided 2026-11-19 (review F5)).
+- **Acceptance unknown** (setup or round) is shown as waiting with Try Again (`sync/status-strings#T19.5`); MP6.9 is the step that settles it (decided 2026-11-19 (review F4)).
+
+### MP6.9 Settling an unknown acceptance
+
+Decided 2026-11-19 (review F4). MP4 keeps "Server acceptance unknown" until evidence settles it; this is the step that gets the evidence.
+
+- **The step**: read the server's facts again and compare them with the retained candidate (the collection this device sent) and with the retained server copy or the last proved baseline. It starts no upload and changes nothing on either side.
+- **When**: automatically at the start of the next round or setup attempt, before anything else of it, and when the user chooses Try Again in the status. While the state lasts, the upload exclusion of MP3 stands and no writer starts.
+- **Accepted** (the server's facts are the candidate's): the exact acceptance is recorded, local upload activation completes, the exclusion is released, and setup or routine sync goes on as normal.
+- **Not accepted** (the server's facts are still those of the retained copy or baseline): nothing reached the server. For a routine round the pending changes stay pending and the next round sends them. For a setup upload the confirmed upload is offered again as Try Again under the same bound decision, as MP4 allows while the facts are unchanged.
+- **Neither** (the server holds something else): another client changed it. MP4's "changed facts require a refreshed decision" applies: the keep-collection sheet (MP6.3 row 4) is shown, and nothing is uploaded before its answer.
+- **Not readable** (offline, a server error): the state stays unknown and waiting; the step runs again at the next attempt or Try Again.
+- Candidate, backups and retained copies are kept until one of the first three outcomes is recorded.

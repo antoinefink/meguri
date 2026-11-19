@@ -81,8 +81,11 @@ Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`, `home.fsrsSheet`; 
 ### A1.2 At open
 
 - A collection whose status is `needsEnable` or `needsReEnable` opens as any other, and the app then runs `enableFsrs` by itself, with no question (`sched/app-coordination#F5.1`). Opening never waits for the op, and the op never keeps the collection from opening.
-- **Sync first when it can** (orchestrator decision, 2026-11-19). When a sync service is connected and would sync by itself at this open, the op starts only after that open-time sync's collection exchange has ended, whatever its result, or after the service's own rules have given it up: Sync Automatically off or the update hold, offline, an account or sign-in that needs the user, a setup or decision that is pending, a failure that waits for a retry. With no service, or one that does not sync at open, the op starts at once. The app adds no network wait, timer or prompt of its own: it acts on what the service already reports. A study entry point used while the op still waits for that sync starts it at once, so study never waits on the network.
-- Residual risk: a review made on another device and synced only after the op can have its card state overwritten for that card; the review-log row survives, and the memory state is computed again from the log.
+- **Sync first when it can** (orchestrator decision, 2026-11-19; narrowed, decided 2026-11-19 (review F2)). Nothing but study needs FSRS on, so the op waits for evidence from the service where a service can still give it:
+  - It starts at once only when no exchange is to be expected by itself: the service is Off, Sync Automatically is off (the update hold included), or the service is in a state that needs the user (an account or sign-in, a pending setup or decision).
+  - With a connected service in any other state, offline and waiting for a retry included, it does not start at once. It starts after the next collection exchange ends, whatever its result, or when a study entry point is used, whichever comes first. A device that stays offline and is not studied on keeps `fsrs` off until then, which harms nothing.
+  - The app adds no network wait, timer or prompt of its own: it acts on what the service already reports.
+- Residual risk: when the op runs before this device has the other devices' latest changes (study started offline or before the exchange ended), every card that another device reviewed since this device's last sync and that the op rewrites can, at the later sync, have its due date and interval reverted to this device's older values; the review-log rows survive.
 - This holds for every way a collection comes to be open on a device: a launch, a new empty collection (which holds no `fsrs` key, S1), an imported or restored collection, and a collection that a sync service's setup or replacement put on the device (`CollectionReplaced` is treated as an open).
 - While the op waits or runs, the collection is open and usable: browsing, adding and editing notes, import, export, sync and settings work. Only study waits: an entry point shows the normal loading state of a starting session and goes on when the op commits (`sched/app-coordination#F4`). Nothing names FSRS, memory states or a count of cards, and nothing is asked.
 - No cancel is offered. When the app quits or is killed while the op runs, the transaction rolls back (E4): `fsrs` is still off, no card changed, and the next open starts again.
@@ -96,7 +99,7 @@ Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`, `home.fsrsSheet`; 
 
 ### A1.4 When the op fails
 
-- One rule for a failure at open and a failure in the background (orchestrator decision, 2026-11-19): **the collection stays open.** Study is refused (S3): each study entry point shows one plain sentence with Try Again, which runs the op again (`sched/app-coordination#F5.3`). Browsing, adding notes, import, export, sync and settings stay available, so the user can repair the cause in Meguri or export the collection.
+- One rule for a failure at open and a failure in the background (orchestrator decision, 2026-11-19): **the collection stays open.** Study is refused (S3): each study entry point shows one plain sentence (`study.prepare.failed`) with Try Again, which runs the op again (`sched/app-coordination#F5.3`). Browsing, adding notes, import, export, sync and settings stay available, so the user can repair the cause in Meguri or export the collection.
 - Nothing else is shown: no alert at open, no banner. The next open tries again by A1.2.
 - A failed op wrote nothing (E4). Meguri never schedules a card while `fsrs` reads off, and never offers a way to study with it off.
 - Known repeating cause: a preset whose stored ignore-date text `sched/fsrs-items#I1.3` refuses fails the whole op (`sched/memory-state#M4.3`, unchanged). Unsupported presets do not fail it: their cards are skipped (E2, U4).
@@ -110,7 +113,7 @@ Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`, `home.fsrsSheet`; 
 ### A1.6 For the owner
 
 - **No consent before the first write.** Opening a collection that has FSRS off changes it soon after: the switch, and the memory state of every reviewed card. Due dates and intervals do not change (E4). After the next sync every other client of that collection has FSRS on too.
-- **Unsynced work elsewhere**: A1.2's residual risk. Sync-first removes it for what the service holds at open; it stays for a device that syncs later, for an open while offline, and when study is started before the open-time sync ends.
+- **Unsynced work elsewhere**: A1.2's residual risk. Waiting for an exchange removes it for what the service holds by then; it stays when study is started offline or before the exchange ends, and for a device that syncs its reviews later (decided 2026-11-19 (review F2) gives its scale: every card reviewed elsewhere since this device's last sync).
 - **A client that keeps turning FSRS off** makes Meguri rewrite the reviewed cards and sync them again each time (A1.3). Only the log shows it.
 - **A collection whose op always fails** opens, but cannot be studied in Meguri until its cause is repaired (A1.4).
 - **Undo history is cleared without notice** when the op runs after the user has already made changes (A1.5).
