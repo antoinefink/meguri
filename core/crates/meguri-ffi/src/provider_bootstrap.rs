@@ -3,7 +3,8 @@ use super::{ProviderConnection, ProviderCredentials, ProviderOwner, information}
 use crate::{CoreError, callback, jobs, manual_transfers::{TransferFailure, TransferMediaSnapshot, TransferRecord,
     TransferAcceptance, TransferBoundary, TransferCopy, TransferCounts, TransferDirection, TransferMediaPhase,
     TransferMediaStage, TransferObservation, TransferPhase}};
-use meguri_host::{ManualTransferTask, MeguriAccess, MeguriBootstrapDirection, MeguriBootstrapError};
+use meguri_host::{ManualTransferTask, MeguriAccess, MeguriBootstrapDirection, MeguriBootstrapError, MeguriSetupChange,
+    MeguriSetupChoice, MeguriSetupDecision, MeguriSetupRow, MeguriSetupSettlement, MeguriSetupSide};
 use meguri_sync::{HostKey, oneway::{MediaConfirmation, MediaPreview, Preview, TransferError},
     policy::Operation, provider::{MeguriConnection, MeguriReadiness, MeguriReadyRefusal, MediaRefusal},
     provider_media::{MediaAccounting, PromisedState}};
@@ -53,6 +54,8 @@ pub enum ProviderBootstrapFailure {
     NotComplete, AccountChanged, PublicationChanged, DocumentChanged, BindingChanged,
     MediaEpochChanged, MediaEpochMissing, MediaIncomplete, Cancelled, DiskFull, Unavailable, Storage,
     Transfer { failure: TransferFailure },
+    /// MP6.3: the facts of a setup decision changed, or the choice does not fit them.
+    SetupLocalChanged, SetupRemoteChanged, SetupChoice,
 }
 #[derive(Clone, uniffi::Enum)]
 pub enum ProviderBootstrapOutcome {
@@ -61,6 +64,9 @@ pub enum ProviderBootstrapOutcome {
     MediaConsent { consent: Arc<ProviderBootstrapMediaConsent> },
     Operation { operation: Arc<ProviderBootstrapOperation> },
     Ready { accounting: ProviderMediaAccounting },
+    /// MP6.9. Not accepted and neither carry no authority; accepted names the
+    /// operation whose local activation remains.
+    Settled { settlement: ProviderSetupSettlement },
     Refused { failure: ProviderBootstrapFailure, accounting: Option<ProviderMediaAccounting> },
 }
 fn refused(failure: ProviderBootstrapFailure) -> ProviderBootstrapOutcome {
@@ -76,6 +82,9 @@ fn failure(error: MeguriBootstrapError) -> ProviderBootstrapOutcome {
         E::Busy | E::Engine(meguri_engine::EngineError::Busy { .. }) => F::Busy,
         E::AlreadyBound => F::AlreadyBound, E::Username => F::Username,
         E::Transfer(error) => return transfer_failure(error),
+        E::SetupChanged(MeguriSetupChange::Local) => F::SetupLocalChanged,
+        E::SetupChanged(MeguriSetupChange::Remote) => F::SetupRemoteChanged,
+        E::SetupChanged(MeguriSetupChange::Choice) => F::SetupChoice,
         E::Ready(R::NoIntent) => F::NoIntent, E::Ready(R::OperationMismatch) => F::OperationMismatch,
         E::Ready(R::NotComplete) => F::NotComplete, E::Ready(R::AccountChanged) => F::AccountChanged,
         E::Ready(R::PublicationChanged) => F::PublicationChanged, E::Ready(R::DocumentChanged) => F::DocumentChanged,
@@ -92,8 +101,64 @@ fn failure(error: MeguriBootstrapError) -> ProviderBootstrapOutcome {
 fn transfer_failure(error: TransferError) -> ProviderBootstrapOutcome {
     refused(ProviderBootstrapFailure::Transfer { failure: error.into() })
 }
+fn setup_refused(error: MeguriBootstrapError) -> ProviderSetupDecisionOutcome {
+    match failure(error) {
+        ProviderBootstrapOutcome::Refused { failure, .. } => ProviderSetupDecisionOutcome::Refused { failure },
+        _ => ProviderSetupDecisionOutcome::Refused { failure: ProviderBootstrapFailure::Unavailable },
+    }
+}
 fn invalid() -> CoreError { CoreError::InvalidArgument { message: "Meguri bootstrap decision or owner changed".into() } }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ProviderSetupRow { Download, DownloadOverEmptyDevice, UploadToEmptyServer, Ask, AskUploadOnly }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ProviderSetupChoice { NoQuestion, KeepDevice, KeepServer }
+impl From<ProviderSetupChoice> for MeguriSetupChoice {
+    fn from(value: ProviderSetupChoice) -> Self {
+        match value { ProviderSetupChoice::NoQuestion => Self::NoQuestion, ProviderSetupChoice::KeepDevice => Self::KeepDevice,
+            ProviderSetupChoice::KeepServer => Self::KeepServer }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct ProviderSetupSide {
+    pub notes: u64, pub cards: u64, pub reviews: u64, pub media_files: Option<u64>, pub last_change_ms: Option<i64>,
+}
+impl From<MeguriSetupSide> for ProviderSetupSide {
+    fn from(value: MeguriSetupSide) -> Self {
+        Self { notes: value.notes, cards: value.cards, reviews: value.reviews, media_files: value.media_files,
+            last_change_ms: value.last_change_ms }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct ProviderSetupFacts {
+    pub row: ProviderSetupRow, pub device: Option<ProviderSetupSide>, pub server: Option<ProviderSetupSide>, pub unsent: bool,
+}
+/// The core's decision for one preview. Opaque: only the core that made it can use it.
+#[derive(uniffi::Object)]
+pub struct ProviderSetupDecision { owner: Arc<ProviderOwner>, connection: MeguriConnection, inner: MeguriSetupDecision }
+#[uniffi::export]
+impl ProviderSetupDecision {
+    pub fn facts(&self) -> Result<ProviderSetupFacts, CoreError> {
+        callback::enter("ProviderSetupDecision.facts");
+        Ok(ProviderSetupFacts { row: match self.inner.row {
+                MeguriSetupRow::Download => ProviderSetupRow::Download,
+                MeguriSetupRow::DownloadOverEmptyDevice => ProviderSetupRow::DownloadOverEmptyDevice,
+                MeguriSetupRow::UploadToEmptyServer => ProviderSetupRow::UploadToEmptyServer,
+                MeguriSetupRow::Ask => ProviderSetupRow::Ask, MeguriSetupRow::AskUploadOnly => ProviderSetupRow::AskUploadOnly },
+            device: self.inner.device.map(Into::into), server: self.inner.server.map(Into::into), unsent: self.inner.unsent })
+    }
+}
+#[derive(Clone, uniffi::Enum)]
+pub enum ProviderSetupDecisionOutcome {
+    Decision { decision: Arc<ProviderSetupDecision> },
+    Refused { failure: ProviderBootstrapFailure },
+}
+#[derive(Clone, uniffi::Enum)]
+pub enum ProviderSetupSettlement {
+    Accepted { operation: Arc<ProviderBootstrapOperation>, local_unchanged: bool },
+    NotAccepted { operation: Arc<ProviderBootstrapOperation> },
+    Neither,
+}
 #[derive(Clone, uniffi::Record)]
 pub struct ProviderBootstrapMediaEffects {
     pub stage: TransferMediaStage, pub uploaded_files: u64, pub downloaded_files: u64,
@@ -175,6 +240,7 @@ fn consume(consumed: &Mutex<bool>) -> Result<(), CoreError> {
 enum Source {
     Cell(ProviderBootstrapOutcome), Preview(Arc<ManualTransferTask<Preview>>),
     Media(ManualTransferTask<MediaPreview>), Operation(Arc<ManualTransferTask<Operation>>),
+    Settle(ManualTransferTask<MeguriSetupSettlement>),
 }
 #[derive(uniffi::Object)]
 pub struct ProviderBootstrapResult {
@@ -209,6 +275,21 @@ impl ProviderBootstrapResult {
                 Ok(inner) => ProviderBootstrapOutcome::Operation { operation: Arc::new(ProviderBootstrapOperation {
                     owner: self.owner.clone(), connection: self.connection.clone(), inner }) },
                 Err(error) => transfer_failure(error),
+            }),
+            Source::Settle(task) => task.take_result().map(|result| {
+                let operation = |inner| Arc::new(ProviderBootstrapOperation {
+                    owner: self.owner.clone(), connection: self.connection.clone(), inner });
+                match result {
+                    Ok(MeguriSetupSettlement::Accepted { operation: inner, local_unchanged }) => ProviderBootstrapOutcome::Settled {
+                        settlement: ProviderSetupSettlement::Accepted { operation: operation(inner), local_unchanged } },
+                    Ok(MeguriSetupSettlement::NotAccepted { operation: inner }) => {
+                        // The exclusion was released by the recorded outcome.
+                        self.owner.host.refresh_provider_admission();
+                        ProviderBootstrapOutcome::Settled { settlement: ProviderSetupSettlement::NotAccepted { operation: operation(inner) } }
+                    }
+                    Ok(MeguriSetupSettlement::Neither) => ProviderBootstrapOutcome::Settled { settlement: ProviderSetupSettlement::Neither },
+                    Err(error) => transfer_failure(error),
+                }
             }),
         };
         match value {
@@ -265,11 +346,27 @@ impl ProviderConnection {
         if self.owner.generation != owner.generation { return Err(invalid()); }
         Ok(())
     }
+    fn setup_step<T>(&self, credentials: ProviderCredentials, decision: &ProviderSetupDecision, preview: &ProviderBootstrapPreview,
+        step: impl FnOnce(MeguriAccess, &MeguriSetupDecision, Preview) -> Result<T, MeguriBootstrapError>,
+        source: impl FnOnce(T) -> Source) -> Result<ProviderBootstrapJob, CoreError> {
+        self.owner.validate()?;
+        self.same_current_owner(&preview.owner, &preview.connection)?;
+        self.same_current_owner(&decision.owner, &decision.connection)?;
+        let access = match self.access(credentials) { Ok(access) => access, Err(error) => return Ok(self.job(Source::Cell(failure(error)))) };
+        // A refused step changed nothing: the preview stays usable for a new decision.
+        let mut consumed = preview.consumed.lock().unwrap_or_else(PoisonError::into_inner);
+        if *consumed { return Err(invalid()); }
+        Ok(self.job(match step(access, &decision.inner, preview.inner.clone()) {
+            Ok(task) => { *consumed = true; source(task) }
+            Err(error) => Source::Cell(failure(error)),
+        }))
+    }
     fn job(&self, source: Source) -> ProviderBootstrapJob {
         let (handle, preparation, media_task) = match &source {
             Source::Cell(_) => (None, None, None),
             Source::Preview(task) => (Some(jobs::wrap(task.job.clone())), Some(task.clone()), None),
             Source::Media(task) => (Some(jobs::wrap(task.job.clone())), None, None),
+            Source::Settle(task) => (Some(jobs::wrap(task.job.clone())), None, None),
             Source::Operation(task) => (Some(jobs::wrap(task.job.clone())), None, Some(task.clone())),
         };
         ProviderBootstrapJob { handle, result: Arc::new(ProviderBootstrapResult { owner: self.owner.clone(),
@@ -368,6 +465,59 @@ impl ProviderConnection {
             Ok(accounting) => ProviderBootstrapOutcome::Ready { accounting: (&accounting).into() },
             Err(error) => failure(error),
         })
+    }
+    /// MP6.3 preparation. The core picks the direction: the download with no
+    /// collection on this device, otherwise the upload's read of both sides.
+    pub fn start_setup_prepare(&self, credentials: ProviderCredentials) -> Result<ProviderBootstrapJob, CoreError> {
+        callback::enter("ProviderConnection.start_setup_prepare");
+        self.owner.validate()?;
+        let source = match self.access(credentials).and_then(|access| self.owner.host.prepare_meguri_setup(access)) {
+            Ok(task) => Source::Preview(Arc::new(task)), Err(error) => Source::Cell(failure(error)),
+        };
+        Ok(self.job(source))
+    }
+    /// Local reads only. The preview stays usable.
+    pub fn setup_decision(&self, credentials: ProviderCredentials, preview: Arc<ProviderBootstrapPreview>) -> Result<ProviderSetupDecisionOutcome, CoreError> {
+        callback::enter("ProviderConnection.setup_decision");
+        self.owner.validate()?;
+        self.same_current_owner(&preview.owner, &preview.connection)?;
+        let username = credentials.username.clone();
+        if let Err(error) = self.access(credentials) { return Ok(setup_refused(error)); }
+        Ok(match self.owner.host.meguri_setup_decision(&self.inner, &username, &preview.inner) {
+            Ok(inner) => ProviderSetupDecisionOutcome::Decision { decision: Arc::new(ProviderSetupDecision {
+                owner: self.owner.clone(), connection: self.inner.clone(), inner }) },
+            Err(error) => setup_refused(error),
+        })
+    }
+    /// Row 1, row 3 or "keep this device's collection": confirms the preview itself.
+    pub fn start_setup_confirm(&self, credentials: ProviderCredentials, decision: Arc<ProviderSetupDecision>,
+        preview: Arc<ProviderBootstrapPreview>, choice: ProviderSetupChoice) -> Result<ProviderBootstrapJob, CoreError> {
+        callback::enter("ProviderConnection.start_setup_confirm");
+        self.setup_step(credentials, &decision, &preview, |access, shown, preview|
+            self.owner.host.confirm_meguri_setup(access, shown, preview, choice.into()), |task| Source::Operation(Arc::new(task)))
+    }
+    /// Row 2 or "keep the server's collection": discards the upload's preview and prepares the download.
+    pub fn start_setup_download_prepare(&self, credentials: ProviderCredentials, decision: Arc<ProviderSetupDecision>,
+        preview: Arc<ProviderBootstrapPreview>, choice: ProviderSetupChoice) -> Result<ProviderBootstrapJob, CoreError> {
+        callback::enter("ProviderConnection.start_setup_download_prepare");
+        self.setup_step(credentials, &decision, &preview, |access, shown, preview|
+            self.owner.host.prepare_meguri_setup_download(access, shown, preview, choice.into()), |task| Source::Preview(Arc::new(task)))
+    }
+    /// Confirms that download only while both sides are what the decision held.
+    pub fn start_setup_download_confirm(&self, credentials: ProviderCredentials, decision: Arc<ProviderSetupDecision>,
+        download: Arc<ProviderBootstrapPreview>, choice: ProviderSetupChoice) -> Result<ProviderBootstrapJob, CoreError> {
+        callback::enter("ProviderConnection.start_setup_download_confirm");
+        self.setup_step(credentials, &decision, &download, |access, shown, preview|
+            self.owner.host.confirm_meguri_setup_download(access, shown, preview, choice.into()), |task| Source::Operation(Arc::new(task)))
+    }
+    /// MP6.9: one read of the server's facts. Starts no upload.
+    pub fn start_setup_settle(&self, credentials: ProviderCredentials) -> Result<ProviderBootstrapJob, CoreError> {
+        callback::enter("ProviderConnection.start_setup_settle");
+        self.owner.validate()?;
+        let source = match self.access(credentials).and_then(|access| self.owner.host.settle_meguri_setup(access)) {
+            Ok(task) => Source::Settle(task), Err(error) => Source::Cell(failure(error)),
+        };
+        Ok(self.job(source))
     }
     pub fn bootstrap_readiness(&self) -> Result<ProviderBootstrapReadiness, CoreError> {
         callback::enter("ProviderConnection.bootstrap_readiness");

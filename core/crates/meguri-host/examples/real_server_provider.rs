@@ -51,6 +51,7 @@ fn bootstrap<T>(value: std::result::Result<T, MeguriBootstrapError>, stage: &'st
         MeguriBootstrapError::Username => "Username".into(),
         MeguriBootstrapError::Engine(_) => "Engine".into(),
         MeguriBootstrapError::Transfer(_) => "Transfer".into(),
+        MeguriBootstrapError::SetupChanged(_) => "SetupChanged".into(),
         // Its formatter emits only a closed category, never account data.
         MeguriBootstrapError::Ready(e) => format!("Ready/{e:?}"),
     }))

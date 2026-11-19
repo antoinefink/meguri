@@ -262,6 +262,8 @@ pub struct CoreHost {
     pub(crate) cloud_policy: Option<meguri_sync::cloud::policy::Driver>,
     cloud: Option<Arc<meguri_sync::cloud::runtime::Runtime>>,
     pub(crate) manual_transfers: meguri_sync::oneway::ManualTransfers,
+    pub(crate) manual_transfer_directory: PathBuf,
+    pub(crate) setup_retest: Arc<crate::provider_setup::SetupRetest>,
     pub(crate) export: crate::collection_export::ExportInputs,
     process: ProcessCore,
     closed: Mutex<CloseState>,
@@ -272,7 +274,7 @@ pub struct CoreHost {
     media: Arc<MediaPort>,
     clock: Arc<dyn Clock>,
     backup: Arc<dyn BackupService>,
-    backup_inputs: meguri_package::entry::EntryInputs,
+    pub(crate) backup_inputs: meguri_package::entry::EntryInputs,
     // The same composition-time authority used by ordinary engine open.
     // Metadata publication must not resolve the caller's directory again.
     provider_collection_path: PathBuf,
@@ -635,6 +637,7 @@ impl CoreHost {
         options.maintenance_status = Some(Arc::new(MaintenanceStatusSource {
             backups: paths.backups.clone(),
         }));
+        let setup_retest = Arc::new(crate::provider_setup::SetupRetest::default());
         let manual_transfers = meguri_sync::oneway::ManualTransfers::new(meguri_sync::oneway::TransferInputs {
             engine: engine.clone(),
             paths: paths.clone(),
@@ -644,7 +647,7 @@ impl CoreHost {
             clock: config.clock.clone(),
             random: config.random.clone(),
             space: config.disk_space_provider.clone(),
-            backup: backup.clone(),
+            backup: Arc::new(crate::provider_setup::RetestingBackup::new(backup.clone(), setup_retest.clone())),
             initial_open: options.clone(),
         });
         let cloud_policy = cloud
@@ -663,6 +666,8 @@ impl CoreHost {
             cloud_policy,
             cloud,
             manual_transfers,
+            manual_transfer_directory: config.manual_transfer_directory.clone(),
+            setup_retest,
             backup_inputs,
             provider_collection_path: paths.collection(),
             initial_open: options.clone(),
