@@ -11,6 +11,13 @@ import Observation
     func release() async throws
     func setFocus(_ ord: Int) async throws
     func dispose()
+    /// N17.1: a runtime that can load the next draft into the page it already
+    /// shows hands that page on, so the keyboard stays up after an add. The
+    /// receiver ends as `dispose()` ends it, except that the page lives on.
+    func successor(for draft: NoteEditorDraft, isCurrent: @escaping @MainActor () -> Bool) -> (any AddNoteFieldRuntime)?
+}
+extension AddNoteFieldRuntime {
+    public func successor(for draft: NoteEditorDraft, isCurrent: @escaping @MainActor () -> Bool) -> (any AddNoteFieldRuntime)? { nil }
 }
 
 /// Collection-owned A5/A7 action model. Production presentation remains gated
@@ -33,6 +40,20 @@ public final class AddNoteFlow {
     public private(set) var missingClozeConfirmation: UUID?
     public private(set) var discardConfirmation: UUID?
     public private(set) var exclusiveOperation: String?
+    /// N17.1: the deck of the newest add, until its sheet closes or the selection changes.
+    public struct Confirmation: Equatable, Sendable {
+        public let note: Int64
+        public let deck: String
+    }
+    public private(set) var confirmation: Confirmation?
+    /// A2's lists for the Deck and Type rows, read on open and after each relevant change.
+    public private(set) var deckChoices: [DeckNameEntry] = []
+    public private(set) var notetypeChoices: [NotetypeName] = []
+    @ObservationIgnored private var choicesTask: Task<Void, Never>?
+    @ObservationIgnored private var choicesPending = false
+    /// Chosen by each opener: after an add the next draft loads into the page
+    /// already showing, instead of a page from the factory.
+    @ObservationIgnored private var continuesPage = false
     @ObservationIgnored private weak var owner: ReviewCollection?
     @ObservationIgnored private var factory: RuntimeFactory?
     @ObservationIgnored private var epoch = UUID()
@@ -70,10 +91,85 @@ public final class AddNoteFlow {
             backgroundTask == nil && exclusiveOperation == nil && owner?.canBeginAddAction == true
     }
 
+    /// N17.1: Add also waits for content in the first field.
+    public var canAdd: Bool { canSave && draft?.firstFieldHasContent == true }
+    private var canChangeSelection: Bool {
+        canSave && runtime?.draft === draft && startedEpoch == epoch
+    }
+
+    /// A2: every normal deck in the snapshot's order. The default deck is left
+    /// out when the deck tree hides it, unless it is selected or nothing else is listed.
+    nonisolated public static func deckChoices(names: [DeckNameEntry], selected: Int64, defaultShown: Bool) -> [DeckNameEntry] {
+        let normal = names.filter { !$0.filtered }
+        let listed = normal.filter { $0.id != 1 || defaultShown || selected == 1 }
+        return listed.isEmpty ? normal : listed
+    }
+
+    public func refreshChoices() {
+        guard isPresented, let draft else { return }
+        // A request made while one is in flight runs once that one ends.
+        guard choicesTask == nil else { choicesPending = true; return }
+        choicesTask = Task {
+            defer {
+                choicesTask = nil
+                if choicesPending { choicesPending = false; refreshChoices() }
+            }
+            guard let decks = try? await CoreDeckService().allDeckNames(),
+                  let types = try? await CoreNotetypeService().notetypeNames(),
+                  isPresented, let current = self.draft, current.generation == draft.generation,
+                  decks.generation == current.generation else { return }
+            deckChoices = Self.deckChoices(names: decks.decks, selected: current.deck.id,
+                                           defaultShown: owner?.deck(1) != nil)
+            notetypeChoices = types
+        }
+    }
+
+    /// A2: choosing another deck selects it and changes nothing else.
+    public func selectDeck(_ id: Int64) async {
+        guard canChangeSelection, id != draft?.deck.id else { return }
+        if await applyEntryDeck(id) { confirmation = nil }
+        refreshChoices()
+    }
+
+    /// A3: held flush, A3.1's mapping, the deck kept, the last add forgotten,
+    /// then the new draft loaded with focus at the same position.
+    public func selectNotetype(_ id: Int64) async {
+        guard canChangeSelection, let draft, let page = runtime, id != draft.notetype.id else { return }
+        opening = true
+        defer { opening = false; startSelectionRefresh(); refreshChoices() }
+        await selectionTask?.value
+        let expected = epoch
+        do {
+            try await page.flush(hold: true)
+            guard owns(draft, epoch: expected), runtime === page, draft.pendingFields.isEmpty else { throw Self.ownerChanged }
+            let revision = draft.preparationRevision
+            let notetype = try await CoreNotetypeService().readNotetype(id: id)
+            let lifecycle = try await CoreCollectionService().lifecycle()
+            guard owns(draft, epoch: expected), runtime === page, draft.preparationRevision == revision,
+                  lifecycle == .ready(generation: draft.generation) else { throw Self.ownerChanged }
+            let next = try draft.replacingSelection(notetype: notetype, deck: draft.deck)
+            confirmation = nil
+            // The new draft gets its own host.
+            let host = page
+            host.dispose()
+            epoch = UUID()
+            preparation.replace(with: next)
+            do { try await mount(next) }
+            catch {
+                if preparation.draft === next, runtime?.draft === next,
+                   owner?.ownsAddGeneration(next.generation) == true { record(error) }
+            }
+        } catch {
+            if epoch == expected, preparation.draft === draft {
+                record(error); await release(page, draft: draft, epoch: expected)
+            }
+        }
+    }
+
     /// A factory is supplied by Editor once, never by a SwiftUI view remount.
     /// An invalid explicit deck refuses the entry rather than using defaults.
     @discardableResult
-    public func open(presetDeck: Int64? = nil, makeRuntime: @escaping RuntimeFactory) async -> Bool {
+    public func open(presetDeck: Int64? = nil, continuingPage: Bool = false, makeRuntime: @escaping RuntimeFactory) async -> Bool {
         guard owner?.canBeginAddAction == true, exclusiveOperation == nil,
               draft?.submissionAcknowledged != true, !resumingInput, !opening, !saving, !guardingClose, backgroundTask == nil else { return false }
         if isPresented {
@@ -95,11 +191,12 @@ public final class AddNoteFlow {
               owner?.ownsAddGeneration(draft.generation) == true, exclusiveOperation == nil else {
             error = preparation.error; return false
         }
-        factory = makeRuntime; isPresented = true
+        factory = makeRuntime; continuesPage = continuingPage; isPresented = true
         error = nil; failure = nil; refusal = nil
         do {
             try await mount(draft)
             if retryingStartup || noNotetype { selectionChanged(generation: draft.generation) }
+            refreshChoices()
             return true
         }
         catch { return false }
@@ -144,6 +241,7 @@ public final class AddNoteFlow {
               owner?.ownsAddGeneration(generation) == true else { return }
         selectionObservation = UUID(); pendingSelectionGeneration = generation
         startSelectionRefresh()
+        refreshChoices()
     }
 
     private var canRefreshSelection: Bool {
@@ -255,16 +353,20 @@ public final class AddNoteFlow {
         if showingNoNotetype { error = nil; failure = nil; showingNoNotetype = false }
     }
 
-    private func mount(_ draft: NoteEditorDraft) async throws {
+    private func mount(_ draft: NoteEditorDraft, after previous: (any AddNoteFieldRuntime)? = nil) async throws {
         epoch = UUID(); runtime = nil
         let expected = epoch
         var startingHost: (any AddNoteFieldRuntime)?
         do {
-            guard let factory else { throw BridgeError.unavailable(reason: "The field editor is unavailable.") }
-            let host = try factory(draft, { [weak self, weak draft] in
+            let current: @MainActor () -> Bool = { [weak self, weak draft] in
                 guard let self, let draft else { return false }
                 return self.owns(draft, epoch: expected)
-            })
+            }
+            // After an add the same page takes the next draft when it can.
+            let adopted = continuesPage ? previous?.successor(for: draft, isCurrent: current) : nil
+            if adopted == nil { previous?.dispose() }
+            guard let factory else { throw BridgeError.unavailable(reason: "The field editor is unavailable.") }
+            let host = try adopted ?? factory(draft, current)
             startingHost = host; runtime = host
             try await host.start()
             guard owns(draft, epoch: expected), runtime === host else {
@@ -384,13 +486,14 @@ public final class AddNoteFlow {
                 return added
             }
             lastAdded = added; history.insert(added.id, at: 0)
+            confirmation = Confirmation(note: added.id, deck: draft.deck.fullName)
             // Newer input in this same owner survives a delayed reply too.
             guard exact() else {
                 await release(host, draft: draft, epoch: expected)
                 return added
             }
-            host.dispose(); epoch = UUID(); preparation.replace(with: next)
-            do { try await mount(next) }
+            epoch = UUID(); preparation.replace(with: next)
+            do { try await mount(next, after: host) }
             catch {
                 if preparation.draft === next, runtime?.draft === next,
                    owner?.ownsAddGeneration(next.generation) == true { record(error) }
@@ -466,6 +569,7 @@ public final class AddNoteFlow {
                     await release(host, draft: draft, epoch: expected); return false
                 }
                 epoch = UUID(); host.dispose(); runtime = nil; isPresented = false
+                confirmation = nil
                 if discard { preparation.replace(with: nil) }
                 return true
             } catch {
@@ -562,7 +666,8 @@ public final class AddNoteFlow {
         epoch = UUID(); runtime?.dispose(); runtime = nil; isPresented = false
         cancelUnconfirmedAdd()
         if let confirmation = discardConfirmation { answerDiscard(confirmation, discard: false) }
-        history.removeAll(); lastAdded = nil
+        history.removeAll(); lastAdded = nil; confirmation = nil
+        deckChoices = []; notetypeChoices = []
         if draft?.unchangedSinceLastAdd == true { preparation.replace(with: nil) }
         else if draft != nil { error = "The collection changed. Your draft has been kept." }
     }

@@ -58,6 +58,31 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         }
     }
 
+    /// The page is already loaded and ready: this host continues another's web view.
+    private var pageReady = false
+    private var firstLoad: UInt64 = 0
+
+    /// N17.1: the next draft in the page the previous host shows. The web view
+    /// stays first responder, so on touch the keyboard stays up after an add.
+    private init(continuing previous: FieldEditorHost, draft: NoteEditorDraft, isCurrent: @escaping @MainActor () -> Bool) {
+        self.draft = draft; self.isCurrent = isCurrent
+        document = previous.document; relay = previous.relay; webView = previous.webView
+        super.init()
+        pageReady = true; loadID = previous.loadID; firstLoad = previous.loadID
+        relay.owner = self; webView.navigationDelegate = self
+        #if os(iOS)
+        (webView as? FieldEditorWebView)?.owner = self
+        refreshAccessory()
+        #endif
+    }
+    public func successor(for draft: NoteEditorDraft, isCurrent: @escaping @MainActor () -> Bool) -> (any AddNoteFieldRuntime)? {
+        guard editable, !closed, !processTerminated, loadID < Self.maximumID else { return nil }
+        // End this host as dispose() does, but leave the page and its handler alive.
+        closed = true
+        if let expected = activeLoad { fail(EditorRuntimeError.unavailable, load: expected) }
+        return FieldEditorHost(continuing: self, draft: draft, isCurrent: isCurrent)
+    }
+
     public init(draft: NoteEditorDraft, isCurrent: @escaping @MainActor () -> Bool) throws {
         self.draft = draft; self.isCurrent = isCurrent
         document = try EditorDocument(resources: .module); relay = EditorMessageRelay()
@@ -69,10 +94,64 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         configuration.userContentController.addScriptMessageHandler(relay, contentWorld: Self.world, name: "meguriEditor")
         configuration.userContentController.addUserScript(WKUserScript(source: document.script, injectionTime: .atDocumentEnd,
             forMainFrameOnly: true, in: Self.world))
+        #if os(iOS)
+        let view = FieldEditorWebView(frame: .zero, configuration: configuration)
+        // The form's grouped background shows through; the page paints only its boxes.
+        view.isOpaque = false; view.backgroundColor = .clear; view.scrollView.backgroundColor = .clear
+        webView = view
+        #else
         webView = WKWebView(frame: .zero, configuration: configuration)
+        #endif
         super.init()
         relay.owner = self; webView.navigationDelegate = self
+        #if os(iOS)
+        view.owner = self
+        refreshAccessory()
+        #endif
     }
+
+    // MARK: The focused field's controls (N17.1)
+
+    /// The field the one mode control acts on: the field that has, or last had, focus.
+    public var modeField: Int? {
+        guard editable, let ord = draft.focusedField, draft.fields.indices.contains(ord),
+              !draft.fields[ord].collapsed else { return nil }
+        return ord
+    }
+    public var focusedMode: NoteEditorDraft.Mode? { modeField.map { draft.fields[$0].mode } }
+    /// F1's identifier for the mode button of the field it acts on.
+    public var modeControlIdentifier: String {
+        modeField.map { "editor.field.\($0).htmlToggle" } ?? "editor.add.htmlToggle"
+    }
+    public func toggleFocusedMode() {
+        guard !held, let ord = modeField else { return }
+        let mode: NoteEditorDraft.Mode = draft.fields[ord].mode == .html ? .rich : .html
+        Task { try? await setMode(mode, ord: ord) }
+    }
+    /// The next or previous expanded field, as Tab moves (F4), without leaving the page.
+    func adjacentField(previous: Bool) -> Int? {
+        let shown = draft.fields.indices.filter { !draft.fields[$0].collapsed }
+        guard let current = draft.focusedField, let index = shown.firstIndex(of: current) else { return nil }
+        let target = index + (previous ? -1 : 1)
+        return shown.indices.contains(target) ? shown[target] : nil
+    }
+    func moveFocus(previous: Bool) {
+        guard !held, let ord = adjacentField(previous: previous) else { return }
+        Task { try? await setFocus(ord) }
+    }
+
+    #if os(iOS)
+    private func refreshAccessory() {
+        guard let view = webView as? FieldEditorWebView, view.owner === self else { return }
+        view.modeItem.isEnabled = modeField != nil && !held
+        view.modeItem.isSelected = focusedMode == .html
+        view.modeItem.accessibilityIdentifier = modeControlIdentifier
+        view.previousItem.isEnabled = adjacentField(previous: true) != nil
+        view.nextItem.isEnabled = adjacentField(previous: false) != nil
+    }
+    #else
+    private func refreshAccessory() {}
+    #endif
 
     public func start() async throws {
         if let startup, let expected = activeLoad {
@@ -82,7 +161,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
             return
         }
         // Only explicit process recovery may replace a failed load.
-        guard loadID == 0 else { throw EditorRuntimeError.unavailable }
+        guard loadID == firstLoad else { throw EditorRuntimeError.unavailable }
         try await startLoad()
     }
 
@@ -95,13 +174,15 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         let work = Task { [self] in
             try requireCurrent(expected)
             interval = Signposts.begin(IntervalNames.editorOpenToEditable)
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-                ready = continuation; allowsDocumentNavigation = true
-                readyTimeout = Task { [weak self] in
-                    do { try await Task.sleep(for: .seconds(10)) } catch { return }
-                    self?.fail(EditorRuntimeError.unavailable, load: expected)
+            if !pageReady {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                    ready = continuation; allowsDocumentNavigation = true
+                    readyTimeout = Task { [weak self] in
+                        do { try await Task.sleep(for: .seconds(10)) } catch { return }
+                        self?.fail(EditorRuntimeError.unavailable, load: expected)
+                    }
+                    documentNavigation = webView.load(URLRequest(url: EditorDocument.url))
                 }
-                documentNavigation = webView.load(URLRequest(url: EditorDocument.url))
             }
             try requireCurrent(expected)
             try await openDraft(load: expected)
@@ -305,6 +386,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         case "contentHeight": contentHeight = EditorBridgeMessage.number(message.body["height"])!
         default: throw EditorRuntimeError.invalidMessage
         }
+        refreshAccessory()
     }
     private func checkFields(load expected: UInt64) {
         Task { [weak self] in
@@ -397,12 +479,44 @@ private struct FieldEditorMount: UIViewRepresentable {
 }
 #endif
 
+#if os(iOS)
+/// WebKit asks the web view for the keyboard bar, so a subclass supplies it:
+/// the mode control, previous and next field, Done. It replaces WebKit's own
+/// bar, so those three keep their place. The bar outlives a draft; its
+/// actions go to the host that currently owns the page.
+final class FieldEditorWebView: WKWebView {
+    weak var owner: FieldEditorHost?
+    private(set) lazy var modeItem = item("chevron.left.forwardslash.chevron.right", "HTML Editor", "editor.add.htmlToggle") { $0.toggleFocusedMode() }
+    private(set) lazy var previousItem = item("chevron.up", "Previous Field", "editor.add.previousField") { $0.moveFocus(previous: true) }
+    private(set) lazy var nextItem = item("chevron.down", "Next Field", "editor.add.nextField") { $0.moveFocus(previous: false) }
+    private lazy var accessory: UIToolbar = {
+        let done = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in self?.endEditing(true) })
+        done.accessibilityIdentifier = "editor.add.keyboardDone"
+        let bar = UIToolbar()
+        bar.items = [modeItem, .flexibleSpace(), previousItem, nextItem, .flexibleSpace(), done]
+        bar.sizeToFit()
+        return bar
+    }()
+    override var inputAccessoryView: UIView? { accessory }
+
+    private func item(_ symbol: String, _ label: String.LocalizationValue, _ identifier: String,
+                      _ action: @escaping @MainActor (FieldEditorHost) -> Void) -> UIBarButtonItem {
+        let item = UIBarButtonItem(image: UIImage(systemName: symbol), primaryAction: UIAction { [weak self] _ in
+            if let owner = self?.owner { action(owner) }
+        })
+        item.accessibilityLabel = String(localized: label, bundle: .module)
+        item.accessibilityIdentifier = identifier
+        return item
+    }
+}
+#endif
+
 // The collection retains this actual host through the AppModel runtime boundary.
 // A remounted form reads it; it must not create/dispose a host on appear/disappear.
 extension ReviewCollection {
     @discardableResult public func prepareAddNoteEditor(presetDeck: Int64? = nil) async -> FieldEditorHost? {
         let flow = addNoteFlow
-        guard await flow.open(presetDeck: presetDeck, makeRuntime: { draft, current in
+        guard await flow.open(presetDeck: presetDeck, continuingPage: true, makeRuntime: { draft, current in
             try FieldEditorHost(draft: draft, isCurrent: current)
         }) else { return nil }
         return flow.runtime as? FieldEditorHost

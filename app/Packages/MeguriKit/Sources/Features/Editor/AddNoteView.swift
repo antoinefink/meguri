@@ -1,5 +1,6 @@
 import AppModel
 import CoreBridge
+import DesignSystem
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -22,9 +23,9 @@ public struct AddNoteView: View {
                     AccessibilityNotification.Announcement(String(localized: String.LocalizationValue(key), bundle: .module)).post()
                 }
             }
-            .onChange(of: flow.lastAdded?.id) { _, id in
-                if id != nil, let added = flow.lastAdded {
-                    AccessibilityNotification.Announcement(String(localized: "\(added.cards.count) cards added", bundle: .module)).post()
+            .onChange(of: flow.confirmation) { _, added in
+                if let added {
+                    AccessibilityNotification.Announcement(String(localized: "Added to \(Self.deckName(added.deck))", bundle: .module)).post()
                 }
             }
             .onChange(of: flow.error) { _, message in
@@ -34,9 +35,13 @@ public struct AddNoteView: View {
 
     private var presentation: some View {
         #if os(macOS)
-        VStack {
+        VStack(spacing: 0) {
             HStack {
                 Text("Add Note", bundle: .module).font(.headline)
+                if let added = confirmationText {
+                    Text(verbatim: added).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("editor.add.result")
+                }
                 Spacer()
                 closeButton
             }
@@ -44,16 +49,25 @@ public struct AddNoteView: View {
             Divider()
             editor
             Divider()
-            HStack { Spacer(); addButton }.padding()
+            HStack { modeToggle; Spacer(); addButton }.padding()
         }
+        // The page's own background, so the fields and their form read as one surface.
+        .background(Color(nsColor: .textBackgroundColor))
         .modifier(AddNoteDecisions(flow: flow))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("editor.add")
         #else
         NavigationStack {
             editor
+                // N17.1: over the whole screen the form keeps a readable column.
+                .frame(maxWidth: coversScreen ? ContentWidth.readable : .infinity)
+                .frame(maxWidth: .infinity)
+                .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
                 .navigationTitle(Text("Add Note", bundle: .module))
                 .navigationBarTitleDisplayMode(.inline)
+                // The confirmation is the bar's subtitle: it covers no field
+                // and moves nothing while the keyboard is up.
+                .navigationSubtitle(Text(verbatim: confirmationText ?? ""))
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { closeButton }
                     ToolbarItem(placement: .confirmationAction) { addButton }
@@ -71,42 +85,45 @@ public struct AddNoteView: View {
         #endif
     }
 
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var coversScreen: Bool {
+        AddNotePresentation.coversScreen(phone: UIDevice.current.userInterfaceIdiom == .phone, regularWidth: sizeClass == .regular)
+    }
+    #endif
+
     private var editor: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 0) {
             if let draft = flow.draft {
-                Grid(alignment: .leading) {
-                    GridRow {
-                        Text("Type", bundle: .module)
-                        Text(verbatim: draft.notetype.name)
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("editor.add.type")
-                    GridRow {
-                        Text("Deck", bundle: .module)
-                        Text(verbatim: draft.deck.fullName)
-                    }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("editor.add.deck")
-                }
-                .padding(.horizontal)
+                AddNoteSelectionForm(flow: flow, draft: draft)
                 if let host = flow.runtime as? FieldEditorHost {
                     FieldEditorView(host: host)
-                        .id(host.draft.identity)
+                        // The page, not the draft: after an add the same web view
+                        // stays mounted and first responder (N17.1).
+                        .id(ObjectIdentifier(host.webView))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if let error = host.error, flow.error == nil {
-                        failure(error)
-                    }
                 } else {
                     ContentUnavailableView {
                         Label { Text("Editor Unavailable", bundle: .module) } icon: { Image(systemName: "exclamationmark.triangle") }
                     }
                 }
-                if let error = draft.fieldCheckError, flow.error == nil { failure(error) }
             }
+            messages
+        }
+    }
+
+    /// Lines that explain a refusal or a failure, under the fields. A blank or
+    /// ordinary draft shows none.
+    @ViewBuilder private var messages: some View {
+        let host = flow.runtime as? FieldEditorHost
+        let draft = flow.draft
+        VStack(alignment: .leading) {
+            if let error = host?.error, flow.error == nil { failure(error) }
+            if let error = draft?.fieldCheckError, flow.error == nil { failure(error) }
             if flow.opening || flow.saving || flow.guardingClose {
                 ProgressView().accessibilityIdentifier("editor.add.busy")
             }
-            if let state = flow.refusal ?? flow.draft?.fieldCheck?.state {
+            if let state = flow.refusal ?? draft?.fieldCheck?.state {
                 fieldStatus(state)
             }
             if let operation = flow.exclusiveOperation {
@@ -118,12 +135,18 @@ public struct AddNoteView: View {
                 AddNoteRequestMessage(issue: issue)
                     .accessibilityIdentifier("editor.add.requestError")
             }
-            if let added = flow.lastAdded {
-                Text("\(added.cards.count) cards added", bundle: .module)
-                    .accessibilityIdentifier("editor.add.result")
-                    .accessibilityAddTraits(.updatesFrequently)
-            }
         }
+        .padding(.horizontal)
+    }
+
+    /// "Added to <deck>", until the next note is started.
+    private var confirmationText: String? {
+        guard let added = flow.confirmation, flow.draft?.unchangedSinceLastAdd == true else { return nil }
+        return String(localized: "Added to \(Self.deckName(added.deck))", bundle: .module)
+    }
+    /// A deck is named by its last component, as on its own page.
+    static func deckName(_ fullName: String) -> String {
+        fullName.components(separatedBy: "::").last.flatMap { $0.isEmpty ? nil : $0 } ?? fullName
     }
 
     @ViewBuilder private func fieldStatus(_ state: FieldState) -> some View {
@@ -136,8 +159,9 @@ public struct AddNoteView: View {
     private func statusKey(_ state: FieldState) -> String? {
         switch state {
         case .normal: nil
-        case .empty:
-            flow.refusal == .empty || flow.draft?.isBlank == false ? "Enter content in the first field." : nil
+        // N17.1: Add waits for the first field, so the live empty state says
+        // nothing. Only a refused add names it (editor/add-flow A5 step 4).
+        case .empty: flow.refusal == .empty ? "Enter content in the first field." : nil
         case .duplicate: "A note with this first field already exists."
         case .notetypeNotCloze: "This note type does not support cloze deletions."
         case .fieldNotCloze: "This field does not support cloze deletions."
@@ -157,9 +181,24 @@ public struct AddNoteView: View {
         Button(action: add) { Text("Add", bundle: .module) }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(!flow.canSave || (flow.runtime as? FieldEditorHost)?.editable != true)
+            .disabled(!flow.canAdd || (flow.runtime as? FieldEditorHost)?.editable != true)
             .accessibilityIdentifier("editor.add.save")
     }
+    #if os(macOS)
+    /// The one mode control, for the field that has focus (⇧⌘X does the same).
+    @ViewBuilder private var modeToggle: some View {
+        if let host = flow.runtime as? FieldEditorHost {
+            Toggle(isOn: Binding(get: { host.focusedMode == .html }, set: { _ in host.toggleFocusedMode() })) {
+                Label { Text("HTML Editor", bundle: .module) } icon: { Image(systemName: "chevron.left.forwardslash.chevron.right") }
+            }
+            .toggleStyle(.button)
+            .labelStyle(.iconOnly)
+            .disabled(host.focusedMode == nil)
+            .help(Text("HTML Editor", bundle: .module))
+            .accessibilityIdentifier(host.modeControlIdentifier)
+        }
+    }
+    #endif
     private var closeButton: some View {
         Button(role: .close, action: close) {
             Label { Text("Close", bundle: .module) } icon: { Image(systemName: "xmark") }
@@ -176,6 +215,54 @@ public struct AddNoteView: View {
         Task { await flow.save() }
     }
     private func close() { collection.navigation.dismissSheet() }
+}
+
+/// The form's first group: Deck, then Type, each a menu on its current value.
+/// The fields under it scroll in their own view, so this group keeps the
+/// height of its two rows and never scrolls.
+private struct AddNoteSelectionForm: View {
+    let flow: AddNoteFlow
+    let draft: NoteEditorDraft
+    @State private var top: CGFloat = 0
+    @State private var deckBottom: CGFloat = 0
+    @State private var typeTop: CGFloat = 0
+    @State private var typeBottom: CGFloat?
+    /// The last row's lower edge: its content plus half the gap between the
+    /// two rows' contents, which is one row's own inset.
+    private var bottom: CGFloat? { typeBottom.map { $0 + max(0, typeTop - deckBottom) / 2 } }
+
+    private var decks: [DeckNameEntry] {
+        flow.deckChoices.contains { $0.id == draft.deck.id } ? flow.deckChoices : [draft.deck] + flow.deckChoices
+    }
+    private var notetypes: [NotetypeName] {
+        flow.notetypeChoices.contains { $0.id == draft.notetype.id } ? flow.notetypeChoices
+            : [NotetypeName(id: draft.notetype.id, name: draft.notetype.name)] + flow.notetypeChoices
+    }
+    private var busy: Bool { flow.opening || flow.saving || flow.guardingClose || flow.exclusiveOperation != nil }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker(selection: Binding(get: { draft.deck.id }, set: { id in Task { await flow.selectDeck(id) } })) {
+                    ForEach(decks, id: \.id) { Text(verbatim: $0.fullName).tag($0.id) }
+                } label: { Text("Deck", bundle: .module) }
+                .accessibilityIdentifier("editor.add.deck")
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { deckBottom = $0 }
+                Picker(selection: Binding(get: { draft.notetype.id }, set: { id in Task { await flow.selectNotetype(id) } })) {
+                    ForEach(notetypes, id: \.id) { Text(verbatim: $0.name).tag($0.id) }
+                } label: { Text("Type", bundle: .module) }
+                .accessibilityIdentifier("editor.add.type")
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { typeTop = $0.minY; typeBottom = $0.maxY }
+            }
+            .disabled(busy)
+        }
+        .formStyle(.grouped)
+        .scrollDisabled(true)
+        .scrollContentBackground(.hidden)
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { top = $0 }
+        // Until the rows report their place the form takes its share of the sheet.
+        .frame(height: bottom.map { max(0, $0 - top) })
+    }
 }
 
 private struct AddNoteDecisions: ViewModifier {

@@ -16,13 +16,12 @@ final class EditorDocument: NSObject, WKURLSchemeHandler {
             throw CocoaError(.fileNoSuchFile)
         }
         var source = try String(contentsOf: page, encoding: .utf8)
-        for key in ["editor.html", "editor.rich", "editor.mode"] {
-            let label = Bundle.module.localizedString(forKey: key, value: nil, table: nil)
-            let escaped = label.replacingOccurrences(of: "&", with: "&amp;")
-                .replacingOccurrences(of: "\"", with: "&quot;")
-                .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
-            source = source.replacingOccurrences(of: "{{\(key)}}", with: escaped)
-        }
+        // N17.1: the page lays its fields out as the platform's form does.
+        #if os(macOS)
+        source = source.replacingOccurrences(of: "{{editor.platform}}", with: "mac")
+        #else
+        source = source.replacingOccurrences(of: "{{editor.platform}}", with: "touch")
+        #endif
         html = Data(source.utf8)
         script = try String(contentsOf: runtime, encoding: .utf8)
         super.init()

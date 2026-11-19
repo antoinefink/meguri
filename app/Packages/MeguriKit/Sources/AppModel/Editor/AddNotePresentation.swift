@@ -35,6 +35,10 @@ public final class AddNotePresentation {
 
     public func clearIssue() { issue = nil }
 
+    /// N17.1: an iPhone at regular width (the Duo opened wide) shows Add Note
+    /// over the whole screen. Every other layout keeps the system sheet.
+    nonisolated public static func coversScreen(phone: Bool, regularWidth: Bool) -> Bool { phone && regularWidth }
+
     private func request(_ route: SheetRoute?) {
         guard let owner else { return }
         let navigation = owner.navigation

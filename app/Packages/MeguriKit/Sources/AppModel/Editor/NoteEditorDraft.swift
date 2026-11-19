@@ -60,6 +60,16 @@ public final class NoteEditorDraft {
 
     public var values: [String] { fields.map(\.target) }
     public var isBlank: Bool { pendingFields.isEmpty && fields.allSatisfy { Self.blankValue($0.target).isEmpty } }
+    /// N17.1 enables Add. Typing counts before its commit arrives; a committed
+    /// value follows the live field check, so markup with no content stays out.
+    public var firstFieldHasContent: Bool {
+        if pendingFields.contains(0) { return true }
+        guard let first = fields.first, !Self.blankValue(first.target).isEmpty else { return false }
+        // Only a check of exactly this content can say the field is empty. A
+        // failed or older check is unknown: Add stays enabled and checks itself.
+        return !(fieldCheckError == nil && checkedRevision == revision && fieldCheck?.state == .empty)
+    }
+    private var checkedRevision: UInt64?
     public var unchangedSinceLastAdd: Bool {
         guard pendingFields.isEmpty else { return false }
         return fields.enumerated().allSatisfy { index, field in
@@ -171,7 +181,10 @@ public final class NoteEditorDraft {
             }
         }
         let next = try NoteEditorDraft(generation: generation, notetype: notetype, deck: deck, values: mapped, tags: tags)
-        if !changedType {
+        if changedType {
+            // A3 step 5: the same position, or the new type's last field.
+            next.focusedField = min(focusedField ?? 0, next.fields.count - 1)
+        } else {
             next.lastAddedValues = lastAddedValues
             for index in fields.indices {
                 next.fields[index].mode = fields[index].mode
@@ -197,7 +210,7 @@ public final class NoteEditorDraft {
         do {
             let result = try await CoreNoteService().checkNoteFields(notetypeId: notetype.id, fields: values, ownNote: nil)
             guard current(), expected == revision, request == checkRevision else { return }
-            fieldCheck = result; fieldCheckError = nil
+            fieldCheck = result; fieldCheckError = nil; checkedRevision = expected
         } catch {
             guard current(), expected == revision, request == checkRevision else { return }
             fieldCheckError = String(describing: error)

@@ -8,8 +8,6 @@
         "fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr li main " +
         "nav ol p pre section table ul").split(" "));
     let loadId = 0, seq = 0, held = true, fields = [];
-    const labels = Object.fromEntries(["html", "rich", "mode"].map(key =>
-        [key, document.querySelector(`meta[name="editor-${key}"]`).content]));
     const bridge = window.webkit.messageHandlers.meguriEditor;
     const envelope = (type, payload = {}) => ({type, loadId, seq: ++seq, ...payload});
     const emit = (type, payload) => bridge.postMessage(envelope(type, payload));
@@ -73,8 +71,10 @@
         return result;
     }
     function selectRange(field, value) {
-        const current = selection(field);
-        current.removeAllRanges(); current.addRange(value);
+        // Replace the selection in one step. Clearing it first leaves a
+        // focused field with no caret when WebKit refuses a range inside the
+        // field's shadow tree, and typing then goes nowhere.
+        selection(field).setBaseAndExtent(value.startContainer, value.startOffset, value.endContainer, value.endOffset);
         field.caret = value.cloneRange();
     }
     function saveCaret(field) {
@@ -163,8 +163,6 @@
         field.host.hidden = field.collapsed || field.mode !== "rich";
         field.source.hidden = field.collapsed || field.mode !== "html";
         field.label.setAttribute("aria-expanded", String(!field.collapsed));
-        field.toggle.textContent = field.mode === "rich" ? labels.html : labels.rich;
-        field.toggle.setAttribute("aria-pressed", String(field.mode === "html"));
         placeholder(field);
     }
     function placeholder(field) {
@@ -225,7 +223,9 @@
             saveCaret(field); field.lastKind = null; commit(field, "blur"); void emit("blur", {ord: field.ord});
         });
         input.addEventListener("beforeinput", event => {
-            if (held) { event.preventDefault(); return; }
+            // Composition input cannot be cancelled: remember the field, so
+            // what it now shows is committed once the hold ends.
+            if (held) { event.preventDefault(); if (!event.cancelable) field.heldInput = true; return; }
             if (["historyUndo", "historyRedo"].includes(event.inputType)) {
                 event.preventDefault(); history(field, event.inputType === "historyRedo"); return;
             }
@@ -234,7 +234,10 @@
             }
             beforeEdit(field, event.inputType);
         });
-        input.addEventListener("input", () => { if (!held) { dirty(field); historyState(field); } });
+        input.addEventListener("input", () => {
+            if (held) { field.heldInput = true; return; }
+            dirty(field); historyState(field);
+        });
         input.addEventListener("keydown", event => {
             if (held) { event.preventDefault(); return; }
             if (event.key === "Tab") { event.preventDefault(); tab(field, event.shiftKey); }
@@ -250,17 +253,17 @@
     }
     function makeField(value) {
         const section = document.createElement("section"), header = document.createElement("header");
-        const label = document.createElement("button"), toggle = document.createElement("button");
-        label.type = toggle.type = "button";
+        // N17.1: the name is the section's header; it still collapses the field (F3).
+        // The one mode control is native, in the keyboard bar or the Mac bottom bar.
+        const label = document.createElement("button");
+        label.type = "button"; label.className = "label";
         label.textContent = value.name; label.id = `editor.field.${value.ord}.label`;
-        toggle.id = `editor.field.${value.ord}.htmlToggle`;
-        toggle.setAttribute("aria-label", `${labels.mode}: ${value.name}`);
-        header.append(label, toggle);
+        header.append(label);
         const boundary = document.createElement("div"), host = document.createElement("div");
         boundary.className = "fieldBoundary"; host.className = "richHost"; boundary.append(host);
         const root = host.attachShadow({mode: "closed"});
         const style = document.createElement("style");
-        style.textContent = ":host { display:block; position:relative } meguri-field-content { display:block; min-height:2em; overflow-wrap:anywhere } " +
+        style.textContent = ":host { display:block; position:relative } meguri-field-content { display:block; min-height:1.3em; outline:none; overflow-wrap:anywhere } " +
             ".placeholder { position:absolute; inset-block-start:0; inset-inline-start:0; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; color:GrayText } [hidden] { display:none !important }";
         const rich = document.createElement("meguri-field-content");
         rich.contentEditable = "true"; rich.setAttribute("role", "textbox"); rich.setAttribute("aria-multiline", "true");
@@ -280,10 +283,14 @@
         section.append(header, boundary, source); container.append(section);
         const field = {ord: value.ord, baseline: value.baselineHtml ?? value.html,
             changed: Object.hasOwn(value, "baselineHtml"), pending: false, mode: value.mode,
-            collapsed: value.collapsed, rich, root, host: boundary, source, label, toggle, placeholder: placeholderLabel,
+            collapsed: value.collapsed, rich, root, host: boundary, source, label, placeholder: placeholderLabel,
             timer: null, caret: null, sourceCaret: null, undo: [], redo: [], lastKind: null, lastEdit: 0};
         label.addEventListener("click", () => collapse(field, !field.collapsed));
-        toggle.addEventListener("click", () => toggleMode(field));
+        // The box's own padding belongs to the field: a tap there gives it
+        // focus. A tap in the text keeps the caret WebKit placed.
+        boundary.addEventListener("click", event => {
+            if (event.target === boundary && !held && !field.collapsed) active(field).focus();
+        });
         wire(field, rich); wire(field, source); show(field);
         return field;
     }
@@ -333,11 +340,16 @@
             if (typeof message.hold !== "boolean") throw new Error("Invalid hold");
             if (message.hold) held = true;
             const commits = fields.map(commitValue).filter(Boolean);
-            if (held) container.inert = true;
+            // A hold refuses input in each handler. The fields keep their focus,
+            // so on touch the keyboard stays up across an add (N17.1).
             return envelope("flush", {commits});
         }
         case "release":
-            keys(message, ["type", "loadId"]); held = false; container.inert = false; return {loadId};
+            keys(message, ["type", "loadId"]); held = false; container.inert = false;
+            for (const changed of fields.filter(value => value.heldInput)) {
+                changed.heldInput = false; dirty(changed); historyState(changed);
+            }
+            return {loadId};
         case "setFocus":
             keys(message, ["type", "loadId", "ord"]); if (!field) throw new Error("Unknown field"); focus(field); return {loadId};
         case "setFieldState":
