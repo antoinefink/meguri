@@ -334,7 +334,7 @@ mg__invoke_docker() {
   if [ -n "${MEGURI_INITIAL_ADOPTION_FIXTURE:-}" ]; then
     fixture_env=(-e "MEGURI_INITIAL_ADOPTION_FIXTURE=$MEGURI_INITIAL_ADOPTION_FIXTURE")
   fi
-  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
+  mg_compose run --pull never --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
     -e MG_JOB="$MG_JOB" -e MG_RUN_ID="$MG_RUN_ID" -e MG_DEFAULT_REPRO="$MG_DEFAULT_REPRO" \
     ${fixture_env[0]+"${fixture_env[@]}"} \
     "$service" tools/mg __exec "$MG_JOB" "$rel" -- ${1+"$@"} </dev/null

@@ -481,6 +481,84 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   [ "$(field '.failures[0].id')" = wrong-container ]
 }
 
+docker_invoke_fixture() {
+  add_fixture_jobs
+  echo 'mg_job fx-docker docker:dev fx_args "fixture: Docker invocation"' >>"$SB/tools/mg.d/zz-fixture.sh"
+  local stubs="$BATS_TEST_TMPDIR/docker-invoke-bin"
+  mkdir -p "$stubs"
+  export MG_CONTAINER="" STUB_LOG="$BATS_TEST_TMPDIR/docker-invoke.jsonl"
+  : >"$STUB_LOG"
+  cat >"$stubs/docker" <<'EOF'
+#!/usr/bin/env bash
+jq -nc --args '$ARGS.positional' -- "$@" >>"$STUB_LOG"
+case "$1" in
+  info|ps) exit 0 ;;
+  compose) shift ;;
+  *) exit 97 ;;
+esac
+[ "$1" = -p ] || exit 97
+shift 2
+[ "$1" = -f ] || exit 97
+shift 2
+if [ "$1" = --progress ]; then
+  [ "$2" = plain ] || exit 97
+  shift 2
+fi
+case "$1" in
+  build) [ "$2" = dev ] || exit 97; exit "${STUB_BUILD_RC:-0}" ;;
+  run) shift ;;
+  *) exit 97 ;;
+esac
+env_args=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --pull) [ "$2" = never ] || exit 97; shift 2 ;;
+    --rm|-T|--no-deps) shift ;;
+    --label) shift 2 ;;
+    -e) env_args+=("$2"); shift 2 ;;
+    dev) shift; break ;;
+    *) exit 97 ;;
+  esac
+done
+cd "$MG_ROOT" || exit 97
+exec env MG_CONTAINER=dev "${env_args[@]}" "$@"
+EOF
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+}
+
+@test "docker invocation builds before run and uses the exact no-second-build override" {
+  docker_invoke_fixture
+  MEGURI_INITIAL_ADOPTION_FIXTURE=fixture mg fx-docker 'one argument' --flag
+  [ "$status" -eq 0 ]
+  [ "$(field -c .details.args)" = '["one argument","--flag"]' ]
+  local run_id
+  run_id="$(field .run_id)"
+  jq -es --arg id "$run_id" --arg root "$SB" '
+    map(select(.[0] == "compose")) as $calls
+    | ($calls | length) == 2
+      and $calls[0][5:] == ["--progress", "plain", "build", "dev"]
+      and $calls[1][5:12] == ["run", "--pull", "never", "--rm", "-T", "--no-deps", "--label"]
+      and $calls[1][12] == ("meguri.mg.run-id=" + $id)
+      and ($calls[1] | index("MEGURI_INITIAL_ADOPTION_FIXTURE=fixture")) != null
+      and $calls[1][-8:] == ["dev", "tools/mg", "__exec", "fx-docker",
+        ("build/mg/fx-docker/" + $id), "--", "one argument", "--flag"]
+      and all($calls[]; .[1:5] == ["-p", $calls[0][2], "-f", ($root + "/docker/compose.yml")])
+  ' "$STUB_LOG"
+  validate "$result"
+}
+
+@test "docker invocation retains the image-build error receipt and never runs after build failure" {
+  docker_invoke_fixture
+  STUB_BUILD_RC=19 mg fx-docker
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = image-build ]
+  [[ "$(field '.failures[0].repro')" == 'docker compose -p '*" -f docker/compose.yml build dev" ]]
+  jq -es 'map(select(.[0] == "compose")) | length == 1 and .[0][5:] == ["--progress", "plain", "build", "dev"]' "$STUB_LOG"
+  validate "$result"
+}
+
 # --- doctor (host commands stubbed) ----------------------------------------
 
 @test "doctor with absent legacy team metadata warns, leaves the account unverified and only reads host state" {
@@ -1106,6 +1184,139 @@ mod tests {
   [ "$(failure_ids)" = 'fx::other$other_breaks' ]
   [ "$(field -c .summary)" = '{"total":3,"passed":2,"failed":1,"skipped":0}' ]
   validate "$result"
+}
+
+# These are tiny fixture bodies, not copies of the expensive real tests. The
+# near matches prove package, binary and full-name equality independently.
+core_modes_fixture() {
+  write_workspace
+  write_crate meguri-engine ''
+  write_crate meguri-engine-extra ''
+  write_crate meguri-sync ''
+  write_crate meguri-ffi ''
+  write_file core/crates/meguri-ffi/tests/hooks.rs '#[cfg(feature = "test-hooks")]
+#[test] fn hooks_enabled() {}'
+  printf '\n[features]\ntest-hooks = []\n' >>"$SB/core/crates/meguri-ffi/Cargo.toml"
+  SESSION_CASE=c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions
+  SUSPEND_CASE=suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k
+  MERGE_CASE=merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k
+  write_file core/crates/meguri-engine/tests/canary_pins.rs '#[test] fn pin_held() {}'
+  write_file core/crates/meguri-engine/tests/session_predict.rs "#[test] fn $SESSION_CASE() {}
+#[test] fn ${SESSION_CASE}_extra() {}
+mod nested { #[test] fn $SESSION_CASE() {} }"
+  write_file core/crates/meguri-engine/tests/session_predict_extra.rs "#[test] fn $SESSION_CASE() {}"
+  write_file core/crates/meguri-engine-extra/tests/session_predict.rs "#[test] fn $SESSION_CASE() {}"
+  write_file core/crates/meguri-sync/tests/normal_sync.rs "mod large {
+#[test] fn $SUSPEND_CASE() {}
+#[test] fn $MERGE_CASE() {}
+#[test] fn ${MERGE_CASE}_extra() {}
+}"
+  write_file core/crates/meguri-sync/tests/normal_sync_extra.rs "mod large {
+#[test] fn $SUSPEND_CASE() {}
+#[test] fn $MERGE_CASE() {}
+}"
+}
+
+core_report_names() {
+  local paths=() path
+  # MG resolves artifact paths against this sandbox when publishing its result.
+  while IFS= read -r path; do paths+=("$path"); done < <(
+    field '.artifacts[] | select(.kind == "nextest-jsonl" or .kind == "nextest-canary-jsonl") | .path'
+  )
+  jq -sc '[.[] | select(.type == "test" and .event != "started") | .name] | sort' \
+    "${paths[@]}"
+}
+
+@test "core-test quick and stress partition exact fixture identities and enable FFI hooks" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  core_modes_fixture
+  local quick stress whole
+  mg core-test --quick
+  [ "$status" -eq 0 ]
+  quick="$(core_report_names)"
+  jq -e '[.artifacts[] | select(.kind == "nextest-canary-jsonl")] | length == 1' "$result"
+  jq -e 'index("meguri-ffi::hooks$hooks_enabled") != null' <<<"$quick"
+  validate "$result"
+
+  # Stress must not run the ordinary canaries.
+  write_file core/crates/meguri-engine/tests/canary_pins.rs '#[test] fn pin_held() { panic!("canary ran in stress"); }'
+  mg core-test --stress
+  [ "$status" -eq 0 ]
+  [ "$(field -c .summary)" = '{"total":3,"passed":3,"failed":0,"skipped":0}' ]
+  stress="$(core_report_names)"
+  jq -e --argjson cases "$stress" '.details.stress_tests == $cases' "$result"
+  jq -e --arg session "$SESSION_CASE" --arg suspend "$SUSPEND_CASE" --arg merge "$MERGE_CASE" '
+    . == (["meguri-engine::session_predict$" + $session,
+      "meguri-sync::normal_sync$large::" + $suspend,
+      "meguri-sync::normal_sync$large::" + $merge] | sort)' <<<"$stress"
+  validate "$result"
+
+  write_file core/crates/meguri-engine/tests/canary_pins.rs '#[test] fn pin_held() {}'
+  mg core-test -- --features meguri-ffi/test-hooks
+  [ "$status" -eq 0 ]
+  whole="$(core_report_names)"
+  jq -ne --argjson q "$quick" --argjson s "$stress" --argjson all "$whole" '
+    ($q + $s | sort) == $all and ($q - $s) == $q'
+
+  # Legacy bare and explicit callers must not inherit the new feature.
+  mg core-test
+  [ "$status" -eq 0 ]
+  jq -e 'index("meguri-ffi::hooks$hooks_enabled") == null' <<<"$(core_report_names)"
+  mg core-test -- -E 'package(=meguri-ffi)'
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = no-tests-matched ]
+}
+
+@test "core-test quick stops on canary failure and also works without canaries" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  core_modes_fixture
+  write_file core/crates/meguri-engine/tests/canary_pins.rs '#[test] fn pin_held() { panic!("pin drifted"); }'
+  mg core-test --quick
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = 'meguri-engine::canary_pins$pin_held' ]
+  [ "$(field .summary.total)" -eq 1 ]
+  jq -e '[.artifacts[] | select(.kind == "nextest-jsonl")] | length == 0' "$result"
+  validate "$result"
+
+  rm "$SB/core/crates/meguri-engine/tests/canary_pins.rs"
+  mg core-test --quick
+  [ "$status" -eq 0 ]
+  local names
+  names="$(core_report_names)"
+  jq -e --arg session "$SESSION_CASE" --arg suspend "$SUSPEND_CASE" --arg merge "$MERGE_CASE" '
+    index("meguri-ffi::hooks$hooks_enabled") != null
+    and index("meguri-engine::session_predict$" + $session) == null
+    and index("meguri-sync::normal_sync$large::" + $suspend) == null
+    and index("meguri-sync::normal_sync$large::" + $merge) == null' <<<"$names"
+}
+
+@test "core-test stress rejects missing and skipped expected cases and retains test failures" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  core_modes_fixture
+  local body
+  for body in '#[test] fn renamed() {}' "#[test] #[ignore] fn $SESSION_CASE() {}" "#[test] fn $SESSION_CASE() { panic!(\"stress failed\"); }"; do
+    write_file core/crates/meguri-engine/tests/session_predict.rs "$body"
+    mg core-test --stress
+    [ "$status" -eq 1 ]
+    jq -e '.failures | any(.id == "stress-selection")' "$result"
+    validate "$result"
+  done
+  jq -e --arg id "meguri-engine::session_predict\$$SESSION_CASE" '
+    .failures | any(.id == $id and (.message | contains("stress failed")))' "$result"
+}
+
+@test "core-test modes reject ambiguous combinations before Cargo" {
+  make_core_update_stub
+  mg core-test --quick --stress
+  [ "$status" -eq 2 ]
+  [ "$(failure_ids)" = usage ]
+  mg core-test --canaries -- -E 'all()'
+  [ "$status" -eq 2 ]
+  [ "$(failure_ids)" = usage ]
+  mg core-test -- -E 'all()' --stress
+  [ "$status" -eq 2 ]
+  [ "$(failure_ids)" = usage ]
+  [ ! -s "$STUB_LOG" ]
 }
 
 # --- core-lint and core-deny on a copy of the real workspace -----------------

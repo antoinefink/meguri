@@ -1,7 +1,7 @@
 # Rust core jobs. Sourced by tools/mg; they run inside the `dev` container.
 
 mg_job core-test docker:dev mg_core_test \
-  "Rust tests: cargo nextest on core/ (no retries), canary_* test binaries first; --canaries runs only those; args after -- go to nextest"
+  "Rust tests: cargo nextest on core/ (no retries), canary_* first; --canaries only, --quick excludes three stress cases, --stress requires those three; args after -- go to nextest"
 mg_job core-lint docker:dev mg_core_lint \
   "Rust lint: clippy -D warnings on all targets and features, layering-check (edges.toml), and no AnkiWeb name in meguri-sync built without its features; source formatting is optional"
 mg_job core-deny docker:dev mg_core_deny \
@@ -29,6 +29,12 @@ mg_u38_wiring() {
 # nextest rejects a binary() filter that matches no binary, so the canary
 # phase runs only when a canary exists.
 MG_CORE_CANARIES='binary(/^canary_/)'
+
+# Exact identities shared by quick's exclusion and stress's selection. Keep
+# nextest's existing scheduling overrides; neither mode changes the profile.
+MG_CORE_STRESS='(package(=meguri-engine) & binary(=session_predict) & test(=c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions))
+  | (package(=meguri-sync) & binary(=normal_sync) & test(=large::suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k))
+  | (package(=meguri-sync) & binary(=normal_sync) & test(=large::merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k))'
 
 # mg__core_canary_packages: workspace packages with a canary_* test target, one per line.
 mg__core_canary_packages() {
@@ -64,21 +70,33 @@ mg__nextest() {
   )
 }
 
-# tools/mg core-test [--canaries] [-- nextest args, e.g. -E 'package(meguri-text)']
+# tools/mg core-test [--canaries | --quick | --stress | -- nextest args]
 # --canaries runs the canary phase alone (the gate's canary stage, U19) and
-# fails when the workspace has no canary.
+# fails when the workspace has no canary. Quick keeps that ordering; stress
+# runs only its exact three cases. Both opt into the FFI test hooks locally.
 mg_core_test() {
-  local only_canaries=false
-  if [ "${1:-}" = --canaries ]; then
-    only_canaries=true
-    shift
-    if [ "$#" -gt 0 ]; then
-      mg_failure usage "--canaries takes no nextest arguments" "tools/mg core-test --canaries"
+  local only_canaries=false mode=default arg
+  case "${1:-}" in
+    --canaries|--quick|--stress)
+      mode="${1#--}"
+      shift
+      if [ "$#" -gt 0 ]; then
+        mg_failure usage "--$mode takes no other arguments" "tools/mg core-test --$mode"
+        mg_status error
+        return 0
+      fi
+      [ "$mode" != canaries ] || only_canaries=true
+      ;;
+  esac
+  [ "${1:-}" = "--" ] && shift
+  for arg in ${1+"$@"}; do
+    case "$arg" in --canaries|--quick|--stress)
+      mg_failure usage "core-test modes must be used alone" "tools/mg core-test --quick"
       mg_status error
       return 0
-    fi
-  fi
-  [ "${1:-}" = "--" ] && shift
+      ;;
+    esac
+  done
   mg__core_environment
 
   # Only a bare run may match no tests (no or empty workspace). With nextest
@@ -87,7 +105,7 @@ mg_core_test() {
     if [ "$only_canaries" = true ]; then
       mg_failure no-canaries "core/ has no Cargo workspace, so no canary (tests/canary_*.rs) runs"
       mg_status fail
-    elif [ "$#" -eq 0 ]; then
+    elif [ "$#" -eq 0 ] && [ "$mode" = default ]; then
       mg_message "core-test: no Cargo workspace in core/ yet; 0 tests"
       mg_status pass
     else
@@ -99,9 +117,19 @@ mg_core_test() {
   fi
 
   local main="$MG_RUN_DIR/nextest.jsonl" canary="$MG_RUN_DIR/nextest-canary.jsonl"
-  local rc stopped=false pkg
-  local files=() canaries=()
-  if [ "$#" -eq 0 ]; then
+  local rc stopped=false pkg stress_complete=true
+  local ordinary_filter="not ($MG_CORE_CANARIES)"
+  local files=() canaries=() features=()
+  case "$mode" in
+    quick|stress) features=(--features meguri-ffi/test-hooks) ;;
+  esac
+  if [ "$mode" = quick ]; then
+    ordinary_filter="$ordinary_filter & not ($MG_CORE_STRESS)"
+    set -- --no-tests=pass -E "not ($MG_CORE_STRESS)"
+  elif [ "$mode" = stress ]; then
+    set -- -E "$MG_CORE_STRESS"
+  fi
+  if [ "$mode" != stress ] && { [ "$#" -eq 0 ] || [ "$mode" = quick ]; }; then
     while IFS= read -r pkg; do
       if [ -n "$pkg" ]; then canaries+=(-p "$pkg"); fi
     done < <(mg__core_canary_packages)
@@ -122,14 +150,14 @@ mg_core_test() {
     elif [ "$only_canaries" = true ]; then
       :
     else
-      mg__nextest "$main" --workspace --no-tests=pass -E "not ($MG_CORE_CANARIES)"
+      mg__nextest "$main" --workspace ${features[0]+"${features[@]}"} --no-tests=pass -E "$ordinary_filter"
       rc=$?
       mg_artifact nextest-jsonl "$main"
       files=("$canary" "$main")
     fi
   else
     [ "$#" -gt 0 ] || set -- --no-tests=pass
-    mg__nextest "$main" --workspace "$@"
+    mg__nextest "$main" --workspace ${features[0]+"${features[@]}"} "$@"
     rc=$?
     mg_artifact nextest-jsonl "$main"
     files=("$main")
@@ -162,10 +190,28 @@ mg_core_test() {
   elif [ "$rc" -ne 0 ] && [ "$failed" -eq 0 ]; then
     mg_failure "nextest-exit-$rc" "cargo nextest exited with code $rc before reporting a test failure (build or setup error); see log.txt"
   fi
+  if [ "$mode" = stress ]; then
+    local stress_tests
+    if stress_tests="$(jq -ces '
+      [.[] | select(.type == "test" and .event != "started")] as $tests
+      | ([$tests[].name] | sort) as $names
+      | select(($tests | length) == 3 and all($tests[]; .event == "ok")
+        and $names == ([
+          "meguri-engine::session_predict$c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions",
+          "meguri-sync::normal_sync$large::suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k",
+          "meguri-sync::normal_sync$large::merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k"
+        ] | sort))
+      | $names' "$main")"; then
+      mg_detail stress_tests "$stress_tests"
+    else
+      stress_complete=false
+      mg_failure stress-selection "stress requires exactly the three expected cases to pass, with none missing or skipped" "tools/mg core-test --stress"
+    fi
+  fi
   if [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ] && [ "$only_canaries" = true ]; then
     mg_message "core-test: canaries only: $passed passed, $skipped skipped"
     mg_status pass
-  elif [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ]; then
+  elif [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ] && [ "$stress_complete" = true ]; then
     mg_message "core-test: $passed passed, $skipped skipped"
     mg_status pass
   elif [ "$stopped" = true ] && [ "$failed" -gt 0 ]; then
