@@ -294,6 +294,10 @@ struct ReviewProgressBar: View {
         ProgressView(value: progress.fraction)
             .progressViewStyle(.linear)
             .tint(.secondary)
+            // Read as text: it takes no input, and as a progress control the
+            // audit asks a full hit region of this thin bar.
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isStaticText)
             .accessibilityLabel(Text("Session Progress", bundle: .module))
             .accessibilityValue(Text("\(progress.answered) of \(progress.total)", bundle: .module))
             .accessibilityIdentifier("review.session.progress")
