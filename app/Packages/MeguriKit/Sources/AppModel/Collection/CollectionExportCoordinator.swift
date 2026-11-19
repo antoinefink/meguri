@@ -86,10 +86,29 @@ public final class CollectionExportCoordinator {
     public func cancel() async {
         guard !destinationPresented else { return }
         // First, so a preparation that finishes meanwhile opens no save dialog.
+        let wasContinuous = continuous
         continuous = false
         await cancelAndDrain()
+        // A save whose outcome is unknown, or whose cleanup is pending, keeps
+        // its sheet and message: closing would hide what the person must check.
+        guard !publicationUncertain, !completionRetryNeeded else { continuous = wasContinuous; return }
+        // The lease was acquired while this waited: end it as a cancelled
+        // dialog does, so nothing stays held behind a closed sheet.
+        if destinationPresented {
+            completeNative(saved: false)
+            await task?.value
+        }
         if providerLease == nil { await discard() }
         if owner?.navigation.sheet == .collectionExport { owner?.navigation.dismissSheet() }
+    }
+    /// The export sheet is the save dialog's host: without it no dialog may open.
+    private var sheetShows: Bool { owner?.navigation.sheet == .collectionExport }
+    /// A continuous export whose sheet went away, or was cancelled, ends here.
+    private func abandonContinuous() async {
+        task = nil
+        if providerLease != nil { await finishProvider() }
+        if providerLease == nil { await discard() }
+        continuous = false
     }
     /// After the save dialog: a clean save or a cancel ends the export. A
     /// failure keeps the sheet, its message and the file for another try.
@@ -120,7 +139,11 @@ public final class CollectionExportCoordinator {
                 report(error, destination: false)
             }
             self.operation = nil; task = nil; progress = nil
-            if continuous, stage == .ready, canSave { chooseDestination() }
+            if continuous {
+                // Without its sheet there is nobody to ask or to tell.
+                if !sheetShows { await abandonContinuous() }
+                else if stage == .ready, canSave { chooseDestination() }
+            }
         }
     }
     private func progressReceiver() -> @Sendable (CoreProgress) -> Void {
@@ -135,6 +158,7 @@ public final class CollectionExportCoordinator {
     public func chooseDestination() {
         guard canSave, let artifact else { return }
         stage = .saving; message = nil; publicationUncertain = false
+        let automatic = continuous
         task = Task {
             do {
                 let lease = try await artifact.acquire()
@@ -142,6 +166,13 @@ public final class CollectionExportCoordinator {
                 guard !stale, owner?.generation == artifact.metadata.sourceGeneration else {
                     stale = true
                     throw BridgeError.invalidArgument("The collection was replaced")
+                }
+                // Cancelled, or its sheet closed, while the lease was acquired:
+                // present nothing, give the lease back and discard the file.
+                guard !automatic || (continuous && sheetShows) else {
+                    stage = .ready
+                    await abandonContinuous()
+                    return
                 }
                 destinationPresented = true
                 stage = .ready

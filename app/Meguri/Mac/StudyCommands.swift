@@ -10,7 +10,7 @@ struct NativeCommandContext {
 
     var fileActionsAvailable: Bool {
         collection.navigation.sheet == nil && !collection.deckActions.busy && !collection.manualTransfers.busy
-            && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
+            && !collection.entry.pickerPresented && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
     }
     func present(_ route: SheetRoute) {
         guard collection.navigation.sheet == nil else { return }

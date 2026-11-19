@@ -530,7 +530,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`,
 
 - Import (File › Import…, Settings, the empty collection) opens the system file picker at once, on the window that asked, limited to collection packages. No sheet comes first.
 - A chosen file opens one sheet. While the file is read it shows "Reading File…" with Cancel. Then the confirmation: `Import “<file name>”?`, one summary line "N notes · N cards · N media files" with plural forms, and, only when a collection is replaced, "This replaces the collection on this iPhone. Meguri keeps a backup of the current one." (iPad, Mac). Import and Cancel are the two actions.
-- A footnote under the group says "Its media (<size>) is merged with the media on this iPhone; files already here are kept." `package/container` P16.4 asks for the size and for both statements; this is their one line.
+- A footnote line under the summary, in the same row, says "Its media (<size>) is merged with the media on this iPhone; files already here are kept." It shows only when the file has media. `package/container` P16.4 asks for the size and for both statements; this is their one line.
 - The summary's accessibility value gives the review count, which the line itself leaves out.
 - After Import the sheet shows "Importing…" with Cancel while cancelling is safe, then closes on success. Nothing in the import changed: inspection, the safety backup and recovery run as before.
 - A refused file shows one plain message with Choose Another File. Recovery states keep their message and the receipts the person must keep (backup, retained media reference); those rows appear only there.
@@ -540,7 +540,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`,
 ### N17.3 Exporting the collection
 
 - Export Collection starts at once: the sheet shows "Preparing Export…" with a progress bar (a spinner while no total is known) and Cancel. When the file is ready the system save dialog opens over it: the Files export on touch, the save panel on Mac.
-- Cancel while preparing, and Cancel in the save dialog, discard the prepared file and close the sheet. A finished save does the same, with no "Saved" step.
+- Cancel while preparing, and Cancel in the save dialog, discard the prepared file and close the sheet. Cancel is disabled while the save dialog shows and while the file is being saved. No route leaves the prepared file or the provider's hold on it behind a closed sheet. A finished save does the same, with no "Saved" step.
 - A save that fails keeps the sheet with one message, Choose Another Location and Cancel; the file is kept for that retry (`package/file-export` E4) and discarded on Cancel. An interrupted export's leftover file is discarded when the next export starts.
 - Settings › Collection: the footer under the Export row reads "Export saves all decks, cards, review history and media in one file." The export's contents did not change.
 - Removed: Prepare Export, Choose Save Location, Discard Prepared Export, Done, "Ready to Save" and the explanation paragraphs.

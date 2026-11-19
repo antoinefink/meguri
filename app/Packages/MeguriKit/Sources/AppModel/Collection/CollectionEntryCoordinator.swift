@@ -66,6 +66,8 @@ public final class CollectionEntryCoordinator {
         case .success(let urls):
             guard urls.count == 1, let url = urls.first, canChoose, owner?.entryAllowed == true else { return }
             showSheet()
+            // Another sheet took the window meanwhile: the file is not read.
+            guard owner?.navigation.sheet == .collectionEntry else { return }
             inspect(url)
         case .failure(let error):
             guard !requiresRecovery else { return }

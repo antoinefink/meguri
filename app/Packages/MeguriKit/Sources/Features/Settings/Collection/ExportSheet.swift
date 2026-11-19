@@ -28,7 +28,8 @@ struct CollectionExportPresentation {
     init() {}
     init(_ coordinator: CollectionExportCoordinator) {
         busy = coordinator.busy || (coordinator.continuous && coordinator.stage == .idle)
-        canCancel = !coordinator.destinationPresented && coordinator.stage != .discarding
+        // Not while the system dialog or the save itself owns the file.
+        canCancel = !coordinator.destinationPresented && coordinator.stage != .discarding && coordinator.stage != .saving
         saved = coordinator.stage == .saved
         canChooseAgain = coordinator.canChooseAgain
         canRetryCompletion = coordinator.canRetryCompletion
@@ -87,9 +88,9 @@ struct CollectionExportContent: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(action: close) {
-                        Text(presentation.saved ? LocalizedStringKey("Done") : LocalizedStringKey("Cancel"), bundle: .module)
-                    }
+                    // A plain titled button, so the system draws its own bar button.
+                    Button(presentation.saved ? String(localized: "Done", bundle: .module) : String(localized: "Cancel", bundle: .module),
+                           action: close)
                     .keyboardShortcut(.cancelAction)
                     .disabled(presentation.busy && !presentation.canCancel)
                     .accessibilityIdentifier("settings.importExport.close")

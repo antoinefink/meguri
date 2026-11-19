@@ -19,6 +19,18 @@ private struct RefusingExportService: CollectionExportService {
     }
 }
 
+/// The real service, keeping the last preparation error for a failed expectation's text.
+private final class ObservedExportService: CollectionExportService {
+    let lastError = Mutex<String?>(nil)
+    func prepare(operation: CollectionExportOperation, progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> ExportedCollection {
+        do { return try await CoreCollectionExportService().prepare(operation: operation, progress: progress) }
+        catch { lastError.withLock { $0 = String(describing: error) }; throw error }
+    }
+    func save(_ artifact: ExportedCollection, to: URL, operation: CollectionExportOperation) async throws {
+        try await CoreCollectionExportService().save(artifact, to: to, operation: operation)
+    }
+}
+
 extension ReviewCollectionStartupTests {
     @Test func exportWithoutStudyAdmissionRetriesDestinationAndReimportsCapturedReview() async throws {
         let files = FileManager.default
@@ -317,6 +329,63 @@ extension ReviewCollectionStartupTests {
             await coordinator.cancel()
             #expect(!coordinator.destinationPresented)
             expectFinished()
+            #expect(await owner.close())
+        } catch {
+            coordinator.nativeCancelled(); await coordinator.waitForCompletion()
+            await coordinator.cancel(); await coordinator.discard(); _ = await owner.close(); throw error
+        }
+    }
+    /// N17.3: no route leaves the provider's lease or the prepared file behind a closed sheet.
+    @Test func continuousExportEndsCleanlyWhenCancelledOrItsSheetCloses() async throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        var configuration = LaunchConfiguration()
+        configuration.collectionLocation = AppModel.CollectionLocation(directory: root.appending(path: "Collection"))
+        configuration.clock = .fixed(Date(timeIntervalSince1970: 1_894_701_600)); configuration.timeZone = TimeZone(secondsFromGMT: 0)
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(),
+            providerDirectory: root.appending(path: "synthetic-installation"))
+        await owner.start()
+        let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
+        owner.entry.inspect(source); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion()
+        try #require(owner.state == .ready)
+        let service = ObservedExportService()
+        let coordinator = CollectionExportCoordinator(owner: owner, service: service)
+        func expectReleased(_ name: String) {
+            let route = Comment(rawValue: "\(name): \(coordinator.stage) \(service.lastError.withLock { $0 } ?? "no error")")
+            #expect(coordinator.stage == .idle && coordinator.artifact == nil && coordinator.providerLease == nil, route)
+            #expect(!coordinator.busy && !coordinator.destinationPresented && !coordinator.continuous, route)
+            #expect(owner.navigation.sheet == nil && coordinator.canPresent, route)
+        }
+        do {
+            // Cancel while the lease is being acquired, after preparation.
+            coordinator.start(); await coordinator.waitForCompletion()
+            try #require(coordinator.stage == .saving && !coordinator.destinationPresented, "\(coordinator.message ?? "not acquiring")")
+            await coordinator.cancel()
+            expectReleased("cancel during acquisition")
+            // The sheet closes during preparation: no dialog opens without its host.
+            coordinator.start()
+            owner.navigation.dismissSheet()
+            await coordinator.waitForCompletion(); await coordinator.waitForCompletion()
+            expectReleased("sheet closed during preparation")
+            // The sheet closes while the lease is being acquired. Core can still be
+            // retiring the export it just discarded and refuse a new one as busy.
+            for _ in 0..<50 {
+                coordinator.start(); await coordinator.waitForCompletion()
+                if coordinator.stage == .saving { break }
+                await coordinator.cancel()
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try #require(coordinator.stage == .saving && !coordinator.destinationPresented)
+            owner.navigation.dismissSheet()
+            await coordinator.waitForCompletion()
+            expectReleased("sheet closed during acquisition")
+            // A file chosen after another sheet took the window is not read.
+            owner.navigation.present(.accountSync)
+            owner.entry.selection(.success([source]))
+            #expect(!owner.entry.busy && owner.entry.preview == nil && owner.navigation.sheet == .accountSync)
+            owner.navigation.dismissSheet()
             #expect(await owner.close())
         } catch {
             coordinator.nativeCancelled(); await coordinator.waitForCompletion()

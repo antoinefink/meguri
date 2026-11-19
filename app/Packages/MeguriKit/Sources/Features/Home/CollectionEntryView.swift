@@ -231,15 +231,17 @@ struct CollectionEntryContent: View {
                                 .foregroundStyle(.secondary)
                                 .accessibilityValue(Text(verbatim: CollectionEntryPresentation.count(facts.reviews, "review", "reviews")))
                                 .accessibilityIdentifier("onboarding.collectionImport.preview.counts")
+                            // Inside the row, where secondary text has the row's
+                            // background behind it and scales with the text size.
+                            if let note = CollectionEntryPresentation.mediaNote(facts) {
+                                Text(verbatim: note)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityIdentifier("onboarding.collectionImport.preview.media")
+                            }
                         }
                         if let consequence = CollectionEntryPresentation.consequence(facts) {
                             Text(verbatim: consequence)
                                 .accessibilityIdentifier("onboarding.collectionImport.preview.safety")
-                        }
-                    } footer: {
-                        if let note = CollectionEntryPresentation.mediaNote(facts) {
-                            Text(verbatim: note)
-                                .accessibilityIdentifier("onboarding.collectionImport.preview.media")
                         }
                     }
                 }
