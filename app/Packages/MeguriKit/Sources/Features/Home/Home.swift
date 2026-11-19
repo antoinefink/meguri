@@ -403,17 +403,14 @@ public struct HomeView: View {
     /// N14.3: the deck's name over one row with what is waiting and its action.
     private func deckSummary(_ deck: ReviewCollection.DeckPageDetail, empty: Bool) -> some View {
         Section {
-            // Side by side while both fit on one line each; otherwise the action goes under the text.
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    deckWaitingText(deck, empty: empty)
-                    Spacer()
-                    deckAction(deck, empty: empty)
-                }
-                VStack(alignment: .leading) {
-                    deckWaitingText(deck, empty: empty)
-                    deckAction(deck, empty: empty)
-                }
+            // Side by side; at the accessibility text sizes the action goes under the text.
+            // One copy of each element: under ViewThatFits the Dynamic Type audit failed them.
+            let stacked = dynamicTypeSize.isAccessibilitySize
+            let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading)) : AnyLayout(HStackLayout())
+            layout {
+                deckWaitingText(deck, empty: empty)
+                if !stacked { Spacer() }
+                deckAction(deck, empty: empty)
             }
             // A List takes the screen's identifier, so the page's goes here.
             .accessibilityElement(children: .contain)
@@ -791,7 +788,9 @@ private struct HomeDeckBranch: View {
         DisclosureGroup(isExpanded: expanded) { EmptyView() } label: { EmptyView() }
             .fixedSize()
             .allowsHitTesting(false)
-            .accessibilityHidden(true)
+            // One element first: hidden alone, the group still exports its own
+            // small indicator button, which fails the touch-target audit (R1980).
+            .accessibilityRepresentation { EmptyView() }
     }
 
     /// N14.7: the touch target over the triangle. It reserves no layout: it reaches into the
