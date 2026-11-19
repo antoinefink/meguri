@@ -117,6 +117,7 @@ pub(super) async fn handle(service:Arc<Service>,authority:NativeAuthority,key:St
                     let _:Empty=super::framing::json(&bytes)?;
                     let next=r.usn.checked_add(1).ok_or(Error::new("storage_unavailable"))?;
                     let stamp=(time::OffsetDateTime::now_utc().unix_timestamp_nanos()/1_000_000) as i64;
+                    let stamp=crate::collection::schema::sync_stamp(&r.db,stamp)?;
                     let response=encode(&stamp)?;
                     r.db.execute("UPDATE col SET mod=?1,ls=?1,usn=?2 WHERE id=1",rusqlite::params![stamp,next])?;
                     crate::accounts::phase("normal_before_commit")?;

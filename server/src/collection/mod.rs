@@ -9,3 +9,4 @@ pub(crate) mod graves;
 pub(crate) mod changes;
 pub(crate) mod chunks;
 pub(crate) mod sanity;
+pub(crate) mod mcp;

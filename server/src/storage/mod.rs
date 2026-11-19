@@ -3,6 +3,7 @@ pub(crate) mod owned;
 pub(crate) mod deletion;
 mod root;
 mod semantic;
+mod oauth;
 pub(crate) mod collection;
 use crate::{Error, Result};
 pub use root::{AccountStores, DataRoot};

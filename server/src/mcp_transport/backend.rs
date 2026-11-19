@@ -1,0 +1,123 @@
+// SPDX-License-Identifier: MIT
+//! Application seam. Authority is server-owned and deliberately generic here.
+use super::{descriptors::*, inputs::ToolCall};
+use axum::{http::HeaderMap, response::Response};
+use serde::Serialize;
+use std::{collections::BTreeMap, future::Future, pin::Pin};
+
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// Protocol metadata only. The ID is for a denied tool-result envelope, never
+/// an account identity. No tenant, device or collection selector is supplied.
+pub struct AuthorizationRequest<'a> {
+    pub headers: &'a HeaderMap,
+    pub required: Access,
+    pub rpc_id: Option<&'a serde_json::Value>,
+    pub tool_name: Option<&'a str>,
+}
+
+/// Implement with the MCP bearer verifier, never browser/native credentials.
+/// Resolve/validate this request's grant, canonical resource, expiration and
+/// credential generation, and enforce the COMPLETE required scope set here.
+/// Return OAuth denials at the HTTP boundary (401/403 plus Bearer challenge).
+/// A server-owned client binding may instead return the specified tool-level
+/// challenge for write step-up. Never use body fields to select an account.
+/// Implementations must not log headers, tokens, body data or challenge state.
+pub trait Authorizer<A>: Send + Sync + 'static {
+    fn authorize<'a>(&'a self, request: AuthorizationRequest<'a>)
+        -> BoxFuture<'a, Result<A, Response>>;
+}
+
+/// All operations use the supplied authority, not any collection/tenant selector.
+/// The backend owns bounded collection admission, blocking-worker isolation,
+/// publication pinning, cursor/revision authentication, and grant rechecks at
+/// admission, before releasing reads, and under the write barrier through commit.
+/// Enforce the item/byte limits while reading/building, BEFORE growing results.
+/// A dropped HTTP caller must not abandon a live durable worker or release its
+/// root/barrier/admission ownership; that worker retains its own ownership.
+pub trait Backend<A>: Send + Sync + 'static {
+    fn dispatch(&self, authority: A, call: ToolCall)
+        -> BoxFuture<'_, Result<ToolOutput, DispatchFailure>>;
+}
+
+/// Late OAuth failures must bypass the HTTP-success tool envelope. The bridge
+/// supplies the same server-built challenge used by its HTTP authorizer.
+pub enum DispatchFailure {
+    Tool(ToolFailure),
+    Challenge(Response),
+}
+impl From<ToolFailure> for DispatchFailure {
+    fn from(failure: ToolFailure) -> Self { Self::Tool(failure) }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Note {
+    pub note_id: String,
+    pub note_type_id: String,
+    pub fields: BTreeMap<String, String>,
+    pub tags: Vec<String>,
+    pub revision: String,
+}
+#[derive(Debug, Serialize)]
+pub struct Deck {
+    pub deck_id: String,
+    pub name: String,
+    pub filtered: bool,
+}
+#[derive(Debug, Serialize)]
+pub struct NoteType {
+    pub note_type_id: String,
+    pub name: String,
+    pub field_names: Vec<String>,
+}
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ToolOutput {
+    Notes { notes: Vec<Note>, next_cursor: Option<String> },
+    Catalog { decks: Vec<Deck>, note_types: Vec<NoteType>, next_cursor: Option<String> },
+    Changed { note_id: String, revision: String },
+}
+impl ToolOutput {
+    pub(super) fn bounded(&self) -> bool {
+        let text = |s: &str| s.len() <= MAX_STRING_BYTES;
+        let handle = |v: &Option<String>| v.as_ref().is_none_or(|s| s.len() <= MAX_HANDLE_BYTES);
+        match self {
+            Self::Notes { notes, next_cursor } => notes.len() <= MAX_PAGE_ITEMS && handle(next_cursor)
+                && notes.iter().all(|n| n.fields.len() <= MAX_FIELDS && n.tags.len() <= MAX_TAGS
+                    && n.revision.len() <= MAX_HANDLE_BYTES
+                    && n.fields.iter().all(|(k,v)| text(k) && text(v))
+                    && n.tags.iter().all(|v| text(v))),
+            Self::Catalog { decks, note_types, next_cursor } =>
+                decks.len().saturating_add(note_types.len()) <= MAX_PAGE_ITEMS && handle(next_cursor)
+                && decks.iter().all(|d| text(&d.name))
+                && note_types.iter().all(|n| text(&n.name) && n.field_names.len() <= MAX_FIELDS
+                    && n.field_names.iter().all(|s| text(s))),
+            Self::Changed { revision, .. } => revision.len() <= MAX_HANDLE_BYTES,
+        }
+    }
+}
+
+/// Fixed public outcomes prevent SQL, collection text or bearer material from
+/// entering protocol errors. Busy certifies that no write committed.
+#[derive(Clone, Copy, Debug)]
+pub enum ToolFailure {
+    NotFound,
+    Conflict,
+    InvalidInput,
+    ResultTooLarge,
+    UnsupportedCollection,
+    Busy,
+}
+impl ToolFailure {
+    pub(super) fn value(self) -> serde_json::Value {
+        let code = match self {
+            Self::NotFound => "not_found", Self::Conflict => "conflict",
+            Self::InvalidInput => "invalid_input", Self::ResultTooLarge => "result_too_large",
+            Self::UnsupportedCollection => "unsupported_collection", Self::Busy => "busy",
+        };
+        if matches!(self, Self::Busy) {
+            serde_json::json!({"error":{"code":code, "retryable":true, "retry_after_ms":1000,
+                "write_committed":false}})
+        } else { serde_json::json!({"error":{"code":code}}) }
+    }
+}

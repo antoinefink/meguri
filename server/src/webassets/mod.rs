@@ -11,7 +11,7 @@ pub struct Asset {
 }
 
 pub const NAVIGATION: &[&str] = &[
-    "/", "/setup", "/login", "/invite", "/reset", "/connection", "/collection", "/settings", "/accounts",
+    "/", "/setup", "/login", "/invite", "/reset", "/connection", "/collection", "/settings", "/accounts", "/oauth/consent",
 ];
 
 include!(concat!(env!("OUT_DIR"), "/meguri_web_assets.rs"));
@@ -67,7 +67,7 @@ mod tests {
         for path in NAVIGATION {
             assert!(std::ptr::eq(select(path, &SHELL, FILES).unwrap(), &SHELL));
         }
-        for path in ["/index.html", "/accounts/", "/collection/", "/unknown", "/api/status", "/api/unknown", "/sync/", "/msync/", "/health"] {
+        for path in ["/index.html", "/accounts/", "/collection/", "/oauth/consent/", "/oauth/consent/extra", "/oauth/unknown", "/unknown", "/api/status", "/api/unknown", "/sync/", "/msync/", "/health"] {
             assert!(select(path, &SHELL, FILES).is_none());
         }
     }

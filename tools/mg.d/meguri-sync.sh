@@ -7,6 +7,8 @@ mg_job sync-server-deps docker:dev mg_sync_server_deps \
   "Server graph/deny/notices evidence, locked; --resolve initial lock, --resolve-existing manifest changes, or --update <package> <exact-version>"
 mg_job sync-server-format docker:dev mg_sync_server_format \
   "Optional server rustfmt check; --write explicitly applies formatting in Docker"
+mg_job sync-server-mcp-bench docker:dev mg_sync_server_mcp_bench \
+  "Opt-in M7 generated 20/200 MB SQLite Backend benchmark, locked offline release; no arguments or hosted services"
 mg_job sync-server-candidate-build host mg_sync_server_candidate_build \
   "Clean committed candidate build in Docker: --lane desktop --phase full --author-session <recorded-id>"
 mg_job sync-server-interop host mg_sync_server_interop \
@@ -552,6 +554,64 @@ mg_sync_server__web() {
   export MEGURI_WEB_PREPARED_DIR="$MG_RUN_DIR/web/prepared"
   mg_artifact browser-build "$MG_RUN_DIR/web" "Source-bound compiled browser assets and distributed-code notices"
 }
+mg_sync_server_mcp_bench() {
+  if [ "$#" -ne 0 ]; then
+    mg_failure usage "sync-server-mcp-bench takes no arguments"; mg_status error; return 0
+  fi
+  mg_sync_server__env && mg_sync_server__locked || return 0
+  mg_sync_server__web || return 0
+  local report="$MG_RUN_DIR/mcp-size-scaling.json" binary="$MG_RUN_DIR/benchmark-build.jsonl" executable rc=0
+  # The usual /tmp is tmpfs. Use disposable scratch on the existing Cargo
+  # volume; statfs and the constraint gaps are recorded by each fresh worker.
+  # No database/WAL/SHM is written into the retained artifact directory.
+  mkdir -p "$CARGO_TARGET_DIR" || { mg_status error; return 0; }
+  (cd server && RUSTFLAGS= CARGO_ENCODED_RUSTFLAGS= \
+    cargo test --offline --locked --release --no-default-features --lib --no-run \
+      --message-format json-render-diagnostics) >"$binary" || rc=$?
+  mg_artifact mcp-benchmark-build "$binary"
+  if [ "$rc" -ne 0 ] || ! jq -se '
+      [.[] | select(.reason=="compiler-artifact" and .target.name=="meguri_sync_server" and .executable!=null)] |
+      length==1 and .[0].features==[] and .[0].profile.test==true and
+      .[0].profile.opt_level=="3" and .[0].profile.debug_assertions==false
+    ' "$binary" >/dev/null; then
+    mg_failure mcp-benchmark-build "Locked release libtest build failed or profile/features differ; inspect retained Cargo JSONL"
+    mg_status fail; return 0
+  fi
+  executable="$(jq -r 'select(.reason=="compiler-artifact" and .target.name=="meguri_sync_server" and .executable!=null) | .executable' "$binary")"
+  if [ ! -x "$executable" ]; then
+    mg_failure mcp-benchmark-executable "Cargo did not provide the release libtest executable"; mg_status fail; return 0
+  fi
+  mg_detail mcp_benchmark_inputs "$(jq -nc \
+    --arg binary_sha256 "$(shasum -a 256 "$executable" | awk '{print $1}')" \
+    --arg lock_sha256 "$(shasum -a 256 server/Cargo.lock | awk '{print $1}')" \
+    --arg toolchain "$(cd server && rustc -Vv)" \
+    '{binary_sha256:$binary_sha256,lock_sha256:$lock_sha256,toolchain:$toolchain,
+      profile:"release",features:[],offline:true,locked:true,scratch:"existing cargo target volume"}')"
+  TMPDIR="$CARGO_TARGET_DIR" MEGURI_MCP_BENCH_OUT="$report" \
+    "$executable" collection::mcp::tests::size_scaling::generated_sqlite_size_scaling \
+      --ignored --exact --test-threads=1 --nocapture || rc=$?
+  if [ -f "$report" ]; then mg_artifact mcp-size-scaling "$report"; fi
+  if [ "$rc" -ne 0 ] || ! jq -e '
+      .schema_version==1 and .complete==true and (.fixtures|length)==2 and
+      (.runs|length)==6 and all(.runs[];
+        (.raw_samples|length)==401 and (.summaries|length)==4 and
+        all(.summaries[]; .samples==100))
+    ' "$report" >/dev/null; then
+    mg_failure mcp-benchmark "Benchmark failed or proof incomplete; retain log and any partial generated report"
+    mg_status fail; return 0
+  fi
+  mg_count total 1; mg_count passed 1; mg_count failed 0
+  mg_detail mcp_benchmark "$(jq -c '{
+    observed_idle_p95_within_150ms:all(.runs[];.observed_idle_p95_within_150ms),
+    observed_busy_max_within_250ms:all(.runs[];.observed_busy_max_within_250ms),
+    acceptance_claim:false, environment:"shared docker:dev; see actual constraints and gaps in report"
+  }' "$report")"
+  # Over-budget observations are retained, never a timing assertion in CI.
+  # Even a fast run cannot grant the dedicated M7 environment's acceptance.
+  mg_message "Generated benchmark complete; inspect latency, I/O, WAL, memory and environment gaps in mcp-size-scaling.json. No M7 acceptance claimed."
+  mg_status warn
+}
+
 mg_sync_server_test() {
   [ "${1:-}" != -- ] || shift
   # Only separate filter operands are forwarded. No Cargo/config/output/policy

@@ -35,7 +35,34 @@ pub(crate) fn open_upload(path: &Path) -> Result<Connection> {
     Ok(c)
 }
 
+/// Page-local request open: no integrity scan, copy, hash, or migration. The
+/// publication adapter has already admitted and pinned a verified schema-18 file.
+pub(super) fn open_mcp(path: &Path, writable: bool) -> Result<Connection> {
+    crate::storage::private_collection_file(path)?;
+    let flags = OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_NOFOLLOW
+        | if writable { OpenFlags::SQLITE_OPEN_READ_WRITE } else { OpenFlags::SQLITE_OPEN_READ_ONLY };
+    let c = Connection::open_with_flags(path, flags).map_err(super::mcp::sql_error)?;
+    // Request latency must not inherit a large native WAL. Maintenance owns
+    // checkpointing outside point operations, including the last-handle close.
+    c.set_db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true).map_err(super::mcp::sql_error)?;
+    let c = configure_timeout(c, false, Duration::ZERO)?;
+    if writable {
+        c.pragma_update(None, "wal_autocheckpoint", 0).map_err(super::mcp::sql_error)?;
+        c.pragma_update(None, "journal_mode", "WAL").map_err(super::mcp::sql_error)?;
+        c.pragma_update(None, "synchronous", "FULL").map_err(super::mcp::sql_error)?;
+        let mode: String = c.pragma_query_value(None, "journal_mode", |r|r.get(0)).map_err(super::mcp::sql_error)?;
+        let sync: i64 = c.pragma_query_value(None, "synchronous", |r|r.get(0)).map_err(super::mcp::sql_error)?;
+        if mode != "wal" || sync != 2 { return Err(Error::new("storage_unavailable")); }
+    }
+    Ok(c)
+}
 fn configure(c: Connection, writable: bool) -> Result<Connection> {
+    configure_timeout(c, writable, Duration::from_secs(5))
+}
+fn configure_timeout(c: Connection, writable: bool, timeout: Duration) -> Result<Connection> {
+    // Set this before any SQL can inspect a locked schema. A request connection
+    // must never use rusqlite's default five-second wait during configuration.
+    c.busy_timeout(timeout)?;
     // Extension loading is absent from the selected rusqlite features; do not
     // enable its API merely to disable it. SQLite connections start disabled.
     c.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_FKEY, false)?;
@@ -46,7 +73,6 @@ fn configure(c: Connection, writable: bool) -> Result<Connection> {
     c.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
     c.pragma_update(None,"ignore_check_constraints",true)?;
     super::unicase::register(&c)?;
-    c.busy_timeout(Duration::from_secs(5))?;
     if writable {
         c.pragma_update(None, "journal_mode", "WAL")?;
         c.pragma_update(None, "synchronous", "FULL")?;
@@ -72,6 +98,13 @@ pub fn create_blank(path: &Path, seconds: i64, millis: i64) -> Result<()> {
     drop(c);
     File::open(path)?.sync_all()?;
     Ok(())
+}
+
+/// Native finish/download may not hide a committed C7 change when the clock
+/// repeats a tick or moves backward. Full upload starts a different publication.
+pub(crate) fn sync_stamp(c: &Connection, sampled: i64) -> Result<i64> {
+    let committed: i64 = c.query_row("SELECT mod FROM col WHERE id=1", [], |r|r.get(0))?;
+    Ok(sampled.max(committed))
 }
 
 pub fn checkpoint(c: &Connection) -> Result<()> {

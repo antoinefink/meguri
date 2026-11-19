@@ -929,6 +929,7 @@ utilities:
   - {job: sync-server-package, why: "Explicit clean image build; exact-image runtime smoke builds and verifies it in gates"}
   - {job: sync-server-local, why: "Explicit persistent operator service and existing recovery commands; automated packaging uses an isolated synthetic volume"}
   - {job: sync-server-format, why: "explicit optional server source formatting on demand"}
+  - {job: sync-server-mcp-bench, why: "Explicit generated M7 release size-scaling observations; shared environment gaps and latency data retained, no default timing gate or acceptance"}
   - {job: gate, why: "runs the tiers"}
   - {job: merge, why: "runs the gate for a branch and fast-forwards the integration branch"}
   - {job: catch-up, why: "re-runs the runs merges queued because of the machine's state, once tools/mg doctor reports their user step clear (U19b)"}

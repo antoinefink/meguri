@@ -254,6 +254,7 @@ pub(crate) async fn snapshot(service:Arc<Service>,authority:NativeAuthority,capa
         let usn:i32=tx.query_row("SELECT usn FROM col WHERE id=1",[],|r|r.get(0))?;
         let next=usn.checked_add(1).ok_or(Error::new("storage_unavailable"))?;
         let stamp=(time::OffsetDateTime::now_utc().unix_timestamp_nanos()/1_000_000) as i64;
+        let stamp=schema::sync_stamp(&tx,stamp)?;
         tx.execute("UPDATE col SET mod=?1,usn=?2 WHERE id=1",rusqlite::params![stamp,next])?;
         tx.commit()?;
         // Pin a committed read transaction before releasing the account barrier.

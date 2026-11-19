@@ -4,6 +4,7 @@ mod barrier;
 mod credentials;
 mod deletion;
 mod provision;
+pub(crate) mod oauth;
 use crate::{
     Config, DataRoot, Error, Result, crypto,
     limits::{Attempts, CollectionCapacity, HashPool, TempBudget},
@@ -81,6 +82,7 @@ pub struct Service {
     pub(crate) browser_ingress: Arc<crate::httpapi::ingress::Ingress>,
     pub(crate) native_ingress: Arc<crate::protocol::framing::Ingress>,
     pub(crate) normal_sessions: Arc<crate::collection::session::Sessions>,
+    pub(crate) mcp_key: [u8; 32],
     pub(crate) metadata: Metadata,
     pub(crate) hashes: HashPool,
     pub(crate) attempts: Attempts,
@@ -105,6 +107,7 @@ impl Service {
             browser_ingress: Arc::new(crate::httpapi::ingress::Ingress::default()),
             native_ingress: Arc::new(crate::protocol::framing::Ingress::default()),
             normal_sessions: crate::collection::session::Sessions::new(),
+            mcp_key: crypto::bearer(&crypto::random_token()?)?,
             metadata,
             hashes: HashPool::default(),
             attempts: Attempts::default(),
@@ -121,6 +124,7 @@ impl Service {
         service.metadata.files(|r| {
             r.upgrade_media()?;
             r.upgrade_deletions()?;
+            r.upgrade_oauth()?;
             Ok(())
         }).await?;
         service.recover_deletions().await?;
@@ -236,6 +240,7 @@ pub(crate) fn check_admin(
 pub(crate) fn revoke(c: &Connection, id: &str) -> Result<()> {
     c.execute("UPDATE credentials SET revoked=1 WHERE account_id=?1", [id])?;
     c.execute("UPDATE capabilities SET state='revoked' WHERE state IN ('available','provisioning') AND (issuer=?1 OR target=?1)",[id])?;
+    oauth::revoke_account(c, id)?;
     Ok(())
 }
 pub(crate) fn replace_password(c: &Connection, id: &str, phc: &str) -> Result<()> {
