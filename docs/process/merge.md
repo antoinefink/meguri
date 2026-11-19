@@ -1,12 +1,14 @@
 # Merging a unit
 
-## Current workflow: direct commits on master
+## Task branches and integration
 
-Antoine changed the workflow on 2026-10-18. Work directly on `master` in the main checkout; create no branches or worktrees. Inspect an existing unit's status and log before bringing its prepared work onto `master`. Preserve its spec and implementation history and any uncommitted work.
+Prefer a separate worktree for independent work. Reuse a suitable checkout and inspect its status and history before taking over prepared work. Use the main checkout for integration or a coordinated change when that is simpler.
 
-Record the unit's starting commit before bringing in its work. Keep the spec, implementation, independent review and fix steps, clean-room restrictions and review log. Commit WIP freely with co-author attribution. Before accepting a unit, commit its `Unit:` trailer and record passing focused tests, affected-platform builds, and provenance/privacy/similarity checks. Resolve known failures before acceptance. Only push `master`, without force. `tools/mg merge` is not required.
+When asked for a PR, push the task branch and open or update the PR against `master`. A draft can carry independent work with focused checks, independent review, and links to any inherited failures. Reserve integration for authorized changes on `master` with the required gate evidence. Use `tools/mg merge` when its local integration path fits. Never force-push.
 
-Antoine's 2026-10-25 goal allows batches of 3–5 related units, including Swift/FFI. Pure Rust internals may cover up to 20 units per full gate. Follow `docs/process/tiers.md`: each unit keeps focused checks, independent review, a separate commit and its starting commit. Record the original batch base, covered units and shared gate receipt. Accept units only after that gate. Run full gates at batch and milestone boundaries and fix technical failures before the next batch. Human checks wait for final acceptance. Independent later implementation may proceed while a milestone waits only for human evidence. Final acceptance still requires every gate and evidence item.
+Record each unit's starting commit and review/fix log. Commit WIP with co-author attribution. Keep the spec, implementation and review evidence, including provenance, privacy and similarity checks. Record the `Unit:` trailer and required verification before accepting the unit.
+
+Antoine's 2026-10-25 goal allows batches of 3–5 related units, including Swift/FFI. Pure Rust internals may cover up to 20 units per full gate. Follow `docs/process/tiers.md`: each unit keeps focused checks, independent review, a separate commit and its starting commit. Record the original batch base, covered units and shared gate receipt. Accept units only after that gate. Run full gates at batch and milestone boundaries and fix required technical failures before integrating the next batch. Human checks wait for final acceptance. Final acceptance requires every applicable gate and evidence item.
 
 Antoine made remaining VoiceOver cursor and speech work optional follow-up after app completion (2026-10-20). Its failed checks remain recorded and callable, but no longer block unit or milestone acceptance. Keyboard ownership, accessibility audits, labels, contrast and hit targets remain required. Independent Rust units may proceed while U70 awaits its non-VoiceOver review and full gate; keep it unaccepted until those pass.
 
@@ -14,7 +16,7 @@ Manual device and reference checks are deferred until the final session (Antoine
 
 Antoine approved one interim known-failure exception on 2026-10-21: exact R554 audio failure through U69, approval `E-20261021T134124Z-a07a`. Apply only the scope in `tiers.md`; all other checks must pass, the full gate stays failed, and M1R/final acceptance still requires the repair. Record the exception and supplementary T1 receipts in each affected unit log.
 
-The branch-merge procedure below remains available for historical receipts and existing tooling. Queued runs remain incomplete verification: run `tools/mg catch-up` between units and require passing results at milestone gates. Run catch-up on the clean gate commit before committing acceptance-only notes when possible, so it can reuse exact-commit passing results. Record both receipts afterwards.
+Queued runs remain incomplete verification. Run `tools/mg catch-up` between units and require passing results at milestone gates. Run catch-up on the clean gate commit before committing acceptance-only notes when possible, so it can reuse exact-commit passing results. Record both receipts afterwards.
 
 A full, clean main-checkout gate with an explicit base saves its queued checks
 for catch-up when the tip commit carries `Unit:`. Local, partial and dirty gates
@@ -27,7 +29,7 @@ Read `verification-status.md` on resume and before a batch. Update it after each
 required gate. Record each failure group's tested commit, receipt, status and
 next focused check. Preserve individual failures in their original receipts.
 
-Repair required active failures before unrelated features or a new batch.
+Give required active repairs priority on `master`. An independent task branch can proceed when it can verify its changes without relying on the failed behavior.
 Existing frozen, queued, human-evidence and optional VoiceOver exceptions retain
 their exact scopes. An inherited failure is not a passing baseline.
 
@@ -35,10 +37,9 @@ After a repair, run the exact failed cases and affected tests. Mark the repair
 as focused-verified until its required integration gate passes. Keep the original
 integration base. Focused counts never establish whole-app health.
 
-Close known technical failures and review findings before another full gate.
-Keep the existing batch cadence. Update the register from the complete result
-before further feature work. Failed, queued, pending and unrun checks remain
-distinct from passing checks.
+Close known technical failures and review findings before the next integration gate.
+Keep the batch cadence and update the register from the complete result. Record
+failed, queued, pending, unrun and passing checks by their actual outcomes.
 
 ## Repair rounds for the active goal
 
@@ -51,9 +52,9 @@ requirement. Record actual unresolved decisions separately; authorization
 alone never makes a failed gate pass. See
 `review-log/repair-rounds-authorization-20261114.md`.
 
-## Earlier workflow: role branches
+## Local integration with `tools/mg merge`
 
-`tools/mg merge <branch>` checks and fast-forwards the integration branch in the main checkout (`master`). The origin remote uses `master` as its default branch. The orchestrator runs it in the main checkout. A green receipt merges without human review (R1991).
+When integration is authorized, the orchestrator can run `tools/mg merge <branch>` from the main checkout. The command runs the applicable branch and integrator checks, then fast-forwards `master` on a complete passing receipt.
 
 ## What it does
 

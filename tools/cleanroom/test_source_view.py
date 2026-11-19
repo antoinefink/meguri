@@ -35,6 +35,14 @@ class SourceViewTests(unittest.TestCase):
     def git(self, *args):
         return subprocess.check_output(["git", "-C", str(self.root), *args])
 
+    def commit_index(self):
+        tree = self.git("write-tree").decode().strip()
+        return self.git("-c", "user.name=test", "-c", "user.email=test@localhost",
+                        "commit-tree", tree, "-m", "synthetic source").decode().strip()
+
+    def prepare_index(self):
+        return prepare(self.root, self.target, self.commit_index())
+
     def file(self, name, value="synthetic"):
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -49,19 +57,34 @@ class SourceViewTests(unittest.TestCase):
             self.file(folder + "/sentinel", "not for implementation")
         self.git("add", "-A")
         self.git("reset", "--", "core/untracked.rs")
-        report = prepare(self.root, self.target)
+        report = self.prepare_index()
         self.assertEqual(report["files"], 2)
         self.assertEqual((self.target / "core/lib.rs").read_text(), "independent implementation")
         self.assertFalse((self.target / ".git").exists())
         self.assertEqual(sorted(p.name for p in self.target.iterdir()), ["core", "specs"])
         validate(self.target)
 
+    def test_source_bytes_and_mode_come_from_the_selected_commit(self):
+        source = self.file("tools/example.sh", "committed version")
+        source.chmod(0o755)
+        self.git("add", "-A")
+        commit = self.commit_index()
+        source.write_text("working version")
+        source.chmod(0o644)
+        self.git("add", "-A")
+
+        report = prepare(self.root, self.target, commit)
+        exported = self.target / "tools/example.sh"
+        self.assertEqual(report["source_commit"], commit)
+        self.assertEqual(exported.read_text(), "committed version")
+        self.assertEqual(exported.stat().st_mode & 0o777, 0o755)
+
     def test_links_and_submodule_entries_fail_closed(self):
         self.file("core/allowed.rs")
         (self.root / "core/link.rs").symlink_to("allowed.rs")
         self.git("add", "-A")
         with self.assertRaises(ValueError):
-            prepare(self.root, self.target)
+            self.prepare_index()
         self.assertFalse(self.target.exists())
 
     def test_symlink_parent_is_rejected_before_reading(self):
@@ -71,14 +94,14 @@ class SourceViewTests(unittest.TestCase):
         (self.root / "core/nested").rmdir()
         (self.root / "core/nested").symlink_to(self.root / "outside", target_is_directory=True)
         with self.assertRaises(ValueError):
-            prepare(self.root, self.target)
+            self.prepare_index()
 
     def test_hardlinks_are_rejected(self):
         path = self.file("core/lib.rs")
         os.link(path, self.root / "linked")
         self.git("add", "-A")
         with self.assertRaises(ValueError):
-            prepare(self.root, self.target)
+            self.prepare_index()
 
     def test_forbidden_components_and_traversal_are_rejected(self):
         for name in ("/core/a", "core/../oracle/a", "core/build/a", "app/.git/a", "core/refs/a",
@@ -107,7 +130,7 @@ class SourceViewTests(unittest.TestCase):
             self.assertFalse(permitted(name))
             self.file(name)
         self.git("add", "-A")
-        report = prepare(self.root, self.target)
+        report = self.prepare_index()
         self.assertEqual(report["files"], len(allowed))
         self.assertFalse(report["real_history"])
         self.assertIn(".config", report["credential_trees"])
@@ -141,12 +164,12 @@ class SourceViewTests(unittest.TestCase):
         self.git("add", "-A")
         os.link(path, self.root / "alias")
         with self.assertRaises(ValueError):
-            prepare(self.root, self.target)
+            self.prepare_index()
         (self.root / "alias").unlink()
         path.unlink()
         path.symlink_to(self.root / "outside")
         with self.assertRaises(ValueError):
-            prepare(self.root, self.target)
+            self.prepare_index()
         path.unlink()
         path.write_text("own code")
         tree = self.git("write-tree").decode().strip()
@@ -154,7 +177,7 @@ class SourceViewTests(unittest.TestCase):
                           "commit-tree", tree, "-m", "synthetic submodule").decode().strip()
         self.git("update-index", "--add", "--cacheinfo", "160000," + commit + ",server/module")
         with self.assertRaises(ValueError):
-            prepare(self.root, self.target)
+            self.prepare_index()
         self.assertFalse(self.target.exists())
 
     def test_server_seed_and_output_use_the_same_boundary(self):

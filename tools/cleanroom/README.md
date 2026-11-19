@@ -1,10 +1,11 @@
 # Restricted implementation runner
 
-Run `tools/mg cleanroom-image` after changing the runtime image. Then run
-`tools/mg cleanroom --check` to test its boundaries without authentication.
+Run `tools/mg cleanroom-image` in the task checkout when its image is missing
+or the runtime changes. Use `tools/mg cleanroom --check` to test the boundaries
+without authentication.
 
-For implementation or fixes, record the appropriate session, commit the input
-on master, and run:
+For implementation or fixes, record the appropriate session and commit the input
+in the task checkout. Run from that checkout:
 
 ```sh
 tools/mg cleanroom --prompt <file> --session <session-id>
@@ -17,7 +18,8 @@ paths and file types before Codex starts. The export includes the input patch
 and any further fixes. This avoids recreating code from a large prompt.
 Write temporary handoffs outside `/work`; its root accepts only source paths.
 
-The runner copies tracked, permitted regular files from clean master. It excludes
+The runner records the source commit and exports permitted regular files from its
+Git tree. It checks the checkout again after export. The source view excludes
 `refs/`, `oracle/`, `local-data/`, `.git`, all build output and agent configuration,
 including nested copies of those names. It refuses symbolic links, hard links
 and submodules. It mounts only this copy, its own run directory and its runner
@@ -40,8 +42,8 @@ root filesystem and only SETFCAP retained. SETFCAP permits the root UID mapping;
 SYS_ADMIN and privileged mode are not used. These options apply only to this
 container. The Codex command sandbox remains mandatory.
 
-Review `changes.patch` before applying it to master. Source review uses a fresh
-implementer-role session with a read-only task. The critic role grades rendered
+Review `changes.patch` before applying it to the task checkout. Source review uses
+a fresh implementer-role session with a read-only task. The critic role grades rendered
 screen packets only. The runner never writes to the real checkout. Run builds
 and tests through `tools/mg` from the orchestrator;
 the restricted runner has no Docker socket or warmed dependency cache. Main

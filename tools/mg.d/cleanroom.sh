@@ -1,6 +1,6 @@
-# Master-only source isolation for Codex implementers/fixers (U2).
+# Source isolation for Codex implementers and fixers (U2).
 mg_job cleanroom host mg_cleanroom \
-  "Isolated Codex runner: --check probes boundaries; --prompt <file> --session <id> [--effort high|xhigh] [--seed-patch <own-code patch>]; exports changes.patch, never edits master"
+  "Isolated Codex runner: --check probes boundaries; --prompt <file> --session <id> [--effort high|xhigh] [--seed-patch <own-code patch>]; exports changes.patch from a clean checkout"
 mg_job cleanroom-image host mg_cleanroom_image \
   "Build the version-pinned isolated Codex runtime from a digest-pinned Linux base"
 
@@ -24,8 +24,22 @@ mg_cleanroom_cleanup() {
   docker rm -f "meguri-cleanroom-$MG_RUN_ID" >/dev/null 2>&1 || true
 }
 
+mg_cleanroom_source_commit() {
+  local commit status
+  commit="$(git -C "$MG_ROOT" rev-parse --verify HEAD)" || return 1
+  status="$(git -C "$MG_ROOT" status --porcelain --untracked-files=normal)" || return 1
+  [ -z "$status" ] || return 1
+  (
+    set -o pipefail
+    git --no-replace-objects -C "$MG_ROOT" cat-file blob "$commit:$MG_SESSIONS_FILE" |
+      jq -es --arg s "$1" '[.[] | select(.session == $s)] |
+        length == 1 and (.[0].role == "implementer" or .[0].role == "fixer")' >/dev/null
+  ) || return 1
+  printf '%s\n' "$commit"
+}
+
 mg_cleanroom() {
-  local check=false prompt="" session="" seed="" effort=high role rc image before
+  local check=false prompt="" session="" seed="" effort=high rc image before
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --check) check=true; shift ;;
@@ -48,27 +62,21 @@ mg_cleanroom() {
     mg_failure cleanroom-image "isolated runtime unavailable; run tools/mg cleanroom-image"
     mg_status error; return 0
   fi
-  if [ "$check" = false ]; then
-    role="$(jq -rs --arg s "$session" '[.[] | select(.session == $s)] | if length == 1 then .[0].role else "" end' "$MG_ROOT/$MG_SESSIONS_FILE")"
-    if ! mg_word_in "$role" "implementer fixer" ||
-      [ "$(git -C "$MG_ROOT" branch --show-current)" != master ] ||
-      [ -n "$(git -C "$MG_ROOT" status --porcelain)" ]; then
-      mg_failure source-state "run requires clean master and a recorded implementer/fixer session"
-      mg_status error; return 0
-    fi
+  if [ "$check" = false ] && ! before="$(mg_cleanroom_source_commit "$session")"; then
+    mg_failure source-state "run requires a clean checkout and an implementer/fixer session recorded at HEAD"
+    mg_status error; return 0
   fi
   mkdir -p "$MG_RUN_DIR/codex-home"
   cp "$MG_TOOLS/cleanroom/config.toml" "$MG_RUN_DIR/codex-home/config.toml"
   if [ "$check" = true ]; then
     mkdir "$MG_RUN_DIR/source"
   else
-    before="$(git -C "$MG_ROOT" rev-parse HEAD)"
-    if ! python3 "$MG_TOOLS/cleanroom/source_view.py" prepare "$MG_ROOT" "$MG_RUN_DIR/source" >"$MG_RUN_DIR/source-view.json"; then
+    if ! python3 "$MG_TOOLS/cleanroom/source_view.py" prepare "$MG_ROOT" "$MG_RUN_DIR/source" --commit "$before" >"$MG_RUN_DIR/source-view.json"; then
       mg_failure source-view "source view refused unsafe input; no Codex run started"
       mg_status error; return 0
     fi
-    if [ "$before" != "$(git -C "$MG_ROOT" rev-parse HEAD)" ] || [ -n "$(git -C "$MG_ROOT" status --porcelain)" ]; then
-      mg_failure source-changed "master changed during source-view preparation"
+    if [ "$before" != "$(mg_cleanroom_source_commit "$session")" ]; then
+      mg_failure source-changed "checkout changed during source-view preparation"
       mg_status error; return 0
     fi
     cp "$prompt" "$MG_RUN_DIR/prompt.md"
@@ -102,7 +110,7 @@ mg_cleanroom() {
   fi
   mg_artifact log "$MG_RUN_DIR/log.txt" "clean-room boundary probes"
   if [ "$check" = false ]; then
-    mg_artifact patch "$MG_RUN_DIR/changes.patch" "review before applying to master"
+    mg_artifact patch "$MG_RUN_DIR/changes.patch" "review before applying to the task checkout"
     mg_artifact text "$MG_RUN_DIR/codex.out" "Codex implementation report"
     mg_artifact json "$MG_RUN_DIR/source-view.json" "permitted source view"
   fi

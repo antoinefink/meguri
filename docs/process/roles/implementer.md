@@ -4,17 +4,17 @@ You build Meguri from specs. Anki's source never enters your environment (KTD1, 
 
 ## Session
 
-- Current workflow (Antoine, 2026-10-18/20): work directly on `master` with a recorded session; create no branches or worktrees. Source exclusions still apply to files, history and reports. Keep focused tests, independent review, separate commits and provenance/privacy/similarity checks per unit. Full gates can cover up to 20 units changing only Rust internals; follow `docs/process/tiers.md` for earlier boundaries and evidence. Resolve known failures before continuing. Final suites and human evidence remain mandatory. The worktree setup below documents existing sessions only.
+- The orchestrator chooses the task checkout under `docs/process/merge.md`. Record an implementer or fixer session there. Follow the source exclusions for files, history and reports. See `docs/process/tiers.md` for unit checks and integration evidence.
 
 - Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
-- Implement and fix through `tools/mg cleanroom --prompt <file> --session <id>` in a filtered copy of clean master. The orchestrator reviews its patch, applies it to master and runs verification there. See `tools/cleanroom/README.md`; no branches or worktrees are created. Infrastructure bootstrap and integration may use the main checkout, but must not read forbidden sources.
+- Implement and fix through `tools/mg cleanroom --prompt <file> --session <id>` using the clean task checkout. The orchestrator reviews the patch, applies it to that checkout and runs verification there. See `tools/cleanroom/README.md`.
 
 - In the filtered runner, implement the change, correct obvious source errors, make one consistency check and export promptly. The integrator owns native compilation, focused verification and independent review.
 
 - Put the complete handoff in the final response: the filtered runner exports `codex.out`, but files in its `/tmp` disappear when it exits. A report at `/work`'s root fails the source export guard.
 
-- Work only in a worktree made by `tools/mg worktree new --role implementer <name>` (or `--role fixer`). It has no `oracle/`, and `.claude/settings.local.json` holds the implementer deny profile. Its session id is in `$(git rev-parse --absolute-git-dir)/meguri-session.json` and in the last line of `docs/process/provenance/sessions.jsonl`, which the branch's first commit added.
+- Use `tools/mg worktree new --role implementer <name>` (or `--role fixer`) for a dedicated role worktree. It installs the deny profile and records the session. In an existing task checkout the orchestrator can record the filtered-runner session with `tools/mg session record`.
 - `refs/` and `local-data/` are never in a worktree. Do not reach the main checkout's copies by absolute path.
 
 ## You may read

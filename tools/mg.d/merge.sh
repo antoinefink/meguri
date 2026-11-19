@@ -23,7 +23,7 @@
 # escalation can be added or resolved in the unit's worktree.
 
 mg_job merge host mg_merge \
-  "Merge a unit branch into the integration branch (the main checkout's branch), only path to it (R1951): <branch> [--worktree <dir>] [--unit <id>]; gate in the branch's worktree, similarity scan and static checks from the main checkout against the branch's tree, where: tip and oracle runs in a full checkout of the tip, fast-forward only on a passing complete receipt"
+  "Merge a unit branch into the integration branch (the main checkout's branch): <branch> [--worktree <dir>] [--unit <id>]; gate in the branch's worktree, similarity scan and static checks from the main checkout against the branch's tree, where: tip and oracle runs in a full checkout of the tip, fast-forward only on a passing complete receipt"
 mg_job escalation host mg_escalation \
   "Escalations for Antoine (docs/process/provenance/escalations.jsonl): add --kind behavior-gap|approval|blocked-red|stop-condition --unit <id> --summary <text> [--detail <JSON>] | resolve <id> --by <name> --resolution <text> | list [--open] [--unit <id>]"
 
