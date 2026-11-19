@@ -144,6 +144,9 @@ extension ReviewCollectionStartupTests {
             }
             try #require(try await serviceAppSignal(drained.stream, stage: "original SDK result and command ACK drain while account proof held"))
             await drain?.value
+            // The original Sync Now exchange has returned its result. Take its completion
+            // here: the later exchange must wait for its own, or it is still running at close.
+            try await backend.waitForExchange()
             #expect(await sdk.deliveredSentBatches.filter { $0.id == batch && $0.zone == heldZone }.count == 1)
             for (name, revision) in heldRevisions {
                 let ack = try #require(try await backend.workflow.entityFacts(name: name))
