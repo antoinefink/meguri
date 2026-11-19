@@ -258,7 +258,7 @@ public final class SyncCoordinator {
     /// P25.1: `media` is true in every value this coordinator holds or sends.
     public private(set) var settings: CloudPolicyDeviceSettings {
         didSet {
-            if !settings.media, !stagesMediaForTests {
+            if !settings.media {
                 settings = .init(enabled: settings.enabled, paused: settings.paused, automatic: settings.automatic, media: true)
             }
         }
@@ -1861,19 +1861,7 @@ public final class SyncCoordinator {
     /// through `setAutomatic` and `clearUpdateHold`, so no person can pause or
     /// turn media off; the pause stays for the coordinator and its tests.
     public func setDeviceSettings(paused: Bool, automatic: Bool) {
-        // P25.1: no caller can turn media off.
-        writeDeviceSettings(paused: paused, automatic: automatic, media: true)
-    }
-    /// Tests only, and never set by the app. The core still reads the `media`
-    /// member of a DeviceSettings input (P3 keeps it), and the suites that check
-    /// how a ResumeMedia command is joined, superseded or disposed use a media-off
-    /// input to issue that command at a chosen moment. No interface reaches this.
-    @ObservationIgnored private var stagesMediaForTests = false
-    func stageDeviceSettingsForTests(paused: Bool, automatic: Bool, media: Bool) {
-        stagesMediaForTests = true
-        writeDeviceSettings(paused: paused, automatic: automatic, media: media)
-    }
-    private func writeDeviceSettings(paused: Bool, automatic: Bool, media: Bool) {
+        // P25.1: no caller, the tests included, can turn media off.
         // The device's own value never disagrees with a value written here. It is
         // still first stored only by the switch or the migration (P25.3).
         if automaticIsStored, storedAutomatic != automatic { rememberAutomatic(automatic) }
@@ -1887,7 +1875,7 @@ public final class SyncCoordinator {
             let revision = providerSettingsRevision
             let attachment = hostRevision
             let previous = providerSettingsTask
-            let next = CloudPolicyDeviceSettings(enabled: settings.enabled, paused: paused, automatic: automatic, media: media)
+            let next = CloudPolicyDeviceSettings(enabled: settings.enabled, paused: paused, automatic: automatic, media: true)
             desiredProviderSettings = next
             if paused {
                 initialOwnAdmission.setOpen(false)
@@ -1907,7 +1895,7 @@ public final class SyncCoordinator {
                     }
                     providerState = state
                     desiredProviderSettings = nil
-                    applyDeviceSettings(paused: committed.paused, automatic: committed.automatic, media: committed.media, enabled: committed.enabled)
+                    applyDeviceSettings(paused: committed.paused, automatic: committed.automatic, enabled: committed.enabled)
                     if committed.paused, state.selection == .meguri, meguriPauseDrain == nil {
                         // This join cannot live in providerSettingsTask: a
                         // confirmation's replacement joins that settings task.
@@ -1933,13 +1921,14 @@ public final class SyncCoordinator {
             }
             return
         }
-        applyDeviceSettings(paused: paused, automatic: automatic, media: media)
+        applyDeviceSettings(paused: paused, automatic: automatic)
     }
-    private func applyDeviceSettings(paused: Bool, automatic: Bool, media: Bool, enabled: Bool? = nil) {
+    /// P25.1: a committed value from an earlier build's ledger may still say media off; it is applied as on.
+    private func applyDeviceSettings(paused: Bool, automatic: Bool, enabled: Bool? = nil) {
         let wasPaused = settings.paused
         let wasAutomatic = settings.automatic
         if paused { initialOwnAdmission.setOpen(false) }
-        saveSettings(.init(enabled: enabled ?? settings.enabled, paused: paused, automatic: automatic, media: media))
+        saveSettings(.init(enabled: enabled ?? settings.enabled, paused: paused, automatic: automatic, media: true))
         if wasPaused, !paused, settings.enabled, let pending = retainedRecoveryStart,
            pending.backend === backend, pending.generation == generation, pending.revision == hostRevision,
            !closing, !suspended, !replacing, !drained, !backendRetired, setupState == .attached,
@@ -1978,10 +1967,11 @@ public final class SyncCoordinator {
             retryAccountCompletion()
         }
     }
-    private func saveSettings(_ settings: CloudPolicyDeviceSettings) {
-        self.settings = settings
+    private func saveSettings(_ value: CloudPolicyDeviceSettings) {
+        // The assignment reads media as on (P25.1); store and send that value.
+        settings = value
         defaults?.set(["enabled": settings.enabled, "paused": settings.paused,
-            "automatic": settings.automatic, "media": settings.media], forKey: Self.settingsKey)
+            "automatic": settings.automatic, "media": true], forKey: Self.settingsKey)
         receive(.settings(settings))
     }
     private func persistSettings(_ settings: CloudPolicyDeviceSettings) async throws {
@@ -2270,7 +2260,7 @@ public final class SyncCoordinator {
                 }
                 providerState = state
                 desiredProviderSettings = nil
-                applyDeviceSettings(paused: committed.paused, automatic: committed.automatic, media: committed.media, enabled: committed.enabled)
+                applyDeviceSettings(paused: committed.paused, automatic: committed.automatic, enabled: committed.enabled)
             }
             return true
         } catch {

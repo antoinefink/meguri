@@ -1160,13 +1160,21 @@ extension ReviewCollectionStartupTests {
                 Issue.record("Expected the real ready return preview")
                 return
             }
-            // Finish discovery's account proof and trailing refresh. Enabling
-            // media changes status while preserving the preview's account authority.
+            // Finish discovery's account proof and trailing refresh. Media is always
+            // on (sync/policy P25.1), so the status change comes from the update hold:
+            // it is set here, and clearing it below changes status while preserving
+            // the preview's account authority.
             await harness.sync.drainOperations()
-            try #require(!harness.sync.settings.enabled && !harness.sync.settings.paused
-                && !harness.sync.settings.automatic && !harness.sync.settings.media)
+            harness.sync.setDeviceSettings(paused: true, automatic: false)
+            await harness.sync.waitForInputs(); await harness.sync.drainOperations()
+            try #require(!harness.sync.settings.enabled && harness.sync.settings.paused
+                && !harness.sync.settings.automatic && harness.sync.settings.media)
+            guard case .ready = harness.sync.preview else {
+                Issue.record("The update hold must leave the ready return preview in place")
+                return
+            }
             let status = try #require(harness.sync.status)
-            try #require(status.media.noSpace != true && status.mediaPaused)
+            try #require(status.media.noSpace != true && status.controls.userPaused == true)
             let originalCoordinator = harness.sync
             let backend = try harness.backend
             let originalGuard = try await backend.workflow.currentGuard()
@@ -1180,7 +1188,7 @@ extension ReviewCollectionStartupTests {
             backend.afterExecution = { command, result in
                 guard case .statusChanged(let status) = command.action, heldCommand == nil else { return }
                 heldCommand = command; heldResult = result
-                #expect(!status.mediaPaused && status.media.noSpace != true)
+                #expect(status.controls.userPaused == false && status.media.noSpace != true)
                 #expect(!Task.isCancelled && result.error == nil && !result.deferred)
                 held.continuation.yield(true)
                 await resultGate.hold()
@@ -1203,7 +1211,7 @@ extension ReviewCollectionStartupTests {
             }
             var choosing: Task<Void, Never>?
             do {
-                originalCoordinator.stageDeviceSettingsForTests(paused: false, automatic: false, media: true)
+                originalCoordinator.setDeviceSettings(paused: false, automatic: false)
                 // The status Core phase is held by this result: an input
                 // barrier here would wait for the same ACK we have not released.
                 try #require(try await serviceAppSignal(held.stream, stage: "local-only actual status result held"))
