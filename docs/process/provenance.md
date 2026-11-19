@@ -8,36 +8,35 @@ Meguri reimplements Anki's behavior without its code (KTD1, R1954–R1960, R2021
 | oracle-maintainer | full worktree or main checkout | yes, pinned tag and the `anki` wheel |
 | implementer, fixer | sparse worktree without `oracle/`, deny profile | never |
 | critic | packet directory, no tools (U10) | never |
-| infra, integrator | main checkout | no need |
+| infra, integrator | task or main checkout | no need |
 
-Antoine changed the build workflow on 2026-10-18: all new work happens directly on `master`, with no new branches or worktrees. Implementer and fixer sessions use `tools/mg session record`; their forbidden-source rules and commit trailers still apply. Existing role worktrees remain sources of prepared work. Their setup below describes the earlier workflow. Every completed unit requires its review log and verification receipts. Under Antoine’s updated goal on 2026-10-20, focused tests, independent review and provenance/privacy/similarity checks remain per unit. Full gates may cover up to 20 units changing only Rust internals; `docs/process/tiers.md` defines earlier boundaries, batch bases and receipts. Units remain awaiting acceptance until their required gate passes. Known failures block acceptance. Final suites and required human evidence stay mandatory; `tools/mg merge` is optional.
+Work may use a task branch or a coordinated main checkout under [the integration workflow](merge.md). Record the role before implementation. Each completed unit requires a review log, focused tests, independent review, and provenance, privacy and similarity evidence. [Verification tiers](tiers.md) govern batch bases, gate receipts and acceptance.
 
 Manual device and reference checks are deferred until the final session (Antoine, 2026-10-20). Continue with automated VM tests. Final evidence remains required.
 
 The sole interim exception to known failures blocking acceptance is Antoine's 2026-10-21 R554 decision, approval `E-20261021T134124Z-a07a`. Its exact scope is in `tiers.md`: until U69, retain the failed full gate and enabled test, require every other check, and record the exception per unit. M1R's technical stop condition and final acceptance requirements remain.
 
 For new implementation and fixes, `tools/mg cleanroom` exports a filtered copy of
-clean master into a separate container. Forbidden trees, build output, real Git
-history, host credentials and dependency caches are absent from its source view.
+a clean, committed checkout into a separate container. Its source view excludes
+forbidden trees, build output, real Git history, host credentials and dependency caches.
 Codex's command sandbox denies networking and access to the temporary run
 credentials; web search and integrations are disabled. Synthetic boundary probes
-must pass before each run. The orchestrator applies the reviewed patch to master
-and verifies it through `tools/mg`. The integrator still has main-checkout access
-and must not read forbidden sources. Details and runtime limitations:
-`tools/cleanroom/README.md`. The earlier deny profiles below describe existing
-worktrees; they are not filesystem isolation for new main-checkout sessions.
+must pass before each run. The orchestrator applies the reviewed patch to the task
+checkout and verifies it through `tools/mg`. The integrator has main-checkout access
+and must respect role source boundaries. The deny profiles below are an additional
+worktree control. See `tools/cleanroom/README.md` for runtime isolation.
 
 ## Session records (R1958)
 
 `docs/process/provenance/sessions.jsonl` holds one JSON line per agent session. Lines are only ever appended, and every record is committed where it is appended, in a commit that changes only that file (`Record session <id> (<role>, <name>)`, trailers `Role: infra` and `Session: <id>`). `.gitattributes` merges the file with git's union driver, so records committed on different branches never conflict, and no checkout is left with an uncommitted ledger that blocks a merge.
 
 - `tools/mg worktree new --role <role> <name> [--base <ref>] [--branch <branch>] [--path <dir>]` creates the worktree (default branch `unit/<name>`, default path `<main checkout>-wt/<name>`), installs the commit-msg hook, writes the record to `<worktree git dir>/meguri-session.json` and commits it to the worktree's own ledger as the branch's first commit. The record reaches the integration branch when the unit merges. Jobs read the marker to know a worktree's role. For implementer and fixer roles, git sets `extensions.worktreeConfig` in the repository config, so the sparse settings stay in that worktree. If the marker or the record cannot be written or committed, the worktree (and a branch it created) is removed and the run is an error.
-- `tools/mg session record --role <role> [--name <name>] [--note <text>]` records a session that has no worktree (a critic packet, a spec writer in the main checkout) and commits it on the current branch of the checkout it runs in. Other staged changes stay staged. Parallel runs (one critic session per check) wait for each other on a lock in the repository's git directory, so each record gets its own commit.
+- `tools/mg session record --role <role> [--name <name>] [--note <text>]` records a session in an existing checkout and commits the record on its current branch. Other staged changes stay staged. Parallel runs wait for each other on a lock in the repository's git directory, so each record gets its own commit.
 - Roles are matched as whole words: a value such as `implementer fixer` is rejected everywhere (worktree, session record, commit-msg hook).
 
 Fields: `session` (id), `role`, `kind` (`worktree` or `session`), `name`, `base_commit`, `role_doc` and `role_doc_blob` (the role instructions in force), `created_at`; for worktrees also `branch`, `worktree`, `sparse`, `excluded_paths` and `deny_profile` (`source`, `installed`, `sha256` of the rendered profile).
 
-A worktree made with plain `git worktree add` has no record, no marker and no deny profile. Create implementer worktrees only through `tools/mg worktree new`.
+Use `tools/mg worktree new` to set up a dedicated role worktree. An orchestrator using an existing checkout can record the session with `tools/mg session record` and run the filtered implementation there.
 
 The deny profile binds a Claude session started in the worktree. An orchestrator's subagents start in the main checkout and never load it, so `.claude/hooks/cleanroom_guard.py` (a project PreToolUse hook in `.claude/settings.json`) applies the same rules to every subagent labelled as an implementer or fixer (workflow labels `U<n>:implement…`, `U<n>:fix-…`, `U<n>:codexfix-…`; Agent descriptions starting `implementer` or `fixer`). It also refuses git commands that would print `oracle/` content: unit branches carry the spec side's `oracle/` commits, which the sparse checkout keeps off disk but `git diff` and `git show` still print. Test: `.claude/hooks/test_cleanroom_guard.sh`.
 

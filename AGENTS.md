@@ -16,16 +16,16 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 ## Tooling
 
 - On a migrated Mac, source `.local/activate` when present before running jobs. Machine-local VM storage and tool setup: `docs/process/new-machine.md`.
-- Work directly on `master` in the main checkout; do not create branches or worktrees. Resume prepared work without redoing it. Record each unit's starting commit and review/fix log. Commit WIP with co-author attribution; push only `master`, never force. `tools/mg merge` is not required (Antoine, 2026-10-18).
+- Prefer an isolated task branch and worktree for feature work. Reuse prepared work and choose the checkout that fits the task. A request for a PR authorizes pushing its task branch and opening or updating the PR against `master`. Reserve integration on `master` for authorized changes. Never force-push. See `docs/process/merge.md`.
 - Antoine (2026-10-22): implement working reviews next. Follow `docs/process/review-first-delivery.md` for execution order. Keep all milestone gates and complete the full plan.
 
-- Antoine (2026-11-17): first deliver usable daily reviews with our own Meguri Sync server. Prioritize that end-to-end path; preserve prepared unrelated work and defer its follow-ons. Retain required safety, review and verification checks.
+- Antoine (2026-11-17): prioritize usable daily reviews with our own Meguri Sync server for integration. Independent work may proceed in an isolated worktree and reach draft PR review while repairs continue.
 
 - Verification (updated goal, 2026-10-25): keep focused checks, independent review, separate commits and provenance/privacy/similarity checks per unit. Group 3–5 related units in dependency order, including Swift/FFI, with one full gate at the coherent batch boundary. Pure Rust internals may cover at most 20 units per full gate. Always gate milestone boundaries; record the original batch base and resolve technical failures before the next batch. See `docs/process/tiers.md`.
 
 - For each edit, run the smallest `tools/mg` checks that cover the change. After an authorized push, use GitHub Actions for the broader public Linux suites it covers. Reserve full local suites for required gates or failures that focused checks cannot diagnose. Use each hosted receipt only for its verified scope in `docs/process/tiers.md`.
 
-- Failure discipline (Antoine, 2026-11-16): read `docs/process/verification-status.md` on resume and before a batch. Repair required active failures before unrelated features. Focused passes do not clear a failed gate. Maintain the register under `docs/process/merge.md`.
+- Failure discipline: read `docs/process/verification-status.md` on resume and before a batch. Keep required repairs first in the integration order. Report inherited failures on affected draft PRs and use full gate evidence for integration. Maintain the register under `docs/process/merge.md`.
 
 - Antoine (2026-11-14): continue as many repair/review rounds as needed for this goal; do not ask for round-count extensions. Keep independent review, failure evidence and all required checks. See `docs/process/review-log/repair-rounds-authorization-20261114.md`.
 

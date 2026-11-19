@@ -89,7 +89,7 @@ existing attach points for later providers. The next step covers local entry,
 using the package/replace primitives required by the chosen supported format.
 Reuse prepared specs and code before writing replacements.
 
-Work on master in coherent batches of 3–5 related units when useful, following
+Integrate on master in coherent batches of 3–5 related units when useful, following
 Antoine's 2026-10-25 goal. Record each unit's starting commit, use the filtered
 implementer/fixer and independent review, and retain separate commits and focused
 checks per unit. Run one full gate covering the complete integration batch.
@@ -106,6 +106,6 @@ Frozen server requirements do not block delivery.
 
 Delivery priority (2026-10-29): finish reviews and iCloud sync first.
 
-Antoine requests iCloud sync after the current backup, integrity and recovery work is verified. Prioritize U113 and U114 and their dependencies before the remaining editing, search and statistics features. Cover collections, saved reviews and media across devices under the approved CloudKit contract. Before using a rule listed in `sync/policy#P24`, add its `conformance/cloudkit-acceptance#Q11` test and resolve the listed item through the spec-writer workflow. `sched/optimizer` O12 and O13 were approved on 2026-10-27. Before U47 builds on an O19 item, add its named test and settle the recorded correction through the spec-writer workflow; the approval alone does not close O19. Anki-server work stays frozen.
+Antoine requests iCloud sync after the current backup, integrity and recovery work is verified. Give U113 and U114 and their dependencies integration priority over the remaining editing, search and statistics features. Cover collections, saved reviews and media across devices under the approved CloudKit contract. Before using a rule listed in `sync/policy#P24`, add its `conformance/cloudkit-acceptance#Q11` test and resolve the listed item through the spec-writer workflow. `sched/optimizer` O12 and O13 were approved on 2026-10-27. Before U47 builds on an O19 item, add its named test and settle the recorded correction through the spec-writer workflow; the approval alone does not close O19. Anki-server work stays frozen.
 
 Preparation follow-up: the requested search R1881 command (`tools/mg similarity -- conformance/scenarios/search conformance/goldens/search`) reports pass but scans 0 files and skips both inputs (`similarity/20261027T153016Z-48035`). It does not prove coverage. Keep the 38 ported search scenarios inactive until U81/U82 and complete the required R1881 check before activation. Counts are retained in `build/unit-intake/U132-maintenance/search-r1881-status.json`.
