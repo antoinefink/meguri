@@ -828,6 +828,9 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    # Complete-content PUBLIC review: add_note_privacy_review_2, 2026-11-19.
+    'app/Packages/MeguriKit/Tests/AppModelTests/AddNoteFormTests.swift':
+        '6b0c861d5e52b05545e3bfbd8466384c65c72ad2e3bc48f540f2f99a403f1414',
     'docs/process/review-log/meguri-collection-mcp-20261119.md':
         '05cb4950ef3ced22e56e850a70ff9d1859ac49a216953314eb4aa0ada3ff6ab2',
     'server/src/accounts/oauth/mod.rs':
@@ -1322,7 +1325,7 @@ PUBLIC_ARTIFACTS = {
         "2c9222832834a1a4251d5388c2e158f15d69be007739c0953c7980e1ba13e768",
     # Complete public-file review: owned_cleanup_diagnosis, 2026-11-18.
     "app/Packages/MeguriKit/Sources/Features/Editor/FieldEditorHost.swift":
-        "da01854da3e0a19fd458a77ed70d173ee755c1a9f4f421caa4b2ef8974ff66e1",
+        "f2dd76f61515c6986bab071d1dacfab42282e8bf41c832a56311252d64c2d1a7",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "app/Packages/MeguriKit/Tests/AppModelTests/FieldEditorTests.swift":
         "f4cfb32a6987d170f6b435e40cb8ca839ac1887c14b753ca97bfb0f1ca959a30",
@@ -1331,7 +1334,7 @@ PUBLIC_ARTIFACTS = {
         "f1432c094aa8dc1498d33b196e56b0b15fb1b8ab73c23ee7bac34c15f302d455",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "app/Packages/MeguriKit/Sources/AppModel/Editor/AddNoteFlow.swift":
-        "cd93e7106d0b0d827813f0efd8c73e1539c1ad1e2fc1f1594e40a150001b6788",
+        "577130bbe8fe6ea990045e36ca550fa4979f860306677172f8c6302af8e5dc53",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "app/Packages/MeguriKit/Tests/AppModelTests/ManualTransferSettingsTests.swift":
         "797f2c54583e226dabcf48f3b7992503b60542ad79337612e37ab7b9f1628668",
