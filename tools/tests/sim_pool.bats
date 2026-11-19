@@ -7,9 +7,9 @@
 bats_require_minimum_version 1.5.0
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-IPHONE_TYPE=com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro
+IPHONE_TYPE=com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro
 IPAD_TYPE=com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB
-RT27=com.apple.CoreSimulator.SimRuntime.iOS-27-0
+RT27=com.apple.CoreSimulator.SimRuntime.iOS-27-2
 RT18=com.apple.CoreSimulator.SimRuntime.iOS-18-2
 
 setup_file() {
@@ -466,12 +466,12 @@ assert_pool_devices_untouched() {
   pool status
   [ "$status" -eq 0 ]
   jq -e . <<<"$output" >/dev/null
-  [ "$(jq -r '.runtime.version' <<<"$output")" = 27.0 ]
+  [ "$(jq -r '.runtime.version' <<<"$output")" = 27.2 ]
   [ "$(jq -r '.devices | length' <<<"$output")" -eq 2 ]
   [ "$(jq -r --arg u "$u" '.devices[] | select(.udid == $u) | "\(.kind) \(.leased) \(.lease.holder) \(.lease_expired) \(.current_runtime)"' <<<"$output")" = "iphone true s1 false true" ]
   [ "$(jq -r '.devices[] | select(.name == "Meguri-Pool-ipad-1") | "\(.kind) \(.leased) \(.state)"' <<<"$output")" = "ipad false Shutdown" ]
   [ "$(jq -r '[.kinds[].kind] | join(" ")' <<<"$output")" = "iphone iphone-small ipad ipad-small foldable" ]
-  [ "$(jq -r '.kinds[] | select(.kind == "ipad-small") | .device_type' <<<"$output")" = com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro ]
+  [ "$(jq -r '.kinds[] | select(.kind == "ipad-small") | .device_type' <<<"$output")" = com.apple.CoreSimulator.SimDeviceType.iPad-mini-A20-Pro ]
   [[ "$stderr" == *"Meguri-Pool-iphone-1  $u  Booted  leased to s1"* ]]
 }
 
@@ -653,15 +653,15 @@ mg_sandbox() {
   not_called "simctl create"
   FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true pool acquire foldable --holder t1
   [ "$status" -eq 0 ]
-  called "^xcrun simctl create Meguri-Pool-foldable-1 com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-1\$"
+  called "^xcrun simctl create Meguri-Pool-foldable-1 com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4\$"
 }
 
 @test "a newer runtime in the pool leaves the other kinds on the pinned one" {
   FAKE_SIM_RT271=true pool acquire iphone --holder t1
   [ "$status" -eq 0 ]
-  called "^xcrun simctl create Meguri-Pool-iphone-1 com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro $RT27\$"
+  called "^xcrun simctl create Meguri-Pool-iphone-1 com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro $RT27\$"
   FAKE_SIM_RT271=true pool status
-  [ "$(jq -r '.runtime.version' <<<"$output")" = 27.0 ]
+  [ "$(jq -r '.runtime.version' <<<"$output")" = 27.2 ]
   [ "$(jq -r '.devices[0].current_runtime' <<<"$output")" = true ]
 }
 

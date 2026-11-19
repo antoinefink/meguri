@@ -114,7 +114,7 @@ case "$name $*" in
     if [ "${STUB_NO_IOS27:-0}" = 1 ]; then
       echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-18-2","version":"18.2","buildversion":"22C150","isAvailable":true,"platform":"iOS"}]}'
     else
-      echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","version":"27.0","buildversion":"24A434","isAvailable":true,"platform":"iOS"}]}'
+      echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2","version":"27.2","buildversion":"24B8117","isAvailable":true,"platform":"iOS"}]}'
     fi ;;
   "defaults read com.apple.dt.Xcode IDEProvisioningTeamByIdentifier")
     if [ "${STUB_ACCOUNT:-1}" = 1 ]; then
@@ -160,7 +160,7 @@ case "$name $*" in
     echo "${STUB_VM_MACOS_BUILD:-26A434}" ;;
   "vm-ssh xcrun simctl list runtimes --json")
     if [ "${STUB_VM_RUNTIME:-1}" = 1 ]; then
-      echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","version":"27.0","buildversion":"24A434","isAvailable":true,"platform":"iOS"}]}'
+      echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-2","version":"27.2","buildversion":"24B8117","isAvailable":true,"platform":"iOS"}]}'
     else
       echo '{"runtimes":[]}'
     fi ;;
@@ -599,7 +599,7 @@ EOF
   [ "$(field .status)" = pass ]
   jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "pass" and (.message | contains("running, SSH answers, Xcode 27.0 (27A266a) as on this Mac")))' "$result"
   [ "$(field -c '.details.mac_vm.vms[0] | [.drive_connected, .present, .state, .ssh, .xcode, .xcode_matches_host, .sim_runtime]')" = '[true,true,"running",true,"27.0 (27A266a)",true,true]' ]
-  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac/simulators" and .status == "pass" and (.message | contains("iOS 27.0 (24A434) simulator runtime")))' "$result"
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac/simulators" and .status == "pass" and (.message | contains("iOS 27.2 (24B8117) simulator runtime")))' "$result"
   [ "$(field '[.user_steps[] | select(.id == "mac-vm")] | length')" = 0 ]
 
   # A VM without the pinned simulator runtime warns, naming the script that

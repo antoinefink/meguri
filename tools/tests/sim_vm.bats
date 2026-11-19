@@ -409,7 +409,7 @@ assert_host_untouched() {
   local u
   u="$(field .details.udid)"
   [ "$(vm_sim meguri-mac __state "$u")" = Booted ]
-  called "^xcrun simctl create Meguri-Pool-iphone-1 com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-0\$"
+  called "^xcrun simctl create Meguri-Pool-iphone-1 com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro com.apple.CoreSimulator.SimRuntime.iOS-27-2\$"
   # After the boot the pool checks, in the VM's simulator, that SpringBoard
   # applies appearance changes.
   called "^xcrun simctl spawn $u log show --start "
@@ -435,7 +435,7 @@ assert_host_untouched() {
 @test "sim-setup checks the VM's runtime and device types and creates the pool there" {
   mg sim-setup --kinds iphone,ipad
   [ "$(field .status)" = pass ]
-  [ "$(field .details.runtime.actual.build)" = 24A434 ]
+  [ "$(field .details.runtime.actual.build)" = 24B8117 ]
   [ "$(field '.details.devices | keys | join(" ")')" = "ipad iphone" ]
   [ "$(jq -r '"\(.runner) \(.vm)"' "$SB/build/sim-devices.local.json")" = "vm meguri-mac" ]
   [ "$(vm_sim meguri-mac list devices --json | jq '[.devices[][] | select(.name | startswith("Meguri-Pool-"))] | length')" = 2 ]
@@ -1416,20 +1416,20 @@ FAKE
   echo info >"$asset/Restore/Firmware/043-70362-657.dmg.cryptex_info"
   stub "$BIN/xcrun" "
 case \"\$*\" in
-  'simctl runtime list -j') jq -n --arg p '$asset' '[{build: \"24A434\", runtimeIdentifier: \"com.apple.CoreSimulator.SimRuntime.iOS-27-0\", state: \"Ready\", path: \$p}]' ;;
+  'simctl runtime list -j') jq -n --arg p '$asset' '[{build: \"24B8117\", runtimeIdentifier: \"com.apple.CoreSimulator.SimRuntime.iOS-27-2\", state: \"Ready\", path: \$p}]' ;;
   *) echo \"host-xcrun \$*\" >>\"\$STUB_LOG\"; exit 97 ;;
 esac"
   run --separate-stderr "$SB/tools/vm/add-sim-runtime.sh"
   [ "$status" -eq 0 ] || { echo "$stderr"; return 1; }
-  called "^xcrun simctl runtime add .*/runtime-import/com.apple.CoreSimulator.SimRuntime.iOS-27-0-24A434/AssetData/Restore/043-70362-657.dmg\$"
-  [ "$(vm_sim meguri-mac list runtimes --json | jq -r '[.runtimes[].buildversion] | index("24A434") != null')" = true ]
-  [[ "$stderr" == *"meguri-mac has the iOS 27.0 (24A434) simulator runtime"* ]]
+  called "^xcrun simctl runtime add .*/runtime-import/com.apple.CoreSimulator.SimRuntime.iOS-27-2-24B8117/AssetData/Restore/043-70362-657.dmg\$"
+  [ "$(vm_sim meguri-mac list runtimes --json | jq -r '[.runtimes[].buildversion] | index("24B8117") != null')" = true ]
+  [[ "$stderr" == *"meguri-mac has the iOS 27.2 (24B8117) simulator runtime"* ]]
   # The import directory is gone.
   [ -z "$(ls "$FAKE_VM_DIR/meguri-mac/fs"/*/runtime-import 2>/dev/null)" ] || [ -z "$(ls -A "$(find "$FAKE_VM_DIR" -name runtime-import -type d | head -n 1)")" ]
 
   : >"$STUB_LOG"
   run --separate-stderr "$SB/tools/vm/add-sim-runtime.sh"
   [ "$status" -eq 0 ]
-  [[ "$stderr" == *"already has the iOS 27.0 (24A434) simulator runtime"* ]]
+  [[ "$stderr" == *"already has the iOS 27.2 (24B8117) simulator runtime"* ]]
   not_called '^xcrun simctl runtime add'
 }

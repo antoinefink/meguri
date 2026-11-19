@@ -14,7 +14,7 @@
 #   xcrun simctl __voiceover <udid> [enabled|disabled]           set or read state
 #   xcrun simctl __voiceover_disable_fail <udid> <true|false>
 #
-# FAKE_SIM_RT27_BUILD sets the iOS 27.0 runtime's build (default 24A434);
+# FAKE_SIM_RT27_BUILD sets the pinned iOS 27.2 runtime's build (default 24B8117);
 # FAKE_SIM_FOLDABLE=1 adds a foldable iPhone device type. `io <udid>
 # recordVideo ... <file>` writes the file and runs until SIGINT (with
 # FAKE_SIM_RECORD_EMPTY=1 the file is empty; FAKE_SIM_RECORD_EXIT_AFTER=<s>
@@ -23,7 +23,7 @@
 # fail. `spawn <udid> launchctl kickstart|list` stands in for SpringBoard's
 # restart, `spawn <udid> log show` for its style arbiter's log: with
 # FAKE_SIM_SB=stale new devices' SpringBoard ignores appearance changes until
-# FAKE_SIM_SB_RESTARTS (1) restarts, or never. FAKE_SIM_NO_RT27=1 leaves the iOS 27.0 runtime out
+# FAKE_SIM_SB_RESTARTS (1) restarts, or never. FAKE_SIM_NO_RT27=1 leaves the pinned runtime out
 # until `runtime add <image>` adds it.
 
 set -u
@@ -33,8 +33,8 @@ shift
 case "$tool ${1:-}" in "simctl __"*) ;; *) printf 'xcrun %s %s\n' "$tool" "$*" >>"$STUB_LOG" ;; esac
 
 DB="$FAKE_SIM_DB"
-RT_NEW=com.apple.CoreSimulator.SimRuntime.iOS-27-0
-IPHONE=com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro
+RT_NEW=com.apple.CoreSimulator.SimRuntime.iOS-27-2
+IPHONE=com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro
 
 # Calls run in parallel (parallel acquires boot different devices), so every
 # read-modify-write of the database holds a mkdir lock.
@@ -79,13 +79,13 @@ if [ "$tool" = devicectl ]; then
 fi
 case "${1:-} ${2:-}" in
   "list runtimes")
-    rt27='{"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-0", "version": "27.0", "buildversion": "'"${FAKE_SIM_RT27_BUILD:-24A434}"'", "isAvailable": true, "platform": "iOS"},'
+    rt27='{"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-2", "version": "27.2", "buildversion": "'"${FAKE_SIM_RT27_BUILD:-24B8117}"'", "isAvailable": true, "platform": "iOS"},'
     [ "${FAKE_SIM_NO_RT27:-}" != 1 ] || [ -e "$DB.runtime-added" ] || rt27=""
     cat <<EOF
 {"runtimes": [
   {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-18-2", "version": "18.2", "buildversion": "22C150", "isAvailable": true, "platform": "iOS"},
   $rt27
-  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-1", "version": "27.1", "buildversion": "${FAKE_SIM_RT271_BUILD:-24B5}", "isAvailable": ${FAKE_SIM_RT271:-false}, "platform": "iOS"},
+  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4", "version": "27.2", "buildversion": "${FAKE_SIM_RT271_BUILD:-24B5}", "isAvailable": ${FAKE_SIM_RT271:-false}, "platform": "iOS"},
   {"identifier": "com.apple.CoreSimulator.SimRuntime.watchOS-28-0", "version": "28.0", "buildversion": "23R1", "isAvailable": true, "platform": "watchOS"}
 ]}
 EOF
@@ -94,11 +94,13 @@ EOF
     {
       cat <<'EOF'
 {"devicetypes": [
+  {"name": "iPhone 18 Pro", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro", "productFamily": "iPhone"},
   {"name": "iPhone 17 Pro", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", "productFamily": "iPhone"},
   {"name": "iPhone 17 Pro Max", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max", "productFamily": "iPhone"},
   {"name": "iPhone 17e", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17e", "productFamily": "iPhone"},
   {"name": "iPad Pro 13-inch (M5) (16GB)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-16GB", "productFamily": "iPad"},
   {"name": "iPad Pro 13-inch (M5)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB", "productFamily": "iPad"},
+  {"name": "iPad mini (A20 Pro)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-mini-A20-Pro", "productFamily": "iPad"},
   {"name": "iPad mini (A17 Pro)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro", "productFamily": "iPad"},
   {"name": "Apple Watch Ultra 3 (49mm)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Ultra-3-49mm", "productFamily": "Apple Watch"}
 EOF
@@ -206,7 +208,7 @@ EOF
   "runtime add")
     [ -f "${3:-}" ] || { echo "fake simctl runtime add: no image at ${3:-}" >&2; exit 1; }
     : >"$DB.runtime-added"
-    echo "D: 87197EB7-5F23-4323-BCB1-A9E56C24B65F iOS (27.0 - 24A434) (Ready)"
+    echo "D: 87197EB7-5F23-4323-BCB1-A9E56C24B65F iOS (27.2 - 24B8117) (Ready)"
     ;;
   spawn\ *)
     # Only launchctl in the simulator (restarting SpringBoard, listing it)

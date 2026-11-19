@@ -10,7 +10,7 @@
 bats_require_minimum_version 1.5.0
 
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-RT27=com.apple.CoreSimulator.SimRuntime.iOS-27-0
+RT27=com.apple.CoreSimulator.SimRuntime.iOS-27-2
 
 setup_file() {
   local t="$BATS_FILE_TMPDIR/template"
@@ -256,7 +256,7 @@ EOF
     called "^xcrun simctl create Meguri-Pool-$kind-1 $type $RT27\$"
     [ "$(field --arg k "$kind" '.details.devices[$k].status')" = created ]
   done
-  called "^xcrun simctl create Meguri-Pool-iphone-1 com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro $RT27\$"
+  called "^xcrun simctl create Meguri-Pool-iphone-1 com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro $RT27\$"
   u="$(jq -r '.devices.iphone.udids[0]' "$SB/build/sim-devices.local.json")"
   [ "$(sim __state "$u")" = Booted ]
   [ ! -e "$MEGURI_SIM_POOL_DIR/leases/$u" ]
@@ -276,8 +276,8 @@ EOF
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
   [ "$(field '.failures[0].id')" = runtime-mismatch ]
-  [[ "$(field '.failures[0].message')" == *"24A999"*"pins iOS 27.0 (24A434"* ]]
-  [ "$(field '.details.runtime | "\(.expected.build) \(.actual.build)"')" = "24A434 24A999" ]
+  [[ "$(field '.failures[0].message')" == *"24A999"*"pins iOS 27.2 (24B8117"* ]]
+  [ "$(field '.details.runtime | "\(.expected.build) \(.actual.build)"')" = "24B8117 24A999" ]
   not_called "simctl create"
 }
 
@@ -291,10 +291,10 @@ EOF
 }
 
 @test "sim-setup adds the foldable lane once the toolchain offers a foldable iPhone" {
-  FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24A94425 mg sim-setup --kinds foldable
+  FAKE_SIM_FOLDABLE=1 FAKE_SIM_RT271=true FAKE_SIM_RT271_BUILD=24B91016s mg sim-setup --kinds foldable
   [ "$status" -eq 0 ]
   [ "$(field '.details.foldable.status')" = available ]
-  called "^xcrun simctl create Meguri-Pool-foldable-1 com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-1\$"
+  called "^xcrun simctl create Meguri-Pool-foldable-1 com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4\$"
   not_called "simctl create Meguri-Pool-iphone"
 }
 
@@ -1181,8 +1181,8 @@ EOF
   mg drive "$script" --platform ipad
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = runtime-mismatch ]
-  [[ "$(field '.failures[0].message')" == *"iOS 27.0 (24A999"*"pins iOS 27.0 (24A434"* ]]
-  [ "$(field '.details.runtime | "\(.expected.build) \(.actual.build)"')" = "24A434 24A999" ]
+  [[ "$(field '.failures[0].message')" == *"iOS 27.2 (24A999"*"pins iOS 27.2 (24B8117"* ]]
+  [ "$(field '.details.runtime | "\(.expected.build) \(.actual.build)"')" = "24B8117 24A999" ]
   mg drive "$script" --device "$u"
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = runtime-mismatch ]
