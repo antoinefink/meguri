@@ -222,6 +222,16 @@ final class NativeReplayWaitTests: XCTestCase {
 /// The drive script format (tools/drive-scripts/AGENTS.md). These tests only
 /// parse JSON; they launch no app.
 final class DriveScriptTests: XCTestCase {
+    func testDoStepsParseTheirOpAndArgument() throws {
+        let script = try parse(#"{"name":"x","steps":[{"launch":{}},{"do":"label:Meguri Sync"},{"do":"press:home.deck.row.1"},{"do":"appearance:dark"}]}"#)
+        XCTAssertEqual(script.steps.dropFirst().map(\.action), [.custom("label:Meguri Sync"), .custom("press:home.deck.row.1"), .custom("appearance:dark")])
+        XCTAssertEqual(script.steps.last?.action.kind, "do")
+        for bad in ["label", "label:", "shake:now", ":x"] {
+            let malformed = "{\"name\":\"x\",\"steps\":[{\"launch\":{}},{\"do\":\"\(bad)\"}]}"
+            XCTAssertTrue(error(malformed).contains("do takes <op>:<argument>"), bad)
+        }
+    }
+
     private func parse(_ json: String) throws(DriveScriptError) -> DriveScript {
         try DriveScript(json: Data(json.utf8))
     }

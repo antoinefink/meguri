@@ -431,7 +431,7 @@ final class AgentDriver {
     private func prepareInput(_ action: DriveScript.Action) throws {
         #if os(macOS)
         switch action {
-        case .tap, .type, .swipe, .scroll:
+        case .tap, .type, .swipe, .scroll, .custom:
             try running().bringToFront(bundleIdentifier: try build.bundleIdentifier)
         default:
             break
@@ -482,7 +482,64 @@ final class AgentDriver {
             try resize(size)
         case .foregroundCycle:
             try foregroundCycle()
+        case let .custom(command):
+            try custom(command)
         }
+    }
+
+    /// Screen-library capture steps that need no unique identifier.
+    private func custom(_ command: String) throws {
+        let parts = command.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { throw StepFailure(message: "do takes <op>:<argument>") }
+        let app = try running(), argument = parts[1]
+        func labelled(_ label: String) throws -> XCUIElement {
+            let pieces = label.components(separatedBy: "#")
+            let typed = pieces[0].components(separatedBy: "@")
+            let types: [String: XCUIElement.ElementType] = ["textView": .textView, "button": .button, "switch": .switch, "staticText": .staticText, "textField": .textField, "menuBarItem": .menuBarItem, "menuItem": .menuItem]
+            let query = app.descendants(matching: typed.count > 1 ? types[typed[1]] ?? .any : .any).matching(NSPredicate(format: "label == %@ OR title == %@", typed[0], typed[0]))
+            let element = pieces.count > 1 ? query.element(boundBy: Int(pieces[1]) ?? 0) : query.firstMatch
+            guard element.waitForExistence(timeout: 5) else { throw StepFailure(message: "no element labelled '\(label)'") }
+            return element
+        }
+        switch parts[0] {
+        case "label":
+            try labelled(argument).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).clickOrTap()
+        case "press":
+            let element = app.descendants(matching: .any).matching(identifier: argument).firstMatch
+            guard element.waitForExistence(timeout: 5) else { throw StepFailure(message: "no element '\(argument)'") }
+            #if os(macOS)
+            element.rightClick()
+            #else
+            element.press(forDuration: 1.2)
+            #endif
+        case "pressLabel":
+            #if os(macOS)
+            try labelled(argument).rightClick()
+            #else
+            try labelled(argument).press(forDuration: 1.2)
+            #endif
+        case "keys":
+            app.typeText(argument)
+        case "point":
+            let values = argument.split(separator: ",").compactMap { Double($0) }
+            guard values.count == 2 else { throw StepFailure(message: "point takes x,y in 0...1") }
+            app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: values[0], dy: values[1])).clickOrTap()
+        case "sleep":
+            Thread.sleep(forTimeInterval: Double(argument) ?? 1)
+        #if os(iOS)
+        case "orientation":
+            let orientations: [String: UIDeviceOrientation] = ["portrait": .portrait, "landscapeLeft": .landscapeLeft, "landscapeRight": .landscapeRight]
+            guard let orientation = orientations[argument] else { throw StepFailure(message: "unknown orientation") }
+            XCUIDevice.shared.orientation = orientation
+            Thread.sleep(forTimeInterval: 1.5)
+        case "appearance":
+            XCUIDevice.shared.appearance = argument == "dark" ? .dark : .light
+            Thread.sleep(forTimeInterval: 1)
+        #endif
+        default:
+            throw StepFailure(message: "unknown do op '\(parts[0])'")
+        }
+        tree = nil
     }
 
     private func foregroundCycle() throws {
@@ -731,7 +788,15 @@ final class AgentDriver {
         let screenshot = app.windows.firstMatch.screenshot()
         let origin = tree.window.origin
         #else
-        let screenshot = (privateInput || foregroundOnly) ? app.screenshot() : XCUIScreen.main.screenshot()
+        // A foldable has two screens and the app may be on the other one
+        // (unfolded: the inner display): capture the app there.
+        // (unfolded: the inner display), where some captures come back
+        // black: take the candidate with the most content.
+        let candidates = XCUIScreen.screens.count > 1 && !privateInput && !foregroundOnly
+            ? XCUIScreen.screens.map { $0.screenshot() } + [app.screenshot(), app.windows.firstMatch.screenshot()]
+            : [(privateInput || foregroundOnly) ? app.screenshot() : XCUIScreen.main.screenshot()]
+        print("drive: capture candidates \(candidates.map { $0.pngRepresentation.count })")
+        let screenshot = candidates.max { $0.pngRepresentation.count < $1.pngRepresentation.count }!
         let origin = CGPoint.zero
         #endif
         let png = screenshot.pngRepresentation

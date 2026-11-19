@@ -39,6 +39,9 @@ struct DriveScript: Equatable {
         case resize(size: String)
         /// iOS: Home then activate the same still-running app.
         case foregroundCycle
+        /// `<op>:<argument>`, for controls with no unique identifier and
+        /// for device state (`customOps`; tools/drive-scripts/AGENTS.md).
+        case custom(String)
 
         var kind: String {
             switch self {
@@ -51,6 +54,7 @@ struct DriveScript: Equatable {
             case .snapshot: "snapshot"
             case .resize: "resize"
             case .foregroundCycle: "foregroundCycle"
+            case .custom: "do"
             }
         }
     }
@@ -63,7 +67,8 @@ struct DriveScript: Equatable {
     var name: String
     var steps: [Step]
 
-    static let actionKeys = ["launch", "tap", "type", "swipe", "scroll", "wait", "snapshot", "resize", "foregroundCycle"]
+    static let customOps = ["label", "press", "pressLabel", "keys", "point", "sleep", "orientation", "appearance"]
+    static let actionKeys = ["launch", "tap", "type", "swipe", "scroll", "wait", "snapshot", "resize", "foregroundCycle", "do"]
     static let defaultWaitTimeout: TimeInterval = 10
 
     init(name: String, steps: [Step]) {
@@ -170,6 +175,13 @@ struct DriveScript: Equatable {
                 throw DriveScriptError("\(at): snapshot names use lowercase letters, digits and '-', got '\(name)'")
             }
             action = .snapshot(name: name)
+        case "do":
+            let command = try string(value, at, key)
+            let parts = command.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2, customOps.contains(parts[0]), !parts[1].isEmpty else {
+                throw DriveScriptError("\(at): do takes <op>:<argument> with op one of \(customOps.joined(separator: ", ")), got '\(command)'")
+            }
+            action = .custom(command)
         case "foregroundCycle":
             guard keys == ["foregroundCycle"], isBoolean(value), value as? Bool == true else {
                 throw DriveScriptError("\(at): foregroundCycle takes only literal true and no other keys")
