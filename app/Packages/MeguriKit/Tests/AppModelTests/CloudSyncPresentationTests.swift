@@ -226,6 +226,38 @@ import Testing
             #expect(settling.symbol == presentation.symbol && settling.isBusy == presentation.isBusy)
         }
     }
+    @Test func reviewShowsSyncStatusOnlyWhenSyncNeedsThePerson() {
+        // N16.2. iCloud: a decision, an account or a recorded problem.
+        let needing: [CloudPolicyStatusState] = [.needsAttention, .paused(.decisionRequired),
+            .iCloudUnavailable(.noAccount), .iCloudUnavailable(.restricted), .iCloudUnavailable(.setupNeeded)]
+        for state in needing { #expect(SyncStatusPresentation.needsUser(state), "\(state)") }
+        let quiet: [CloudPolicyStatusState?] = [nil, .localOnly, .iCloudUnavailable(.temporary), .paused(.userPaused),
+            .paused(.automaticOff), .offline, .syncingCollection, .syncingMedia, .changesPending,
+            .upToDate(asOfMilliseconds: 1), .awaitingEvidence]
+        for state in quiet { #expect(!SyncStatusPresentation.needsUser(state), "\(String(describing: state))") }
+        // Meguri Sync: by routine state once set up.
+        let routines: [(MeguriRoutineState, Bool)] = [(.unreported, false), (.exchanging, false), (.idle, false),
+            (.pending, false), (.waiting, false), (.network, false), (.server, false), (.cancelled, false),
+            (.failed, false), (.mediaBlocked, true), (.authentication, true), (.acceptanceUnknown, true),
+            (.fullSyncRequired, true)]
+        for (routine, expected) in routines {
+            let presentation = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired,
+                stage: nil, localCollection: true, paused: false, routine: routine)
+            #expect(presentation.needsUser == expected, "\(routine)")
+        }
+        let paused = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: nil,
+            localCollection: true, paused: true, routine: .idle)
+        #expect(!paused.needsUser)
+        let signedOut = MeguriSyncStatusPresentation(stopped: false, connection: .signedOut, stage: nil,
+            localCollection: true, paused: false, routine: nil)
+        #expect(signedOut.needsUser)
+        let choosing = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: .required,
+            localCollection: true, paused: false, routine: nil)
+        #expect(choosing.needsUser)
+        let transferring = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: .collection,
+            localCollection: true, paused: false, routine: nil)
+        #expect(!transferring.needsUser)
+    }
     @Test func meguriLastExchangeDetailsFollowRoutineAndStatusPrecedence() {
         // Presentation inputs only; no invented ready binding or server result.
         let completed: Int64 = 1_700_000_000_000

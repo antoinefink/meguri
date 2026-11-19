@@ -73,6 +73,16 @@ public struct SyncStatusPresentation {
     public static func providerNeedsAttention(_ state: SyncProviderState?) -> Bool {
         state?.phase == .blocked || state?.phase == .handoffRecovery
     }
+    /// Whether iCloud sync waits on the person: a decision, an account or a
+    /// problem that will not clear by itself. Waiting, transfers and a pause
+    /// the person chose do not count (N16.2).
+    public static func needsUser(_ state: CloudPolicyStatusState?) -> Bool {
+        switch state {
+        case .needsAttention, .paused(.decisionRequired): true
+        case .iCloudUnavailable(let reason): reason != .temporary
+        default: false
+        }
+    }
     public static func showsRecoveryResume(_ recovery: CloudRecoveryStatus) -> Bool {
         if recovery.adoptionRecoveredCancelOnly || recovery.adoptionAfterReview { return false }
         switch recovery.step {
@@ -350,6 +360,16 @@ public struct MeguriSyncStatusPresentation {
              "sync.meguri.status.syncingCollection.title", "sync.meguri.status.syncingMedia.title": true
         default: false
         }
+    }
+    /// Whether Meguri Sync waits on the person (N16.2): a sign-in, a
+    /// collection choice or a setup that cannot go on. Transfers, pending
+    /// changes, a pause the person chose, failures that retry and the state
+    /// before the first report do not count; a stopped provider is the
+    /// coordinator's `providerNeedsAttention`.
+    public var needsUser: Bool {
+        ["signedOut", "signInRequired", "setup", "chooseCollection", "mediaBlocked", "acceptanceUnknown",
+         "acceptedLocalIncomplete", "setupFailed", "connectionBlocked"]
+            .contains { titleKey == "sync.meguri.status.\($0).title" }
     }
     public var symbol: String {
         if isBusy { return "arrow.triangle.2.circlepath" }

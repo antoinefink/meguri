@@ -486,6 +486,15 @@ public final class SyncCoordinator {
     private var provider: CoreProviderService?
     public private(set) var providerState: SyncProviderState?
     public var providerNeedsAttention: Bool { SyncStatusPresentation.providerNeedsAttention(providerState) }
+    /// Sync waits on the person, so review shows its status button (N16.2).
+    public var needsUser: Bool {
+        if providerNeedsAttention { return true }
+        return switch providerState?.selection {
+        case .meguri: meguriStatus.needsUser
+        case .iCloud: SyncStatusPresentation.needsUser(status?.state)
+        case .localOnly, nil: false
+        }
+    }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
     private var providerDiscovery: ProviderDiscoveryOwnership?
     private var providerHandoff: ProviderHandoffOwnership?

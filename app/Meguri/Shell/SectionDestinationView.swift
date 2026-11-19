@@ -6,6 +6,18 @@ import Review
 import Settings
 import SwiftUI
 
+/// The review with the sync status button only while sync waits on the
+/// person, or while its popover is still open (N16.2).
+private struct ReviewDestination: View {
+    let model: ReviewCoordinator
+    let collection: ReviewCollection
+    var body: some View {
+        let showsStatus = collection.sync.needsUser || collection.syncPresentation.statusOwnsInput
+        ReviewView(model: model, status: showsStatus ? AnyView(CloudSyncStatusButton(collection: collection)) : nil,
+            visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } }
+    }
+}
+
 /// What the shell hosts in each of its slots (KTD10): section roots, the
 /// deck page, the sidebar's deck rows, the review, sheets, and the deck
 /// lookup deep links ask (R320). `standard` is the app's; the units that
@@ -58,7 +70,7 @@ struct ShellFeatures {
         features.sidebarDecks = { _ in AnyView(HomeSidebarDecks(collection: collection)) }
         features.review = { presentation, _ in
             if let model = presentation.session as? ReviewCoordinator {
-                AnyView(ReviewView(model: model, status: AnyView(CloudSyncStatusButton(collection: collection)), visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } })
+                AnyView(ReviewDestination(model: model, collection: collection))
             } else { AnyView(EmptyView()) }
         }
         features.sheet = { route, navigation in
