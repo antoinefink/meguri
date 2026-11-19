@@ -1112,7 +1112,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        '3d3b7e4b2c4582471ea018de24fbaf4e2d2e9425ae8d0af2db509f087df755f7',
+        '5ca0caa4458fbd874a51fce1eb1bfc40b9a6ccb6e51e17afd08e987f224cc000',
     # Independently reviewed first-party license scope, exact complete text.
     'LICENSING.md':
         '98c119e6dedf0192268fc328b9a8e0be58771760a4bc2156387db57ae97c7f2a',
@@ -1154,9 +1154,9 @@ PUBLIC_ARTIFACTS = {
     "docs/plans/2026-11-15-1028-feat-meguri-sync-server-plan.md":
         "80af6e19d1dad2fc8d100d502f53bece53be1ab52d5e49fe4a9f16131f51d067",
     "docs/plans/2026-11-19-1436-feat-meguri-sync-collection-mcp-plan.md":
-        "ece3faa526ba7a9002cdba8ef7e08845b64b6ca4c0a8cbc35e8fb36db06710fd",
+        "be34378df02e9c7b06534d226c0ae982109f41618c9354fd569ac5795de7020c",
     "specs/sync/server-collection.md":
-        "bf5f4248cb2a7126c58c4177873128c3b3d33ba2d0f155bac68ffe0dbe9d4eeb",
+        "85c3d211817ce238682043964f4e61835a5fbc83009134b69998242563c42ccb",
     "specs/sync/server-lifecycle.md":
         "abacc93c438e5230f8cd8a60a671e8da7efd521465d0d98d189e95444ecd20f1",
     "specs/sync/server-media.md":
@@ -1164,7 +1164,7 @@ PUBLIC_ARTIFACTS = {
     "specs/servers/meguri-sync-web.md":
         'df95f9d7c15f66688c40b1890d115c30cf486ce1ab899adfc2a170714ceaacb4',
     "specs/servers/meguri-collection-mcp.md":
-        "b2e41383f691526431cbc231f4c1b9480868bfc70bdca4d02c861de016921e8a",
+        "013e3aa719a920b3d97e4a0792071b5f9d19b9a710e36f6082c1b399fe954fc8",
     "specs/conformance/meguri-sync-server.md":
         '4c0e7651ab72236ad31320925e8c1c163c6dc7f1904e9c0c3e52df50e8f9e479',
     "conformance/schema/meguri-sync-server.schema.json":
