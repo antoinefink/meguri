@@ -60,6 +60,8 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     public var settingsRequest: UUID?
     public var settingsSearch = ""
     public var meguriAffectedFilesPresented = false
+    /// A status action asked for N15.3's sheet; the Sync section presents it.
+    public var keepCollectionRequested = false
     public var serviceChanging = false
     public var serviceChangeFailed = false
     public var meguriSigningOut = false
@@ -85,6 +87,9 @@ public struct SyncStatusPresentation {
         default: false
         }
     }
+    /// N16.2 with N15.4's kinds: the review shows the status button for a
+    /// needs you row or an issues row, never for waiting rows alone.
+    public static func needsUser(_ status: SyncMainStatus) -> Bool { status.needsYou || status.hasIssues }
     /// Sync Now may ask for the status. During review it shows only where the
     /// status button itself shows (N16.2): presenting it pauses the review.
     public static func showsStatusAfterSyncNow(requested: Bool, reviewing: Bool, needsUser: Bool) -> Bool {
@@ -233,7 +238,7 @@ extension ReviewCollection {
         navigation.featureState { SyncPresentation() }
     }
     public func cloudPreviewEntryUnavailableReason(_ entry: CloudSyncEntry) -> String? {
-        if sync.settings.paused { return "sync.status.paused.user" }
+        // P25.2: the update hold disables nothing; the entry clears it.
         if sync.setupState == .configurationUnavailable { return "sync.status.unavailable.setupNeeded" }
         if sync.connectionService == nil,
            !(entry == .connect && lifecycle == .noCollection && sync.setupState == .prepared) {
@@ -250,7 +255,7 @@ extension ReviewCollection {
         if sync.providerState?.selection == .meguri {
             switch sync.meguriStatus.route {
             case .round, .account: return .available
-            case .disabled: return .unavailable(sync.settings.paused ? .paused : .recoveryRequired)
+            case .disabled: return .unavailable(.recoveryRequired)
             }
         }
         return SyncStatusPresentation.availability(sync.status?.syncNow, setup: sync.setupState)
@@ -277,7 +282,8 @@ extension ReviewCollection {
     /// preserves the collection's subscription and platform-configuration order.
     public func prepareCloudConnectionPreview(allowDuringReview: Bool = false) async throws {
         guard review == nil || allowDuringReview else { throw BridgeError.sessionActive }
-        guard !sync.settings.paused else { throw BridgeError.unavailable(reason: "paused") }
+        // A recovery call the person starts clears the update hold first (P25.2).
+        guard await sync.clearUpdateHold() else { throw BridgeError.unavailable(reason: "paused") }
         try await prepareCloudConnectionHost()
         try Task.checkCancellation()
         guard sync.setupState != .configurationUnavailable else {

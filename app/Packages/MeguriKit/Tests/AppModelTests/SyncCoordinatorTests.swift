@@ -650,7 +650,119 @@ struct SyncCoordinatorTests {
         await sync.cancelConnectionPreview()
         #expect(!sync.settings.enabled)
         let restored = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: defaults)
-        #expect(restored.settings == .init(enabled: false, paused: true, automatic: false, media: false))
+        // P25.1: a stored media off from an earlier build reads as on.
+        #expect(restored.settings == .init(enabled: false, paused: true, automatic: false, media: true))
+    }
+
+    // sync/policy P25.5, U151's rows.
+
+    private func round2Defaults(_ stored: [String: Bool]?) throws -> (UserDefaults, String) {
+        let name = "SyncCoordinatorTests.round2.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        if let stored { defaults.set(stored, forKey: "meguri.cloud.deviceSettings") }
+        return (defaults, name)
+    }
+
+    @Test func missingAutomaticReadsOnAndTheFirstInputCarriesIt() async throws {
+        let (defaults, name) = try round2Defaults(nil)
+        defer { defaults.removePersistentDomain(forName: name) }
+        let backend = SyncOwnerFake()
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: defaults)
+        #expect(sync.settings.automatic && sync.settings.media && !sync.settings.paused)
+        #expect(sync.storedAutomatic && sync.automaticSwitchValue)
+        var inputs: [CloudPolicyDeviceSettings] = []
+        backend.routeInput = { event in
+            if case .settings(let value) = event { inputs.append(value) }
+            return .commands([])
+        }
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2)
+        await sync.waitForInputs()
+        #expect(inputs.first?.automatic == true && inputs.first?.media == true)
+        #expect(await sync.cancelAndDrain())
+    }
+
+    @Test func storedPauseBecomesAutomaticOffInOneWriteBeforeTheFirstInput() async throws {
+        let (defaults, name) = try round2Defaults(["enabled": true, "paused": true, "automatic": true, "media": false])
+        defer { defaults.removePersistentDomain(forName: name) }
+        let backend = SyncOwnerFake()
+        var inputs: [CloudPolicyDeviceSettings] = []
+        backend.routeInput = { event in
+            if case .settings(let value) = event { inputs.append(value) }
+            return .commands([])
+        }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: defaults)
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2)
+        await sync.waitForInputs()
+        // No publish or adopt op: no hold. The first input is already migrated.
+        #expect(inputs.first == .init(enabled: true, paused: false, automatic: false, media: true))
+        #expect(sync.settings == .init(enabled: true, paused: false, automatic: false, media: true))
+        #expect(!sync.storedAutomatic && !sync.updateHold)
+        let stored = try #require(defaults.dictionary(forKey: "meguri.cloud.deviceSettings") as? [String: Bool])
+        #expect(stored == ["enabled": true, "paused": false, "automatic": false, "media": true])
+        #expect(await sync.cancelAndDrain())
+        // It runs once: a later launch changes nothing, and a stored off survives.
+        let later = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: defaults)
+        #expect(later.settings == .init(enabled: true, paused: false, automatic: false, media: true))
+        #expect(!later.storedAutomatic)
+    }
+
+    @Test func storedSettingsThatWereNotPausedKeepTheirValues() async throws {
+        let (defaults, name) = try round2Defaults(["enabled": true, "paused": false, "automatic": true, "media": false])
+        defer { defaults.removePersistentDomain(forName: name) }
+        let backend = SyncOwnerFake()
+        var inputs: [CloudPolicyDeviceSettings] = []
+        backend.routeInput = { event in
+            if case .settings(let value) = event { inputs.append(value) }
+            return .commands([])
+        }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: defaults)
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2)
+        await sync.waitForInputs()
+        // Only the removed media value changes; automatic and paused are untouched.
+        #expect(inputs.first == .init(enabled: true, paused: false, automatic: true, media: true))
+        #expect(sync.storedAutomatic)
+        #expect(await sync.cancelAndDrain())
+    }
+
+    @Test func clearingActsWritePausedOffBeforeTheirRequest() async throws {
+        let backend = SyncOwnerFake()
+        var timeline: [String] = []
+        backend.routeInput = { event in
+            switch event {
+            case .settings(let value): timeline.append(value.paused ? "paused" : "clear")
+            case .syncNowRequested: timeline.append("syncNow")
+            default: break
+            }
+            return .commands([])
+        }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2)
+        // The hold, as a stored pause that no control sets any more.
+        sync.setDeviceSettings(paused: true, automatic: false)
+        await sync.waitForInputs()
+        #expect(sync.updateHold)
+        timeline.removeAll()
+        // A launch-like refresh, a foreground return and an account read do not clear it.
+        await sync.foregroundAfterLocalResume()
+        await sync.prepareConnectionAuthority()
+        await sync.waitForInputs()
+        #expect(sync.updateHold && !timeline.contains("clear"))
+        // Sync Now clears it first, then forwards the request.
+        sync.syncNow(source: .command)
+        while sync.updateHold { await Task.yield() }
+        await sync.waitForInputs()
+        for _ in 0..<50 where !timeline.contains("syncNow") { await Task.yield(); await sync.waitForInputs() }
+        let clear = try #require(timeline.firstIndex(of: "clear"))
+        let request = try #require(timeline.firstIndex(of: "syncNow"))
+        #expect(clear < request && !sync.settings.paused)
+        // Auto stays as stored: off.
+        #expect(!sync.settings.automatic)
+        // A recovery call the person starts clears it through the same write.
+        sync.setDeviceSettings(paused: true, automatic: false)
+        await sync.waitForInputs()
+        #expect(await sync.clearUpdateHold())
+        #expect(!sync.updateHold)
+        #expect(await sync.cancelAndDrain())
     }
 }
 
