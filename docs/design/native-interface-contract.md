@@ -409,7 +409,7 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 - In the tab layout the deck page's toolbar has Add Note only. Sidebar layouts keep Go to Deck and Create Deck in the window toolbar.
 - A regular deck with no new, learning or review cards waiting shows "Nothing to study right now" in place of the counts and an Add Note button in place of Study. A filtered deck keeps its counts and Study. The deck menu's Study and the Mac's Study command are disabled under the same condition, through the same availability function.
 - No New Subdeck button and no More menu. The long-press deck menu is otherwise unchanged.
-- iPhone, the Duo and iPad: the page is a system inset grouped list on the grouped background. Its first section has the deck's last name component as a large in-content header over one row: leading, "N cards waiting" (new + learning + to review) with "X new · Y learning · Z to review" in footnote secondary text under it; trailing, the standard-size Study button. With nothing waiting the row reads "Nothing to study right now" with Add Note trailing. When the text and the action do not fit side by side, the action goes under the text, and the three counts go one per line before any of them wraps. Then the "Subdecks" section, the error line, and the previous session in its own section. The navigation bar's title mode is inline, so no empty large-title band sits above the page. Replaces N13.2's "plain list on white" for the touch deck page; the Mac page is N14.4's.
+- iPhone, the Duo and iPad: the page is a system inset grouped list on the grouped background. Its first section has the deck's last name component as a large in-content header over one row: leading, "N cards waiting" (new + learning + to review) with "X new · Y learning · Z to review" in footnote secondary text under it; trailing, the standard-size Study button. With nothing waiting the row reads "Nothing to study right now" with Add Note trailing. At the accessibility text sizes the action goes under the text (by text size, not by fit: under a fit test the Dynamic Type audit failed the row's elements), and the three counts go one per line before any of them wraps. Then the "Subdecks" section, the error line, and the previous session in its own section. The navigation bar's title mode is inline, so no empty large-title band sits above the page. Replaces N13.2's "plain list on white" for the touch deck page; the Mac page is N14.4's.
 
 ### N14.4 Mac titles
 
@@ -432,7 +432,7 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 ### N14.7 Touch deck rows
 
 - A deck row's disclosure triangle is on the leading edge, before the name: the system's own disclosure indicator, at its size and weight, at the row's normal leading inset. The layout reserves only the indicator's width; rows without subdecks keep that width empty, so names line up, and each nested level indents by the standard spacing. The count ends at the row's trailing edge with no reserved column.
-- The touch target is a 44 × 44 point button laid over the indicator, above the row's content: it reaches into the row's leading inset and a little over the name's start, where it wins the tap. It reserves no layout.
+- The touch target is a 44 × 44 point button laid over the indicator, above the row's content: it reaches into the row's leading inset and a little over the name's start, where it wins the tap. It reserves no layout. The drawn indicator has an empty accessibility representation, so that button is the only disclosure element.
 - Selection and disclosure stay separate controls with their identifiers (`home.deck.row.<id>`, `home.deck.disclosure.<id>`). Applies to the deck list and to the deck page's Subdecks rows.
 - Replaces N13.2's trailing disclosure and its reserved count column.
 
@@ -454,7 +454,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 - Touch: the bar spans the screen's width on its bottom edge, inside the bottom safe area, so the home indicator lies over its middle. iPhone Duo: the same edge folded, held wide and held tall; held wide it runs under both halves and across the fold. It is not a control, so it may cross (R9 covers controls).
 - Mac: the bar is the window's last row, under the answer buttons. The Mac had no bar before.
 - The bar shows on the question and answer sides and between cards. Loading, waiting, paused and finished states have none.
-- Its value is the answers given over those answers plus the cards left (new, learning and to review). Accessibility: label "Session Progress", value "12 of 40", identifier `review.session.progress`. It takes no input.
+- Its value is the answers given over those answers plus the cards left (new, learning and to review). Accessibility: label "Session Progress", value "12 of 40", identifier `review.session.progress`. It takes no input and is read as text, so the hit-region audit does not ask a touch target of it.
 - Replaces: N11.1's bar across the top and its device setting (R341–R345), N13.3's counts line and top bar.
 
 ### N16.2 Sync status during review
