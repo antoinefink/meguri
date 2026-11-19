@@ -2,6 +2,9 @@ import AppModel
 import CoreBridge
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(iOS)
+import UIKit
+#endif
 
 public struct CollectionEntryView: View {
     @Bindable private var coordinator: CollectionEntryCoordinator
@@ -14,9 +17,30 @@ public struct CollectionEntryView: View {
             continueRecovery: { Task { await coordinator.continueAfterActivation() } },
             dismiss: { Task { await coordinator.dismiss() } }
         ))
-        .fileImporter(isPresented: $coordinator.pickerPresented,
-                      allowedContentTypes: [UTType(importedAs: "com.antoinefink.meguri.collection-package")],
-                      allowsMultipleSelection: false, onCompletion: coordinator.selection)
+        .modifier(CollectionImportPicker(coordinator: coordinator, inSheet: true))
+    }
+}
+
+/// N17.2: Import opens the system file picker directly, on the window that
+/// asked. While the import sheet shows (a refused file, "Choose Another
+/// File"), the sheet presents the picker instead.
+public struct CollectionImportPicker: ViewModifier {
+    private let coordinator: CollectionEntryCoordinator?
+    private let hosts: Bool
+    public init(coordinator: CollectionEntryCoordinator?, hosts: Bool) {
+        self.coordinator = coordinator
+        self.hosts = hosts && coordinator?.pickerInSheet == false
+    }
+    init(coordinator: CollectionEntryCoordinator, inSheet: Bool) {
+        self.coordinator = coordinator
+        hosts = coordinator.pickerInSheet == inSheet
+    }
+    public func body(content: Content) -> some View {
+        content.fileImporter(
+            isPresented: Binding(get: { hosts && coordinator?.pickerPresented == true },
+                                 set: { if !$0, hosts { coordinator?.pickerPresented = false } }),
+            allowedContentTypes: [UTType(importedAs: "com.antoinefink.meguri.collection-package")],
+            allowsMultipleSelection: false) { coordinator?.selection($0) }
     }
 }
 
@@ -56,6 +80,39 @@ struct CollectionEntryPresentation {
     let backup: ImportBackupReceipt?
     let backupPublication: ImportBackupPublication?
     let mediaReference: String?
+    var fileName: String?
+
+    /// N17.2's confirmation, in plain words.
+    var confirmationTitle: String { fileName.map { "Import “\($0)”?" } ?? "Import This Collection?" }
+    static func count(_ value: UInt64, _ one: String, _ other: String) -> String {
+        "\(value.formatted()) \(value == 1 ? one : other)"
+    }
+    static func summary(_ facts: Facts) -> String {
+        [count(facts.notes, "note", "notes"), count(facts.cards, "card", "cards"),
+         count(facts.mediaCount, "media file", "media files")].joined(separator: " · ")
+    }
+    static var deviceName: String {
+        #if os(macOS)
+        "Mac"
+        #else
+        UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        #endif
+    }
+    /// One line, and only when a collection is about to be replaced.
+    static func consequence(_ facts: Facts, device: String = deviceName) -> String? {
+        facts.replacingExisting ? "This replaces the collection on this \(device). Meguri keeps a backup of the current one." : nil
+    }
+    /// package/container P16.4 asks for the media size and for what happens to
+    /// media already here; one footnote carries both.
+    static func mediaNote(_ facts: Facts, device: String = deviceName) -> String {
+        let size = Int64(clamping: facts.mediaDecodedBytes).formatted(.byteCount(style: .file))
+        return "Its media (\(size)) is merged with the media on this \(device); files already here are kept."
+    }
+    /// Receipts the person must keep; shown with a failure, never in the ordinary flow.
+    var showsRetainedDetails: Bool {
+        !busy && facts == nil && (requiresRecovery || backup != nil || backupPublication != nil || mediaReference != nil
+            || (message != nil && generation != nil))
+    }
 
     var busy: Bool { progress != nil }
     var canCancel: Bool { progress?.canCancel == true }
@@ -85,7 +142,8 @@ struct CollectionEntryPresentation {
          preparedMedia: CollectionImportMedia? = nil, finalMedia: CollectionImportMedia? = nil,
          generation: UInt64? = nil, backup: ImportBackupReceipt? = nil,
          backupPublication: ImportBackupPublication? = nil, mediaReference: String? = nil,
-         failure: CollectionEntryFailure? = nil) {
+         failure: CollectionEntryFailure? = nil, fileName: String? = nil) {
+        self.fileName = fileName
         self.facts = facts; self.progress = progress; self.message = message
         self.candidateActive = candidateActive; self.canChoose = canChoose && !requiresRecovery && !candidateActive
         self.needsReinspection = needsReinspection
@@ -101,7 +159,8 @@ struct CollectionEntryPresentation {
         facts = coordinator.preview.map { .init(notes: $0.facts.notes, cards: $0.facts.cards,
             reviews: $0.facts.reviews, replacingExisting: $0.facts.replacingExisting,
             mediaCount: $0.facts.mediaCount, mediaDecodedBytes: $0.facts.mediaDecodedBytes) }
-        progress = coordinator.busy ? .init(title: coordinator.progressTitle,
+        fileName = coordinator.selectedFileName
+        progress = coordinator.busy ? .init(title: coordinator.plainProgressTitle,
             completed: coordinator.progress?.completed ?? 0, total: coordinator.progress?.total,
             canCancel: coordinator.canCancel) : nil
         message = coordinator.message
@@ -144,27 +203,41 @@ struct CollectionEntryContent: View {
             Form {
                 if let progress = presentation.progress {
                     Section {
-                        Text(verbatim: progress.title)
-                            .accessibilityIdentifier("onboarding.collectionImport.progress.stage")
                         Group {
                             if let total = progress.total {
-                                ProgressView(value: Double(progress.completed), total: Double(max(1, total)))
-                            } else { ProgressView() }
+                                ProgressView(value: Double(min(progress.completed, total)), total: Double(max(1, total))) {
+                                    Text(verbatim: progress.title)
+                                }
+                            } else { ProgressView { Text(verbatim: progress.title) } }
                         }
                         .accessibilityLabel(progress.title)
                         .accessibilityValue(Text(progress.total.map { "\(progress.completed) of \($0)" } ?? "In progress"))
                         .accessibilityIdentifier("onboarding.collectionImport.progress.value")
-                        if let media = presentation.preparedMedia {
-                            Text("Prepared media plan")
-                            mediaRows(CollectionEntryPresentation.mediaRows(media, completed: false))
-                                .accessibilityIdentifier("onboarding.collectionImport.progress.media")
-                        }
+                    } footer: {
                         if !presentation.canCancel {
-                            Text("Finishing activation. Cancellation is no longer available.")
+                            Text("Finishing. This step can’t be cancelled.")
                         }
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("onboarding.collectionImport.progress")
+                } else if let facts = presentation.facts {
+                    Section {
+                        VStack(alignment: .leading) {
+                            Text(verbatim: presentation.confirmationTitle)
+                                .font(.headline)
+                                .accessibilityAddTraits(.isHeader)
+                                .accessibilityIdentifier("onboarding.collectionImport.preview.heading")
+                            Text(verbatim: CollectionEntryPresentation.summary(facts))
+                                .foregroundStyle(.secondary)
+                                .accessibilityValue(Text(verbatim: CollectionEntryPresentation.count(facts.reviews, "review", "reviews")))
+                                .accessibilityIdentifier("onboarding.collectionImport.preview.counts")
+                        }
+                        if let consequence = CollectionEntryPresentation.consequence(facts) {
+                            Text(verbatim: consequence)
+                                .accessibilityIdentifier("onboarding.collectionImport.preview.safety")
+                        }
+                    } footer: {
+                        Text(verbatim: CollectionEntryPresentation.mediaNote(facts))
+                            .accessibilityIdentifier("onboarding.collectionImport.preview.media")
+                    }
                 }
                 if let message = presentation.message {
                     Section {
@@ -174,6 +247,7 @@ struct CollectionEntryContent: View {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .symbolRenderingMode(.multicolor)
                         }
+                        .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("onboarding.collectionImport.error")
                         if presentation.canContinueRecovery {
                             Button("Continue Recovery", action: actions.continueRecovery)
@@ -181,37 +255,7 @@ struct CollectionEntryContent: View {
                         }
                     }
                 }
-                Section {
-                    Text("Import a latest-format .colpkg file, including its media. Older formats are not supported. No account or network connection is needed.")
-                        .accessibilityIdentifier("onboarding.collectionImport.explanation")
-                }
-                if let facts = presentation.facts {
-                    Section {
-                        Text("\(facts.notes) notes · \(facts.cards) cards · \(facts.reviews) reviews")
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.counts")
-                        LabeledContent("Destination", value: "this device")
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.destination")
-                        LabeledContent("Validated media files", value: facts.mediaCount.formatted())
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.files")
-                        LabeledContent("Decoded media bytes", value: facts.mediaDecodedBytes.formatted())
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.bytes")
-                        Text(facts.replacingExisting
-                            ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
-                            : "There is no local collection file to replace. A pre-import safety backup is not needed.")
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.safety")
-                        Text("Existing media is kept. Supplied media is merged by name and content; replaced versions are saved in trash. Restoring a safety backup’s media needs those saved files.")
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.media.retention")
-                        Button(facts.replacingExisting ? "Replace Collection" : "Import Collection", action: actions.confirm)
-                            .keyboardShortcut(.defaultAction)
-                            .accessibilityIdentifier("onboarding.collectionImport.confirm")
-                    } header: {
-                        Text("Collection Preview")
-                            .accessibilityIdentifier("onboarding.collectionImport.preview.heading")
-                    }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("onboarding.collectionImport.preview")
-                }
-                if presentation.finalMedia != nil || (!presentation.busy && presentation.preparedMedia != nil) || presentation.generation != nil || presentation.backup != nil || presentation.backupPublication != nil || presentation.mediaReference != nil {
+                if presentation.showsRetainedDetails {
                     Section("Import Details") {
                         if presentation.activated {
                             Text("Collection imported.")
@@ -221,12 +265,11 @@ struct CollectionEntryContent: View {
                             LabeledContent("Collection generation", value: generation.formatted())
                                 .accessibilityIdentifier("onboarding.collectionImport.result.generation")
                         }
-                        if !presentation.busy && !presentation.mediaDetailRows.isEmpty {
+                        if !presentation.mediaDetailRows.isEmpty {
                             if let note = presentation.mediaCompletionNote {
                                 Text(verbatim: note)
                             }
                             mediaRows(presentation.mediaDetailRows)
-                                .accessibilityIdentifier("onboarding.collectionImport.result.media")
                         }
                         if let backup = presentation.backup {
                             LabeledContent("Safety backup", value: backup.name)
@@ -243,13 +286,13 @@ struct CollectionEntryContent: View {
                         }
                     }
                 }
-                if presentation.canChoose {
+                if presentation.canChoose, presentation.facts == nil {
                     Section {
                         if presentation.needsReinspection {
                             Button("Inspect Again", action: actions.reinspect)
                                 .accessibilityIdentifier("onboarding.collectionImport.reinspect")
                         }
-                        Button("Choose File", action: actions.chooseFile)
+                        Button(presentation.message == nil ? "Choose File" : "Choose Another File", action: actions.chooseFile)
                             .accessibilityIdentifier("onboarding.collectionImport.choose")
                     }
                 }
@@ -262,14 +305,25 @@ struct CollectionEntryContent: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(presentation.busy ? "Cancel Import" : "Cancel", action: actions.dismiss)
+                    Button("Cancel", action: actions.dismiss)
                         .keyboardShortcut(.cancelAction)
                         .disabled((presentation.busy && !presentation.canCancel) || presentation.requiresRecovery)
                         .accessibilityIdentifier("onboarding.collectionImport.cancel")
                 }
+                if presentation.facts != nil, !presentation.busy {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Import", action: actions.confirm)
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut(.defaultAction)
+                            .accessibilityIdentifier("onboarding.collectionImport.confirm")
+                    }
+                }
             }
         }
         .presentationSizing(.form)
+        #if os(iOS)
+        .presentationDetents([.medium])
+        #endif
         .interactiveDismissDisabled(presentation.busy || presentation.requiresRecovery)
     }
 

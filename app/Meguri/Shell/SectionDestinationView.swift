@@ -37,6 +37,8 @@ struct ShellFeatures {
     var syncStatus: () -> AnyView = { AnyView(EmptyView()) }
     var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
     var addPanel: () -> AnyView = { AnyView(EmptyView()) }
+    /// N17.2: Import opens the file picker on the presenting window, before any sheet.
+    var collectionEntry: CollectionEntryCoordinator?
     var sectionRoot: (AppSection, AppNavigation) -> AnyView
     var deckPage: (DeckID, AppNavigation) -> AnyView
     /// The rows of the sidebar's "Decks" group, each tagged
@@ -52,6 +54,7 @@ struct ShellFeatures {
         collection.configureAddNotePresentation()
         var features = standard
         features.addPanel = { AnyView(AddNoteView(collection: collection)) }
+        features.collectionEntry = collection.entry
         features.todayRoot = true
         features.today = { _ in AnyView(TodayView(collection: collection, besideDeckList: true)) }
         #if os(macOS)

@@ -46,26 +46,43 @@ public final class CollectionEntryCoordinator {
          recordDiagnostic: @escaping FieldDiagnosticRecorder = { _ in }) {
         self.owner = owner; self.service = service; self.recordDiagnostic = recordDiagnostic
     }
+    /// The name of the chosen file, for the confirmation's title (N17.2).
+    public var selectedFileName: String? { selectedSource?.lastPathComponent }
+    /// The sheet hosts the picker while it shows; otherwise its window does.
+    public var pickerInSheet: Bool { owner?.navigation.sheet == .collectionEntry }
+    /// N17.2: Import opens the system file picker directly. The sheet follows
+    /// once a file is chosen. Unfinished recovery still opens on its sheet.
     public func present() {
         guard canPresent else { return }
-        if !requiresRecovery { message = nil; failure = nil }
-        owner?.navigation.present(.collectionEntry)
+        guard !requiresRecovery else { owner?.navigation.present(.collectionEntry); return }
+        message = nil; failure = nil
+        if owner?.navigation.sheet == nil { owner?.navigation.sheetHost = .main }
+        pickerPresented = true
     }
     public func chooseFile() { guard canChoose else { return }; pickerPresented = true }
     public func selection(_ result: Result<[URL], any Error>) {
         pickerPresented = false
         switch result {
         case .success(let urls):
-            guard urls.count == 1, let url = urls.first else { return }
+            guard urls.count == 1, let url = urls.first, canChoose, owner?.entryAllowed == true else { return }
+            showSheet()
             inspect(url)
         case .failure(let error):
             guard !requiresRecovery else { return }
-            if (error as NSError).code != NSUserCancelledError { report(error) }
+            if (error as NSError).code != NSUserCancelledError { report(error); showSheet() }
         }
+    }
+    /// Keeps the window that showed the picker as the sheet's host.
+    private func showSheet() {
+        guard let navigation = owner?.navigation, navigation.sheet == nil else { return }
+        let host = navigation.sheetHost
+        navigation.present(.collectionEntry)
+        navigation.sheetHost = host
     }
     public func reinspect() { if let selectedSource, canChoose { inspect(selectedSource) } }
     public func inspect(_ source: URL) {
         guard canChoose, let owner, owner.entryAllowed else { return }
+        pickerPresented = false
         selectedSource = source
         lastActivation = nil; preparedMedia = nil; recoveryFinished = false
         revision &+= 1
@@ -296,6 +313,8 @@ public final class CollectionEntryCoordinator {
             return "Import could not finish. Your previous collection is still available. Choose the file again; if this continues, export a fresh .colpkg."
         }
     }
+    /// N17.2: one plain line per step; the phase detail stays in diagnostics.
+    public var plainProgressTitle: String { stage == .readingPackage ? "Reading File…" : "Importing…" }
     public var progressTitle: String {
         switch progress?.phase {
         case .committing?: "Activating collection…"

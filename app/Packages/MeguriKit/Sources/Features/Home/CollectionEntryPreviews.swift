@@ -21,12 +21,14 @@ public enum CollectionEntryPreview: PreviewStates {
         case .empty:
             .init()
         case .typical:
-            .init(facts: .init(notes: 6, cards: 11, reviews: 6, replacingExisting: false, mediaCount: 0, mediaDecodedBytes: 0))
+            .init(facts: .init(notes: 1_204, cards: 3_410, reviews: 18_250, replacingExisting: true, mediaCount: 212, mediaDecodedBytes: 48_300_000),
+                  fileName: "Japanese.colpkg")
         case .overflow:
             // Large counts and the actual, longer replacement/safety explanation.
             // There are no source titles, paths or other unrendered source fields.
             .init(facts: .init(notes: 12_345_678, cards: 98_765_432, reviews: 1_234_567_890, replacingExisting: true,
-                               mediaCount: 12_345, mediaDecodedBytes: 9_876_543_210))
+                               mediaCount: 12_345, mediaDecodedBytes: 9_876_543_210),
+                  fileName: "A collection exported from another device with a very long descriptive name 2026-11-19.colpkg")
         case .error:
             .init(message: CollectionEntryCoordinator.explanation(
                 CollectionEntryFailure(issue: .replacement(.mediaRecoveryRequired(recoveryReference: "r6-preview"))), fallback: ""
@@ -34,7 +36,7 @@ public enum CollectionEntryPreview: PreviewStates {
                   preparedMedia: .init(incoming: 5, decodedBytes: 2048, reused: 2, added: 3, trashed: 1),
                   mediaReference: "r6-preview")
         case .loading:
-            .init(progress: .init(title: "Preparing activation…", completed: 42, total: nil, canCancel: true), canChoose: false,
+            .init(progress: .init(title: "Importing…", completed: 42, total: 100, canCancel: true), canChoose: false,
                   preparedMedia: .init(incoming: 5, decodedBytes: 2048, reused: 2, added: 3, trashed: 1))
         }
     }
