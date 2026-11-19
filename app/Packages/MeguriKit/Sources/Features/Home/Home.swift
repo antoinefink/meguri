@@ -193,7 +193,7 @@ public struct HomeView: View {
         guard todayBesideDeckList else { return nil }
         let navigation = collection.navigation
         return HomeTodayRow(waiting: TodayDecks(nodes: collection.decks).totals.waiting,
-            selected: navigation.homeDeckPage == nil, selectedDeck: navigation.homeDeckPage?.rawValue) { navigation.openHome() }
+            selection: DeckListSelection(homeDeckPage: navigation.homeDeckPage)) { navigation.openHome() }
     }
     /// Today beside the list (N14.1) already shows the previous session.
     private var showsPreviousSession: Bool {
@@ -593,7 +593,7 @@ public struct HomeDeckTree: View {
                 List {
                     if let today {
                         // N14.10: Today in its own group, then the decks in theirs.
-                        Section { HomeTodayRowView(row: today) }
+                        Section { HomeTodayRowView(row: today).id(InfoAnchor.today) }
                         Section { branches }
                     } else {
                         branches
@@ -637,7 +637,12 @@ public struct HomeDeckTree: View {
                     tracking = false
                     await Task.yield()
                     let saved = navigation?.scrollPosition(for: .section(.home))
-                    if let id = saved?.viewID as? Int64, contains(id, in: nodes) {
+                    if today != nil, let id = saved?.viewID as? Int64, id == nodes.first?.id {
+                        // Saved at the first deck, the list was at its top: the Today row is part of it.
+                        restoring = nil
+                        scrollToTop(proxy)
+                        tracking = true
+                    } else if let id = saved?.viewID as? Int64, contains(id, in: nodes) {
                         restoring = id
                         proxy.scrollTo(id, anchor: .top)
                         if let frame = rowFrames[id], frame.maxY > 0, frame.minY < viewport.size.height {
@@ -666,11 +671,11 @@ public struct HomeDeckTree: View {
         ForEach(nodes, id: \.id) { node in
             HomeDeckBranch(node: node, collection: collection, ancestors: [], depth: 0, select: select,
                 isExpanded: isExpanded, isExpansionPending: isExpansionPending,
-                setExpanded: setExpanded, selectedDeck: today?.selectedDeck, frameChanged: recordFrame)
+                setExpanded: setExpanded, selection: today?.selection, frameChanged: recordFrame)
         }
     }
 
-    private enum InfoAnchor: Hashable { case previousSession, error }
+    private enum InfoAnchor: Hashable { case today, previousSession, error }
     private func recordFrame(_ id: Int64, _ frame: CGRect?) { rowFrames[id] = frame }
     private func contains(_ id: Int64, in nodes: [CountedDeckNode]) -> Bool {
         nodes.contains { node in
@@ -678,7 +683,10 @@ public struct HomeDeckTree: View {
         }
     }
     private func scrollToTop(_ proxy: ScrollViewProxy) {
-        if let first = nodes.first {
+        if today != nil {
+            // The Today row is the list's first: the top is above the first deck.
+            proxy.scrollTo(InfoAnchor.today, anchor: .top)
+        } else if let first = nodes.first {
             proxy.scrollTo(first.id, anchor: .top)
         } else if error != nil {
             proxy.scrollTo(InfoAnchor.error, anchor: .top)
@@ -697,10 +705,10 @@ private struct HomeDeckBranch: View {
     let isExpanded: ((Int64) -> Bool)?
     let isExpansionPending: ((Int64) -> Bool)?
     let setExpanded: ((Int64, Bool, Bool) -> Void)?
-    /// The deck whose page shows beside this list (N14.10); nil where the list shows no selection.
-    var selectedDeck: Int64? = nil
+    /// What shows beside this list (N14.10); nil where the list marks no row.
+    var selection: DeckListSelection? = nil
     let frameChanged: (Int64, CGRect?) -> Void
-    private var selected: Bool { selectedDeck == node.id }
+    private var selected: Bool { selection?.marks(node, expanded: expanded.wrappedValue) == true }
     #if os(macOS)
     @Environment(\.locale) private var locale
     #else
@@ -755,7 +763,7 @@ private struct HomeDeckBranch: View {
     private func childBranch(_ child: CountedDeckNode) -> some View {
         AnyView(HomeDeckBranch(node: child, collection: collection, ancestors: path.components(separatedBy: "::"), depth: depth + 1,
             select: select, isExpanded: isExpanded, isExpansionPending: isExpansionPending,
-            setExpanded: setExpanded, selectedDeck: selectedDeck, frameChanged: frameChanged))
+            setExpanded: setExpanded, selection: selection, frameChanged: frameChanged))
     }
 
     #if !os(macOS)
@@ -879,16 +887,34 @@ private struct HomeDeckBranch: View {
     #endif
 }
 
-/// The deck list's first row beside Today (N14.10): what it counts, whether it is the
-/// selection, and the way back to Today.
+/// Which row the deck list beside the detail marks (N14.10): Today while no deck page
+/// shows, otherwise that deck's row, or the collapsed parent that hides it.
+public nonisolated struct DeckListSelection: Equatable, Sendable {
+    /// The deck whose page the detail shows; nil while it shows Today.
+    public let deck: Int64?
+    public init(deck: Int64?) { self.deck = deck }
+    public init(homeDeckPage: DeckID?) { deck = homeDeckPage?.rawValue }
+    public var today: Bool { deck == nil }
+
+    /// A collapsed deck stands for the subdeck it hides.
+    public func marks(_ node: CountedDeckNode, expanded: Bool) -> Bool {
+        guard let deck else { return false }
+        return node.id == deck || (!expanded && Self.holds(deck, under: node))
+    }
+    private static func holds(_ deck: Int64, under node: CountedDeckNode) -> Bool {
+        node.children.contains { $0.id == deck || holds(deck, under: $0) }
+    }
+}
+
+/// The deck list's first row beside Today (N14.10): what it counts, what the list
+/// marks, and the way back to Today.
 public struct HomeTodayRow {
     public let waiting: Int
-    public let selected: Bool
-    /// The deck whose page shows instead, which the list marks the same way.
-    public let selectedDeck: Int64?
+    public let selection: DeckListSelection
     public let open: () -> Void
-    public init(waiting: Int, selected: Bool, selectedDeck: Int64? = nil, open: @escaping () -> Void) {
-        self.waiting = waiting; self.selected = selected; self.selectedDeck = selectedDeck; self.open = open
+    public var selected: Bool { selection.today }
+    public init(waiting: Int, selection: DeckListSelection = DeckListSelection(deck: nil), open: @escaping () -> Void) {
+        self.waiting = waiting; self.selection = selection; self.open = open
     }
 }
 
@@ -901,7 +927,7 @@ private struct HomeTodayRowView: View {
     var body: some View {
         Button(action: row.open) {
             content
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -923,13 +949,16 @@ private struct HomeTodayRowView: View {
     private var content: some View {
         // As a deck row: at the accessibility sizes the count goes under the title.
         (stacks ? AnyLayout(VStackLayout(alignment: .leading)) : AnyLayout(HStackLayout())) {
-            Label {
-                Text("Today", bundle: .module)
-                    .foregroundStyle(.token(.textPrimary))
-            } icon: {
+            // Not a Label: the Dynamic Type audit read its title as text that may be cut.
+            HStack(spacing: Spacing.small) {
                 // The sidebar layouts' symbol for Today (N14.1).
                 Image(systemName: "sun.max")
+                    .foregroundStyle(.tint)
                     .accessibilityHidden(true)
+                Text("Today", bundle: .module)
+                    .foregroundStyle(.token(.textPrimary))
+                    // Rows grow with the text size rather than cut it.
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if !stacks { Spacer() }
             if row.waiting > 0 {
@@ -946,11 +975,13 @@ private struct HomeTodayRowView: View {
 private extension View {
     /// The selected row's grey in the list beside Today (N14.10): the system's fill for a
     /// selected cell, since these rows are buttons and the list has no selection of its own.
-    @ViewBuilder func homeRowSelection(_ selected: Bool) -> some View {
+    /// One view whether or not it is selected: a branch here would give the row a new
+    /// identity on selection, which drops its recorded frame and cuts the tap's highlight.
+    func homeRowSelection(_ selected: Bool) -> some View {
         #if os(macOS)
         self
         #else
-        if selected { listRowBackground(Color(uiColor: .systemGray5)) } else { self }
+        listRowBackground(selected ? Color(uiColor: .systemGray5) : nil)
         #endif
     }
 }

@@ -55,6 +55,19 @@ struct RootView: View {
         #endif
     }
 
+    #if os(iOS)
+    /// The tab layout's list beside the deck: not for the welcome (N18.1), and not
+    /// decided while the collection is still opening.
+    private var besideDetail: Bool? {
+        guard let collection else { return true }
+        switch collection.state {
+        case .unopened, .loading: return nil
+        case .noFile: return false
+        case .ready, .unavailable, .creationRecovery, .failed: return true
+        }
+    }
+    #endif
+
     var body: some View {
         Group {
             if let launchScreen {
@@ -67,7 +80,7 @@ struct RootView: View {
                     #if os(iOS)
                     CompactRootView(navigation: navigation, features: features, configuration: configuration,
                         hasDecks: collection?.decks.isEmpty == false,
-                        showsWelcome: collection?.state == .noFile)
+                        besideDetail: besideDetail)
                     #endif
                 case .sidebar:
                     SidebarRootView(navigation: navigation, features: features, configuration: configuration)

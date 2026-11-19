@@ -47,27 +47,24 @@ nonisolated enum WelcomeArrangement: Equatable, Sendable {
     /// An iPhone at regular width, wider than tall: the heading and the list side by side.
     case sides
 
-    static func resolve(phone: Bool, regularWidth: Bool, size: CGSize) -> WelcomeArrangement {
-        phone && regularWidth && size.width > size.height ? .sides : .column
+    /// Shorter than this, a half cannot hold the heading: a large iPhone in landscape keeps the column.
+    static let sidesMinimumHeight: CGFloat = 480
+
+    /// The accessibility text sizes keep the column too, where the heading scrolls with the rows.
+    static func resolve(phone: Bool, regularWidth: Bool, size: CGSize, accessibilitySize: Bool = false) -> WelcomeArrangement {
+        phone && regularWidth && !accessibilitySize && size.width > size.height && size.height >= sidesMinimumHeight
+            ? .sides : .column
     }
-    /// The rows' extent down the screen, first top to last bottom.
-    static func rowsSpan(_ frames: some Collection<CGRect>) -> ClosedRange<CGFloat>? {
-        guard let top = frames.map(\.minY).min(), let bottom = frames.map(\.maxY).max(), bottom > top else { return nil }
-        return top...bottom
-    }
-    /// The top margin that puts `rows` in the middle of `visible`, from the margin that put
-    /// them where they are. Nil, the system's own margin, when they leave too little room
-    /// to centre without scrolling: then the list starts at the top.
-    static func centredOffset(current: CGFloat?, rows: ClosedRange<CGFloat>?, visible: ClosedRange<CGFloat>,
+    /// The top margin that puts rows `rowsHeight` tall in the middle of a half `height` tall.
+    /// `inset` is what the system keeps above the first row beside our margin: the row's
+    /// top in the list's own content, less the margin in force when it was measured.
+    /// Nil, the system's own margin from the top, when there is nothing measured, when
+    /// other sections follow the rows, or when the rows leave too little room: then
+    /// the list scrolls, and its margin must not follow it.
+    static func centredMargin(rowsHeight: CGFloat?, inset: CGFloat, height: CGFloat, followed: Bool,
                               clearance: CGFloat = Spacing.xxLarge) -> CGFloat? {
-        guard let rows else { return current }
-        let height = rows.upperBound - rows.lowerBound
-        guard visible.upperBound - visible.lowerBound >= height + 2 * clearance else { return nil }
-        let wanted = (visible.lowerBound + visible.upperBound - height) / 2
-        // Whether or not the system keeps an inset of its own above ours, the next measurement corrects the rest.
-        let next = max(0, (current ?? 0) + wanted - rows.lowerBound)
-        if let current, abs(next - current) < 0.5 { return current }
-        return next
+        guard let rowsHeight, rowsHeight > 0, !followed, height >= rowsHeight + 2 * clearance else { return nil }
+        return max(0, (height - rowsHeight) / 2 - inset)
     }
     /// The side margin that keeps a column `readable` wide in the middle of `width`;
     /// nil leaves the system's margin.
@@ -90,10 +87,12 @@ struct HomeWelcome: View {
     #if !os(macOS)
     @Environment(\.shellLayout) private var shellLayout
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var fold = FoldGeometry()
-    /// Where each row sits on screen, and the top margin that centres them on the trailing half.
-    @State private var rowFrames: [WelcomeChoice: CGRect] = [:]
-    @State private var rowsOffset: CGFloat?
+    /// Each row's height, measured only with the rows beside the heading, and what the
+    /// system keeps above the first row there.
+    @State private var rowHeights: [WelcomeChoice: CGFloat] = [:]
+    @State private var systemInset: CGFloat = 0
     #endif
 
     var body: some View {
@@ -102,7 +101,8 @@ struct HomeWelcome: View {
             column(width: proxy.size.width)
             #else
             let arrangement = WelcomeArrangement.resolve(phone: shellLayout == .compact,
-                regularWidth: sizeClass == .regular, size: proxy.size)
+                regularWidth: sizeClass == .regular, size: proxy.size,
+                accessibilitySize: dynamicTypeSize.isAccessibilitySize)
             switch arrangement {
             case .column: column(width: proxy.size.width)
             case .sides: sides
@@ -120,7 +120,7 @@ struct HomeWelcome: View {
     private func column(width: CGFloat) -> some View {
         Form {
             Section {
-                choices
+                choices(measured: false, margin: nil, known: true)
             } header: {
                 heading
                     .textCase(nil)
@@ -130,6 +130,7 @@ struct HomeWelcome: View {
         }
         .formStyle(.grouped)
         .contentMargins(.horizontal, WelcomeArrangement.columnMargin(width: width), for: .scrollContent)
+        .welcomeBarEdge()
     }
 
     #if !os(macOS)
@@ -140,19 +141,19 @@ struct HomeWelcome: View {
                 .padding(.horizontal, Spacing.large)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             GeometryReader { half in
-                let visible = half.frame(in: .global)
+                let rowsHeight = rowHeights.isEmpty ? nil : rowHeights.values.reduce(0, +)
+                let margin = WelcomeArrangement.centredMargin(rowsHeight: rowsHeight, inset: systemInset,
+                    height: half.size.height, followed: hasNotices)
                 Form {
-                    Section { choices }
+                    Section { choices(measured: true, margin: margin, known: rowsHeight != nil) }
                     notices
                 }
                 .formStyle(.grouped)
+                .coordinateSpace(.named(Self.rowsSpace))
                 .scrollBounceBehavior(.basedOnSize)
                 // A form has no alignment of its own: its top margin puts the rows in the middle.
-                .contentMargins(.top, rowsOffset, for: .scrollContent)
-                .onChange(of: WelcomeArrangement.rowsSpan(rowFrames.values), initial: true) { _, rows in
-                    rowsOffset = WelcomeArrangement.centredOffset(current: rowsOffset, rows: rows,
-                        visible: visible.minY...visible.maxY)
-                }
+                .contentMargins(.top, margin, for: .scrollContent)
+                .welcomeBarEdge()
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -174,17 +175,39 @@ struct HomeWelcome: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    @ViewBuilder private var choices: some View {
-        if let sync { row(.sync, sync) }
-        if let importFile { row(.importFile, importFile) }
-        if let startEmpty { row(.startEmpty, startEmpty) }
+    private static let rowsSpace = "home.welcome.rows"
+    private var hasNotices: Bool { error != nil || (previousAnswerCount ?? 0) > 0 }
+
+    private var firstChoice: WelcomeChoice {
+        sync != nil ? .sync : importFile != nil ? .importFile : .startEmpty
     }
 
-    private func row(_ choice: WelcomeChoice, _ action: Action) -> some View {
+    @ViewBuilder private func choices(measured: Bool, margin: CGFloat?, known: Bool) -> some View {
+        if let sync { row(.sync, sync, measured: measured, margin: margin, known: known) }
+        if let importFile { row(.importFile, importFile, measured: measured, margin: margin, known: known) }
+        if let startEmpty { row(.startEmpty, startEmpty, measured: measured, margin: margin, known: known) }
+    }
+
+    @ViewBuilder private func row(_ choice: WelcomeChoice, _ action: Action, measured: Bool,
+                                  margin: CGFloat?, known: Bool) -> some View {
+        #if os(macOS)
         WelcomeRow(choice: choice, action: action)
-            #if !os(macOS)
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { rowFrames[choice] = $0 }
-            #endif
+        #else
+        if measured {
+            WelcomeRow(choice: choice, action: action)
+                // A height only: a position changes with every scroll step.
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowHeights[choice] = $0 }
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.rowsSpace)).minY } action: { top in
+                    // The first row's top, less our margin, is what the system keeps above it.
+                    // Read only before the rows are measured and while they are centred: a
+                    // centred list fits, so it cannot scroll and move the row under the reading.
+                    guard choice == firstChoice, margin != nil || !known else { return }
+                    systemInset = max(0, top - (margin ?? 0))
+                }
+        } else {
+            WelcomeRow(choice: choice, action: action)
+        }
+        #endif
     }
 
     /// What the page showed above its content before: an error from the last attempt, the last session.
@@ -225,6 +248,9 @@ private struct WelcomeRow: View {
         #endif
     }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var decorated: Bool { !dynamicTypeSize.isAccessibilitySize }
+
     private var text: some View {
         VStack(alignment: .leading, spacing: Spacing.xxSmall) {
             Text(verbatim: choice.title)
@@ -240,17 +266,25 @@ private struct WelcomeRow: View {
     var body: some View {
         Button(action: action.run) {
             HStack(spacing: Spacing.small) {
-                Label { text } icon: {
-                    // The title names the row; the symbol is decoration.
-                    Image(systemName: choice.systemImage)
-                        .accessibilityHidden(true)
+                // At the accessibility text sizes the text takes the row: a label there wraps
+                // each text around its symbol, and the state views leave their symbols out too.
+                if decorated {
+                    Label { text } icon: {
+                        // The title names the row; the symbol is decoration.
+                        Image(systemName: choice.systemImage)
+                            .accessibilityHidden(true)
+                    }
+                } else {
+                    text
                 }
                 Spacer(minLength: 0)
-                // Drawn: these rows act in place, so the system adds no disclosure indicator of its own.
-                Image(systemName: "chevron.forward")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(chevronStyle)
-                    .accessibilityHidden(true)
+                if decorated {
+                    // Drawn: these rows act in place, so the system adds no disclosure indicator of its own.
+                    Image(systemName: "chevron.forward")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(chevronStyle)
+                        .accessibilityHidden(true)
+                }
             }
             .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
             .contentShape(Rectangle())
@@ -264,5 +298,19 @@ private struct WelcomeRow: View {
         .accessibilityLabel(Text(verbatim: choice.title))
         .accessibilityHint(Text(verbatim: choice.explanation))
         .accessibilityIdentifier(choice.identifier)
+    }
+}
+
+private extension View {
+    /// An opaque navigation bar in the page's own colour: nothing shows at rest, and rows
+    /// that scroll under it are covered. Under the system's translucent bar the contrast
+    /// audit failed a row title seen through the bar, at the largest text size in dark.
+    @ViewBuilder func welcomeBarEdge() -> some View {
+        #if os(macOS)
+        self
+        #else
+        toolbarBackground(Color(uiColor: .systemGroupedBackground), for: .navigationBar)
+            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
+        #endif
     }
 }

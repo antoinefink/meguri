@@ -26,6 +26,15 @@ public enum HomeDeckListPreview: PreviewStates {
             .accessibilityIdentifier("home.collection.screen")
         } }
     }
+    /// The typical tree as it shows beside the detail (N14.10): Today first, and the
+    /// selected row marked. `deck` nil selects Today.
+    public static func besideDetail(deck: Int64?) -> some View {
+        HomeDeckTree(nodes: nodes(overflow: false),
+            today: HomeTodayRow(waiting: 31, selection: DeckListSelection(deck: deck)) {}, select: { _ in })
+            .navigationTitle(Text("Decks", bundle: .module))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("home.collection.screen")
+    }
     /// Every state view is centred, as in `HomeView` (N2).
     private static func scrollContent(state: PreviewState, availableHeight: CGFloat) -> some View {
         ScrollView {
