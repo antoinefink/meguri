@@ -487,8 +487,8 @@ public struct MeguriSyncStatusPresentation {
     public static func failureKey(_ failure: MeguriBootstrapFailure) -> String? {
         switch failure {
         case .accountChanged, .connectionChanged, .username: "sync.meguri.setup.error.identityChanged"
-        case .publicationChanged: "sync.meguri.setup.error.remoteChanged"
-        case .documentChanged: "sync.meguri.setup.error.localChanged"
+        case .publicationChanged, .setupRemoteChanged: "sync.meguri.setup.error.remoteChanged"
+        case .documentChanged, .setupLocalChanged: "sync.meguri.setup.error.localChanged"
         case .storage, .diskFull: "sync.meguri.setup.error.storage"
         case .cancelled: "sync.meguri.setup.error.cancelled"
         case .transfer(let value): transferFailureKey(value)

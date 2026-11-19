@@ -181,7 +181,9 @@ struct MeguriAccountRows: View {
     @State private var address = ""
     @State private var username = ""
     @State private var password = ""
-    @State private var choosing = false
+    /// A Sign In made here continues into setup (MP6.3). Setup that was left
+    /// unfinished earlier continues only from a user action.
+    @State private var setupAfterSignIn = false
     private var sync: SyncCoordinator { collection.sync }
     private var changing: Bool { collection.syncPresentation.serviceChanging }
     private var signedIn: Bool { sync.meguriPhase == .setupRequired && sync.meguriRoutine != .authentication }
@@ -232,6 +234,11 @@ struct MeguriAccountRows: View {
             } else {
                 LabeledContent(SyncText.value("sync.settings.account"), value: sync.meguriEndpoint)
                     .accessibilityIdentifier("settings.sync.meguri.account")
+                // Setup left unfinished in an earlier session continues only from here.
+                if sync.meguriStage == .required, sync.meguriCanChoose, !setupAfterSignIn, sync.meguriSetupDecision == nil {
+                    Button(SyncText.value("sync.recovery.tryAgain")) { sync.startMeguriSetup() }
+                        .accessibilityIdentifier("settings.sync.meguri.continueSetup")
+                }
             }
             if collection.meguriSignInPreparing {
                 ProgressView(SyncText.value("sync.meguri.signIn.preparing"))
@@ -245,68 +252,103 @@ struct MeguriAccountRows: View {
         .onAppear { address = sync.meguriEndpoint; startSetupIfAsked() }
         .onChange(of: sync.meguriEndpoint) { _, endpoint in address = endpoint; password = "" }
         .onChange(of: sync.meguriCanChoose) { _, _ in startSetupIfAsked() }
+        .onChange(of: sync.meguriCanSettle) { _, _ in startSetupIfAsked() }
+        .onChange(of: collection.syncPresentation.keepCollectionRequested) { _, _ in startSetupIfAsked() }
         .onDisappear { password = "" }
-        .sheet(isPresented: Binding(
-            get: { choosing || collection.syncPresentation.keepCollectionRequested },
-            set: { choosing = $0; if !$0 { collection.syncPresentation.keepCollectionRequested = false } })) {
-            MeguriKeepCollectionSheet(collection: collection) {
-                choosing = false; collection.syncPresentation.keepCollectionRequested = false
+        // The one presentation of the keep-collection sheet (N15.3). The core's
+        // decision opens it; no view state can.
+        .sheet(isPresented: Binding(get: { sync.meguriSetupDecision != nil }, set: { _ in })) {
+            if let decision = sync.meguriSetupDecision {
+                MeguriKeepCollectionSheet(collection: collection, facts: decision.facts)
             }
         }
-        .sheet(isPresented: Binding(get: { sync.meguriPreview != nil && !choosing }, set: { _ in })) {
+        .sheet(isPresented: Binding(get: { sync.meguriPreview != nil }, set: { _ in })) {
             if let preview = sync.meguriPreview { MeguriSetupPreviewSheet(collection: collection, preview: preview) }
         }
     }
     private func signIn() {
         let secret = password; password = ""
         guard !processing, !changing, !address.isEmpty, !username.isEmpty, !secret.isEmpty else { return }
+        setupAfterSignIn = true
         Task {
             // Signing in to set the service up is a service choice: it clears the hold.
             guard await sync.clearUpdateHold() else { return }
             collection.signInMeguri(endpoint: address, username: username, password: secret)
         }
     }
-    /// MP6.3: signing in is the consent to set the service up. With no
-    /// collection on this device only a download can run; otherwise Meguri asks.
+    /// MP6.3: signing in is the consent to set the service up. The core reads
+    /// both sides and asks only when both hold a collection. MP6.9: an unknown
+    /// acceptance is settled before anything else of a setup attempt.
     private func startSetupIfAsked() {
-        guard sync.meguriCanChoose, sync.meguriStage == .required, sync.meguriPreview == nil else { return }
-        if collection.lifecycle == .noCollection { sync.prepareMeguri(.useServerCollection) }
-        else { choosing = true }
+        let requested = collection.syncPresentation.keepCollectionRequested
+        guard setupAfterSignIn || requested else { return }
+        if sync.meguriCanSettle {
+            setupAfterSignIn = false
+            sync.settleMeguriSetup()
+        } else if sync.meguriCanChoose, sync.meguriSetupDecision == nil, sync.meguriPreview == nil,
+                  sync.meguriStage == .required || requested {
+            setupAfterSignIn = false
+            collection.syncPresentation.keepCollectionRequested = false
+            // A sheet opened by the status action keeps the service on Cancel (V27.4).
+            sync.startMeguriSetup(keepingService: requested)
+        }
     }
 }
 
-/// N15.3 for Meguri Sync. The core's preview of the chosen direction follows
-/// and keeps the bound confirmation (MP4), so nothing is replaced by this sheet alone.
+/// N15.3 for Meguri Sync: both sides' counts, then one button per collection.
+/// A button is the confirmation, bound by the core to the facts shown here
+/// (MP6.3); changed facts reload the sheet and need a new choice.
 struct MeguriKeepCollectionSheet: View {
     let collection: ReviewCollection
-    let close: () -> Void
+    let facts: MeguriSetupFacts
+    @Environment(\.appClock) private var clock
     @State private var cancelling = false
     private var sync: SyncCoordinator { collection.sync }
+    private var choices: [MeguriSetupChoice] { SyncCoordinator.meguriSetupChoices(facts.row) }
+    private var working: Bool { cancelling || sync.meguriBusy }
     var body: some View {
         NavigationStack {
             Form {
                 Section {
+                    if let key = sync.meguriSetupNoticeKey {
+                        Text(SyncText.value(key)).accessibilityIdentifier("sync.keepCollection.changed")
+                    }
                     Text(SyncText.value("sync.keep.message"))
                         .accessibilityIdentifier("sync.keepCollection.message")
-                    LabeledContent(SyncText.value("sync.meguri.preview.server"), value: sync.meguriEndpoint)
                 }
-                Section {
-                    Button(SyncText.value("sync.keep.device"), role: .destructive) {
-                        close(); sync.prepareMeguri(.useDeviceCollection)
-                    }
-                    .accessibilityIdentifier("sync.keepCollection.keepDevice")
-                } footer: {
-                    VStack(alignment: .leading) {
-                        Text(SyncText.value("sync.keep.device.effect.meguri"))
-                        Text(SyncText.value("sync.meguri.preview.otherClients"))
+                if let device = facts.device {
+                    Section(SyncText.value("sync.counts.thisDevice")) { rows(device) }
+                }
+                if let server = facts.server {
+                    Section(SyncText.value("sync.service.meguri")) {
+                        LabeledContent(SyncText.value("sync.meguri.preview.server"), value: sync.meguriEndpoint)
+                        rows(server)
                     }
                 }
-                Section {
-                    Button(SyncText.value("sync.keep.service.meguri"), role: .destructive) {
-                        close(); sync.prepareMeguri(.useServerCollection)
+                if choices.contains(.keepDevice) {
+                    Section {
+                        Button(SyncText.value("sync.keep.device"), role: .destructive) { sync.answerMeguriSetup(.keepDevice) }
+                            .disabled(working)
+                            .accessibilityIdentifier("sync.keepCollection.keepDevice")
+                    } footer: {
+                        VStack(alignment: .leading) {
+                            Text(SyncText.value("sync.keep.device.effect.meguri"))
+                            Text(SyncText.value("sync.meguri.preview.otherClients"))
+                        }
                     }
-                    .accessibilityIdentifier("sync.keepCollection.keepService")
-                } footer: { Text(SyncText.value("sync.keep.service.effect")) }
+                }
+                if choices.contains(.keepServer) {
+                    Section {
+                        Button(SyncText.value("sync.keep.service.meguri"), role: .destructive) { sync.answerMeguriSetup(.keepServer) }
+                            .disabled(working)
+                            .accessibilityIdentifier("sync.keepCollection.keepService")
+                    } footer: {
+                        VStack(alignment: .leading) {
+                            Text(SyncText.value("sync.keep.service.effect"))
+                            if facts.unsent { Text(SyncText.value("sync.meguri.preview.unsent")) }
+                        }
+                    }
+                }
                 Section {} footer: {
                     VStack(alignment: .leading) {
                         Text(SyncText.value("sync.meguri.preview.media"))
@@ -321,24 +363,39 @@ struct MeguriKeepCollectionSheet: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(SyncText.value("sync.service.cancel"), role: .cancel) {
-                        // MP6.3: Cancel while no binding is ready leaves the service Off.
-                        guard !sync.serviceConnected else { close(); return }
-                        cancelling = true
-                        Task {
-                            let removed = await sync.removeMeguriConnection()
-                            collection.syncPresentation.serviceChangeFailed = !removed
-                            cancelling = false; close()
-                        }
-                    }
-                    .disabled(cancelling)
-                    .accessibilityIdentifier("sync.keepCollection.cancel")
+                    // Cancel is always available: only its own run disables it.
+                    Button(SyncText.value("sync.service.cancel"), role: .cancel, action: cancel)
+                        .disabled(cancelling)
+                        .accessibilityIdentifier("sync.keepCollection.cancel")
                 }
             }
-            .disabled(cancelling || !sync.meguriCanChoose)
             .interactiveDismissDisabled()
         }
         .accessibilityIdentifier("sync.keepCollection.sheet")
+    }
+    @ViewBuilder private func rows(_ side: MeguriSetupSide) -> some View {
+        LabeledContent(SyncText.value("sync.counts.notes"), value: side.notes.formatted(.number))
+        LabeledContent(SyncText.value("sync.counts.cards"), value: side.cards.formatted(.number))
+        LabeledContent(SyncText.value("sync.counts.reviews"), value: side.reviews.formatted(.number))
+        if let media = side.mediaFiles {
+            LabeledContent(SyncText.value("sync.counts.mediaFiles"), value: media.formatted(.number))
+        }
+        if let change = side.lastChangeMs {
+            LabeledContent(SyncText.value("sync.counts.lastChange"), value: SyncText.instant(change, now: clock.now()))
+        }
+    }
+    /// MP6.3, V27.4: during setup Cancel leaves the service Off, which removes
+    /// the sign-in; from a status action it changes nothing but the sheet.
+    private func cancel() {
+        cancelling = true
+        Task {
+            if sync.meguriBusy { sync.cancelMeguriPreparation() }
+            if await sync.cancelMeguriSetup() {
+                let removed = await sync.removeMeguriConnection()
+                collection.syncPresentation.serviceChangeFailed = !removed
+            }
+            cancelling = false
+        }
     }
 }
 
@@ -378,6 +435,18 @@ struct SyncMainStatusRows: View {
                 ForEach(Array(SyncStatusCopy.lines(cloud, now: clock.now()).enumerated()), id: \.offset) { _, line in
                     Text(line).font(.footnote).foregroundStyle(.secondary)
                 }
+            }
+            if meguri, let done = sync.meguriSetupDone {
+                // T19.3: what setup did when it asked nothing.
+                Group {
+                    switch done {
+                    case .uploaded: Text(SyncText.value("sync.setup.done.uploaded.meguri"))
+                    case .downloaded(let backup):
+                        Text(SyncText.value("sync.setup.done.downloaded.meguri"))
+                        if backup { Text(SyncText.value("sync.setup.done.backup")) }
+                    }
+                }
+                .font(.footnote).foregroundStyle(.secondary)
             }
             if meguri, sync.meguriStage == .media, let progress = sync.meguriMediaProgress {
                 Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: progress.awaiting)))
@@ -423,7 +492,7 @@ struct SyncMainStatusRows: View {
         switch action {
         case .chooseCollection:
             if meguri {
-                if sync.meguriCanChoose {
+                if sync.meguriCanChoose, !sync.meguriBusy {
                     Button(title) { collection.syncPresentation.keepCollectionRequested = true }
                         .accessibilityIdentifier(id)
                 }
@@ -481,14 +550,15 @@ struct SyncMainStatusRows: View {
                 Button(title, role: .cancel) { sync.cancelMeguriPreparation() }.accessibilityIdentifier(id)
             }
         case .meguriTryAgain:
-            // Setup runs again from preparation; an unknown acceptance has no
-            // settling step in the core yet, so no button is shown for it.
-            if sync.meguriCanChoose {
-                Button(title) {
-                    if collection.lifecycle == .noCollection { sync.prepareMeguri(.useServerCollection) }
-                    else { collection.syncPresentation.keepCollectionRequested = true }
-                }
-                .accessibilityIdentifier(id)
+            // An unknown acceptance runs MP6.9's settling step; any other
+            // failure runs setup again from preparation (T19.5).
+            if sync.meguriCanSettle {
+                Button(title) { sync.settleMeguriSetup() }.accessibilityIdentifier(id)
+            } else if sync.meguriRoutine == .acceptanceUnknown {
+                Button(title) { sync.settleMeguriRound() }
+                    .disabled(sync.meguriBusy).accessibilityIdentifier(id)
+            } else if sync.meguriCanChoose {
+                Button(title) { sync.startMeguriSetup() }.accessibilityIdentifier(id)
             }
         case .meguriFinishSetup:
             if sync.meguriCanFinish {
