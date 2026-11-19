@@ -12,7 +12,7 @@ use meguri_engine::{
     replace::{PreparedUpload, ReplaceReason, ReplacementStage},
 };
 use meguri_model::{clock::Clock, rng::RandomSource, time::EpochMillis};
-use meguri_storage::{ReadRows, StorageError, atomic_file, space::SpaceProvider};
+use meguri_storage::{ReadRows, StorageError, atomic_file, paths::CollectionPaths, space::SpaceProvider};
 use std::{
     fmt, fs,
     future::Future,
@@ -221,6 +221,9 @@ impl TransferAccess {
 #[derive(Clone)]
 pub struct TransferInputs {
     pub engine: Engine,
+    /// Canonical paths bound once by the host for all transfer I/O.
+    pub paths: CollectionPaths,
+    /// Original configured roots, retained only for layout validation.
     pub collection_directory: PathBuf,
     pub backups_directory: PathBuf,
     pub state_directory: PathBuf,
@@ -319,7 +322,7 @@ impl ManualTransfers {
             .map_err(Into::into)
     }
     fn live(&self) -> PathBuf {
-        self.inputs.collection_directory.join("collection.anki2")
+        self.inputs.paths.collection()
     }
     fn owned(&self, operation: &Operation) -> Result<PathBuf> {
         if !files::valid_name(operation.id.as_str()) {
@@ -513,7 +516,7 @@ impl ManualTransfers {
                 op.local = local;
                 self.prepare_inside(&mut op, Some(c), &mut access, &cancel, progress)?;
             } else {
-                let _ownership = meguri_storage::lockfile::CollectionLock::acquire(&self.inputs.collection_directory)
+                let _ownership = meguri_storage::lockfile::CollectionLock::acquire(&self.inputs.paths.directory)
                     .map_err(|_| TransferError::Unavailable)?;
                 slot.check_verified_review(reason(direction))?;
                 let (guard, local) = self.capture(None)?;
@@ -542,7 +545,7 @@ impl ManualTransfers {
             self.backup(op, collection, cancel)?;
         }
         let _before = self.meta(access, &mut job)?;
-        let stage = ReplacementStage::new(&self.inputs.collection_directory)?;
+        let stage = ReplacementStage::new(&self.inputs.paths.directory)?;
         self.stage(
             if op.direction == Direction::Export {
                 "server_copy"
@@ -556,7 +559,7 @@ impl ManualTransfers {
         if op.direction == Direction::Export {
             let cancelled = || cancel.is_cancelled();
             let context = meguri_package::CollectionPackageWriteContext {
-                collection_directory: &self.inputs.collection_directory,
+                collection_directory: &self.inputs.paths.directory,
                 purpose: atomic_file::Purpose::Export,
                 finalisation: meguri_package::Finalisation::ExclusiveCreate,
                 clock: self.inputs.clock.as_ref(),
@@ -564,7 +567,7 @@ impl ManualTransfers {
                 space: self.inputs.space.as_ref(),
                 is_cancelled: &cancelled,
             };
-            let copy = meguri_package::preserve_server_copy(&stage.path(), &self.inputs.backups_directory, &context)
+            let copy = meguri_package::preserve_server_copy(&stage.path(), &self.inputs.paths.backups, &context)
                 .map_err(package_error)?;
             op.server_copy = Some(ServerCopy {
                 artifact: files::artifact(&copy.path)?,
@@ -586,7 +589,7 @@ impl ManualTransfers {
             drop(stage);
             cancel.check()?;
             self.stage("preparing", progress);
-            let stage = ReplacementStage::new(&self.inputs.collection_directory)?;
+            let stage = ReplacementStage::new(&self.inputs.paths.directory)?;
             let c = collection.ok_or(TransferError::Unavailable)?;
             self.same_local(op, Some(c))?;
             {
@@ -816,15 +819,15 @@ impl ManualTransfers {
             if !files::valid_name(&backup.name) {
                 return Err(TransferError::Artifact);
             }
-            files::check(&self.inputs.backups_directory.join(&backup.name), backup)?;
+            files::check(&self.inputs.paths.backups.join(&backup.name), backup)?;
         }
         if let Some(copy) = &op.server_copy {
             if !files::valid_name(&copy.artifact.name) {
                 return Err(TransferError::Artifact);
             }
-            files::check(&self.inputs.backups_directory.join(&copy.artifact.name), &copy.artifact)?;
+            files::check(&self.inputs.paths.backups.join(&copy.artifact.name), &copy.artifact)?;
         }
-        let stage = ReplacementStage::new(&self.inputs.collection_directory)?;
+        let stage = ReplacementStage::new(&self.inputs.paths.directory)?;
         files::retain(&source, &stage.path())?;
         // Only this disposable activation inode becomes writable. The durable
         // candidate remains sealed, and changing its copy's mode must keep bytes exact.
@@ -969,7 +972,7 @@ impl ManualTransfers {
             if !files::valid_name(&name) {
                 return Err(TransferError::Artifact);
             }
-            let path = self.inputs.backups_directory.join(&name);
+            let path = self.inputs.paths.backups.join(&name);
             let artifact = files::artifact(&path)?;
             // Retain independent original/backup bytes in the durable operation
             // namespace as well as the published backup. No retention/sweep owns it.
@@ -1092,7 +1095,7 @@ impl ManualTransfers {
             cancel.check()?;
             self.capture(Some(exclusive.collection()))?
         } else {
-            let _ownership = meguri_storage::lockfile::CollectionLock::acquire(&self.inputs.collection_directory)
+            let _ownership = meguri_storage::lockfile::CollectionLock::acquire(&self.inputs.paths.directory)
                 .map_err(|_| TransferError::Unavailable)?;
             slot.check_verified_review(reason(op.direction))?;
             self.check_absent_recovery_source(&op)?;
@@ -1254,9 +1257,14 @@ impl ManualTransfers {
             Ok(parent.canonicalize()?.join(suffix))
         };
         let root = resolve(&self.inputs.state_directory)?;
-        for protected in [&self.inputs.collection_directory, &self.inputs.backups_directory] {
-            let protected = resolve(protected)?;
-            if root.starts_with(&protected) || protected.starts_with(&root) {
+        for (supplied, pinned) in [
+            (&self.inputs.collection_directory, &self.inputs.paths.directory),
+            (&self.inputs.backups_directory, &self.inputs.paths.backups),
+        ] {
+            // Validate the supplied spelling without making a mutable alias the
+            // authority for transfer bytes or replacement destinations.
+            let protected = resolve(supplied)?;
+            if &protected != pinned || root.starts_with(&protected) || protected.starts_with(&root) {
                 return Err(TransferError::Artifact);
             }
         }
@@ -1279,8 +1287,8 @@ impl ManualTransfers {
             (Direction::Export, Some(d)) => (mul_add(d, 2, 0)?, mul_add(d, 2, 4 * 1024 * 1024)?),
             (Direction::Import, Some(d)) => (mul_add(d, 4, s)?, b),
         };
-        let collection = ancestor(&self.inputs.collection_directory)?;
-        let backup = ancestor(&self.inputs.backups_directory)?;
+        let collection = ancestor(&self.inputs.paths.directory)?;
+        let backup = ancestor(&self.inputs.paths.backups)?;
         let state = ancestor(&self.inputs.state_directory)?;
         // Add needs by actual filesystem, including the durable evidence root.
         let mut budgets = std::collections::BTreeMap::<u64, (PathBuf, u64)>::new();

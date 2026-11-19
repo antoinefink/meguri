@@ -16,6 +16,97 @@ fn leases_free(host: &CoreHost) {
     drop(lease); drop(slot);
 }
 
+#[cfg(unix)]
+#[test]
+fn meguri_server_preview_uses_opened_collection_through_ancestor_alias() {
+    use meguri_storage::{ReadRows, ReaderRole};
+    use std::os::unix::fs::symlink;
+
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let real = root.path().join("real");
+    let mut config = config(&real.join("local"), std::sync::Arc::new(meguri_model::clock::FixedClock::new(
+        NOW, meguri_model::clock::UtcOffset::UTC)));
+    let destination = config.collection_directory.canonicalize().unwrap().join("collection.anki2");
+    meguri_engine::bootstrap::create(&destination, config.clock.as_ref(), config.random.as_ref()).unwrap();
+    // Alias an ancestor directory; the database itself remains a regular file.
+    let alias = root.path().join("alias");
+    symlink(&real, &alias).unwrap();
+    config.collection_directory = alias.join("local/collection");
+    config.backups_directory = alias.join("local/backups");
+    let raw_path = config.collection_directory.join("collection.anki2");
+    let host = CoreHost::open(config.clone()).unwrap();
+    settle(&host);
+    let collection = host.collection().unwrap();
+    assert_ne!(collection.path(), raw_path);
+    assert_eq!(collection.path(), destination);
+    assert!(!fs::symlink_metadata(&destination).unwrap().file_type().is_symlink());
+    let connection = select(&host);
+    let generation = collection.generation();
+    let before = fs::read(&destination).unwrap();
+    let col_before = collection.reader(ReaderRole::Query).unwrap().col().unwrap();
+    let state_path = config.manual_transfer_directory.join("manual-transfers.json");
+    assert!(!state_path.exists());
+    let (_, data) = server(&root.path().join("server"));
+    let script = offline_preparation_script(data);
+    let preview = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(
+        access(&connection, &script), D::UseServerCollection).unwrap()).unwrap();
+    script.assert_done();
+    assert_eq!(script.count(Method::Meta), 2);
+    assert_eq!(script.count(Method::Download), 1);
+    assert_eq!(script.count(Method::Upload), 0);
+    assert_eq!(script.count(Method::MediaBegin), 0);
+    assert_eq!(preview.operation.phase, Phase::Preview);
+    assert_eq!(preview.operation.direction, Direction::Import);
+    assert_eq!(preview.operation.actual_generation, Some(generation.0));
+    assert!(state_path.is_file());
+    assert_eq!(host.manual_transfer_history().active().unwrap().as_ref(), Some(&preview.operation));
+    let current = host.collection().unwrap();
+    assert_eq!(current.generation(), generation);
+    assert_eq!(current.path(), destination);
+    assert_eq!(fs::read(&destination).unwrap(), before);
+    let reader = current.reader(ReaderRole::Query).unwrap();
+    assert_eq!(reader.col().unwrap(), col_before);
+    assert!(reader.config_value("bootstrap-server").unwrap().is_none());
+    drop(reader);
+    let discarded = host.discard_meguri_bootstrap_preparation(&connection, &preview.operation).unwrap();
+    assert_eq!(discarded.phase, Phase::Cancelled);
+    assert!(host.manual_transfer_history().active().unwrap().is_none());
+    host.close().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn meguri_server_preview_rejects_forbidden_ancestor_alias_before_requests_or_journal() {
+    use std::os::unix::fs::symlink;
+
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let real = root.path().join("real");
+    let mut config = config(&real.join("local"), std::sync::Arc::new(meguri_model::clock::FixedClock::new(
+        NOW, meguri_model::clock::UtcOffset::UTC)));
+    let destination = config.collection_directory.canonicalize().unwrap().join("collection.anki2");
+    meguri_engine::bootstrap::create(&destination, config.clock.as_ref(), config.random.as_ref()).unwrap();
+    let alias = root.path().join(".meguri-stage-alias");
+    symlink(&real, &alias).unwrap();
+    config.collection_directory = alias.join("local/collection");
+    assert_eq!(config.collection_directory.canonicalize().unwrap().join("collection.anki2"), destination);
+    let host = CoreHost::open(config.clone()).unwrap();
+    settle(&host);
+    assert_eq!(host.collection().unwrap().path(), destination);
+    let connection = select(&host);
+    let state_path = config.manual_transfer_directory.join("manual-transfers.json");
+    assert!(!state_path.exists());
+    let offline = Script::new(vec![]);
+    let result = bootstrap_complete(&host, || host.prepare_meguri_bootstrap(
+        access(&connection, &offline), D::UseServerCollection).unwrap());
+    assert!(matches!(result, Err(meguri_sync::oneway::TransferError::Artifact)));
+    offline.assert_done();
+    assert!(!state_path.exists());
+    assert!(host.manual_transfer_history().active().unwrap().is_none());
+    host.close().unwrap();
+}
+
 #[test]
 fn meguri_initial_server_download_can_start_without_a_local_collection() {
     let _lane = LANE.lock().unwrap();

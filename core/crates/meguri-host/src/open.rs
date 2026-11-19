@@ -637,6 +637,7 @@ impl CoreHost {
         }));
         let manual_transfers = meguri_sync::oneway::ManualTransfers::new(meguri_sync::oneway::TransferInputs {
             engine: engine.clone(),
+            paths: paths.clone(),
             collection_directory: config.collection_directory.clone(),
             backups_directory: config.backups_directory.clone(),
             state_directory: config.manual_transfer_directory.clone(),
