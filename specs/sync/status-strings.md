@@ -1138,7 +1138,7 @@ The same four rules make the main status. The first condition that applies decid
 | T18.5 | `sync.meguri.setup.choose`, `.useDevice`, `.useServer`, `.download.detail`, `.download`, `.review`, `sync.meguri.setup.error.cancelled`, `sync.meguri.preview.title.download`, `.direction.download`, `.confirm.download` |
 | T18.7 | `sync.meguri.now.unavailable.paused`, `.signIn`, `.stopped`, `sync.meguri.pause`, `sync.meguri.resume`, `sync.meguri.now.chooseCollection` |
 
-- Every key of the table above is removed from the catalog when T19 ships, except the T13.4 and T13.6 row (decided 2026-11-19 (review F12)). A T18.2 key added to this list: `sync.service.blocked` as the needs-you sentence, replaced by `sync.needsYou.blocked`; it stays the line under the picker.
+- Every key of the table above is removed from the catalog when T19 ships, except the T13.4 and T13.6 row (decided 2026-11-19 (review F12)). `sync.service.blocked` (T18.2) is not on the list: it stays in use as the line under the picker, and only the needs-you sentence is `sync.needsYou.blocked` (decided 2026-11-19 (re-review R3)).
 - Still used, though their flow changed: `sync.connect.upload.*` and `sync.connect.useICloud.*` (T19.3, one direction only); `sync.service.iCloud` (the old service's name in the `sync.serviceSwitch` lines); `sync.decision.action`, `.action.label` and `.unsentInBackup`; the `useDevice` and `useServer` preview keys of T18.5 (Troubleshooting); `sync.status.needsAttention.title`; the T9.1 texts that T19.4 names.
 
 ### T19.9 Tests
