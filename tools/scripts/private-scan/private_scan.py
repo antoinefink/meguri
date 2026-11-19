@@ -829,13 +829,13 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'docs/process/review-log/meguri-collection-mcp-20261119.md':
-        '4060e5fd2bf9d33e022fcb97f29ac6e4aed761f3023224f779ecc4467adeaa29',
+        '508eaae5109e720f7ee8817b3dc377521bac66284ffac6efc6777846ca2248d8',
     'server/src/accounts/oauth/mod.rs':
         '34f18c2a351778b43a6d71e8a774bca913c140feec5015689233502aa49df933',
     'server/src/httpapi/oauth.rs':
         'efe2fe1940f7a3e08f0982fd79073a64ec0202a1af8932254207f95e2b2e43c8',
     'server/tests/mcp_oauth.rs':
-        '39068c5e4f02cab4f649cb4ec60d38028d8ae3684269175fee76fd78d3983fd7',
+        'f86fc4956ddf11a21b42432345dad9211890be57ea97f9531d4ad08fe882704f',
     'server/src/mcp_service/transport.rs':
         '7481f58597155c7531c5679487fcead2f8b039b4ced23d0fb78258e3727fb8ec',
     'server/src/mcp_service/authority_tests.rs':
@@ -847,9 +847,9 @@ PUBLIC_ARTIFACTS = {
     'server/src/mcp_transport/tests.rs':
         '7867fe6cc86ff4e597702fee81222018be3aa557e0d3d9b01cb7daeec00e95a2',
     'server/src/collection/mcp/tests.rs':
-        'f025e206aa100c5bc0a62117c9d250dc9c74630c02b6fa2f38cc79f169e228bf',
+        '78ee3ea5c3baaeac36c969d1d284165afba8651aeba1301ad8119cdebd0e7ccd',
     'server/src/collection/mcp/tests/size_scaling.rs':
-        'e45f787f1e4ae6c510cc06ab76d0956a6292e687972d09a920b9861e39f4bcf5',
+        '6a7e9ae78d1ef2688703f1ce292b25ebebcb34ceb3e8f3b20dbdf66bc2dde7a0',
     'server/src/accounts/oauth/policy.rs':
         '305463b17d26a788b961d8dabf8265d3a34f02f51593db1cf181c186dc92b993',
     'server/src/accounts/oauth/tests.rs':
@@ -1112,7 +1112,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        '5ca0caa4458fbd874a51fce1eb1bfc40b9a6ccb6e51e17afd08e987f224cc000',
+        'ecdafd694c89d1aaa37f0cc0cec4f6cecc37e30d3f0131dbdbb43b5893befe1a',
     # Independently reviewed first-party license scope, exact complete text.
     'LICENSING.md':
         '98c119e6dedf0192268fc328b9a8e0be58771760a4bc2156387db57ae97c7f2a',

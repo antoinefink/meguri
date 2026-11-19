@@ -22,7 +22,6 @@ impl Authority for Access {
 }
 struct Runtime(i64);
 impl WriteRuntime for Runtime {
-    fn permit_new_card(&self)->Result<()> { Ok(()) }
     fn now_millis(&self)->Result<i64> { Ok(self.0) }
     fn guid_random_u64(&self)->Result<u64> { Ok(1700000000000) }
     // P4's published vector for p=1. Tests with due-order decks never call it.
@@ -281,40 +280,6 @@ fn stamp_overflow_invalid_fields_missing_notes_and_identity_cap_have_no_partial_
     f.db.execute("INSERT INTO notes SELECT 999999999999,guid,mid,mod,usn,tags,flds,sfld,csum,flags,data FROM notes WHERE id=1000",[]).unwrap();
     assert_eq!(write::allocate(&f.db,"notes",2000).unwrap(),2000);
     assert_eq!(write::allocate(&f.db,"notes",1000).unwrap(),1001);
-}
-
-#[test]
-fn new_card_permit_only_gates_generation_and_refusal_rolls_back_every_effect() {
-    struct NoNewCards;
-    impl WriteRuntime for NoNewCards {
-        fn permit_new_card(&self)->Result<()> { Err(unsupported()) }
-        fn now_millis(&self)->Result<i64> { Ok(2000) }
-        fn guid_random_u64(&self)->Result<u64> { panic!("edit never needs GUID randomness") }
-        fn random_position(&self,_:u32)->Result<u32> { panic!("due-order fixture") }
-    }
-    let f=Fixture::new();
-    let first=f.create("one",vec![],1000).unwrap();
-    let edit=|revision:String, fields:Fields, add_tags:Option<Vec<String>>| EditInput {
-        note_id:first.note_id.clone(), revision, fields:Some(fields), add_tags, remove_tags:None,
-    };
-    // Template 1 has no card yet. Harmless edits must still succeed, including
-    // no-ops, instead of conservatively requiring every template's card.
-    let harmless=f.backend.edit_note(&f.path,&f.access,
-        edit(first.revision,Fields(BTreeMap::from([("Front".into(),"two".into())])),None),&NoNewCards).unwrap();
-    let before=f.exact(&first.note_id);
-    let stamps=f.stamp();
-    let counter:Vec<u8>=f.db.query_row("SELECT val FROM config WHERE key='nextPos'",[],|r|r.get(0)).unwrap();
-    let same=f.backend.edit_note(&f.path,&f.access,
-        edit(harmless.revision.clone(),Fields(BTreeMap::from([("Front".into(),"two".into())])),None),&NoNewCards).unwrap();
-    assert_eq!(same.revision,harmless.revision);
-    let denied=f.backend.edit_note(&f.path,&f.access,
-        edit(harmless.revision,Fields(BTreeMap::from([("Reverse".into(),"yes".into())])),Some(vec!["new-tag".into()])),&NoNewCards).unwrap_err();
-    assert_eq!(denied.code,"unsupported_collection");
-    assert_eq!(f.exact(&first.note_id),before);
-    assert_eq!(f.stamp(),stamps);
-    assert_eq!(f.db.query_row("SELECT count(*) FROM cards",[],|r|r.get::<_,i64>(0)).unwrap(),1);
-    assert_eq!(f.db.query_row("SELECT count(*) FROM tags",[],|r|r.get::<_,i64>(0)).unwrap(),0);
-    assert_eq!(f.db.query_row("SELECT val FROM config WHERE key='nextPos'",[],|r|r.get::<_,Vec<u8>>(0)).unwrap(),counter);
 }
 
 #[test]

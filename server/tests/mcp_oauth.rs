@@ -334,9 +334,182 @@ async fn native_exchange(h: &Harness, c: &Client, method: &str, key: &str, body:
     let r=c.post(format!("{}/sync/{method}",h.base)).header("content-type","application/octet-stream")
         .header("anki-sync",json!({"v":11,"k":key,"c":"synthetic","s":"mcpmount"}).to_string())
         .body(zstd::stream::encode_all(serde_json::to_vec(&body).unwrap().as_slice(),0).unwrap())
+        .timeout(std::time::Duration::from_secs(15))
         .send().await.unwrap();
-    assert_eq!(r.status(),200);
+    assert_eq!(r.status(),200,"/sync/{method}");
     serde_json::from_slice(&zstd::stream::decode_all(r.bytes().await.unwrap().as_ref()).unwrap()).unwrap()
+}
+
+async fn note_write_tool(h: &Harness, c: &Client, access: &str, name: &str, arguments: Value) -> Value {
+    let response=mcp_request(h,c,access,"tools/call",json!({"name":name,"arguments":arguments}))
+        .timeout(std::time::Duration::from_secs(15)).send().await.unwrap();
+    assert_eq!(response.status(),200);
+    let body:Value=response.json().await.unwrap();
+    assert_eq!(body["result"]["isError"],false,"{body}");
+    let text:Value=serde_json::from_str(body["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["result"]["structuredContent"],text);
+    text
+}
+
+// Complete W6–W12 receiver round for the generated one-note fixture below.
+// Return admission meta: a native client retains this USN for its next round.
+async fn note_write_round(h: &Harness, c: &Client, key: &str, min_usn: &Value, cards: u32) -> (Value,Value,Value) {
+    let meta=native_exchange(h,c,"meta",key,json!({"v":11,"cv":"synthetic"})).await;
+    assert_eq!(native_exchange(h,c,"start",key,json!({"minUsn":min_usn,"lnewer":false,"graves":null})).await,
+        json!({"cards":[],"decks":[],"notes":[]}));
+    let changes=native_exchange(h,c,"applyChanges",key,json!({"changes":{"models":[],"decks":[[],[]],"tags":[]}})).await;
+    // This fixture has at most three outgoing rows, so its first chunk ends the stream.
+    let chunk=native_exchange(h,c,"chunk",key,json!({})).await;
+    assert_eq!(chunk["done"],true);
+    assert_eq!(chunk["revlog"],json!([]));
+    assert_eq!(native_exchange(h,c,"applyChunk",key,json!({"chunk":{"done":true}})).await,Value::Null);
+    let counts=json!([[0,0,0],cards,1,0,0,1,1,1]);
+    let sanity=native_exchange(h,c,"sanityCheck2",key,json!({"client":counts})).await;
+    assert_eq!(sanity,json!({"status":"ok","c":counts,"s":counts}));
+    let finish=native_exchange(h,c,"finish",key,json!({})).await;
+    assert!(finish.as_i64().unwrap()>=meta["mod"].as_i64().unwrap());
+    let after=native_exchange(h,c,"meta",key,json!({"v":11,"cv":"synthetic"})).await;
+    assert_eq!(after["mod"],finish);
+    assert_eq!(after["usn"].as_i64().unwrap(),meta["usn"].as_i64().unwrap()+1);
+    (meta,changes,chunk)
+}
+
+#[tokio::test]
+async fn production_mcp_create_and_card_generating_edit_reach_native_incremental_sync() {
+    use meguri_model::proto::{ProtoBlob, deck::{DeckCommon,DeckKind,DeckKindMessage,NormalDeck},
+        deck_config::DeckConfigMessage, notetype::{FieldConfig,NotetypeConfig,TemplateConfig}};
+    use meguri_sync_server::collection::schema;
+    use rusqlite::{Connection,params,types::ValueRef};
+
+    // Read committed rows independently. Only W9's derived-column placeholders
+    // differ from storage; the cards are compared in full W8 column order.
+    fn rows(db: &Connection, sql: &str) -> Vec<Value> {
+        let mut q=db.prepare(sql).unwrap();
+        let columns=q.column_count();
+        q.query_map([],|r| {
+            Ok(Value::Array((0..columns).map(|i|match r.get_ref(i).unwrap() {
+                ValueRef::Integer(n)=>json!(n),
+                ValueRef::Text(s)=>json!(std::str::from_utf8(s).unwrap()),
+                other=>panic!("unexpected fixture column: {other:?}"),
+            }).collect()))
+        }).unwrap().map(|r|r.unwrap()).collect()
+    }
+    fn stamps(db: &Connection) -> (i64,i64,i64,i64,i64) {
+        db.query_row("SELECT mod,usn,crt,scm,ls FROM col",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).unwrap()
+    }
+    const NOTES: &str="SELECT id,guid,mid,mod,usn,tags,flds,'','',0,'' FROM notes ORDER BY id";
+    const CARDS: &str="SELECT * FROM cards ORDER BY ord";
+
+    let h=Harness::new().await;
+    let c=local_client();
+    let identity=h.setup().await;
+    let cookie=h.login("root.admin",PASSWORD).await;
+    let tokens=grant(&h,&c,&cookie,true,false).await;
+    let access=tokens["access_token"].as_str().unwrap();
+    let account=h.path().join("state/accounts").join(identity["id"].as_str().unwrap());
+    let pointer=std::fs::read_to_string(account.join("current-collection")).unwrap();
+    let generation=pointer.lines().find_map(|line|line.strip_prefix("generation=")).unwrap();
+    let path=account.join("generations").join(generation).join("collection.anki2");
+    // First-party protobuf fixtures, as in collection/mcp/tests.rs. No backend
+    // replacement, test runtime or alternate MCP mount enables these writes.
+    {
+        let mut db=schema::open(&path,true).unwrap();
+        let tx=db.transaction().unwrap();
+        let common=ProtoBlob::new(DeckCommon::default()).to_bytes().into_owned();
+        let mut normal=NormalDeck::default();normal.config_id=1;
+        let kind=ProtoBlob::new(DeckKindMessage::new(DeckKind::Normal(normal))).to_bytes().into_owned();
+        tx.execute("INSERT INTO decks VALUES(1,'Generated deck',0,0,?1,?2)",params![common,kind]).unwrap();
+        let mut preset=DeckConfigMessage::default();preset.new_card_insert_order=1;
+        tx.execute("INSERT INTO deck_config VALUES(1,'Generated preset',0,0,?1)",[ProtoBlob::new(preset).to_bytes().into_owned()]).unwrap();
+        tx.execute("INSERT INTO notetypes VALUES(10,'Generated type',0,0,?1)",[ProtoBlob::new(NotetypeConfig::default()).to_bytes().into_owned()]).unwrap();
+        for (ord,name) in [(0,"Front"),(1,"Back"),(2,"Reverse")] {
+            tx.execute("INSERT INTO fields VALUES(10,?1,?2,?3)",params![ord,name,ProtoBlob::new(FieldConfig::default()).to_bytes().into_owned()]).unwrap();
+        }
+        for (ord,front) in [(0,"{{Front}}"),(1,"{{#Reverse}}{{Back}}{{/Reverse}} ")] {
+            let mut template=TemplateConfig::default();template.q_format=front.into();
+            tx.execute("INSERT INTO templates VALUES(10,?1,?2,0,0,?3)",params![ord,format!("Generated {ord}"),ProtoBlob::new(template).to_bytes().into_owned()]).unwrap();
+        }
+        tx.execute("INSERT INTO config VALUES('nextPos',0,0,?1)",[b"1".as_slice()]).unwrap();
+        tx.commit().unwrap();
+    }
+    let db=schema::open(&path,false).unwrap();
+    let key=native_exchange(&h,&c,"hostKey","",json!({"u":"root.admin","p":PASSWORD})).await["key"].as_str().unwrap().to_owned();
+    let baseline=native_exchange(&h,&c,"meta",&key,json!({"v":11,"cv":"synthetic"})).await;
+    let before=stamps(&db);
+    assert_eq!(baseline["usn"],before.1);
+    assert_eq!(baseline["mod"],before.0);
+    let created=note_write_tool(&h,&c,access,"create_note",json!({"deck_id":"1","note_type_id":"10",
+        "fields":{"Front":"cafe\u{301}","Back":"generated answer"},"tags":["generated"]})).await;
+    let note_id=created["note_id"].as_str().unwrap().parse::<i64>().unwrap();
+    let first_notes=rows(&db,NOTES);
+    let first_cards=rows(&db,CARDS);
+    assert_eq!(first_notes.len(),1);
+    assert_eq!(first_cards.len(),1);
+    assert_eq!(first_notes[0][0],note_id);
+    assert_eq!(first_notes[0][2],10);
+    assert_eq!(first_notes[0][3],note_id/1000);
+    assert_eq!(first_notes[0][4],baseline["usn"]);
+    assert_eq!(first_notes[0][5]," generated ");
+    assert_eq!(first_notes[0][6],"café\u{1f}generated answer\u{1f}");
+    let card_id=first_cards[0][0].as_i64().unwrap();
+    assert!(card_id>0);
+    assert_eq!(first_cards[0],json!([card_id,note_id,1,0,first_notes[0][3],baseline["usn"],0,0,825,0,0,0,0,0,0,0,0,"{}"]));
+    let created_stamps=stamps(&db);
+    assert!(created_stamps.0>before.0);
+    assert_eq!(created_stamps.1,before.1+1);
+    assert_eq!((created_stamps.2,created_stamps.3,created_stamps.4),(before.2,before.3,before.4));
+
+    // The write stamped rows with baseline U, not the now-incremented col.usn.
+    // Start inclusively at U to prove the normal receiver actually gets them.
+    let (first_meta,changes,chunk)=note_write_round(&h,&c,&key,&baseline["usn"],1).await;
+    assert_eq!(chunk["notes"],json!(first_notes));
+    assert_eq!(chunk["cards"],json!(first_cards));
+    assert_eq!(changes["models"][0]["id"],10);
+    assert_eq!(changes["models"].as_array().unwrap().len(),1);
+    assert_eq!(changes["decks"][0].as_array().unwrap().len(),1);
+    assert_eq!(changes["decks"][1].as_array().unwrap().len(),1);
+    assert_eq!(changes["decks"][0][0]["id"],1);
+    assert_eq!(changes["decks"][1][0]["id"],1);
+    assert_eq!(changes["tags"],json!(["generated"]));
+    assert_eq!(changes["conf"]["nextPos"],2);
+
+    let before_edit=stamps(&db);
+    let edited=note_write_tool(&h,&c,access,"edit_note",json!({"note_id":created["note_id"],"revision":created["revision"],
+        "fields":{"Reverse":"yes"},"add_tags":["expanded"],"remove_tags":["generated"]})).await;
+    assert_eq!(edited["note_id"],created["note_id"]);
+    assert_ne!(edited["revision"],created["revision"]);
+    let edited_notes=rows(&db,NOTES);
+    let edited_cards=rows(&db,CARDS);
+    assert_eq!(edited_notes.len(),1);
+    assert_eq!(edited_notes[0][0],note_id);
+    assert_eq!(edited_notes[0][1],first_notes[0][1]);
+    assert_eq!(edited_notes[0][4],before_edit.1);
+    assert_eq!(edited_notes[0][5]," expanded ");
+    assert_eq!(edited_notes[0][6],"café\u{1f}generated answer\u{1f}yes");
+    assert_eq!(edited_cards.len(),2);
+    assert_eq!(edited_cards[0],first_cards[0]);
+    let new_card_id=edited_cards[1][0].as_i64().unwrap();
+    assert_ne!(new_card_id,card_id);
+    assert_eq!(edited_cards[1],json!([new_card_id,note_id,1,1,edited_notes[0][3],before_edit.1,0,0,825,0,0,0,0,0,0,0,0,"{}"]));
+    let edited_stamps=stamps(&db);
+    assert!(edited_stamps.0>before_edit.0);
+    assert_eq!(edited_stamps.1,before_edit.1+1);
+    assert_eq!((edited_stamps.2,edited_stamps.3,edited_stamps.4),(before_edit.2,before_edit.3,before_edit.4));
+    let (_,changes,chunk)=note_write_round(&h,&c,&key,&first_meta["usn"],2).await;
+    assert_eq!(chunk["notes"],json!(edited_notes));
+    assert_eq!(chunk["cards"],json!([edited_cards[1]]));
+    assert_eq!(changes["models"],json!([]));
+    assert_eq!(changes["decks"],json!([[],[]]));
+    assert_eq!(changes["tags"],json!(["expanded"]));
+    assert_eq!(changes["conf"]["nextPos"],2);
+    assert_eq!(rows(&db,CARDS),edited_cards);
+    assert_eq!(rows(&db,NOTES),edited_notes);
+    let finished=stamps(&db);
+    assert_eq!(finished.1,edited_stamps.1+1);
+    assert!(finished.0>=edited_stamps.0);
+    assert_eq!(finished.4,finished.0);
+    drop(db);
+    h.stop().await;
 }
 
 #[tokio::test]

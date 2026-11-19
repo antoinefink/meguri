@@ -19,7 +19,6 @@ const BATCH: i64 = 256;
 // first-party generator, not a different random distribution or mock position.
 struct SeededRuntime(i64);
 impl WriteRuntime for SeededRuntime {
-    fn permit_new_card(&self) -> Result<()> { Runtime(self.0).permit_new_card() }
     fn now_millis(&self) -> Result<i64> { Runtime(self.0).now_millis() }
     fn guid_random_u64(&self) -> Result<u64> { Ok(self.0 as u64) }
     fn random_position(&self, p: u32) -> Result<u32> {

@@ -55,9 +55,6 @@ pub trait Authority {
 /// production adapter must use the U21 clock, R1875 randomness, and exactly P4's
 /// seeded StdRng calculation. A failure rolls back the complete operation.
 pub trait WriteRuntime {
-    /// Called inside the existing write transaction immediately before each new
-    /// card insert. Refusal rolls back note, tag, card, counter and stamp effects.
-    fn permit_new_card(&self) -> Result<()>;
     fn now_millis(&self) -> Result<i64>;
     fn guid_random_u64(&self) -> Result<u64>;
     fn random_position(&self, counter: u32) -> Result<u32>;
