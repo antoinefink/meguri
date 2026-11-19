@@ -12,5 +12,5 @@ export function passwordError(value: string): string | undefined {
   if (size > 1024) return "Make your password shorter.";
   return undefined;
 }
-export const navigation = ["/", "/setup", "/login", "/invite", "/reset", "/connection", "/collection", "/settings", "/accounts"] as const;
+export const navigation = ["/", "/setup", "/login", "/invite", "/reset", "/connection", "/collection", "/settings", "/accounts", "/oauth/consent"] as const;
 export function protectedPath(path: string): boolean { return ["/connection", "/collection", "/settings", "/accounts"].includes(path); }

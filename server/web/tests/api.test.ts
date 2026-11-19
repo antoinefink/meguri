@@ -6,6 +6,12 @@ test("W3 requests use exact envelopes, same-origin cookies, no-store and no auto
   const cases: [string, object | undefined, unknown][] = [
     ["/api/status", undefined, { setup_required: true }],
     ["/api/me", undefined, { id: "opaque-id", username: "member", role: "member", server_url: "https://sync.test" }],
+    ["/api/me/mcp-grants", undefined, { account_id: "opaque-id", grants: [{ id: "grant-id", client_name: "Synthetic client", access: "read", created_at: "2026-11-19T00:00:00Z" }] }],
+    ["/api/me/mcp-grants/grant-id/revoke", {}, { account_id: "opaque-id" }],
+    ["/api/mcp/authorization/read", { request: "synthetic" }, { username: "member", client_name: "Synthetic client", redirect_host: "callback.test", access_options: ["read", "read_write"] }],
+    ["/api/mcp/authorization/decide", { request: "synthetic", decision: "read" }, { redirect_to: "https://callback.test/done" }],
+    ["/api/mcp/authorization/decide", { request: "synthetic", decision: "read_write" }, { redirect_to: "https://callback.test/done" }],
+    ["/api/mcp/authorization/decide", { request: "synthetic", decision: "deny" }, { redirect_to: "https://callback.test/denied" }],
     ["/api/admin/accounts", undefined, { accounts: [] }],
     ["/api/setup", { token: "synthetic", username: "admin", password: " exact password " }, { id: "opaque-id", username: "admin", role: "admin" }],
     ["/api/invitations/claim", { token: "synthetic", username: "member", password: " exact password " }, { id: "opaque-id", username: "member", role: "member" }],

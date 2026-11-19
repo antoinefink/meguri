@@ -4,6 +4,12 @@ export type Me = Identity & { server_url: string };
 export type AccountStorage = { collection_bytes: number; media_bytes: number; total_bytes: number };
 export type Account = Identity & { enabled: boolean; provisioning_state: "provisioning" | "ready"; storage?: AccountStorage | null };
 export type GeneratedLink = { url: string; expires_at: string };
+export type MCPAccess = "read" | "read_write";
+export type MCPGrant = { id: string; client_name: string; access: MCPAccess; created_at: string };
+export type MCPGrants = { account_id: string; grants: MCPGrant[] };
+export type MCPRevocation = { account_id: string };
+export type MCPAuthorization = { username: string; client_name: string; redirect_host: string; access_options: MCPAccess[] };
+export const accessLabel: Record<MCPAccess, string> = { read: "Read collection", read_write: "Read and edit collection" };
 export type ErrorField = "username" | "password" | "token" | "current_password" | "new_password" | "confirmation";
 export class ApiError extends Error {
   constructor(public code: string, public status = 0, public field: ErrorField | undefined = undefined) { super("Account request failed"); }

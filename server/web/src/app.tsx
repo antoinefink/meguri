@@ -10,7 +10,9 @@ import { CredentialsForm } from "./forms";
 import type { FormMode } from "./forms";
 import { Accounts } from "./accounts";
 import { Collection } from "./collection";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, CopyValue, Outcome, Sidebar, SidebarContent, SidebarGroup, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "./ui";
+import { Connection } from "./connection";
+import { Consent } from "./consent";
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Outcome, Sidebar, SidebarContent, SidebarGroup, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "./ui";
 import type { OutcomeValue } from "./ui";
 import pomegranate from "./favicon-64.png";
 
@@ -50,11 +52,12 @@ type PageState = { path: string; token: string; visit: number };
 export function App() {
   const [page, setPage] = useState<PageState>(() => {
     const token = consumeInitialToken();
-    return { path: location.pathname, token: ["/setup", "/invite", "/reset"].includes(location.pathname) ? token : "", visit: 0 };
+    return { path: location.pathname, token: ["/setup", "/invite", "/reset", "/oauth/consent"].includes(location.pathname) ? token : "", visit: 0 };
   });
   const [me, setMe] = useState<Me | null>(null), [setup, setSetup] = useState(false), [loading, setLoading] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<OutcomeValue | null>(null), [notice, setNotice] = useState<OutcomeValue | null>(null);
   const [signingOut, setSigningOut] = useState(false), logoutBusy = useRef(false);
+  const [identityVisit, setIdentityVisit] = useState(0);
   const main = useRef<HTMLElement>(null), startup = useRef(false), alive = useRef(true);
   const go = (path: string, message?: string, replace = false) => {
     if (replace) history.replaceState(null, "", path); else history.pushState(null, "", path);
@@ -112,8 +115,10 @@ export function App() {
       else setNotice({ error: true, text: errorMessage(error) });
     });
     return () => controller.abort();
+  }, [page.visit, loading, identityVisit]);
+  useLayoutEffect(() => {
+    if (!loading && document.activeElement?.getAttribute("role") !== "alert") main.current?.focus();
   }, [page.visit, loading]);
-  useLayoutEffect(() => { if (!loading) main.current?.focus(); }, [page.visit, loading]);
   function intercept(event: MouseEvent<HTMLAnchorElement>, path: string) {
     if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault(); go(path);
@@ -137,16 +142,17 @@ export function App() {
     } finally { logoutBusy.current = false; if (alive.current) setSigningOut(false); }
   }
   const capabilityPage = ["/setup", "/invite", "/reset"].includes(page.path);
-  const accountShell = me !== null && !capabilityPage && page.path !== "/login";
+  const accountShell = me !== null && !capabilityPage && page.path !== "/login" && page.path !== "/oauth/consent";
   let content: ReactNode;
   if (loading) content = <p role="status">Opening Meguri…</p>;
   else if (bootstrapError) content = <Card><CardHeader><CardTitle>Could not open your account</CardTitle></CardHeader><CardContent><Outcome value={bootstrapError} /><Button onClick={() => void bootstrap()}>Try loading again</Button></CardContent></Card>;
   else if (!navigation.some(path => path === page.path)) content = <Card><CardHeader><CardTitle>Page not found</CardTitle><CardDescription>This address does not match a Meguri account page.</CardDescription></CardHeader><CardContent>{link(me ? accountHomePath : "/login", me ? "Go to Collection" : "Go to sign in")}</CardContent></Card>;
+  else if (page.path === "/oauth/consent") content = <Consent key={page.visit} request={page.token} clearRequest={clearToken} me={me} onLogin={setMe} onSessionLoss={() => setMe(null)} link={link} />;
   else if (capabilityPage && me) content = <Card className="auth-card"><CardHeader><CardTitle>Check your account</CardTitle><CardDescription>You are signed in as {me.username} ({me.role === "admin" ? "administrator" : "member"}).</CardDescription></CardHeader><CardContent className="stack"><p>This link may be intended for a different account. Sign out before using it.</p><Button aria-disabled={signingOut} onClick={() => void logout(true)}>{signingOut ? "Signing out…" : `Sign out ${me.username}`}</Button>{link(accountHomePath, "Return to your account")}</CardContent></Card>;
   else if (page.path === "/accounts" && me?.role !== "admin") content = <Card><CardHeader><CardTitle>Administrator access required</CardTitle><CardDescription>Your member account does not have permission to manage accounts.</CardDescription></CardHeader><CardContent>{link(accountHomePath, "Return to Collection")}</CardContent></Card>;
   else if (page.path === "/accounts" && me) content = <Accounts me={me} sessionLoss={sessionLoss} />;
   else if (page.path === "/collection" && me) content = <Collection key={page.visit} sessionLoss={sessionLoss} />;
-  else if (page.path === "/connection" && me) content = <Connection me={me} />;
+  else if (page.path === "/connection" && me) content = <Connection key={`${page.visit}:${me.id}`} me={me} sessionLoss={sessionLoss} refreshIdentity={() => setIdentityVisit(value => value + 1)} />;
   else if (page.path === "/login" && me) content = <Card className="auth-card"><CardHeader><CardTitle>Signed in as {me.username}</CardTitle></CardHeader><CardContent className="stack">{link(accountHomePath, "Open Collection")}<Button variant="outline" aria-disabled={signingOut} onClick={() => void logout()}>Sign out</Button></CardContent></Card>;
   else if (["/login", "/setup", "/invite", "/reset", "/settings"].includes(page.path) && (!protectedPath(page.path) || me)) content = <CredentialsForm key={page.visit} mode={page.path.slice(1) as FormMode} token={page.token} clearToken={clearToken} onLogin={identity => { setMe(identity); go(accountHomePath, "Signed in.", true); }} onSuccess={message => { setMe(null); if (page.path === "/setup") setSetup(false); go("/login", message, true); }} onSessionLoss={sessionLoss} link={link} />;
   else content = <p role="status">Opening account page…</p>;
@@ -183,10 +189,5 @@ export function App() {
       {!accountShell && <Brand auth />}
       <Outcome value={notice} />{content}
     </SidebarInset>
-  </div>;
-}
-function Connection({ me }: { me: Me }) {
-  return <div className="stack"><header className="page-heading"><p className="eyebrow">Your account</p><h1>Connect your devices</h1><p>Use the same account in your browser and native clients.</p></header>
-    <Card><CardHeader><CardTitle level={2}>Connection details</CardTitle><CardDescription>Sign in to a compatible client with your username and account password.</CardDescription></CardHeader><CardContent className="stack"><CopyValue label="Server URL" value={me.server_url} /><CopyValue label="Username" value={me.username} /><p>Replacing your password revokes existing client sign-ins. Sign in again on each device afterward.</p></CardContent></Card>
   </div>;
 }

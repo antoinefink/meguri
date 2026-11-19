@@ -828,6 +828,8 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'docs/process/review-log/meguri-collection-mcp-20261119.md':
+        '4060e5fd2bf9d33e022fcb97f29ac6e4aed761f3023224f779ecc4467adeaa29',
     'server/src/accounts/oauth/mod.rs':
         '34f18c2a351778b43a6d71e8a774bca913c140feec5015689233502aa49df933',
     'server/src/httpapi/oauth.rs':
