@@ -62,13 +62,16 @@ jobs:
               GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" "$@"
           }
 
+          if [[ "$SUITE" == server || "$SUITE" == package-smoke ]]; then
+            mg sync-web-image
+            mg sync-web-deps --install
+          fi
+
           case "$SUITE" in
             core) args=(core-test --quick) ;;
             server) args=(sync-server-test) ;;
             conformance) args=(conformance --lane docker) ;;
             package-smoke)
-              mg sync-web-image
-              mg sync-web-deps --install
               mg sync-web-browser-install
               args=(sync-server-package-test)
               ;;
