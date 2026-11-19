@@ -12,6 +12,8 @@ struct CompactRootView: View {
     let features: ShellFeatures
     let configuration: LaunchConfiguration
     let hasDecks: Bool
+    /// N18.1: with no collection the welcome takes the whole width, one side of the fold each.
+    var showsWelcome = false
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var isUpright = false
 
@@ -43,7 +45,7 @@ struct CompactRootView: View {
     /// Unfolded and held wide, Decks shows the list beside the deck. Held tall the
     /// system would hide the list behind a toggle, so it keeps its stack (N13).
     @ViewBuilder private func stack(_ tab: CompactTab) -> some View {
-        if tab == .decks, sizeClass == .regular, !isUpright {
+        if tab == .decks, sizeClass == .regular, !isUpright, !showsWelcome {
             NavigationSplitView(columnVisibility: .constant(.doubleColumn)) {
                 decksList
                     .navigationSplitViewColumnWidth(min: 280, ideal: 475, max: 475)

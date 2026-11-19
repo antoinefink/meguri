@@ -10,8 +10,13 @@ public enum HomeDeckListPreview: PreviewStates {
                 if state == .typical || state == .overflow {
                     HomeDeckTree(nodes: nodes(overflow: state == .overflow), select: { _ in })
                 } else {
-                    GeometryReader { geometry in
-                        scrollContent(state: state, availableHeight: geometry.size.height)
+                    if state == .empty {
+                        // The live screen's three rows, enabled (N18.1).
+                        HomeWelcome(sync: .init(), importFile: .init(), startEmpty: .init())
+                    } else {
+                        GeometryReader { geometry in
+                            scrollContent(state: state, availableHeight: geometry.size.height)
+                        }
                     }
                 }
             }
@@ -26,10 +31,9 @@ public enum HomeDeckListPreview: PreviewStates {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.large) {
                 switch state {
-                case .empty: HomeCollectionEmptyContent(importAction: {})
                 case .loading: LoadingStateView(Text(verbatim: "Opening collection…"))
                 case .error: ErrorStateView(Text(verbatim: "Couldn’t Open Collection"), message: Text(verbatim: "The collection is open in another program."), retryIdentifier: "home.collection.retry", retry: {})
-                case .typical, .overflow: EmptyView() // Rendered by the native List above.
+                case .empty, .typical, .overflow: EmptyView() // Rendered by their own lists above.
                 }
             }
             .padding(Spacing.medium)

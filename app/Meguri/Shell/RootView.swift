@@ -66,7 +66,8 @@ struct RootView: View {
                 case .compact:
                     #if os(iOS)
                     CompactRootView(navigation: navigation, features: features, configuration: configuration,
-                        hasDecks: collection?.decks.isEmpty == false)
+                        hasDecks: collection?.decks.isEmpty == false,
+                        showsWelcome: collection?.state == .noFile)
                     #endif
                 case .sidebar:
                     SidebarRootView(navigation: navigation, features: features, configuration: configuration)
