@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pub(crate) mod owned;
+pub(crate) mod deletion;
 mod root;
 mod semantic;
 pub(crate) mod collection;

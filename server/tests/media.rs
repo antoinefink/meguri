@@ -186,6 +186,94 @@ async fn download(h: &Harness, key: &str, names: &[&str]) -> BTreeMap<String, Ve
 }
 
 #[tokio::test]
+async fn administrator_deletes_only_the_selected_member_and_its_stores() {
+    async fn hostkey(h: &Harness, username: &str) -> String {
+        let request = serde_json::to_vec(&json!({"u":username,"p":PASSWORD})).unwrap();
+        let bytes = decoded(native(h, "sync", "hostKey", "", &request).await).await;
+        serde_json::from_slice::<Value>(&bytes).unwrap()["key"].as_str().unwrap().into()
+    }
+
+    let mut h = Harness::new().await;
+    let administrator = h.setup().await;
+    let admin = h.login("root.admin", PASSWORD).await;
+    let member = h.member(&admin, "deleted.member").await;
+    let other = h.member(&admin, "kept.member").await;
+    let member_cookie = h.login("deleted.member", PASSWORD).await;
+    let other_cookie = h.login("kept.member", PASSWORD).await;
+    let admin_key = login(&h).await;
+    let member_key = hostkey(&h, "deleted.member").await;
+    let other_key = hostkey(&h, "kept.member").await;
+    let id = member["id"].as_str().unwrap();
+    let reset = h.reset_link(&admin, id).await;
+    let accounts = h.path().join("state/accounts");
+    let directory = accounts.join(id);
+    let collection = directory.join("generations/initial/collection.anki2");
+    assert!(collection.is_file());
+    // The same media name in separate accounts must remain isolated.
+    assert_eq!(media(&h, &admin_key, "uploadChanges", &addition("shared.bin", b"admin bytes")).await, json!([1,1]));
+    assert_eq!(media(&h, &other_key, "uploadChanges", &addition("shared.bin", b"other bytes")).await, json!([1,1]));
+    let preserved = [administrator["id"].as_str().unwrap(), other["id"].as_str().unwrap()]
+        .map(|id| (accounts.join(id), store_bytes(&accounts.join(id))));
+    assert_eq!(media(&h, &member_key, "uploadChanges", &addition("shared.bin", b"deleted bytes")).await, json!([1,1]));
+
+    // First deletion request: the untouched server must fail here with 404.
+    let response = h.post(&format!("/api/admin/accounts/{id}/delete"), json!({}), Some(&admin)).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.json::<Value>().await.unwrap(), json!({"data":null}));
+    assert!(!directory.exists(), "collection and uploaded media must both be purged");
+    assert!(!collection.exists());
+
+    // Exercise refusal against an existing member, before any deletion of it.
+    let protected = h.member(&admin, "protected.member").await;
+    let protected_id = protected["id"].as_str().unwrap();
+    let protected_directory = accounts.join(protected_id);
+    let protected_stores = store_bytes(&protected_directory);
+    let protected_delete = format!("/api/admin/accounts/{protected_id}/delete");
+    error(h.post(&protected_delete, json!({}), Some(&other_cookie)).await, 403, "permission_denied").await;
+    error(h.post(&protected_delete, json!({}), None).await, 401, "authentication_failed").await;
+    for origin in [None, Some("https://other.example.test")] {
+        let request = h.client.post(format!("{}{protected_delete}", h.base))
+            .header("cookie", &admin).json(&json!({}));
+        let request = if let Some(origin) = origin { request.header("origin", origin) } else { request };
+        error(request.send().await.unwrap(), 403, "origin_rejected").await;
+    }
+    error(h.post(&format!("/api/admin/accounts/{}/delete", administrator["id"].as_str().unwrap()), json!({}), Some(&admin)).await, 403, "permission_denied").await;
+    error(h.post(&format!("/api/admin/accounts/{id}/delete"), json!({}), Some(&admin)).await, 404, "route_not_found").await;
+    assert_eq!(store_bytes(&protected_directory), protected_stores);
+    let protected_cookie = h.login("protected.member", PASSWORD).await;
+
+    for restart in [false, true] {
+        if restart {
+            h = Harness::reopen(h.stop().await).await;
+        }
+        assert!(!directory.exists());
+        for (path, bytes) in &preserved {
+            assert_eq!(&store_bytes(path), bytes);
+        }
+        assert_eq!(store_bytes(&protected_directory), protected_stores);
+        error(h.get("/api/me", Some(&member_cookie)).await, 401, "authentication_failed").await;
+        error(h.post("/api/login", json!({"username":"deleted.member","password":PASSWORD}), None).await, 401, "authentication_failed").await;
+        assert_eq!(native(&h, "msync", "begin", &member_key, br#"{"v":"synthetic-media"}"#).await.status(), 403);
+        error(h.post("/api/resets/claim", json!({"token":reset,"new_password":NEW_PASSWORD}), None).await, 403, "capability_invalid").await;
+        for cookie in [&admin, &other_cookie, &protected_cookie] {
+            assert_eq!(h.get("/api/me", Some(cookie)).await.status(), 200);
+        }
+        assert_eq!(download(&h, &admin_key, &["shared.bin"]).await["shared.bin"], b"admin bytes");
+        assert_eq!(download(&h, &other_key, &["shared.bin"]).await["shared.bin"], b"other bytes");
+        let response = h.get("/api/admin/accounts", Some(&admin)).await;
+        assert_eq!(response.status(), 200);
+        let list = response.json::<Value>().await.unwrap();
+        let rows = list["data"]["accounts"].as_array().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|row| row["id"] != id));
+        for identity in [&administrator, &other, &protected] {
+            assert!(rows.iter().any(|row| row["id"] == identity["id"]));
+        }
+    }
+    let _ = h.stop().await;
+}
+
+#[tokio::test]
 async fn authenticated_media_upload_storage_tracks_live_blobs_per_account() {
     let h = Harness::new().await;
     let identity = h.setup().await;

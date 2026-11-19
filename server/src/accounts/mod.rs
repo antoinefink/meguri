@@ -2,6 +2,7 @@
 mod administration;
 mod barrier;
 mod credentials;
+mod deletion;
 mod provision;
 use crate::{
     Config, DataRoot, Error, Result, crypto,
@@ -111,11 +112,21 @@ impl Service {
             #[cfg(feature = "test-hooks")]
             hooks: crate::test_hooks::Hooks::default(),
         });
-        service.resume_startup().await?;
+        if service.admission_open().await? {
+            service.resume_startup().await?;
+        }
         // Provisioning must obtain its staging budget before any schema write.
         // The exclusive root owner still prevents serving until both complete;
         // upgrade_media validates semantics before and after migration.
-        service.metadata.files(|r| { r.upgrade_media()?; crate::media::recovery::startup(r) }).await?;
+        service.metadata.files(|r| {
+            r.upgrade_media()?;
+            r.upgrade_deletions()?;
+            Ok(())
+        }).await?;
+        service.recover_deletions().await?;
+        if service.admission_open().await? {
+            service.metadata.files(crate::media::recovery::startup).await?;
+        }
         Ok(service)
     }
     pub async fn status(&self) -> Result<bool> {

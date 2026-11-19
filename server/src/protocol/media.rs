@@ -56,6 +56,8 @@ pub(crate) async fn handle(service:Arc<Service>,authority:NativeAuthority,method
             service.pause("media_download_pinned").await;
             let root=service.metadata.owner(); let budget=service.temp.clone();
             let output=tokio::task::spawn_blocking(move ||archive::download(&root,&account,budget,requested)).await.map_err(|_|Error::new("storage_unavailable"))??;
+            #[cfg(feature="test-hooks")]
+            service.pause("media_download_opened").await;
             framing::file_download(service,output.file.try_clone()?,output)
         },
         _=>Err(Error::new("route_not_found")),

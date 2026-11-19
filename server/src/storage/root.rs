@@ -221,6 +221,73 @@ impl DataRoot {
         if !self.path.join(relative).try_exists()? { pinned.remove(relative); }
         Ok(())
     }
+    /// Capture only a validated live directory. A provisioning reservation may
+    /// own no directory yet; that absence never authorizes deleting a later one.
+    pub(crate) fn account_deletion_binding(&self, id: &str, provisioning: bool) -> Result<Option<(u64,u64)>> {
+        self.stores(id)?;
+        let mut pinned = self.directories.lock().map_err(|_| unavailable())?;
+        let parent = self.bound_dir_locked(Path::new("state/accounts"), false, &mut pinned)?;
+        if at::optional_dir(&parent, &format!(".delete-{id}"))?.is_some() { return Err(unavailable()); }
+        match at::optional_dir(&parent, id)? {
+            Some(directory) => {
+                let current = self.bound_dir_locked(&PathBuf::from("state/accounts").join(id), false, &mut pinned)?;
+                if at::identity(&directory)? != at::identity(&current)? { return Err(unavailable()); }
+                Ok(Some(at::identity(&current)?))
+            }
+            None if provisioning => Ok(None),
+            None => Err(unavailable()),
+        }
+    }
+    pub(crate) fn remove_account_directory(&self, id: &str, expected: Option<(u64,u64)>) -> Result<()> {
+        self.stores(id)?;
+        let relative = PathBuf::from("state/accounts").join(id);
+        let quarantine = format!(".delete-{id}");
+        let (parent, removed) = {
+            let mut pinned = self.directories.lock().map_err(|_| unavailable())?;
+            let parent = self.bound_dir_locked(Path::new("state/accounts"), false, &mut pinned)?;
+            let original = at::optional_dir(&parent, id)?;
+            // Never put a quarantine path in the permanent directory pin map.
+            let staged = at::optional_dir(&parent, &quarantine)?;
+            let removed = match (expected, original, staged) {
+                (None, None, None) | (Some(_), None, None) => None,
+                (Some(identity), Some(original), None) => {
+                    let current = self.bound_dir_locked(&relative, false, &mut pinned)?;
+                    if at::identity(&original)? != identity || at::identity(&current)? != identity { return Err(unavailable()); }
+                    let publication = at::publish(&parent, id, &quarantine);
+                    // publish may have renamed successfully before a parent
+                    // fsync failed. Prove the move and evict pins even then.
+                    let moved = at::optional_dir(&parent, &quarantine)?;
+                    if at::optional_dir(&parent, id)?.is_some() || moved.as_ref().map(at::identity).transpose()? != Some(identity) {
+                        return Err(unavailable());
+                    }
+                    pinned.retain(|path, _| !path.starts_with(&relative));
+                    publication?;
+                    moved
+                }
+                (Some(identity), None, Some(staged)) if at::identity(&staged)? == identity => {
+                    pinned.retain(|path, _| !path.starts_with(&relative));
+                    Some(staged)
+                }
+                _ => return Err(unavailable()),
+            };
+            (parent, removed)
+        };
+        // The global pin mutex and metadata writer are both released. The
+        // retained parent and quarantine descriptors keep the checked identities.
+        crate::accounts::phase("delete_after_quarantine")?;
+        if let Some(directory) = removed {
+            if Some(at::identity(&directory)?) != expected { return Err(unavailable()); }
+            let current = at::optional_dir(&parent, &quarantine)?.ok_or_else(unavailable)?;
+            if Some(at::identity(&current)?) != expected || at::optional_dir(&parent, id)?.is_some() { return Err(unavailable()); }
+            at::purge(&directory)?;
+            at::remove_empty_directory(&parent, &quarantine, &directory)?;
+        }
+        crate::accounts::phase("delete_after_remove")?;
+        // Repeat even when both entries were already absent after interruption.
+        parent.sync_all()?;
+        crate::accounts::phase("delete_after_parent_sync")?;
+        Ok(())
+    }
     pub fn validate(&self) -> Result<()> {
         no_links(&self.path)?;
         binding(&self.path, &self.dir, true)?;
@@ -456,7 +523,7 @@ impl DataRoot {
             drop(db);
             return self.initialize_schema();
         }
-        if !matches!(version,1|2) {
+        if !matches!(version,1|2|3) {
             return Err(unavailable());
         }
         super::semantic::validate(self, &db, true)?;
@@ -516,7 +583,7 @@ impl DataRoot {
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
         let integrity: String = db.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
         let foreign: bool = db.prepare("PRAGMA foreign_key_check")?.exists([])?;
-        if !matches!(version,1|2) || integrity != "ok" || foreign {
+        if !matches!(version,1|2|3) || integrity != "ok" || foreign {
             return Err(unavailable());
         }
         let (phase, hash): (String, Vec<u8>) = db.query_row(
@@ -686,4 +753,57 @@ mod retirement_tests {
             assert!(root.directories.lock().unwrap().contains_key(&relative));
         }
     }
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn deletion_forgets_only_original_pins_even_if_rename_sync_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut root = DataRoot::acquire(&temp.path().join("owner"), true).unwrap(); root.init().unwrap();
+        let id = crypto::random_token().unwrap();
+        let relative = PathBuf::from("state/accounts").join(&id);
+        root.bound_dir(&relative.join("media"), true).unwrap();
+        let sibling = PathBuf::from("state/accounts").join(crypto::random_token().unwrap());
+        root.bound_dir(&sibling, true).unwrap();
+        let binding = root.account_deletion_binding(&id, false).unwrap();
+        assert!(crate::test_hooks::storage_failure("owned_after_publish_rename", || root.remove_account_directory(&id, binding)).is_err());
+        root.validate().unwrap();
+        let pins = root.directories.lock().unwrap();
+        assert!(!pins.keys().any(|p| p.starts_with(&relative)));
+        assert!(pins.contains_key(&sibling));
+        assert!(!pins.keys().any(|p| p.file_name().unwrap().to_string_lossy().starts_with(".delete-")));
+        drop(pins);
+        root.remove_account_directory(&id, binding).unwrap();
+        root.remove_account_directory(&id, binding).unwrap();
+        root.validate().unwrap();
+    }
+    #[test]
+    fn deletion_rejects_unbound_or_conflicting_paths_and_does_not_follow_descendant_links() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut root = DataRoot::acquire(&temp.path().join("owner"), true).unwrap(); root.init().unwrap();
+        let id = crypto::random_token().unwrap();
+        let relative = PathBuf::from("state/accounts").join(&id);
+        root.bound_dir(&relative, true).unwrap();
+        let binding = root.account_deletion_binding(&id, false).unwrap();
+        let quarantine = root.state().join("accounts").join(format!(".delete-{id}"));
+        assert!(root.remove_account_directory(&id, None).is_err());
+        assert!(root.remove_account_directory(&id, Some((0,0))).is_err());
+        directory(&quarantine, true).unwrap();
+        assert!(root.remove_account_directory(&id, binding).is_err());
+        fs::remove_dir(&quarantine).unwrap();
+        let outside = temp.path().join("outside"); fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("keep"), b"preserved").unwrap();
+        std::os::unix::fs::symlink(&outside, root.path.join(&relative).join("link")).unwrap();
+        root.remove_account_directory(&id, binding).unwrap();
+        assert_eq!(fs::read(outside.join("keep")).unwrap(), b"preserved");
+        assert!(!quarantine.exists());
+        root.validate().unwrap();
+        // Absence recorded for a never-created reservation cannot remove any
+        // subsequently found original or quarantine directory.
+        let missing = crypto::random_token().unwrap();
+        assert_eq!(root.account_deletion_binding(&missing, true).unwrap(), None);
+        let unexpected = root.state().join("accounts").join(format!(".delete-{missing}"));
+        directory(&unexpected, true).unwrap();
+        assert!(root.remove_account_directory(&missing, None).is_err());
+        assert!(unexpected.is_dir());
+    }
+
 }

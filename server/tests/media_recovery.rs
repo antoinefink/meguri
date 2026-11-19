@@ -236,7 +236,9 @@ async fn offline_v1_migration_preserves_existing_credentials_collections_and_unk
     let root=meguri_sync_server::DataRoot::acquire(&path,false).unwrap();
     // Restore the pre-media metadata shape in this stopped synthetic fixture.
     let c=rusqlite::Connection::open(root.database()).unwrap();
-    c.execute_batch("DROP TABLE media_names; DROP TABLE media_blobs; ALTER TABLE accounts DROP COLUMN media_usn; PRAGMA user_version=1;").unwrap();drop(c);
+    c.execute_batch("DROP TRIGGER deletion_id_reserved; DROP TRIGGER reservation_retained; DROP TABLE account_deletions;
+CREATE TRIGGER reservation_retained BEFORE DELETE ON provisioning_reservations BEGIN SELECT RAISE(ABORT,'retained reservation'); END;
+DROP TABLE media_names; DROP TABLE media_blobs; ALTER TABLE accounts DROP COLUMN media_usn; PRAGMA user_version=1;").unwrap();drop(c);
     let unknown=account.join("media/operator-kept");std::fs::write(&unknown,b"unknown preserved bytes").unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&unknown,std::fs::Permissions::from_mode(0o600)).unwrap();drop(root);
@@ -275,7 +277,9 @@ async fn process_kill_before_media_migration_commit_preserves_v1_and_restarts_mi
     // Restore only this stopped synthetic fixture's pre-media schema. Its real
     // credentials, provisioning proofs, collection and unknown media survive.
     let db = rusqlite::Connection::open(root.database()).unwrap();
-    db.execute_batch("DROP TABLE media_names; DROP TABLE media_blobs; ALTER TABLE accounts DROP COLUMN media_usn; PRAGMA user_version=1;").unwrap();
+    db.execute_batch("DROP TRIGGER deletion_id_reserved; DROP TRIGGER reservation_retained; DROP TABLE account_deletions;
+CREATE TRIGGER reservation_retained BEFORE DELETE ON provisioning_reservations BEGIN SELECT RAISE(ABORT,'retained reservation'); END;
+DROP TABLE media_names; DROP TABLE media_blobs; ALTER TABLE accounts DROP COLUMN media_usn; PRAGMA user_version=1;").unwrap();
     drop(db);
     let account = path.join("state/accounts").join(id);
     let unknown = account.join("media/operator-kept");
@@ -333,7 +337,7 @@ async fn process_kill_before_media_migration_commit_preserves_v1_and_restarts_mi
     let root = meguri_sync_server::DataRoot::acquire(&path, false).unwrap();
     root.check_initialized().unwrap();
     let db = rusqlite::Connection::open_with_flags(root.database(), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-    assert_eq!(db.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0)).unwrap(), 2);
+    assert_eq!(db.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0)).unwrap(), 3);
     assert_eq!(db.query_row("SELECT count(*) FROM pragma_table_info('accounts') WHERE name='media_usn'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
     assert_eq!(db.query_row("SELECT media_usn FROM accounts WHERE id=?1", [id], |r| r.get::<_, i64>(0)).unwrap(), 1);
     drop(db);
@@ -362,4 +366,33 @@ async fn process_kill_before_media_migration_commit_preserves_v1_and_restarts_mi
     assert_eq!(store_bytes(&path.join("state/accounts")), migrated_stores);
     assert_eq!(std::fs::read(&unknown).unwrap(), b"preserve unknown media\0\xff");
     // SIGKILL at the existing migration hook, not power-loss emulation.
+}
+
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+async fn deletion_retires_native_round_without_waiting_for_opened_media_snapshot() {
+    let h = Harness::new().await;
+    h.setup().await;
+    let admin = h.login("root.admin", PASSWORD).await;
+    let member = h.member(&admin, "snapshot.member").await;
+    let id = member["id"].as_str().unwrap();
+    let key = login(&h, "snapshot.member").await;
+    assert_eq!(media(&h, &key, "uploadChanges", &zip("snapshot", b"prior snapshot")).await, json!([1,1]));
+    ready_to_finish(&h, &key).await;
+    let pause = h.service.hooks.arm("media_download_opened");
+    let download = request(&h.client, &h.base, "msync", "downloadFiles", &key, br#"{"files":["snapshot"]}"#);
+    let download = tokio::spawn(async move { download.send().await.unwrap() });
+    within(pause.arrived()).await;
+    let response = within(h.post(&format!("/api/admin/accounts/{id}/delete"), json!({}), Some(&admin))).await;
+    assert_eq!(response.status(), 200);
+    assert!(!h.path().join("state/accounts").join(id).exists());
+    pause.resume();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(decoded(within(download).await.unwrap()).await)).unwrap();
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut archive.by_name("0").unwrap(), &mut bytes).unwrap();
+    assert_eq!(bytes, b"prior snapshot");
+    for (family, method, bytes) in [("sync", "finish", b"{}".as_slice()), ("msync", "begin", br#"{"v":"synthetic"}"#.as_slice())] {
+        assert_eq!(request(&h.client, &h.base, family, method, &key, bytes).send().await.unwrap().status(), 403);
+    }
+    let _ = h.stop().await;
 }

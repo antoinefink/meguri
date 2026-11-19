@@ -340,7 +340,7 @@ fn mutation(path: &str) -> bool {
     ) || path
         .strip_prefix("/api/admin/accounts/")
         .and_then(|s| s.split_once('/'))
-        .is_some_and(|(id, action)| !id.is_empty() && matches!(action, "reset" | "disable"))
+        .is_some_and(|(id, action)| !id.is_empty() && matches!(action, "reset" | "disable" | "delete"))
 }
 async fn dispatch(
     service: &Service,
@@ -470,13 +470,17 @@ async fn dispatch(
         _ => {
             if let Some(suffix) = path.strip_prefix("/api/admin/accounts/") {
                 if let Some((id, action)) = suffix.split_once('/') {
-                    if !id.is_empty() && matches!(action, "reset" | "disable") {
+                    if !id.is_empty() && matches!(action, "reset" | "disable" | "delete") {
                         let _: Empty = parse(bytes)?;
                         let a = authority(service, &parts.headers).await?;
                         return if action == "reset" {
                             Ok(data(service.reset_link(a, id.into()).await?, true))
                         } else {
-                            service.disable(a, id.into()).await?;
+                            if action == "delete" {
+                                service.delete_member(a, id.into()).await?;
+                            } else {
+                                service.disable(a, id.into()).await?;
+                            }
                             Ok(data((), false))
                         };
                     }
