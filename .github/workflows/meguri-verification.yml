@@ -63,7 +63,7 @@ jobs:
           }
 
           case "$SUITE" in
-            core) args=(core-test -- --features meguri-ffi/test-hooks) ;;
+            core) args=(core-test --quick) ;;
             server) args=(sync-server-test) ;;
             conformance) args=(conformance --lane docker) ;;
             package-smoke)

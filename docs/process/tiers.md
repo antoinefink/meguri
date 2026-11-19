@@ -83,6 +83,8 @@ An entry without the approval or the evidence makes the gate fail. A test of a c
 
 Local scheduled runs remain available. `tools/mg nightly --print-schedule` writes two launchd entries (nightly at 02:30, weekly on Sundays at 04:00). Installing them is Antoine's step `nightly-scheduler` (docs/process/one-time-setup.md); agents never install them. GitHub Actions runs public synthetic Docker jobs independently of image publication. Hosted receipts identify the exact commit, job, and outcome. Keep the existing batch and release requirements until a hosted run proves equivalent coverage, including the required features, cases, skip policy, platform and architecture. A Docker conformance result supplies its Docker lane.
 
+For warm development feedback, select affected cases with `tools/mg core-test -- -E '<filter>'` and group Swift test filters in one `tools/mg swift-test -- --filter '<pattern>' --filter '<pattern>'` call to share its preparation. `tools/mg core-test --quick` runs the canaries and ordinary Core checks with FFI test hooks. `tools/mg core-test --stress` requires successful reports for exactly the 10,000-session review case and the two 150,000-card sync cases. GitHub runs the quick checks for routine verification and the scale checks nightly, manually and for Core or runner input changes. The ordinary full Core job and the local release gate retain all three cases.
+
 Antoine authorized a narrow unsigned Apple pilot on 2026-11-19 for the public Core XCFramework build on GitHub's Xcode runner. This is the exception to the Docker-only cloud placement rule (R1939). It supplies build feedback. The signed app journey, test VM, private data and device requirements retain their designated environments.
 
 ## Milestones and release

@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: MIT
+name: Verify Core at scale
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/meguri-core-stress.yml'
+      - 'core/**'
+      - 'docker/compose.yml'
+      - 'docker/dev.Dockerfile*'
+      - 'tools/mg'
+      - 'tools/mg.d/core.sh'
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/meguri-core-stress.yml'
+      - 'core/**'
+      - 'docker/compose.yml'
+      - 'docker/dev.Dockerfile*'
+      - 'tools/mg'
+      - 'tools/mg.d/core.sh'
+  schedule:
+    - cron: '37 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: meguri-core-stress-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stress:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run the three full-scale Core cases
+        shell: bash
+        run: |
+          rc=0
+          receipt="$(sudo -n env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
+            GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" \
+            core-test --stress)" || rc=$?
+          if [[ -f "$receipt" ]]; then
+            cp "$receipt" "$RUNNER_TEMP/meguri-result.json"
+          fi
+          ((rc == 0))
+          jq -e --arg sha "$GITHUB_SHA" \
+            '.status == "pass" and .commit.sha == $sha and .commit.dirty == false
+            and .job == "core-test" and .args == ["--stress"]
+            and .placement == "docker" and .service == "dev"
+            and .summary == {total: 3, passed: 3, failed: 0, skipped: 0}
+            and (.details.stress_tests | type == "array" and length == 3)' "$receipt"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: meguri-core-stress-result
+          path: ${{ runner.temp }}/meguri-result.json
+          if-no-files-found: ignore
+          retention-days: 7

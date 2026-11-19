@@ -976,9 +976,9 @@ PUBLIC_ARTIFACTS = {
         "72169adb46c2ff96e675b412cfc1a5959a8c9037bca6689fcf59d73f0d093f41",
     # Complete public-file review: verification_plan_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
-        "76fc832c4625c3cacda50974bf8e336d24d826b46551495eb7ef024516f870ac",
+        "609deb94c749e43e802dbaf344a96847b76accd06cebce46f91cdfae76e9bfaf",
     "docs/process/tiers.md":
-        "132cb674d320b50afd7c8e56badd5af9aaf90f1e1cf953834860afc15c2c363e",
+        "e3e5c72ffe6e5111f4efdc894427ba0b6f1fde00d41ea547a22e02d3d9508ffc",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
     "core/crates/meguri-engine/tests/editor_services.rs":
         "b6fb526f02c4f15c0946c9a06be200b0e47a5b836f05266b45af8d06d6bc2471",
