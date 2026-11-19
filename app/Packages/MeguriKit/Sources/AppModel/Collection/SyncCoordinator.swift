@@ -491,7 +491,7 @@ public final class SyncCoordinator {
         if providerNeedsAttention { return true }
         return switch providerState?.selection {
         case .meguri: meguriStatus.needsUser
-        case .iCloud: SyncStatusPresentation.needsUser(status?.state)
+        case .iCloud: SyncStatusPresentation.needsUser(status?.state, setup: setupState)
         case .localOnly, nil: false
         }
     }

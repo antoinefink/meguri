@@ -76,12 +76,19 @@ public struct SyncStatusPresentation {
     /// Whether iCloud sync waits on the person: a decision, an account or a
     /// problem that will not clear by itself. Waiting, transfers and a pause
     /// the person chose do not count (N16.2).
-    public static func needsUser(_ state: CloudPolicyStatusState?) -> Bool {
-        switch state {
+    public static func needsUser(_ state: CloudPolicyStatusState?, setup: SyncCoordinator.SetupState) -> Bool {
+        // The installation cannot reach iCloud until it is set up: a setup step.
+        if setup == .configurationUnavailable { return true }
+        return switch state {
         case .needsAttention, .paused(.decisionRequired): true
         case .iCloudUnavailable(let reason): reason != .temporary
         default: false
         }
+    }
+    /// Sync Now may ask for the status. During review it shows only where the
+    /// status button itself shows (N16.2): presenting it pauses the review.
+    public static func showsStatusAfterSyncNow(requested: Bool, reviewing: Bool, needsUser: Bool) -> Bool {
+        requested && (!reviewing || needsUser)
     }
     public static func showsRecoveryResume(_ recovery: CloudRecoveryStatus) -> Bool {
         if recovery.adoptionRecoveredCancelOnly || recovery.adoptionAfterReview { return false }
@@ -260,7 +267,10 @@ extension ReviewCollection {
             return true
         }
         sync.syncNow(source: source)
-        if showStatus { syncPresentation.statusPresented = true }
+        if SyncStatusPresentation.showsStatusAfterSyncNow(requested: showStatus, reviewing: review != nil,
+                                                          needsUser: sync.needsUser) {
+            syncPresentation.statusPresented = true
+        }
         return true
     }
     /// A preview cannot enable sync. Preparing the existing entry location also
@@ -362,15 +372,11 @@ public struct MeguriSyncStatusPresentation {
         }
     }
     /// Whether Meguri Sync waits on the person (N16.2): a sign-in, a
-    /// collection choice or a setup that cannot go on. Transfers, pending
-    /// changes, a pause the person chose, failures that retry and the state
-    /// before the first report do not count; a stopped provider is the
-    /// coordinator's `providerNeedsAttention`.
-    public var needsUser: Bool {
-        ["signedOut", "signInRequired", "setup", "chooseCollection", "mediaBlocked", "acceptanceUnknown",
-         "acceptedLocalIncomplete", "setupFailed", "connectionBlocked"]
-            .contains { titleKey == "sync.meguri.status.\($0).title" }
-    }
+    /// collection choice, a setup step, or a round or setup that stopped and
+    /// will not retry. Transfers, pending changes, a pause the person chose,
+    /// failures that retry and the state before the first report do not
+    /// count. From the inputs, never from the title.
+    public let needsUser: Bool
     public var symbol: String {
         if isBusy { return "arrow.triangle.2.circlepath" }
         return switch titleKey {
@@ -444,6 +450,21 @@ public struct MeguriSyncStatusPresentation {
             }
         } else { pair = ("signedIn", "sync.meguri.status.setupUnavailable") }
         titleKey = "sync.meguri.status.\(pair.0).title"; detailKey = pair.1
+        if stopped || connection == .blocked { needsUser = true }
+        else if connection == .unconfigured || connection == .authenticating { needsUser = false }
+        else if connection == .signedOut || connection == .cancelled { needsUser = true }
+        else if let stage {
+            needsUser = switch stage {
+            case .required, .preview, .mediaBlocked, .acceptanceUnknown, .acceptedLocalIncomplete, .failed: true
+            case .preparing, .collection, .media: false
+            }
+        } else if paused { needsUser = false }
+        else if let routine {
+            needsUser = switch routine {
+            case .failed, .mediaBlocked, .authentication, .acceptanceUnknown, .fullSyncRequired: true
+            case .unreported, .exchanging, .idle, .pending, .waiting, .network, .server, .cancelled: false
+            }
+        } else { needsUser = true } // Signed in, setup not continued.
         // Waiting has the same title as pending, but proves no completed work.
         self.lastExchange = pair.0 == "on" || (pair.0 == "pending" && routine == .pending) ? lastExchange : nil
     }
