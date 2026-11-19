@@ -12,6 +12,106 @@ import notify
 /// --suite CollectionEntryJourneyTests. First-run picker hierarchy attachments
 /// are required evidence; provider navigation uses visible system labels only.
 @MainActor final class CollectionEntryJourneyTests: XCTestCase {
+    #if os(iOS)
+    func testSettingsAccountSyncReopensWithMeguriSelected() throws {
+        continueAfterFailure = false
+        let build = try BuildUnderTest.current()
+        let bundle = try build.bundleIdentifier
+        XCTAssertTrue(build.hasHooks && bundle.hasSuffix(".dev"), "Requires the development fixture installer")
+        guard build.hasHooks, bundle.hasSuffix(".dev") else { return }
+        let appInfo = try build.appInfo
+        try XCTSkipIf(appInfo["MeguriCloudSchemaConfigured"] as? Bool != true,
+            "Requires team signing with the cloud schema configured")
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "app/Fixtures/CollectionEntry/EmptyCollection"),
+            locale: "en_US", animations: false).arguments
+        app.launch()
+        addTeardownBlock { @MainActor in app.terminate() }
+
+        XCTAssertTrue(app.staticTexts["No Collection"].waitForExistence(timeout: 10))
+        let settings = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.settings",
+            sidebarIdentifier: "shell.root.sidebar.settings", compactLabel: "Settings", timeout: 10), app.debugDescription)
+        try click(settings, app, bundle)
+        let accountRows = app.buttons.matching(identifier: "settings.root.accountSync")
+        let account = try XCTUnwrap(waitForHittable(accountRows), app.debugDescription)
+        XCTAssertEqual(accountRows.count, 1)
+        try click(account, app, bundle)
+        XCTAssertTrue(app.staticTexts["Choose a service to sync this collection."].waitForExistence(timeout: 10),
+            "Requires fresh synthetic local-only provider state")
+        let services = app.buttons.matching(identifier: "settings.accountSync.service")
+        let service = try XCTUnwrap(waitForHittable(services), app.debugDescription)
+        XCTAssertEqual(services.count, 1)
+        XCTAssertTrue(service.isEnabled)
+        try click(service, app, bundle)
+        // The standard iOS Picker exposes menu choices as native buttons.
+        let options = app.buttons.matching(NSPredicate(format: "label == %@", "Meguri Sync"))
+        let meguri = try XCTUnwrap(waitForHittable(options), app.debugDescription)
+        XCTAssertEqual(options.count, 1)
+        try click(meguri, app, bundle)
+
+        func checkFormAndGoBack() throws {
+            let serviceCommitted = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format:
+                "exists == true AND (label == %@ OR value == %@ OR label == %@)",
+                "Meguri Sync", "Meguri Sync", "Sync Service, Meguri Sync"), object: service)], timeout: 20) == .completed
+            if !serviceCommitted {
+                // Fixed synthetic targets only; never read credential field values.
+                let identifiers = ["settings.root.accountSync", "settings.accountSync.content",
+                    "settings.accountSync.service", "settings.accountSync.meguri.address",
+                    "settings.accountSync.meguri.username", "settings.accountSync.meguri.password",
+                    "settings.accountSync.meguri.signIn", "sync.serviceSwitch.confirm"]
+                var context = identifiers.map { identifier in
+                    "\(identifier): count=\(app.descendants(matching: .any).matching(identifier: identifier).count)"
+                }
+                if service.exists {
+                    context.append("service: label=\(service.label.debugDescription) value=\(String(describing: service.value)) enabled=\(service.isEnabled) hittable=\(service.isHittable)")
+                }
+                context.append("Account & Sync navigation bar: \(app.navigationBars["Account & Sync"].exists)")
+                context.append("Settings navigation bar: \(app.navigationBars["Settings"].exists)")
+                let attachment = XCTAttachment(string: context.joined(separator: "\n"))
+                attachment.name = "settings-account-sync-unsettled"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+            XCTAssertTrue(serviceCommitted, "The committed service must survive reopening")
+            XCTAssertTrue(element(app, "settings.accountSync.content").exists)
+            for name in ["address", "username", "password"] {
+                let fields = name == "password"
+                    ? app.secureTextFields.matching(identifier: "settings.accountSync.meguri.password")
+                    : app.textFields.matching(identifier: "settings.accountSync.meguri.\(name)")
+                let field = try XCTUnwrap(waitForHittable(fields), "Actionable native \(name) field required")
+                XCTAssertEqual(fields.count, 1)
+                XCTAssertTrue(field.isEnabled)
+            }
+            let signIns = app.buttons.matching(identifier: "settings.accountSync.meguri.signIn")
+            let signIn = signIns.firstMatch
+            XCTAssertTrue(signIn.waitForExistence(timeout: 20), app.debugDescription)
+            XCTAssertEqual(signIns.count, 1)
+            XCTAssertEqual(signIn.label, "Sign In")
+            XCTAssertFalse(signIn.isEnabled, "Empty credentials must not submit")
+            XCTAssertFalse(app.buttons["settings.accountSync.done"].exists, "Use the pushed Settings page")
+            // Exercise real secure-field focus without credentials or submission.
+            let password = app.secureTextFields["settings.accountSync.meguri.password"]
+            try click(password, app, bundle)
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+            XCTAssertTrue(password.exists && password.isEnabled && password.isHittable)
+            let back = try XCTUnwrap(waitForHittable(app.navigationBars["Account & Sync"].buttons
+                .matching(NSPredicate(format: "label == %@", "Settings"))), app.debugDescription)
+            try click(back, app, bundle)
+            _ = try XCTUnwrap(waitForHittable(accountRows), "One Back must return to the Settings root")
+            XCTAssertTrue(app.navigationBars["Settings"].exists)
+            XCTAssertFalse(element(app, "settings.accountSync.content").exists)
+            XCTAssertFalse(app.secureTextFields["settings.accountSync.meguri.password"].exists)
+            XCTAssertTrue(app.buttons["settings.root.collection"].exists)
+        }
+
+        try checkFormAndGoBack()
+        let reopen = try XCTUnwrap(waitForHittable(accountRows), app.debugDescription)
+        try click(reopen, app, bundle)
+        try checkFormAndGoBack()
+    }
+    #endif
+
     func testNoFileHomeAccountSyncActionReturnsToCollectionChoices() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()

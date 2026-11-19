@@ -172,7 +172,9 @@ public struct MacSettingsView: View {
             .navigationSplitViewColumnWidth(min: 200, ideal: 215, max: 260)
         } detail: {
             if section == "accountSync" {
-                AccountSyncView(collection: collection, host: .settings)
+                NavigationStack {
+                    AccountSyncView(collection: collection, host: .settings)
+                }
             } else {
               Form {
                 if section == "collection" {

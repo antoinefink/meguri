@@ -19,15 +19,12 @@ public struct AccountSyncView: View {
     private var controls: CloudPolicyControls { sync.status?.controls ?? .unknown }
     private var decisionRequired: Bool { controls.decisionRequired == true }
     public var body: some View {
-        if sync.providerState?.selection == .meguri {
-            NavigationStack {
-                form.navigationDestination(isPresented: Binding(
-                    get: { collection.syncPresentation.meguriAffectedFilesPresented },
-                    set: { collection.syncPresentation.meguriAffectedFilesPresented = $0 })) {
-                        MeguriAffectedFilesPage(collection: collection)
-                    }
+        // Settings and the sheet each supply this page's navigation stack.
+        form.navigationDestination(isPresented: Binding(
+            get: { sync.providerState?.selection == .meguri && collection.syncPresentation.meguriAffectedFilesPresented },
+            set: { collection.syncPresentation.meguriAffectedFilesPresented = $0 })) {
+                MeguriAffectedFilesPage(collection: collection)
             }
-        } else { form }
     }
     private var form: some View {
         Form {
