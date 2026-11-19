@@ -1125,14 +1125,18 @@ PUBLIC_ARTIFACTS = {
     # independently reviewed technical contracts, exact paths and full bytes.
     "docs/plans/2026-11-15-1028-feat-meguri-sync-server-plan.md":
         "80af6e19d1dad2fc8d100d502f53bece53be1ab52d5e49fe4a9f16131f51d067",
+    "docs/plans/2026-11-19-1436-feat-meguri-sync-collection-mcp-plan.md":
+        "ece3faa526ba7a9002cdba8ef7e08845b64b6ca4c0a8cbc35e8fb36db06710fd",
     "specs/sync/server-collection.md":
-        "36f7c4adee4eb035c0342e715f0d052a77bd57137d33222e5ee7e84a8f0b9bfa",
+        "bf5f4248cb2a7126c58c4177873128c3b3d33ba2d0f155bac68ffe0dbe9d4eeb",
     "specs/sync/server-lifecycle.md":
         "abacc93c438e5230f8cd8a60a671e8da7efd521465d0d98d189e95444ecd20f1",
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        '1d7a1e41539e81871ed19bcc02866d99104bf61c8ab35f4927a4874dce91efb2',
+        'c181fec0d6563e2a84897264435607d980b181492dc00f8602cc6015495e4b04',
+    "specs/servers/meguri-collection-mcp.md":
+        "b2e41383f691526431cbc231f4c1b9480868bfc70bdca4d02c861de016921e8a",
     "specs/conformance/meguri-sync-server.md":
         '4c0e7651ab72236ad31320925e8c1c163c6dc7f1904e9c0c3e52df50e8f9e479',
     "conformance/schema/meguri-sync-server.schema.json":
