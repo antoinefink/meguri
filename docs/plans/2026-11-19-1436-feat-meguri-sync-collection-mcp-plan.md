@@ -139,7 +139,7 @@ Product Contract unchanged.
 
 - Keep the daily-review repairs first for integration. The inspected full gate `gate/20261119T033410Z-80366` was cancelled, and its partial results remain in the [verification register](../process/verification-status.md). Run focused checks for independent changes on this worktree.
 - The [repository workflow](../../AGENTS.md) authorizes the `mcp` branch and a draft PR against `master`. Preserve separate local and hosted verification evidence.
-- Prove native sync compatibility under mixed-client note creation before shipping U3. Resolve different-GUID ID collisions and changing new-card position state under the reviewed native sync contract. One local uniqueness check cannot prove convergence across offline devices.
+- Verify that ordinary native incremental sync delivers MCP writes. Keep Anki-compatible timestamp IDs and the established native merge rules. Antoine accepted the rare case where independent writers choose the same ID.
 
 ### Key Technical Decisions
 
@@ -192,12 +192,12 @@ The collection write path resolves authority and generation, checks the note rev
 
 **Files** `specs/servers/meguri-sync-web.md`, new `specs/servers/meguri-collection-mcp.md`, `specs/sync/server-collection.md`, `specs/sync/server-lifecycle.md`, `specs/notes/card-generation.md`, and new `server/tests/mcp_collection.rs` and `server/tests/mcp_oauth.rs` fixtures.
 
-**Approach** Settle the collection invariants, account revocation boundary and compatible stamps. Verify collision and new-card positions with the existing cross-client protocol before covering them in U3. Review the dependency choice, rollback and exact packaging impact before admitting the SDK and OAuth code.
+**Approach** Settle the collection invariants, account revocation boundary and compatible stamps. Verify incremental delivery and new-card positions with the existing cross-client protocol. Review the dependency choice, rollback and exact packaging impact before admitting the SDK and OAuth code.
 
 **Test scenarios**
 
 - Native sync from a baseline carries an eligible server-authored note, tags and cards with equal-second and equal-millisecond variations.
-- Independently created notes from a sync baseline converge with distinct identities, including the case of device and server choosing the same candidate ID.
+- Independently created notes with distinct IDs converge from a shared sync baseline.
 - After restore, reset or disable, previous credentials fail authorization while the current collection remains readable to a newly authorized account when applicable.
 
 **Verification** Independent neutral-spec and privacy review, then real protocol characterization with generated fixtures.
