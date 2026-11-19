@@ -255,7 +255,14 @@ public final class SyncCoordinator {
     public enum SetupState: Equatable { case configurationUnavailable, prepared, attached, failed }
     public private(set) var setupState: SetupState = .configurationUnavailable
     public private(set) var status: CloudPolicyStatus?
-    public private(set) var settings: CloudPolicyDeviceSettings
+    /// P25.1: `media` is true in every value this coordinator holds or sends.
+    public private(set) var settings: CloudPolicyDeviceSettings {
+        didSet {
+            if !settings.media, !stagesMediaForTests {
+                settings = .init(enabled: settings.enabled, paused: settings.paused, automatic: settings.automatic, media: true)
+            }
+        }
+    }
     public private(set) var generation: UInt64 = 0 {
         didSet { if generation != oldValue { meguriLastExchange = nil } }
     }
@@ -275,6 +282,8 @@ public final class SyncCoordinator {
     public private(set) var preview: CloudConnectionPreviewWork?
     public private(set) var connectionFailure: CloudConnectionFailure?
     public private(set) var recovery: CloudRecoveryStatus?
+    /// The retained op could not be read at this attachment: it is not proved absent.
+    public private(set) var recoveryReadFailed = false
     /// True until the original retained preview task has returned, including cancellation/drain.
     /// Publication and recovery work deliberately do not count as preview activity.
     public var connectionPreviewActive: Bool { readingPreview }
@@ -486,17 +495,59 @@ public final class SyncCoordinator {
     // from the selected service's committed settings so it survives a change.
     private static let automaticKey = "meguri.sync.automatic"
     private static let round2Key = "meguri.sync.round2Migrated"
+    /// Rendering fixtures only: no binding stands behind this value.
+    private var renderConnected: Bool?
     /// P25.3: on with no stored value. Written only when the person changes
     /// the switch or P25.2's migration writes off.
     public var storedAutomatic: Bool { (defaults?.object(forKey: Self.automaticKey) as? Bool) ?? memoryAutomatic }
     private var memoryAutomatic = true
-    private var settingsWrittenHere = false
+    fileprivate func applyRenderFixture(_ state: RenderState) {
+        let recent = Int64(clock.now().timeIntervalSince1970 * 1_000) - 240_000
+        setupState = .attached
+        switch state {
+        case .off:
+            providerState = .renderFixture(selection: .localOnly, phase: .localOnly)
+            status = .renderFixture(state: .localOnly, syncNow: .unavailable(.notConnected))
+        case .meguriConnected, .meguriNeedsYou:
+            providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+            meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
+            meguriRoutine = state == .meguriConnected ? .idle : .fullSyncRequired
+            meguriLastExchange = recent
+            renderConnected = true
+        case .meguriSignIn:
+            providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
+            meguriPhase = .signedOut; meguriEndpoint = "https://sync.example.test/"
+            renderConnected = false
+        case .iCloudSelected:
+            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
+            status = .renderFixture(state: .localOnly, syncNow: .unavailable(.notConnected), controls: .init(enable: .connect))
+            renderConnected = false
+        case .iCloudConnected:
+            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
+            settings = .init(enabled: true, paused: false, automatic: true, media: true)
+            status = .renderFixture(state: .upToDate(asOfMilliseconds: recent),
+                controls: .init(bindingUsable: true, bindingActive: true, automaticEligible: true))
+        case .iCloudNeedsYou:
+            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
+            settings = .init(enabled: true, paused: false, automatic: true, media: true)
+            status = .renderFixture(state: .needsAttention, stateWithoutAttention: .changesPending,
+                attention: [.quotaFull: 1, .oversize: 2], pending: 12,
+                controls: .init(bindingUsable: true, bindingActive: true, automaticEligible: true))
+        case .iCloudIssues:
+            providerState = .renderFixture(selection: .iCloud, phase: .iCloud)
+            settings = .init(enabled: true, paused: false, automatic: true, media: true)
+            status = .renderFixture(state: .needsAttention, stateWithoutAttention: .upToDate(asOfMilliseconds: recent),
+                attention: [.oversize: 2, .refused: 1, .conflicts: 3],
+                controls: .init(bindingUsable: true, bindingActive: true, automaticEligible: true))
+        }
+    }
     /// P25.3 "connected": the selected service has a ready binding.
     public var serviceConnected: Bool {
+        if let renderConnected { return renderConnected }
         switch providerState?.selection {
-        case .meguri: meguriAutomaticSettingVisible
-        case .iCloud: status?.controls.bindingUsable == true
-        case .localOnly, nil: false
+        case .meguri: return meguriAutomaticSettingVisible
+        case .iCloud: return status?.controls.bindingUsable == true
+        case .localOnly, nil: return false
         }
     }
     /// What the Sync Automatically switch shows: the committed value once
@@ -510,52 +561,98 @@ public final class SyncCoordinator {
         guard automaticSwitchAvailable else { return }
         rememberAutomatic(on)
         // Turning it on is a clearing act of the update hold (P25.2).
-        setDeviceSettings(paused: on ? false : settings.paused, automatic: on, media: true)
+        setDeviceSettings(paused: on ? false : settings.paused, automatic: on)
     }
     private func rememberAutomatic(_ on: Bool) {
-        memoryAutomatic = on
+        memoryAutomatic = on; memoryAutomaticStored = true
         defaults?.set(on, forKey: Self.automaticKey)
+    }
+    private var memoryAutomaticStored = false
+    private var automaticIsStored: Bool {
+        defaults.map { $0.object(forKey: Self.automaticKey) != nil } ?? memoryAutomaticStored
+    }
+    /// An earlier build's stored values still wait for P25.2's migration.
+    private var round2MigrationPending: Bool {
+        guard let defaults else { return false }
+        return !defaults.bool(forKey: Self.round2Key)
     }
     /// P25.2: a stored pause is only the update hold; no control sets it.
     public var updateHold: Bool { settings.paused || desiredProviderSettings?.paused == true }
     /// Every clearing act writes `paused: false` before its request goes on.
+    /// Auto stays as stored: a pause that the migration has not turned into
+    /// Sync Automatically off yet (its write failed, or this act came first)
+    /// stores off here, before the write, so it can never read on afterwards.
     @discardableResult public func clearUpdateHold() async -> Bool {
         if let pending = providerSettingsTask { await pending.value }
         guard settings.paused else { return true }
-        setDeviceSettings(paused: false, automatic: settings.automatic, media: true)
+        if round2MigrationPending { rememberAutomatic(false) }
+        setDeviceSettings(paused: false, automatic: settings.automatic && storedAutomatic)
         if let write = providerSettingsTask { await write.value }
         return !settings.paused
     }
-    /// P25.1, P25.2: runs once per attachment, before its first DeviceSettings
-    /// input. One write turns a stored pause into Sync Automatically off; the
-    /// pause stays, as the update hold, only with a `publish` or `adopt` op.
+    /// P25.1, P25.2: runs at each attachment until it has succeeded once, before
+    /// that attachment's first DeviceSettings input. One write turns a stored
+    /// pause into Sync Automatically off; the pause stays, as the update hold,
+    /// only with a `publish` or `adopt` op. The device's own value is stored
+    /// before the service's settings are written, so a failed or interrupted
+    /// write never leaves Sync Automatically reading on.
     private func migrateRound2Settings(_ retained: Result<CloudRecoveryStatus?, any Error>) async {
-        // Only values stored by an earlier build migrate: once per installation.
-        // A value this coordinator wrote itself is not an earlier build's.
-        guard let defaults, !defaults.bool(forKey: Self.round2Key), !settingsWrittenHere else { return }
+        if let pending = providerSettingsTask { await pending.value }
+        guard let defaults, round2MigrationPending else { return }
+        let operation = retainedOperationForMigration?() ?? retained.map { $0 != nil }
         var next = settings
-        if !next.media { next = .init(enabled: next.enabled, paused: next.paused, automatic: next.automatic, media: true) }
-        if next.paused {
-            let hold: Bool
-            switch retained {
-            case .success(let op): hold = op != nil
-            // An op that cannot be read is not proved absent: nothing opens.
-            case .failure: hold = providerState?.selection != .meguri
-            }
-            next = .init(enabled: next.enabled, paused: hold, automatic: false, media: true)
+        // P25.3: an off the person chose under the earlier build belongs to the
+        // device, so it survives a change of service.
+        if defaults.object(forKey: Self.automaticKey) == nil,
+           next.paused || (next.enabled && !next.automatic && providerState?.selection != .localOnly) {
+            rememberAutomatic(false)
         }
-        if next != settings {
-            if let provider {
-                guard let state = try? await provider.saveSettings(next), let committed = state.settings else { return }
-                providerState = state
-                next = committed
-            }
-            if settings.paused { rememberAutomatic(false) }
-            settings = next
-            defaults.set(["enabled": next.enabled, "paused": next.paused,
-                "automatic": next.automatic, "media": next.media], forKey: Self.settingsKey)
+        if next.paused {
+            next = .init(enabled: next.enabled, paused: Self.keepsUpdateHold(operation: operation, selection: providerState?.selection),
+                automatic: false, media: true)
+        }
+        if next != settings || !storedSettingsAreCurrent(next) {
+            guard await commitMigratedSettings(next) else { return }
         }
         defaults.set(true, forKey: Self.round2Key)
+    }
+    /// P25.2: the stored pause stays, as the update hold, only with a `publish`
+    /// op at any step or an `adopt` op. An op that cannot be read is not proved
+    /// absent, so nothing opens; Meguri Sync has no such op.
+    static func keepsUpdateHold(operation: Result<Bool, any Error>, selection: SyncProviderSelection?) -> Bool {
+        switch operation {
+        case .success(let present): present
+        case .failure: selection != .meguri
+        }
+    }
+    /// Tests only: whether a retained op exists, where no connection service can report one.
+    @ObservationIgnored var retainedOperationForMigration: (@MainActor () -> Result<Bool, any Error>)?
+    private func storedSettingsAreCurrent(_ value: CloudPolicyDeviceSettings) -> Bool {
+        guard let stored = defaults?.dictionary(forKey: Self.settingsKey) as? [String: Bool] else { return true }
+        return stored == ["enabled": value.enabled, "paused": value.paused, "automatic": value.automatic, "media": true]
+    }
+    /// The migration's one write, in order with every other settings write.
+    private func commitMigratedSettings(_ next: CloudPolicyDeviceSettings) async -> Bool {
+        let previous = providerSettingsTask
+        let provider = provider, attachment = hostRevision
+        var committed = false
+        let write = Task {
+            await previous?.value
+            var value = next
+            if let provider {
+                guard let state = try? await provider.saveSettings(next), let saved = state.settings,
+                      self.provider === provider, attachment == hostRevision else { return }
+                providerState = state
+                value = saved
+            }
+            settings = value
+            defaults?.set(["enabled": settings.enabled, "paused": settings.paused,
+                "automatic": settings.automatic, "media": true], forKey: Self.settingsKey)
+            committed = true
+        }
+        providerSettingsTask = write
+        await write.value
+        return committed
     }
     private var providerDirectory: URL?
     private var provider: CoreProviderService?
@@ -581,7 +678,7 @@ public final class SyncCoordinator {
             else if recovery.switchConflict { facts.recoveryOp = .publishConflict }
             else {
                 switch recovery.step {
-                case .staging, .staged, .ready: facts.recoveryOp = nil
+                case .staging, .staged, .ready: facts.recoveryOp = recovery.adoptionTransportWait ? .adoptWaiting : nil
                 default: facts.recoveryOp = .publishWaiting
                 }
             }
@@ -602,7 +699,8 @@ public final class SyncCoordinator {
             return SyncKinds.meguri(meguriKindFacts)
         }
         return SyncKinds.cloud(state: status?.state, stateWithoutAttention: status?.stateWithoutAttention,
-            attention: status?.attention ?? [:], facts: cloudKindFacts, setup: setupState)
+            attention: status?.attention ?? [:], facts: cloudKindFacts, setup: setupState,
+            selectedNotSetUp: providerState?.selection == .iCloud && status?.controls.enable == .connect)
     }
     public var meguriKindFacts: MeguriKindFacts {
         .init(handoffRecovery: providerState?.phase == .handoffRecovery, providerBlocked: providerState?.phase == .blocked,
@@ -632,6 +730,8 @@ public final class SyncCoordinator {
     }
     public private(set) var meguriPhase: MeguriProviderConnectionPhase = .unconfigured
     public private(set) var meguriEndpoint = ""
+    /// The signed-in account's name (N15.2 row 2); nil while signed out.
+    public private(set) var meguriUsername: String?
     public private(set) var meguriStage: MeguriSetupStage?
     public private(set) var meguriPreview: MeguriBootstrapPreview?
     public private(set) var meguriReceipt: MeguriBootstrapReceipt?
@@ -676,16 +776,9 @@ public final class SyncCoordinator {
             && meguriCanRun && meguriWake == nil && !meguriCancelling && !deviceSettingsSettling && meguriStage == nil
             && meguriPhase == .setupRequired && meguriStatus.route == .round
     }
-    public func setMeguriAutomatic(_ automatic: Bool) {
-        guard meguriAutomaticSettingAvailable, automatic != settings.automatic else { return }
-        setDeviceSettings(paused: settings.paused, automatic: automatic, media: settings.media)
-    }
     public var meguriStatus: MeguriSyncStatusPresentation {
         .init(stopped: providerNeedsAttention, connection: meguriAuthenticating ? .authenticating : meguriPhase,
-            stage: meguriStage, localCollection: meguriHasLocalCollection, paused: false,
-            routine: meguriRoutine, failureKey: meguriFailureKey,
-            lastExchange: meguriCanRun && !meguriCancelling ? meguriLastExchange : nil,
-            settling: deviceSettingsSettling)
+            stage: meguriStage, routine: meguriRoutine, settling: deviceSettingsSettling)
     }
     var prepareEditorReplacement: (@MainActor (String, ReviewCollection.EditorReplacementDecision, @MainActor () -> Bool) async -> ReviewCollection.EditorReplacementAdmission?)?
     var editorReplacementIsCurrent: (@MainActor (UUID) -> Bool)?
@@ -807,6 +900,7 @@ public final class SyncCoordinator {
             try await owner.load()
             guard meguriCurrent(owner, expected, revision), editRevision == meguriAddressEditRevision else { return }
             meguriPhase = await owner.phase
+            meguriUsername = await owner.username
             let configured = try await provider?.configuredMeguri()
             guard meguriCurrent(owner, expected, revision), editRevision == meguriAddressEditRevision else { return }
             guard let configured else {
@@ -895,6 +989,7 @@ public final class SyncCoordinator {
                         try await owner.configure(endpoint: endpoint)
                         guard self.meguriCurrent(owner, expected, revision), editRevision == self.meguriAddressEditRevision else { return }
                         self.meguriPhase = await owner.phase
+                        self.meguriUsername = await owner.username
                         let configured = try await owner.bootstrapService()
                         guard self.meguriCurrent(owner, expected, revision), editRevision == self.meguriAddressEditRevision else { return }
                         self.meguriLoadedConnection = (owner, configured.connection)
@@ -919,6 +1014,7 @@ public final class SyncCoordinator {
                 }
                 guard self.meguriCurrent(owner, expected, revision) else { return }
                 self.meguriPhase = await owner.phase
+                self.meguriUsername = await owner.username
                 let facade = try await owner.bootstrapService()
                 guard self.meguriCurrent(owner, expected, revision) else { return }
                 self.meguriBootstrap = facade
@@ -927,7 +1023,10 @@ public final class SyncCoordinator {
                 self.meguriLastError = error
                 if self.generation == expected, self.hostRevision == revision, editRevision == self.meguriAddressEditRevision {
                     if self.meguriSignInErrorKey == nil { self.meguriSignInErrorKey = Self.meguriAuthenticationKey(error) }
-                    if let owner = self.meguriConnectionOwner { self.meguriPhase = await owner.phase }
+                    if let owner = self.meguriConnectionOwner {
+                        self.meguriPhase = await owner.phase
+                        self.meguriUsername = await owner.username
+                    }
                 }
             }
         }
@@ -1250,7 +1349,7 @@ public final class SyncCoordinator {
         guard meguriCurrent(owner, expected, revision), let state, let committed = state.settings else { return }
         providerState = state; settings = committed
         if committed.automatic, !storedAutomatic {
-            setDeviceSettings(paused: committed.paused, automatic: false, media: true)
+            setDeviceSettings(paused: committed.paused, automatic: false)
         }
         try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
         guard meguriCurrent(owner, expected, revision), meguriReady else { return }
@@ -1365,6 +1464,7 @@ public final class SyncCoordinator {
         default: return false
         }
         meguriPhase = phase
+        if phase == .signedOut { meguriUsername = nil }
         // Reopen only through explicit sign-in or a checked local load. Keep
         // the connection, binding and all retained result/recovery evidence.
         meguriReady = false; meguriRound = nil; meguriRoutine = nil
@@ -1695,8 +1795,10 @@ public final class SyncCoordinator {
             backend.connection?.debugResetAdoptionProgress()
             #endif
             recovery = status
+            recoveryReadFailed = false
             if status != nil { retainedRecoveryStart = (backend, generation, revision) }
         case .failure:
+            recoveryReadFailed = true
             #if DEBUG
             if case .failure(let error) = result {
                 DebugCloudDiagnostics.record(.retainedRecoveryFailure, error: error)
@@ -1757,9 +1859,24 @@ public final class SyncCoordinator {
 
     /// The coordinator's one settings write. P25: the interface reaches it only
     /// through `setAutomatic` and `clearUpdateHold`, so no person can pause or
-    /// turn media off; the full form stays for the coordinator and its tests.
-    public func setDeviceSettings(paused: Bool, automatic: Bool, media: Bool = true) {
-        settingsWrittenHere = true
+    /// turn media off; the pause stays for the coordinator and its tests.
+    public func setDeviceSettings(paused: Bool, automatic: Bool) {
+        // P25.1: no caller can turn media off.
+        writeDeviceSettings(paused: paused, automatic: automatic, media: true)
+    }
+    /// Tests only, and never set by the app. The core still reads the `media`
+    /// member of a DeviceSettings input (P3 keeps it), and the suites that check
+    /// how a ResumeMedia command is joined, superseded or disposed use a media-off
+    /// input to issue that command at a chosen moment. No interface reaches this.
+    @ObservationIgnored private var stagesMediaForTests = false
+    func stageDeviceSettingsForTests(paused: Bool, automatic: Bool, media: Bool) {
+        stagesMediaForTests = true
+        writeDeviceSettings(paused: paused, automatic: automatic, media: media)
+    }
+    private func writeDeviceSettings(paused: Bool, automatic: Bool, media: Bool) {
+        // The device's own value never disagrees with a value written here. It is
+        // still first stored only by the switch or the migration (P25.3).
+        if automaticIsStored, storedAutomatic != automatic { rememberAutomatic(automatic) }
         guard !closing, !replacing, !providerActionInProgress else { return }
         guard desiredProviderSettings == nil || providerState?.phase != .blocked else { return }
         // Meguri's controls read committed fields. Reject reentry so a rapid
@@ -2466,6 +2583,38 @@ public final class SyncCoordinator {
             }
         }
     }
+    /// The person's Resume of a waiting op (`resume_recovery_op`). It clears
+    /// the update hold first (P25.2), then resumes the kind of op that waits.
+    public func resumeRecoveryOperation() async {
+        guard await clearUpdateHold() else { return }
+        if recovery?.adoptionTransportWait == true { resumeWaitingAdoption() } else { resumeConnection() }
+    }
+    /// V27.5: Off, or a change of service, is refused while an `adopt` or
+    /// `publish` op could restore the binding before, and while the op could
+    /// not be read. A `publish` op whose switch conflict is set permits it.
+    public var serviceChangeRefusedForOperation: Bool {
+        Self.serviceChangeRefused(selection: providerState?.selection, operationSwitchConflict: recovery?.switchConflict,
+            readFailed: recoveryReadFailed)
+    }
+    /// `operationSwitchConflict` is nil with no op.
+    static func serviceChangeRefused(selection: SyncProviderSelection?, operationSwitchConflict: Bool?, readFailed: Bool) -> Bool {
+        guard selection == .iCloud else { return false }
+        if readFailed { return true }
+        guard let operationSwitchConflict else { return false }
+        return !operationSwitchConflict
+    }
+    /// V27.5's first two rows: an active binding with no op stops; every other permitted state keeps local only.
+    static func offStopsBinding(bindingActive: Bool?, operationPresent: Bool) -> Bool {
+        bindingActive == true && !operationPresent
+    }
+    /// V27.5's rows for Off with iCloud selected. Writes nothing when refused.
+    @discardableResult public func turnOffICloud() async -> Bool {
+        guard providerState?.selection == .iCloud, !serviceChangeRefusedForOperation else { return false }
+        if Self.offStopsBinding(bindingActive: status?.controls.bindingActive, operationPresent: recovery != nil) {
+            await stopUsingICloud()
+        } else { await keepLocalOnly() }
+        return providerState?.selection != .iCloud
+    }
     /// User action only. Automatic connection/policy wakes cannot release a wait.
     public func resumeWaitingAdoption() {
         guard !closing, !suspended, !replacing, !settings.paused, !awaitingInitialOwnProof,
@@ -2556,6 +2705,8 @@ public final class SyncCoordinator {
         if ownWorkRequested, !cancellingConnectionOperation, !closing, !replacing, !suspended, !settings.paused, !awaitingInitialOwnProof, initialOwnDrain == nil { ownWorkRequested = false; resumeConnection() }
     }
     public func prepareConnectionCancellation() async -> CloudRecoveryCancellation? {
+        // `cancel_recovery_op` is a clearing act of the update hold (P25.2).
+        guard await clearUpdateHold() else { return nil }
         guard !closing, !suspended, !replacing, !activatingInitialAdoption,
               let backend, let own = backend.own else { return nil }
         let expected = generation, revision = hostRevision
@@ -4041,5 +4192,20 @@ public final class SyncCoordinator {
             }
         }
         observePlatformSignalLifetime?(.started)
+    }
+}
+
+extension SyncCoordinator {
+    public enum RenderState: String, Equatable, CaseIterable, Sendable {
+        case off, meguriConnected, meguriSignIn, meguriNeedsYou, iCloudSelected, iCloudConnected, iCloudNeedsYou, iCloudIssues
+    }
+    /// Builds synthetic Sync section examples. The coordinator is never
+    /// attached: it owns no collection, account, binding or server, and its
+    /// actions find nothing to act on.
+    public static func renderFixture(_ state: RenderState, clock: AppClock = .system) -> SyncCoordinator {
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in throw SyncOwnerFailure.configurationUnavailable },
+            defaults: nil, clock: clock)
+        sync.applyRenderFixture(state)
+        return sync
     }
 }

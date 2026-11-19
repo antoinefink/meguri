@@ -187,7 +187,7 @@ import Testing
              Row(.needsYou, "sync.needsYou.meguri.identityChanged", .meguriSignIn)),
             (Facts(stage: .failed, failureKey: "sync.meguri.setup.error.storage"),
              Row(.needsYou, "sync.needsYou.meguri.storage", .meguriTryAgain)),
-            (Facts(stage: .failed, failureKey: "sync.meguri.setup.error.cancelled"), Row(nil, nil)),
+            (Facts(stage: .failed, failureKey: MeguriSyncStatusPresentation.cancelledFailureKey), Row(nil, nil)),
             (Facts(), Row(.waiting, "sync.meguri.status.setupUnavailable")),
             (Facts(routine: .idle), Row(nil, nil)),
             (Facts(routine: .idle, automatic: false), Row(nil, "sync.status.automaticOff.detail")),
@@ -233,10 +233,40 @@ import Testing
 
     @Test func syncNowReasonsNameSyncSettings() {
         #expect(SyncText.value(SyncKinds.syncNowOffKey).contains("Sync settings"))
-        #expect(SyncKinds.meguriSyncNowKey("sync.meguri.now.unavailable.signIn") == "sync.meguri.now.unavailable.signIn.sync")
-        #expect(SyncKinds.meguriSyncNowKey("sync.meguri.now.unavailable.stopped") == "sync.meguri.now.unavailable.stopped.sync")
-        #expect(SyncKinds.meguriSyncNowKey("sync.meguri.now.unavailable.acceptanceUnknown")
-            == "sync.meguri.now.unavailable.acceptanceUnknown")
+        let signIn = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: nil, routine: .authentication)
+        #expect(signIn.route == .disabled("sync.meguri.now.unavailable.signIn.sync"))
+        let stopped = MeguriSyncStatusPresentation(stopped: true, connection: .setupRequired, stage: nil, routine: .idle)
+        #expect(stopped.route == .disabled("sync.meguri.now.unavailable.stopped.sync"))
+        // T19.7: full sync required leads to the status action, not a Sync Now text of its own.
+        let choose = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: nil, routine: .fullSyncRequired)
+        #expect(choose.route == .account("sync.decision.action"))
+    }
+
+    // Rows that T19.4 does not list, kept at the least claim.
+
+    @Test func anAdoptionWaitingOnTransportOffersResumeOnlyWhileItIsOffered() {
+        let offered = SyncKinds.cloud(state: .needsAttention, stateWithoutAttention: .changesPending,
+            attention: [.recoveryOpWaiting: 1], facts: .init(recoveryOp: .adoptWaiting, resumeOpOffered: true))
+        #expect(offered.needsYou && offered.detailKey == "sync.attention.adoptWaiting" && offered.action == .resumeOp)
+        let waiting = SyncKinds.cloud(state: .needsAttention, stateWithoutAttention: .changesPending,
+            attention: [.recoveryOpWaiting: 1], facts: .init(recoveryOp: .adoptWaiting))
+        #expect(waiting.kind == .waiting && waiting.detailKey == "sync.attention.adoptWaiting" && waiting.action == nil)
+        #expect(waiting.titleKey == "sync.status.pending.title")
+        let marks: Set<Character> = [".", "!", "?"]
+        #expect(SyncText.value("sync.attention.adoptWaiting").filter(marks.contains).count == 1)
+    }
+
+    @Test func iCloudSelectedButNeverSetUpIsRow16NotSyncOff() {
+        // The policy still reports `localOnly` until a connection is confirmed.
+        let selected = SyncKinds.cloud(state: .localOnly, selectedNotSetUp: true)
+        #expect(selected.needsYou && selected.titleKey == "sync.status.needsAttention.title")
+        #expect(selected.detailKey == "sync.needsYou.setUp" && selected.action == .setUpAgain)
+        // With the service Off the same state stays Sync Off.
+        let off = SyncKinds.cloud(state: .localOnly)
+        #expect(off.titleKey == "sync.status.off.title" && off.action == nil && !off.needsYou)
+        // Any other state ignores the flag.
+        let connected = SyncKinds.cloud(state: .changesPending, selectedNotSetUp: true)
+        #expect(connected.titleKey == "sync.status.pending.title" && !connected.needsYou)
     }
 
     @Test func everyActionHasItsCatalogTitle() {

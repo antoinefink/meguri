@@ -115,7 +115,9 @@ extension ReviewCollectionStartupTests {
                     Task { @MainActor in command.release() }
                 }
             }
-            harness.sync.setDeviceSettings(paused: false, automatic: false, media: false)
+            // P25.1: media is always on and changes no status. The stored pause (the
+            // update hold) is the setting whose write still issues one.
+            harness.sync.setDeviceSettings(paused: true, automatic: harness.sync.settings.automatic)
             try await initialCloudSignal(commandEntered.stream, stage: "sticky-failure-command-entry")
             harness.sync.observeAccountPolicyDrain = { phase in
                 if case .waiting = phase { waiting.continuation.yield(()) }
@@ -578,7 +580,7 @@ extension ReviewCollectionStartupTests {
             let generation = harness.owner.generation
             let requestsBefore = harness.requests.count
             if hold == .pause {
-                harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+                harness.sync.setDeviceSettings(paused: true, automatic: false)
                 transition = Task { await harness.sync.waitForInitialOwnDrain() }
             } else {
                 transition = Task { harness.owner.setForeground(false); await harness.owner.waitForLifecycle() }
@@ -611,7 +613,7 @@ extension ReviewCollectionStartupTests {
                 await proof.hold()
             }
             if hold == .pause {
-                harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+                harness.sync.setDeviceSettings(paused: false, automatic: false)
                 await harness.sync.waitForInputs()
                 let resumedSettings = try await provider.state()
                 #expect(resumedSettings.settings == .init(enabled: true, paused: false, automatic: false, media: true))
@@ -1011,7 +1013,7 @@ extension ReviewCollectionStartupTests {
             // Hold the actual command after its native Core body returns, before
             // the original policy result is ACKed. The input lane can then
             // observe the pending operation instead of waiting on its own gate.
-            harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+            harness.sync.setDeviceSettings(paused: true, automatic: false)
             try await initialCloudSignal(entered.stream, stage: "resume-preissued-status")
             try #require(harness.sync.settings.paused)
             let unpaused = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -1020,7 +1022,7 @@ extension ReviewCollectionStartupTests {
             withObservationTracking { _ = harness.sync.settings.paused } onChange: { [continuation = unpaused.continuation] in
                 continuation.yield(())
             }
-            harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            harness.sync.setDeviceSettings(paused: false, automatic: false)
             try await initialCloudSignal(unpaused.stream, stage: "resume-settings-unpaused")
             try #require(!harness.sync.settings.paused)
             harness.sync.observeResumePolicyDrain = { stage in
@@ -1031,7 +1033,7 @@ extension ReviewCollectionStartupTests {
                     #expect(!returned && !harness.sync.settings.enabled)
                     #expect(harness.factory.created.count == starts)
                     if pauseDuringDrain {
-                        harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+                        harness.sync.setDeviceSettings(paused: true, automatic: false)
                     }
                     releaseCommand?.resume(); releaseCommand = nil
                 case .finished:
@@ -1203,7 +1205,7 @@ extension ReviewCollectionStartupTests {
                 let settings = harness.sync.settings
                 try #require(settings.media, "\(trace.diagnostic)")
                 holdArmed = true
-                harness.sync.setDeviceSettings(paused: settings.paused, automatic: settings.automatic, media: false)
+                harness.sync.stageDeviceSettingsForTests(paused: settings.paused, automatic: settings.automatic, media: false)
                 try await initialCloudSignal(nativeEntry.stream, stage: "first-proof-issued-status-entry") {
                     await trace.diagnostic
                 }
@@ -1384,7 +1386,7 @@ extension ReviewCollectionStartupTests {
                 #expect(result.error == nil && !result.deferred)
                 returned = true
             }
-            harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+            harness.sync.setDeviceSettings(paused: true, automatic: false)
             try await initialCloudSignal(entered.stream, stage: "close-resume-issued-status-entry")
             try #require(harness.sync.settings.paused)
             let unpaused = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
@@ -1394,7 +1396,7 @@ extension ReviewCollectionStartupTests {
             withObservationTracking { _ = harness.sync.settings.paused } onChange: { [continuation = unpaused.continuation] in
                 continuation.yield(())
             }
-            harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            harness.sync.setDeviceSettings(paused: false, automatic: false)
             try await initialCloudSignal(unpaused.stream, stage: "close-resume-settings-unpaused")
             try #require(!harness.sync.settings.paused)
             harness.sync.observeResumePolicyDrain = { stage in
@@ -1442,11 +1444,11 @@ extension ReviewCollectionStartupTests {
             let backend = try #require(harness.backends.last)
             let connection = try #require(backend.connection)
             let starts = harness.factory.created.count
-            harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+            harness.sync.setDeviceSettings(paused: true, automatic: false)
             await harness.sync.waitForInputs()
             await harness.sync.confirmResume()
             #expect(harness.sync.preview != nil && !harness.sync.settings.enabled)
-            harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            harness.sync.setDeviceSettings(paused: false, automatic: false)
             await harness.sync.waitForInputs()
             await harness.sync.cancelConnectionPreview()
             #expect(harness.sync.preview == nil && harness.persistedEnabled == false)

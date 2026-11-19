@@ -20,6 +20,10 @@ public struct SyncProviderState: Sendable {
     }
     public var permitsICloudStartup: Bool { selection == .iCloud && phase != .blocked && phase != .handoffRecovery && settings?.enabled == true && settings?.paused == false }
     public static let blocked = SyncProviderState(selection: nil, phase: .blocked, settings: nil, revision: 0)
+    /// Rendering fixtures only: a synthetic value that describes no stored selection.
+    public static func renderFixture(selection: SyncProviderSelection, phase: SyncProviderPhase) -> SyncProviderState {
+        SyncProviderState(selection: selection, phase: phase, settings: nil, revision: 0)
+    }
     private init(selection: SyncProviderSelection?, phase: SyncProviderPhase, settings: CloudPolicyDeviceSettings?, revision: UInt64) {
         self.selection = selection; self.phase = phase; self.settings = settings; self.revision = revision; removalPending = false
     }
@@ -187,6 +191,9 @@ public actor MeguriProviderConnectionOwner {
     private var removing = false
     private var configurationBlocked = false
     public private(set) var phase: MeguriProviderConnectionPhase = .unconfigured
+    /// The signed-in account's name, from the stored sign-in; nil while signed out.
+    /// Display only: it grants nothing and is never the credential.
+    public private(set) var username: String?
     public init(service: any MeguriProviderConnectionService, store: any MeguriProviderCredentialStore = DeviceMeguriProviderCredentialStore()) {
         self.service = service; self.store = store
     }
@@ -340,6 +347,7 @@ public actor MeguriProviderConnectionOwner {
             try requireCurrent(expected, current)
             ownership = configured
             configurationBlocked = false
+            username = nil
             phase = .signedOut
             bootstrapAvailable = true
         } catch { if isCurrent(expected, current) { phase = .blocked }; throw error }
@@ -367,6 +375,7 @@ public actor MeguriProviderConnectionOwner {
             let credentials = try await store.load(connection: current.connection)
             try requireCurrent(expected, current)
             if let credentials, credentials.connection != current.connection { throw MeguriProviderCredentialFailure.wrongConnection }
+            username = credentials?.username
             phase = credentials == nil ? .signedOut : .setupRequired
             bootstrapAvailable = true
         } catch { if isCurrent(expected, current) { phase = .blocked }; throw error }
@@ -390,11 +399,13 @@ public actor MeguriProviderConnectionOwner {
             let credentials = try await service.authenticate(ownership, username: username, password: password)
             try requireCurrent(expected, ownership)
             try await store.save(credentials)
+            return credentials.username
         }
-        attempt = (expected, task)
+        attempt = (expected, Task { _ = try await task.value })
         do {
-            try await task.value
+            let saved = try await task.value
             try requireCurrent(expected, ownership)
+            self.username = saved
             attempt = nil; phase = .setupRequired; bootstrapAvailable = true
         } catch {
             if isCurrent(expected, ownership) { attempt = nil; phase = .blocked }
@@ -429,6 +440,7 @@ public actor MeguriProviderConnectionOwner {
             guard let current else { return }
             try await store.delete(connection: current.connection)
             try requireCurrent(expected, current)
+            username = nil
             phase = .signedOut
         } catch { if isCurrent(expected, current) { phase = .blocked }; throw error }
     }

@@ -971,32 +971,32 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
         }
     }
 
-    @Test(.timeLimit(.minutes(1))) func coldMeguriPausedResumePersistsAfterAttachmentAndReload() async throws {
+    @Test(.timeLimit(.minutes(1))) func coldMeguriStoredPauseBecomesAutomaticOffAtTheAttachment() async throws {
+        // sync/policy P25.2: no Resume exists. A pause that an earlier build stored
+        // is turned into Sync Automatically off, in one provider write, when the
+        // person's first sync action attaches the service.
         try await withNativeMeguriNoFileOwner(coldSelected: true, coldPaused: true) { app in
             let sync = app.sync
             try #require(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
-            try #require(sync.providerState?.selection == .meguri && sync.settings.paused)
+            try #require(sync.providerState?.selection == .meguri && sync.settings.paused && sync.updateHold)
             try #require(app.backends.isEmpty && !sync.meguriSignInAttached)
-            let automatic = sync.settings.automatic, media = sync.settings.media
-            let gate = StartupResultGate()
-            app.beforeBackend = { await gate.hold() }
+            app.defaults.removeObject(forKey: "meguri.sync.round2Migrated")
+            app.defaults.removeObject(forKey: "meguri.sync.automatic")
             let calls = Mutex<[BridgeCall]>([])
             try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
-                app.owner.resumeMeguri()
-                #expect(app.owner.meguriSignInPreparing)
-                app.owner.resumeMeguri()
-                await gate.requested()
-                #expect(sync.settings.paused)
-                #expect(calls.withLock { !$0.contains(.providerSaveSettings) })
-                gate.release()
-                await app.owner.waitForMeguriSignInPreparation()
+                // Choosing or signing in to the service clears the hold first, then attaches.
+                #expect(await sync.clearUpdateHold())
+                #expect(!sync.storedAutomatic)
+                try await app.owner.prepareSyncServiceSelection()
                 await sync.waitForInputs()
                 await sync.waitForMeguriAction()
                 try #require(app.sync === sync && sync.meguriSignInAttached && app.backends.count == 1)
-                #expect(!app.owner.meguriSignInPreparing && !sync.deviceSettingsSettling && !sync.settings.paused)
+                #expect(!app.owner.meguriSignInPreparing && !sync.deviceSettingsSettling)
+                #expect(!sync.settings.paused && !sync.settings.automatic && sync.settings.media && !sync.updateHold)
                 let provider = try await CoreProviderService.attached()
                 let committed = try #require(try await provider.refresh().settings)
-                #expect(!committed.paused && committed.automatic == automatic && committed.media == media)
+                #expect(!committed.paused && !committed.automatic)
+                #expect(app.defaults.bool(forKey: "meguri.sync.round2Migrated"))
                 sync.loadMeguriConnection()
                 await sync.waitForMeguriAction()
                 let reloaded = try #require(try await provider.refresh().settings)
@@ -1005,7 +1005,6 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
                 #expect(try await CoreCollectionService().lifecycle() == .noCollection)
                 #expect(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
                 #expect(!FileManager.default.fileExists(atPath: app.owner.configuration.collectionLocation.collectionFile.path))
-                #expect(calls.withLock { $0.filter { $0 == .prepareCloudConnectionHost }.count } == 1)
                 #expect(calls.withLock { $0.filter { $0 == .providerSaveSettings }.count } == 1)
                 #expect(calls.withLock { !$0.contains(.providerConfigureMeguri) && !$0.contains(.providerStartLogin) })
                 #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })

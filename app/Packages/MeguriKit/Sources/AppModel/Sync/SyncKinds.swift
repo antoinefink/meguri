@@ -54,6 +54,8 @@ public struct CloudKindFacts: Sendable, Equatable {
     }
     public enum RecoveryOp: Sendable, Equatable, CaseIterable {
         case adoptUnproven, publishConflict, publishAccount, publishWaiting, adoptAfterReview, abandonWaiting
+        /// An `adopt` op whose download waits on transport (V14.3): the person can resume it.
+        case adoptWaiting
     }
     public enum Fence: Sendable, Equatable, CaseIterable { case restore, importCollection, none }
     public var isolation: Isolation
@@ -183,6 +185,9 @@ public enum SyncKinds {
         if op == .publishWaiting, facts.resumeOpOffered {
             rows.append(.init(.needsYou, "sync.attention.publishWaiting", .resumeOp))
         }
+        if op == .adoptWaiting {
+            rows.append(facts.resumeOpOffered ? .init(.needsYou, "sync.attention.adoptWaiting", .resumeOp) : .init(.waiting, "sync.attention.adoptWaiting"))
+        }
         if has(.quotaFull), !facts.publishQuota { rows.append(.init(.needsYou, "sync.needsYou.quotaFull", .tryAgain)) }
         if has(.generationIncomplete), facts.abandonOffered {
             rows.append(.init(.needsYou, "sync.attention.generationIncomplete", .abandon))
@@ -217,10 +222,16 @@ public enum SyncKinds {
     /// T19.4's four rules. `setup` covers an installation with no projection yet.
     public static func cloud(state: CloudPolicyStatusState?, stateWithoutAttention: CloudPolicyStatusState? = nil,
                              attention: [CloudPolicyAttention: UInt64] = [:], facts: CloudKindFacts = .init(),
-                             setup: SyncCoordinator.SetupState = .attached) -> SyncMainStatus {
+                             setup: SyncCoordinator.SetupState = .attached,
+                             selectedNotSetUp: Bool = false) -> SyncMainStatus {
         var rows = cloudRows(attention: attention, facts: facts)
         let effective: CloudPolicyStatusState? = state == nil && setup == .configurationUnavailable
             ? .iCloudUnavailable(.setupNeeded) : state
+        // Row 16: iCloud is the selected service and nothing is set up, so the
+        // policy still reports `localOnly`. The status must not read "Sync Off".
+        if selectedNotSetUp, effective == .localOnly {
+            rows.insert(.init(.needsYou, "sync.needsYou.setUp", .setUpAgain), at: 0)
+        }
         if let row = cloudStateRow(effective, fence: facts.fence) { rows.insert(row, at: row.kind == .needsYou ? 0 : rows.count) }
         let issues = rows.filter { $0.kind == .issues }
         if let row = rows.first(where: { $0.kind == .needsYou }) {
@@ -231,7 +242,7 @@ public enum SyncKinds {
         let shown = effective == .needsAttention ? stateWithoutAttention : effective
         let base = SyncStatusPresentation(state: shown, setup: setup)
         let waiting = rows.first { $0.kind == .waiting }
-        return .init(symbol: base.symbol, titleKey: shown == .localOnly ? "sync.status.off.title" : base.titleKey,
+        return .init(symbol: base.symbol, titleKey: base.titleKey,
                      detailKey: waiting?.textKey ?? base.detailKey, detailCount: waiting?.count, action: nil,
                      kind: waiting == nil ? nil : .waiting, issues: issues, issuesRowKey: nil)
     }
@@ -274,7 +285,8 @@ public enum SyncKinds {
                     return .init(.needsYou, "sync.needsYou.meguri.identityChanged", .meguriSignIn)
                 case "sync.meguri.setup.error.storage":
                     return .init(.needsYou, "sync.needsYou.meguri.storage", .meguriTryAgain)
-                case "sync.meguri.setup.error.cancelled": return .init(nil, nil)
+                // MP6.3: a cancelled setup leaves the service Off; no row.
+                case MeguriSyncStatusPresentation.cancelledFailureKey: return .init(nil, nil)
                 default:
                     // remoteUnavailable, remoteChanged, localChanged, backupFailed, server,
                     // invalidDownload, and a failure with no typed key: all precede activation.
@@ -350,11 +362,4 @@ public enum SyncKinds {
 
     /// T19.7's replaced reasons.
     public static let syncNowOffKey = "sync.now.unavailable.off"
-    public static func meguriSyncNowKey(_ key: String) -> String {
-        switch key {
-        case "sync.meguri.now.unavailable.signIn": "sync.meguri.now.unavailable.signIn.sync"
-        case "sync.meguri.now.unavailable.stopped": "sync.meguri.now.unavailable.stopped.sync"
-        default: key
-        }
-    }
 }

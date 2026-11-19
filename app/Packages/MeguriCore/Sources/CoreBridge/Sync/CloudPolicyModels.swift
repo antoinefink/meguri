@@ -667,3 +667,35 @@ public enum CloudPolicyAdmission: Sendable {
         }
     }
 }
+
+// Rendering fixtures: synthetic values for screens drawn without a collection,
+// an account or a server. They come from no policy step and grant nothing.
+extension CloudPolicyMediaFacts {
+    public static let renderFixtureNone = CloudPolicyMediaFacts(uploadFiles: 0, downloadFiles: 0)
+    private init(uploadFiles: UInt64?, downloadFiles: UInt64?) {
+        self.uploadFiles = uploadFiles; uploadBytes = nil; self.downloadFiles = downloadFiles; downloadBytes = nil
+        unknownBlobs = nil; missingNames = nil; uploadsRunning = nil; downloadsRunning = nil
+        remainingDownloadMs = nil; rootAcked = nil; zoneMissing = nil; noSpace = nil
+    }
+}
+extension CloudPolicyStatus {
+    public static func renderFixture(state: CloudPolicyStatusState, stateWithoutAttention: CloudPolicyStatusState? = nil,
+                                     attention: [CloudPolicyAttention: UInt64] = [:], pending: UInt64 = 0,
+                                     accountStatus: CloudPolicyAccountStatus = .available,
+                                     syncNow: CloudPolicySyncNowAvailability = .available,
+                                     controls: CloudPolicyControls = .unknown) -> CloudPolicyStatus {
+        var status = CloudPolicyStatus(state: state, stateWithoutAttention: stateWithoutAttention, attention: attention,
+            pending: pending, accountStatus: accountStatus, syncNow: syncNow)
+        status.controls = controls
+        return status
+    }
+    private init(state: CloudPolicyStatusState, stateWithoutAttention: CloudPolicyStatusState?,
+                 attention: [CloudPolicyAttention: UInt64], pending: UInt64,
+                 accountStatus: CloudPolicyAccountStatus, syncNow: CloudPolicySyncNowAvailability) {
+        self.state = state; self.stateWithoutAttention = stateWithoutAttention
+        self.pending = pending; heldBack = 0; inFlight = 0; incomingWaiting = 0
+        self.attention = attention; media = .renderFixtureNone; mediaPaused = false; error = nil
+        self.accountStatus = accountStatus; accountMatchesBinding = true
+        asOfMilliseconds = nil; lastCompleted = nil; lastAttempt = nil; self.syncNow = syncNow
+    }
+}

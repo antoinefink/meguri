@@ -122,39 +122,6 @@
         }
       }
     },
-    "sync.action.reviewConflicts": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review Conflicts…"
-          }
-        }
-      }
-    },
-    "sync.action.showDetails": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show Details…"
-          }
-        }
-      }
-    },
-    "sync.adopt.action": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace Local Collection from iCloud…"
-          }
-        }
-      }
-    },
     "sync.adopt.backup": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -323,17 +290,6 @@
         }
       }
     },
-    "sync.attention.cloudError": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud sync isn’t working right now. If this continues, copy the debug info and report it."
-          }
-        }
-      }
-    },
     "sync.attention.collectionCorrupt": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -341,29 +297,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "This collection is damaged, so syncing stopped."
-          }
-        }
-      }
-    },
-    "sync.attention.conflicts": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld edit was kept as a copy because it conflicted with a change from another device."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld edits were kept as copies because they conflicted with changes from other devices."
-                }
-              }
-            }
           }
         }
       }
@@ -408,17 +341,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "This collection stopped syncing with iCloud."
-          }
-        }
-      }
-    },
-    "sync.attention.localStorageFull": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This device is out of storage space, so iCloud sync stopped. Free up space, then try again."
           }
         }
       }
@@ -469,17 +391,6 @@
         }
       }
     },
-    "sync.attention.mediaMissingInICloud": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Media files can’t sync because Meguri’s media data is missing from iCloud. Cards and notes still sync."
-          }
-        }
-      }
-    },
     "sync.attention.oversize": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -510,17 +421,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "The iCloud collection was replaced from another device while this device was uploading."
-          }
-        }
-      }
-    },
-    "sync.attention.quotaFull": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your iCloud storage is full. Changes stay on this device until there’s room."
           }
         }
       }
@@ -594,40 +494,6 @@
         }
       }
     },
-    "sync.attention.rootUnreadable": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri can’t read which collection is current in iCloud. Your collection and its unsent changes are still on this device."
-          }
-        }
-      }
-    },
-    "sync.attention.storageGuidance": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "device": {
-              "mac": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Manage your iCloud storage in System Settings."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "Manage your iCloud storage in Settings."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "sync.attention.trackingError": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -662,17 +528,6 @@
         }
       }
     },
-    "sync.attention.unsupportedSchema": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Some sync information needs a newer version of Meguri. Update Meguri on this device to sync all your changes."
-          }
-        }
-      }
-    },
     "sync.attention.unsyncable": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -703,17 +558,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "iCloud Sync"
-          }
-        }
-      }
-    },
-    "sync.connect.action": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Connect to iCloud…"
           }
         }
       }
@@ -1159,17 +1003,6 @@
         }
       }
     },
-    "sync.decision.title.none": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose where to keep this collection."
-          }
-        }
-      }
-    },
     "sync.details.heldBack": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -1589,17 +1422,6 @@
         }
       }
     },
-    "sync.media.off": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Audio and image sync is off."
-          }
-        }
-      }
-    },
     "sync.media.sizeLeft": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -1712,28 +1534,6 @@
         }
       }
     },
-    "sync.now.unavailable.notConnected": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This collection doesn’t sync with iCloud. You can turn on syncing in Account & Sync."
-          }
-        }
-      }
-    },
-    "sync.now.unavailable.paused": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud sync is paused. Resume it in Account & Sync to sync now."
-          }
-        }
-      }
-    },
     "sync.now.unavailable.recoveryRequired": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -1830,17 +1630,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Changes that other devices have not sent yet are not counted."
-          }
-        }
-      }
-    },
-    "sync.publish.action": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Replace iCloud Collection…"
           }
         }
       }
@@ -2256,17 +2045,6 @@
         }
       }
     },
-    "sync.settings.advanced": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Advanced"
-          }
-        }
-      }
-    },
     "sync.settings.automatic": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -2289,17 +2067,6 @@
         }
       }
     },
-    "sync.settings.conflicts": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review Conflicts…"
-          }
-        }
-      }
-    },
     "sync.settings.iCloud": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -2311,39 +2078,6 @@
         }
       }
     },
-    "sync.settings.media": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sync Audio and Images"
-          }
-        }
-      }
-    },
-    "sync.settings.media.footer": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "When this is off, cards and notes still sync."
-          }
-        }
-      }
-    },
-    "sync.settings.pause": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pause iCloud Sync"
-          }
-        }
-      }
-    },
     "sync.settings.privacy": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -2351,72 +2085,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Your collection is stored in your private iCloud account and uses your iCloud storage. With Advanced Data Protection on, your collection’s content and media are end-to-end encrypted; some sync information, such as sizes and dates, is not."
-          }
-        }
-      }
-    },
-    "sync.settings.resumePause": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Resume iCloud Sync"
-          }
-        }
-      }
-    },
-    "sync.settings.section": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Account & Sync"
-          }
-        }
-      }
-    },
-    "sync.settings.stop.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stop Using iCloud on This Device?"
-          }
-        }
-      }
-    },
-    "sync.settings.stop.message": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This collection stays on this device and stops syncing. Nothing in iCloud is deleted."
-          }
-        }
-      }
-    },
-    "sync.settings.stop.confirm": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stop Using iCloud"
-          }
-        }
-      }
-    },
-    "sync.settings.stop": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stop Using iCloud on This Device…"
           }
         }
       }
@@ -2465,40 +2133,6 @@
         }
       }
     },
-    "sync.status.localOnly.title": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud Off"
-          }
-        }
-      }
-    },
-    "sync.status.needsAttention.count": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld issue needs your attention."
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld issues need your attention."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "sync.status.needsAttention.title": {
       "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
       "localizations": {
@@ -2539,17 +2173,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Paused"
-          }
-        }
-      }
-    },
-    "sync.status.paused.user": {
-      "comment": "Approved sync/status-strings copy; displayed only for the corresponding typed backend fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iCloud sync is paused."
           }
         }
       }
@@ -2698,17 +2321,6 @@
         }
       }
     },
-    "sync.service.label": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sync Service"
-          }
-        }
-      }
-    },
     "sync.service.iCloud": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -2771,17 +2383,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cancel"
-          }
-        }
-      }
-    },
-    "sync.service.recovery": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Changing the sync service didn’t finish. No service syncs until you choose what to do."
           }
         }
       }
@@ -2859,17 +2460,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Switch to Meguri Sync"
-          }
-        }
-      }
-    },
-    "sync.switch.title.localOnly": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stop Using Meguri Sync on This Device"
           }
         }
       }
@@ -3031,28 +2621,6 @@
         }
       }
     },
-    "sync.switch.next.iCloud": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Next, connect to iCloud and choose which collection to keep."
-          }
-        }
-      }
-    },
-    "sync.switch.next.meguri": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Next, sign in to your Meguri Sync server and choose which collection to keep."
-          }
-        }
-      }
-    },
     "sync.switch.next.localOnly": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3093,17 +2661,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Switch to Meguri Sync"
-          }
-        }
-      }
-    },
-    "sync.switch.confirm.localOnly": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stop Using Meguri Sync"
           }
         }
       }
@@ -3207,17 +2764,6 @@
         }
       }
     },
-    "sync.meguri.signIn.footer": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Signing in doesn’t send or change your collection."
-          }
-        }
-      }
-    },
     "sync.meguri.error.address": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3295,83 +2841,6 @@
         }
       }
     },
-    "sync.meguri.signOut": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign Out…"
-          }
-        }
-      }
-    },
-    "sync.meguri.signOut.title": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign Out of Meguri Sync?"
-          }
-        }
-      }
-    },
-    "sync.meguri.signOut.message": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri Sync stops, your sign-in is removed from this device, and this collection then stays on this device only. Your collection, media and backups stay. Nothing on the server is deleted."
-          }
-        }
-      }
-    },
-    "sync.meguri.signOut.confirm": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign Out"
-          }
-        }
-      }
-    },
-    "sync.meguri.signingOut": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Signing Out…"
-          }
-        }
-      }
-    },
-    "sync.meguri.signOut.failed": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign-out didn’t finish."
-          }
-        }
-      }
-    },
-    "sync.meguri.stop": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stop Using Meguri Sync on This Device…"
-          }
-        }
-      }
-    },
     "sync.meguri.status.stopped.title": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3390,17 +2859,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Can’t Use Sign-In"
-          }
-        }
-      }
-    },
-    "sync.meguri.status.connectionBlocked.detail": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri can’t read or save your Meguri Sync sign-in on this device. Unlock this device, then choose Try Again."
           }
         }
       }
@@ -3493,94 +2951,6 @@
         }
       }
     },
-    "sync.meguri.status.paused.title": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Paused"
-          }
-        }
-      }
-    },
-    "sync.meguri.status.paused.detail": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri Sync is paused. Changes stay on this device."
-          }
-        }
-      }
-    },
-    "sync.meguri.status.on.title": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "On"
-          }
-        }
-      }
-    },
-    "sync.meguri.lastExchange": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last exchange completed %@."
-          }
-        }
-      }
-    },
-    "sync.meguri.status.pending.title": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Waiting to Sync"
-          }
-        }
-      }
-    },
-    "sync.meguri.status.pending.detail": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Some changes on this device haven’t been sent yet."
-          }
-        }
-      }
-    },
-    "sync.meguri.status.syncingCollection.title": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Syncing Collection…"
-          }
-        }
-      }
-    },
-    "sync.meguri.status.syncingMedia.title": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Syncing Media…"
-          }
-        }
-      }
-    },
     "sync.meguri.status.signInRequired.title": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3588,17 +2958,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sign In Required"
-          }
-        }
-      }
-    },
-    "sync.meguri.status.signInRequired.detail": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The server didn’t accept your sign-in, so Meguri Sync stopped. Changes stay on this device."
           }
         }
       }
@@ -3636,17 +2995,6 @@
         }
       }
     },
-    "sync.meguri.round.fullSyncRequired": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The server needs you to choose which collection to keep before syncing continues."
-          }
-        }
-      }
-    },
     "sync.meguri.status.failed.title": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3680,17 +3028,6 @@
         }
       }
     },
-    "sync.meguri.round.cancelled": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The exchange was cancelled. Changes stay on this device."
-          }
-        }
-      }
-    },
     "sync.meguri.status.setup.title": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3698,50 +3035,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Setup Required"
-          }
-        }
-      }
-    },
-    "sync.meguri.setup.choose": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose which collection to keep. Syncing starts after the collection and its media transfer."
-          }
-        }
-      }
-    },
-    "sync.meguri.setup.useDevice": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use This Device’s Collection…"
-          }
-        }
-      }
-    },
-    "sync.meguri.setup.download.detail": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Download your collection from your Meguri Sync server to start."
-          }
-        }
-      }
-    },
-    "sync.meguri.setup.download": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Download from Meguri Sync…"
           }
         }
       }
@@ -3775,17 +3068,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Cancel"
-          }
-        }
-      }
-    },
-    "sync.meguri.setup.review": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review the replacement to continue."
           }
         }
       }
@@ -4265,17 +3547,6 @@
         }
       }
     },
-    "sync.meguri.now.unavailable.paused": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri Sync is paused. Resume it in Account & Sync to sync now."
-          }
-        }
-      }
-    },
     "sync.meguri.now.unavailable.acceptanceUnknown": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -4283,50 +3554,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Meguri Sync can’t send changes until Meguri knows whether the server received the last ones."
-          }
-        }
-      }
-    },
-    "sync.meguri.now.unavailable.signIn": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign in to Meguri Sync in Account & Sync to sync."
-          }
-        }
-      }
-    },
-    "sync.meguri.now.unavailable.stopped": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri Sync is stopped. Open Account & Sync to see what to do."
-          }
-        }
-      }
-    },
-    "sync.meguri.pause": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pause Meguri Sync"
-          }
-        }
-      }
-    },
-    "sync.meguri.resume": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Resume Meguri Sync"
           }
         }
       }
@@ -4349,28 +3576,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Continue Setup…"
-          }
-        }
-      }
-    },
-    "sync.meguri.now.chooseCollection": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose Collection…"
-          }
-        }
-      }
-    },
-    "sync.meguri.setup.useServer": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Use Server Collection…"
           }
         }
       }
@@ -4481,17 +3686,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Replacing this device’s collection didn’t finish. Your backup and the downloaded collection are kept until this is settled."
-          }
-        }
-      }
-    },
-    "sync.meguri.setup.error.cancelled": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Setup was cancelled."
           }
         }
       }
@@ -5507,6 +4701,28 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "sync.attention.adoptWaiting": {
+      "comment": "Approved sync/status-strings T13.7; shown with Resume while an adoption waits on transport.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replacing this collection with the iCloud collection was not finished."
+          }
+        }
+      }
+    },
+    "sync.status.openSettings": {
+      "comment": "Proposed for sync/status-strings T19: the status popover's link to the Sync section of Settings.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync Settings"
           }
         }
       }

@@ -116,7 +116,7 @@ extension ReviewCollectionStartupTests {
             // First deliver actual settings/visible work in Available's window,
             // before Swift foreground entry can perform any repair or gate.
             let windowReferences = ["available-current.png", "available-head.mp3"]
-            app.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            app.sync.setDeviceSettings(paused: false, automatic: false)
             app.sync.visibleMedia(windowReferences, generation: generation)
             await app.sync.waitForInputs()
             try #require(try await serviceAppSignal(priorityDone.stream, stage: "Available settings and visible media ACK before Swift foreground entry"))
@@ -126,7 +126,7 @@ extension ReviewCollectionStartupTests {
             // the unchanged screen's replay and the original SDK result/ACK.
             foreground = Task { @MainActor in await app.sync.foregroundAfterLocalResume() }
             try #require(try await serviceAppSignal(account.entered, stage: "ordinary foreground account read held"))
-            app.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            app.sync.setDeviceSettings(paused: false, automatic: false)
             await app.sync.waitForInputs()
             try #require(try await serviceAppSignal(priorityDone.stream, stage: "replayed visible media ACK before foreground proof"))
             #expect(completedReferences == [windowReferences, windowReferences])
