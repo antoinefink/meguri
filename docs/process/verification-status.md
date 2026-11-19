@@ -7,7 +7,27 @@ Keep integration base `1416a520542a8c5daa38a23bfe398da704c3d6c9`.
 Its result records 26 passing jobs, 11 failed jobs, one error and pending work.
 T1 checks skipped after T0 did not run.
 
-Latest attempt: `gate/20261118T182457Z-10002` on clean `b14752095`, from the same
+Latest attempt: `gate/20261118T233158Z-35777` on clean `1881a469d`, from the
+same integration base. All 26 completed T0 jobs passed. Full Rust reported
+5,616 passed, zero failed and 10 skipped, and all 40 failures from the previous
+full Rust run passed. The server ran 193 tests, the exact package passed four
+smoke cases, and native durability passed 320 tests. Conformance passed its
+gate, including both formerly failing macOS cases, with 409 scenarios pending.
+The host rebuild and cache check passed. Swift Core passed 690 tests and the
+Swift Profile performance check passed.
+
+MeguriKit `swift-test/20261119T011750Z-98342` printed passes for the five prior
+failed methods and the two previously unfinished methods. It then stopped
+producing output for over five minutes after starting
+`intentionalCloseRefusesOriginalReadWithoutStickyFailureAndFencesLateProvider`.
+The gate joined with exit 2 after intentional SIGINT. The gate and MeguriKit
+receipts have incomplete totals, and T1 did not run. Source inspection shows
+that this fixture disables the provider, skips discovery, requests an account
+read and waits without a deadline for resolver admission. The production
+provider guard can refuse that read before reaching the held resolver. The
+adjacent sticky-failure fixture uses the same setup.
+
+Previous attempt: `gate/20261118T182457Z-10002` on clean `b14752095`, from the same
 integration base. The gate joined with exit 2 after the MeguriKit child stopped
 producing output for over five minutes. The gate recorded 21 passing and five
 failing T0 jobs before cancellation, with no T1 jobs run. The gate and child
@@ -15,7 +35,7 @@ cancellation receipts have incomplete totals. The unfinished checks remain requi
 The completed server suite passed 193 cases, the ARM64 package smoke passed all
 four cases, and native durability passed 320 cases on this source.
 
-Previous attempt: `gate/20261118T170640Z-84436` on clean `11692b9ad`, from the same
+Earlier attempt: `gate/20261118T170640Z-84436` on clean `11692b9ad`, from the same
 integration base. Static checks, static tree, both canary jobs, browser
 verification, Core lint and dependency checks passed. The gate joined with
 exit 2 after the Core child stalled on the unbounded account-read barrier in
