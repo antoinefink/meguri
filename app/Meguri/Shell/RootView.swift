@@ -1,6 +1,7 @@
 import AppModel
 import CoreBridge
 import Editor
+import Home
 import SwiftUI
 
 /// The root of the window (KTD10): the tab layout at compact width, the
