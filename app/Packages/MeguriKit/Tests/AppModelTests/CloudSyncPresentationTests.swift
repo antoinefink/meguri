@@ -832,6 +832,49 @@ import Testing
         #expect(owner.navigation.section == .home)
     }
 
+    @Test func aStatusActionForTheKeepCollectionSheetOpensTheSyncSectionFirst() {
+        // N15.3: only the Sync section presents the sheet. Choose… and Try Again in
+        // the status popover open that section and ask for the sheet there.
+        let owner = handoffCollection()
+        let presentation = owner.syncPresentation
+        // Compact: nothing is asked for until the status sheet has really dismissed.
+        presentation.statusPresented = true
+        let id = presentation.statusPresentationID
+        owner.queueAccountSyncAfterStatusDismissal(keepCollection: true)
+        #expect(presentation.statusHandoffPending && !presentation.keepCollectionRequested)
+        #expect(owner.navigation.section == .home)
+        owner.compactSyncStatusDidDismiss(id)
+        #expect(owner.navigation.section == .settings && owner.navigation.path(.settings).isEmpty)
+        #expect(presentation.keepCollectionRequested && presentation.settingsRequest != nil)
+        // A plain Open Settings never asks for the sheet.
+        presentation.keepCollectionRequested = false
+        owner.navigation.show(.home)
+        presentation.statusPresented = true
+        let plain = presentation.statusPresentationID
+        owner.queueAccountSyncAfterStatusDismissal()
+        owner.compactSyncStatusDidDismiss(plain)
+        #expect(owner.navigation.section == .settings && !presentation.keepCollectionRequested)
+        // A handoff that is cancelled leaves no request for a later visit to Settings.
+        owner.navigation.show(.home)
+        presentation.statusPresented = true
+        let cancelled = presentation.statusPresentationID
+        owner.queueAccountSyncAfterStatusDismissal(keepCollection: true)
+        presentation.cancelStatusHandoff()
+        owner.compactSyncStatusDidDismiss(cancelled)
+        #expect(owner.navigation.section == .home && !presentation.keepCollectionRequested)
+        // Regular width: the popover closes and the section opens at once; a route
+        // that another sheet owns records nothing.
+        presentation.statusPresented = false
+        #expect(owner.openAccountSyncFromStatus(keepCollection: true))
+        #expect(owner.navigation.section == .settings && presentation.keepCollectionRequested)
+        presentation.keepCollectionRequested = false
+        owner.navigation.show(.home)
+        owner.navigation.present(.collectionEntry)
+        #expect(!owner.openAccountSyncFromStatus(keepCollection: true))
+        #expect(owner.navigation.section == .home && !presentation.keepCollectionRequested)
+        owner.navigation.dismissSheet()
+    }
+
     @Test func compactAccountSyncRejectsStaleOrCancelledRequestsAndOldReopenCallbacks() {
         final class Session {}
         for change in 0..<6 {

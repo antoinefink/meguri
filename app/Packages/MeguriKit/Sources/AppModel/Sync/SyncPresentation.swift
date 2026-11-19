@@ -44,7 +44,7 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     public private(set) var statusPresentationID = UUID()
     fileprivate enum StatusDestination {
         case cloudSync(CloudSyncEntry, AppNavigation.SheetHost)
-        case accountSync
+        case accountSync(keepCollection: Bool)
     }
     fileprivate struct StatusEntry {
         let presentationID: UUID
@@ -301,8 +301,16 @@ extension ReviewCollection {
     public func queueCloudSyncAfterStatusDismissal(_ entry: CloudSyncEntry, host: AppNavigation.SheetHost = .main) {
         queueSyncStatusDestination(.cloudSync(entry, host))
     }
-    public func queueAccountSyncAfterStatusDismissal() {
-        queueSyncStatusDestination(.accountSync)
+    public func queueAccountSyncAfterStatusDismissal(keepCollection: Bool = false) {
+        queueSyncStatusDestination(.accountSync(keepCollection: keepCollection))
+    }
+    /// N15.3: only the Sync section presents the keep-collection sheet, so a status
+    /// action outside Settings opens that section first. The request is recorded
+    /// only once the section is opening, so a refused route leaves nothing behind.
+    @discardableResult public func openAccountSyncFromStatus(keepCollection: Bool) -> Bool {
+        guard navigation.openAccountSync() else { return false }
+        if keepCollection { syncPresentation.keepCollectionRequested = true }
+        return true
     }
     private func queueSyncStatusDestination(_ destination: SyncPresentation.StatusDestination) {
         let presentation = syncPresentation
@@ -322,7 +330,7 @@ extension ReviewCollection {
               request.reviewID == navigation.review?.id, navigation.sheet == nil else { return }
         switch request.destination {
         case .cloudSync(let entry, let host): presentCloudSync(entry, host: host)
-        case .accountSync: navigation.openAccountSync()
+        case .accountSync(let keepCollection): openAccountSyncFromStatus(keepCollection: keepCollection)
         }
     }
 }

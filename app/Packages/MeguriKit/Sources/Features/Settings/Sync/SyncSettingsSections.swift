@@ -369,6 +369,9 @@ struct SyncMainStatusRows: View {
     var host: AppNavigation.SheetHost = .main
     /// The compact status sheet hands its destination over after it dismisses.
     var openEntry: ((CloudSyncEntry, AppNavigation.SheetHost) -> Void)? = nil
+    /// Set outside Settings (the status popover): Meguri's setup sheets belong to
+    /// the Sync section, so its actions open that section, asking for N15.3's sheet or not.
+    var showInSettings: ((_ keepCollection: Bool) -> Void)? = nil
     @Environment(\.appClock) private var clock
     @State private var recovering = false
     private var sync: SyncCoordinator { collection.sync }
@@ -445,7 +448,7 @@ struct SyncMainStatusRows: View {
         case .chooseCollection:
             if meguri {
                 if sync.meguriCanChoose {
-                    Button(title) { collection.syncPresentation.keepCollectionRequested = true }
+                    Button(title) { askKeepCollection() }
                         .accessibilityIdentifier(id)
                 }
             } else {
@@ -507,8 +510,10 @@ struct SyncMainStatusRows: View {
             // settling step in the core yet, so no button is shown for it.
             if sync.meguriCanChoose {
                 Button(title) {
-                    if collection.lifecycle == .noCollection { sync.prepareMeguri(.useServerCollection) }
-                    else { collection.syncPresentation.keepCollectionRequested = true }
+                    if collection.lifecycle == .noCollection {
+                        sync.prepareMeguri(.useServerCollection)
+                        showInSettings?(false)
+                    } else { askKeepCollection() }
                 }
                 .accessibilityIdentifier(id)
             }
@@ -520,6 +525,10 @@ struct SyncMainStatusRows: View {
             // The sign-in fields are in the section; the others have no entry here.
             EmptyView()
         }
+    }
+    private func askKeepCollection() {
+        if let showInSettings { showInSettings(true) }
+        else { collection.syncPresentation.keepCollectionRequested = true }
     }
     private func open(_ entry: CloudSyncEntry) {
         if let openEntry { openEntry(entry, host) } else { collection.presentCloudSync(entry, host: host) }
