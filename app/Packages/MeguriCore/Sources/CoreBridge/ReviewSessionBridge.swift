@@ -230,8 +230,6 @@ public struct ReviewHomePreset: Sendable, Hashable {
     public let id: Int64
     public let autoplay: Bool
     public let skipQuestionWhenReplayingAnswer: Bool
-    public let showTimer: Bool
-    public let stopTimerOnAnswer: Bool
     public let maximumAnswerSeconds: UInt32
     public let questionSeconds: Float
     public let answerSeconds: Float
@@ -240,12 +238,10 @@ public struct ReviewHomePreset: Sendable, Hashable {
     public let waitForAudio: Bool
     public let leechAction: Int32
 
-    public init(id: Int64, autoplay: Bool, skipQuestionWhenReplayingAnswer: Bool, showTimer: Bool, stopTimerOnAnswer: Bool, maximumAnswerSeconds: UInt32, questionSeconds: Float, answerSeconds: Float, questionAction: Int32, answerAction: Int32, waitForAudio: Bool, leechAction: Int32) {
+    public init(id: Int64, autoplay: Bool, skipQuestionWhenReplayingAnswer: Bool, maximumAnswerSeconds: UInt32, questionSeconds: Float, answerSeconds: Float, questionAction: Int32, answerAction: Int32, waitForAudio: Bool, leechAction: Int32) {
         self.id = id
         self.autoplay = autoplay
         self.skipQuestionWhenReplayingAnswer = skipQuestionWhenReplayingAnswer
-        self.showTimer = showTimer
-        self.stopTimerOnAnswer = stopTimerOnAnswer
         self.maximumAnswerSeconds = maximumAnswerSeconds
         self.questionSeconds = questionSeconds
         self.answerSeconds = answerSeconds
@@ -258,8 +254,7 @@ public struct ReviewHomePreset: Sendable, Hashable {
         id = value.id
         autoplay = value.autoplay
         skipQuestionWhenReplayingAnswer = value.skipQuestionWhenReplayingAnswer
-        showTimer = value.showTimer
-        stopTimerOnAnswer = value.stopTimerOnAnswer
+        // The preset's on-screen timer fields stay in the collection; the app has no timer (N16.7).
         maximumAnswerSeconds = value.maximumAnswerSeconds
         questionSeconds = value.questionSeconds
         answerSeconds = value.answerSeconds

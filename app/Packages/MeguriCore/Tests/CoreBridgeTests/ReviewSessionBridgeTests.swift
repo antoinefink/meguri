@@ -118,7 +118,7 @@ extension EventTests {
         #expect(item.nextStates.good.revlog == CoreBridge.ReviewRevlogPreview(interval: -91, lastInterval: 24, kind: 2, factor: 750))
         #expect(item.nextStates.easy.label == CoreBridge.ReviewAnswerLabel(lessThan: true, amount: "1", unit: .years))
         #expect(item.homePreset == CoreBridge.ReviewHomePreset(id: -61, autoplay: true, skipQuestionWhenReplayingAnswer: true,
-                                                             showTimer: true, stopTimerOnAnswer: false, maximumAnswerSeconds: 123,
+                                                             maximumAnswerSeconds: 123,
                                                              questionSeconds: 1.25, answerSeconds: 2.75, questionAction: 2, answerAction: 3,
                                                              waitForAudio: true, leechAction: 1))
         let units: [(MeguriCoreBindings.ReviewTimeUnit, CoreBridge.ReviewTimeUnit)] = [

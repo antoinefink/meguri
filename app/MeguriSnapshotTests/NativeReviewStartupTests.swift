@@ -518,8 +518,7 @@ import WebKit
             renderKey: .init(bytes: Array(repeating: UInt8(id), count: 32)),
             nextStates: .init(current: state, again: answer, hard: answer, good: answer, easy: answer),
             predictedNext: .init(again: 2, hard: 2, good: 2, easy: 2), flag: 0, marked: false,
-            homePreset: .init(id: 1, autoplay: false, skipQuestionWhenReplayingAnswer: false, showTimer: false,
-                stopTimerOnAnswer: false, maximumAnswerSeconds: 60, questionSeconds: 0, answerSeconds: 0,
+            homePreset: .init(id: 1, autoplay: false, skipQuestionWhenReplayingAnswer: false, maximumAnswerSeconds: 60, questionSeconds: 0, answerSeconds: 0,
                 questionAction: 0, answerAction: 0, waitForAudio: false, leechAction: 0))
     }
     private static func requireDrawable(_ page: NSView, in host: NSView) throws {
