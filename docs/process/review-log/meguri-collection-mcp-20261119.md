@@ -60,3 +60,11 @@ Antoine approved the existing timestamp IDs and native conflict rules for rare o
 - `sync-server-lint/20261119T161609Z-80251` passed. The browser source is unchanged from the approved verification above. Live ChatGPT and Claude sessions, dedicated performance acceptance and the integration gate remain pending.
 
 `workflow_review` independently classified the complete plan, amended specs and seven source files as public. The allowlist records the exact digests for the files with existing entries. The reviewer verified both ledger appends as public operational metadata. The record SHA-256 values, including newline, are `c9b266847f9f4d12351119a82a8057f807c4bac64616396c9bda6f6ae9a769ad` at `61c7a4521` and `b037b6a5e5826ecce02e4f3218e9b597978f7fc655d77154b35b7a963ef329e0` at `8775779ea`.
+
+### Exact-image verification fixture
+
+Starting commit `767229db6`. The batch gate `20261119T162512Z-97746` passed the server, browser, dependency and packaged-image tests, then reached four tooling self-test failures. On a clean standalone checkout of the same commit, focused `selftest/20261119T170503Z-29660` passed the three cases whose Git metadata was unavailable inside Docker on the linked worktree. It reproduced the packaged browser fixture failure. Both synthetic success reports omitted the completed-test count required by the production verifier.
+
+Filtered fix `20261119T170745Z-78150` repaired both fixture reports. Focused `selftest/20261119T170852Z-90080` passed the original positive and refusal cases, including cleanup and output checks. The production verifier keeps its complete-report requirement.
+
+`workflow_review` independently classified the full test module as public at SHA-256 `79dde58ab2f3db5a2c34b51c0e535c7d920abaa5621dfd8ea3f60c61215827fe`. The reviewer verified ledger append `1c970d52` as one public operational record over an exact parent prefix. Its record SHA-256 is `a9eba1ef82cd680c26a51036d4890fa871dd83f0751b8627fe8733f9e003a0de`.

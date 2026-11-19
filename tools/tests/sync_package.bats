@@ -158,7 +158,7 @@ setup() {
   mkdir "$BATS_TEST_TMPDIR/bin" "$BATS_TEST_TMPDIR/product" "$BATS_TEST_TMPDIR/frontend" "$BATS_TEST_TMPDIR/frontend/prepared"
   printf '[]\n' >"$BATS_TEST_TMPDIR/product/assets.json"
   cp "$BATS_TEST_TMPDIR/product/assets.json" "$BATS_TEST_TMPDIR/frontend/prepared/assets.json"
-  printf '{"errors":[],"counts":{"total":9,"passed":9}}\n' >"$BATS_TEST_TMPDIR/frontend/test-counts.json"
+  printf '{"errors":[],"counts":{"total":9,"completed":9,"passed":9}}\n' >"$BATS_TEST_TMPDIR/frontend/test-counts.json"
   export EXPORT_IMAGE="sha256:$(printf '%064d' 0)" MG_RUN_ID
   export EXPORT_CID="$(printf '%064d' 1)"
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
@@ -271,7 +271,7 @@ with open(root + "/test/fixture.json", "rb") as handle:
 PY
     [ "$?" -eq 0 ] || return 97
     printf 'browser\n' >>"$MG_RUN_DIR/export-sequence"
-    printf '{"errors":[],"counts":{"total":1,"passed":1}}\n' >"$MG_RUN_DIR/test-counts.json"
+    printf '{"errors":[],"counts":{"total":1,"completed":1,"passed":1}}\n' >"$MG_RUN_DIR/test-counts.json"
     mkdir "$MG_RUN_DIR/browser-artifacts"
     local number
     for number in 1 2 3 4 5 6 7 8 9; do : >"$MG_RUN_DIR/browser-artifacts/$number.png"; done

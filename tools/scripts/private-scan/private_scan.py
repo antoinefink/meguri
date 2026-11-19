@@ -829,7 +829,7 @@ PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
     'docs/process/review-log/meguri-collection-mcp-20261119.md':
-        '508eaae5109e720f7ee8817b3dc377521bac66284ffac6efc6777846ca2248d8',
+        '05cb4950ef3ced22e56e850a70ff9d1859ac49a216953314eb4aa0ada3ff6ab2',
     'server/src/accounts/oauth/mod.rs':
         '34f18c2a351778b43a6d71e8a774bca913c140feec5015689233502aa49df933',
     'server/src/httpapi/oauth.rs':
@@ -1112,7 +1112,7 @@ PUBLIC_ARTIFACTS = {
         '2cfc1f7c8eb2399bf6bc2e8d77274682dd00563b2c467d15d17eb29956feee03',
     # Independently classified original public session metadata, exact bytes.
     'docs/process/provenance/sessions.jsonl':
-        'ecdafd694c89d1aaa37f0cc0cec4f6cecc37e30d3f0131dbdbb43b5893befe1a',
+        '94ddec9d8850bbd907c6c6b4c5fb449d15c9ef703c37226ff535e27900cde962',
     # Independently reviewed first-party license scope, exact complete text.
     'LICENSING.md':
         '98c119e6dedf0192268fc328b9a8e0be58771760a4bc2156387db57ae97c7f2a',
