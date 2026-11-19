@@ -828,10 +828,36 @@ def refresh_public(repo, expected, shared_main=False):
 PUBLIC_NOTICE_PATH = "specs/render/unicode-data-LICENSE.txt"
 PUBLIC_NOTICE_SHA256 = "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
 PUBLIC_ARTIFACTS = {
+    'server/src/accounts/oauth/mod.rs':
+        '34f18c2a351778b43a6d71e8a774bca913c140feec5015689233502aa49df933',
+    'server/src/httpapi/oauth.rs':
+        'efe2fe1940f7a3e08f0982fd79073a64ec0202a1af8932254207f95e2b2e43c8',
+    'server/tests/mcp_oauth.rs':
+        '39068c5e4f02cab4f649cb4ec60d38028d8ae3684269175fee76fd78d3983fd7',
+    'server/src/mcp_service/transport.rs':
+        '7481f58597155c7531c5679487fcead2f8b039b4ced23d0fb78258e3727fb8ec',
+    'server/src/mcp_service/authority_tests.rs':
+        '838db9c2d104b449d041dce05dda4fc44f5d5f6b9e5fc7828c868c4c58b16e2d',
+    'server/src/mcp_transport/backend.rs':
+        '3a7192b670af868ce26f82b52748d53ce19b9df88c3824a3f0629d120bffa872',
+    'server/src/mcp_transport/mod.rs':
+        'c79902eaf9eca1d7449a3d938e495f20bcb415b53afb3c421f80b9c3c4d9bd09',
+    'server/src/mcp_transport/tests.rs':
+        '7867fe6cc86ff4e597702fee81222018be3aa557e0d3d9b01cb7daeec00e95a2',
+    'server/src/collection/mcp/tests.rs':
+        'f025e206aa100c5bc0a62117c9d250dc9c74630c02b6fa2f38cc79f169e228bf',
+    'server/src/collection/mcp/tests/size_scaling.rs':
+        'e45f787f1e4ae6c510cc06ab76d0956a6292e687972d09a920b9861e39f4bcf5',
+    'server/src/accounts/oauth/policy.rs':
+        '305463b17d26a788b961d8dabf8265d3a34f02f51593db1cf181c186dc92b993',
+    'server/src/accounts/oauth/tests.rs':
+        '0439b970e98b4937bbc1777b46a4e3bf88d9e50cf6da937258a63ef8bdaa0db7',
+    'server/src/accounts/oauth/tokens.rs':
+        '91e82ec8f188a98952328e82c7bbf29def1c2c85a2ba7bd3daaea2e9b55ae312',
     'server/src/accounts/deletion.rs':
         '1d0b85ee5ad9302685654ab0212d53a0d5feae132eba1f219a812e1cfd4cf270',
     'server/src/storage/deletion.rs':
-        '22f4dbd29832312191f660ee2f0239bf1e7ce34389dd3e5a06aaa04f8718fe93',
+        '50d1e9b315653da5886ad37f0c5da546b41115025fb34ddeb7cbcb1c4259a30b',
     "docs/process/review-log/meguri-sync-local-sign-in-recovery-20261118.md":
         "3f81b8c9ba8d4c6d8bc4912d58bfa7fb1a346f2e825d2f601e0ffa097c8603a7",
     "docs/process/review-log/app-icon-20261118.md":
@@ -1047,9 +1073,9 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/style.css':
         '6a0fdbdf6a892c051129c554b5b940271763bfda3641b0a1fecfa5f5b7583e9f',
     'server/web/src/app.tsx':
-        'af8641725a4c838aec5c45b516d6522d643c1880644a369025a3a634054747ee',
+        '7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63',
     'server/web/tests/browser/accounts.spec.ts':
-        '37ca8fc2e940b4b4a42231522dc1a51b24bb7a67c30b97caf8d99ab0b828622f',
+        '608ff299ccd4686fa5bca418585ee385e89689d484c5a64ca382c487bb9d9f8b',
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
@@ -1134,7 +1160,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        '2b7251aef3c0c2d4033696ca944de14d45b8e9b259546401fc02c88b3e36f50f',
+        'df95f9d7c15f66688c40b1890d115c30cf486ce1ab899adfc2a170714ceaacb4',
     "specs/servers/meguri-collection-mcp.md":
         "b2e41383f691526431cbc231f4c1b9480868bfc70bdca4d02c861de016921e8a",
     "specs/conformance/meguri-sync-server.md":
