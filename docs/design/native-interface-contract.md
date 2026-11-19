@@ -443,6 +443,79 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 
 - The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it, except during review, which has none (N16.2). The Mac sidebar never drew one.
 
+## N15. Round 2 Settings and sync decisions (2026-11-19)
+
+Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`: `settings.root`, `settings.accountSync`, `sync.connect`, `sync.status`, `sync.serviceSwitch`). Where earlier text differs, this section wins. The behaviour is `sync/policy` P25, `sync/cloudkit-recovery` V27 and `sync/meguri-provider` MP6; all text is `sync/status-strings` T19. Those spec sections are under review; this section is built when they are approved. The points raised for the owner are in P25.6, V27.9 and MP6.8; two of them (no device backup of a replaced iCloud collection, and Cancel removing the Meguri Sync sign-in) were decided on 2026-11-19 and are marked there.
+
+### N15.1 Settings page
+
+- Settings is one flat page: a grouped form whose sections are Sync, then Collection. The sections' rows are on the page itself; no row pushes a form that only repeats a section.
+- Mac, and the iPhone Duo's inner display held wide: the sections are a list beside the selected section, as in the system's Settings. Mac keeps N5's Settings scene and N11.4's search field; the list has Sync and Collection. The last selected section is restored (N5).
+- iPhone, the Duo folded or held tall, and iPad: the flat page, in the Settings tab or sidebar section (N11.4), with N14.8's title in the tab layout.
+- A Settings section that N11.4 lists and whose unit lands later joins as a further section after Collection, in N11.4's order. This section decides only Sync and Collection.
+- Collection keeps N5's and N12.4's file import and export. Import and export always carry cards and media; there is no media-scope choice (N5).
+- Native controls only: `Form`, `Section`, `Picker`, `Toggle`, `LabeledContent`, `NavigationLink`, sheets and alerts with system roles. No custom chrome (N1).
+
+### N15.2 The Sync section
+
+Its rows, in this order, each only under its condition:
+
+1. **Service**: a standard `Picker` labelled Service with Off, Meguri Sync and iCloud, in that order. iCloud has the secondary label Beta after its name, in the picker and wherever the service is a heading or a row label; the label is text, not colour alone, and VoiceOver reads "iCloud, Beta". The picker shows the service the core reports, never the value just tapped (MP6.1).
+2. **Account**, for Meguri Sync only: the username as its value; it pushes the page with Server Address and Username, and the sign-in fields while not signed in (MP2's labelled fields and one prominent Sign In, N6's credential rules). iCloud has no account row: the status says when the Apple account needs the user, and Meguri never asks for an Apple password (R117).
+3. **Status**: the status symbol, title and detail of T19.4 or T19.5. A needs you status has its one action as a button in this row. An issues row under it pushes the issues list. A waiting status has no button.
+4. **Sync Automatically**: a `Toggle`, shown while a service is connected, with its footer.
+5. **Sync Now**: a button, through `syncNowAvailability()` (N11.8); disabled with its reason as N11.8 says.
+6. **Troubleshooting**: a `NavigationLink`, shown while a service is selected.
+
+- While the value is Off the section has the Service row and its footer only.
+- Changing the value: from Off, no confirmation; setup starts, with progress and Cancel under the picker. From a service, the `sync.serviceSwitch` sheet once, for Off or for the other service; then the new service's setup runs with no Connect step (V27.2, MP6.3). While a change is refused, the picker keeps its value and the reason shows under it.
+- No row or footer says that cards and media sync together. The section has no media toggle, no Pause, no Sign Out, no Stop Using row, no Advanced group, no Review Conflicts row and no "This option is no longer available." line: an action that cannot run now is hidden, or disabled with the reason it gives; an action with no implementation is not shown.
+- The iCloud privacy footer (R2058, R2059) stays under the section while iCloud is the service.
+
+### N15.3 Which collection to keep
+
+- One sheet (`sync.keepCollection`) for both services: both sides' counts and last change side by side, then two buttons, each with what it replaces and what protects the replaced side under it, and Cancel.
+- Both buttons have the destructive role and neither is the default; Return confirms nothing and Esc cancels (N11.8). A button is the confirmation: no preview page and no alert follow it.
+- It opens from setup only when both sides hold a collection, from a needs you action, and once by itself after a restore or import that needs the choice (N11.8). Cancel during setup leaves the Service at Off.
+- With one direction only, it is the short upload or download confirmation of T19.3.
+
+### N15.4 Problems in three kinds
+
+- **Waiting**: the status detail says what Meguri waits for. No button.
+- **Needs you**: the title, one sentence and one button, in the Sync section's status row and in the status popover. With several, one shows at a time, in T19.4's order.
+- **Issues**: one row with their count, in the Sync section and the popover, which opens a list. Each row of the list has its text and the items it concerns.
+- The sync status button (N11.8) uses the needs-attention symbol only for needs you. With only waiting or issues rows it keeps the symbol of the state underneath; an issues count is never shown by colour alone. During review the button shows only as N16.2 says.
+- iCloud's conflict copies have no entry in the status, the popover or the Sync section.
+- During a review session on iPhone and iPad, a status action that needs Settings presents the Sync section in a sheet over the review, as N11.8 says for Account & Sync.
+
+### N15.5 Troubleshooting
+
+One page inside Sync, for both services, with these rows:
+
+1. Replace This Device's Collection…
+2. Replace the iCloud Collection… or Replace the Meguri Sync Collection…
+3. for iCloud, Restore Previous iCloud Collection from <date>…, while it is offered
+4. Cancel Replacement…, while a replacement can be cancelled and that is not the status action
+5. Sync Log, a page of real recorded attempts under N7's rules: nothing fabricated, missing fields as "Not recorded", no secrets or card content
+6. Copy Debug Info
+7. for iCloud, one plain line with the number of saved conflict copies, with no action, while there are any
+
+- Each replace entry opens its preview sheet and changes nothing; the preview's destructive button is the confirmation (N11.8, N8).
+- Opening the page may start iCloud's read-only preview reads (N11.8); it starts no Meguri Sync request (N8, MP2).
+
+### N15.6 What this replaces
+
+- **N11.4**: "iPad and iPhone: Settings … listing the same sections as rows" becomes N15.1's flat page; Account & Sync in the section list becomes Sync. The Mac scene, its search field, "Each section is a grouped form", "Changes apply at once", the synced marker, About and Backups are unchanged.
+- **N11.8**, third bullet (Account & Sync's enable control, Resume iCloud Sync, Connect to iCloud…, Pause iCloud Sync, the Stop Using row and Advanced): replaced by N15.2 and N15.5. Its rule that Off is refused while an `adopt` or `publish` op exists stays (V27.5).
+- **N11.8**, fourth bullet (entries disabled while the user's pause is on): removed; there is no Pause (P25.2).
+- **N11.8**, fifth bullet: the Review Conflicts page and the popover's Review Conflicts… and Show Details… are removed until a review screen exists (V27.7); the rule for presenting Settings over a review stays, for the Sync section.
+- **N11.8**, sixth bullet: "The two-collections decision and the publication choice push the chosen direction's preview inside their own sheet" and "This includes the first connection's 'Use iCloud Collection' for an empty collection" are replaced by N15.3 and V27.2. The rest stays: an entry ending in "…" opens a preview and changes nothing, destructive buttons are never the default, and the toolbar placements.
+- **N11.8**, bullet 8: the sheet that opens by itself is N15.3's; its Cancel takes the place of the earlier dismiss button.
+- **N11.8**, bullets 1, 2, 7, 9 and 10 are unchanged.
+- **N12.4**, first bullet: "Account & Sync offers iCloud Sync and Meguri Sync" becomes N15.2's Service row. Second bullet: MP2's native controls and N11.8's safety rules stay; N11.8's iCloud controls are replaced as above. The other bullets are unchanged.
+- **Plan text**: R122 (the media setting); R117's Enable and Pause controls; R2046's "explicit connection action" and "a paused connection"; R125's "advanced recovery actions", for their place only (their previews, backups and confirmations stay); R2054's Review Conflicts action in the needs-attention state and Settings, which is not met until a review screen exists; U161's Account & Sync layout.
+- **Screen contracts**: `settings.accountSync`, `sync.status`, `sync.connect`, `sync.publicationChoice`, `sync.serviceSwitch` and `sync.meguriSetup` need new versions for this section; `sync.reviewConflicts` is not shown; `sync.keepCollection` is new.
+
 ## N16. Round 3 review decisions (2026-11-19)
 
 Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; round 3 options 1F, 2B, 3D, 4D, 5B). Where earlier text differs, this section wins. Kept from 2026-11-01: the white card page, one row of answers with the interval under each name, the row split at the fold on the Duo held wide, the Mac's round Back button, no key hints. The card is the user's template and is never restyled. Buttons and titles keep Apple's title capitalisation ("Show Answer", "Keep Going").

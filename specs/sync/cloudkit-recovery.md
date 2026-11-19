@@ -4,7 +4,7 @@ Spec: sync/cloudkit-recovery
 Requirements: R2051, R2054, R2055, R2056, R1548, R1593 (connecting: V13), R2066 (recovery contract); supports R89, R117, R125, R158, R169, R458, R1553, R1555, R1558, R1559, R1561, R1562, R1592, R2010, R2012, R2043, R2046, R2049, R2057, R2059
 Anki: none (Meguri design)
 Scenarios: none yet
-Status: Approved 2026-10-27 (R2066). Implement U113 and U114 against this contract; first settle the open items of `sync/policy#P24`. Approved 2026-11-12 (R2066) for the new V26.1 paragraphs "Sync Now epoch verification". Every other section remains in force and unchanged.
+Status: Approved 2026-10-27 (R2066). Implement U113 and U114 against this contract; first settle the open items of `sync/policy#P24`. Approved 2026-11-12 (R2066) for the new V26.1 paragraphs "Sync Now epoch verification". Every other section remains in force and unchanged. Under review (R2066) for the new 2026-11-19 V27 and the ten lines that begin "Changed 2026-11-19 (V27" in V1, V9.2, V11, V12.2, V13.3, V13.5, V16, V17.2, V22 and V24. Do not implement them until approved. Every other section remains in force and unchanged.
 
 How Meguri stays correct when something goes wrong around CloudKit sync: the crash windows of every step of sending and receiving, the durability rules for the cursor and the outbox, account and service conditions, conflict copies, the publication fence after a restore or an import, the first connection, the two replace directions, and what the damaged-collection screen may offer. Record formats, merges, tombstones, epochs and structural generations are `sync/cloudkit-records` (the K ids below). Eligibility, hold-back, the Sync Now boundary and status computation are `sync/policy` (the P ids below).
 
@@ -24,7 +24,7 @@ Lines marked **Assumption** state Apple behavior this design depends on and has 
 - **Isolated binding**: a binding in state `isolated` (K10.2), with an isolation reason (V2.2). Its pending rows, intents and conflict copies are kept. Its inbox is kept too, except when it is isolated as `zone_deleted_by_user` or `encrypted_data_reset`: then K12.5 deletes, with the isolation, what tracking holds only as a copy of the server (the inbox entries that no apply intent names, their staged files, and its `refused` rows). Nothing runs against it, and the tracking observer records no dirty mark for it (V2.2, "Restoring a binding").
 - **Publication fence**: `cloudPublicationPending` true in the sidecar's `deviceState` (`engine/collection-replace#R6.1`).
 - **Recovery decision**: a question only the user can answer: the fence (V12), a first connection (V13), an isolated binding that needs a choice (V9, V10), or an incomplete generation (V18). Decisions are computed from durable state at every start, so they survive relaunch.
-- **Empty collection**: a local collection with no row in `notes`, `cards` or `revlog`, no deck other than id 1, and no tracked media file (`media/media-files#M7.1`). Note types, presets and config do not count.
+- **Empty collection**: a local collection with no row in `notes`, `cards` or `revlog`, no deck other than id 1, and no tracked media file (`media/media-files#M7.1`). Note types, presets and config do not count. Changed 2026-11-19 (V27.1): the connect flow decides by **no user content**, which also counts note types; this term stays for the rules that cite it.
 - **Recovery op**: one of the user-started operations of V13.2 (prefetch), V14, V15 and V18. Each has a durable record in tracking (V2.3).
 - **Withheld**, **superseded**: the two states of a local media file left from the collection that an adoption replaced (V14.4).
 - **Sent after the replacement**: the changes of a binding acknowledged after the mark V10.2 chooses ("Which mark counts": a confirmation mark, a counter value taken before the server read of a confirmation that `MGActive` named its epoch, or 0), once `MGActive` names another one (V10.2).
@@ -373,6 +373,8 @@ A binding isolated as `signed_out`, `account_changed` or `stopped` can be resume
 
 The new binding of a waiting `publish` op is resumed by V15.3, not here. Resume, in one tracking commit, makes the binding active, deletes its `engine_state` row, records the open collection's file identity (V8.2) and clears its `scan_state` drained flag (V2.2, "Restoring a binding"). The engine's state is reset by an account change (A12), so no cursor is kept. Then the reconcile scan runs (K11.4), so edits made while the binding was isolated are found, and only then does the instance start without a cursor. Its fetch from the start reconciles the epoch with tracking (V3.1 rule 5); pending local changes then send normally. When a condition fails, Resume is not offered and V13 applies.
 
+Changed 2026-11-19 (V27.2, V27.6): Resume has no confirmation step of its own, and it is not offered for a `stopped` binding after the other service was set up on this device.
+
 ## V10. Service conditions
 
 ### V10.1 Zones
@@ -468,6 +470,7 @@ The new binding of a waiting `publish` op is resumed by V15.3, not here. Resume,
 | offline | network | offline | none |
 
 - No reason shows a modal that blocks study (R1562). Failures of background work change only the indicator and the popover (R166).
+- Changed 2026-11-19 (V27.5, V27.7): the row "paused, the user paused sync" is removed (`sync/policy#P25.2`); "Connect to iCloud" and V16 in the Action column are the Service control's iCloud and Off; Review Conflicts is not offered. The conditions, reasons and error classes of this table are unchanged. `sync/status-strings#T19.4` gives each row its kind, sentence and action.
 - A decision is never answered by Sync Now, the automatic toggle, a relaunch or an Anki transfer. Sync Now with a pending decision starts no exchange (`sync/policy#P12.1` row 6) and shows the decision's action.
 
 ## V12. The publication fence (R1548)
@@ -493,6 +496,7 @@ The status is paused with "Choose where to keep the restored collection" (or the
 - Without an available account, only the last two are offered.
 - When the device has no binding and iCloud is not enabled, the fence stays, and the first connection (V13) is the decision. Each V13 choice except Cancel resolves it; Cancel keeps the fence.
 - Using the iCloud collection instead, which discards the restored one, is V14, offered in Account & Sync as an advanced action, not in this sheet. It resolves the fence too (V14.2 step 8).
+- Changed 2026-11-19 (V27.4): the decision is asked in V27.4's sheet. Its choices are this table's first row and V14; "Keep this collection on this device only" is the Service control's Off (V27.5), and "Not now" is the sheet's Cancel. The fence, its reasons and what each choice does are unchanged.
 
 ## V13. Connecting
 
@@ -525,6 +529,8 @@ The connect action (Welcome's Connect to iCloud, Account & Sync's Enable, or a V
 
 A first publication is a `publish` op like any other, so a crash follows V15.3, and another device that publishes first leads to V15.2 step 5.
 
+Changed 2026-11-19 (V27.2): rows 3 to 6 are replaced by V27.2's table. Rows 1 and 2 are unchanged.
+
 ### V13.4 Counts
 
 - A side's counts: notes, cards, review entries, decks, note types, media files, the newest review instant and the last change instant.
@@ -543,6 +549,8 @@ Two non-empty collections are never merged. The decision offers:
 | Replace the iCloud collection with this device's | V15, reason 2: the iCloud collection stays as the previous epoch for 30 days, and other devices are asked (V10.2) |
 | Keep this device's collection without iCloud | local only; nothing is sent |
 | Cancel | nothing changes; not connected; a pending fence stays (V12.2) |
+
+Changed 2026-11-19 (V27.4): the decision is V27.4's sheet, whose two buttons are the confirmations of V14 and V15. The third choice is removed: Cancel leaves the service Off, which is the same state.
 
 ### V13.6 Unproved native layout: existing collection choice
 
@@ -689,6 +697,8 @@ From V12 (the fence), V13 (a first upload: V13.3 rows 1 and 3; two collections),
 
 None of these deletes iCloud data. Meguri offers no action that deletes the user's iCloud data; system settings do, and Meguri then sees V10.1.
 
+Changed 2026-11-19 (V27.5, `sync/policy#P25.2`): the first row is removed; no control sets Pause. Rows 3 and 4 are reached by choosing Off in the Service control. Their effects are unchanged.
+
 ## V17. Conflict copies (R2054)
 
 ### V17.1 When
@@ -701,6 +711,7 @@ Only where `sync/cloudkit-records` K16 says. Cards get copies only together with
 - The list holds every unresolved copy of every binding on this device, isolated and salvage bindings included, newest first, grouped per object (kind and key). A card's copy is listed in its note's group. Copies of an isolated or salvage binding are labelled "from an earlier iCloud connection".
 - Unresolved copies keep the attention item `conflicts`, and so the state needs attention, until each is resolved (`sync/policy#P14.4`, `#P22`). Opening Review Conflicts does not clear it.
 - Account & Sync shows the count of unresolved copies.
+- Changed 2026-11-19 (V27.7): until a review screen exists, the copies have no entry in the main status and no Review Conflicts action; their count is one line in Troubleshooting. Every other rule of V17 stays, and no copy is deleted.
 
 ### V17.3 Operations
 
@@ -812,7 +823,7 @@ The errors of `engine/collection-replace#R9`, `package/backup-triggers#T9` and `
 2. No cursor is saved past a record or a record deletion that is not durably in the inbox, refused or applied (K21 invariant 5).
 3. No fact from CloudKit, from a stopped engine instance or from a staging fetcher changes an isolated binding's rows. Only isolation itself (V2.2), the user operations of V9.2 and V14 to V18, and the salvage of V8.1 do.
 4. Nothing is sent while the fence is pending, while sync is paused, from an isolated binding, or to an account other than the binding's (R1548, R2055). Decided 2026-10-27 (review round 4): this holds for zone deletions too. They are never engine work, which the engine would send by itself with no batch request; `DeleteZones` runs them as an own operation whose guard `zone_deletion_check` checks right before the deletion starts, so an input that closes the gate (Pause, an account change, a stop, a fence) makes it delete nothing (`sync/policy#P4`, `#P10.3`).
-5. Nothing replaces a local or an iCloud collection without the user's confirmation, except V13.3's adoption into a device with no collection.
+5. Nothing replaces a local or an iCloud collection without the user's confirmation, except V13.3's adoption into a device with no collection. Changed 2026-11-19 (V27.3): the exception also covers a side that V27.1 proves to hold no user content, replaced as the direct result of the user choosing the service; invariant 6 applies to it in full.
 6. Every replacement of a local collection keeps a safety backup of it. Every replacement of an iCloud collection keeps the previous epoch for 30 days (R2056): Meguri never deletes it earlier, except a zone that survived an encrypted data reset unreadable (V10.1). A zone that CloudKit itself removed (an encrypted data reset, a deletion in system settings) leaves no previous epoch to keep.
 7. A recovery decision survives relaunch and is answered only by the user.
 8. Meguri never deletes an unresolved conflict copy.
@@ -951,7 +962,7 @@ Questions for review (each settled; decided 2026-10-27 in the R2066 approval pas
 7. Decided 2026-10-27: resolved copies are kept 30 days; unresolved copies are kept forever, and they keep the state needs attention until each is resolved; opening Review Conflicts does not clear it (V17.2, `sync/policy#P14.4`, `#P22`).
 8. Decided 2026-10-27: a device restored from an Apple backup gets a new file identity, so V8.2 asks the user to choose again; a stale tracking file must never send its rows as edits.
 9. Decided 2026-10-27: on an epoch switch, the device's unsent changes are kept in its safety backup after adoption (V14.2), and the preview counts them (V13.4); they do not become conflict copies.
-10. Decided 2026-10-27: Pause iCloud Sync makes Sync Now unavailable (V16); Pause means nothing reaches CloudKit.
+10. Decided 2026-10-27: Pause iCloud Sync makes Sync Now unavailable (V16); Pause means nothing reaches CloudKit. Changed 2026-11-19 (V27.5): the user has no Pause. `sync/policy#P25.2`'s update hold keeps "nothing reaches CloudKit" for a device that was paused, until its first sync action; Sync Now is that action and is available.
 11. Decided 2026-10-27: only the epoch named by `MGActive.previous_epoch_id` is offered for restore (V14.1); older retained epochs are not listed.
 12. Decided 2026-10-27: after an adoption, local media files the iCloud collection does not name are withheld: kept on the device and uploaded only after the user changes one or inserts it into a note; same-named files with other content are replaced by the iCloud files and kept in the media trash (V14.4).
 
@@ -1085,3 +1096,128 @@ Core calls for U161 and U114. Each runs off the main thread, commits before it r
 - After each commit that makes an op operation due, and each time V26.1's "Due again" applies, the core reports `RecoveryWriteDue{op_id, operation}` to U114 when V26.1's start condition holds, beside the `Binding` and `TrackingChanged` inputs that `sync/policy#P3` lists. The zone deletion after a cancel and `RootReadDue{instance}` are reported as V26.1 says. The `publish` step `sent` (V15.2, "K18.3 step 3 is done") is found by the core in a tracking commit of the new binding, so no call reports it.
 - `Cancelled` (V21) is the result of a call that was running when the user cancelled its op.
 - Decided 2026-10-27 (review round 3): U114's media reads and downloads are not recovery calls. Their results reach the core through `sync/policy#P4`'s result calls (`media_root_read`, `blob_reads`, `asset_entry_read`, `download_result`), each with the guard of its action. A call whose guard is not current fails with `StaleGuard` and changes nothing (V3.4), so a read started before an account change, a binding change, a replacement or a close records no media key, sets no `media_zone_missing` and no blob server state, and installs nothing. The bound binding's record-ID reads of `active` and `epoch` carry the instance id instead (`root_read` above), and A21's zone listing carries a guard as these do (`zone_listing` above).
+
+## V27. Setup by choosing the service; Off (2026-11-19)
+
+Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`: `sync.connect`, `sync.serviceSwitch`, `sync.status`, `settings.accountSync`; `docs/design/native-interface-contract.md` N15). Where V9.2, V11, V12.2, V13.3, V13.5, V16 and V17.2 differ, this section wins; the lines marked "Changed 2026-11-19" point here. It replaces R2046's "explicit connection action" and R117's Enable and Pause controls. It changes no record, no step of V14 or V15, no crash window, no isolation rule and no recovery call's meaning. The same rules for Meguri Sync are `sync/meguri-provider#MP6`; the text is `sync/status-strings#T19`.
+
+The rule: **choosing iCloud in the Service control is the user's consent to set it up.** There is no Connect step after it. Meguri asks a question only when the user's choice would replace something of the user's.
+
+### V27.1 No user content
+
+- **No user content**, of a local collection: no row in `notes`, `cards` or `revlog`; no deck other than id 1; no note type other than a stock one as created; and no tracked media file (`media/media-files#M7.1`). A stock note type as created is one whose `notetypes` row has `mtime_secs` 0: the new-collection bootstrap writes that value (`storage/new-collection#B7`), and every local save of a note type stamps the row with the current time (`notetypes/records` N3.2). Presets, config and tags do not count.
+- It is V1's empty collection with note types added. A collection with no notes and one note type the user made or edited holds user content.
+- **Of an iCloud collection**: the same test on the staged collection of a finished prefetch (V13.2 step 3), with "no tracked media file" read as no live media-name entity in the epoch (K9.4). Nothing else proves it. `MGEpoch.counts`, a cancelled or unfinished prefetch, zero cards and an `MGEpoch` that is not `complete` prove nothing: such an epoch is treated as holding user content.
+- **Unreadable is content.** A collection, a row or a count that the core cannot read is treated as user content. A damaged local collection (`Failed{Corrupt}`) is never "no user content"; its remedy is V19.
+- Only the core computes it, from rows, inside the flow that uses it. No stamp, flag, count summary or earlier result stands in for it, and U161 never computes it.
+
+### V27.2 What choosing iCloud runs
+
+Choosing iCloud while no service syncs, or after the one confirmation of a switch from Meguri Sync (`sync/meguri-provider#MP6.4`), runs V13 with V13.1's conditions and V13.2's reads unchanged, and then the first row that matches. A review session refuses it with `SessionActive` (V20) and the control keeps its value.
+
+| # | This device | `MGActive` | What runs | Question |
+|---|---|---|---|---|
+| 1 | no collection | none | V13.3 row 1, unchanged | none |
+| 2 | no collection | an epoch | V13.3 row 2, unchanged: V14 with no confirmation | none |
+| 3 | a collection whose `stopped` binding V9.2 offers to resume (V27.6) | that binding's epoch | `resume_binding` (V9.2) | none |
+| 4 | a collection | none | V15 from step 2, with no preview of a replaced side; the reason is V13.3 row 3's | none |
+| 5 | a collection with no user content | a complete epoch | V14 from step 3 with the active source, the safety backup of step 7 included | none |
+| 6 | a collection with user content | a complete epoch proved to hold no user content | V15 from step 2, reason 2, its switch conditional on the change tag of the `MGActive` the proof was read with | none |
+| 7 | a collection with user content | an epoch that holds user content, or is not proved to hold none | V27.4's sheet | which collection to keep |
+
+- Rows 1 to 6 replace nothing of the user's, so they start with no confirmation. Rows 3 to 6 replace V13.3's rows 3, 4 and 6 and their three confirmations.
+- **The core picks the row.** `recovery_state()` (V26.2) gives the first-connection decision with the row it computed and its question, `none` or `keep`. For `none`, U151 makes the row's recovery call at once, with the facts of that state as arguments (the epoch id and the `MGActive` change tag); the checks of `adopt`, `publish` and `resume_binding` are unchanged, so changed facts give `EpochChanged` or `NotOffered` and the row is computed again.
+- **Proof is checked again where it is used.** Row 5: when V14.2 step 7 enters its exclusive phase, the core tests the open collection for no user content again; when it holds user content by then (a note added while the collection staged), the op is cancelled as V14.3's first `ready` row says, nothing is replaced, and the flow starts again at this table, where row 7 now asks. Row 6: the prefetch's staged collection is of the epoch that the `MGActive` change tag names, and the switch is conditional on that tag (K18.3 step 5); a conflict is V15.2 step 5, which asks.
+- **Until the first durable step** of rows 2 to 7 (the commit of `resume_binding`, V14.2 step 3's op row, V15.2 step 2's op row), the Service control shows progress with Cancel. Cancel there deletes the prefetch (V13.2) and leaves the service Off; a pending fence stays (V12.2). A failure there (offline, `AccountUnavailable`, `EpochIncomplete`, a failed read) leaves iCloud selected with no binding, which is `needsAttention{chooseCollection}` (`sync/policy#P14.4`); its action runs this table again.
+- From the first durable step on, V14.3 and V15.3 apply unchanged: a kill, a failure or a Cancel has the outcome they give.
+- **What the user is told.** After rows 2 to 6 the status says what was done: this device's collection was uploaded, the iCloud collection was downloaded, or syncing continues (`sync/status-strings#T19.3`). After row 5 it also says that the collection that was on this device is in the backups.
+- V13.6's unproved-layout decision is unchanged: it offers V13.5's choices, now through V27.4's sheet, and never a row of this table.
+
+### V27.3 Why no confirmation is safe
+
+V22 invariant 5 keeps its rule: nothing replaces a collection that holds user content without the user's confirmation. The rows that start without one are:
+
+| Row | What is replaced | What keeps it recoverable |
+|---|---|---|
+| 2 | nothing: no local collection | |
+| 3 | nothing: the same collection continues with the same epoch | |
+| 4 | nothing: `MGActive` names no epoch | |
+| 5 | a local collection proved to hold no user content, at the replace itself (V27.2) | the safety backup of V14.2 step 7 (V22 invariant 6); a failed backup stops the op with nothing replaced (`SafetyBackupFailed`). Its presets and config, which do not count as user content, are in that backup |
+| 6 | an iCloud collection proved to hold no user content | it stays as the previous epoch for 30 days (V22 invariant 6); every other device bound to it is isolated `epoch_switched` and asked (V10.2) |
+
+- A side that is not proved empty by V27.1 always gets row 7's question. A wrong "holds user content" costs one question; the rules never err the other way.
+- V22 invariants 6, 7 and 9 are unchanged. Two collections are never merged in any row.
+
+### V27.4 Which collection to keep
+
+One sheet, with the same wording for iCloud and Meguri Sync (`sync/status-strings#T19.3`, screen contract `sync.keepCollection`). It replaces V13.5's decision, V12.2's choice sheet, the choice of V15.2 step 5 and, for the paths below, the previews of V14.2 step 1 and V15.2 step 1 followed by a second confirmation.
+
+It is shown for:
+
+- V27.2 row 7;
+- the publication fence (V12.2), always, whatever the two sides hold;
+- an isolated binding whose row of V11 offers V14 or V15: `epoch_switched`, a `crt` mismatch, `rootUnreadable`, lost iCloud data (V27.6), a `publish` op whose switch conflict is set (V15.2 step 5), and V13.6;
+- a connection in another iCloud account (V27.6).
+
+| Choice | Runs | Offered |
+|---|---|---|
+| Keep this device's collection | V15: `publish` with the reason V12.2, V13.3 or V13.5 gives; for a switch conflict, `republish` | while V15.1 allows it and the account is available |
+| Keep the iCloud collection | V14 with the active source: `adopt` | while `MGActive` names a complete epoch that can be read, and outside a review session (V20) |
+| Cancel | nothing | always |
+
+- **The sheet is the preview and the confirmation of the direction chosen** (V14.2 steps 1 and 2, V15.2 steps 1 and 2). It shows, before either button can be used: both sides' counts and last change (V13.4), a side whose counts come from `MGEpoch.counts` labelled with their date; under each choice, what that choice replaces, the unsent, held, isolated, sent-after-replacement and fetched-not-applied work that it loses (V13.4, R2056), and what keeps the replaced side recoverable. Lines whose count is 0 are not shown; the direction and the recoverability line always are.
+- **Recoverability, said as it is.** Keeping the iCloud collection: this device's collection is backed up on this device first (V14.2 step 7); media files are not in that backup (`package/backup-triggers#T6.1`). Keeping this device's collection: the iCloud collection stays in iCloud as the previous collection for 30 days (V14.1, K18.5); Meguri writes no copy of it on this device (V24 question 2), and the sheet does not say that it does.
+- **Binding of the confirmation.** A button passes the epoch id and `MGActive` change tag that the sheet showed (V26.2 `adopt`, `publish`, `republish`). `EpochChanged` reloads the sheet's facts and needs a new choice. Neither button is the default; Return confirms nothing.
+- With one side absent or unreadable the sheet offers only the other direction and Cancel, and says why.
+- **Cancel.** During a setup started from the Service control it leaves the service Off (V27.2). Everywhere else it changes nothing: the fence, the isolation or the waiting op stays, and the status keeps its action. The third choice of V13.5 and V12.2, keep this device's collection without iCloud, is the Service control's Off (V27.5).
+- After a restore or an import that sets the fence while iCloud is the service, the sheet opens once by itself over the deck workspace (N11.8); Cancel closes it and the status keeps the action.
+- The one-direction entries of Troubleshooting (V14.1's and V15.1's "advanced action", V14.1's previous collection) keep their own previews (V14.2 step 1, V15.2 step 1) and one destructive button, unchanged.
+
+### V27.5 Off
+
+Off in the Service control replaces Stop Using iCloud on This Device, Keep on This Device Only as a separate action, and Pause. It asks once (`sync/status-strings#T19.2`) and then runs, by state:
+
+| State | Runs |
+|---|---|
+| the binding is active, with no `adopt` or `publish` op | `stop_using_icloud()`: the binding is isolated `stopped` (V16) |
+| a pending fence, no binding with iCloud selected, an isolated binding of a V11 row that offers V16, or a `publish` op whose switch conflict is set | `keep_local_only()` (V12.2, V13.5, V15.2 step 5, V16) |
+| any other `adopt` or `publish` op exists | refused, with no confirmation shown: the control says that the replacement must finish or be cancelled first, because the op's Cancel or failure would restore the binding before (V14.3, V15.3) |
+
+- The confirmation shows this device's unsent and held work first (`sync/meguri-provider#MP3` step 1, as for a switch).
+- Off keeps the collection, its media, its backups, its pending rows and its conflict copies on this device, and deletes nothing in iCloud (V16). The status is `localOnly`, which the control shows as Off.
+- A switch to Meguri Sync stops iCloud the same way, inside the handoff of `sync/meguri-provider#MP3`.
+- No user control sets Pause (`sync/policy#P25.2`). V16's Automatic sync off row is unchanged.
+
+### V27.6 Coming back, and where Meguri always asks
+
+- **From Off.** Choosing iCloud again resumes a `stopped` binding with no confirmation (V27.2 row 3) when V9.2's conditions hold: the same account, the same collection, the same epoch. The unsent changes then sync as they would have.
+- **Not after the other service.** V9.2's Resume is not offered for a `stopped` binding once Meguri Sync has reached a ready binding on this device since the stop (`sync/meguri-provider#MP3`: no old baseline is restored after work under another service, and the Meguri version is never silently sent to an old iCloud epoch). The provider binding metadata of `sync/meguri-provider#MP1` records it. V27.2 then goes on to rows 4 to 7, which for two collections is the question.
+- **The same account again.** For a binding isolated `signed_out` or `account_changed` whose identity is the account's again, the status action Resume Syncing calls `resume_binding` directly. That action is V9.2's explicit Resume; no further sheet follows.
+- **Another account** (R2055). While the newest binding other than a salvage binding belongs to another account than the one signed in, a connection never takes rows 4, 5 or 6 of V27.2. It shows V27.4's sheet in the form that applies, naming that this is a different iCloud account, also when one side is absent or holds no user content. Nothing of this collection reaches the new account without that confirmation.
+- **Lost iCloud data** (R2054). A binding isolated `zone_missing`, `active_missing`, `zone_deleted_by_user` or `encrypted_data_reset`, `rootUnreadable` and `mediaZoneMissing` never lead to a silent upload: uploading again is V27.4's sheet in its one-direction form, so deleted iCloud content is never recreated without the user's confirmation.
+
+### V27.7 Conflict copies
+
+- Until a review screen exists, V17's copies have no entry in the main status, the popover or the Sync section, and no Review Conflicts action. Troubleshooting shows their count as one plain line with no action (`sync/status-strings#T19.6`).
+- Everything else of V17 stands: copies are made as K16 says, kept until resolved, never deleted while unresolved (V22 invariant 8), counted in `sync/policy#P14.4` `conflicts`, and included in Copy Debug Info. V17.3's and V17.4's operations stay in the core for the review screen.
+- R2054's Review Conflicts action is not met while that screen is missing. This section records that; it does not waive it.
+
+### V27.8 Test obligations
+
+Added to V23.2:
+
+- V27.1: each of a note, a card, a review, a second deck, a note type with `mtime_secs` above 0 and a tracked media file makes a collection hold user content; a new collection, and one with only changed presets, config and tags, holds none; an epoch known only by `MGEpoch.counts` of zero is not proved empty.
+- V27.2: each row from its two sides, with no confirmation call for rows 1 to 6; a note added between row 5's start and its exclusive phase cancels the op with the collection unchanged and gives row 7; an `MGActive` changed between row 6's proof and its switch gives V15.2 step 5; Cancel before the first durable step leaves Off, no binding and no staging; a failed read leaves `chooseCollection`.
+- V27.4: each button passes the shown epoch id and change tag; `EpochChanged` needs a new choice; the fence always shows the sheet; Cancel from the status changes nothing.
+- V27.5: each state row; Off with an `adopt` op at `ready` is refused and writes nothing.
+- V27.6: a `stopped` binding resumes with no confirmation; after a Meguri Sync ready binding it is not offered; with a binding of another account and an empty new account nothing is published before the sheet's confirmation; a `zone_deleted_by_user` binding publishes nothing before it.
+
+### V27.9 For the owner
+
+- **"Empty" also means no media files**, which the decision's list does not name (notes, cards, review history, note types and decks beyond the stock ones). V1 already had it, and a device or a service with media files and no cards would otherwise be replaced or reconciled with no question. Presets, config and tags stay out of the test, as before; when a local collection of row 5 is replaced, they are in its safety backup.
+- **Row 6** replaces an iCloud collection that is proved empty, with no question. It is what "upload from this device when the service is empty" means once a device has started empty in iCloud. The proof needs the prefetch to finish, so a slow or cancelled prefetch gives the question instead.
+- **"The replaced collection is backed up on the device first"** is true when this device's collection is replaced. When the iCloud collection is replaced, what exists today is the 30-day previous collection in iCloud, and no copy on this device (V24 question 2). V27.4 says that in the sheet and does not claim a device backup. Decided 2026-11-19 (`docs/design/decisions.md`, `sync.connect`, by Claude at Antoine's request): the sheet states each side's protection as it is, and no new device backup of the iCloud collection is written for now. A later change that writes the prefetched iCloud collection into the backups folder needs a `package/backups` change and does not cover media.
+- **R2055 and R2054 keep two questions that the decision's rule alone would drop** (V27.6): a connection in a different iCloud account, and uploading again after the iCloud data was deleted or lost. Both would otherwise be "upload when the service is empty". The question is V27.4's sheet in its one-direction form, so no new screen is added.
+- **Coming back from Meguri Sync is not a silent resume** (V27.6), by `sync/meguri-provider#MP3`.
+- **R2056's pending work stays in the sheet** (V27.4). The decision says counts and last changed are enough to decide; R2056 also requires the pending work at risk. The lines show only when their count is above 0.
+- **Review Conflicts** (V27.7): R2054 stays unmet until the screen exists.
