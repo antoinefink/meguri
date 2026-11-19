@@ -80,12 +80,18 @@ jobs:
 
           rc=0
           receipt="$(mg "${args[@]}")" || rc=$?
-          if [[ -f "$receipt" ]]; then
-            cp "$receipt" "$RUNNER_TEMP/meguri-result.json"
+          artifact="$RUNNER_TEMP/meguri-result.json"
+          receipt_prefix="$GITHUB_WORKSPACE/build/mg/${args[0]}/"
+          receipt_suffix="${receipt#"$receipt_prefix"}"
+          if [[ "$receipt" == "$receipt_prefix"* &&
+                "$receipt_suffix" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+/result\.json$ ]] &&
+             sudo -n test -f "$receipt"; then
+            sudo -n cat -- "$receipt" > "$artifact.tmp"
+            mv -- "$artifact.tmp" "$artifact"
           fi
           ((rc == 0))
-          jq -e --arg sha "$GITHUB_SHA" \
-            '.status == "pass" and .commit.sha == $sha and .commit.dirty == false' "$receipt"
+          jq -e --arg sha "$GITHUB_SHA" --arg job "${args[0]}" \
+            '.status == "pass" and .commit.sha == $sha and .commit.dirty == false and .job == $job' "$artifact"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
