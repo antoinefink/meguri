@@ -338,8 +338,9 @@ extension AppNavigation {
         guard sheet == nil else { return false }
         if review != nil { present(.accountSync) }
         else {
+            // N15.1: the Sync section is on the flat Settings page itself.
             show(.settings)
-            setPath([.settingsPage(.accountSync)], for: .settings)
+            setPath([], for: .settings)
         }
         return true
     }

@@ -16,9 +16,10 @@ public struct CloudSyncStatusButton: View {
     #endif
     public init(collection: ReviewCollection) { self.collection = collection }
     private var meguri: Bool { collection.sync.providerState?.selection == .meguri }
-    private var copy: SyncStatusPresentation { .init(state: collection.sync.status?.state, setup: collection.sync.setupState) }
-    private var titleKey: String { meguri ? collection.sync.meguriStatus.titleKey : copy.titleKey }
-    private var detailKey: String? { meguri ? collection.sync.meguriStatus.detailKey : copy.detailKey }
+    /// N15.4: the needs-attention symbol only for needs you; otherwise the state underneath.
+    private var main: SyncMainStatus { collection.sync.mainStatus }
+    private var titleKey: String { main.titleKey }
+    private var detailKey: String? { main.detailCount == nil ? main.detailKey : nil }
     private var presented: Binding<Bool> {
         Binding(get: { collection.navigation.sheet == nil && collection.syncPresentation.statusPresented },
             set: { collection.syncPresentation.statusPresented = $0 })
@@ -41,15 +42,13 @@ public struct CloudSyncStatusButton: View {
                     .accessibilityIdentifier("sync.status.mediaIndicator")
             }
             Button { presented.wrappedValue.toggle() } label: {
-                Image(systemName: meguri ? collection.sync.meguriStatus.symbol : copy.symbol)
+                Image(systemName: main.symbol)
                     .symbolEffect(.rotate, options: .repeating,
                         isActive: !reduceMotion && (meguri ? collection.sync.meguriStatus.isBusy : collection.sync.status?.state == .syncingCollection))
             }
             .accessibilityLabel(SyncText.value(meguri ? "sync.meguri.button.label" : "sync.button.label"))
             .accessibilityValue(SyncText.value(titleKey).replacingOccurrences(of: "…", with: ""))
-            .help(meguri
-                ? ([SyncText.value(titleKey)] + collection.sync.meguriStatus.detailLines(now: clock.now())).joined(separator: "\n")
-                : [SyncText.value(titleKey), detailKey.map(SyncText.value)].compactMap { $0 }.joined(separator: "\n"))
+            .help([SyncText.value(titleKey), detailKey.map(SyncText.value)].compactMap { $0 }.joined(separator: "\n"))
             .accessibilityIdentifier("sync.status.button")
             .disabled(collection.syncPresentation.statusHandoffPending)
             .popover(isPresented: presented(compact: false)) {
@@ -81,41 +80,25 @@ public struct CloudSyncStatusButton: View {
         }
     }
     private var status: some View {
-        VStack {
-            Form {
-                SyncStatusContent(collection: collection)
-                if !meguri {
-                if collection.sync.status?.controls.enable == .connect {
-                    Section { CloudPreviewEntryButton(collection: collection, entry: .connect, entryAction: openStatusEntry) }
-                }
-                if collection.sync.status?.controls.decisionRequired == true {
+        NavigationStack {
+            VStack {
+                Form {
                     Section {
-                        Button(SyncText.value("sync.decision.action")) { openStatusEntry(.publicationChoice, .main) }
-                            .accessibilityLabel(SyncText.value("sync.decision.action.label"))
-                    }
-                }
-                if collection.sync.settings.paused {
-                    Section {
-                        Button(SyncText.value("sync.settings.resumePause")) {
-                            let settings = collection.sync.settings
-                            collection.sync.setDeviceSettings(paused: false, automatic: settings.automatic, media: settings.media)
+                        SyncMainStatusRows(collection: collection, openEntry: openStatusEntry)
+                        if meguri, MeguriMediaFactRows.isVisible(collection.sync) {
+                            MeguriMediaFactRows(collection: collection)
                         }
                     }
                 }
-                CloudAttentionSection(collection: collection, entryAction: openStatusEntry)
+                .formStyle(.grouped)
+                Divider()
+                VStack {
+                    SyncNowButton(collection: collection)
+                    Button(SyncText.value("sync.settings.sync.section"), action: showSettings)
+                        .accessibilityIdentifier("sync.status.settings")
                 }
+                .padding()
             }
-            .formStyle(.grouped)
-            Divider()
-            VStack {
-                SyncNowButton(collection: collection, accountAction: { key in
-                    if key == "sync.meguri.media.showAffected" { collection.syncPresentation.meguriAffectedFilesPresented = true }
-                    showSettings()
-                })
-                Button(SyncText.value("sync.settings.section"), action: showSettings)
-                    .accessibilityIdentifier("sync.status.accountSync")
-            }
-            .padding()
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("sync.status.popover")

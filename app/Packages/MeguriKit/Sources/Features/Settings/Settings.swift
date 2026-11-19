@@ -3,29 +3,77 @@ import CoreBridge
 import DesignSystem
 import SwiftUI
 
-/// Compact/regular mobile Settings uses system navigation into grouped forms.
+/// N15.1: Settings is one flat page, a grouped form with Sync then Collection.
+/// Where there is room beside it (an unfolded iPhone held wide), the sections
+/// are a list next to the selected section, as in the system's Settings.
 public struct SettingsView: View {
     private let collection: ReviewCollection
     #if !os(macOS)
     @Environment(\.shellLayout) private var shellLayout
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @AppStorage("settings.selectedSection") private var selectedSection = "accountSync"
     #endif
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
-        List {
-            ForEach(SettingsPage.visible, id: \.self) { page in
-                NavigationLink(value: Destination.settingsPage(page)) {
-                    SettingsPageLabel(page: page)
+        content
+            .navigationTitle(Text("Settings", bundle: .module))
+            #if !os(macOS)
+            // As the Decks tab's root (N14.8).
+            .toolbarTitleDisplayMode(shellLayout == .compact ? .inlineLarge : .automatic)
+            #endif
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("settings.root.content")
+    }
+    @ViewBuilder private var content: some View {
+        #if os(macOS)
+        flat
+        #else
+        // The tab layout at regular width and wider than tall: an unfolded iPhone held wide.
+        GeometryReader { proxy in
+            if shellLayout == .compact, sizeClass == .regular, proxy.size.width > proxy.size.height {
+                HStack(spacing: 0) {
+                    List(selection: Binding<String?>(get: { section }, set: { if let value = $0 { selectedSection = value } })) {
+                        ForEach([SettingsPage.accountSync, .collection], id: \.self) { page in
+                            SettingsPageLabel(page: page)
+                                .tag(page.rawValue)
+                                .accessibilityIdentifier("settings.root.\(page.rawValue)")
+                        }
+                    }
+                    .frame(width: proxy.size.width / 3)
+                    NavigationStack {
+                        Form {
+                            if section == "collection" { SettingsCollectionFilesSection(collection: collection) }
+                            else { SyncSettingsSections(collection: collection) }
+                        }
+                        .formStyle(.grouped)
+                    }
                 }
-                .accessibilityIdentifier("settings.root.\(page.rawValue)")
+            } else { flat }
+        }
+        #endif
+    }
+    #if !os(macOS)
+    private var section: String { selectedSection == "collection" ? "collection" : "accountSync" }
+    #endif
+    private var flat: some View {
+        Form {
+            SyncSettingsSections(collection: collection)
+            SettingsCollectionFilesSection(collection: collection)
+            if SettingsPage.showsAnkiServer {
+                // The hidden legacy interface keeps its pages for its own suites.
+                Section {
+                    NavigationLink(value: Destination.settingsPage(.collection)) {
+                        Text("Server Transfers", bundle: .module)
+                    }
+                    .accessibilityIdentifier("settings.root.collection")
+                    NavigationLink(value: Destination.settingsPage(.ankiServer)) {
+                        SettingsPageLabel(page: .ankiServer)
+                    }
+                    .accessibilityIdentifier("settings.root.ankiServer")
+                }
             }
         }
-        .navigationTitle(Text("Settings", bundle: .module))
-        #if !os(macOS)
-        // As the Decks tab's root (N14.8).
-        .toolbarTitleDisplayMode(shellLayout == .compact ? .inlineLarge : .automatic)
-        #endif
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings.root.content")
+        .formStyle(.grouped)
     }
 }
 
@@ -33,7 +81,7 @@ struct SettingsPageLabel: View {
     let page: SettingsPage
     var body: some View {
         switch page {
-        case .accountSync: Label(SyncText.value("sync.settings.section"), systemImage: "icloud")
+        case .accountSync: Label(SyncText.value("sync.settings.sync.section"), systemImage: "icloud")
         case .collection: Label { Text("Collection", bundle: .module) } icon: { Image(systemName: "rectangle.stack") }
         case .ankiServer: Label { Text("Anki Server", bundle: .module) } icon: { Image(systemName: "network") }
         }
@@ -125,7 +173,10 @@ struct SettingsCollectionFilesSection: View {
             } label: {
                 Label { Text("To a file", bundle: .module) } icon: { Image(systemName: "square.and.arrow.up") }
             }
-        } header: { Text("Collection Files", bundle: .module) }
+        } header: {
+            Text("Collection", bundle: .module)
+                .accessibilityIdentifier("settings.root.collectionHeading")
+        }
         footer: {
             // N17.3: one line under the Export row says what the file holds.
             Text("Export saves all decks, cards, review history and media in one file.", bundle: .module)
@@ -234,7 +285,7 @@ public struct MacSettingsView: View {
         let query = collection.syncPresentation.settingsSearch
         guard !query.isEmpty else { return true }
         let terms: String = switch page {
-        case .accountSync: SyncText.value("sync.settings.section") + " iCloud " + SyncText.value("sync.service.meguri")
+        case .accountSync: SyncText.value("sync.settings.sync.section") + " iCloud " + SyncText.value("sync.service.meguri")
         case .collection: String(localized: "Collection", bundle: .module) + " Import Export"
         case .ankiServer: String(localized: "Anki Server", bundle: .module) + " Connection"
         }

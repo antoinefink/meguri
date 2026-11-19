@@ -106,7 +106,7 @@ public struct CloudConnectionView: View {
             } else if confirming {
                 ProgressView(SyncText.value("sync.publish.preparing"))
             } else if submitted {
-                if confirmation == .resume { SyncStatusRows(collection: collection) }
+                if confirmation == .resume { SyncMainStatusRows(collection: collection) }
                 else if let recovery = sync.recovery { CloudRecoveryContent(collection: collection, recovery: recovery) }
                 else if publication.accepted, sync.connectionOperationActive {
                     ProgressView(SyncText.value("sync.publish.uploading"))

@@ -3,116 +3,31 @@ import CoreBridge
 import Foundation
 import SwiftUI
 
-/// Text is projected from Rust facts, never from native SDK idleness.
-struct SyncStatusContent: View {
-    let collection: ReviewCollection
-    var body: some View {
-        Section {
-            SyncStatusRows(collection: collection)
-            if collection.sync.providerState?.selection == .meguri,
-               MeguriMediaFactRows.isVisible(collection.sync) {
-                MeguriMediaFactRows(collection: collection)
-            }
-        }
-    }
-}
-
-/// Shared native rows can live in Settings' iCloud group or the status popover.
-struct SyncStatusRows: View {
-    let collection: ReviewCollection
-    var showsMeguriProviderLabel = true
-    @Environment(\.appClock) private var clock
-    private var sync: SyncCoordinator { collection.sync }
-    private var presentation: SyncStatusPresentation { .init(state: sync.status?.state, setup: sync.setupState) }
-    var body: some View {
-        Group {
-            if sync.providerState?.selection == .meguri {
-                VStack(alignment: .leading) {
-                    if showsMeguriProviderLabel { Text(SyncText.value("sync.service.meguri")) }
-                    Text(SyncText.value(sync.meguriStatus.titleKey))
-                    ForEach(Array(sync.meguriStatus.detailLines(now: clock.now()).enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                    }
-                    if sync.meguriStage == .media, let progress = sync.meguriMediaProgress {
-                        Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: progress.awaiting)))
-                    }
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("settings.accountSync.meguri.status")
-            } else {
-            VStack(alignment: .leading) {
-                Label(SyncText.value(presentation.titleKey), systemImage: presentation.symbol)
-                if let key = presentation.detailKey { Text(SyncText.value(key)) }
-                if let status = sync.status {
-                    if case .upToDate(let at) = status.state {
-                        Text(SyncText.format("sync.status.upToDate.detail", SyncText.instant(at, now: clock.now())))
-                    }
-                    if status.state == .needsAttention {
-                        if status.attention.count == 1, let item = status.attention.first {
-                            Text(SyncStatusCopy.attention(item.key, count: item.value))
-                        } else if !status.attention.isEmpty {
-                            Text(SyncText.format("sync.status.needsAttention.count", status.attention.count))
-                        }
-                    }
-                    if SyncStatusCopy.keepsLocally(status) { Text(SyncText.value("sync.status.keptLocally")) }
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("settings.accountSync.status")
-            #if DEBUG
-            .accessibilityValue([DebugCloudDiagnostics.processFetchValue, sync.debugPolicyStatusValue, DebugCloudDiagnostics.latestValue]
-                .compactMap { $0 }.joined(separator: " "))
-            #endif
-            if let status = sync.status {
-                ForEach(Array(SyncStatusCopy.lines(status, now: clock.now()).enumerated()), id: \.offset) { offset, line in
-                    Text(line)
-                        .accessibilityIdentifier("settings.accountSync.detail.\(offset)")
-                }
-            }
-            if let failure = sync.connectionFailure {
-                Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure)))
-                    .accessibilityIdentifier("settings.accountSync.connectionError")
-            } else if sync.operationFailed {
-                Text(SyncText.value("sync.recovery.error.other"))
-                    .accessibilityIdentifier("settings.accountSync.operationError")
-            }
-            if let recovery = sync.recovery {
-                CloudRecoveryContent(collection: collection, recovery: recovery)
-            }
-            }
-        }
-    }
-}
-
 struct SyncNowButton: View {
     let collection: ReviewCollection
     var identifier = "sync.status.syncNow"
     var showsUnavailableReason = true
-    var reasonIdentifierSuffix = ""
-    var accountAction: ((String) -> Void)? = nil
-    private var titleKey: String {
-        if collection.sync.providerState?.selection == .meguri, case .account(let key) = collection.sync.meguriStatus.route { return key }
-        return "sync.now.command"
-    }
+    private var meguri: Bool { collection.sync.providerState?.selection == .meguri }
     private var reason: String? { SyncStatusCopy.unavailable(collection) }
+    private var available: Bool {
+        // Meguri Sync runs a round only once its setup has completed (MP5).
+        if meguri { return collection.sync.meguriStatus.route == .round }
+        return collection.syncNowAvailability() == .available
+    }
     var body: some View {
-        Button(SyncText.value(titleKey)) {
-            if collection.sync.providerState?.selection == .meguri, case .account(let key) = collection.sync.meguriStatus.route,
-               let accountAction { accountAction(key) }
-            else { collection.requestSyncNow() }
-        }
-            .disabled(collection.syncNowAvailability() != .available || collection.navigation.sheet != nil)
+        Button(SyncText.value("sync.now.command")) { collection.requestSyncNow() }
+            .disabled(!available || collection.navigation.sheet != nil)
             .help(reason ?? SyncText.value("sync.now.command"))
             .accessibilityIdentifier(identifier)
             #if DEBUG
             // Observe the actual coordinator; never query a transport from a view.
-            .accessibilityValue(collection.sync.providerState?.selection == .meguri
+            .accessibilityValue(meguri
                 ? "meguri-round-success-sequence:\(collection.sync.debugMeguriRoundSuccessSequence)"
                 : DebugCloudDiagnostics.nativeFetchSequenceValue)
             #endif
         if showsUnavailableReason, let reason {
-            Text(reason).foregroundStyle(.secondary)
-                .accessibilityIdentifier("\(identifier)Reason\(reasonIdentifierSuffix)")
+            Text(reason).font(.footnote).foregroundStyle(.secondary)
+                .accessibilityIdentifier("\(identifier)Reason")
         }
     }
 }
@@ -128,7 +43,9 @@ enum SyncStatusCopy {
     }
     static func unavailable(_ collection: ReviewCollection) -> String? {
         if collection.sync.providerState?.selection == .meguri {
-            if case .disabled(let key) = collection.sync.meguriStatus.route { return key.map(SyncText.value) }
+            if case .disabled(let key) = collection.sync.meguriStatus.route {
+                return key.map { SyncText.value(SyncKinds.meguriSyncNowKey($0)) }
+            }
             return nil
         }
         guard case .unavailable(let reason) = collection.syncNowAvailability() else { return nil }
@@ -137,8 +54,9 @@ enum SyncStatusCopy {
         case .collectionUnavailable: key = "sync.now.unavailable.collectionUnavailable"
         case .reviewActive:
             key = SyncStatusPresentation.reviewAvailabilityKey(collection.sync.status?.controls)
-        case .notConnected: key = "sync.now.unavailable.notConnected"
-        case .paused: key = "sync.now.unavailable.paused"
+        case .notConnected: key = SyncKinds.syncNowOffKey
+        // Never reported: P12.1 row 4 is removed (P25.2).
+        case .paused: key = "sync.now.unavailable.recoveryRequired"
         case .iCloudUnavailable:
             if collection.sync.status == nil, collection.sync.setupState == .configurationUnavailable {
                 key = "sync.status.unavailable.setupNeeded"
@@ -166,7 +84,7 @@ enum SyncStatusCopy {
             lines += resultLines(attempt.outcome, status: status)
         }
         if let error = status.error { lines.append(SyncText.value(SyncStatusPresentation.errorKey(error.error))) }
-        lines += media(status.media, paused: status.mediaPaused)
+        lines += media(status.media)
         return lines
     }
     static func sum(_ first: UInt64?, _ second: UInt64?) -> UInt64? {
@@ -174,8 +92,7 @@ enum SyncStatusCopy {
         let result = first.addingReportingOverflow(second)
         return result.overflow ? nil : result.partialValue
     }
-    static func media(_ facts: CloudPolicyMediaFacts, paused: Bool) -> [String] {
-        if paused { return [SyncText.value("sync.media.off")] }
+    static func media(_ facts: CloudPolicyMediaFacts) -> [String] {
         var lines: [String] = []
         let running = (facts.uploadsRunning ?? 0) > 0 || (facts.downloadsRunning ?? 0) > 0
         if let files = sum(facts.uploadFiles, facts.downloadFiles), files > 0 {
@@ -212,7 +129,7 @@ enum SyncStatusCopy {
             if newer > 0 { lines.append(SyncText.format("sync.result.newerPending", Int64(clamping: newer))) }
             if held > 0 { lines.append(SyncText.value("sync.details.heldBack")) }
             if incoming > 0 { lines.append(SyncText.format("sync.result.incomingWaiting", Int64(clamping: incoming))) }
-            lines += media(facts, paused: status.mediaPaused)
+            lines += media(facts)
             return lines
         case .incomplete(let outstanding, let blocked):
             var lines: [String] = []
@@ -226,46 +143,6 @@ enum SyncStatusCopy {
             return savingFailure ? [] : [SyncText.value("sync.status.keptLocally")]
         }
     }
-    static func attention(_ item: CloudPolicyAttention, count: UInt64) -> String {
-        if item == .generationIncomplete || item == .recoveryOpWaiting {
-            return SyncText.value("sync.error.conflictRecovery")
-        }
-        let key: String = switch item {
-        case .isolated: "isolated"
-        case .rootUnreadable: "rootUnreadable"
-        case .chooseCollection: "chooseCollection"
-        case .conflicts: "conflicts"
-        case .conflictsUnreadable: "conflictsUnreadable"
-        case .refused: "refused"
-        case .referenceWaiting: "referenceWaiting"
-        case .oversize: "oversize"
-        case .unreadable: "unreadable"
-        case .unsyncable: "unsyncable"
-        case .claimStuck: "claimStuck"
-        case .generationIncomplete, .recoveryOpWaiting: "cloudError" // required detail is not in this projection
-        case .assetUnavailable: "assetUnavailable"
-        case .applyFailed: "applyFailed"
-        case .rekeyFailed: "rekeyFailed"
-        case .crtMismatch: "crtMismatch"
-        case .collectionCorrupt: "collectionCorrupt"
-        case .mediaZoneMissing: "mediaMissingInICloud"
-        case .mediaChanged: "mediaChanged"
-        case .mediaMissing: "mediaMissing"
-        case .exchangeIncomplete: "exchangeIncomplete"
-        case .quotaFull: "quotaFull"
-        case .localStorageFull: "localStorageFull"
-        case .trackingError: "trackingError"
-        case .unsupportedSchema: "unsupportedSchema"
-        case .cloudError: "cloudError"
-        }
-        return SyncText.format("sync.attention." + key, Int64(clamping: count))
-    }
-    // P14.4's presentation order; a Dictionary's iteration order is not UI order.
-    static let attentionOrder: [CloudPolicyAttention] = [.isolated, .rootUnreadable, .chooseCollection,
-        .conflicts, .conflictsUnreadable, .refused, .referenceWaiting, .oversize, .unreadable, .unsyncable,
-        .claimStuck, .generationIncomplete, .assetUnavailable, .applyFailed, .rekeyFailed, .crtMismatch,
-        .collectionCorrupt, .mediaZoneMissing, .mediaChanged, .mediaMissing, .recoveryOpWaiting,
-        .exchangeIncomplete, .quotaFull, .localStorageFull, .trackingError, .unsupportedSchema, .cloudError]
 }
 
 struct CloudRecoveryContent: View {
@@ -284,7 +161,7 @@ struct CloudRecoveryContent: View {
                 if recovery.adoptionTransportWait { collection.sync.resumeWaitingAdoption() }
                 else { collection.sync.resumeConnection() }
             }
-                .disabled(recovery.switchConflict || recovery.step == .cancelling || collection.sync.settings.paused)
+                .disabled(recovery.switchConflict || recovery.step == .cancelling)
                 .accessibilityIdentifier("sync.recovery.resume")
         }
         CloudRecoveryCancelButton(collection: collection, recovery: recovery)

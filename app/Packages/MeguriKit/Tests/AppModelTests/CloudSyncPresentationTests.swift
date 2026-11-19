@@ -688,7 +688,7 @@ import Testing
         navigation.dismissSheet()
         #expect(navigation.openAccountSync())
         #expect(navigation.section == .settings)
-        #expect(navigation.path(.settings) == [.settingsPage(.accountSync)])
+        #expect(navigation.path(.settings).isEmpty)
     }
 
     @Test func compactStatusWaitsForNativeDismissalAndConsumesOriginalEntryAndHostOnce() {
@@ -874,7 +874,7 @@ import Testing
         #expect(owner.navigation.section == .home && presentation.statusHandoffPending)
         owner.compactSyncStatusDidDismiss(id)
         #expect(owner.navigation.sheet == nil && owner.navigation.section == .settings)
-        #expect(owner.navigation.path(.settings) == [.settingsPage(.accountSync)])
+        #expect(owner.navigation.path(.settings).isEmpty)
         #expect(!presentation.statusOwnsInput)
         owner.navigation.show(.home)
         owner.compactSyncStatusDidDismiss(id)
@@ -914,7 +914,7 @@ import Testing
             if owner.navigation.review != nil { #expect(owner.navigation.sheet == .accountSync) }
             else {
                 #expect(owner.navigation.section == .settings)
-                #expect(owner.navigation.path(.settings) == [.settingsPage(.accountSync)])
+                #expect(owner.navigation.path(.settings).isEmpty)
             }
         }
     }
