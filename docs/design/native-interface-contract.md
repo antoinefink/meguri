@@ -185,7 +185,7 @@ Decided 2026-10-27:
 
 - Every platform uses N3's quiet corners. There is no top bar with its own background, no title and no remaining counts.
 - Upper left, the exit. Sidebar layout (Mac, iPad and unfolded iPhone at regular width): a labelled "Back to Decks" button with the `chevron.backward` symbol. Compact layout: a close button with the `xmark` symbol, accessibility label and Voice Control name "Back to Decks". Esc does the same when nothing above the card owns it (R243).
-- Upper right, leading to trailing (the timer is removed, N16.7; the status icon shows only when sync needs the person, N16.2): the timer when enabled (R364); on iPhone and iPad the undo button (U179) and the ⋯ menu button (U182); then the sync status icon (N3; `sync.status`'s button, whose states that contract gives, N11.8). The Mac has no on-screen undo or ⋯: undo and redo are in the Edit menu, card actions in the Card menu and the card's context menu (R288).
+- Upper right, leading to trailing: on iPhone and iPad the undo button (U179) and the ⋯ menu button (U182); then the sync status icon, only while sync needs the person (N16.2; N3; `sync.status`'s button, whose states that contract gives, N11.8). The Mac has no on-screen undo or ⋯: undo and redo are in the Edit menu, card actions in the Card menu and the card's context menu (R288).
 - The progress bar (R341–R345, when its device setting is on) is a thin native linear progress indicator across the top of the review area, below the corner controls. Replaced by N16.1: the bar is on the bottom edge and always shown.
 - The review area's background is the card's computed `body` background (R335), so the user's card styling reaches the window edges. Corner controls and the answer region use system control styles, with a foreground chosen for contrast against that background. Need: preserving user-authored card styling. No other chrome tint.
 - The sidebar stays hidden for the whole session; Show Sidebar is disabled during review.
@@ -442,7 +442,7 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 
 ### N14.9 iPad sidebar title
 
-- The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it. The Mac sidebar never drew one.
+- The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it, except during review, which has none (N16.2). The Mac sidebar never drew one.
 
 ## N16. Round 3 review decisions (2026-11-19)
 
@@ -460,7 +460,9 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 ### N16.2 Sync status during review
 
 - The sync status button is in the review's toolbar only while sync needs the person. Otherwise the toolbar holds Close and Undo (Redo when there is one) on touch, and Back to Decks alone on Mac.
-- Sync needs the person when: the provider has stopped or is finishing a provider change; iCloud has a problem to act on, a decision to make or no account it can use (a short-lived failure does not count); Meguri Sync has no sign-in, or waits for a sign-in, a choice of collection or a setup step, or its media or setup cannot continue. The button stays away for transfers, changes not yet sent, no network, failures that retry by themselves and a pause the person chose. With sync off it never shows.
+- Sync needs the person when: the provider has stopped or is finishing a provider change; iCloud has a problem to act on, a decision to make or no account it can use (a short-lived failure does not count); Meguri Sync has no sign-in, or waits for a sign-in, a choice of collection or a setup step (signed in with setup not continued counts), or its media, setup or last round stopped and will not retry. iCloud not yet set up on this installation counts as a setup step. The button stays away for transfers, changes not yet sent, no network, failures that retry by themselves and a pause the person chose. With sync off it never shows.
+- iPad: the system's sidebar toggle is removed for the whole review, with the sidebar (N11.1); it returns with the deck workspace. It showed beside Close before this round.
+- Sync Now during review syncs without presenting the status, which would pause the review, unless sync needs the person. On Mac a request to open Settings is served by the window, so it works while the button is absent.
 - The button stays while its own popover or sheet is open, so a state that clears does not close what the person is reading.
 - The round 2 split into waiting, needs you and issues (`decisions.md`, `sync.status`) is not built yet; when it is, this rule takes its "needs you" and "issues" kinds.
 - Replaces: N3's and N11.1's status icon that stays in the review's corner, N12.3's and N13.3's status toolbar item as a permanent item.
@@ -482,7 +484,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 
 - A finished session shows the number of cards studied as one large number, "cards in 12 minutes" under it in secondary text, and Done. No symbol, no title, no count per answer, no line about learning cards to come.
 - The number counts different cards answered in the session. The time is the session's active study time: whole minutes from one minute up, seconds before that ("card in 40 seconds").
-- Keep Going sits beside Done only while learning cards are ready again; the two stack when they do not fit side by side. Both are standard bordered buttons.
+- Keep Going sits beside Done only while learning cards are ready again; the two stack at the accessibility text sizes. Both are standard bordered buttons.
 - A session that ends with nothing answered has no number: it says "Finished for Now" over Done.
 - N11.6's summary sheet over the deck workspace is unchanged.
 - Replaces: the check mark, "Finished for Now" as the finished title and its recorded-answers line.
