@@ -218,11 +218,11 @@ import notify
         XCTAssertTrue(HomeControls.waitForDeckCounts(app, new: 0, learning: 0, review: 0), app.debugDescription)
         XCTAssertFalse(deckPage.buttons["home.deck.study"].firstMatch.exists, "Add Note takes Study's place while nothing waits")
         let emptyAddButtons = deckPage.buttons.matching(identifier: "home.deck.empty.addNote")
-        let emptyAdd = try XCTUnwrap(waitForHittable(emptyAddButtons), app.debugDescription)
+        let emptyDeckAdd = try XCTUnwrap(waitForHittable(emptyAddButtons), app.debugDescription)
         XCTAssertEqual(emptyAddButtons.count, 1)
-        XCTAssertEqual(emptyAdd.label, "Add Note")
-        XCTAssertTrue(emptyAdd.isEnabled)
-        try click(emptyAdd, app, bundle)
+        XCTAssertEqual(emptyDeckAdd.label, "Add Note")
+        XCTAssertTrue(emptyDeckAdd.isEnabled)
+        try click(emptyDeckAdd, app, bundle)
 
         let editor = element(app, "editor.add")
         XCTAssertTrue(editor.waitForExistence(timeout: 10))
@@ -230,9 +230,16 @@ import notify
         XCTAssertTrue(fields.waitForExistence(timeout: 10))
         let front = "Meguri empty deck native question QZ71"
         let back = "Meguri empty deck native answer QZ83"
+        // N17.1: Deck then Type as menu rows; Add waits for the first field.
+        XCTAssertTrue(element(app, "editor.add.deck").waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(element(app, "editor.add.type").exists, app.debugDescription)
+        let emptyAdd = editor.buttons["editor.add.save"].firstMatch
+        XCTAssertTrue(emptyAdd.waitForExistence(timeout: 10))
+        XCTAssertFalse(emptyAdd.isEnabled, "Add stays disabled until the first field has content")
+        XCTAssertFalse(element(app, "editor.add.fieldStatus").exists)
         for (name, content) in [("Front", front), ("Back", back)] {
             // Production declares a named multiline textbox. Require its
-            // native AX input, rather than the separate field-label button.
+            // native AX input, rather than the field's header.
             let inputs = fields.descendants(matching: .textView).matching(NSPredicate(format: "label == %@", name))
             let input = try XCTUnwrap(waitForHittable(inputs), "Expected an actionable \(name) multiline text view")
             XCTAssertEqual(inputs.count, 1)
@@ -263,7 +270,9 @@ import notify
             "The real field-change events must make Add actionable")
         XCTAssertEqual(add.label, "Add")
         try click(add, app, bundle)
-        XCTAssertTrue(waitForText(element(app, "editor.add.result"), "1 card added"))
+        // N17.1: the confirmation names the deck; the sheet stays open on a cleared form.
+        XCTAssertTrue(waitForText(element(app, "editor.add.result"), "Added to Default"))
+        XCTAssertTrue(editor.exists)
         XCTAssertFalse(element(app, "editor.add.error").exists)
         let closeEditor = try XCTUnwrap(waitForHittable(editor.buttons.matching(identifier: "editor.add.close")),
             app.debugDescription)
@@ -316,25 +325,10 @@ import notify
         #else
         let folder: URL? = nil
         #endif
+        // N17.3: a finished save closes the export by itself; nothing is left to discard.
         let saved = try exerciseNativeExport(app, bundle, destinationFolder: folder)
         let settingsContent = element(app, "settings.root.content")
-        let prepare = app.buttons.matching(identifier: "settings.importExport.prepare").firstMatch
-        let discard = app.buttons["settings.importExport.discard"].firstMatch
-        try click(discard, app, bundle)
-        let discarded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            prepare.exists && prepare.isEnabled && prepare.isHittable && !discard.exists
-        }, object: nil)
-        let discardResult = XCTWaiter().wait(for: [discarded], timeout: 10)
-        if discardResult != .completed { capturePicker(app) }
-        XCTAssertEqual(discardResult, .completed, app.debugDescription)
-        let done = waitForHittable(app.buttons.matching(identifier: "settings.importExport.close"))
-        if done == nil { capturePicker(app) }
-        try click(try XCTUnwrap(done, app.debugDescription), app, bundle)
-        let exportContent = element(app, "settings.importExport.content")
-        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: exportContent)
-        let dismissResult = XCTWaiter().wait(for: [dismissed], timeout: 10)
-        if dismissResult != .completed { capturePicker(app) }
-        XCTAssertEqual(dismissResult, .completed, app.debugDescription)
+        XCTAssertFalse(element(app, "settings.importExport.content").exists, app.debugDescription)
         let importCollection = app.buttons["settings.root.importCollection"].firstMatch
         #if os(iOS)
         try revealSettingsControl("settings.root.importCollection", app)
@@ -345,17 +339,11 @@ import notify
         let importResult = XCTWaiter().wait(for: [importReady], timeout: 10)
         if importResult != .completed { capturePicker(app) }
         XCTAssertEqual(importResult, .completed, app.debugDescription)
+        // N17.2: Import opens the system picker directly, with no sheet before it.
         try click(importCollection, app, bundle)
-        let chooseFile = app.buttons["onboarding.collectionImport.choose"].firstMatch
-        let chooseReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            chooseFile.exists && chooseFile.isEnabled && chooseFile.isHittable
-        }, object: nil)
-        let chooseResult = XCTWaiter().wait(for: [chooseReady], timeout: 10)
-        if chooseResult != .completed { capturePicker(app) }
-        XCTAssertEqual(chooseResult, .completed, app.debugDescription)
-        try click(chooseFile, app, bundle)
         try pick(saved, app, bundle)
-        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "6 notes · 11 cards · 7 reviews"))
+        // The saved review travels in the file: the summary's value carries its count.
+        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "7 reviews"))
         try click(element(app, "onboarding.collectionImport.confirm"), app, bundle)
         let imported = deckRows(app, identifier: "home.deck.row.1788249600212")
         // Return to Home through the production shell after native replacement.
@@ -531,9 +519,8 @@ import notify
         XCTAssertTrue(entry.waitForExistence(timeout: 20),
             "Native first launch must expose Import Collection: \(launchError.exists ? text(launchError) : app.debugDescription)")
         try click(entry, app, bundle)
-        try click(element(app, "onboarding.collectionImport.choose"), app, bundle)
         try pick(source, app, bundle)
-        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "1 notes · 1 cards · \(reviews) reviews"))
+        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), reviews == 1 ? "1 review" : "\(reviews) reviews"))
         capture(app, "native-review-import-preview")
         try click(element(app, "onboarding.collectionImport.confirm"), app, bundle)
         let deckQuery = deckRows(app, identifier: "home.deck.row.\(deckID)")
@@ -832,11 +819,30 @@ import notify
         }, object: nil)
         XCTAssertEqual(XCTWaiter().wait(for: [exportReady], timeout: 10), .completed, app.debugDescription)
         capture(app, "export-native-settings-route")
+        // N17.3: Export Collection prepares at once, then the system save dialog opens.
+        // Cancelling or finishing there closes the export and leaves Settings.
+        let exportContent = element(app, "settings.importExport.content")
+        func exportClosed() -> Bool {
+            let closed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !exportContent.exists && !self.element(app, "settings.importExport.progress").exists
+                    && settingsContent.exists && export.exists && export.isEnabled
+            }, object: nil)
+            return XCTWaiter().wait(for: [closed], timeout: 30) == .completed
+        }
+        func startExport() throws {
+            #if os(iOS)
+            try revealSettingsControl("settings.root.exportCollection", app)
+            #endif
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                settingsContent.exists && export.exists && export.isEnabled && export.isHittable
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, app.debugDescription)
+            try click(export, app, bundle)
+        }
         try click(export, app, bundle)
-        let prepare = try XCTUnwrap(waitForHittable(app.buttons.matching(identifier: "settings.importExport.prepare")), app.debugDescription)
-        try click(prepare, app, bundle)
-        XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 30), app.debugDescription)
-        try click(element(app, "settings.importExport.choose"), app, bundle)
+        for removed in ["prepare", "choose", "discard", "ready", "explanation"] {
+            XCTAssertFalse(element(app, "settings.importExport.\(removed)").exists, removed)
+        }
         capturePicker(app)
         #if os(macOS)
         let savePanel = app.sheets.matching(identifier: "save-panel").firstMatch
@@ -846,31 +852,18 @@ import notify
         let saved = folder.appending(path: destinationFilename ?? "Meguri-Collection.colpkg")
         #else
         try cancelNativeExportPicker(app, bundle)
-        let delegateReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            let choose = self.element(app, "settings.importExport.choose")
-            return self.element(app, "settings.importExport.ready").exists
-                && choose.exists && choose.isEnabled && choose.isHittable
-        }, object: nil)
-        let delegateResult = XCTWaiter().wait(for: [delegateReady], timeout: 10)
-        if delegateResult != .completed { capturePicker(app) }
-        XCTAssertEqual(delegateResult, .completed, "Native cancellation must return the export to Ready: \(app.debugDescription)")
         // The native local folder is installed by the existing public source hook.
         let root = URL(fileURLWithPath: "/RF2 Import Tests")
         let folder = destinationFilename.map { root.appending(path: String($0.dropLast(".colpkg".count))) } ?? root
         let saved = folder.appending(path: "Meguri-Collection.colpkg")
         #endif
-        XCTAssertTrue(element(app, "settings.importExport.ready").waitForExistence(timeout: 10))
+        guard exportClosed() else {
+            capturePicker(app)
+            XCTFail("Cancelling the save dialog must discard the export and return to Settings: \(app.debugDescription)")
+            throw NSError(domain: "CollectionEntryJourneyTests", code: 2)
+        }
         for replacement in [false, true] {
-            let choose = app.buttons.matching(identifier: "settings.importExport.choose").firstMatch
-            let chooseReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                choose.exists && choose.isEnabled && choose.isHittable
-            }, object: nil)
-            guard XCTWaiter().wait(for: [chooseReady], timeout: 30) == .completed else {
-                capture(app, "export-native-choose-not-ready")
-                XCTFail("Native export Choose must be enabled and hittable: \(app.debugDescription)")
-                throw NSError(domain: "CollectionEntryJourneyTests", code: 2)
-            }
-            try click(choose, app, bundle)
+            try startExport()
             #if os(macOS)
             XCTAssertTrue(savePanel.waitForExistence(timeout: 10))
             try app.bringToFront(bundleIdentifier: bundle)
@@ -922,17 +915,9 @@ import notify
                 }
             }
             #endif
-            XCTAssertTrue(element(app, "settings.importExport.saved").waitForExistence(timeout: 30), app.debugDescription)
-            let ownerCompleted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                let choose = self.element(app, "settings.importExport.choose")
-                let discard = self.element(app, "settings.importExport.discard")
-                return choose.exists && choose.isEnabled && choose.isHittable
-                    && discard.exists && discard.isEnabled && discard.isHittable
-                    && !self.element(app, "settings.importExport.progress").exists
-                    && !self.element(app, "settings.importExport.retryCleanup").exists
-            }, object: nil)
-            XCTAssertEqual(XCTWaiter().wait(for: [ownerCompleted], timeout: 10), .completed,
-                "The native destination and export owner must finish before continuing")
+            if !exportClosed() { capturePicker(app) }
+            XCTAssertFalse(element(app, "settings.importExport.retryCleanup").exists)
+            XCTAssertFalse(exportContent.exists, "The native destination and export owner must finish and close: \(app.debugDescription)")
             #if os(macOS)
             XCTAssertTrue(FileManager.default.fileExists(atPath: saved.path), "NSSavePanel must save the expected collection filename at \(saved.path)")
             #endif
@@ -1471,14 +1456,9 @@ import notify
         }
         let entry = element(app, "home.collection.import")
         XCTAssertTrue(entry.waitForExistence(timeout: 20))
+        // N17.2: the system picker opens directly; the one sheet follows the choice.
         try click(entry, app, bundle)
-        XCTAssertTrue(element(app, "onboarding.collectionImport.choose").waitForExistence(timeout: 10))
-        let explanation = app.descendants(matching: .any)["onboarding.collectionImport.content"].firstMatch.staticTexts
-            .matching(identifier: "onboarding.collectionImport.explanation").element
-        let explanationText = "Import a latest-format .colpkg file, including its media. Older formats are not supported. No account or network connection is needed."
-        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format:
-            "exists == true AND (label == %@ OR value == %@)", explanationText, explanationText), object: explanation)], timeout: 10), .completed)
-        try click(element(app, "onboarding.collectionImport.choose"), app, bundle)
+        XCTAssertFalse(element(app, "onboarding.collectionImport.content").exists)
         try pick(source, app, bundle)
         let confirm = element(app, "onboarding.collectionImport.confirm")
         XCTAssertTrue(confirm.waitForExistence(timeout: 30), app.debugDescription)
@@ -1720,12 +1700,26 @@ import notify
     }
     #endif
     private func assertPreview(_ app: XCUIApplication, hasLocalCollection: Bool) {
-        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.counts"), "6 notes · 11 cards · 6 reviews"))
-        let safety = hasLocalCollection
-            ? "This will replace the local collection on this device. Meguri must finish a safety backup of your current collection, including saved answers, before replacing it. If that backup fails, import stops."
-            : "There is no local collection file to replace. A pre-import safety backup is not needed."
-        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.safety"), safety))
-        XCTAssertEqual(element(app, "onboarding.collectionImport.confirm").label, hasLocalCollection ? "Replace Collection" : "Import Collection")
+        // N17.2: one confirmation: the file's name, its counts, one consequence line.
+        XCTAssertTrue(waitForText(element(app, "onboarding.collectionImport.preview.heading"), "Import “review.colpkg”?"))
+        let counts = element(app, "onboarding.collectionImport.preview.counts")
+        XCTAssertTrue(waitForText(counts, "6 reviews"))
+        XCTAssertEqual(counts.label, "6 notes · 11 cards · 0 media files")
+        let safety = element(app, "onboarding.collectionImport.preview.safety")
+        if hasLocalCollection {
+            #if os(macOS)
+            let device = "Mac"
+            #else
+            let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+            #endif
+            XCTAssertTrue(waitForText(safety, "This replaces the collection on this \(device). Meguri keeps a backup of the current one."))
+        } else {
+            XCTAssertFalse(safety.exists, "Nothing is replaced, so no consequence line shows")
+        }
+        XCTAssertEqual(element(app, "onboarding.collectionImport.confirm").label, "Import")
+        for removed in ["preview.destination", "preview.media.files", "preview.media.bytes", "preview.media.retention", "explanation", "choose"] {
+            XCTAssertFalse(element(app, "onboarding.collectionImport.\(removed)").exists, removed)
+        }
     }
     private func waitForStudyReady(_ study: XCUIElement, _ app: XCUIApplication) throws {
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in

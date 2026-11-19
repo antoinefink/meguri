@@ -7,29 +7,9 @@
       "reason": "R1977, N13: white text on the system's own blue prominent button, the standard primary action; the audit calls it nearly passing. Also reported before the redesign (run 20261101T202247Z-74923). A larger button or custom tint would override the system style."
     },
     {
-      "identifier": "settings.importExport.explanation",
-      "auditType": "contrast",
-      "reason": "R1977: iPad run 20261023T041457Z-97877 reports whole-frame contrast for Explanation above the conservative viewport at log lines 676, 896 and 1160. ContrastTests checks textPrimary/backgroundPrimary (R1979). CollectionExportAccessibilityTests removes this exact contrast exception whenever the full frame is visible for the supplemental all-types audit; continuous paragraph coverage remains required. Native verification is pending."
-    },
-    {
       "identifier": "settings.importExport.choose",
       "auditType": "contrast",
       "reason": "R1977: iPad run 20261023T041457Z-97877 reports whole-frame contrast for Choose below the conservative viewport at log lines 901, 1165 and 1471. ContrastTests checks textPrimary/backgroundPrimary (R1979). CollectionExportAccessibilityTests removes this exact contrast exception when the entire enabled, hittable frame is visible for the supplemental all-types audit. Native verification is pending."
-    },
-    {
-      "identifier": "settings.importExport.discard",
-      "auditType": "contrast",
-      "reason": "R1977: iPad AX5 run 20261023T035747Z-85354 reports Discard Prepared Export at 250,1616 440x139 below the current scroll viewport. The existing textPrimary/backgroundPrimary token pair passes ContrastTests (R1979). CollectionExportAccessibilityTests removes this exact contrast exception for the supplemental all-types system audit when the entire enabled, hittable target frame is visible above the padded footer. Native AA verification remains pending."
-    },
-    {
-      "identifier": "settings.importExport.ready",
-      "auditType": "contrast",
-      "reason": "iPad AX5 light/dark run 20261023T031552Z-43929 reports the entire foreground Ready at 250,905 335x63 below the visible scroll viewport. This is the scroll-edge/whole-frame limitation (R1977); textPrimary/backgroundPrimary is the unchanged declared token pair checked by ContrastTests (R1979). CollectionExportAccessibilityTests adds scrolled full-frame visibility proof and a supplemental all-types system audit with this exact contrast suppression removed while this target is visible; native verification is pending."
-    },
-    {
-      "identifier": "settings.importExport.readyDetail",
-      "auditType": "contrast",
-      "reason": "R1977: iPad run 20261023T031552Z-43929 records Ready detail below the scroll viewport at AX5. ContrastTests checks textPrimary/backgroundPrimary (R1979). Supplemental audits check visible text without this exact exception. Native checks remain pending."
     },
     {
       "identifier": "settings.importExport.message",
@@ -37,19 +17,9 @@
       "reason": "iPad AX5 light/dark run 20261023T031552Z-43929 reports the entire foreground Message at 250,905 530x311 below the visible scroll viewport. This is the scroll-edge/whole-frame limitation (R1977); textPrimary/backgroundPrimary is the unchanged declared token pair checked by ContrastTests (R1979). CollectionExportAccessibilityTests checks exact accessible Text and bounded, overlapping beginning-to-end portions with screenshots and frames. The supplemental all-types audit removes this exact contrast suppression only when the entire paragraph frame is visible; taller paragraphs retain this evidenced whole-frame exception and token proof. Native verification is pending."
     },
     {
-      "identifier": "settings.importExport.prepare",
-      "auditType": "contrast",
-      "reason": "R1977: iPad AX5 light/dark run 20261023T031552Z-43929 reports Prepare at 250,1241 375x77 below the visible scroll viewport (scroll-edge/whole-frame limitation). Diagnostic run 20261023T045237Z-24347 on iPhone iOS 27.0 (24A434), Xcode 27.0 (27A266a), proves contrast alone times out with native Code -56 for error/light/largest text despite stable, fully visible Prepare. Before/current geometry matches exactly: Prepare (24,543.3333333333333,228.33333333333334,139.33333333333326), viewport (0,132,402,558.6666666666666), Done (24,738.6666666666666,164.66666666666666,77.33333333333337); both buttons are enabled and hittable, and the retained screenshot is clear and legible. Repeated combined supplemental audits fail with the same contrast Code -56; original failed receipts remain. Dark combined supplemental run 20261023T050054Z-30109 also times out with native Code -56 for error/dark/largest text with exactly matching geometry and enabled, hittable, legible controls; this combined timeout does not establish an isolated dark contrast diagnosis. No product P0/P1 is demonstrated. The unchanged textPrimary/backgroundPrimary token pair passes ContrastTests (R1979). CollectionExportAccessibilityTests retains full-frame, reachability and screenshot proofs and removes this exact contrast exception for visible full frames. Initial .all remains unchanged per variant; only the supplemental audit with newly observed full frames including Prepare in these exact iPhone/error/light-or-dark/largest-text cases omits contrast. All other supplemental types and variants, including iPad contrast, remain enabled. This records an R1977 native audit limitation, not successful native contrast verification for these exact visible cases."
-    },
-    {
       "identifier": "onboarding.collectionImport.preview.heading",
       "auditType": "contrast",
       "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the preview heading is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
-    },
-    {
-      "identifier": "onboarding.collectionImport.preview.destination",
-      "auditType": "contrast",
-      "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the destination line is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
     },
     {
       "identifier": "onboarding.collectionImport.preview.counts",
@@ -67,11 +37,6 @@
       "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the error text is offscreen. The scroll-edge whole-frame limitation applies (R1977); statusError/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
     },
     {
-      "identifier": "onboarding.collectionImport.progress.stage",
-      "auditType": "contrast",
-      "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the stage text is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
-    },
-    {
       "identifier": "onboarding.collectionImport.choose",
       "auditType": "contrast",
       "reason": "At the largest text size in iPad run 20261022T205058Z-15571 the Choose File text is offscreen. The scroll-edge whole-frame limitation applies (R1977); textPrimary/backgroundPrimary is a declared pair checked by ContrastTests (R1979)."
@@ -80,11 +45,6 @@
       "identifier": "onboarding.collectionImport.confirm",
       "auditType": "contrast",
       "reason": "At the largest text sizes in the overflow state the text runs on under the Cancel bar, where the scroll edge effect fades it until the screen is scrolled, and the audit measures the whole frame, faded part included (iPhone, 2026-10-22; run 20261022T202045Z-94081). The text colours are token pairings ContrastTests checks (R1979)."
-    },
-    {
-      "identifier": "onboarding.collectionImport.explanation",
-      "auditType": "contrast",
-      "reason": "At the largest text sizes in the loading state the text runs on under the Cancel Import bar, where the scroll edge effect fades it until the screen is scrolled, and the audit measures the whole frame, faded part included (iPhone, 2026-10-22; run 20261022T202045Z-94081). The text colours are token pairings ContrastTests checks (R1979)."
     },
     {
       "identifier": "home.deck.name.1",

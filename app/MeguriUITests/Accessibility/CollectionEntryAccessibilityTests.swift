@@ -17,7 +17,7 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
             try AccessibilityAudit.runAllVariants(
                 state: state, launch: MeguriLaunch(locale: "en_US", animations: false, route: "collection/import/\(state)"),
                 waitFor: "onboarding.collectionImport.content", suppressions: suppressions,
-                supplemental: { app, variant in
+                supplemental: { app, _ in
                     if state == "loading" {
                         let value = app.descendants(matching: .any)
                             .matching(identifier: "onboarding.collectionImport.progress.value").firstMatch
@@ -25,41 +25,17 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
                         XCTAssertEqual(value.elementType, .progressIndicator)
                         XCTAssertGreaterThanOrEqual(value.frame.width, 44)
                         XCTAssertGreaterThanOrEqual(value.frame.height, 44)
-                        XCTAssertEqual(value.label, "Copying collection…")
-                        #if os(macOS)
-                        let fraction = try XCTUnwrap(value.value as? NSNumber)
-                        XCTAssertEqual(fraction.doubleValue, 0.42, accuracy: 0.000001)
-                        #else
-                        XCTAssertEqual(value.value as? String, "42 of 100")
-                        #endif
-                        #if os(macOS)
-                        XCTAssertEqual(app.staticTexts["onboarding.collectionImport.progress.stage"].value as? String, "Copying collection…")
-                        #else
-                        XCTAssertEqual(app.staticTexts["onboarding.collectionImport.progress.stage"].label, "Copying collection…")
-                        #endif
+                        // N17.2: one plain line names the step; it is the bar's own label.
+                        XCTAssertEqual(value.label, "Importing…")
                     }
-                    guard state == "overflow" else {
-                        return AccessibilityAudit.StateResult(state: state, findings: [], touchTargets: [])
-                    }
-                    let content = app.descendants(matching: .any).matching(identifier: "onboarding.collectionImport.content").firstMatch
-                    var findings: [AuditFinding] = []
-                    var touchTargets: [TouchTargetViolation] = []
-                    try self.scrollToRequiredControls(content, app: app, build: build, identifiers: [
-                        "onboarding.collectionImport.confirm", "onboarding.collectionImport.choose"
-                    ]) { visible in
-                        let viewport = content.frame.intersection(app.windows.firstMatch.frame)
-                        for identifier in visible {
-                            let control = app.buttons[identifier]
-                            XCTAssertTrue(control.isHittable, "\(identifier) must remain reachable after scrolling")
-                            XCTAssertTrue(viewport.contains(control.frame), "\(identifier)'s entire frame must fit the scroll viewport")
+                    if state == "typical" || state == "overflow" {
+                        XCTAssertEqual(app.buttons["onboarding.collectionImport.confirm"].firstMatch.label, "Import")
+                        for removed in ["preview.destination", "preview.media.files", "preview.media.bytes", "explanation", "choose"] {
+                            XCTAssertFalse(app.descendants(matching: .any)["onboarding.collectionImport.\(removed)"].firstMatch.exists, removed)
                         }
-                        findings += try AccessibilityAudit.run(
-                            app, variant: "overflow scrolled (\(visible.joined(separator: ", "))), \(variant)", suppressions: suppressions
-                        )
-                        touchTargets += try TouchTargets.violations(in: app)
                     }
-                    XCTAssertEqual(app.buttons["onboarding.collectionImport.confirm"].label, "Replace Collection")
-                    return AccessibilityAudit.StateResult(state: state, findings: findings, touchTargets: touchTargets)
+                    // The confirmation's actions sit in the bar: nothing has to be scrolled into reach.
+                    return AccessibilityAudit.StateResult(state: state, findings: [], touchTargets: try TouchTargets.violations(in: app))
                 }
             )
         }
