@@ -3676,3 +3676,122 @@ PY
   called '^inline-transport-verified$'
   not_called '^(sim-|vm-)|xcrun (simctl|devicectl)'
 }
+
+@test "physical personal preview rejects conflated arguments and contradictory configuration before discovery" {
+  local args
+  for args in '--config Debug' '--config Profile' '--config AppStore' '--config' \
+      '--device fake' '--route sample/sheet' '--seconds 5' '--window-size default' \
+      '--keep-app-running' '--record' '-- -MeguriFixture private' '--'; do
+    mg run --personal-preview --platform iphone --physical-device "$PHONE" $args
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+    [ ! -s "$STUB_LOG" ]
+    case "$args" in --config*) [[ "$(field '.failures[0].message')" == *'explicit --config must be Release'* ]] ;; esac
+  done
+  mg run --personal-preview --platform iphone
+  [ "$status" -eq 2 ]
+  mg run --personal-preview --physical-device "$PHONE"
+  [ "$status" -eq 2 ]
+  mg run --personal-preview --platform mac --physical-device "$PHONE"
+  [ "$status" -eq 2 ]
+  mg run --personal-preview --platform iphone-small --physical-device "$PHONE"
+  [ "$status" -eq 2 ]
+  mg run --platform iphone --physical-device "$PHONE" --config Release
+  [ "$status" -eq 2 ]
+  mg drive --personal-preview --platform iphone --physical-device "$PHONE"
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB_LOG" ]
+}
+
+# Preserve the real build/settings boundary; stop at the synthetic compiler
+# failure, before signed-product verification or any installer/device process.
+@test "physical personal preview selects team Release device core isolated products and exact inventory under host lease" {
+  personal_facts
+  jq 'map(.buildSettings |= (.CODE_SIGN_ENTITLEMENTS |= sub("macOS"; "iOS")) + {
+    PLATFORM_NAME:"iphoneos", MEGURI_SIGNING:"team", DEVELOPMENT_TEAM:"TESTTEAM01",
+    MEGURI_TEAM_ID:"TESTTEAM01", CODE_SIGN_IDENTITY:"Apple Development"} | del(.buildSettings.ENABLE_HARDENED_RUNTIME))' \
+    "$FX_PERSONAL_SETTINGS" >"$BATS_TEST_TMPDIR/device-settings.json"
+  mv "$BATS_TEST_TMPDIR/device-settings.json" "$FX_PERSONAL_SETTINGS"
+  local kind config
+  for kind in iphone ipad; do
+    jq --arg p "$PHONE" --arg model "$( [ "$kind" = iphone ] && echo iPhone99,1 || echo iPad99,1 )" \
+      'map(if .identifier == $p then .modelCode = $model else . end)' "$FX_DEVICES" >"$FX_DEVICES.tmp"
+    mv "$FX_DEVICES.tmp" "$FX_DEVICES"
+    for config in implicit explicit; do
+      : >"$STUB_LOG"
+      if [ "$config" = implicit ]; then
+        FX_BUILD_RC=1 mg run --personal-preview --platform "$kind" --physical-device "$PHONE"
+      else
+        FX_BUILD_RC=1 mg run --config Release --physical-device "$PHONE" --platform "$kind" --personal-preview
+      fi
+      [ "$status" -eq 1 ]
+      [ "$(field '.failures[0].id')" = build ]
+      [ "$(grep -c '^xcrun xcdevice list --timeout 20$' "$STUB_LOG")" -eq 2 ]
+      called '^host-lease --no-session$'
+      called '^xcframework .* --configuration Release --slices device$'
+      called '^xcodebuild -showBuildSettings .* -sdk iphoneos -arch arm64 '
+      called "^xcodebuild build .* -configuration Release -destination platform=iOS,id=$PHONE -derivedDataPath build/app/PersonalDevicePreviewDerivedData .* MEGURI_SIGNING=team -allowProvisioningUpdates -allowProvisioningDeviceRegistration MEGURI_BUNDLE_ID_SUFFIX=.dev MEGURI_CLOUD_CONFIGURATION=development$"
+      not_called 'build-for-testing|-testPlan|test-without-building|^(sim-|vm-|open|system_profiler)|xcrun (simctl|devicectl)'
+      [ "$(field .details.build.personal_preview)" = true ]
+      [ "$(field .details.build.config)" = Release ]
+      [ "$(field .details.build.messages)" = null ]
+    done
+  done
+  : >"$STUB_LOG"
+  mg run --personal-preview --platform iphone --physical-device "$SIM"
+  [ "$status" -eq 2 ]
+  mg run --personal-preview --platform iphone --physical-device "$PHONE"
+  [ "$status" -eq 2 ] # inventory now identifies the selected device as iPad
+  not_called '^(lint|xcframework|host-lease|sim-|vm-|xcodebuild)'
+}
+
+@test "physical personal preview profile binds iOS development signer push group and selected device with optional debugger grant" {
+  personal_facts
+  jq 'del(.["com.apple.application-identifier"], .["com.apple.developer.aps-environment"])
+    | .["application-identifier"] = "TESTTEAM01.com.antoinefink.meguri.dev"
+    | .["com.apple.security.application-groups"] = ["group.com.antoinefink.meguri.dev"]
+    | .["aps-environment"] = "development"' "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/ios-entitlements.json"
+  mv "$BATS_TEST_TMPDIR/ios-entitlements.json" "$FX_APP_ENT"
+  python3 - "$FX_APP_ENT" "$FX_APP_PROFILE" "$PHONE" <<'PY'
+import json, plistlib, sys
+from pathlib import Path
+path = Path(sys.argv[2])
+profile = plistlib.loads(path.read_bytes())
+profile.update(Platform=['iOS'], ProvisionedDevices=[sys.argv[3]], Entitlements=json.loads(Path(sys.argv[1]).read_text()))
+profile['Entitlements']['get-task-allow'] = True
+path.write_bytes(plistlib.dumps(profile))
+PY
+  cat >>"$SB/tools/mg.d/zz-physical-fakes.sh" <<'FAKES'
+mg_job fx-device-profile host fx_device_profile "Synthetic iOS preview provisioning check"
+fx_device_profile() {
+  if mg_app_personal_profile "$MG_ROOT/build/fixture.app" "$(cat "$FX_APP_ENT")" "$PHONE" ios; then
+    mg_status pass
+  else
+    mg_status fail
+  fi
+}
+FAKES
+  mkdir -p "$SB/build/fixture.app"
+  local debugger
+  for debugger in absent true false; do
+    jq --arg mode "$debugger" 'if $mode == "absent" then del(.["get-task-allow"]) else .["get-task-allow"] = ($mode == "true") end' \
+      "$FX_APP_ENT" >"$BATS_TEST_TMPDIR/debugger.json"
+    mv "$BATS_TEST_TMPDIR/debugger.json" "$FX_APP_ENT"
+    cp "$FX_APP_PROFILE" "$SB/build/fixture.app/embedded.mobileprovision"
+    mg fx-device-profile
+    [ "$status" -eq 0 ]
+    [ "$(field .status)" = pass ]
+  done
+  python3 - "$FX_APP_PROFILE" <<'PY'
+import plistlib, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+profile = plistlib.loads(path.read_bytes())
+profile['ProvisionedDevices'] = ['other-synthetic-device']
+path.write_bytes(plistlib.dumps(profile))
+PY
+  cp "$FX_APP_PROFILE" "$SB/build/fixture.app/embedded.mobileprovision"
+  mg fx-device-profile
+  [ "$status" -ne 0 ]
+  not_called '^system_profiler|xcrun (simctl|devicectl)|xcodebuild '
+}

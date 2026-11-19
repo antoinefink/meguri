@@ -29,6 +29,7 @@ Refused, need, command = products.Refused, products.need, products.command
 APP = "com.antoinefink.meguri.dev"
 TEST = APP + ".uitests"
 RUNNER = TEST + ".xctrunner"
+PREVIEW_PRODUCTS = "build/app/PersonalDevicePreviewDerivedData/Build/Products"
 DIAGNOSTIC_BYTES = 16 * 1024 * 1024  # Per artifact, matching the guarded reader.
 
 
@@ -330,6 +331,102 @@ def prepare(args):
     })
 
 
+def preview_inputs(args):
+    """Hash only the fixed app (including its widget) at each boundary."""
+    base = args.root / PREVIEW_PRODUCTS
+    app = base / "Release-iphoneos/Meguri.app"
+
+    def allowed(name):
+        return not name.endswith((".xctest", ".xctestrun", ".debug.dylib", "-Runner.app", ".xctrunner"))
+
+    # Inspect product names without opening unrelated products or following
+    # their links. Generated xctestrun files can sit beside Release-iphoneos.
+    for directory in (base, app.parent):
+        with products.authority(str(directory)) as fd:
+            need(all(allowed(name) for name in os.listdir(fd)), "preview-test-products")
+    inventory = products.snapshot(str(args.root / "build"), str(app))[0]
+    need(all(entry["type"] != "symlink" and all(allowed(part) for part in name.split("/"))
+             for name, entry in inventory.items()), "preview-test-products")
+    stamp = read_bytes(args.root / "app/Packages/MeguriCore/Binaries/.stamp", args.root / "app").decode()
+    settings = read_bytes(args.output.parent / "personal-preview-settings.json", args.output.parent)
+    return {"device": args.device, "source": args.source, "configuration": "Release",
+            "inventory": inventory, "core_stamp": stamp, "settings_sha256": products.digest(settings)}
+
+
+def preview_artifacts(args):
+    """Verify typed metadata, signatures and device binaries only when sealing.
+
+    The shell brackets its shared settings/profile/cloud policy with this seal.
+    Installation compares the exact sealed inputs without repeating validation.
+    """
+    inputs = preview_inputs(args)
+    app = args.root / PREVIEW_PRODUCTS / "Release-iphoneos/Meguri.app"
+    widget = app / "PlugIns/MeguriWidget.appex"
+    artifacts = {}
+    team = None
+    for kind, path, identifier, executable in (("app", app, APP, "Meguri"),
+            ("widget", widget, APP + ".widget", "MeguriWidget")):
+        raw = read_bytes(path / "Info.plist", path)
+        name = str((path / "Info.plist").relative_to(app))
+        need(products.digest(raw) == inputs["inventory"][name]["sha256"], "product-changed")
+        metadata = products.plist(raw, "product-info")
+        need(metadata.get("CFBundleIdentifier") == identifier and
+             metadata.get("CFBundleExecutable") == executable and
+             metadata.get("CFBundleSupportedPlatforms") == ["iPhoneOS"] and
+             all(isinstance(metadata.get(key), str) and metadata[key] for key in
+                 ("CFBundleVersion", "CFBundleShortVersionString")), "preview-product-identity")
+        if kind == "app":
+            need(metadata.get("MeguriCardInspectionBuild") == "personalRelease", "preview-release")
+        signed = signature(path, identifier, False)  # Not Debug's debugger-grant policy.
+        need(team is None or team == signed["team"], "product-team")
+        team = signed["team"]
+        binary = str(path / executable)
+        need(command(["/usr/bin/lipo", "-archs", binary], "preview-architecture").stdout.strip() == b"arm64",
+             "preview-architecture")
+        load = command(["/usr/bin/xcrun", "vtool", "-show-build", binary], "preview-platform").stdout.decode()
+        platforms = re.findall(r"\bplatform\s+(\S+)", load)
+        need(platforms and set(platforms) == {"IOS"}, "preview-platform")
+        artifacts[kind] = {"path": str(path), "bundle_id": identifier, "build": metadata["CFBundleVersion"],
+                           "version": metadata["CFBundleShortVersionString"], "signature": signed}
+    need(all(artifacts["app"][key] == artifacts["widget"][key] for key in ("build", "version")),
+         "preview-product-version")
+    rows = [row.split("=", 1) for row in inputs["core_stamp"].splitlines()]
+    need(all(len(row) == 2 for row in rows) and len({row[0] for row in rows}) == len(rows), "preview-core")
+    core = dict(rows)
+    need(core.get("configuration") == "Release" and core.get("profile") == "release" and
+         core.get("features") == "ankiweb" and "device" in core.get("slices", "").split(",") and
+         re.fullmatch(r"[a-f0-9]{32}", core.get("hash", "")), "preview-core")
+    return dict(inputs, products=artifacts)
+
+
+def preview_seal(args):
+    write_json(args.output / "preview-artifacts.json", preview_artifacts(args))
+
+
+def preview(args):
+    artifacts = read_json(args.output / "preview-artifacts.json")
+    sealed_inputs = {key: value for key, value in artifacts.items() if key != "products"}
+    need(preview_inputs(args) == sealed_inputs, "preview-products-changed")
+    app = artifacts["products"]["app"]
+    need(app["path"] == str(args.root / PREVIEW_PRODUCTS / "Release-iphoneos/Meguri.app"),
+         "preview-products-changed")
+    device_query(args.device, args.output, ["device", "install", "app", app["path"]])
+    installed = installation(args.device, args.output, APP)
+    need(installed["bundleVersion"] == app["build"], "installed-product-build")
+    need(preview_inputs(args) == sealed_inputs, "preview-products-changed")
+    # Persist independently of launch: a locked phone can still prove install.
+    # Different filenames/schema confer no Debug preparation/drive authority.
+    write_json(args.output / "preview-install-witness.json", {
+        "version": 1, "success": True, "device": args.device, "source": args.source,
+        "configuration": "Release", "personal_preview": True, "artifacts": artifacts, "installed_app": installed})
+    launch = device_query(args.device, args.output, ["device", "process", "launch", "--terminate-existing", APP])
+    process = selected_process(args.device, args.output, launch.get("process", {}).get("processIdentifier"), installed)
+    write_json(args.output / "preview-launch.json", {
+        "version": 1, "configuration": "Release", "personal_preview": True,
+        "device": args.device, "source": args.source, "process": process, "normal_launch_verified": True,
+        "install_witness_sha256": products.digest(read_bytes(args.output / "preview-install-witness.json", args.output))})
+
+
 def matching_artifacts(args, prepared):
     current, generated = local_artifacts(args.root, Path(prepared["artifacts"]["xctestrun"]))
     app = installation(args.device, args.output, APP)
@@ -416,7 +513,7 @@ def complete(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("prepare", "admit", "complete"))
+    parser.add_argument("action", choices=("prepare", "admit", "complete", "preview-seal", "preview"))
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--source", required=True)
@@ -430,11 +527,18 @@ def main():
              re.fullmatch(r"(?:[a-fA-F0-9]{8}-[a-fA-F0-9]{16}|[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12})", args.device),
              "physical-arguments")
         products.contained(str(args.root / "build/mg"), str(args.output))
-        if args.action != "complete":
+        if args.action in ("preview-seal", "preview"):
+            need(args.xctestrun is None and args.output.name == "personal-preview" and
+                 args.output.parent.parent == args.root / "build/mg/run", "preview-arguments")
+        if args.action not in ("complete", "preview"):
             args.output.mkdir(mode=0o700)
         if args.action == "prepare":
             need(args.xctestrun is not None, "prepared-xctestrun-missing")
             prepare(args)
+        elif args.action == "preview-seal":
+            preview_seal(args)
+        elif args.action == "preview":
+            preview(args)
         elif args.action == "admit":
             admit(args)
         else:
@@ -446,7 +550,7 @@ def main():
             category = str(error) if isinstance(error, Refused) else "physical-evidence-unavailable"
             try:
                 write_json(args.output / "refusal.json", {"reason": category,
-                    "kept_running": args.action != "prepare", "activated_existing": False, "continuity": "unknown"})
+                    "kept_running": args.action in ("admit", "complete"), "activated_existing": False, "continuity": "unknown"})
             except OSError:
                 pass
         return 1

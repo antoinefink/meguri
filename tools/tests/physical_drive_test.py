@@ -535,5 +535,207 @@ class PhysicalDriveEvidenceTests(unittest.TestCase):
                 self.assertFalse(any("launch" in call for call in calls))
 
 
+class PersonalPreviewTests(unittest.TestCase):
+    def fixture(self, root):
+        root = Path(root)
+        output = root / "build/mg/run/synthetic/personal-preview"
+        output.mkdir(parents=True)
+        (output.parent / "personal-preview-settings.json").write_text("[]")
+        app = root / drive.PREVIEW_PRODUCTS / "Release-iphoneos/Meguri.app"
+        widget = app / "PlugIns/MeguriWidget.appex"
+        for path, identifier, executable in ((app, drive.APP, "Meguri"), (widget, drive.APP + ".widget", "MeguriWidget")):
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "Info.plist").write_bytes(plistlib.dumps({
+                "CFBundleIdentifier": identifier, "CFBundleExecutable": executable,
+                "CFBundleSupportedPlatforms": ["iPhoneOS"], "CFBundleVersion": "17",
+                "CFBundleShortVersionString": "1.0", "MeguriCardInspectionBuild": "personalRelease"}))
+            (path / executable).write_bytes(b"synthetic executable")
+        stamp = root / "app/Packages/MeguriCore/Binaries/.stamp"
+        stamp.parent.mkdir(parents=True)
+        stamp.write_text("hash=" + "a" * 32 + "\nconfiguration=Release\nprofile=release\nfeatures=ankiweb\nslices=device,mac\n")
+        return SimpleNamespace(root=root, output=output, source="a" * 64, device="selected", xctestrun=None), app, widget, stamp
+
+    def binary_command(self, argv, category):
+        return subprocess.CompletedProcess(argv, 0, b"arm64\n" if "-archs" in argv else b"platform IOS\n", b"")
+
+    def test_personal_preview_guard_fixes_release_product_and_refuses_test_hooks_platform_versions_and_links(self):
+        for case in ("valid", "hooks", "test", "xctestrun", "debug-dylib", "runner", "release-test",
+                     "products-xctestrun", "identity", "version", "typed-version", "link", "simulator"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                args, app, widget, stamp = self.fixture(directory)
+                if case == "hooks":
+                    stamp.write_text(stamp.read_text().replace("features=ankiweb", "features=ankiweb,test-hooks"))
+                elif case in ("test", "xctestrun", "debug-dylib", "runner"):
+                    name = {"test": "Other.xctest", "xctestrun": "Other.xctestrun",
+                            "debug-dylib": "Meguri.debug.dylib", "runner": "OtherTests-Runner.app"}[case]
+                    (app / name).write_bytes(b"forbidden preview artifact")
+                elif case == "release-test":
+                    (app.parent / "Other.xctest").symlink_to("/missing/unrelated-product")
+                elif case == "products-xctestrun":
+                    (app.parent.parent / "Other.xctestrun").write_bytes(b"forbidden product name")
+                elif case in ("identity", "version", "typed-version"):
+                    metadata = plistlib.loads((widget / "Info.plist").read_bytes())
+                    metadata["CFBundleIdentifier" if case == "identity" else "CFBundleVersion"] = (
+                        17 if case == "typed-version" else "other")
+                    (widget / "Info.plist").write_bytes(plistlib.dumps(metadata))
+                elif case == "link":
+                    (app / "alias").symlink_to("Meguri")
+                def binary(argv, category):
+                    if case == "simulator" and "vtool" in argv:
+                        return subprocess.CompletedProcess(argv, 0, b"platform IOSSIMULATOR\n", b"")
+                    return self.binary_command(argv, category)
+                with patch.object(drive, "signature", return_value={"team": "TESTTEAM01", "verified": True}) as signed, \
+                     patch.object(drive, "command", side_effect=binary), patch.object(drive, "device_query") as query:
+                    if case == "valid":
+                        artifacts = drive.preview_artifacts(args)
+                        self.assertEqual(artifacts["products"]["app"]["path"], str(app))
+                        self.assertEqual(set(artifacts["products"]), {"app", "widget"})
+                        self.assertEqual([call.args[2] for call in signed.call_args_list], [False, False])
+                    else:
+                        with self.assertRaises(drive.Refused):
+                            drive.preview_artifacts(args)
+                    query.assert_not_called()
+
+    def test_personal_preview_installs_only_sealed_app_and_keeps_witness_when_normal_launch_is_locked(self):
+        for locked in (False, True):
+            with self.subTest(locked=locked), tempfile.TemporaryDirectory() as directory:
+                args, app, _, _ = self.fixture(directory)
+                # These siblings must never be hashed, traversed or required to
+                # resolve. A separate widget product is not the installed widget.
+                (app.parent / "Meguri.app.dSYM").mkdir()
+                (app.parent / "Meguri.app.dSYM/ignored").symlink_to("/missing/symbols")
+                (app.parent / "MeguriWidget.appex").symlink_to("/missing/widget")
+                (app.parent.parent / "PackageFrameworks").symlink_to("/missing/packages")
+                (app.parent.parent / "Debug-iphoneos").mkdir()
+                (app.parent.parent / "Debug-iphoneos/Other.xctest").write_bytes(b"unrelated debug product")
+                installed = {"bundleVersion": "17", "url": "file:///private/synthetic/Meguri.app/"}
+                process = {"processIdentifier": 17, "executable": installed["url"] + "Meguri"}
+                calls = []
+                def query(device, output, arguments):
+                    self.assertEqual((device, output), (args.device, args.output))
+                    calls.append(arguments)
+                    if arguments[:3] == ["device", "process", "launch"]:
+                        self.assertTrue((output / "preview-install-witness.json").is_file())
+                        if locked:
+                            raise drive.Refused("public-device-query")
+                        return {"process": {"processIdentifier": 17}}
+                    return {}
+                with patch.object(drive, "signature", return_value={"team": "TESTTEAM01"}) as signed, \
+                     patch.object(drive, "command", side_effect=self.binary_command) as binary, \
+                     patch.object(drive.products, "snapshot", wraps=drive.products.snapshot) as snapshot, \
+                     patch.object(drive.products, "stream_file", wraps=drive.products.stream_file) as stream, \
+                     patch.object(drive, "installation", return_value=installed) as installation, \
+                     patch.object(drive, "selected_process", return_value=process), \
+                     patch.object(drive, "device_query", side_effect=query):
+                    drive.preview_seal(args)
+                    self.assertEqual(snapshot.call_count, 1)
+                    sealed_reads = stream.call_count
+                    self.assertEqual(sealed_reads, 4)  # app/widget Info.plist and executable only
+                    signed.reset_mock()
+                    binary.reset_mock()
+                    if locked:
+                        with self.assertRaises(drive.Refused):
+                            drive.preview(args)
+                    else:
+                        drive.preview(args)
+                    installation.assert_called_once_with(args.device, args.output, drive.APP)
+                    self.assertEqual([call.args for call in snapshot.call_args_list],
+                                     [(str(args.root / "build"), str(app))] * 3)
+                    self.assertEqual(stream.call_count, sealed_reads * 3)
+                    signed.assert_not_called()
+                    binary.assert_not_called()
+                self.assertEqual(calls, [["device", "install", "app", str(app)],
+                                        ["device", "process", "launch", "--terminate-existing", drive.APP]])
+                witness = drive.read_json(args.output / "preview-install-witness.json")
+                self.assertIs(witness["success"], True)
+                self.assertEqual(witness["configuration"], "Release")
+                self.assertNotIn("installed_runner", witness)
+                self.assertEqual((args.output / "preview-launch.json").exists(), not locked)
+                for filename in ("preparation.json", "install-witness.json", "destination.xctestrun"):
+                    self.assertFalse((args.output / filename).exists())
+
+    def test_personal_preview_refuses_artifact_changes_before_install_and_during_install_without_launch(self):
+        cases = ("app", "widget", "metadata", "add", "remove", "mode", "stamp", "settings", "device", "source")
+        for phase, change in [(phase, change) for phase in ("before", "during") for change in cases] + [("installed-version", None)]:
+            with self.subTest(phase=phase, change=change), tempfile.TemporaryDirectory() as directory:
+                args, app, widget, stamp = self.fixture(directory)
+                def mutate():
+                    if change in ("app", "widget", "metadata"):
+                        path = {"app": app / "Meguri", "widget": widget / "MeguriWidget",
+                                "metadata": widget / "Info.plist"}[change]
+                        path.write_bytes(b"changed after sealing")
+                    elif change == "add":
+                        (app / "new-resource").write_bytes(b"new")
+                    elif change == "remove":
+                        (app / "Meguri").unlink()
+                    elif change == "mode":
+                        (app / "Meguri").chmod(0o700)
+                    elif change == "stamp":
+                        stamp.write_text(stamp.read_text() + "changed=yes\n")
+                    elif change == "settings":
+                        (args.output.parent / "personal-preview-settings.json").write_text("[ ]")
+                    elif change == "device":
+                        args.device = "other-device"
+                    elif change == "source":
+                        args.source = "b" * 64
+                def query(device, output, arguments):
+                    self.assertEqual(arguments, ["device", "install", "app", str(app)])
+                    if phase == "during":
+                        mutate()
+                    return {}
+                with patch.object(drive, "signature", return_value={"team": "TESTTEAM01"}), \
+                     patch.object(drive, "command", side_effect=self.binary_command), \
+                     patch.object(drive, "installation", return_value={"bundleVersion": "18" if phase == "installed-version" else "17"}), \
+                     patch.object(drive, "device_query", side_effect=query) as device:
+                    drive.preview_seal(args)
+                    if phase == "before":
+                        mutate()
+                    with self.assertRaises(drive.Refused):
+                        drive.preview(args)
+                    self.assertEqual(device.call_count, 0 if phase == "before" else 1)
+                self.assertFalse((args.output / "preview-install-witness.json").exists())
+                self.assertFalse((args.output / "preview-launch.json").exists())
+
+    def test_personal_preview_arguments_refuse_xctestrun_and_debug_output_before_device_work(self):
+        for case in ("xctestrun", "debug-output"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                args, _, _, _ = self.fixture(directory)
+                output = args.output if case == "xctestrun" else args.output.with_name("physical")
+                argv = ["physical-drive.py", "preview", "--root", str(args.root), "--output", str(output),
+                        "--source", args.source, "--device", "00000000-0000000000000001"]
+                if case == "xctestrun":
+                    argv += ["--xctestrun", str(args.root / "input.xctestrun")]
+                with patch.object(drive.sys, "argv", argv), patch.object(drive.os, "umask"), \
+                     patch.object(drive, "device_query") as query, patch.object(drive, "preview_artifacts") as artifacts:
+                    self.assertEqual(drive.main(), 1)
+                    query.assert_not_called()
+                    artifacts.assert_not_called()
+
+    def test_personal_preview_cloud_policy_allows_team_ios_release_only_with_explicit_development_facts(self):
+        spec = importlib.util.spec_from_file_location("cloud_configuration", Path(__file__).with_name("cloud_build_configuration.py"))
+        cloud = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cloud)
+        settings = {
+            "PRODUCT_BUNDLE_IDENTIFIER": drive.APP, "MEGURI_BUNDLE_ID_SUFFIX": ".dev",
+            "MEGURI_CLOUD_CONTAINER_development": "iCloud.example.isolated",
+            "MEGURI_CLOUD_CONTAINER_production": "iCloud.example.daily",
+            "MEGURI_CLOUD_CONFIGURATION": "development", "MEGURI_CLOUD_CONTAINER": "iCloud.example.isolated",
+            "MEGURI_CLOUD_ENVIRONMENT": "development", "MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT": "Development",
+            "MEGURI_CLOUD_PUSH_ENVIRONMENT": "development", "INFOPLIST_KEY_MeguriCloudContainer": "iCloud.example.isolated",
+            "INFOPLIST_KEY_MeguriCloudEnvironment": "development", "MEGURI_CLOUD_SCHEMA_CONFIGURED_development": "NO",
+            "MEGURI_CLOUD_SCHEMA_CONFIGURED_production": "NO", "MEGURI_CLOUD_SCHEMA_CONFIGURED": "NO", "MEGURI_CLOUD_SCHEMA_BOOLEAN": "0"}
+        info = {"MeguriCloudContainer": "iCloud.example.isolated", "MeguriCloudEnvironment": "development", "MeguriCloudSchemaConfigured": False}
+        grants = {"com.apple.developer.icloud-container-identifiers": ["iCloud.example.isolated"],
+                  "com.apple.developer.icloud-services": ["CloudKit"], "com.apple.developer.icloud-container-environment": "Development",
+                  "aps-environment": "development", "get-task-allow": True}
+        cloud.check(settings, "Release", "ios", "team", info, grants, {}, personal_preview=True)
+        for preview, config, signing, entitlements, widget in ((False, "Release", "team", grants, {}),
+                (True, "Debug", "team", grants, {}), (True, "Release", "adhoc", grants, {}),
+                (True, "Release", "team", {**grants, "aps-environment": "production"}, {}),
+                (True, "Release", "team", grants, {"aps-environment": "development"})):
+            with self.assertRaises(ValueError):
+                cloud.check(settings, config, "ios", signing, info, entitlements, widget, personal_preview=preview)
+
+
 if __name__ == "__main__":
     unittest.main()

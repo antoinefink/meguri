@@ -15,7 +15,7 @@
 mg_job build-app host mg_build_app \
   "Build the app and its tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] [--test-plan UI|CloudAgent] [--standalone|--personal-preview] (lint-ui first, core XCFramework; default build-for-testing with UI plan; CloudAgent: Debug only, no previews; --standalone: Mac Debug automation preview; --personal-preview: Mac Release with development identities and team signing in PersonalPreviewDerivedData; previews never launch)"
 mg_job run host mg_run \
-  "Install and launch: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile]; physical requires Debug and a normal launch without overrides; simulator/Mac also accept --route, --window-size, --seconds and -- launch args"
+  "Install and launch: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid> | --physical-device <explicit identifier>] [--config Debug|Profile]; physical requires Debug, or --personal-preview for manual team Release without test hooks; physical launches have no overrides; simulator/Mac also accept --route, --window-size, --seconds and -- launch args"
 
 MG_APP_DD=build/app/DerivedData
 MG_APP_DEV_ID=com.antoinefink.meguri.dev
@@ -137,8 +137,12 @@ mg_app_build_action() {
       fi
       ;;
     personal-preview)
-      if [ "$platform/$config/$plan/$scheme" != mac/Release/UI/Meguri ] || [ "$signing" != team ]; then
-        mg_failure usage "--personal-preview requires Mac Release, the normal Meguri scheme and MEGURI_APP_SIGNING=team"
+      if { [ "$platform/$config/$plan/$scheme" != mac/Release/UI/Meguri ] &&
+          { [ "$platform/$config/$plan/$scheme" != ios-device/Release/UI/Meguri ] ||
+            [ "${MG_APP_PERSONAL_DEVICE_ALLOWED:-false}" != true ] || [ "${MG_JOB:-}" != run ] ||
+            [ "$MG_APP_DD" != build/app/PersonalDevicePreviewDerivedData ] || [ -z "${MG_UI_PHYSICAL_DEVICE:-}" ]; }; } ||
+          [ "$signing" != team ]; then
+        mg_failure usage "--personal-preview requires Mac Release or the verified physical run route, the normal Meguri scheme and team signing"
         mg_status error
         return 1
       fi
@@ -156,7 +160,7 @@ mg_app_build_action() {
   fi
   [ "$#" -le 4 ] || settings=("${@:5}")
   if [ "$platform" = ios-device ]; then
-    if ! mg_word_in "$config" "Debug Profile"; then
+    if [ "$personal" != true ] && ! mg_word_in "$config" "Debug Profile"; then
       mg_failure usage "physical iOS tests require Debug or Profile with the development bundle id"
       mg_status error
       return 1
@@ -172,6 +176,7 @@ mg_app_build_action() {
       return 1
     fi
     core_args=(--slices mac,sim,device)
+    [ "$personal" != true ] || core_args=(--slices device)
     signing=team
   fi
   if [ "$platform" = mac ] && [ "$personal" != true ] && ! mg_word_in "$config" "Debug Profile"; then
@@ -247,7 +252,9 @@ mg_app_build_action() {
   fi
   counts="$(xcrun xcresulttool get build-results --path "$result" 2>/dev/null |
     jq -c '{errors: .errorCount, warnings: .warningCount, messages: [(.errors[]?, .warnings[]?) | .message] | .[:10]}')" || counts=null
-  [ -z "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ] || counts="$(jq -c 'del(.messages)' <<<"${counts:-null}")"
+  if [ "$platform/$personal" = ios-device/true ] || [ -n "${MG_CLOUD_AGENT_MAC_PROFILE_BINDING:-}" ]; then
+    counts="$(jq -c 'del(.messages)' <<<"${counts:-null}")"
+  fi
   mg_detail build "$(jq -nc --arg p "$platform" --arg c "$config" --arg app "$(mg_app_products "$platform" "$config")/Meguri.app" \
     --arg action "$action" --arg plan "$plan" --arg dd "$MG_APP_DD" --argjson personal "$personal" --argjson counts "${counts:-null}" \
     '{platform: $p, config: $c, app: $app, action: $action, test_plan: $plan, standalone: ($action == "build" and ($personal | not)), personal_preview: $personal, derived_data: $dd} + ($counts // {})')"
@@ -329,11 +336,12 @@ mg_app_input_digest() {
 # Inspect resolved settings before any native app build. The suffix must reach
 # both targets, while Release keeps its native launch/core and uses isolated development cloud.
 mg_app_personal_settings() {
-  local settings="$MG_RUN_DIR/personal-preview-settings.json"
+  local settings="$MG_RUN_DIR/personal-preview-settings.json" sdk=macosx cloud_platform=mac
+  [ "$platform" != ios-device ] || { sdk=iphoneos; cloud_platform=ios; }
   xcodebuild -showBuildSettings -json -project app/Meguri.xcodeproj -target Meguri -target MeguriWidget \
-    -configuration Release -sdk macosx -arch arm64 \
+    -configuration Release -sdk "$sdk" -arch arm64 \
     "$@" >"$settings" || return 1
-  jq -e '
+  jq -e --arg sdk "$sdk" '
     type == "array" and
     ([.[] | select(.target == "Meguri" or .target == "MeguriWidget")] | length == 2) and
     all(.[] | select(.target == "Meguri" or .target == "MeguriWidget");
@@ -350,24 +358,29 @@ mg_app_personal_settings() {
       # Xcode omits empty settings from its JSON; the exact entitlement path
       # below independently confirms that no hooks or ad-hoc suffix resolved.
       (.MEGURI_ENTITLEMENTS_HOOKS_SUFFIX // "") == "" and (.MEGURI_ENTITLEMENTS_SIGNING_SUFFIX // "") == "" and
-      .CODE_SIGN_ENTITLEMENTS == (if $target == "Meguri" then "Meguri/Meguri-macOS.entitlements" else "MeguriWidget/MeguriWidget-macOS.entitlements" end) and
-      .ENABLE_TESTABILITY == "NO" and .ENABLE_DEBUG_DYLIB == "NO" and .ENABLE_HARDENED_RUNTIME == "YES")
+      .CODE_SIGN_ENTITLEMENTS == ((if $target == "Meguri" then "Meguri/Meguri-" else "MeguriWidget/MeguriWidget-" end) + (if $sdk == "macosx" then "macOS" else "iOS" end) + ".entitlements") and
+      .ENABLE_TESTABILITY == "NO" and .ENABLE_DEBUG_DYLIB == "NO" and
+      (if $sdk == "macosx" then .ENABLE_HARDENED_RUNTIME == "YES" else
+        .PLATFORM_NAME == "iphoneos" and .MEGURI_SIGNING == "team" and
+        .DEVELOPMENT_TEAM == .MEGURI_TEAM_ID and (.DEVELOPMENT_TEAM | test("^[A-Z0-9]{10}$")) and
+        .CODE_SIGN_IDENTITY == "Apple Development" end))
   ' "$settings" >/dev/null || return 1
   python3 "$MG_TOOLS/tests/cloud_build_configuration.py" --settings "$settings" \
-    --configuration Release --platform mac --signing team --personal-preview
+    --configuration Release --platform "$cloud_platform" --signing team --personal-preview
 }
 
 # Profiles are checked in memory and never published. Validate the signed
-# identity/grants against an unexpired development profile, including this Mac.
+# identity/grants against an unexpired development profile, including the selected device (this Mac by default).
 mg_app_personal_profile() {
-  local bundle="$1" ent="$2" hardware="$3" cert_dir rc
-  [ -f "$bundle/Contents/embedded.provisionprofile" ] || return 1
+  local bundle="$1" ent="$2" hardware="$3" platform="${4:-mac}" cert_dir rc profile="$1/Contents/embedded.provisionprofile"
+  [ "$platform" != ios ] || profile="$bundle/embedded.mobileprovision"
+  [ -f "$profile" ] || return 1
   cert_dir="$(mktemp -d "$MG_RUN_DIR/personal-signer.XXXXXX")" || return 1
   if ! codesign -d --extract-certificates="$cert_dir/cert" "$bundle" >/dev/null; then
     rm -rf "$cert_dir"
     return 1
   fi
-  security cms -D -i "$bundle/Contents/embedded.provisionprofile" | python3 -I -c '
+  security cms -D -i "$profile" | python3 -I -c '
 import datetime, fnmatch, json, plistlib, sys
 def profile_authorizes(key, grant, claim):
     # Only services/environment have authorization forms beyond exact equality.
@@ -399,9 +412,13 @@ try:
     assert team in profile["TeamIdentifier"], "team membership"
     assert grants["com.apple.developer.team-identifier"] == team, "team grant"
     assert isinstance(identity, str) and fnmatch.fnmatchcase(identity, allowed), "identity grant"
-    # Mac device-bound development profiles omit debugger grants. Release
-    # products must not carry that entitlement even when a profile permits it.
-    assert "OSX" in profile["Platform"], "Mac profile"
+    # Mac previews forbid debugger grants; normal iOS development signing
+    # may add get-task-allow, independently of Swift/Rust test hooks.
+    assert ("OSX" if sys.argv[4] == "mac" else "iOS") in profile["Platform"], "profile platform"
+    if sys.argv[4] == "ios":
+        assert grants.get("get-task-allow") is True, "iOS development profile"
+        assert profile.get("ProvisionsAllDevices", False) is False, "device-bound profile"
+        assert type(signed.get("get-task-allow", False)) is bool, "debugger grant"
     assert profile["DeveloperCertificates"] and all(isinstance(cert, bytes) and cert for cert in profile["DeveloperCertificates"]), "developer certificates"
     with open(sys.argv[3], "rb") as certificate:
         assert certificate.read() in profile["DeveloperCertificates"], "authorized signer"
@@ -410,7 +427,8 @@ try:
     assert sys.argv[2] in profile["ProvisionedDevices"], "device coverage"
     if "com.apple.developer.icloud-container-identifiers" in signed:
         assert grants.get("com.apple.developer.icloud-container-identifiers") == signed["com.apple.developer.icloud-container-identifiers"], "isolated cloud container grant"
-        for key in ("com.apple.developer.icloud-services", "com.apple.developer.icloud-container-environment", "com.apple.developer.aps-environment"):
+        for key in ("com.apple.developer.icloud-services", "com.apple.developer.icloud-container-environment",
+                    "com.apple.developer.aps-environment" if sys.argv[4] == "mac" else "aps-environment"):
             assert profile_authorizes(key, grants.get(key), signed[key]), "cloud/push grant"
     for key in ("keychain-access-groups", "com.apple.security.application-groups"):
         for value in signed.get(key, []):
@@ -421,18 +439,20 @@ except AssertionError as error:
 except (KeyError, TypeError, ValueError, OSError, plistlib.InvalidFileException) as error:
     print("personal preview provisioning parse: " + type(error).__name__, file=sys.stderr)
     sys.exit(1)
-' "$ent" "$hardware" "$cert_dir/cert0"
+' "$ent" "$hardware" "$cert_dir/cert0" "$platform"
   rc=$?
   rm -rf "$cert_dir"
   return "$rc"
 }
 
 mg_app_personal_check() {
-  local app="$1" widget="$1/Contents/PlugIns/MeguriWidget.appex" bundle xml ent info team="" identity
+  local app="$1" platform="${2:-mac}" hardware="${3:-}" prefix=Contents/ slice=mac cloud_platform=mac
+  [ "$platform" != ios-device ] || { prefix=""; slice=device; cloud_platform=ios; }
+  local widget="$1/${prefix}PlugIns/MeguriWidget.appex" bundle xml ent info team="" identity
   local app_ent widget_ent app_info
-  local hardware stamp hash slices app_hash widget_hash app_profile_hash widget_profile_hash="" digest signed_info cert_dir widget_provision=not_embedded
+  local stamp hash slices app_hash widget_hash app_profile_hash widget_profile_hash="" digest signed_info cert_dir widget_provision=not_embedded
   codesign --verify --deep --strict "$app" && codesign --verify --strict "$widget" || return 1
-  hardware="$(system_profiler SPHardwareDataType -json | jq -er '.SPHardwareDataType[0] |
+  [ "$platform" != mac ] || hardware="$(system_profiler SPHardwareDataType -json | jq -er '.SPHardwareDataType[0] |
     (.provisioning_UDID // .platform_UUID) | select(type == "string" and length > 0)')" || return 1
   [ -n "$hardware" ] || return 1
   for bundle in "$app" "$widget"; do
@@ -444,14 +464,25 @@ mg_app_personal_check() {
     signed_info="$(codesign -d --verbose=4 "$bundle" 2>&1)" || return 1
     [ "$(sed -n 's/^Identifier=//p' <<<"$signed_info")" = "$identity" ] &&
       [ "$(sed -n 's/^TeamIdentifier=//p' <<<"$signed_info")" = "$team" ] || return 1
-    jq -e --arg team "$team" --arg identity "$identity" '
-      type == "object" and .["com.apple.security.app-sandbox"] == true and
-      ((.["com.apple.security.get-task-allow"] // false) == false) and ((.["get-task-allow"] // false) == false) and
-      .["com.apple.security.application-groups"] == [$team + ".com.antoinefink.meguri.dev"] and
+    jq -e --arg team "$team" --arg identity "$identity" --arg platform "$platform" '
+      type == "object" and
+      (if $platform == "mac" then .["com.apple.security.app-sandbox"] == true and
+        ((.["com.apple.security.get-task-allow"] // false) == false) and ((.["get-task-allow"] // false) == false)
+       else .["com.apple.developer.team-identifier"] == $team and
+        .["application-identifier"] == ($team + "." + $identity) end) and
+      .["com.apple.security.application-groups"] == [(if $platform == "mac" then $team else "group" end) + ".com.antoinefink.meguri.dev"] and
       ([keys[] | select(startswith("com.apple.security.temporary-exception."))] == []) and
       ([keys[] | select(startswith("com.apple.security.cs."))] == [])
     ' <<<"$ent" >/dev/null || return 1
-    if [ "$bundle" = "$app" ]; then
+    if [ "$platform" = ios-device ]; then
+      jq -e --arg team "$team" --arg identity "$identity" '
+        (.["keychain-access-groups"] // []) as $groups |
+        ($groups == [] or $groups == [$team + "." + $identity]) and
+        (.["com.apple.security.get-task-allow"] // false) == false
+      ' <<<"$ent" >/dev/null || return 1
+      mg_app_personal_profile "$bundle" "$ent" "$hardware" ios || return 1
+      if [ "$bundle" = "$app" ]; then app_ent="$ent"; else widget_ent="$ent"; widget_provision=verified; fi
+    elif [ "$bundle" = "$app" ]; then
       jq -e --arg team "$team" --arg identity "$identity" '
         .["com.apple.developer.team-identifier"] == $team and
         (.["com.apple.application-identifier"] // .["application-identifier"]) == ($team + "." + $identity) and
@@ -475,24 +506,30 @@ mg_app_personal_check() {
         widget_provision=verified
       fi
     fi
-    info="$(plutil -convert json -o - "$bundle/Contents/Info.plist")" || return 1
+    info="$(plutil -convert json -o - "$bundle/${prefix}Info.plist")" || return 1
     jq -e --arg identity "$identity" '.CFBundleIdentifier == $identity' <<<"$info" >/dev/null || return 1
+    if [ "$platform" = ios-device ]; then
+      jq -e '.MeguriAppGroupIdentifier == "group.com.antoinefink.meguri.dev"' <<<"$info" >/dev/null || return 1
+    fi
     if [ "$bundle" = "$app" ]; then
       app_info="$info"
-      jq -e '.CFBundleExecutable == "Meguri" and .MeguriCardInspectionBuild == "personalRelease" and .LSUIElement == false' <<<"$info" >/dev/null || return 1
+      jq -e --arg platform "$platform" '.CFBundleExecutable == "Meguri" and .MeguriCardInspectionBuild == "personalRelease" and
+        (if $platform == "mac" then .LSUIElement == false else .CFBundleSupportedPlatforms == ["iPhoneOS"] end)' <<<"$info" >/dev/null || return 1
     else
       jq -e '.CFBundleExecutable == "MeguriWidget"' <<<"$info" >/dev/null || return 1
     fi
   done
   # Use the same cloud policy for resolved settings and signed product facts.
-  python3 -B - "$MG_TOOLS/tests" "$MG_RUN_DIR/personal-preview-settings.json" "$app_info" "$app_ent" "$widget_ent" <<'PY_CLOUD' || return 1
+  python3 -B - "$MG_TOOLS/tests" "$MG_RUN_DIR/personal-preview-settings.json" "$app_info" "$app_ent" "$widget_ent" "$cloud_platform" <<'PY_CLOUD' || return 1
 import json, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from cloud_build_configuration import check
 settings = json.loads(Path(sys.argv[2]).read_text())
 app = next(target["buildSettings"] for target in settings if target["target"] == "Meguri")
-check(app, "Release", "mac", "team", *(json.loads(value) for value in sys.argv[3:]), personal_preview=True)
+if sys.argv[6] == "ios":
+    assert all(target["buildSettings"]["DEVELOPMENT_TEAM"] == json.loads(sys.argv[4])["com.apple.developer.team-identifier"] for target in settings)
+check(app, "Release", sys.argv[6], "team", *(json.loads(value) for value in sys.argv[3:6]), personal_preview=True)
 PY_CLOUD
   cert_dir="$(mktemp -d "$MG_RUN_DIR/personal-widget-signer.XXXXXX")" || return 1
   if ! codesign -d --extract-certificates="$cert_dir/app" "$app" >/dev/null ||
@@ -502,19 +539,23 @@ PY_CLOUD
     return 1
   fi
   rm -rf "$cert_dir"
-  [ "$(lipo -archs "$app/Contents/MacOS/Meguri")" = arm64 ] &&
-    [ "$(lipo -archs "$widget/Contents/MacOS/MeguriWidget")" = arm64 ] || return 1
+  local executable_prefix="${prefix}"
+  [ "$platform" != mac ] || executable_prefix=Contents/MacOS/
+  [ "$(lipo -archs "$app/${executable_prefix}Meguri")" = arm64 ] &&
+    [ "$(lipo -archs "$widget/${executable_prefix}MeguriWidget")" = arm64 ] || return 1
   stamp="$(cat "$MG_ROOT/app/Packages/MeguriCore/Binaries/.stamp")" || return 1
   grep -qx 'configuration=Release' <<<"$stamp" && grep -qx 'profile=release' <<<"$stamp" &&
     grep -qx 'features=ankiweb' <<<"$stamp" || return 1
   hash="$(sed -n 's/^hash=//p' <<<"$stamp")"
   printf '%s\n' "$hash" | grep -Eq '^[0-9a-f]{32}$' || return 1
   slices="$(sed -n 's/^slices=//p' <<<"$stamp")"
-  printf '%s\n' "$slices" | tr ',' '\n' | grep -qx mac || return 1
-  app_hash="$(shasum -a 256 "$app/Contents/MacOS/Meguri" | cut -c1-64)"
-  widget_hash="$(shasum -a 256 "$widget/Contents/MacOS/MeguriWidget" | cut -c1-64)"
-  app_profile_hash="$(shasum -a 256 "$app/Contents/embedded.provisionprofile" | cut -c1-64)"
-  [ "$widget_provision" != verified ] || widget_profile_hash="$(shasum -a 256 "$widget/Contents/embedded.provisionprofile" | cut -c1-64)"
+  printf '%s\n' "$slices" | tr ',' '\n' | grep -qx "$slice" || return 1
+  app_hash="$(shasum -a 256 "$app/${executable_prefix}Meguri" | cut -c1-64)"
+  widget_hash="$(shasum -a 256 "$widget/${executable_prefix}MeguriWidget" | cut -c1-64)"
+  local profile_path=Contents/embedded.provisionprofile
+  [ "$platform" != ios-device ] || profile_path=embedded.mobileprovision
+  app_profile_hash="$(shasum -a 256 "$app/$profile_path" | cut -c1-64)"
+  [ "$widget_provision" != verified ] || widget_profile_hash="$(shasum -a 256 "$widget/$profile_path" | cut -c1-64)"
   for digest in "$app_hash" "$widget_hash" "$app_profile_hash" ${widget_profile_hash:+"$widget_profile_hash"}; do
     printf '%s\n' "$digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
   done
@@ -1234,13 +1275,14 @@ mg_build_app() {
 }
 
 mg_run() {
-  local seconds=5 window="" args=() a
+  local seconds=5 window="" args=() a personal=false seconds_given=false
   # --seconds and --window-size are run's own; the rest are drive's.
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --personal-preview) personal=true; shift ;;
       --seconds)
         [ "$#" -ge 2 ] && case "$2" in "" | *[!0-9]*) false ;; esac || { mg_drive__usage "--seconds takes whole seconds"; return 0; }
-        seconds="$2" && shift 2
+        seconds="$2" && seconds_given=true && shift 2
         ;;
       --window-size)
         [ "$#" -ge 2 ] && [ -n "$2" ] || { mg_drive__usage "--window-size takes minimum, default, large or <w>x<h>"; return 0; }
@@ -1251,6 +1293,13 @@ mg_run() {
       *) args[${#args[@]}]="$1" && shift ;;
     esac
   done
+  if [ "$personal" = true ]; then
+    [ -z "$window" ] && [ "$seconds_given" = false ] || {
+      mg_drive__usage "--personal-preview requires a normal physical launch without run overrides"; return 0;
+    }
+    mg_run__personal ${args[0]+"${args[@]}"}
+    return 0
+  fi
   mg_drive__args ${args[0]+"${args[@]}"} || return 0
   [ "${#MG_D_POSITIONAL[@]}" -eq 0 ] || { mg_drive__usage "unexpected argument"; return 0; }
   if [ -n "$MG_D_PHYSICAL" ]; then
@@ -1327,13 +1376,43 @@ mg_run() {
   mg_status pass
 }
 
+# Consume Release before the Debug-only shared parser. Only this manual run
+# route admits the device preview; drive/continuity retain their existing policy.
+mg_run__personal() {
+  local args=() platform=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --config)
+        [ "$#" -ge 2 ] && [ "$2" = Release ] || {
+          mg_drive__usage "--personal-preview implies Release; explicit --config must be Release"; return 0;
+        }
+        shift 2 ;;
+      --platform|--physical-device)
+        [ "$#" -ge 2 ] || { mg_drive__usage "personal preview requires --platform iphone|ipad and --physical-device <explicit existing identifier>"; return 0; }
+        [ "$1" != --platform ] || platform="$2"
+        args[${#args[@]}]="$1"; args[${#args[@]}]="$2"; shift 2 ;;
+      *) mg_drive__usage "--personal-preview accepts only --platform iphone|ipad, --physical-device and optional --config Release; no launch overrides"; return 0 ;;
+    esac
+  done
+  mg_word_in "$platform" "iphone ipad" || { mg_drive__usage "--personal-preview requires --platform iphone or ipad"; return 0; }
+  mg_drive__args ${args[0]+"${args[@]}"} || return 0
+  [ -n "$MG_D_PHYSICAL" ] || { mg_drive__usage "--personal-preview requires --physical-device <explicit existing identifier>"; return 0; }
+  mg_run__physical "$MG_D_PHYSICAL" "$MG_D_KIND" personal-preview
+}
+
 # Normal preparation is separate from preservation: a build, installation and
 # development-app restart are authorized here, never in --keep-app-running.
 mg_run__physical() {
-  local device="$1" kind="$2" source after xctestrun MG_UI_PHYSICAL_DEVICE=""
+  local device="$1" kind="$2" mode="${3:-debug}" source after xctestrun MG_UI_PHYSICAL_DEVICE=""
+  local MG_APP_PERSONAL_DEVICE_ALLOWED=false
   mg_ui_test__physical_check "$device" "$kind" || return 0
   mg_host_lease --no-session || return 0
   mg_ui_test__physical_check "$device" "$kind" || return 0
+  if [ "$mode" = personal-preview ]; then
+    MG_APP_PERSONAL_DEVICE_ALLOWED=true
+    mg_run__physical_personal "$device"
+    return 0
+  fi
   source="$(mg_app_input_digest)"
   [ -n "$source" ] || { mg_failure physical-source "development source evidence unavailable"; mg_status fail; return 0; }
   export MG_APP_TEST_SCHEME=Meguri MG_APP_TEST_PLAN=UI
@@ -1356,6 +1435,43 @@ mg_run__physical() {
   mg_message "run: signed Debug development app launched normally on the selected physical device; preservation remains unproved"
   mg_status pass
 }
+
+# The lease and exact inventory are owned by mg_run__physical. Seal local
+# inputs before policy verification, then match those same bytes at installation.
+mg_run__physical_personal() (
+  umask 077
+  local device="$1" source app
+  local MG_APP_DD=build/app/PersonalDevicePreviewDerivedData MEGURI_APP_SIGNING=team
+  source="$(mg_app_input_digest)"
+  if ! printf '%s\n' "$source" | grep -Eq '^[0-9a-f]{64}$'; then
+    mg_failure physical-source "personal preview source evidence unavailable"; mg_status fail; return 0
+  fi
+  mg_app_build_action personal-preview ios-device Release >"$MG_RUN_DIR/personal-preview-build.log" 2>&1 || return 0
+  app="$(mg_app_products ios-device Release)/Meguri.app"
+  if [ "$source" != "$(mg_app_input_digest)" ] ||
+      ! python3 -B -I "$MG_TOOLS/scripts/physical-drive.py" preview-seal --root "$MG_ROOT" \
+        --output "$MG_RUN_DIR/personal-preview" --device "$device" --source "$source" \
+        >"$MG_RUN_DIR/personal-preview-verification.log" 2>&1 ||
+      ! mg_app_personal_check "$app" ios-device "$device" >>"$MG_RUN_DIR/personal-preview-verification.log" 2>&1 ||
+      [ "$source" != "$(mg_app_input_digest)" ]; then
+    mg_failure personal-preview-product "device preview requires stable sources, signed arm64 dev app/widget, authorized device development profiles and Release core without test hooks; see private verification evidence"
+    mg_status fail; return 0
+  fi
+  # Registered before launch: a locked device can retain the install witness
+  # even when normal launch fails. These artifacts never authorize Debug drive.
+  mg_artifact json "$MG_RUN_DIR/personal-preview/preview-install-witness.json" "private personal preview install witness (when installed)"
+  if ! python3 -B -I "$MG_TOOLS/scripts/physical-drive.py" preview --root "$MG_ROOT" \
+      --output "$MG_RUN_DIR/personal-preview" --device "$device" --source "$source" \
+      >"$MG_RUN_DIR/personal-preview-install.log" 2>&1; then
+    mg_failure personal-preview-launch "personal device preview install or normal launch failed; any verified install witness remains private; no fallback"
+    mg_status fail; return 0
+  fi
+  mg_artifact json "$MG_RUN_DIR/personal-preview/preview-launch.json" "private personal preview normal launch"
+  mg_detail input "$(jq -nc --arg input "$source" '$input')"
+  mg_detail normal_launch_verified true
+  mg_message "run: signed Release personal preview installed and launched normally on the selected physical device"
+  mg_status pass
+)
 
 # The Mac: a hidden background launch that must stay up, out of the Dock and
 # never active, for <seconds>, then quits (it holds the host lease meanwhile,

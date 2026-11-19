@@ -31,8 +31,8 @@ def check(settings, configuration, platform, signing, info=None, entitlements=No
         require(artifact is None or isinstance(artifact, dict), "plist artifact must be a dictionary")
     require(configuration in ("Debug", "Profile", "Release", "AppStore"), "unknown configuration")
     require(platform in ("mac", "ios") and signing in ("adhoc", "team"), "unknown platform/signing")
-    require(not personal_preview or (configuration, platform, signing) == ("Release", "mac", "team"),
-            "personal preview requires Mac Release with team signing")
+    require(not personal_preview or (configuration == "Release" and signing == "team"),
+            "personal preview requires Release with team signing")
     development = configuration in ("Debug", "Profile") or personal_preview
     environment = "development" if development else "production"
     suffix = ".dev" if development else ""
