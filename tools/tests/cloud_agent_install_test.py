@@ -28,6 +28,9 @@ v = install.v
 sys.modules[v.__name__] = v
 INSTANCE = "00000000-0000-0000-0000-000000000001"
 UDID = "00000000-0000-0000-0000-000000000002"
+# The pinned simulator runtime build: a simulator delivery binds the header's
+# OS build to it.
+PIN_BUILD = json.loads((Path(__file__).parents[1] / "sim-devices.json").read_bytes())["runtime"]["build"]
 PROVISIONING = "GENERATED-PROVISIONING-UDID-003"
 IPAD_UDID = "00000000-0000-0000-0000-000000000004"
 LEASE_RUN = "20261102T000000Z-104"
@@ -97,12 +100,12 @@ class DeliveryTests(unittest.TestCase):
         self.support = self.root / "private-support"
         self.support.mkdir(mode=0o700)
         self.fixture.profile["ProvisionedDevices"] = [PROVISIONING]
-        self.fixture.expected["os_build"] = "24A434"
+        self.fixture.expected["os_build"] = PIN_BUILD
         self.fixture.save_json(self.fixture.header_path, self.fixture.expected)
         self.manifest = json.loads(self.fixture.manifest_path.read_bytes())
         self.observed = {"vm_instance": INSTANCE, "provisioning_udid": PROVISIONING,
                          "boot_epoch": int(time.time()) - 600,
-                         "os_build": "24A434", "xcode": "Xcode 27.2\nBuild version generated"}
+                         "os_build": PIN_BUILD, "xcode": "Xcode 27.2\nBuild version generated"}
         self.vm = TransportDouble(self)
         self.template = self.fixture.header_path.with_name("template.json")
         self.save_template()

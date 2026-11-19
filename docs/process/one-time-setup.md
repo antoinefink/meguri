@@ -19,7 +19,7 @@ Accept the Xcode license: open Xcode once, or run `sudo xcodebuild -license acce
 
 ### `ios-runtime`
 
-Install the iOS 27 simulator runtime: Xcode › Settings › Components, or `xcodebuild -downloadPlatform iOS`. The iPhone and iPad simulators share it. Builds for the simulator need it on this Mac, and the test VM's simulators get their copy from it (`tools/vm/add-sim-runtime.sh`, run by an agent). Doctor fails without it.
+Install the pinned iOS simulator runtime (`tools/sim-devices.json`; iOS 27.2 since 2026-11-19): Xcode › Settings › Components, or `xcodebuild -downloadPlatform iOS`. The iPhone and iPad simulators share it. Builds for the simulator need it on this Mac, and the test VM's simulators get their copy from it (`tools/vm/add-sim-runtime.sh`, run by an agent). Doctor fails without it.
 
 ### `xcode-account`
 
@@ -139,7 +139,7 @@ Optional: enable "Allow external agents to use Xcode tools" in Xcode's settings.
 
 ### `xcode-27-1`
 
-Xcode 27.1 or later adds the iPhone Duo simulator (R1962). It needs its own iOS 27.1 runtime, pinned under `foldable` in `tools/sim-devices.json`; `tools/vm/add-sim-runtime.sh --foldable` copies it into the VM. Doctor lists this step while Xcode is older than 27.1.
+Xcode 27.1 or later adds the iPhone Duo simulator (R1962). It runs on its own device-specific build of the pinned iOS version (iOS 27.2 since 2026-11-19, which needs Xcode 27.2), pinned under `foldable` in `tools/sim-devices.json`; `tools/vm/add-sim-runtime.sh --foldable` copies it into the VM. Doctor lists this step while Xcode is older than 27.1.
 
 ### `nightly-scheduler`
 
