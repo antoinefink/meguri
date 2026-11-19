@@ -580,9 +580,17 @@ PY
   jq -ne --slurpfile frontend "$frontend/test-counts.json" --slurpfile browser "$MG_RUN_DIR/test-counts.json" '
     $frontend[0].errors==[] and $frontend[0].counts.total==9 and $frontend[0].counts.passed==9 and
     $browser[0].errors==[] and $browser[0].counts.total==1 and $browser[0].counts.passed==1' >/dev/null || return 1
-  local screenshots
-  screenshots="$(find "$MG_RUN_DIR/browser-artifacts" -name '*.png' -type f | wc -l | tr -d ' ')" || return 1
-  [ "$screenshots" -eq 9 ] || { mg_sync_web__failure "Missing audited browser screenshots"; return 1; }
+  local screenshot screenshot_file
+  for screenshot in accounts-narrow accounts-wide anonymous-login-wide \
+    collection-member-320 collection-member-390 connection-admin-320 connection-admin-390 \
+    connection-member-320 connection-member-390 connection-wide invite-conflict-narrow \
+    invite-narrow password-settings-narrow reset-wide setup-wide; do
+    screenshot_file="$MG_RUN_DIR/browser-artifacts/$screenshot.png"
+    if [ -L "$screenshot_file" ] || [ ! -f "$screenshot_file" ] || [ ! -s "$screenshot_file" ]; then
+      mg_sync_web__failure "Missing audited browser screenshot: $screenshot.png"
+      return 1
+    fi
+  done
   mg_detail test_groups "$(jq -nc --slurpfile frontend "$frontend/test-counts.json" --slurpfile browser "$MG_RUN_DIR/test-counts.json" '{frontend:$frontend[0],browser:$browser[0]}')"
   mg_count total 10; mg_count passed 10; mg_count completed 10; mg_count selected 10
 }

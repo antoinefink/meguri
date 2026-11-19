@@ -34,3 +34,21 @@ digests.
 | `server/web/tests/browser/accounts.spec.ts` | `0beb4817bf0fe207d83cc018a3425c2b294a755d266ff1e43672c641cb74bd56` |
 | `server/web/upstream-records.json` | `d58d484cde4905b07a9e188632341dbd03a9bd5a5b287d9f2b95461b27d233ea` |
 | `specs/servers/meguri-sync-web.md` | `e10d6dd3c36b9f286d78576d72d059df0afadef296c5ec271ed180fca9f953eb` |
+
+## Package screenshot evidence
+
+Starting commit `97146fc1fe28e9a9bed4b96fcd9fe3eb8b07a195`. Package smoke
+`sync-server-package-test/20261119T091456Z-71202` passed the browser and
+native seed/check phases. Its full exact-image browser child
+`sync-web-verify/20261119T091831Z-89015` passed the journey, then the
+receipt check refused fifteen audited screenshots because it expected
+nine. The package check now requires each named nonempty regular file.
+Verified the fifteen names against the retained exact-image captures.
+Independent reviewer `registry_review` reviewed the complete tooling
+export `cleanroom/20261119T092120Z-6816` and the final symlink guard.
+The reviewed file on master has SHA-256 `ef5c3c4caa1ee5a6417fb6246cc7d0ed243cb40d98acfd1a0595ffbeaf6515d5`.
+
+The first packaging attempt with the revised wrapper
+`sync-server-package-test/20261119T092531Z-35737` stopped at the
+frontend build-control audit. The assessment now binds the exact
+revised wrapper bytes.
