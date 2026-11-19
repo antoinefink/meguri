@@ -1,5 +1,8 @@
 # cargo-nextest configuration (tools/mg core-test).
 
+# Wrapper scripts settle the disk before wall-clock WAL tests (below).
+experimental = ["wrapper-scripts"]
+
 # Local-server rig tests share an account and read or change its metadata.
 # Run each alone across both packages when explicitly selected.
 [[profile.default.overrides]]
@@ -48,6 +51,17 @@ threads-required = "num-test-threads"
 filter = 'package(meguri-engine) and (binary(wal_durability) or test(=held_reader_times_out_and_resume_recovers) or test(=external_snapshot_blocks_checkpoint_without_marking_shutdown_clean) or test(=busy_uncooperative_thread_prevents_successful_suspend) or test(=derived_builder_honors_suspend_deadline_and_finishes_before_success))'
 threads-required = "num-test-threads"
 
+# An idle machine also needs an idle disk. On a hosted runner, writeback left
+# by a large earlier test stalled the isolated WAL test well past its
+# one-second sync bound (5.06 s against 1.56 s locally). Flush dirty pages
+# before each WAL test starts; the test's own bounds are unchanged.
+[scripts.wrapper.settled-disk]
+command = ['sh', '-c', 'sync && exec "$@"', 'settled-disk']
+
+[[profile.default.scripts]]
+filter = 'package(meguri-engine) and binary(wal_durability)'
+run-wrapper = 'settled-disk'
+
 # This integration test deliberately exhausts the container's 64 MiB /dev
 # tmpfs. Keep it isolated from every other test until its filler is dropped.
 [[profile.default.overrides]]
@@ -81,6 +95,13 @@ threads-required = "num-test-threads"
 
 [[profile.default.overrides]]
 filter = 'package(meguri-ffi) and test(=sync::tests::connection::jobs::connection_suspend_timeout_keeps_claimed_reply_then_retry_drains_without_losing_actual_result)'
+threads-required = "num-test-threads"
+
+# Each of its 24 fixtures ends with a host close under the unchanged suspend
+# deadline, which a fully loaded runner exceeded (SuspendDeadline at
+# "derived connection close").
+[[profile.default.overrides]]
+filter = 'package(meguri-ffi) and test(=sync::tests::connection::jobs::adoption_transport_failure_during_account_unavailability_still_requires_explicit_resume)'
 threads-required = "num-test-threads"
 
 # RF3's measured process footprint needs the runner to itself.

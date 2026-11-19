@@ -34,19 +34,76 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: meguri-verification-${{ github.ref }}
-  cancel-in-progress: true
+# Each suite has its own concurrency group, so a push that skips Core does not
+# cancel a Core run that an earlier push started.
 
 jobs:
+  suites:
+    name: Select suites
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    outputs:
+      suites: ${{ steps.select.outputs.suites }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      # Core runs when an input of `tools/mg core-test` changed: the Rust
+      # workspace, the conformance data and specs its tests read (servers/
+      # specs excepted), its tools/mg job and the dev image. Manual runs, new
+      # branches and anything that cannot be compared run every suite.
+      - name: Select the suites this change affects
+        id: select
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base=
+          case "$EVENT" in
+            # The checked-out merge commit's first parent is the base tip.
+            pull_request) base=HEAD^1 ;;
+            push)
+              if [[ -n "$BEFORE" && ! "$BEFORE" =~ ^0+$ ]] &&
+                 git fetch --no-tags --depth=1 origin "$BEFORE"; then
+                base="$BEFORE"
+              fi
+              ;;
+          esac
+          core=yes
+          if [[ -n "$base" ]] && changed="$(git diff --name-only "$base" HEAD)"; then
+            core_dirs='core|conformance|specs|tools/conformance'
+            core_files='\.github/workflows/meguri-verification\.yml|tools/mg|tools/mg\.d/core\.sh|tools/mg-result\.schema\.json|docker/compose\.yml|docker/dev\.Dockerfile(\.dockerignore)?'
+            # Filter before testing: under pipefail, `grep -q` exiting early
+            # would fail its writer and skip Core on a large change.
+            relevant="$(grep -v '^specs/servers/' <<<"$changed" || true)"
+            if ! grep -qE "^(($core_dirs)/|($core_files)$)" <<<"$relevant"; then
+              core=no
+            fi
+            printf 'Changed files:\n%s\n' "$changed"
+          fi
+          if [[ "$core" == yes ]]; then
+            suites='["core","server","conformance","package-smoke"]'
+          else
+            suites='["server","conformance","package-smoke"]'
+          fi
+          echo "Suites: $suites"
+          echo "suites=$suites" >>"$GITHUB_OUTPUT"
+
   linux:
     name: Linux · ${{ matrix.suite }}
+    needs: suites
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
+    concurrency:
+      group: meguri-verification-${{ github.ref }}-${{ matrix.suite }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
-        suite: [core, server, conformance, package-smoke]
+        suite: ${{ fromJSON(needs.suites.outputs.suites) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -106,6 +163,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.apple
     runs-on: xcode-27
     timeout-minutes: 60
+    concurrency:
+      group: meguri-verification-${{ github.ref }}-apple
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

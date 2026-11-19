@@ -974,9 +974,10 @@ PUBLIC_ARTIFACTS = {
     # Complete public-file review: owned_diagnostic_review, 2026-11-19.
     "docs/process/verification-status.md":
         "72169adb46c2ff96e675b412cfc1a5959a8c9037bca6689fcf59d73f0d093f41",
-    # Complete public-file review: verification_plan_review, 2026-11-19.
+    # Complete public-file review: hosted_core_selection_review, 2026-11-19.
     ".github/workflows/meguri-verification.yml":
-        "1f5f2f9adb83f8ed58073b271ec647d662a6d2b48704c5ba3bd740a08bd13147",
+        "17c70e069e904e69a3f53844e493bc3cf2155dae627ba36c7160a9e7555908c0",
+    # Complete public-file review: verification_plan_review, 2026-11-19.
     "docs/process/tiers.md":
         "e3e5c72ffe6e5111f4efdc894427ba0b6f1fde00d41ea547a22e02d3d9508ffc",
     # Complete public-file review: owned_diagnostic_review, 2026-11-18.
