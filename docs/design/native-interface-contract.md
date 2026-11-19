@@ -442,6 +442,7 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 
 ### N14.9 iPad sidebar title
 
+
 - The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it, except during review, which has none (N16.2). The Mac sidebar never drew one.
 
 ## N16. Round 3 review decisions (2026-11-19)
@@ -503,3 +504,45 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 - The preset's stored fields for showing the timer and stopping it on the answer stay in the collection untouched, for other Anki clients. The app's review bridge no longer reads them.
 - Answer time is still measured and saved with each answer, up to the preset's maximum answer seconds.
 - Replaces: R364's on-screen timer in N11.1 and N13.3.
+
+- The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it. The Mac sidebar never drew one.
+
+
+## N17. Round 5 editor and file transfer decisions (2026-11-19)
+
+Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`, `collection.import`, `settings.importExport`; round 5 options 1B, 2B, 3B and the Duo answer). Where earlier text differs, this section wins. Media is never a separate choice in any of these flows.
+
+### N17.1 Add Note
+
+- One grouped form. Its first group has two rows, Deck then Type, each a system menu on its current value (`editor.add.deck`, `editor.add.type`). The deck list follows `editor/add-flow` A2; the deck starts as `notes/add-defaults` gives it. Choosing a type maps the content as A3 says and keeps the deck.
+- Each field is a section of that form: its name is the header and one box sits below. The rounded name button and the rounded HTML button on every field are gone. A tap on the header still collapses or expands the field (`editor/field-html` F3).
+- The fields stay in one web view, which keeps their scrolling, focus and caret (R5). The Deck and Type group sits above it and does not scroll; it is a real form sized to its two rows.
+- One HTML control for the focused field, the `chevron.left.forwardslash.chevron.right` symbol labelled "HTML Editor", selected while that field shows its HTML. Touch: at the leading end of the keyboard bar, with Previous Field, Next Field and Done; the bar is a system toolbar that replaces WebKit's own. Mac: at the leading end of the panel's bottom bar, opposite Add. ⇧⌘X stays. The control takes the identifier of the field it acts on (`editor.field.<ord>.htmlToggle`), and `editor.add.htmlToggle` while no field has had focus.
+- Add is disabled until the first field has content: typing counts at once, and a committed value follows the live field check. The live "Enter content in the first field." line is gone. The line still names a refused add (`editor/add-flow` A5 step 4), which now needs a race to reach.
+- After an add the fields clear (sticky values stay), focus returns to the first field, and a toast over the fields reads "Added to <deck>", the deck's last name component (`editor.add.result`). VoiceOver announces it. It stays until the next note is started, the selection changes or the sheet closes. The sheet stays open.
+- iPhone Duo opened wide, and any iPhone at regular width: Add Note covers the whole screen, with the form in a centred column no wider than the readable width. Folded or held tall: the sheet. iPad: the system page sheet. A fold or unfold while it is open moves the same draft and web view to the other presentation.
+- Mac: the trailing panel keeps its title bar. Deck and Type are a grouped form; under it each field has its name in a leading, right-aligned column beside its box. ⌘↩ adds.
+- Known gap: each draft loads in a new web view, so on touch the keyboard closes after an add although the page focuses the first field. Keeping the keyboard needs the next draft loaded into the same web view.
+- Not built, and why: Return in the Mac's last field does not add, because `editor/field-html` H4 gives Return to the field (a new line). The toast has no card count and no Undo (`editor/add-flow` A5 step 6 names both). Changing type keeps the deck; `editor/config-keys` K4.2's deck for the type is not read yet.
+- Replaces, in `screen-inventory.yaml`'s `editor.add`: Type before Deck as text rows, "Empty: … Add enabled" and the "1 card added" toast wording. Replaces, in `editor/field-html` F1: a separate mode button on every field.
+
+### N17.2 Importing a collection file
+
+- Import (File › Import…, Settings, the empty collection) opens the system file picker at once, on the window that asked, limited to collection packages. No sheet comes first.
+- A chosen file opens one sheet. While the file is read it shows "Reading File…" with Cancel. Then the confirmation: `Import “<file name>”?`, one summary line "N notes · N cards · N media files" with plural forms, and, only when a collection is replaced, "This replaces the collection on this iPhone. Meguri keeps a backup of the current one." (iPad, Mac). Import is the prominent action and Cancel the other.
+- A footnote under the group says "Its media (<size>) is merged with the media on this iPhone; files already here are kept." `package/container` P16.4 asks for the size and for both statements; this is their one line.
+- The summary's accessibility value gives the review count, which the line itself leaves out.
+- After Import the sheet shows "Importing…" with Cancel while cancelling is safe, then closes on success. Nothing in the import changed: inspection, the safety backup and recovery run as before.
+- A refused file shows one plain message with Choose Another File. Recovery states keep their message and the receipts the person must keep (backup, retained media reference); those rows appear only there.
+- Removed from the interface: the explanation sheet with Choose File, the Collection Preview header, the Destination, Validated media files and Decoded media bytes rows, the two paragraphs, the media plan rows during progress and after an ordinary cancel, and the "Replace Collection" label.
+- Open against a spec: `package/transfer-sheets` X3 asks for a destructive confirm button that is never the default. The decision makes Import prominent, and Return already confirmed before this round.
+
+### N17.3 Exporting the collection
+
+- Export Collection starts at once: the sheet shows "Preparing Export…" with a progress bar (a spinner while no total is known) and Cancel. When the file is ready the system save dialog opens over it: the Files export on touch, the save panel on Mac.
+- Cancel while preparing, and Cancel in the save dialog, discard the prepared file and close the sheet. A finished save does the same, with no "Saved" step.
+- A save that fails keeps the sheet with one message, Choose Another Location and Cancel; the file is kept for that retry (`package/file-export` E4) and discarded on Cancel. An interrupted export's leftover file is discarded when the next export starts.
+- Settings › Collection: the footer under the Export row reads "Export saves all decks, cards, review history and media in one file." The export's contents did not change.
+- Removed: Prepare Export, Choose Save Location, Discard Prepared Export, Done, "Ready to Save" and the explanation paragraphs.
+- Replaces: N9's "Keep the current pre-export explanation" and the prepared file that outlived its sheet.
+
