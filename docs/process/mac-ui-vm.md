@@ -23,7 +23,7 @@ VM; it does not change the host-screen or other-project data rules.
   - account `meguri`, with automatic login and passwordless sudo;
   - no sleep, no screen lock, no screen saver;
   - developer mode on, and automation mode without authentication;
-  - Xcode 27.0 (27A266a) at `/Applications/Xcode.app`, license accepted, first launch done;
+  - Xcode 27.0 (27A266a) at `/Applications/Xcode.app`, license accepted, first launch done (since replaced as the selected Xcode: see [iOS 27.2](#ios-272-2026-11-19));
   - time zone Europe/Berlin, software updates download only.
 
   `tools/vm/setup-guest.sh` is the provisioning script, run once in the VM's Terminal.
@@ -64,8 +64,17 @@ A test run in the VM outlives a lost SSH session or a killed job. So a job stops
 ### Provisioning (2026-10-15)
 
 - The iOS 27.0 (24A434) simulator runtime came from this Mac, not from a download. Here it is a cryptex disk image of 8.07 GB (`Restore/043-70362-657.dmg` in its MobileAsset directory, `xcrun simctl runtime list -j` gives the path). Its directory went to `~/runtime-import/` in the VM by tar over SSH in 37 s, and `xcrun simctl runtime add` of that disk image took 47 s there. CoreSimulator cloned it into `/Library/Developer/CoreSimulator/Images/`, so the VM's disk use did not grow; the import directory was removed afterwards. `tools/vm/add-sim-runtime.sh` does these steps, and leaves a VM that already has the runtime alone (it did so on the provisioned VM). `tools/mg doctor` warns while the VM lacks it.
-- `tools/mg sim-setup` then created the pool in the VM: `Meguri-Pool-iphone-1`, `-iphone-small-1`, `-ipad-1` and `-ipad-small-1` on the pinned runtime; the foldable lane runs on its own iOS 27.1 runtime (`tools/vm/add-sim-runtime.sh --foldable`).
+- `tools/mg sim-setup` then created the pool in the VM: `Meguri-Pool-iphone-1`, `-iphone-small-1`, `-ipad-1` and `-ipad-small-1` on the pinned runtime; the foldable lane ran on its own iOS 27.1 runtime (`tools/vm/add-sim-runtime.sh --foldable`). The pin has moved since: see [iOS 27.2](#ios-272-2026-11-19).
 - Some SpringBoards ignore appearance changes: `simctl ui appearance dark` and `XCUIDevice.appearance = .dark` were accepted, and SpringBoard's style arbiter never logged them, so the accessibility audit's dark variants rendered light ("the variant's appearance did not apply"). It hit the iPhone's first boot and the iPad's SpringBoard restarted 45 s after its first boot; the small iPad's restart and a second small iPad's first boot were fine. A SpringBoard just restarted also drops changes for some seconds. A restart inside the simulator (`launchctl kickstart -k user/foreground/com.apple.SpringBoard` through `simctl spawn`) fixed each broken one. So once after every boot the pool switches the device to dark and back and looks for the arbiter's "changing style … to 2" in the simulator's log, and restarts SpringBoard (then waits 30 s) until it shows, at most three times. The device stays booted.
+
+### iOS 27.2 (2026-11-19)
+
+Antoine decided on 2026-11-19 to stay on the latest versions, VM included. `tools/sim-devices.json` now pins iOS 27.2 (24B8117) for the four standard kinds and the iPhone Duo's own build of it (24B91016s, `…iOS-27-2-iPhone19-4`). The standard iPhone is the iPhone 18 Pro and the small iPad the iPad mini (A20 Pro); the small iPhone (17e) and the iPad Pro 13-inch (M5) keep their device types.
+
+- Xcode: the VM selects Xcode 27.2 (27B52) at `~/Applications/MeguriXcode/Xcode-27.2-27B52.app`, staged by `tools/mg vm-xcode-stage`. Xcode 27.0 stays at `/Applications/Xcode.app`. The VM's macOS is still 27.0.1 (26A434).
+- Runtimes: both 27.2 images came from this Mac with `tools/vm/add-sim-runtime.sh` and `tools/vm/add-sim-runtime.sh --foldable`, as in 2026-10-15. The iOS 27.0 (24A434) and 27.1 (24A94425) runtimes are still installed: checkouts on the old pin use them until this change lands.
+- Pool: `sim-setup` only adds. It creates a device of each kind on the pinned runtime under the next free number and leaves the devices of the old runtimes as they are, booted ones included; `sim status` marks those `(old runtime)`, and no job on the new pin leases them. The first run (`sim-setup/20261119T192921Z-92482`) created `Meguri-Pool-iphone-4` and `-ipad-4` (booted, reset and released), `-iphone-small-3` (its first boot failed: "launchd_sim may have crashed or quit responding") and `-ipad-small-3` (booted; the appearance check after its boot never returned). It was cancelled there, before the foldable kind.
+- Capacity: with four devices of the old pool still booted, the three new ones brought the VM (12 GB) to seven booted simulators. Its load average passed 600, `simctl` calls stopped returning and SSH commands took minutes. The old devices have to be shut down or deleted (or the VM restarted) before the remaining kinds can boot; a job never does that by itself.
 
 ### How jobs use it
 
