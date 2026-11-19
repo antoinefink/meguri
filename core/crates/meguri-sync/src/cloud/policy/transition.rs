@@ -507,7 +507,11 @@ pub fn step(mut s: State, input: Input) -> (State, Vec<Action>) {
         probe(&mut s, &mut a);
     }
     match &input.event {
-        Event::SyncNowRequested(source) if s.sync_now_availability().is_ok() && s.exchange.is_none() => {
+        // P25.2: the host clears the update hold before it forwards a request.
+        // A request that still arrives under the hold starts nothing.
+        Event::SyncNowRequested(source)
+            if s.sync_now_availability().is_ok() && s.exchange.is_none() && !s.settings.paused =>
+        {
             probe(&mut s, &mut a);
             if s.read_gate_open() && !s.facts.summary.crt_known && !s.facts.summary.crt_mismatch
                 && !s.facts.summary.apply_in_progress && !s.engine_runs()

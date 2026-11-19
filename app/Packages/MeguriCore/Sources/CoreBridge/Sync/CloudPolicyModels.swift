@@ -527,6 +527,8 @@ public struct CloudPolicyControls: Sendable {
 }
 public struct CloudPolicyStatus: Sendable {
     public let state: CloudPolicyStatusState
+    /// P25.4: only in `needsAttention`, the state the device would show with no attention item.
+    public let stateWithoutAttention: CloudPolicyStatusState?
     public let pending: UInt64
     public let heldBack: UInt64
     public let inFlight: UInt64
@@ -545,7 +547,8 @@ public struct CloudPolicyStatus: Sendable {
     public private(set) var controls: CloudPolicyControls = .unknown
     init(_ v: MeguriCoreBindings.CloudPolicyStatus) {
         controls = .init(v.controls)
-        state = .init(v.state); pending = v.pending; heldBack = v.heldBack; inFlight = v.inFlight; incomingWaiting = v.incomingWaiting
+        state = .init(v.state); stateWithoutAttention = v.stateWithoutAttention.map(CloudPolicyStatusState.init)
+        pending = v.pending; heldBack = v.heldBack; inFlight = v.inFlight; incomingWaiting = v.incomingWaiting
         attention = Dictionary(uniqueKeysWithValues: v.attention.map { (CloudPolicyAttention($0.kind), $0.count) })
         media = .init(v.media); mediaPaused = v.mediaPaused; error = v.error.map(CloudPolicyErrorDetail.init)
         accountStatus = .init(v.accountStatus); accountMatchesBinding = v.accountMatchesBinding

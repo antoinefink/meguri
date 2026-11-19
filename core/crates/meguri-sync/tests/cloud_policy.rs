@@ -273,7 +273,8 @@ fn recovery_fences_preserve_sync_now_first_match_order() {
             let mut paused = base.clone();
             paused.settings.paused = true;
             paused.account.status = AccountStatus::NoAccount;
-            cases.push(("pause before account", paused, Unavailable::Paused));
+            // P25.2: P12.1 row 4 is removed, so the update hold falls through to the account row.
+            cases.push(("hold does not outrank account", paused, Unavailable::ICloudUnavailable));
             for status in [AccountStatus::NoAccount, AccountStatus::Restricted, AccountStatus::Temporary,
                 AccountStatus::Configuration, AccountStatus::Undetermined]
             {
@@ -724,7 +725,8 @@ fn settings_and_status_precedence_table() {
             true,
             true,
             AccountStatus::Available,
-            StatusState::Paused(PausedReason::UserPaused),
+            // P25.2: the update hold is reported as automaticOff, never userPaused.
+            StatusState::Paused(PausedReason::AutomaticOff),
         ),
         (true, false, AccountStatus::Available, StatusState::ChangesPending),
     ];
@@ -1166,4 +1168,196 @@ fn waiting_exchange_record_roundtrips_absent_and_legacy_classes() {
     let legacy = r#"{"Waiting":{"class":"Offline","retry_after_ms":9000}}"#;
     assert_eq!(serde_json::from_str::<ExchangeOutcome>(legacy).unwrap(),
         ExchangeOutcome::Waiting { class: Some(OperationError::Offline), retry_after_ms: Some(9_000) });
+}
+
+// P25.5 rows.
+
+fn p25_settings(paused: bool, automatic: bool) -> DeviceSettings {
+    DeviceSettings {
+        enabled: true,
+        paused,
+        automatic,
+        media: true,
+    }
+}
+
+#[test]
+fn p25_media_always_on_pauses_media_only_at_a_closing_gate() {
+    for seed in 1..=24_u64 {
+        let mut rng = seed;
+        let mut state = ready();
+        state.settings.media = true;
+        state.facts.summary.sendable = 1;
+        for _ in 0..200 {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let event = match (rng >> 32) % 11 {
+                0 => Event::Foreground,
+                1 => Event::Network {
+                    reachable: rng & 1 == 0,
+                },
+                2 => Event::TrackingChanged(ChangeCause::Local),
+                3 => Event::TrackingChanged(ChangeCause::Cloud),
+                4 => Event::DeviceSettings(p25_settings(false, rng & 2 == 0)),
+                5 => Event::FlushTimerFired,
+                6 => Event::FetchDrained {
+                    zone: Zone::Collection,
+                    fetched: true,
+                },
+                7 => Event::Background { deadline_ms: 132_000 },
+                8 => Event::BackgroundExpiring,
+                9 => Event::SyncNowRequested(Source::Key),
+                _ => Event::TrackingWriteFailed { no_space: rng & 1 == 0 },
+            };
+            let before = state.clone();
+            let (next, actions) = run(state, event);
+            assert!(next.settings.media, "seed {seed}");
+            if kinds(&actions).contains(&ActionKind::PauseMedia) {
+                let closing = (before.gate_open() && !next.gate_open())
+                    || (before.engine_allowed() && !next.engine_allowed())
+                    || next.tracking_stop.is_some();
+                assert!(closing, "seed {seed}: PauseMedia without a closing gate");
+            }
+            assert!(!next.status().media_paused, "seed {seed}");
+            state = next;
+        }
+    }
+}
+
+#[test]
+fn p25_status_never_reports_media_paused() {
+    let mut state = ready();
+    state.settings.media = true;
+    assert!(!state.status().media_paused);
+    state.settings.paused = true;
+    assert!(!state.status().media_paused);
+    state.settings.paused = false;
+    state.facts.summary.media.no_space = Some(true);
+    state.facts.summary.media.remaining_download_ms = Some(9);
+    let status = state.status();
+    assert!(!status.media_paused);
+    assert_eq!(status.media.no_space, Some(true));
+    assert_eq!(status.media.remaining_download_ms, None);
+}
+
+#[test]
+fn p25_update_hold_starts_nothing_and_reads_as_automatic_off() {
+    let steps = [
+        None,
+        Some(PublishStep::Bound),
+        Some(PublishStep::Zones),
+        Some(PublishStep::Sent),
+        Some(PublishStep::Complete),
+    ];
+    for publish_step in steps {
+        let mut state = ready();
+        state.settings = p25_settings(true, false);
+        state.engine = None;
+        state.facts.summary.sendable = 3;
+        state.facts.binding.as_mut().unwrap().publish_step = publish_step;
+        assert!(!state.engine_allowed(), "{publish_step:?}");
+        assert!(!state.gate_open(), "{publish_step:?}");
+        let status = state.status();
+        assert_eq!(
+            status.state,
+            StatusState::Paused(PausedReason::AutomaticOff),
+            "{publish_step:?}"
+        );
+        assert_eq!(status.state_without_attention, None);
+        assert_eq!(status.sync_now, Ok(()), "{publish_step:?}");
+        let events = [
+            Event::Foreground,
+            Event::Network { reachable: true },
+            Event::TrackingChanged(ChangeCause::Local),
+            Event::FlushTimerFired,
+            Event::FetchDrained {
+                zone: Zone::Collection,
+                fetched: true,
+            },
+            Event::DeviceSettings(p25_settings(true, false)),
+            // The host clears the hold first; a request that still arrives starts nothing.
+            Event::SyncNowRequested(Source::Command),
+        ];
+        for event in events {
+            let (next, actions) = run(state, event.clone());
+            for kind in kinds(&actions) {
+                assert!(
+                    !matches!(
+                        kind,
+                        ActionKind::StartEngine { .. }
+                            | ActionKind::RequestSend { .. }
+                            | ActionKind::RequestFetch { .. }
+                            | ActionKind::RunExchange { .. }
+                            | ActionKind::ResumeMedia
+                            | ActionKind::DeleteZones
+                    ),
+                    "{publish_step:?}, {event:?}: {kind:?}"
+                );
+            }
+            state = next;
+        }
+        // Clearing the hold opens the gate with auto as stored: off.
+        let (cleared, _) = run(state, Event::DeviceSettings(p25_settings(false, false)));
+        assert!(!cleared.settings.paused);
+        if publish_step != Some(PublishStep::Bound) {
+            assert!(cleared.engine_allowed(), "{publish_step:?}");
+        }
+    }
+}
+
+#[test]
+fn p25_state_without_attention_follows_rows_5_to_10() {
+    let attention = |state: &mut State| {
+        state.facts.summary.attention.insert(Attention::Refused, 1);
+    };
+    let mut rows: Vec<(&str, State, StatusState)> = Vec::new();
+    let mut hold = ready();
+    hold.settings.paused = true;
+    rows.push(("row 5, hold", hold, StatusState::Paused(PausedReason::AutomaticOff)));
+    let mut auto_off = ready();
+    auto_off.settings.automatic = false;
+    rows.push(("row 5, auto off", auto_off, StatusState::Paused(PausedReason::AutomaticOff)));
+    let mut offline = ready();
+    offline.reachable = false;
+    rows.push(("row 6", offline, StatusState::Offline));
+    let mut media = ready();
+    media.facts.summary.media.downloads_running = Some(1);
+    rows.push(("row 8", media, StatusState::SyncingMedia));
+    let mut pending = ready();
+    pending.facts.summary.sendable = 2;
+    rows.push(("row 9", pending, StatusState::ChangesPending));
+    let mut quiet = ready();
+    quiet.evidence.quiet_ms = Some(900);
+    rows.push(("row 10", quiet, StatusState::UpToDate { as_of_ms: 900 }));
+    for (name, mut state, expected) in rows {
+        let plain = state.status();
+        assert_eq!(plain.state, expected, "{name}");
+        assert_eq!(plain.state_without_attention, None, "{name}");
+        attention(&mut state);
+        let status = state.status();
+        assert_eq!(status.state, StatusState::NeedsAttention, "{name}");
+        assert_eq!(status.state_without_attention, Some(expected), "{name}");
+    }
+    // Row 7 needs a running exchange.
+    let mut syncing = ready();
+    let (next, _) = run(syncing.clone(), Event::SyncNowRequested(Source::Command));
+    syncing = next;
+    assert_eq!(syncing.status().state, StatusState::SyncingCollection);
+    attention(&mut syncing);
+    assert_eq!(
+        syncing.status().state_without_attention,
+        Some(StatusState::SyncingCollection)
+    );
+    // Rows 1 to 3 never carry it, also with an attention item.
+    let mut local = ready();
+    local.settings.enabled = false;
+    attention(&mut local);
+    assert_eq!(local.status().state_without_attention, None);
+    let mut account = ready();
+    account.account.status = AccountStatus::NoAccount;
+    attention(&mut account);
+    assert_eq!(account.status().state_without_attention, None);
+    let mut decision = ready();
+    decision.facts.fence = Fence::DecisionRequired;
+    attention(&mut decision);
+    assert_eq!(decision.status().state_without_attention, None);
 }
