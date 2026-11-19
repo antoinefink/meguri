@@ -12,7 +12,8 @@ struct DeckMenu: View {
             Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
                 Text("Study", bundle: .module)
             }
-            .disabled(!collection.canStudy || collection.navigation.sheet != nil || collection.addNotePresentation.opening)
+            // N14.3: as the deck page, no Study while nothing waits.
+            .disabled(!collection.canStudy || !collection.offersStudy(deckID: deck.id) || collection.navigation.sheet != nil || collection.addNotePresentation.opening)
             .accessibilityIdentifier("home.deckMenu.study.\(deck.id)")
             Button { collection.navigation.present(.add(deck: DeckID(deck.id))) } label: {
                 Text("Add Note", bundle: .module)

@@ -214,10 +214,9 @@ import notify
         try click(deck, app, bundle)
         let deckPage = element(app, "home.deck.page.1")
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
-        let counts = ["new", "learning", "due"].map {
-            deckPage.descendants(matching: .any)["home.deck.counts.\($0)"].firstMatch
-        }
-        for count in counts { XCTAssertTrue(waitForText(count, "0")) }
+        // N14.3: an empty deck shows "Nothing to study right now", not three zero counts.
+        XCTAssertTrue(HomeControls.waitForDeckCounts(app, new: 0, learning: 0, review: 0), app.debugDescription)
+        XCTAssertFalse(deckPage.buttons["home.deck.study"].firstMatch.exists, "Add Note takes Study's place while nothing waits")
         let emptyAddButtons = deckPage.buttons.matching(identifier: "home.deck.empty.addNote")
         let emptyAdd = try XCTUnwrap(waitForHittable(emptyAddButtons), app.debugDescription)
         XCTAssertEqual(emptyAddButtons.count, 1)
@@ -273,9 +272,7 @@ import notify
         try click(closeEditor, app, bundle)
         XCTAssertTrue(editor.waitForNonExistence(timeout: 20))
         let addedToDeck = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            deckPage.exists && zip(counts, ["1", "0", "0"]).allSatisfy { count, expected in
-                count.exists && (count.value as? String) == expected
-            } && !emptyAddButtons.firstMatch.exists
+            deckPage.exists && HomeControls.deckCounts(app) == [1, 0, 0] && !emptyAddButtons.firstMatch.exists
         }, object: nil)
         XCTAssertEqual(XCTWaiter().wait(for: [addedToDeck], timeout: 20), .completed,
             "The saved card must refresh Default and remove its empty-deck Add CTA")
@@ -1509,15 +1506,14 @@ import notify
         XCTAssertFalse(element(app, "home.collection.error").exists)
         let deck = try XCTUnwrap(waitForHittable(importedDeck), app.debugDescription)
         let deckIdentifier = deck.identifier
-        let deckID = try XCTUnwrap(Int64(deckIdentifier.dropFirst("home.deck.row.".count)))
+        let deckID = try XCTUnwrap(HomeControls.deckID(deckIdentifier).flatMap { Int64($0) })
         let deckPage = element(app, "home.deck.page.\(deckID)")
         capture(app, "entry-real-decks")
         try click(deck, app, bundle)
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
         let study = deckPage.buttons["home.deck.study"].firstMatch
         try waitForStudyReady(study, app)
-        let counts = ["new", "learning", "due"].map { deckPage.descendants(matching: .any)["home.deck.counts.\($0)"].firstMatch }
-        let before = counts.map(text)
+        let before = try XCTUnwrap(HomeControls.deckCounts(app), app.debugDescription)
         try click(study, app, bundle)
         let reveal = element(app, "review.session.reveal")
         XCTAssertTrue(reveal.waitForExistence(timeout: 20), "Public package must provide a real reviewable card: \(app.debugDescription)")
@@ -1551,7 +1547,7 @@ import notify
         try click(close, app, bundle)
         XCTAssertTrue(waitForText(element(app, "home.session.recorded"), "1 answer recorded"))
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
-        let after = counts.map(text)
+        let after = try XCTUnwrap(HomeControls.deckCounts(app), app.debugDescription)
         capture(app, "entry-saved-answer")
         app.terminate()
         // Reopen the installed collection without fixture/source/route setup.
@@ -1561,7 +1557,8 @@ import notify
         #if os(macOS)
         let retainedDeck = deckRows(app, identifier: deckIdentifier).element
         #else
-        let retainedDeck = app.buttons[deckIdentifier].firstMatch
+        let retainedRows = deckRows(app, identifier: deckIdentifier)
+        var retainedDeck: XCUIElement { HomeControls.hittable(retainedRows) ?? retainedRows.firstMatch }
         #endif
         let restartReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             (deckPage.exists && study.isHittable) || (retainedDeck.exists && retainedDeck.isHittable)
@@ -1571,10 +1568,11 @@ import notify
             try click(retainedDeck, app, bundle)
         }
         XCTAssertTrue(deckPage.waitForExistence(timeout: 10))
-        for (count, value) in zip(counts, after) { XCTAssertTrue(waitForText(count, value)) }
+        XCTAssertTrue(HomeControls.waitForDeckCounts(app, new: after[0], learning: after[1], review: after[2]),
+            "The reopened deck page must show the counts saved before termination: \(after)")
         XCTAssertFalse(element(app, "home.collection.error").exists)
         capture(app, "entry-restart-durable-answer")
-        XCTAssertFalse(before.contains(""))
+        XCTAssertEqual(before.count, 3, "The deck page must have shown its three counts before Study")
     }
     private func pick(_ source: URL, _ app: XCUIApplication, _ bundle: String) throws {
         #if os(macOS)
@@ -1685,14 +1683,16 @@ import notify
     }
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id].firstMatch }
     private func deckRows(_ app: XCUIApplication, identifier: String) -> XCUIElementQuery {
+        // N14: the Mac's only deck outline is the sidebar's; its rows are
+        // `home.sidebar.deck.<id>`, as static text or a button.
+        let sidebar = identifier.replacingOccurrences(of: HomeControls.rowPrefix, with: HomeControls.sidebarPrefix)
         #if os(macOS)
-        // Home's native outline exposes deck content as static text or a button.
-        // Exact identity excludes the separate sidebar deck outline.
         return app.outlines.outlineRows.descendants(matching: .any).matching(NSPredicate(
-            format: "identifier == %@ AND elementType IN %@", identifier,
+            format: "identifier == %@ AND elementType IN %@", sidebar,
             [XCUIElement.ElementType.staticText.rawValue, XCUIElement.ElementType.button.rawValue]))
         #else
-        return app.buttons.matching(identifier: identifier)
+        // The tab layout's deck list row, or the iPad sidebar's row where the detail shows Today.
+        return app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", [identifier, sidebar]))
         #endif
     }
     private func text(_ element: XCUIElement) -> String { (element.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? element.label }

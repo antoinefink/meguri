@@ -15,6 +15,12 @@ import SwiftUI
 /// fixtures and test-hook routes pass their own.
 struct ShellFeatures {
     var nativeMacWorkspace = false
+    /// N14.1: the sidebar's first row and the detail with no deck selected are Today.
+    var todayRoot = false
+    /// What an unfolded iPhone shows beside the deck list before a deck is picked (N14.1).
+    var today: (AppNavigation) -> AnyView = { _ in
+        AnyView(ContentUnavailableView("Select a Deck", systemImage: "rectangle.stack"))
+    }
     var availableSections: [AppSection] = AppSection.sidebar
     var syncStatus: () -> AnyView = { AnyView(EmptyView()) }
     var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
@@ -34,6 +40,8 @@ struct ShellFeatures {
         collection.configureAddNotePresentation()
         var features = standard
         features.addPanel = { AnyView(AddNoteView(collection: collection)) }
+        features.todayRoot = true
+        features.today = { _ in AnyView(TodayView(collection: collection, besideDeckList: true)) }
         #if os(macOS)
         features.nativeMacWorkspace = true
         features.availableSections = [.home]

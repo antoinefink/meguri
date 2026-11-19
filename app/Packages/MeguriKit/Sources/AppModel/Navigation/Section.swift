@@ -86,6 +86,9 @@ nonisolated public enum ShellLayout: Sendable {
 extension EnvironmentValues {
     /// The live presenting shell layout, supplied by RootView independently of sheet traits.
     @Entry public var shellLayout: ShellLayout = .sidebar
+    /// The tab layout's deck list while Today shows beside it (an unfolded iPhone held wide, N14.1):
+    /// what Today already shows is not repeated in the list.
+    @Entry public var todayBesideDeckList = false
     /// Test hooks force a layout through the size class (`-MeguriSizeClass`), on iPhone too.
     @Entry public var layoutFollowsForcedSizeClass = false
 }

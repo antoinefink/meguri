@@ -526,10 +526,13 @@ final class LocalReviewJourneyTests: XCTestCase {
     }
 
     private func openDeck(_ app: XCUIApplication, bundleIdentifier: String) throws {
-        let deck = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "home.deck.row.", "Cards")).firstMatch
-        XCTAssertTrue(deck.waitForExistence(timeout: 20), "Generate and stage local-review-1 in the VM before this suite")
-        try click(deck, in: app, bundleIdentifier: bundleIdentifier)
-        XCTAssertTrue(element(app, "home.deck.study").waitForExistence(timeout: 10))
+        // N14: the tab layout's deck list row, or the sidebar's row where the detail shows Today.
+        let rows = HomeControls.deckRows(app, labelContaining: "Cards")
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 20), "Generate and stage local-review-1 in the VM before this suite")
+        try click(HomeControls.hittable(rows) ?? rows.firstMatch, in: app, bundleIdentifier: bundleIdentifier)
+        // The page, not Study: a deck with nothing waiting offers Add Note in its place (N14.3).
+        let page = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.deck.page.")).firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
     }
 
     private func reviewState(_ app: XCUIApplication) -> String {
@@ -559,7 +562,13 @@ final class LocalReviewJourneyTests: XCTestCase {
     }
 
     private func waitForDeckCounts(_ app: XCUIApplication, due: Int) -> Bool {
-        var ready = true
+        // N14.3, N14.4: nothing waiting replaces the counts with one line, and the Mac
+        // shows the counts as the window's subtitle; HomeControls reads all three forms.
+        var ready = HomeControls.waitForDeckCounts(app, new: 0, learning: 0, review: due)
+        XCTAssertTrue(ready, "The deck page must show exactly 0 new, 0 learning and \(due) to review")
+        #if !os(macOS)
+        guard due > 0 else { return ready }
+        // Where touch pages show the counts, each stays a unique labelled numeric field.
         for (name, label, value) in [("new", "New", 0), ("learning", "Learning", 0), ("due", "To Review", due)] {
             let fields = app.staticTexts.matching(identifier: "home.deck.counts.\(name)")
             let predicate = NSPredicate(format: "exists == true AND label == %@ AND value == %@", label, String(value))
@@ -568,6 +577,7 @@ final class LocalReviewJourneyTests: XCTestCase {
             XCTAssertTrue(matched, "\(label) must expose the exact numeric value \(value)")
             ready = ready && matched
         }
+        #endif
         return ready
     }
 

@@ -20,11 +20,11 @@ struct SidebarView: View {
                     } label: {
                         Label {
                             // Rows grow with the text size rather than cut it.
-                            Text(features.nativeMacWorkspace && section == .home ? "All Decks" : section.title)
+                            Text(homeTitle(section))
                                 .fixedSize(horizontal: false, vertical: true)
                         } icon: {
                             // The title names the row; the symbol is decoration.
-                            Image(systemName: features.nativeMacWorkspace && section == .home ? CompactTab.decks.systemImage : section.systemImage)
+                            Image(systemName: homeSymbol(section))
                                 .accessibilityHidden(true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -37,8 +37,13 @@ struct SidebarView: View {
                 }
             }
             if features.nativeMacWorkspace {
-                // The row above already names the group.
-                Section { features.sidebarDecks(navigation) }
+                // N14.6: a system section label under Today.
+                Section {
+                    features.sidebarDecks(navigation)
+                } header: {
+                    Text("Decks")
+                        .accessibilityIdentifier("shell.root.sidebarDecks")
+                }
             } else {
                 Section {
                     features.sidebarDecks(navigation)
@@ -52,5 +57,20 @@ struct SidebarView: View {
         }
         .sidebarColumnChrome()
         .navigationTitle(Text(verbatim: "Meguri"))
+        #if !os(macOS)
+        // N14.9: the column keeps its name for accessibility; the bar does not draw it.
+        .toolbar(removing: .title)
+        #endif
+    }
+
+    /// N14.1: with a collection, the first row is Today on every sidebar layout.
+    private func homeTitle(_ section: AppSection) -> LocalizedStringResource {
+        guard section == .home else { return section.title }
+        return features.todayRoot ? "Today" : section.title
+    }
+
+    private func homeSymbol(_ section: AppSection) -> String {
+        guard section == .home else { return section.systemImage }
+        return features.todayRoot ? "sun.max" : section.systemImage
     }
 }

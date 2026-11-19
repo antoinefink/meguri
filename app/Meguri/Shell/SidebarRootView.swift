@@ -50,6 +50,15 @@ struct SidebarRootView: View {
                 } else {
                     NavigationStack(path: $navigation.detailPath) {
                         SectionDestinationView(screen: root, navigation: navigation, features: features)
+                            #if !os(macOS)
+                            // iPadOS draws only a column's own toolbar items: one on the
+                            // split view itself never appears (N11.8's status button).
+                            .toolbar {
+                                if navigation.section == .home {
+                                    ToolbarItem(placement: .primaryAction) { features.syncStatus() }
+                                }
+                            }
+                            #endif
                             .navigationDestination(for: Destination.self) { destination in
                                 SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
                             }
@@ -62,11 +71,13 @@ struct SidebarRootView: View {
             }
             .detailColumnChrome()
         }
+        #if os(macOS)
         .toolbar {
             if navigation.review == nil {
                 ToolbarItem(placement: .primaryAction) { features.syncStatus() }
             }
         }
+        #endif
     }
 
     /// The deck page Home shows in the Home section, else the section's root.

@@ -60,7 +60,8 @@ final class MacHomeHierarchyTests: XCTestCase {
             journey == nil ? "Stage the generated local-review-1 fixture through tools/mg"
                 : "Stage the generated owned-sync-review-1 fixture through tools/mg")
         XCTAssertEqual(homeScreens.count, 1)
-        _ = namedRow(app, prefix: "home.deck.row.", path: "Local Review::Cards")
+        // N14.1: the sidebar is the Mac's only deck outline.
+        _ = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "home.policy.enable"))
             .element(boundBy: 0).exists, "The generated recipe must already enable FSRS")
         XCTAssertEqual(app.sheets.count, 0, "Unexpected admission sheets are fixture prerequisite failures")
@@ -267,7 +268,7 @@ final class MacHomeHierarchyTests: XCTestCase {
             let offSequence = try XCTUnwrap(successSequence(), "Require the exact settled OFF success sequence before review")
             settings.typeKey("w", modifierFlags: .command)
             XCTAssertTrue(settings.waitForNonExistence(timeout: 10), "Close the actual Settings window")
-            let deck = namedRow(app, prefix: "home.deck.row.", path: "Local Review::Cards")
+            let deck = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
             actionable(deck)
             try click(deck, app: app, bundle: bundle)
             let study = unique(main, "home.deck.study")
@@ -347,79 +348,71 @@ final class MacHomeHierarchyTests: XCTestCase {
 
     func testExpandedTreesKeepUniqueIDsNativeDisclosureSelectionAndChildMenus() throws {
         let (app, bundle) = try launchFixture()
-        let parent = namedRow(app, prefix: "home.deck.row.", path: "Local Review")
-        let child = namedRow(app, prefix: "home.deck.row.", path: "Local Review::Cards")
-        let parentID = String(parent.identifier.dropFirst("home.deck.row.".count))
-        let childID = String(child.identifier.dropFirst("home.deck.row.".count))
-        let sidebarParent = element(app, "home.sidebar.deck.\(parentID)")
-        let sidebarChild = element(app, "home.sidebar.deck.\(childID)")
-        XCTAssertTrue(sidebarParent.waitForExistence(timeout: 10))
-        XCTAssertTrue(sidebarChild.waitForExistence(timeout: 10))
+        // N14.1: the sidebar is the Mac's only deck outline; with no deck selected the
+        // The detail column shows the Today page and no second deck list.
+        let sidebarParent = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review")
+        let sidebarChild = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
+        let parentID = String(sidebarParent.identifier.dropFirst("home.sidebar.deck.".count))
+        let childID = String(sidebarChild.identifier.dropFirst("home.sidebar.deck.".count))
+        assertTodayRoot(app, readyDeckID: childID)
         try assertExpandedHierarchy(app, parentID: parentID, childID: childID)
 
         // Each click hits the real AppKit triangle in this deck's native row.
-        // Both outlines share collection-owned study collapse, but not selection.
-        for rowID in [parent.identifier, sidebarParent.identifier] {
-            try click(triangle(app, rowID: rowID), app: app, bundle: bundle)
-            XCTAssertTrue(child.waitForNonExistence(timeout: 10))
-            XCTAssertTrue(sidebarChild.waitForNonExistence(timeout: 10))
-            assertExpansionState(app, parentID: parentID, expanded: false)
-            XCTAssertTrue(parent.exists)
-            XCTAssertTrue(sidebarParent.exists)
-            assertDecksRoot(app)
-            try assertUniqueIDs(app)
+        try click(triangle(app, rowID: sidebarParent.identifier), app: app, bundle: bundle)
+        XCTAssertTrue(sidebarChild.waitForNonExistence(timeout: 10))
+        assertExpansionState(app, parentID: parentID, expanded: false)
+        XCTAssertTrue(sidebarParent.exists)
+        // Today lists what waits whatever the outline shows.
+        assertTodayRoot(app, readyDeckID: childID)
+        try assertUniqueIDs(app)
 
-            try click(triangle(app, rowID: rowID), app: app, bundle: bundle)
-            XCTAssertTrue(child.waitForExistence(timeout: 10))
-            XCTAssertTrue(sidebarChild.waitForExistence(timeout: 10))
-            assertExpansionState(app, parentID: parentID, expanded: true)
-            assertDecksRoot(app)
-            try assertExpandedHierarchy(app, parentID: parentID, childID: childID)
-        }
+        try click(triangle(app, rowID: sidebarParent.identifier), app: app, bundle: bundle)
+        XCTAssertTrue(sidebarChild.waitForExistence(timeout: 10))
+        assertExpansionState(app, parentID: parentID, expanded: true)
+        assertTodayRoot(app, readyDeckID: childID)
+        try assertExpandedHierarchy(app, parentID: parentID, childID: childID)
 
-        try click(parent, app: app, bundle: bundle)
+        try click(sidebarParent, app: app, bundle: bundle)
         assertPage(app, deckID: parentID)
-        try showDecksRoot(app, bundle: bundle)
-        XCTAssertTrue(child.waitForExistence(timeout: 10), "Selecting a parent must not collapse it")
-        try openChildMenu(child, deckID: childID, app: app, bundle: bundle)
+        XCTAssertTrue(sidebarChild.exists, "Selecting a parent must not collapse it")
+        try openChildMenu(sidebarChild, deckID: childID, app: app, bundle: bundle)
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         XCTAssertTrue(menuItem(app, action: "overview", deckID: childID).waitForNonExistence(timeout: 10))
-        try openChildMenu(child, deckID: childID, app: app, bundle: bundle)
+        try openChildMenu(sidebarChild, deckID: childID, app: app, bundle: bundle)
         try click(menuItem(app, action: "overview", deckID: childID), app: app, bundle: bundle)
         assertPage(app, deckID: childID)
         try showDecksRoot(app, bundle: bundle)
-        XCTAssertTrue(child.waitForExistence(timeout: 10))
-        try click(child, app: app, bundle: bundle)
+        assertTodayRoot(app, readyDeckID: childID)
+        XCTAssertTrue(sidebarChild.waitForExistence(timeout: 10))
+        try click(sidebarChild, app: app, bundle: bundle)
         assertPage(app, deckID: childID)
-        assertExpansionState(app, parentID: parentID, expanded: true, sidebarOnly: true)
+        assertExpansionState(app, parentID: parentID, expanded: true)
 
         // Collapsing a sidebar ancestor must leave the selected child's page alone.
         try click(triangle(app, rowID: sidebarParent.identifier), app: app, bundle: bundle)
         XCTAssertTrue(sidebarChild.waitForNonExistence(timeout: 10))
-        assertExpansionState(app, parentID: parentID, expanded: false, sidebarOnly: true)
+        assertExpansionState(app, parentID: parentID, expanded: false)
         assertPage(app, deckID: childID)
         try click(triangle(app, rowID: sidebarParent.identifier), app: app, bundle: bundle)
         XCTAssertTrue(sidebarChild.waitForExistence(timeout: 10))
-        assertExpansionState(app, parentID: parentID, expanded: true, sidebarOnly: true)
+        assertExpansionState(app, parentID: parentID, expanded: true)
         try click(sidebarParent, app: app, bundle: bundle)
         assertPage(app, deckID: parentID)
         XCTAssertTrue(sidebarChild.exists, "Selecting a parent must not collapse it")
         try click(sidebarChild, app: app, bundle: bundle)
         assertPage(app, deckID: childID)
-        try openChildMenu(sidebarChild, deckID: childID, app: app, bundle: bundle)
-        try click(menuItem(app, action: "overview", deckID: childID), app: app, bundle: bundle)
-        assertPage(app, deckID: childID)
         try showDecksRoot(app, bundle: bundle)
+        assertTodayRoot(app, readyDeckID: childID)
         try assertExpandedHierarchy(app, parentID: parentID, childID: childID)
     }
 
     func testSavedStudyCollapseSurvivesRestartWithoutReseeding() throws {
         let (app, bundle) = try launchFixture()
-        let parent = namedRow(app, prefix: "home.deck.row.", path: "Local Review")
-        let child = namedRow(app, prefix: "home.deck.row.", path: "Local Review::Cards")
-        let parentID = String(parent.identifier.dropFirst("home.deck.row.".count))
-        let childID = String(child.identifier.dropFirst("home.deck.row.".count))
+        let parent = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review")
+        let child = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
+        let parentID = String(parent.identifier.dropFirst("home.sidebar.deck.".count))
+        let childID = String(child.identifier.dropFirst("home.sidebar.deck.".count))
         try assertExpandedHierarchy(app, parentID: parentID, childID: childID)
         try click(triangle(app, rowID: parent.identifier), app: app, bundle: bundle)
         XCTAssertTrue(child.waitForNonExistence(timeout: 10))
@@ -432,16 +425,13 @@ final class MacHomeHierarchyTests: XCTestCase {
         app.launchArguments = launchArguments()
         app.launch()
         try showDecksRoot(app, bundle: bundle)
-        XCTAssertTrue(element(app, "home.deck.row.\(parentID)").waitForExistence(timeout: 20))
-        XCTAssertFalse(element(app, "home.deck.row.\(childID)").exists)
+        let sidebarRowID = "home.sidebar.deck.\(parentID)"
+        XCTAssertTrue(element(app, sidebarRowID).waitForExistence(timeout: 20))
         XCTAssertFalse(element(app, "home.sidebar.deck.\(childID)").exists)
         assertExpansionState(app, parentID: parentID, expanded: false)
-        assertDecksRoot(app)
+        assertTodayRoot(app, readyDeckID: childID)
         try assertUniqueIDs(app)
-        _ = triangle(app, rowID: "home.deck.row.\(parentID)")
-        let sidebarRowID = "home.sidebar.deck.\(parentID)"
         try click(triangle(app, rowID: sidebarRowID), app: app, bundle: bundle)
-        XCTAssertTrue(element(app, "home.deck.row.\(childID)").waitForExistence(timeout: 10))
         XCTAssertTrue(element(app, "home.sidebar.deck.\(childID)").waitForExistence(timeout: 10))
         assertExpansionState(app, parentID: parentID, expanded: true)
         try assertExpandedHierarchy(app, parentID: parentID, childID: childID)
@@ -510,8 +500,8 @@ final class MacHomeHierarchyTests: XCTestCase {
         target.clickOrTap()
     }
 
-    private func assertExpansionState(_ app: XCUIApplication, parentID: String, expanded: Bool, sidebarOnly: Bool = false) {
-        for prefix in sidebarOnly ? ["home.sidebar.deck"] : ["home.deck.row", "home.sidebar.deck"] {
+    private func assertExpansionState(_ app: XCUIApplication, parentID: String, expanded: Bool) {
+        for prefix in ["home.sidebar.deck"] {
             let target = triangle(app, rowID: "\(prefix).\(parentID)")
             let state = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 target.exists && Self.nativeExpansionValue(target.value) == expanded
@@ -537,9 +527,19 @@ final class MacHomeHierarchyTests: XCTestCase {
         return nil
     }
 
-    private func assertDecksRoot(_ app: XCUIApplication) {
+    /// N14.1: with no deck selected the detail is Today: the decks with cards
+    /// waiting, each with its own Study, and no second deck outline.
+    private func assertTodayRoot(_ app: XCUIApplication, readyDeckID: String) {
         XCTAssertTrue(element(app, "home.collection.screen").exists)
         XCTAssertFalse(app.buttons["home.deck.study"].exists, "Disclosure must not select a deck or start Study")
+        XCTAssertTrue(element(app, "home.today.deck.\(readyDeckID)").waitForExistence(timeout: 10),
+            "Today must list the deck whose cards wait")
+        let study = app.buttons.matching(identifier: "home.today.study.\(readyDeckID)")
+        XCTAssertEqual(study.count, 1)
+        XCTAssertTrue(study.element(boundBy: 0).isEnabled)
+        XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "home.deck.row.")).count, 0, "The sidebar is the only deck outline")
+        XCTAssertFalse(element(app, "review.session.screen").exists)
     }
 
     private func assertPage(_ app: XCUIApplication, deckID: String) {
@@ -555,7 +555,7 @@ final class MacHomeHierarchyTests: XCTestCase {
     private func openChildMenu(_ row: XCUIElement, deckID: String, app: XCUIApplication, bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         row.rightClick()
-        let actions = [(action: "study", title: "Study"), (action: "overview", title: "Overview"),
+        let actions = [(action: "study", title: "Study"), (action: "addNote", title: "Add Note"), (action: "overview", title: "Overview"),
             (action: "rename", title: "Rename…"), (action: "subdeck", title: "New Subdeck…")]
         for (action, title) in actions {
             let matches = app.menuItems.matching(identifier: "home.deckMenu.\(action).\(deckID)")
@@ -578,8 +578,6 @@ final class MacHomeHierarchyTests: XCTestCase {
         // These are the generated fixture's exported selection controls, including
         // AppKit's staticText parent labels and numeric sidebar badge values.
         let expectedRows = [
-            (id: "home.deck.row.1884308400001", type: "staticText", label: "Local Review", value: "0 new · 0 learning · 4 due"),
-            (id: "home.deck.row.1884308400002", type: "button", label: "Local Review::Cards", value: "0 new · 0 learning · 4 due"),
             (id: "home.sidebar.deck.1884308400001", type: "staticText", label: "Local Review", value: "4"),
             (id: "home.sidebar.deck.1884308400002", type: "button", label: "Local Review::Cards", value: "4")
         ]
@@ -597,7 +595,7 @@ final class MacHomeHierarchyTests: XCTestCase {
 
     private func assertUniqueIDs(_ app: XCUIApplication) throws {
         let tree = try HierarchyExport.tree(app)
-        let home = tree.root.allNodes().filter { $0.identifier.hasPrefix("home.deck.") || $0.identifier.hasPrefix("home.sidebar.") }
+        let home = tree.root.allNodes().filter { $0.identifier.hasPrefix("home.deck.") || $0.identifier.hasPrefix("home.sidebar.") || $0.identifier.hasPrefix("home.today.") }
         let identifiers = home.map(\.identifier)
         XCTAssertEqual(Set(identifiers).count, identifiers.count, "Own Home/sidebar IDs must be unique in the real native tree")
         let attachment = XCTAttachment(data: try HierarchyExport.json(tree, platform: "mac",

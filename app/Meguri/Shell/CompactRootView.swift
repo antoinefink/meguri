@@ -62,6 +62,8 @@ struct CompactRootView: View {
             SectionDestinationView(screen: .root(.home), navigation: navigation, features: features)
                 .toolbar { ToolbarItem(placement: .primaryAction) { features.syncStatus() } }
         }
+        // Today shows beside this list: the list does not repeat it (N14.1).
+        .environment(\.todayBesideDeckList, true)
     }
 
     private var deckDetail: some View {
@@ -70,7 +72,7 @@ struct CompactRootView: View {
                 if let deck = navigation.homeDeckPage {
                     SectionDestinationView(screen: .deckPage(deck), navigation: navigation, features: features)
                 } else if hasDecks {
-                    ContentUnavailableView("Select a Deck", systemImage: "rectangle.stack")
+                    features.today(navigation)
                 }
             }
             .navigationDestination(for: Destination.self) { destination in

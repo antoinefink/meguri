@@ -187,7 +187,11 @@ import AppKit
         // Save an answer in the imported deck before restarting the app.
         try openHome(app, bundle)
         try completeOptionalFsrsAdmission(app, bundle)
-        for id in ["home.deck.row.\(rig.deckID)", "home.deck.study", "review.session.reveal",
+        // N14: the deck's row is in the sidebar where the detail shows Today.
+        let deckRows = HomeControls.deckRows(app, deckID: String(rig.deckID))
+        XCTAssertTrue(deckRows.firstMatch.waitForExistence(timeout: 20))
+        try click(HomeControls.hittable(deckRows) ?? deckRows.firstMatch, app, bundle)
+        for id in ["home.deck.study", "review.session.reveal",
                    "review.session.rate.easy", "review.session.close"] {
             try click(element(app, id), app, bundle)
         }

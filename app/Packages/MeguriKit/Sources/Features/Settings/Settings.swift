@@ -6,6 +6,9 @@ import SwiftUI
 /// Compact/regular mobile Settings uses system navigation into grouped forms.
 public struct SettingsView: View {
     private let collection: ReviewCollection
+    #if !os(macOS)
+    @Environment(\.shellLayout) private var shellLayout
+    #endif
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
         List {
@@ -17,6 +20,10 @@ public struct SettingsView: View {
             }
         }
         .navigationTitle(Text("Settings", bundle: .module))
+        #if !os(macOS)
+        // As the Decks tab's root (N14.8).
+        .toolbarTitleDisplayMode(shellLayout == .compact ? .inlineLarge : .automatic)
+        #endif
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.root.content")
     }

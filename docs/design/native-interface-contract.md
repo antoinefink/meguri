@@ -379,3 +379,67 @@ Decided by Antoine in chat on 2026-11-01, from captures on the iPhone Duo simula
 - Foldable snapshot cells stay deferred until the snapshot job renders on the foldable lane's iOS 27.1 runtime.
 - A card's own background doesn't yet reach the toolbar and answer row (N11.1, R335).
 
+
+## N14. Round 1 structure decisions (2026-11-19)
+
+Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Where earlier text differs, this section wins.
+
+### N14.1 Today
+
+- Sidebar layouts (Mac, iPad at regular width): the sidebar's first row is "Today" with the `sun.max` symbol, in every collection state. With no deck selected the detail shows Today, not a second deck list. The sidebar remains the only deck tree.
+- iPhone Duo held wide unfolded: the detail beside the deck list shows Today until a deck is picked. The list beside it then leaves out its Previous Session section, and Today leaves out the collection's error line, which the list shows: nothing appears in both columns.
+- Today: the collection's totals ("20 new · 3 learning · 72 to review", the top-level decks' counts), then, with no section header or rule, the decks with cards waiting, each with a Study button that starts that deck through the deck page's Study path. A deck is listed when it has cards waiting and no subdeck with cards waiting; a parent is also listed, before its subdecks, when it has cards of its own beyond theirs. A nested deck shows its parents as secondary text under its name ("Languages › 日本語"); the list has no indentation. Mac rows show the non-zero counts by name; touch rows show one number (N13.2), which VoiceOver reads as "N cards waiting". At the accessibility text sizes a row stacks the count and Study under the name. Study keeps the deck page's minimum target.
+- With nothing waiting, Today shows only "Nothing to study right now": no totals and, on Mac, no subtitle (N14.4). Only the previous session keeps a section label. The error line and the previous session follow.
+- Compact layouts (iPhone, the Duo folded or held tall) keep the deck list as the Decks root and have no Today.
+- Loading, no collection, failed and no-decks states keep their content; the page is still titled "Today" where the sidebar's first row says so.
+- A selected deck that is no longer in the collection (deleted, or removed by a sync) loses the selection: the sidebar layouts return to Today. A hidden deck keeps its page.
+- iPad's Today stays a plain list while its deck page is grouped (N14.3); Antoine accepted both on the iPad capture.
+- Replaces: N11.5's Decks root as the sidebar layouts' detail, N12.1's "All Decks" first row, N13.1's "Select a Deck".
+
+### N14.2 Tab-layout deck list
+
+- The toolbar has the sync status button, a Search button (`magnifyingglass`, `home.collection.search`) and one Add menu (`plus`): New Note and New Deck…. There is no Go to Deck or Create Deck button and no Study bar.
+- Search presents the system search field ("Search or Create a Deck") with the keyboard; until then the field stays out of the way. The title is N14.8's. Typing replaces the tree with the matching decks, using Go to Deck's filter: each shows its last name component with its parents as secondary text underneath, as Today does; a row opens that deck. When no deck has the typed name, a "Create deck named …" row opens the Create Deck sheet with the name filled in.
+- The query and the field's presentation are navigation state: a fold, an unfold or a layout switch keeps them.
+- The Go to Deck sheet stays for the sidebar layouts' toolbar, the "/" key and the Mac's Deck menu.
+- Replaces: N13.2's "Touch toolbar items have a symbol and a title" for this list, and N13.1's "Go to Deck and Create Deck stay with the list".
+
+### N14.3 Deck page
+
+- In the tab layout the deck page's toolbar has Add Note only. Sidebar layouts keep Go to Deck and Create Deck in the window toolbar.
+- A regular deck with no new, learning or review cards waiting shows "Nothing to study right now" in place of the counts and an Add Note button in place of Study. A filtered deck keeps its counts and Study. The deck menu's Study and the Mac's Study command are disabled under the same condition, through the same availability function.
+- No New Subdeck button and no More menu. The long-press deck menu is otherwise unchanged.
+- iPhone, the Duo and iPad: the page is a system inset grouped list on the grouped background. Its first section has the deck's last name component as a large in-content header over one row: leading, "N cards waiting" (new + learning + to review) with "X new · Y learning · Z to review" in footnote secondary text under it; trailing, the standard-size Study button. With nothing waiting the row reads "Nothing to study right now" with Add Note trailing. When the text and the action do not fit side by side, the action goes under the text, and the three counts go one per line before any of them wraps. Then the "Subdecks" section, the error line, and the previous session in its own section. The navigation bar's title mode is inline, so no empty large-title band sits above the page. Replaces N13.2's "plain list on white" for the touch deck page; the Mac page is N14.4's.
+
+### N14.4 Mac titles
+
+- Today and the deck page name themselves in the window toolbar. The title is "Today" or the deck's last name component. The subtitle is the counts, zeros included, or "Nothing to study right now" on a deck page; on Today it is the totals, and nothing at all while nothing waits (N14.1). The deck page's content starts with Study at the list's ordinary inset.
+- Touch layouts keep the large title in the content (deck pages) or use N14.8's (tab roots).
+- Replaces on Mac: N12.1's leading large title and in-content counts line.
+
+### N14.5 Activity (not built)
+
+- The heatmap is the minimal form of `decisions.md` (2026-11-19). On a deck page it follows the subdecks, not the counts and Study. Replaces N11.5's "On the deck page it follows the counts and Study" when the heatmap is built.
+
+### N14.6 Sidebar deck list
+
+- Under the Today row, the deck rows sit in a section with the system label "Decks", on Mac as on iPad. Replaces N12.1's "the sidebar has no Decks header".
+- Deck rows have no symbol; an emoji in a deck's name stays as the user typed it.
+- A deck with no new, learning or review cards waiting shows its name in the secondary label colour (on iPad the `textSecondary` token, which keeps 4.5:1 on the sidebar). No check mark or other mark. While the row is selected its name takes the primary label colour, so it reads on the selection highlight; the highlight itself is the system's. The row's accessibility value gives the three counts by name on Mac and iPad, which also says when nothing waits.
+- The count is the To Review badge, hidden at zero (N11.5).
+- The disclosure control is the one the system's sidebar list provides, unmodified: leading on Mac, trailing on iPad.
+
+### N14.7 Touch deck rows
+
+- A deck row's disclosure triangle is on the leading edge, before the name: the system's own disclosure indicator, at its size and weight, at the row's normal leading inset. The layout reserves only the indicator's width; rows without subdecks keep that width empty, so names line up, and each nested level indents by the standard spacing. The count ends at the row's trailing edge with no reserved column.
+- The touch target is a 44 × 44 point button laid over the indicator, above the row's content: it reaches into the row's leading inset and a little over the name's start, where it wins the tap. It reserves no layout.
+- Selection and disclosure stay separate controls with their identifiers (`home.deck.row.<id>`, `home.deck.disclosure.<id>`). Applies to the deck list and to the deck page's Subdecks rows.
+- Replaces N13.2's trailing disclosure and its reserved count column.
+
+### N14.8 Tab roots' titles
+
+- In the tab layout, the Decks list and the Settings root use the system's inline large title (`ToolbarTitleDisplayMode.inlineLarge`): the title sits at the leading edge of the navigation bar, on the toolbar items' row. No custom title view. While search is presented the system's field takes that row. Deck pages keep the inline bar with the deck's name in the content (N14.3).
+
+### N14.9 iPad sidebar title
+
+- The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it. The Mac sidebar never drew one.

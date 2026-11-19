@@ -30,7 +30,9 @@ final class LocalReviewAccessibilityTests: XCTestCase {
             defer { app.terminate() }
             addTeardownBlock { @MainActor in app.terminate() }
 
-            let deck = app.buttons["home.deck.row.1884308400002"].firstMatch
+            // N14: the tab layout's deck list row, or the sidebar's row where the detail shows Today.
+            let deckRows = HomeControls.deckRows(app, deckID: "1884308400002")
+            var deck: XCUIElement { HomeControls.hittable(deckRows) ?? deckRows.firstMatch }
             let enable = element(app, "home.policy.enable")
             let policy = element(app, "home.policy.sheet")
             try wait("collection ready or FSRS admission, \(variant)") {

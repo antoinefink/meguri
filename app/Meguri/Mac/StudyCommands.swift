@@ -38,6 +38,11 @@ struct NativeCommandContext {
         guard let review else { return false }
         return ReviewInputOwnership.admitsNativeCommand(review)
     }
+    /// N14.3: as the deck page, no Study while a regular deck has nothing waiting.
+    var canStudySelectedDeck: Bool {
+        guard let selectedDeck else { return false }
+        return collection.canStudy && collection.offersStudy(deckID: selectedDeck.rawValue)
+    }
     var selectedDeck: DeckID? {
         guard host == .main, fileActionsAvailable, collection.navigation.section == .home,
               let deck = collection.navigation.homeDeckPage, collection.deckPage(deck.rawValue) != nil else { return nil }
@@ -94,11 +99,11 @@ struct StudyCommands: Commands {
         // Explicit answer restoration remains available in Study and card input.
         CommandMenu("Study") {
             Button("Study") {
-                guard let context, let deck = context.selectedDeck, context.collection.canStudy else { return }
+                guard let context, let deck = context.selectedDeck, context.canStudySelectedDeck else { return }
                 Task { await context.collection.startStudy(deckID: deck.rawValue) }
             }
             .keyboardShortcut("r", modifiers: .command)
-            .disabled(context?.selectedDeck == nil || context?.collection.canStudy != true)
+            .disabled(context?.canStudySelectedDeck != true)
             Divider()
             Button("Show Answer") {
                 guard context?.reviewInputAvailable == true else { return }

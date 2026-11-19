@@ -1386,6 +1386,15 @@ public final class ReviewCollection: ChangeFanoutSink {
         return find(decks)
     }
 
+    /// What waits in the deck, from its tree or page counts. A deck outside the
+    /// tree (hidden, with a page projection) counts as a regular deck.
+    public func deckWaiting(_ id: Int64) -> DeckWaiting? {
+        deckPage(id).map { DeckWaiting(counts: $0.counts, filtered: deck(id)?.filtered == true) }
+    }
+    /// N14.3: Study is offered unless a regular deck has nothing waiting; the deck
+    /// page, the deck menu and the Mac's Study command all ask here.
+    public func offersStudy(deckID: Int64) -> Bool { deckWaiting(deckID)?.offersAddNote != true }
+
     public func deckPage(_ id: Int64) -> DeckPageDetail? {
         if let node = deck(id) {
             return DeckPageDetail(id: node.id, name: node.name, counts: node.counts)
@@ -1401,8 +1410,15 @@ public final class ReviewCollection: ChangeFanoutSink {
         do {
             let service = CoreDeckService()
             let before = try await service.allDeckNames()
-            guard current(), before.generation == request.generation,
-                  let entry = before.decks.first(where: { $0.id == request.deckID }) else { return }
+            guard current(), before.generation == request.generation else { return }
+            guard let entry = before.decks.first(where: { $0.id == request.deckID }) else {
+                // N14.1: the deck is gone (deleted, or removed by a sync). Its page has
+                // nothing to show, so the selection returns to the section's root.
+                if navigation.review == nil, navigation.homeDeckPage?.rawValue == request.deckID {
+                    navigation.select(.section(.home))
+                }
+                return
+            }
             let state = try await service.studyState(deckID: request.deckID)
             guard current(), state.deck == request.deckID else { return }
             // studyState has no generation. Bracket it with actual stored deck

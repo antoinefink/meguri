@@ -331,7 +331,8 @@ final class DeckManagementUITests: XCTestCase {
         let page = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", pagePrefix)).firstMatch
         XCTAssertTrue(page.waitForExistence(timeout: 10))
-        XCTAssertTrue(page.staticTexts.matching(NSPredicate(format: "value == %@", name)).firstMatch.waitForExistence(timeout: 10))
+        // N14.4: the Mac names the open deck in the window toolbar, not in the page's content.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value == %@", name)).firstMatch.waitForExistence(timeout: 10))
         let pageID = page.identifier
         XCTAssertTrue(pageID.hasPrefix(pagePrefix))
         XCTAssertFalse(pageID.dropFirst(pagePrefix.count).isEmpty)
@@ -363,7 +364,8 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertEqual(app.sheets.count, 0)
         XCTAssertTrue(list.waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, pageID).waitForExistence(timeout: 10))
-        XCTAssertTrue(element(app, pageID).staticTexts.matching(NSPredicate(format: "value == %@", name)).firstMatch.waitForExistence(timeout: 10))
+        // N14.4: the deck's name is the window's toolbar title.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value == %@", name)).firstMatch.waitForExistence(timeout: 10))
     }
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
