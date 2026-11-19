@@ -244,10 +244,10 @@ screens:
     variants: full
     references: [progress-header, floating-controls]
     purpose: >-
-      The card's question side in quiet corners (native-interface-contract N3, N11.1, N11.2): Back to
-      Decks at the upper left, the timer, touch undo and ⋯ and the sync status icon at the upper right,
-      the thin progress bar under them, the card scrolling between them and a reserved bottom action
-      region holding the Show Answer button.
+      The card's question side in quiet corners (native-interface-contract N3, N11.1, N11.2, N16): Back
+      to Decks at the upper left, touch undo and ⋯ at the upper right with the sync status icon only
+      while sync needs the person, the card scrolling between them, a reserved bottom action region
+      holding the centred Show Answer button and the thin grey progress bar on the bottom edge.
   - id: review.answer
     title: Review, answer side
     units: [U175, U178, U179]
@@ -312,7 +312,9 @@ screens:
     states: [empty, typical]
     variants: pairwise
     references: [content-unavailable]
-    purpose: Nothing left to study today, with what comes next.
+    purpose: >-
+      The end of a session (native-interface-contract N16.5), with the number of cards studied, the
+      time, and Done.
 
   - id: editor.add
     title: Add note
@@ -1383,7 +1385,7 @@ screens:
       sync/status-strings only (T1), by the keys and sections named here. Button: one toolbar item,
       trailing, in the Mac main window's toolbar and the iPad sidebar layout's toolbar, trailing in
       the Decks navigation bar at compact width (R102), and in the review's upper-right corner after
-      the timer, undo and ⋯ (N11.1). Its SF Symbol shows the P14.2 state, one distinct symbol each,
+      undo and ⋯, there only while sync needs the person (N11.1, N16.2). Its SF Symbol shows the P14.2 state, one distinct symbol each,
       never colour alone (R103, R104): localOnly icloud.slash, iCloudUnavailable person.icloud,
       paused (every pausedReason, automaticOff included, T3) pause.circle, needsAttention
       exclamationmark.icloud, offline wifi.slash, syncingCollection arrow.triangle.2.circlepath.icloud

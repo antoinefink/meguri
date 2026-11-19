@@ -55,7 +55,7 @@ Supporting requirements: R15, R30, R31, R35, R40–R42. Show existing features w
 
 - Remove the sidebar and content header/title throughout review.
 - Keep a visible “Back to Decks” action at the upper left.
-- Keep a quiet transfer-state icon at the upper right. Its popover explains the real recorded state.
+- Keep a quiet transfer-state icon at the upper right. Its popover explains the real recorded state. During review it shows only while sync needs the person (N16.2).
 - Do not infer remote freshness from a prior transfer, saved credentials or the absence of errors.
 - Keep Show Answer and the four rating actions at the bottom of the review area.
 - Reserve the action region on both sides so reveal does not move or resize card content.
@@ -185,8 +185,8 @@ Decided 2026-10-27:
 
 - Every platform uses N3's quiet corners. There is no top bar with its own background, no title and no remaining counts.
 - Upper left, the exit. Sidebar layout (Mac, iPad and unfolded iPhone at regular width): a labelled "Back to Decks" button with the `chevron.backward` symbol. Compact layout: a close button with the `xmark` symbol, accessibility label and Voice Control name "Back to Decks". Esc does the same when nothing above the card owns it (R243).
-- Upper right, leading to trailing: the timer when enabled (R364); on iPhone and iPad the undo button (U179) and the ⋯ menu button (U182); then the sync status icon (N3; `sync.status`'s button, whose states that contract gives, N11.8). The Mac has no on-screen undo or ⋯: undo and redo are in the Edit menu, card actions in the Card menu and the card's context menu (R288).
-- The progress bar (R341–R345, when its device setting is on) is a thin native linear progress indicator across the top of the review area, below the corner controls.
+- Upper right, leading to trailing (the timer is removed, N16.7; the status icon shows only when sync needs the person, N16.2): the timer when enabled (R364); on iPhone and iPad the undo button (U179) and the ⋯ menu button (U182); then the sync status icon (N3; `sync.status`'s button, whose states that contract gives, N11.8). The Mac has no on-screen undo or ⋯: undo and redo are in the Edit menu, card actions in the Card menu and the card's context menu (R288).
+- The progress bar (R341–R345, when its device setting is on) is a thin native linear progress indicator across the top of the review area, below the corner controls. Replaced by N16.1: the bar is on the bottom edge and always shown.
 - The review area's background is the card's computed `body` background (R335), so the user's card styling reaches the window edges. Corner controls and the answer region use system control styles, with a foreground chosen for contrast against that background. Need: preserving user-authored card styling. No other chrome tint.
 - The sidebar stays hidden for the whole session; Show Sidebar is disabled during review.
 - An in-window panel over the review (Mac: `review.editCurrent`, and `editor.add` opened during a session, both covering the card area) owns its keys like a sheet (N4): while it shows, the review keys, their menu commands' key equivalents and the tap zones are inactive (U181's suspension), and Esc and ⌘W go to the panel's close guard, never to Back to Decks.
@@ -364,10 +364,10 @@ Decided by Antoine in chat on 2026-11-01, from captures on the iPhone Duo simula
 ### N13.3 Review
 
 - Close, Undo, Redo and the status icon are system toolbar items, so they follow each position. A touch review has a white page. Replaces N11.1's custom corners on touch; the Close symbol and name are unchanged.
-- The counts and thin progress bar sit at the top of the content, with the timer beside them.
+- The counts and thin progress bar sit at the top of the content, with the timer beside them. Replaced by N16.1 and N16.7.
 - Answers are one row at the bottom in every fold position: standard rounded-rectangle buttons, name over a small interval, Again, Hard, Good, Easy. Replaces N11.2's prominent Good on touch.
 - Held wide unfolded, the row splits at the fold: Again and Hard on one side, Good and Easy on the other, in every hinge position, so nothing moves when the phone opens further. Held tall the fold crosses the card, not the row. Nothing interactive sits on the fold (R9).
-- Show Answer takes the trailing half of the row, over Good and Easy. It's smaller than a full-width button and keeps the thumb in place. Replaces N11.2's prominent Show Answer on touch. At accessibility text sizes the answers stack; with a fold in the row, they stack in two columns either side of it.
+- Show Answer takes the trailing half of the row, over Good and Easy. It's smaller than a full-width button and keeps the thumb in place. Replaces N11.2's prominent Show Answer on touch. Replaced by N16.3 where no fold crosses the row. At accessibility text sizes the answers stack; with a fold in the row, they stack in two columns either side of it.
 - One view structure holds the card in every fold position, so folding never recreates its page (R576).
 - Not chosen, after captures: a book layout (card on one side of the fold, answers on the other), an answer column at the side, and, held tall, a 2 × 2 grid or answers filling the lower half.
 
@@ -443,3 +443,61 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 ### N14.9 iPad sidebar title
 
 - The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it. The Mac sidebar never drew one.
+
+## N16. Round 3 review decisions (2026-11-19)
+
+Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; round 3 options 1F, 2B, 3D, 4D, 5B). Where earlier text differs, this section wins. Kept from 2026-11-01: the white card page, one row of answers with the interval under each name, the row split at the fold on the Duo held wide, the Mac's round Back button, no key hints. The card is the user's template and is never restyled. Buttons and titles keep Apple's title capitalisation ("Show Answer", "Keep Going").
+
+### N16.1 Session progress
+
+- One thin grey bar along the very bottom edge, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint. No text, no counts, no accent colour.
+- Touch: the bar spans the screen's width on its bottom edge, inside the bottom safe area, so the home indicator lies over its middle. iPhone Duo: the same edge folded, held wide and held tall; held wide it runs under both halves and across the fold. It is not a control, so it may cross (R9 covers controls).
+- Mac: the bar is the window's last row, under the answer buttons. The Mac had no bar before.
+- The bar shows on the question and answer sides and between cards. Loading, waiting, paused and finished states have none.
+- Its value is the answers given over those answers plus the cards left (new, learning and to review). Accessibility: label "Session Progress", value "12 of 40", identifier `review.session.progress`. It takes no input.
+- Replaces: N11.1's bar across the top and its device setting (R341–R345), N13.3's counts line and top bar.
+
+### N16.2 Sync status during review
+
+- The sync status button is in the review's toolbar only while sync needs the person. Otherwise the toolbar holds Close and Undo (Redo when there is one) on touch, and Back to Decks alone on Mac.
+- Sync needs the person when: the provider has stopped or is finishing a provider change; iCloud has a problem to act on, a decision to make or no account it can use (a short-lived failure does not count); Meguri Sync has no sign-in, or waits for a sign-in, a choice of collection or a setup step, or its media or setup cannot continue. The button stays away for transfers, changes not yet sent, no network, failures that retry by themselves and a pause the person chose. With sync off it never shows.
+- The button stays while its own popover or sheet is open, so a state that clears does not close what the person is reading.
+- The round 2 split into waiting, needs you and issues (`decisions.md`, `sync.status`) is not built yet; when it is, this rule takes its "needs you" and "issues" kinds.
+- Replaces: N3's and N11.1's status icon that stays in the review's corner, N12.3's and N13.3's status toolbar item as a permanent item.
+
+### N16.3 Show Answer and the answer row
+
+- Show Answer is centred in the answer row on touch, as wide as two answer buttons. At the accessibility text sizes it keeps the full row.
+- With a fold through the row (iPhone Duo held wide) it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9).
+- The answer buttons' group is centred: on touch it is the reading column's width (N16.4), on Mac the four standard buttons are centred in it, as is Show Answer.
+- Replaces: N13.3's trailing-half Show Answer where no fold crosses the row.
+
+### N16.4 Reading column
+
+- iPad and Mac: the card, any notice above it and the review's states sit in one centred column, `ContentWidth.readable` wide, the width the touch answer row already had. A narrower window uses its full width.
+- iPhone and iPhone Duo are unchanged: the card takes the full width in every position. The choice is by idiom, as N13.1's layout choice is.
+- The window beside the column shows the card page colour. A template's own background does not reach it yet (N13.4, R335).
+
+### N16.5 End of a session
+
+- A finished session shows the number of cards studied as one large number, "cards in 12 minutes" under it in secondary text, and Done. No symbol, no title, no count per answer, no line about learning cards to come.
+- The number counts different cards answered in the session. The time is the session's active study time: whole minutes from one minute up, seconds before that ("card in 40 seconds").
+- Keep Going sits beside Done only while learning cards are ready again; the two stack when they do not fit side by side. Both are standard bordered buttons.
+- A session that ends with nothing answered has no number: it says "Finished for Now" over Done.
+- N11.6's summary sheet over the deck workspace is unchanged.
+- Replaces: the check mark, "Finished for Now" as the finished title and its recorded-answers line.
+
+### N16.6 Waiting, paused and notice states
+
+- Review's states are plain text, centred in N16.4's column: a title, an optional message in secondary text and standard bordered buttons. No symbol.
+- Waiting for a learning card that is not ready: "Waiting for Learning", "Your next learning card is not ready yet." and Check Now.
+- Paused by an error: "Review Paused", the message and Try Again. Ended: "Session Ended".
+- Loading keeps the system progress indicator with its label.
+- A notice above the card keeps its warning symbol and text, centred in the column; a long one still scrolls within its limit.
+
+### N16.7 No session timer
+
+- Review has no on-screen timer on any platform, and nothing in Meguri offers one. The timer view, its presentation model, strings and tests are removed.
+- The preset's stored fields for showing the timer and stopping it on the answer stay in the collection untouched, for other Anki clients. The app's review bridge no longer reads them.
+- Answer time is still measured and saved with each answer, up to the preset's maximum answer seconds.
+- Replaces: R364's on-screen timer in N11.1 and N13.3.
