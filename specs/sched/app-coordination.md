@@ -84,7 +84,7 @@ The FSRS policy coordinator reads `fsrsPolicyStatus()` (`sched/fsrs-policy#S1`) 
 
 It reads at no other time and has no timer. The core publishes no event for the policy (`sched/fsrs-policy#S3`).
 
-Changed 2026-11-19 (F5.1): the reads of items 1 and 2 belong to the collection store's opening sequence and come before the collection is presented. Items 3 to 5 are unchanged; what a read that is not `ok` starts is F5, not a sheet.
+Changed 2026-11-19 (F5): the items are unchanged; what a read that is not `ok` starts is F5, not a sheet. After items 1 and 2 the job may first wait for the open-time sync (F5.1).
 
 ## F2. The sheet and `enableFsrs` (Removed 2026-11-19)
 
@@ -107,35 +107,36 @@ Removed by Antoine's decision of 2026-11-19 (`sched/fsrs-policy#A1`): Meguri sho
 
 The app side of `sched/fsrs-policy#A1`. No view asks, explains or offers a choice; no setting, menu command or debug option turns FSRS off or skips the step.
 
-### F5.1 In the opening sequence
+### F5.1 After an open
 
-- The collection store (U151) presents a collection only with the status `ok`. Its opening sequence, after the engine reports `Ready` and before it presents anything of the collection: read `fsrsPolicyStatus()`; when the status is `needsEnable` or `needsReEnable`, run `enableFsrs(cancel, progress)` as a job and wait for its commit; then present the collection.
-- The same sequence runs after `CollectionReplaced` (F1 item 2), before the replaced collection is presented again.
-- Until it ends, the store stays in its opening state: the loading content every open shows, with no text, title or count about FSRS. The job's progress may drive that state's own indicator. No Cancel is shown, and the store never requests the job's cancel, except to close the collection (app quit, a replacement).
-- Until it ends, nothing else of the app uses the collection: no deck list, no study or editor entry point, no menu command that needs a collection, no local server request (they wait as for any opening collection, `engine/lifecycle` L6), and no sync start. A sync service's own setup or replacement that put the collection on the device is finished before the sequence starts.
-- With the status `ok` the sequence adds one read and no write.
+- The collection is presented as soon as it is open, whatever the status. The read of F1 item 1 or 2 that finds `needsEnable` or `needsReEnable` schedules one `enableFsrs(cancel, progress)` job:
+  - at once, when no sync service is connected, or the connected one will not sync by itself now. That is the case when the service's status is a state in which no automatic exchange is started: off, Sync Automatically off (the update hold included, `sync/policy#P25.2`), offline, an account or sign-in that needs the user, a pending setup or decision, or a failure waiting for its retry;
+  - otherwise after the open-time sync's collection exchange ends, with any result: F1 item 3's read then starts the job, or finds `ok` when the sync brought FSRS on. Media transfer is not waited for. When the service's status changes to one of the states above before an exchange ends, the job starts then.
+- The coordinator has no timer and makes no network call for this: it reads the status the service already publishes.
+- A study entry point used while the job is still waiting for the sync starts it at once (F4).
+- The job runs in the background and shows nothing. No Cancel is shown, and the app requests the job's cancel only to close the collection (app quit, a replacement).
 
 ### F5.2 While the collection is open
 
 - A read of F1 items 3 to 5 that finds a status other than `ok` starts the job in the background at once, unless one runs already or a review session is open (F3); it shows nothing. It is one job per status found, not one per read.
-- Study entry points wait for it (F4). Everything else stays usable.
+- Study entry points wait for it (F4). Everything else stays usable: browsing, the editor, import, export, sync, settings.
 - `enableFsrs` writes nothing when `fsrs` already reads on, so a job that starts after a sync turned FSRS on again is harmless.
-- `CollectionReplaced` during the job ends it; F5.1 runs for the new collection.
+- `CollectionReplaced` during the job ends it; F5.1 applies to the new collection.
 
 ### F5.3 Failure
 
-- A job of F5.1 that ends without a commit (an error; a cancel caused by anything but a close) closes the collection. The store shows its failed-to-open state, the one a refused open uses, with this text and one Try Again button:
+- A job that ends without a commit (an error; a cancel caused by anything but a close) leaves the collection open and shows nothing by itself, whether it was scheduled by F5.1 or F5.2.
+- The next study entry point is refused (F4) and shows this text with one Try Again button, which starts the job again:
 
-  > Meguri couldn’t finish opening this collection.
+  > Meguri couldn’t prepare this collection for study.
 
-- Try Again opens the collection again, which runs F5.1 again. The state offers what the failed-to-open state already offers besides (Copy Debug Info, and its routes to a backup or another file, where they exist); it adds no "open anyway".
-- The underlying error goes to the diagnostic log and Copy Debug Info, not into the sentence. The sentence does not say that nothing changed: the open's own steps may have written (`sched/fsrs-policy#A1.4`).
-- A job of F5.2 that ends without a commit leaves the collection open and shows nothing by itself. The next study entry point is refused (F4) and shows the same sentence with Try Again, which starts the job again. The next open applies F5.1.
-- The text is Meguri's own, from the String Catalog; no Anki text applies. Spec-writer wording (2026-11-19), open to the owner's edit.
+- Nothing else is disabled or marked. There is no "study anyway". The next open applies F5.1.
+- The underlying error goes to the diagnostic log and Copy Debug Info, not into the sentence.
+- The text is Meguri's own, from the String Catalog; no Anki text applies.
 
 ### F5.4 Record
 
-- Each job writes one entry to the app's diagnostic log: the status that caused it, whether it ran in the opening sequence or in the background, the cards computed and the result. Nothing is shown for a job that commits.
+- Each job writes one entry to the app's diagnostic log: the status that caused it, whether F5.1 or F5.2 scheduled it, the cards computed and the result. A re-enable after another client turned FSRS off (`needsReEnable`) is recorded every time it happens. Nothing is shown for a job that commits.
 
 ## M1. Presets Meguri cannot schedule (R704)
 
@@ -147,4 +148,4 @@ This unit adds the text to the String Catalog; Home (U152) and the review screen
 
 ## T1. Tests
 
-U51's app tests drive the monitor with an injected clock and time zone and a fake core that reports the rows of A3, and check A1 and A2: the trigger list, one call per trigger, the deadline rule, no re-arm after a failed call, and the order rule. The coordinator's tests script the status reads of F1 to F4. Changed 2026-11-19 (F5): no test expects a sheet. Added: with `needsEnable` and with `needsReEnable` at open, the store presents nothing until `enableFsrs` commits, shows only the opening state, and asks nothing; a failed job closes the collection and gives the failed-to-open state with Try Again, which opens and runs the job again; `CollectionReplaced` runs the sequence before the new collection is presented; a not-`ok` read after a sync starts one background job, waits for an open review session, and a second read during the job starts none; a refused study entry point joins the job and goes on at its commit; a failed background job leaves the collection open and study refused with Try Again; with `ok`, no job runs. A source check that no view or String Catalog key of the removed sheet remains. No oracle scenario applies: everything here is Meguri's. U51's verification also looks for repeating timers in a 60-second idle trace (R1854).
+U51's app tests drive the monitor with an injected clock and time zone and a fake core that reports the rows of A3, and check A1 and A2: the trigger list, one call per trigger, the deadline rule, no re-arm after a failed call, and the order rule. The coordinator's tests script the status reads of F1 to F4. Changed 2026-11-19 (F5): no test expects a sheet. Added: with `needsEnable` and with `needsReEnable` at open the collection is presented at once and nothing is asked; with no service, and with a service in each no-automatic-exchange state, the job starts at once; with a service that syncs at open it starts only after the exchange ends, for a successful and a failed exchange, and not at all when the exchange brought `fsrs` on; a status change to offline during the wait starts it; a study entry point during the wait starts it and goes on at its commit; no timer exists during the wait (R1854); a failed job, after an open and in the background alike, leaves the collection open, the editor, import, export and sync usable, and study refused with the F5.3 text and Try Again, which runs the job again; `CollectionReplaced` applies F5.1 to the new collection; a not-`ok` read after a later sync starts one background job, waits for an open review session, and a second read during the job starts none; each job writes its log entry, a second `needsReEnable` included; with `ok`, no job runs. A source check that no view or String Catalog key of the removed sheet remains.

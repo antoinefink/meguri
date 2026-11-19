@@ -620,14 +620,14 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`,
 
 ## N18. Round 4 first-run decisions (2026-11-19)
 
-Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsSheet` rows; round 4 option 1B for the welcome screen, which has no row in `decisions.md` yet and is recorded here from the round's brief). Where earlier text differs, this section wins. The behaviour of N18.1 is `sched/fsrs-policy` A1 and `sched/app-coordination` F5.
+Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsSheet` rows; the `onboarding.welcome` row; round 4 option 1B). Where earlier text differs, this section wins. The behaviour of N18.1 is `sched/fsrs-policy` A1 and `sched/app-coordination` F5.
 
 ### N18.1 FSRS is always on
 
 - No FSRS sheet, prompt, notice, setting, menu command or option exists on any platform. The screen `home.fsrsSheet` is removed, with its view, strings and snapshots.
-- A collection that opens with FSRS off gets it turned on before anything of the collection is shown. Meanwhile the person sees the normal opening state, with nothing about FSRS and no Cancel.
-- When that step fails, the collection stays unopened: the failed-to-open state shows "Meguri couldn’t finish opening this collection." and Try Again. No route opens it with FSRS off.
-- When another client turns FSRS off, Meguri turns it on again at the next open, or in the background while the collection is open, and says nothing. Study waits for it.
+- A collection that opens with FSRS off opens as usual, and Meguri turns FSRS on in the background: after the open-time sync when a service syncs at open, at once otherwise. Nothing about it is shown and nothing is asked. Study entry points show their normal loading state until it is done; a study entry point never waits for the network.
+- When that step fails, the collection stays open: study is refused with "Meguri couldn’t prepare this collection for study." and Try Again at the study entry points, while browsing, adding notes, import, export and sync stay available. A failure at open and a later one behave the same. No route studies with FSRS off.
+- When another client turns FSRS off, Meguri turns it on again each time and says nothing; each time is written to the diagnostic log.
 - The change syncs like any other change. Its risks for the owner are in `sched/fsrs-policy` A1.6.
 - Replaces: R702's and R703's sheet, U51's `FsrsEnabledSheet`, AE29's "after the one-time sheet".
 
