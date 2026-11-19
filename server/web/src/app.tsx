@@ -14,13 +14,15 @@ import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Copy
 import type { OutcomeValue } from "./ui";
 import pomegranate from "./favicon-64.png";
 
+const accountHomePath = "/collection";
+
 function Brand({ auth = false, onClick }: { auth?: boolean; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void }) {
   const content = <>
     <img src={pomegranate} alt="" width={28} height={28} />
     <span>Meguri</span>
   </>;
   return auth ? <p className="brand auth-brand">{content}</p>
-    : <a className="brand" href="/connection" onClick={onClick}>{content}</a>;
+    : <a className="brand" href={accountHomePath} onClick={onClick}>{content}</a>;
 }
 
 // Original decorative identity and sign-out drawings; no account menu.
@@ -95,7 +97,7 @@ export function App() {
   useEffect(() => {
     if (loading || bootstrapError) return;
     if (page.path === "/setup" && !setup) go("/login", undefined, true);
-    else if (page.path === "/") go(setup ? "/setup" : me ? "/connection" : "/login", undefined, true);
+    else if (page.path === "/") go(setup ? "/setup" : me ? accountHomePath : "/login", undefined, true);
     else if (protectedPath(page.path) && !me) go("/login", "Sign in to open your account.", true);
   }, [loading, bootstrapError, setup, me, page.path]);
   useEffect(() => {
@@ -139,14 +141,14 @@ export function App() {
   let content: ReactNode;
   if (loading) content = <p role="status">Opening Meguri…</p>;
   else if (bootstrapError) content = <Card><CardHeader><CardTitle>Could not open your account</CardTitle></CardHeader><CardContent><Outcome value={bootstrapError} /><Button onClick={() => void bootstrap()}>Try loading again</Button></CardContent></Card>;
-  else if (!navigation.some(path => path === page.path)) content = <Card><CardHeader><CardTitle>Page not found</CardTitle><CardDescription>This address does not match a Meguri account page.</CardDescription></CardHeader><CardContent>{link(me ? "/connection" : "/login", me ? "Go to Connection" : "Go to sign in")}</CardContent></Card>;
-  else if (capabilityPage && me) content = <Card className="auth-card"><CardHeader><CardTitle>Check your account</CardTitle><CardDescription>You are signed in as {me.username} ({me.role === "admin" ? "administrator" : "member"}).</CardDescription></CardHeader><CardContent className="stack"><p>This link may be intended for a different account. Sign out before using it.</p><Button aria-disabled={signingOut} onClick={() => void logout(true)}>{signingOut ? "Signing out…" : `Sign out ${me.username}`}</Button>{link("/connection", "Return to your account")}</CardContent></Card>;
-  else if (page.path === "/accounts" && me?.role !== "admin") content = <Card><CardHeader><CardTitle>Administrator access required</CardTitle><CardDescription>Your member account does not have permission to manage accounts.</CardDescription></CardHeader><CardContent>{link("/connection", "Return to Connection")}</CardContent></Card>;
+  else if (!navigation.some(path => path === page.path)) content = <Card><CardHeader><CardTitle>Page not found</CardTitle><CardDescription>This address does not match a Meguri account page.</CardDescription></CardHeader><CardContent>{link(me ? accountHomePath : "/login", me ? "Go to Collection" : "Go to sign in")}</CardContent></Card>;
+  else if (capabilityPage && me) content = <Card className="auth-card"><CardHeader><CardTitle>Check your account</CardTitle><CardDescription>You are signed in as {me.username} ({me.role === "admin" ? "administrator" : "member"}).</CardDescription></CardHeader><CardContent className="stack"><p>This link may be intended for a different account. Sign out before using it.</p><Button aria-disabled={signingOut} onClick={() => void logout(true)}>{signingOut ? "Signing out…" : `Sign out ${me.username}`}</Button>{link(accountHomePath, "Return to your account")}</CardContent></Card>;
+  else if (page.path === "/accounts" && me?.role !== "admin") content = <Card><CardHeader><CardTitle>Administrator access required</CardTitle><CardDescription>Your member account does not have permission to manage accounts.</CardDescription></CardHeader><CardContent>{link(accountHomePath, "Return to Collection")}</CardContent></Card>;
   else if (page.path === "/accounts" && me) content = <Accounts me={me} sessionLoss={sessionLoss} />;
   else if (page.path === "/collection" && me) content = <Collection key={page.visit} sessionLoss={sessionLoss} />;
   else if (page.path === "/connection" && me) content = <Connection me={me} />;
-  else if (page.path === "/login" && me) content = <Card className="auth-card"><CardHeader><CardTitle>Signed in as {me.username}</CardTitle></CardHeader><CardContent className="stack">{link("/connection", "Open Connection")}<Button variant="outline" aria-disabled={signingOut} onClick={() => void logout()}>Sign out</Button></CardContent></Card>;
-  else if (["/login", "/setup", "/invite", "/reset", "/settings"].includes(page.path) && (!protectedPath(page.path) || me)) content = <CredentialsForm key={page.visit} mode={page.path.slice(1) as FormMode} token={page.token} clearToken={clearToken} onLogin={identity => { setMe(identity); go("/connection", "Signed in.", true); }} onSuccess={message => { setMe(null); if (page.path === "/setup") setSetup(false); go("/login", message, true); }} onSessionLoss={sessionLoss} link={link} />;
+  else if (page.path === "/login" && me) content = <Card className="auth-card"><CardHeader><CardTitle>Signed in as {me.username}</CardTitle></CardHeader><CardContent className="stack">{link(accountHomePath, "Open Collection")}<Button variant="outline" aria-disabled={signingOut} onClick={() => void logout()}>Sign out</Button></CardContent></Card>;
+  else if (["/login", "/setup", "/invite", "/reset", "/settings"].includes(page.path) && (!protectedPath(page.path) || me)) content = <CredentialsForm key={page.visit} mode={page.path.slice(1) as FormMode} token={page.token} clearToken={clearToken} onLogin={identity => { setMe(identity); go(accountHomePath, "Signed in.", true); }} onSuccess={message => { setMe(null); if (page.path === "/setup") setSetup(false); go("/login", message, true); }} onSessionLoss={sessionLoss} link={link} />;
   else content = <p role="status">Opening account page…</p>;
   const links: [string, string][] = [["/collection", "Collection"], ["/connection", "Connection"], ["/settings", "Password"], ...(me?.role === "admin" ? [["/accounts", "Accounts"] as [string, string]] : [])];
   const accountIdentity = me && <>
@@ -163,7 +165,7 @@ export function App() {
   return <div className={accountShell ? "account-layout" : "auth-layout"}>
     <a className="skip-link" href="#main" onClick={event => { event.preventDefault(); main.current?.focus(); }}>Skip to content</a>
     {accountShell && <Sidebar>
-      <SidebarHeader><Brand onClick={event => intercept(event, "/connection")} />
+      <SidebarHeader><Brand onClick={event => intercept(event, accountHomePath)} />
         <div className="sidebar-footer mobile-account" role="group" aria-label="Signed-in account">{accountIdentity}</div>
       </SidebarHeader>
       <SidebarContent>

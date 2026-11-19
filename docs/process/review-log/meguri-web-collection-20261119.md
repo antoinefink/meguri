@@ -70,3 +70,28 @@ verified these complete public files.
 | --- | --- |
 | `tools/mg.d/sync-web.sh` | `5eac87b061115351ba2287844f0c26425e20d1619c254ca573cf501ce1621914` |
 | `server/web/scripts/audit-assessment.json` | `a712130b7db6600e3434f5473ba719d5c54d4d30b364c673fca743e60e44467f` |
+
+## Collection as the signed-in home
+
+Starting commit `87e2e8d9c`. Filtered export
+`cleanroom/20261119T100016Z-8888`. Antoine chose Collection as the
+destination for sign-in, the authenticated root URL and the logo.
+The browser and package checks now open Connection explicitly when
+checking its URL and username fields.
+
+Independent reviewer `registry_review` checked the complete sources,
+routing behavior and exact audit and upstream fingerprints. These six
+files contain public material.
+
+| File | SHA-256 |
+| --- | --- |
+| `server/tools/package-smoke.mjs` | `ce99c3df2d1353eb7a2edd155d8e1872f0de4e80c128384e55137d3c23821122` |
+| `server/web/scripts/audit-assessment.json` | `5ec8f3b6e2e2201e69ccf8f91e05b2bcb86ad0b71662517b9aee39c2950b1bbd` |
+| `server/web/src/app.tsx` | `af8641725a4c838aec5c45b516d6522d643c1880644a369025a3a634054747ee` |
+| `server/web/tests/browser/accounts.spec.ts` | `cbac3ec97c1eb84b807a511964dd1e2049d8123f0d21f97f2dc949e4eca01b49` |
+| `server/web/upstream-records.json` | `d7199181ece5972ea365c5086cb612f6f605fee2512af49d1667e304f3d1691c` |
+| `specs/servers/meguri-sync-web.md` | `565b42fd6f92ddc57916e58f43dc46ea240efff00132b8d1bd6ab5334a664fe2` |
+
+`sync-web-verify/20261119T100337Z-12986` passed all ten checks,
+including signed-in landing, authenticated root and pointer and keyboard
+logo navigation over private HTTPS.

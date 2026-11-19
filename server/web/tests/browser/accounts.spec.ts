@@ -55,7 +55,7 @@ async function brand(page: Page) {
     expect(await lockup.evaluate(element => element.tagName)).toBe("P");
   } else {
     await expect(brandLink).toBeVisible();
-    await expect(brandLink).toHaveAttribute("href", "/connection");
+    await expect(brandLink).toHaveAttribute("href", "/collection");
     await expect(brandLink).toHaveCSS("text-decoration-line", "none");
     expect(await brandLink.evaluate(element => getComputedStyle(element).color === getComputedStyle(element.parentElement!).color)).toBe(true);
   }
@@ -239,12 +239,17 @@ async function accountShell(page: Page, username: string, admin: boolean) {
 
 async function connectionLayout(page: Page, username: string, admin: boolean) {
   const viewport = page.viewportSize()!;
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/collection$/);
+  await expect(page.getByRole("heading", { name: "Collection", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Collection", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("main")).toBeFocused();
   try {
     for (const width of [390, 320]) {
       await page.setViewportSize({ width, height: 844 });
+      await page.getByRole("link", { name: "Connection", exact: true }).click();
+      await expect(page).toHaveURL(/\/connection$/);
       await accountShell(page, username, admin);
-      await expect(page.getByRole("status").filter({ hasText: /^Signed in\.$/ })).toBeVisible();
-      await expect(page.locator(".outcome").filter({ hasText: /^Signed in\.$/ })).toHaveCSS("background-color", "rgb(245, 247, 245)");
       await audit(page, `connection-${admin ? "admin" : "member"}-${width}`);
     }
     const main = page.getByRole("main");
@@ -286,18 +291,41 @@ async function connectionLayout(page: Page, username: string, admin: boolean) {
   try {
     for (const width of [1280, 390, 320]) {
       await page.setViewportSize({ width, height: 900 });
+      await page.getByRole("link", { name: "Connection", exact: true }).click();
+      await expect(page).toHaveURL(/\/connection$/);
+      await expect(page.getByRole("heading", { name: "Connect your devices", exact: true })).toBeVisible();
       const documentTime = await page.evaluate(() => performance.timeOrigin);
-      await page.getByRole("link", { name: "Collection", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Collection", exact: true })).toBeVisible();
-      await expect(page).toHaveURL(/\/collection$/);
       const logo = page.getByRole("link", { name: "Meguri", exact: true });
       if (width === 1280) await logo.locator("img").click();
       else { await logo.focus(); await page.keyboard.press("Enter"); }
-      await expect(page).toHaveURL(/\/connection$/);
-      await expect(page.getByRole("heading", { name: "Connect your devices", exact: true })).toBeVisible();
-      await expect(page.getByRole("link", { name: "Connection", exact: true })).toHaveAttribute("aria-current", "page");
+      await expect(page).toHaveURL(/\/collection$/);
+      await expect(page.getByRole("heading", { name: "Collection", exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Collection", exact: true })).toHaveAttribute("aria-current", "page");
+      await expect(page.getByRole("link", { name: "Connection", exact: true })).not.toHaveAttribute("aria-current", "page");
       await expect(page.getByRole("main")).toBeFocused();
       expect(await page.evaluate(() => performance.timeOrigin)).toBe(documentTime);
+    }
+  } finally {
+    await page.setViewportSize(viewport);
+    await page.getByRole("link", { name: "Connection", exact: true }).click();
+    await expect(page).toHaveURL(/\/connection$/);
+    await expect(page.getByRole("heading", { name: "Connect your devices", exact: true })).toBeVisible();
+  }
+}
+
+async function expectSignedIn(page: Page) {
+  await expect(page).toHaveURL(/\/collection$/);
+  await expect(page.getByRole("heading", { name: "Collection", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Collection", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("main")).toBeFocused();
+  const viewport = page.viewportSize()!;
+  try {
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expect(page.getByRole("status").filter({ hasText: /^Signed in\.$/ })).toBeVisible();
+      await expect(page.locator(".outcome").filter({ hasText: /^Signed in\.$/ })).toHaveCSS("background-color", "rgb(245, 247, 245)");
+      // Audit the actual sign-in result before navigation clears its flash notice.
+      await audit(page);
     }
   } finally { await page.setViewportSize(viewport); }
 }
@@ -323,7 +351,7 @@ async function signIn(page: Page, username: string, password: string) {
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Connect your devices" })).toBeVisible();
+  await expectSignedIn(page);
 }
 async function audit(page: Page, name?: string) {
   await loadedFont(page);
@@ -505,7 +533,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await expect(member.getByLabel("Password", { exact: true })).toHaveValue("");
   await member.getByLabel("Password", { exact: true }).fill(initialPassword);
   await member.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(member.getByRole("heading", { name: "Connect your devices" })).toBeVisible();
+  await expectSignedIn(member);
   await accountShell(member, memberUsername, false);
   await connectionLayout(member, memberUsername, false);
   await expect(member.getByRole("main").getByText("Collection", { exact: true })).toHaveCount(0);
@@ -543,6 +571,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await member.goto("/accounts");
   await expect(member.getByRole("heading", { name: "Administrator access required" })).toBeVisible();
   await expect(member.getByRole("button", { name: "Create invitation", exact: true })).toHaveCount(0);
+  await expect(member.getByRole("link", { name: "Return to Collection", exact: true })).toHaveAttribute("href", "/collection");
   await member.getByRole("link", { name: "Password", exact: true }).click();
   await expect(member.getByRole("heading", { name: "Change password", exact: true })).toBeVisible();
   await audit(member, "password-settings-narrow");
@@ -577,6 +606,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await openCapability(member, reset);
   await expect(member.getByRole("heading", { name: "Check your account" })).toBeVisible();
   await expect(member.getByText(`You are signed in as ${memberUsername} (member).`, { exact: true })).toBeVisible();
+  await expect(member.getByRole("link", { name: "Return to your account", exact: true })).toHaveAttribute("href", "/collection");
   await member.getByRole("button", { name: `Sign out ${memberUsername}`, exact: true }).click();
   await expect(member.getByRole("heading", { name: "Reset your password" })).toBeVisible();
   await expect(member.getByLabel("Username", { exact: true })).toHaveCount(0);
@@ -617,6 +647,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await audit(page);
   await openCapability(page, `/setup#token=${fixture.setup_token}`);
   await expect(page.getByRole("heading", { name: "Signed in as root.admin" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open Collection", exact: true })).toHaveAttribute("href", "/collection");
   expect(new URL(page.url()).hash).toBe("");
   expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
   expect(await member.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);

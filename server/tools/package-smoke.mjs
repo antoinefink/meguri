@@ -248,6 +248,9 @@ try {
       await page.getByLabel('Username', { exact: true }).fill(credentials.username);
       await page.getByLabel('Password', { exact: true }).fill(credentials.password);
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await expect(page).toHaveURL(/\/collection$/);
+      await expect(page.getByRole('heading', { name: 'Collection', exact: true })).toBeVisible();
+      await page.getByRole('link', { name: 'Connection', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Connect your devices', exact: true })).toBeVisible();
       await expect(page.getByLabel('Server URL', { exact: true })).toHaveValue(`${origin}/`);
       await expect(page.getByLabel('Username', { exact: true })).toHaveValue(credentials.username);
