@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: MIT
+name: Verify Meguri
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/meguri-verification.yml'
+      - 'app/**'
+      - 'conformance/**'
+      - 'core/**'
+      - 'docker/**'
+      - 'server/**'
+      - 'specs/**'
+      - 'tools/**'
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/meguri-verification.yml'
+      - 'app/**'
+      - 'conformance/**'
+      - 'core/**'
+      - 'docker/**'
+      - 'server/**'
+      - 'specs/**'
+      - 'tools/**'
+  workflow_dispatch:
+    inputs:
+      apple:
+        description: Also build the unsigned Mac and simulator Core XCFramework
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: meguri-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux · ${{ matrix.suite }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core, server, conformance, package-smoke]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run Meguri verification
+        shell: bash
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          mg() {
+            sudo -n env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
+              GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" "$@"
+          }
+
+          case "$SUITE" in
+            core) args=(core-test -- --features meguri-ffi/test-hooks) ;;
+            server) args=(sync-server-test) ;;
+            conformance) args=(conformance --lane docker) ;;
+            package-smoke)
+              mg sync-web-image
+              mg sync-web-deps --install
+              mg sync-web-browser-install
+              args=(sync-server-package-test)
+              ;;
+            *) exit 2 ;;
+          esac
+
+          rc=0
+          receipt="$(mg "${args[@]}")" || rc=$?
+          if [[ -f "$receipt" ]]; then
+            cp "$receipt" "$RUNNER_TEMP/meguri-result.json"
+          fi
+          ((rc == 0))
+          jq -e --arg sha "$GITHUB_SHA" \
+            '.status == "pass" and .commit.sha == $sha and .commit.dirty == false' "$receipt"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: meguri-linux-${{ matrix.suite }}-result
+          path: ${{ runner.temp }}/meguri-result.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  apple:
+    name: Unsigned Apple Core build pilot
+    if: github.event_name == 'workflow_dispatch' && inputs.apple
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the Debug Core XCFramework
+        shell: bash
+        run: |
+          rc=0
+          receipt="$(tools/mg core-xcframework --configuration Debug --slices mac,sim)" || rc=$?
+          if [[ -f "$receipt" ]]; then
+            cp "$receipt" "$RUNNER_TEMP/meguri-result.json"
+          fi
+          ((rc == 0))
+          jq -e --arg sha "$GITHUB_SHA" \
+            '.status == "pass" and .commit.sha == $sha and .commit.dirty == false' "$receipt"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: meguri-apple-core-pilot-result
+          path: ${{ runner.temp }}/meguri-result.json
+          if-no-files-found: ignore
+          retention-days: 7

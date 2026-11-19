@@ -81,7 +81,9 @@ An entry without the approval or the evidence makes the gate fail. A test of a c
 
 `tools/mg nightly [--weekly] [--seed N]` runs T2 and writes one summary result. It draws one seed per night (or takes `--seed`), passes it to every run that takes `{seed}`, and logs it in the summary, so `tools/mg nightly --seed N` replays a night (R1937). The runs' budgets are in tiers.yaml; the differential fuzzer (U247) runs 30 to 60 minutes.
 
-There is no git remote, so nights run on this Mac. `tools/mg nightly --print-schedule` writes two launchd entries (nightly at 02:30, weekly on Sundays at 04:00). Installing them is Antoine's step `nightly-scheduler` (docs/process/one-time-setup.md); agents never install them. A future cloud runner may run only Docker jobs without private data (R1939).
+Local scheduled runs remain available. `tools/mg nightly --print-schedule` writes two launchd entries (nightly at 02:30, weekly on Sundays at 04:00). Installing them is Antoine's step `nightly-scheduler` (docs/process/one-time-setup.md); agents never install them. GitHub Actions runs public synthetic Docker jobs independently of image publication. Hosted receipts identify the exact commit, job, and outcome. Keep the existing batch and release requirements until a hosted run proves equivalent coverage, including the required features, cases, skip policy, platform and architecture. A Docker conformance result supplies its Docker lane.
+
+Antoine authorized a narrow unsigned Apple pilot on 2026-11-19 for the public Core XCFramework build on GitHub's Xcode runner. This is the exception to the Docker-only cloud placement rule (R1939). It supplies build feedback. The signed app journey, test VM, private data and device requirements retain their designated environments.
 
 ## Milestones and release
 
