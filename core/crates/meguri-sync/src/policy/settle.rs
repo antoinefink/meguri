@@ -10,8 +10,10 @@ pub enum UploadSettlement {
     Accepted,
     /// The server's facts are still those read after the retained copy.
     NotAccepted,
-    /// The server holds something else. Nothing is recorded.
+    /// The server holds something else: another client changed it.
     Neither,
+    /// The facts fit the candidate and the baseline alike. Nothing is known.
+    Indistinct,
 }
 
 /// `None` when this record is not an upload waiting for its acceptance.
@@ -37,8 +39,9 @@ pub fn judge_upload(operation: &Operation, candidate: &LocalFacts, server: &Remo
     Some(match (is_candidate, is_baseline) {
         (true, false) => UploadSettlement::Accepted,
         (false, true) => UploadSettlement::NotAccepted,
+        (false, false) => UploadSettlement::Neither,
         // Facts that fit both sides distinguish nothing.
-        _ => UploadSettlement::Neither,
+        (true, true) => UploadSettlement::Indistinct,
     })
 }
 
@@ -71,7 +74,9 @@ impl TransferPolicy {
     /// Accepted records the exact acceptance and leaves local activation to
     /// the retained recovery path, still under the exclusion. Not accepted
     /// records that nothing was sent and releases the exclusion. Neither
-    /// writes nothing: the exclusion stands.
+    /// records the upload as overtaken and releases the exclusion: the server
+    /// is something else now, the retained artifacts stay, and the next setup
+    /// asks which collection to keep. Indistinct writes nothing: the exclusion stands.
     pub fn settle_upload(
         &self,
         expected: &Operation,
@@ -86,7 +91,12 @@ impl TransferPolicy {
             let outcome = judge_upload(current, candidate, server).ok_or(PolicyError::Invalid)?;
             let mut settled = current.clone();
             match outcome {
-                UploadSettlement::Neither => return Ok((outcome, settled)),
+                UploadSettlement::Indistinct => return Ok((outcome, settled)),
+                UploadSettlement::Neither => {
+                    settled.acceptance = Acceptance::Overtaken;
+                    settled.phase = Phase::Failed;
+                    settled.boundary = Some(Boundary::RemoteChanged);
+                }
                 UploadSettlement::Accepted => {
                     settled.acceptance = Acceptance::ExactOk;
                     settled.phase = Phase::NeedsDecision;
@@ -100,7 +110,7 @@ impl TransferPolicy {
             }
             settled.revision = settled.revision.checked_add(1).ok_or(PolicyError::Invalid)?;
             state.operations.insert(settled.id.0.clone(), settled.clone());
-            if outcome == UploadSettlement::NotAccepted {
+            if outcome != UploadSettlement::Accepted {
                 state.active = None;
             }
             Ok((outcome, settled))
@@ -208,9 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn other_facts_write_nothing_and_the_exclusion_stands() {
-        let (_root, policy) = policy();
-        let op = waiting(&policy);
+    fn other_facts_record_the_upload_as_overtaken_and_release_the_exclusion() {
         for server in [
             remote(700, 400, 6),
             remote(500, 400, 6),
@@ -224,11 +232,50 @@ mod tests {
                 ..remote(900, 900, 6)
             },
         ] {
-            let (outcome, same) = policy.settle_upload(&op, &candidate(), &server).unwrap();
+            let (root, policy) = policy();
+            let op = waiting(&policy);
+            let (outcome, settled) = policy.settle_upload(&op, &candidate(), &server).unwrap();
             assert_eq!(outcome, UploadSettlement::Neither);
-            assert_eq!(same, op);
-            assert_eq!(policy.active().unwrap(), Some(op.clone()));
+            assert_eq!(settled.acceptance, Acceptance::Overtaken);
+            assert_eq!(settled.phase, Phase::Failed);
+            assert_eq!(settled.boundary, Some(Boundary::RemoteChanged));
+            // Durable across a restart, and no longer the active record.
+            let reopened = TransferPolicy::new(root.path());
+            assert!(reopened.active().unwrap().is_none());
+            assert_eq!(reopened.get(&op.id).unwrap(), settled);
+            // Every other field of the record, its artifacts included, is kept.
+            let mut expected = op.clone();
+            expected.acceptance = settled.acceptance;
+            expected.phase = settled.phase;
+            expected.boundary = settled.boundary;
+            expected.revision = settled.revision;
+            assert_eq!(settled, expected);
+            // It is settled once; a new operation can begin.
+            assert_eq!(policy.settle_upload(&settled, &candidate(), &server), Err(PolicyError::Stale));
+            assert_eq!(judge_upload(&settled, &candidate(), &server), None);
         }
+    }
+
+    #[test]
+    fn an_overtaken_record_is_valid_only_as_a_failed_upload_that_activated_nothing() {
+        let (root, policy) = policy();
+        let op = waiting(&policy);
+        let (_, settled) = policy.settle_upload(&op, &candidate(), &remote(700, 400, 6)).unwrap();
+        let path = root.path().join("manual-transfers.json");
+        let good = std::fs::read(&path).unwrap();
+        for change in [0, 1, 2] {
+            let mut document: serde_json::Value = serde_json::from_slice(&good).unwrap();
+            let record = &mut document["manualTransfers"]["operations"][settled.id.as_str()];
+            match change {
+                0 => record["direction"] = "Import".into(),
+                1 => record["phase"] = "Cancelled".into(),
+                _ => record["collection_complete"] = true.into(),
+            }
+            std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+            assert_eq!(policy.active(), Err(PolicyError::Storage), "change {change}");
+        }
+        std::fs::write(&path, good).unwrap();
+        assert!(policy.active().unwrap().is_none());
     }
 
     #[test]
@@ -240,7 +287,7 @@ mod tests {
         same.schema_modified = 400;
         same.usn = 5;
         let (outcome, _) = policy.settle_upload(&op, &same, &remote(500, 400, 5)).unwrap();
-        assert_eq!(outcome, UploadSettlement::Neither);
+        assert_eq!(outcome, UploadSettlement::Indistinct);
         assert_eq!(policy.active().unwrap(), Some(op));
     }
 
