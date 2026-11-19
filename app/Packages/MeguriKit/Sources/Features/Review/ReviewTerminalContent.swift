@@ -24,7 +24,7 @@ struct ReviewTerminalContent: View {
         if waiting && !continueAvailable {
             ReviewStateMessage(title: Text("Waiting for Learning", bundle: .module),
                 message: Text("Your next learning card is not ready yet.", bundle: .module)) {
-                Button(action: refresh) { Text("Check Now", bundle: .module) }
+                Button(action: refresh) { Text("Check Now", bundle: .module).reviewStateLabel() }
                     .disabled(!canRefresh)
                     .accessibilityIdentifier("review.session.refresh")
                     .reviewStateTarget()
@@ -53,12 +53,12 @@ struct ReviewTerminalContent: View {
     }
     @ViewBuilder private var actions: some View {
         if continueAvailable {
-            Button(action: continueReview) { Text("review.congrats.continue", bundle: .module) }
+            Button(action: continueReview) { Text("review.congrats.continue", bundle: .module).reviewStateLabel() }
                 .disabled(!canContinue)
                 .accessibilityIdentifier("review.session.continue")
                 .reviewStateTarget()
         }
-        Button(action: close) { Text("Done", bundle: .module) }
+        Button(action: close) { Text("Done", bundle: .module).reviewStateLabel() }
             .disabled(!canFinish)
             .accessibilityIdentifier("review.session.done")
             .reviewStateTarget()

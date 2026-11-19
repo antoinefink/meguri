@@ -62,7 +62,7 @@ public struct ReviewView: View {
             ReviewStatusLayout {
                 ReviewStateMessage(title: Text("Review Paused", bundle: .module),
                     message: model.notice.map { Text(verbatim: $0) }) {
-                    Button(action: model.retry) { Text("Try Again", bundle: .module) }
+                    Button(action: model.retry) { Text("Try Again", bundle: .module).reviewStateLabel() }
                         .accessibilityIdentifier("review.session.retry")
                         .reviewStateTarget()
                 }
@@ -337,7 +337,17 @@ struct ReviewStateActions<Content: View>: View {
         #if !os(macOS)
         .controlSize(.large)
         .buttonBorderShape(.roundedRectangle)
-        .tint(ColorToken.textPrimary.color)
+        #endif
+    }
+}
+extension Text {
+    /// The answer row's fill and text colour: the system's bordered fill
+    /// with primary text, not a tinted fill.
+    func reviewStateLabel() -> some View {
+        #if os(macOS)
+        self
+        #else
+        foregroundStyle(.token(.textPrimary))
         #endif
     }
 }
