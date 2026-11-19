@@ -14,6 +14,7 @@ a partial U124/U162 delivery. Collection-only internal writers remain
 Offer “Export Collection” from Settings on every platform.
 Produce a latest-format whole-collection .colpkg including media by default (E7).
 Show that media is included before creation; no separate option is needed in this delivery.
+Changed 2026-11-19 (`package/transfer-sheets#X7.3`): the export starts when Export Collection is chosen; the text where it is offered says that media is included.
 No deck/selection scope, legacy format or scheduling switch is implied.
 R1625’s complete option set remains part of U124/U162; this extension does not accept those units.
 That option set and `.apkg` deck and selection export are `package/apkg-export` (A14, A1–A13).
@@ -102,6 +103,7 @@ Keep the artifact lease until the platform has its own independent copy or every
 Sheet dismissal alone is not proof that an asynchronous provider finished reading.
 Report “Saved” only after destination completion. This does not prove a provider completed its cloud upload.
 The user may cancel the destination panel and retry while the Ready artifact remains owned.
+Changed 2026-11-19 (Antoine; `package/transfer-sheets#X7.3`): cancelling the destination panel discards the Ready artifact and ends the export; the artifact is retained for a retry only after a destination failure. The sheet shows no “Saved” step; "Saved" above remains the rule for when a save may be treated as complete. The lease rules of this section are unchanged.
 
 ## E5. Cancel, failure and restart
 

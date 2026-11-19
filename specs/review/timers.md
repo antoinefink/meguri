@@ -7,32 +7,23 @@ Scenarios: none. These clocks live in Anki's desktop reviewer, which the oracle 
 
 Three clocks run during review: the answer timer, whose value each answer records; the on-screen timer, which shows it; and the timebox clock. U175 owns the answer timer (`review/answer-flow#F2`), U177 the on-screen timer, U185 the timebox. This file states how they start and stop and how they depend on each other, so that the three units agree.
 
+Changed 2026-11-19 (T2): two clocks run, the answer timer and the timebox clock. Meguri has no on-screen timer and no setting for one. U177's timer is removed; R364 and the display side of R754 are withdrawn by Antoine's decision.
+
 ## T1. The answer timer (R359, R360, R368, R430, R679)
 
 - `review/answer-flow#F2` defines the answer timer: when it starts and starts again, the active time it counts (R360, R679), and the cap on the `msTaken` it sends (`sched/review-session#C9`, `sched/answering`). The edit panel's close is U184's (R398). This section adds only the following.
 - Under the timebox sheet (`review/reviewer-strings#S7`) the next card's timer starts when Continue is chosen, not when its question is drawn under the sheet (R430).
 - A reveal does not stop or restart it, whether the user reveals or Auto Advance does (`review/auto-advance#A6`): an Auto Advance answer records the same time a button would at that instant.
 
-## T2. The on-screen timer (R364, R754)
+## T2. The on-screen timer (Removed 2026-11-19)
 
-- It is shown while the current card's home preset has `show_timer` true (`sched/presets#V2`), and hidden while it is false. Each card decides for itself (R330): the timer appears and disappears as cards of differently configured subdecks follow each other.
-- When no preset has the home deck's `config_id`, `show_timer`, `stop_timer_on_answer` and the cap below come from the default preset (id 1), and from the built-in defaults (`decks/deck-presets#P2`) when there is no preset 1 either, as Anki's reviewer reads them (`sched/presets#V1` leaves this path to its unit).
-- Under the timebox sheet the timer follows the preset of the card whose question waits under the sheet: shown or hidden by that card's `show_timer`, at 00:00 and not counting until Continue starts the answer timer (T1).
-- It shows the answer timer (T1) in whole seconds, rounded down: it shows 0 whenever the answer timer starts or starts again, and it pauses with it. Anki's counter is its own and counts wall-clock seconds (T4).
-- The cap is the home preset's `cap_answer_time_to_secs` as read with `sched/presets#V3`. At the cap it shows the cap and stays there, on both sides, while the answer timer goes on (the recorded time is capped too, T1). The timer then is in a capped state, which its model exposes and its tests check (`capped` true). Anki shows the capped value in red. Meguri must show the capped state by a cue that does not rely on colour alone, and must include it in the timer's accessibility value. The design contract gives the timer's place only (N11.1, N13.3) and does not give this cue yet; the accessibility wording is `review.timer.capped` (`review/reviewer-strings#S17`).
-- At the reveal, when the home preset's `stop_timer_on_answer` is true, it freezes at the value it showed at the reveal and keeps that value for the rest of the answer side. When it is false, it goes on counting on the answer side up to the cap.
-- Format: minutes, a colon and two-digit seconds. Minutes are never carried into hours: 7,200 s shows as 120 minutes. Meguri writes the minutes with at least two digits (R364: "mm:ss"); Anki writes them without a leading zero.
+Removed by Antoine's decision of 2026-11-19 (`docs/design/decisions.md`, `review.question`; `docs/design/native-interface-contract.md` N16.7): "I never use the timer so we can remove it entirely and remove it as an option". The id T2 is not reused.
 
-| Seconds shown | Anki | Meguri |
-|---|---|---|
-| 0 | 0:00 | 00:00 |
-| 5 | 0:05 | 00:05 |
-| 60 | 1:00 | 01:00 |
-| 754 | 12:34 | 12:34 |
-| 7,200 | 120:00 | 120:00 |
-
-- Examples: cap 60, 75 s on the question → 01:00, capped. Cap 60, `stop_timer_on_answer` true, revealed at 12 s → 00:12 on the answer side however long it stays. `stop_timer_on_answer` false, revealed at 12 s, answered at 20 s → 00:20 just before the answer. Background 600 s at 5 s on the question, back for 3 s → 00:08.
-- It changes once per second while it is visible and counting, from a system-driven schedule; it causes no work while hidden, frozen or at the cap (R1854).
+- Review shows no timer on any platform, for any preset. No view, presentation model, capped state, per-second schedule, string or test of it exists.
+- Nothing in Meguri offers one: Deck Options has no control for `show_timer` or `stop_timer_on_answer` (`sched/deck-options#O3`, where both are hidden options), and no preference, menu command or review control stands in for them.
+- **The stored fields are preserved untouched.** `show_timer` and `stop_timer_on_answer` stay in every preset with the values they hold (`sched/presets#V2`). Meguri's review never reads them. No Meguri operation writes them: a Deck Options save, an optimizer commit, a preset copy and sync carry the stored bytes as they are, and a preset Meguri creates gets the defaults of `sched/presets#V2` (both false). Another Anki client of the same collection shows or hides its own timer from them, as before.
+- **Answer time is measured as before.** The answer timer (T1) counts the active time of every card and each answer records it, capped by the home preset's `cap_answer_time_to_secs` (`sched/presets#V3`, `sched/answering`). Maximum answer seconds stays an option of Deck Options. Nothing about the recorded `msTaken`, the review log or the statistics changes.
+- The session's progress bar (N16.1) is not a timer and reads no clock.
 
 ## T3. The timebox clock (R86, R429, R431)
 
@@ -51,8 +42,7 @@ Three clocks run during review: the answer timer, whose value each answer record
 ## T4. Differences from Anki
 
 - The answer timer's differences are `review/answer-flow#F2`'s; T1 adds that Anki shows its timebox dialog before it draws the next card, so its timer starts after the dialog too.
-- Anki's on-screen timer is a separate counter that starts at 0 on each question display, also when the question is drawn again after an edit, and counts wall-clock seconds; Meguri's shows the answer timer, so the two always agree (T2).
-- Anki writes the timer's minutes without a leading zero; Meguri writes at least two digits (R364, T2).
+- Anki's desktop reviewer shows an on-screen timer when the preset asks for one; Meguri shows none and offers no option for it (T2, decided 2026-11-19). The two earlier items here, on the counter and its minutes format, went with it.
 - Anki's timebox counts wall-clock time and starts again each time study starts from a deck (T3); Meguri's counts active time per session and stops while no card is presented (S7, S11).
 - Anki's Finish returns to the deck list; Meguri's opens the session summary (R86, R430).
 
@@ -61,5 +51,5 @@ Three clocks run during review: the answer timer, whose value each answer record
 | Test file (unit) | Covers |
 |---|---|
 | `ActiveTimeClockTests` (U175) | T1: the start at Continue under the timebox sheet; no restart at a manual or automatic reveal (the rest of the timer is `review/answer-flow#F2`'s tests) |
-| `OnScreenTimerTests` (U177) | T2: shown and hidden per card, a missing preset read from preset 1, the timebox sheet's 00:00, the table, the examples, freeze on reveal, the cap kept on the answer side with `capped` true, no updates while hidden, frozen or capped |
+| `OnScreenTimerTests` (U177) | removed 2026-11-19 with T2. In its place, a review test checks that a card whose preset has `show_timer` true shows no timer element, that the answer still records its capped time (T1), and that the preset's `show_timer` and `stop_timer_on_answer` bytes are unchanged after a session and after a Deck Options save |
 | `TimeboxControllerTests` (U185) | T3: start at the first presented card, the restarts and the non-restarts (a summary opened by Finish against one opened by the queue running out), the time counted with the edit panel and the Add sheet open and not counted in the background, the snapshot across relaunch (a changed `timeLim` is `review/review-preferences#P3`'s case) |

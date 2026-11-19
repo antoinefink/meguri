@@ -28,7 +28,7 @@ These strings are fixed by their own specs; this file does not repeat them. The 
 | Fields…, Cards…, Shrink Images, Close HTML Tags (R847, R848) and the other toolbar and menu labels | `editor/formatting` F19 | Meguri's; F19 gives Anki's label beside each |
 | the image controls and label, including Restore Original Size and ` (Original: w×h)` (R878 to R880), and the field context menu (R881) | `editor/paste` P21 | Meguri's; P21 gives Anki's label beside each |
 | the external-change banner "Changed by an external tool" with Reload and Keep mine (R1793); the deleted-note notice; the save-failure lines (Check Database, could not be saved) and the unmatched-field line of `editor/field-html` S2 | `editor/edit-flows` W9 (keys `edit.externalChange.*`, `edit.noteDeleted.notice`, `edit.saveFailed.*`, `edit.unmatchedField.message`) | Meguri's; R1793 fixes the banner's words |
-| the Add toast "1 card added" / "N cards added" with Undo (R813) | screen contract `editor.add`; `editor/add-flow` A5 step 6 | Meguri's; Anki's reads "1 card added." with a full stop |
+| the Add confirmation "Added to <deck>" (R813). The toast "1 card added" / "N cards added" with Undo is withdrawn (2026-11-19) | `docs/design/native-interface-contract.md` N17.1; `editor/add-flow` A5.1 | Meguri's; Anki's toast reads "1 card added." with a full stop |
 | "No notes added yet." (History with no entry) | screen contract `editor.add`; `editor/add-flow` A6 | Meguri's |
 | Copy Info's fixed text: the headings `## Front Template`, `## Back Template`, `## Styling`, the fence labels `html` and `css` and their layout (R932) | `notetypes/editor-actions` A13 | Anki's, written in English in every interface language (not String Catalog entries) |
 

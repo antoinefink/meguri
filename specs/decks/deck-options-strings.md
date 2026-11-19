@@ -62,8 +62,8 @@ One name per option of `sched/deck-options` O3, in O3's order. An option shown i
 | `deckOptions.option.disableAutoplay` | Don’t play audio automatically | `disable_autoplay` |
 | `deckOptions.option.skipQuestionWhenReplayingAnswer` | Skip question when replaying answer | `skip_question_when_replaying_answer` |
 | `deckOptions.option.capAnswerTime` | Maximum answer seconds | `cap_answer_time_to_secs` |
-| `deckOptions.option.showTimer` | Show on-screen timer | `show_timer` |
-| `deckOptions.option.stopTimerOnAnswer` | Stop on-screen timer on answer | `stop_timer_on_answer` |
+| `deckOptions.option.showTimer` | withdrawn 2026-11-19 (`review/timers#T2`): not in the catalog, not shown, the key not reused | `show_timer` |
+| `deckOptions.option.stopTimerOnAnswer` | withdrawn 2026-11-19 (`review/timers#T2`): not in the catalog, not shown, the key not reused | `stop_timer_on_answer` |
 | `deckOptions.option.secondsToShowQuestion` | Seconds to show question for | `seconds_to_show_question` |
 | `deckOptions.option.secondsToShowAnswer` | Seconds to show answer for | `seconds_to_show_answer` |
 | `deckOptions.option.waitForAudio` | Wait for audio | `wait_for_audio` |

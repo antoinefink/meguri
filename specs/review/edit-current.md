@@ -29,7 +29,7 @@ When the note was saved while the editor was open (any field or tag change), the
 
 | Side showing | What is rendered again | Also |
 |---|---|---|
-| question | the question side | a typed answer is discarded; the question's audio plays again when the preset autoplays; the Auto Advance question countdown starts again (U185); the on-screen timer starts again from 0 (R364) |
+| question | the question side | a typed answer is discarded; the question's audio plays again when the preset autoplays; the Auto Advance question countdown starts again (U185); the on-screen timer starts again from 0 (R364; withdrawn 2026-11-19: Meguri has no on-screen timer, `review/timers#T2`) |
 | answer | the answer side | the text typed in `#typeans` before reveal is kept and compared again with the new expected text (`render/type-answer`); the answer's audio plays again when the preset autoplays; the answer buttons are drawn again (U178's gate); the Auto Advance answer countdown starts again |
 
 - The card's scripts run again on the new page (R398). Prepared pages of the note's cards are discarded and prepared again (R447; `sched/review-session#C6`).

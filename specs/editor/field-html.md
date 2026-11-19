@@ -105,7 +105,7 @@ Where WebKit's serializer and the pinned engine's write a scenario's input diffe
 
 ## H6. HTML mode (R254, R827)
 
-- ⇧⌘X, or the field's mode button, switches the focused field between rich and HTML mode.
+- ⇧⌘X, or the field's mode button, switches the focused field between rich and HTML mode. Changed 2026-11-19 (F1): there is no button per field. The one HTML mode control of F1 does what ⇧⌘X does, on the same field.
 - Entering HTML mode, the text area gets its baseline's display HTML verbatim when the field is unchanged, and otherwise H3 steps 1 and 2 of the rich content, so the names stay display-encoded as in H1 and the same steps 3 to 5 apply to both modes.
 - Leaving HTML mode, the rich content is the load parse (H1 step 2) of the text, the appended `<br>` included, so a final `<br>` of the text survives H3 step 1: `a<br>` gives `a<br><br>` in the page and is written `a<br>`.
 - A switch is not an input: switching an unchanged field back and forth leaves it unchanged. A pending commit of the field is made first (S1).
@@ -177,6 +177,14 @@ A patch with neither fields nor tags is not sent.
 - One entry per field, in note type field order, then the tag editor (U193), which content mode leaves out.
 - In a note type whose `original_stock_kind` is Image Occlusion, two fields are not shown (`notetypes/stock-kinds` K4, R833), found as Anki finds them: when fields with `tag` 0, 1, 2 and 3 (Occlusion, Image, Header, Back Extra) all exist, the fields whose `tag` is 0 and 1; otherwise, when the note type has at least four fields, ordinals 0 and 1; otherwise ordinal 0 only. Decided 2026-10-27: Meguri follows Anki here, so a note type that lost its tags (Check Database restores them) still never shows the occlusion data as an editable field. Hidden fields are never loaded into the page; the session writes them as host fields, which S1 and S2 commit and patch like page fields (`editor/image-occlusion-notes` O6.1). Which view an image-occlusion session shows (mask editor or fields) is `editor/image-occlusion-notes` O3; a stock-kind-6 note type with fewer than four fields gets no mask editor and shows `editor/image-occlusion-notes` O2's notice.
 - Each entry has the field name as its label, the input, and a mode button (H6). Accessibility identifiers: `editor.field.<ord>`, `editor.field.<ord>.label`, `editor.field.<ord>.htmlToggle`.
+- Changed 2026-11-19 (Antoine; `docs/design/native-interface-contract.md` N17.1): an entry has its label and its input, and no mode button. The editor has **one HTML mode control**, outside the field list:
+  - It acts on the field that has focus; when no field has focus, on the field of this editor that last had it. Until a field has had focus it is disabled.
+  - Touch: it is in the keyboard accessory bar, at its leading end, so it shows whenever a field is being edited. Mac: it is in the editor's bottom bar, at its leading end.
+  - It is shown selected while the field it acts on is in HTML mode, and its accessibility value says so. Its label is "HTML Editor" (`editor/formatting` F19's name for the command).
+  - It carries the identifier `editor.field.<ord>.htmlToggle` of the field it acts on, so one element holds that identifier at a time. While no field has had focus the Add screen's control is `editor.add.htmlToggle`.
+  - Activating it is H6's switch: a pending commit first, the caret into the text area or back, no input recorded. It never moves focus to another field.
+  - A collapsed field cannot have focus (F3), so the control never acts on one. Each field's mode is still its own, remembered as F3 says; the control only shows and changes the mode of one field at a time.
+  - H4 is unchanged: Return and Shift-Return belong to the field in both modes, and ⌘Return adds.
 - The field's `description` is its placeholder: shown as plain text (never parsed as HTML), in rich mode only, while the field's target would be empty, in the field's font size, in the secondary label color, on one line truncated at its end.
 
 ## F2. Font, size and direction (R828)

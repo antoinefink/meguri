@@ -91,7 +91,7 @@ A duplicate never blocks adding (R808): the Add flow shows the state and adds th
 
 ## K5. What uses which state
 
-- The Add screen (U195): `empty` refuses adding (R809); `notetype_not_cloze` and `field_not_cloze` refuse it (R810); `missing_cloze` asks whether to add anyway (R811); `duplicate` marks the field and offers Show Duplicates (R807); every state but `normal` shows its hint live (R812). The order of flush, selection check, field check, confirmation and add is `editor/add-flow` A5.
+- The Add screen (U195): `empty` refuses adding (R809); `notetype_not_cloze` and `field_not_cloze` refuse it (R810); `missing_cloze` asks whether to add anyway (R811); `duplicate` marks the field and offers Show Duplicates (R807); every state but `normal` shows its hint live (R812; changed 2026-11-19, `editor/add-flow` A5.1: `empty` shows no live hint in the Add screen, whose Add is disabled instead, and its line shows only after a refused add). The order of flush, selection check, field check, confirmation and add is `editor/add-flow` A5.
 - The edit flows (U196, `editor/edit-flows`) show the same marks without refusing a save.
 
 ## K6. Scenarios

@@ -175,7 +175,7 @@ The editor's one insertion step, used by `editor/paste` for attached media, phot
 
 ## F11. HTML editor toggle (R254, R827)
 
-⇧⌘X, the field's mode button and the Format menu's HTML Editor item switch the field that has focus between rich and HTML mode, as `editor/field-html` H6 says. Opening HTML mode moves the keyboard focus into the text area with the caret at its end; closing it returns focus to the rich content with its earlier selection restored (`editor/field-html` F4). The menu item shows a check mark while the focused field is in HTML mode. With no field focused it is disabled.
+⇧⌘X, the field's mode button and the Format menu's HTML Editor item switch the field that has focus between rich and HTML mode, as `editor/field-html` H6 says. Changed 2026-11-19: "the field's mode button" is the editor's one HTML mode control (`editor/field-html` F1). Opening HTML mode moves the keyboard focus into the text area with the caret at its end; closing it returns focus to the rich content with its earlier selection restored (`editor/field-html` F4). The menu item shows a check mark while the focused field is in HTML mode. With no field focused it is disabled.
 
 ## F12. Toolbar, note type buttons and options (R847, R848, R864)
 

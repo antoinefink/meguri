@@ -74,8 +74,6 @@ The screen holds no scheduling rule of its own (U232): ranges, defaults, warning
 | Audio | Don't play audio automatically | `disable_autoplay` | false | boolean | |
 | Audio | Skip question when replaying answer | `skip_question_when_replaying_answer` | false | boolean | |
 | Timers | Maximum answer seconds | `cap_answer_time_to_secs` | 60 | integer 1 to 7200 | `answer_seconds_high` |
-| Timers | Show on-screen timer | `show_timer` | false | boolean | |
-| Timers | Stop on-screen timer on answer | `stop_timer_on_answer` | false | boolean | |
 | Auto Advance | Seconds to show question for | `seconds_to_show_question` | 0.0 (off) | 0 to 9999, step 0.1 | |
 | Auto Advance | Seconds to show answer for | `seconds_to_show_answer` | 0.0 (off) | 0 to 9999, step 0.1 | |
 | Auto Advance | Wait for audio | `wait_for_audio` | true | boolean | |
@@ -86,6 +84,7 @@ The screen holds no scheduling rule of its own (U232): ranges, defaults, warning
 | Advanced | Ignore cards reviewed before | `ignore_revlogs_before_date` | empty | empty, or a date `YYYY-MM-DD` not after today's date | the count (O2 item 7) |
 | Advanced | Load balancer (global) | `loadBalancerEnabled` | true | boolean | |
 
+- Changed 2026-11-19 (`review/timers#T2`): the rows "Show on-screen timer" (`show_timer`) and "Stop on-screen timer on answer" (`stop_timer_on_answer`) left this table. Both are hidden options (below): the screen has no control for them and a save keeps their stored values. The Timers section holds Maximum answer seconds alone.
 - Enum lists are in the order the menus show them; the values and their meanings are `sched/presets#V4`. Under FSRS, Review sort order labels 6 "ascending difficulty" and 5 "descending difficulty" (they are the stored ease orders), and 7 and 11 the retrievability orders. These are short descriptions, not display text: the text shown for every choice is `decks/deck-options-strings#K5` (for example `Easy cards first` for 6, `Difficult cards first` for 5, `Sequential (oldest cards first)` for Insertion order 0).
 - Desired retention and Historical retention are edited as percentages (R742): the field shows whole percent and its stepper moves by 1 %. The core takes any value in range, a fractional percent included.
 - The Auto Advance times are any value from 0 to 9999 seconds. The stepper moves by 0.1 s and the field shows one decimal place. A typed value with more decimals (1.25) is stored as given: the core neither refuses nor rounds it, and O4 has no code for it, as in Anki.

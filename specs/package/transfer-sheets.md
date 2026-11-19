@@ -77,6 +77,7 @@ Anki 26.9.3, before reading the file: one question warning that the existing col
 
 Meguri (U124, `onboarding.collectionImport` and U162):
 
+- Changed 2026-11-19 (X7): the import starts at the system file picker; the confirmation shows the file's name, one summary line and at most one consequence line, in place of the preview facts and statements below. The table's three states still decide what happens to the current collection; X7.2 gives what the sheet says for each.
 - The inspect runs first; the confirmation then shows what P16.4's preview gives (the counts, that media is merged and old media kept), and what it says about the current collection depends on the lifecycle state (`package/file-intake#K6`):
 
   | State | What the confirmation says about the current collection |
@@ -138,7 +139,7 @@ Meguri: the same list, from D17's query. Choosing a deck gives `Deck(id)` (its s
 
 Anki: after a deck package export, a short message giving the number of notes exported; after a collection package export, a short message that the collection was exported.
 
-Meguri: the counts of `package/apkg-export#A11` (notes, cards, media files) once the package is Ready, and "Saved" only after the destination completes (`package/file-export#E4`). A selection of zero notes is not an error; the sheet says so before the user saves (A3).
+Meguri: the counts of `package/apkg-export#A11` (notes, cards, media files) once the package is Ready, and "Saved" only after the destination completes (`package/file-export#E4`). Changed 2026-11-19 (X7.3): the collection export shows neither; a finished save closes the sheet. A selection of zero notes is not an error; the sheet says so before the user saves (A3).
 
 ### X4.5 File name and save location
 
@@ -171,7 +172,57 @@ U162's tests (`ImportFlowTests.swift`, `ExportSheetTests.swift`, `app/MeguriUITe
 - the import sheet shows X2.2's order, starting from a FakeCore config that holds each I5 value; changing "Import any learning progress" and importing sends that value (core write recorded);
 - a FakeCore log with entries in each I13 list → the lines of X2.5 in order, empty ones hidden, Show on the first three and on the default-deck line with the `nid:` search of their target ids, none on "could not be imported"; a log with only duplicates → one line; a note in `new` and `missing_deck` → one row with both reasons; a row's Show opens Browse on that note, none on a "could not be imported" row;
 - `MediaCommitPending` → the result with the media line and no "unchanged" text; `SchemaUnsupported` for each gate → its own message;
-- the collection package confirmation in `Ready`, `NoCollection` and `Failed` → X3's text for each; Return confirms nothing, the destructive button starts the import (X3);
+- the collection package confirmation in `Ready`, `NoCollection` and `Failed` → X3's text for each; Return confirms nothing, the destructive button starts the import (X3); changed 2026-11-19: the text is X7.2's, and X7.4 adds the import and export flow tests;
 - each X4.1 entry point → the format, scope, scheduling value and formats offered it gives, with no remembered values, then with remembered ones; Export Collection with Media… with Include media remembered off → on; switching File › Export… to the deck package → the whole-collection entry;
 - the deck scope list equals D17's list after a "whole collection" entry, a filtered deck and the default deck included; from a Browse selection the list is the selection alone;
 - switching the format to collection package and back keeps Include media and Support older Anki versions as set (X4.3).
+
+## X7. Collection file import and export in two steps (2026-11-19)
+
+Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`, `collection.import` and `settings.importExport`; `docs/design/native-interface-contract.md` N17.2 and N17.3). Where X3, X4.4, `package/container#P16.4`'s first two sentences and `package/file-export` E1 and E4 differ, this section wins. It changes only what the interface shows and in which order. The inspection, the safety backup, the replacement, its recovery, the export's snapshot and contents, and every refusal are unchanged. Media is never a separate choice: a collection import and a collection export always carry the media with the cards.
+
+### X7.1 Import: the file picker first
+
+- Every entry that imports a collection file (`package/file-intake#K1`'s pickers, the welcome screen's Import a Collection File) opens the system file picker at once, on the window that asked. No sheet, explanation or Choose File step comes before it. A file that arrives by a drop or by Open in Meguri skips the picker and continues at the next item.
+- Cancelling the picker ends the flow with nothing read and nothing changed.
+- A chosen collection package is inspected (`package/container#P16.1`) while one sheet shows that the file is being read, with Cancel. A file the inspection refuses gives one plain message that says nothing was changed, with a way to choose another file (X1, X3's fourth item).
+- A deck package chosen in the same picker goes to X2's sheet; X7 does not change it.
+
+### X7.2 Import: one confirmation
+
+After the inspection the same sheet is the one confirmation. It shows, and only this:
+
+| Element | Content | Shown |
+|---|---|---|
+| file name | the chosen file's name, as the question "Import “<file name>”?" | always |
+| summary | one line with three counts from the inspection: notes · cards · media files, each with plural forms (X1) | always |
+| consequence | one line that the collection on this device is replaced and that Meguri keeps a backup of the current one | only when a collection is replaced |
+| actions | Import and Cancel | always |
+
+| State (`package/file-intake#K6`) | Consequence line |
+|---|---|
+| `Ready` | shown: the collection is replaced as a whole after its backup (`package/backup-triggers#T6.1`, T6.2) |
+| `NoCollection` | none: there is nothing to replace and no backup is taken |
+| `Failed` (the open failed) | shown, with the same words: the copy of the unopened collection's files (T7) is the backup it names (spec-writer choice, 2026-11-19: one wording for both replacing states) |
+
+- **X3's button rule stands.** When a collection is replaced (`Ready`, `Failed`), Import has the destructive role and is never the default: Return confirms nothing and Esc cancels. With `NoCollection`, Import is the default action.
+- Not required in the interface any more: the total decoded media size, the statements that media is merged and that old media is kept, the destination, the validated-file and decoded-byte rows, and the per-phase media counts during an ordinary import or after an ordinary cancel. The review count need not be in the line; it is in the summary's accessibility value. Where the interface still shows a line about merged media, it must stay true to `package/container#P16.2`.
+- Still required: the confirmation is bound to the inspected file (a changed or replaced file needs a new inspection); after Import, progress with Cancel while cancelling is safe (`package/container#P16.3`'s phases), no Cancel from `Committing` on; a result that is not success keeps its message and the receipts the user must keep (the backup, a retained media reference, a state that needs recovery), which appear only then; success lands on Home as X3 says, and the publication choice follows as X3 says (`sync/cloudkit-recovery#V12.2`; through V27.4's sheet once V27 is approved).
+- Refused while a review session is open, as before (X3).
+
+### X7.3 Export: prepare, then the save dialog
+
+For Export Collection (`package/file-export` E1: Settings › Collection, File › Export… where it exports the collection, Settings › Backups' export):
+
+- Choosing Export Collection starts the export job at once (`package/file-export` E2). No explanation, Prepare step or option comes first: the export is the whole collection with its media in the latest format (E1, E7). The sheet shows that the export is being prepared, with a progress bar from E2's stages (indeterminate while a stage has no total) and Cancel.
+- When the artifact is Ready the system save dialog opens at once: the save panel on Mac, the Files export on touch (`package/file-export` E4). No Ready to Save step, Choose Save Location button or count summary comes between.
+- **Cancel at either step discards the prepared file.** Cancel while preparing cancels the job and removes its output (E5). Cancel in the save dialog removes the Ready artifact and closes the sheet; it is not kept for a later retry. The sheet's own Cancel is disabled while the save dialog shows and while the destination is being written.
+- A finished save closes the sheet with no "Saved" step. The artifact is removed when E4 and E5 allow it (the provider has its own copy or every provider read has ended); closing the sheet never removes a file a provider still reads.
+- A save that fails keeps the sheet with one message, a way to choose another location, and Cancel. The artifact is kept for that retry only (E4) and removed on Cancel.
+- No route leaves a prepared file, or a provider's hold on it, behind a closed sheet. An artifact left by a killed app is removed when the next export starts, under E5's proof rule.
+- That media is included is said where the export is offered (the Collection section's footer), which meets E1's "show that media is included before creation".
+- X4.1 to X4.3's format list, scope list and options belong to the deck package export (a deck's menu, a Browse selection). This decision does not cover them, and X7.3 gives the collection export none of them: Include media is always on for it, and Support older Anki versions is not offered (E1: no legacy format). Spec-writer reading, 2026-11-19, open to the owner's correction.
+
+### X7.4 Tests
+
+Added to X6: each import entry point opens the picker with no sheet before it; the confirmation's three elements for `Ready`, `NoCollection` and `Failed`, with no consequence line for `NoCollection`; no size, merge or kept-media text is required; Return confirms nothing while a collection is replaced and confirms with `NoCollection`; a refused file's message offers another file. Export: the job starts on the row's activation; the save dialog opens when the artifact is Ready; Cancel while preparing and Cancel in the save dialog each leave no artifact and no lease; a failed save keeps the artifact until Cancel; a finished save closes the sheet.

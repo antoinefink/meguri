@@ -575,6 +575,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 - The preset's stored fields for showing the timer and stopping it on the answer stay in the collection untouched, for other Anki clients. The app's review bridge no longer reads them.
 - Answer time is still measured and saved with each answer, up to the preset's maximum answer seconds.
 - Replaces: R364's on-screen timer in N11.1 and N13.3.
+- Specs aligned 2026-11-19: `review/timers` T2 and `review/reviewer-strings` S17 are removed, and Deck Options shows neither timer option (`sched/deck-options` O3).
 
 ## N17. Round 5 editor and file transfer decisions (2026-11-19)
 
@@ -592,6 +593,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`,
 - Mac: the trailing panel keeps its title bar. Deck and Type are a grouped form; under it each field has its name in a leading, right-aligned column beside its box. ⌘↩ adds.
 - The next draft loads into the page that is already showing, so on touch the keyboard stays up and the caret is in the first field. A hold refuses input without taking focus from the field.
 - Not built, and why: Return in the Mac's last field does not add, because `editor/field-html` H4 gives Return to the field (a new line). The confirmation has no card count and no Undo (`editor/add-flow` A5 step 6 names both). Changing type keeps the deck; `editor/config-keys` K4.2's deck for the type is not read yet.
+- Specs aligned 2026-11-19: `editor/add-flow` A5.1 now gives the disabled Add, the refused add's line and the "Added to <deck>" confirmation with no count and no Undo; `editor/field-html` F1 gives the one HTML control. The "Not built" notes above on the confirmation therefore no longer name a difference from the spec; Return in the last field and K4.2 stand as written.
 - Replaces, in `screen-inventory.yaml`'s `editor.add`: Type before Deck as text rows, "Empty: … Add enabled" and the "1 card added" toast wording. Replaces, in `editor/field-html` F1: a separate mode button on every field.
 
 ### N17.2 Importing a collection file
@@ -603,6 +605,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`,
 - After Import the sheet shows "Importing…" with Cancel while cancelling is safe, then closes on success. Nothing in the import changed: inspection, the safety backup and recovery run as before.
 - A refused file shows one plain message with Choose Another File. Recovery states keep their message and the receipts the person must keep (backup, retained media reference); those rows appear only there.
 - Removed from the interface: the explanation sheet with Choose File, the Collection Preview header, the Destination, Validated media files and Decoded media bytes rows, the two paragraphs, the media plan rows during progress and after an ordinary cancel, and the "Replace Collection" label.
+- Specs aligned 2026-11-19: `package/transfer-sheets` X7 states this flow, and `package/container` P16.4 no longer requires the decoded size or the merged and kept media statements in the interface. The footnote line above is therefore optional; the merge itself is unchanged.
 - `package/transfer-sheets` X3 wins over the sketch for the button: when a collection is replaced, Import has the destructive role and is not the default, so Return confirms nothing. With no collection to replace, Import is the prominent default action.
 
 ### N17.3 Exporting the collection
@@ -613,6 +616,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`,
 - Settings › Collection: the footer under the Export row reads "Export saves all decks, cards, review history and media in one file." The export's contents did not change.
 - Removed: Prepare Export, Choose Save Location, Discard Prepared Export, Done, "Ready to Save" and the explanation paragraphs.
 - Replaces: N9's "Keep the current pre-export explanation" and the prepared file that outlived its sheet.
+- Specs aligned 2026-11-19: `package/transfer-sheets` X7.3, with `package/file-export` E1 and E4.
 
 ## N18. Round 4 first-run decisions (2026-11-19)
 

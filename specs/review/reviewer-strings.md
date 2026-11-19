@@ -5,7 +5,7 @@ Requirements: R78, R86, R184, R185, R241, R339, R349, R351, R362, R363, R364, R3
 Anki: 26.09.3 for S3 to S9 (the wording, plural forms and triggers of Anki desktop's reviewer, congratulations page and unbury dialog, except the differences S11 lists) and for the English values only of S13 and S14 (the reviewer's answer bar and the Forget dialog's two toggles); none for S8.1's link, S10, S15 to S19, the keys, S13's spoken forms and where S13 and S14 show their strings
 Scenarios: conformance/scenarios/review/ (none recorded yet, S12)
 
-The text the review screen shows besides the card: toasts, the timebox prompt, Auto Advance reminders, the congratulations notices, the unbury choices, the grade names and Show Answer, the Forget choices, the notices of a refused or failed answer, the reasons undo is unavailable, the timer's capped state, the menu titles, and the titles and labels of the dialogs and panels over the review. U175, U177, U178, U179, U182, U183, U185, U186 and U187 take every such string only from this file (KTD1). U155's finished state (`decks/deck-list#H5.2`, S8.1) and U157's summary reuse S8 and S9 for the same facts. U153's toasts and U159's Edit menu take their undo and redo titles from S5.
+The text the review screen shows besides the card: toasts, the timebox prompt, Auto Advance reminders, the congratulations notices, the unbury choices, the grade names and Show Answer, the Forget choices, the notices of a refused or failed answer, the reasons undo is unavailable, the menu titles, and the titles and labels of the dialogs and panels over the review. U175, U177, U178, U179, U182, U183, U185, U186 and U187 take every such string only from this file (KTD1). U155's finished state (`decks/deck-list#H5.2`, S8.1) and U157's summary reuse S8 and S9 for the same facts. U153's toasts and U159's Edit menu take their undo and redo titles from S5.
 
 ## S1. Keys, arguments and plurals
 
@@ -201,7 +201,7 @@ The oracle runs the collection library, not Anki's UI, so the text itself is che
 | `AnswerButtonsTests` (U178) | S13: the four grade names in their fixed order; Show Answer as the button with and without an assistive technology, as the menu command and as the accessibility action; the interval taken from `sched/answer-labels` and never from the catalog; the accessibility label examples, `.one` only for the amount `1` (`1.5` uses `.other`), `less than` for a `<` label, `(end)` spoken as it is; the Voice Control input labels |
 | `ForgetDialogModelTests` (U183) | S14: both labels, their order, and each toggle's starting value from its config key; S19's Forget title and button |
 | `AnswerPathTests` (U175) | S15: `review.toast.cardChanged` for `Stale` and `NotAtHead` while the refused card is presented, and for a `CommitFailed` whose error is the `Stale` precondition; none when the card is no longer presented; `review.banner.commitFailed` for every other `CommitFailed` |
-| `OnScreenTimerTests` (U177) | S17: the capped accessibility value while `capped` is true, and the plain value otherwise |
+| `OnScreenTimerTests` (U177) | removed 2026-11-19 with S17; the string lint checks that `review.timer.capped` is absent from the catalog |
 | `ReviewMoreMenuTests` (U182) | S18: every title, in R374's order, the same in the ⋯ menu, the context menu and the Mac Card menu; the U+2026 and U+2212 characters |
 | `SetDueDateDialogModelTests` (U183) | S19: the Set Due Date title, prompt, hint and button; `Malformed` and `TooLarge` mapped to their messages, no message for `Empty` |
 | `ReviewPanelHostTests` (U183) | S19: the Current / Previous labels and the Deck Options title with the home deck's name (a filtered deck's card names its original deck) |
@@ -279,13 +279,9 @@ Meguri's wording; Anki has neither notice (S11).
 - Every M3 reason has a text. A reason added to M3 later needs a key here before the app can show it.
 - Anki has no such texts: its Undo item is only disabled.
 
-## S17. On-screen timer (R364)
+## S17. On-screen timer (Removed 2026-11-19)
 
-| Key | English | Used for |
-|---|---|---|
-| `review.timer.capped` | `%@, limit reached` | the timer's accessibility value while it is capped (`review/timers#T2`, `capped` true); `%@` is the accessibility value the timer has when it is not capped |
-
-- Meguri's wording; Anki only colours the capped value. The visible cue that does not rely on colour is the design contract's (T2).
+Removed with `review/timers#T2` (Antoine, 2026-11-19): Meguri has no on-screen timer. The key `review.timer.capped` is withdrawn: it is not in the String Catalog, no view names it, and the key is not reused. S17 holds no other key.
 
 ## S18. Menu titles (R339, R374, R376, R378)
 
