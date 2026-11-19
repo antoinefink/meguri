@@ -314,7 +314,7 @@ async fn stateless_requests_preserve_ids_reject_batches_and_unknown_notification
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let error: Value = response.json().await.unwrap();
     assert_eq!(error["error"]["code"], -32022);
-    assert_eq!(error["error"]["data"], json!({"supported":SUPPORTED_REVISIONS,"requested":"unsupported"}));
+    assert_eq!(error["error"]["data"], json!({"supported":SUPPORTED_REVISIONS,"requested":"unsupported","reason":"unsupported_version"}));
     let response = r.request(SUPPORTED_REVISIONS[1], "generated-fixture-a")
         .json(&json!([body("ping", json!({}))])).send().await.unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -360,12 +360,224 @@ async fn legacy_initialize_negotiates_only_its_proposal_and_rejects_old_calls() 
         assert_eq!(response.status(),StatusCode::BAD_REQUEST);
         let error=response.json::<Value>().await.unwrap();
         assert_eq!(error["error"]["code"],-32022);
-        assert_eq!(error["error"]["data"],json!({"supported":SUPPORTED_REVISIONS,"requested":"2024-11-05"}));
+        assert_eq!(error["error"]["data"],json!({"supported":SUPPORTED_REVISIONS,"requested":"2024-11-05","reason":"unsupported_version"}));
     }
     // After a lower proposal, both currently supported lanes remain usable.
     for revision in SUPPORTED_REVISIONS {
         let result=rpc(&r,revision,"generated-fixture-a","tools/list",json!({})).await;
         assert_eq!(result["result"]["tools"].as_array().unwrap().len(),4);
     }
+    r.stop().await;
+}
+
+#[tokio::test]
+async fn actionable_validation_preserves_http_rpc_codes_and_id_without_dispatch() {
+    let r = Running::start().await;
+    for revision in SUPPORTED_REVISIONS {
+        for (name, arguments, reason, message) in [
+            ("search_notes", json!({"limit":20}), "missing_filter",
+                "Provide query, deck_id or tag to search notes, or provide note_id alone for an exact lookup."),
+            ("search_notes", json!({"note_id":"1","query":"generated-private-filter","cursor":"generated-private-cursor"}),
+                "exact_id_combination", ValidationError::ExactIdCombination.message()),
+            ("search_notes", json!({"query":"generated-private-filter","limit":51}),
+                "invalid_pagination", ValidationError::Page.message()),
+            ("search_notes", json!({"note_id":123}), "invalid_arguments", ValidationError::Arguments.message()),
+            ("list_decks_and_note_types", json!({"kind":"generated-private-kind"}),
+                "invalid_catalog_kind", ValidationError::CatalogKind.message()),
+            ("create_note", json!({"deck_id":"0","note_type_id":"1","fields":{}}),
+                "invalid_create", ValidationError::Create.message()),
+            ("create_note", json!({"deck_id":"1","note_type_id":"1","fields":[]}),
+                "invalid_arguments", ValidationError::Arguments.message()),
+            ("edit_note", json!({"note_id":"1","revision":"generated-private-revision"}),
+                "missing_change", ValidationError::NoChange.message()),
+            ("edit_note", json!({"note_id":"0","revision":"generated-private-revision","fields":{}}),
+                "invalid_edit", ValidationError::Edit.message()),
+        ] {
+            let response = rpc(&r, revision, "generated-fixture-a", "tools/call", json!({"name":name,"arguments":arguments})).await;
+            assert_eq!(response["id"], 7);
+            assert_eq!(response["error"]["code"], -32602);
+            assert_eq!(response["error"]["data"]["reason"], reason);
+            assert_eq!(response["error"]["message"], message);
+            assert!(response.get("result").is_none());
+            assert!(!response.to_string().contains("generated-private"));
+        }
+    }
+    let response = r.request(SUPPORTED_REVISIONS[1], "generated-fixture-a")
+        .header("content-type", "application/json").body("{").send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error = response.json::<Value>().await.unwrap();
+    assert_eq!(error["error"]["code"], -32700);
+    assert_eq!(error["error"]["data"]["reason"], "invalid_json");
+    assert!(r.fixture.calls.lock().unwrap().is_empty());
+    r.stop().await;
+}
+
+#[test]
+fn tool_error_messages_are_mirrored_and_busy_alone_promises_retry_without_a_write() {
+    for (failure, code) in [
+        (ToolFailure::NotFound, "not_found"), (ToolFailure::Conflict, "conflict"),
+        (ToolFailure::InvalidInput, "invalid_input"), (ToolFailure::ResultTooLarge, "result_too_large"),
+        (ToolFailure::UnsupportedCollection, "unsupported_collection"), (ToolFailure::Busy, "busy"),
+        (ToolFailure::Internal, "internal_error"),
+    ] {
+        let value = json!({"result":tool_result(failure.value(), true)});
+        let error = &value["result"]["structuredContent"]["error"];
+        assert_eq!(error["code"], code);
+        assert!(!error["message"].as_str().unwrap().is_empty());
+        assert_eq!(value["result"]["isError"], true);
+        same_content(&value);
+        if failure == ToolFailure::Busy {
+            assert_eq!(error["retryable"], true);
+            assert_eq!(error["retry_after_ms"], 1000);
+            assert_eq!(error["write_committed"], false);
+        } else {
+            for key in ["retryable", "retry_after_ms", "write_committed"] { assert!(error.get(key).is_none()); }
+        }
+    }
+    assert_ne!(ToolFailure::Internal.value(), ToolFailure::UnsupportedCollection.value());
+}
+
+#[test]
+fn typed_terminal_diagnostics_distinguish_http_success_errors_and_challenges_at_all_levels() {
+    use crate::config::LogLevel;
+    let invalid = body("tools/call", json!({"name":"search_notes","arguments":{"limit":20}}));
+    let bytes = serde_json::to_vec(&invalid).unwrap();
+    let response = wire::validate(&axum::http::HeaderMap::new(), invalid, &bytes).err().unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.extensions().get::<Diagnostic>().unwrap().outcome,
+        Outcome::InvalidParameters(ValidationError::MissingFilter));
+    for (response, expected) in [
+        (authorization_response(StatusCode::OK.into_response(), AuthorizationDecision::StepUp), Outcome::StepUp),
+        (authorization_response(StatusCode::UNAUTHORIZED.into_response(), AuthorizationDecision::Challenge), Outcome::Challenge),
+        (authorization_response(StatusCode::SERVICE_UNAVAILABLE.into_response(), AuthorizationDecision::Unavailable), Outcome::Internal),
+        (authorization_outcome(StatusCode::OK.into_response(), Stage::Authorization, DiagnosticOperation::Edit), Outcome::StepUp),
+        (authorization_outcome(StatusCode::FORBIDDEN.into_response(), Stage::Dispatch, DiagnosticOperation::Edit), Outcome::Challenge),
+        (internal_error(Value::Null), Outcome::Internal),
+    ] { assert_eq!(response.extensions().get::<Diagnostic>().unwrap().outcome, expected); }
+    for (outcome, label) in [
+        (Outcome::Success, "success"),
+        (Outcome::InvalidParameters(ValidationError::MissingFilter), "invalid_parameters"),
+        (Outcome::ToolError(ToolFailure::Conflict), "tool_error"),
+        (Outcome::StepUp, "step_up"), (Outcome::Challenge, "challenge"),
+        (Outcome::Internal, "failure"),
+    ] {
+        let diagnostic = Diagnostic { stage:Stage::Dispatch, operation:DiagnosticOperation::Edit, outcome };
+        assert!(diagnostic.record(LogLevel::Off, StatusCode::OK, 17).is_none());
+        assert_eq!(diagnostic.record(LogLevel::Info, StatusCode::OK, 17).is_none(), outcome == Outcome::Success);
+        let debug = diagnostic.record(LogLevel::Debug, StatusCode::OK, 17).unwrap();
+        assert!(debug.contains(&format!("outcome={label}")));
+        assert!(debug.contains("operation=edit_note status=200"));
+        assert!(debug.ends_with("elapsed_ms=17"));
+        if let Some(info) = diagnostic.record(LogLevel::Info, StatusCode::OK, 17) { assert!(!info.contains("elapsed_ms")); }
+    }
+    for request in [
+        json!({"method":"generated-private-method","id":"generated-private-id","params":{"name":"generated-private-tool"}}),
+        json!({"method":"tools/call","id":"generated-private-id","params":{"name":"generated-private-tool","arguments":{"tag":"generated-private-tag"}}}),
+    ] {
+        let diagnostic = Diagnostic { stage:Stage::Protocol, operation:DiagnosticOperation::classify(&request),
+            outcome:Outcome::InvalidParameters(ValidationError::Arguments) };
+        let record = diagnostic.record(LogLevel::Debug, StatusCode::OK, 0).unwrap();
+        assert!(record.contains("operation=unknown"));
+        assert!(!record.contains("generated-private"));
+    }
+    for reason in [TransportFailure::Origin, TransportFailure::Method, TransportFailure::ContentType,
+        TransportFailure::Shutdown, TransportFailure::Busy, TransportFailure::BodyLimit,
+        TransportFailure::BodyRead, TransportFailure::BodyTimeout] {
+        let response = transport_error(StatusCode::SERVICE_UNAVAILABLE, reason);
+        assert_eq!(response.extensions().get::<Diagnostic>().unwrap().outcome, Outcome::Transport(reason));
+    }
+}
+
+#[tokio::test]
+async fn prepared_dispatch_carries_success_and_tool_failure_without_consuming_response_ownership() {
+    const CHILD: &str = "MEGURI_MCP_DIAGNOSTIC_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "mcp_transport::tests::prepared_dispatch_carries_success_and_tool_failure_without_consuming_response_ownership"])
+            .env(CHILD, "1").output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        let records: Vec<_> = stderr.lines().filter(|line| line.starts_with("mcp_response_ready ")).collect();
+        assert_eq!(records.len(), 3, "{stderr}");
+        for (record, operation, outcome) in [
+            (records[0], "search_notes", "success reason=none"),
+            (records[1], "edit_note", "tool_error reason=conflict"),
+            (records[2], "create_note", "success reason=none"),
+        ] {
+            assert!(record.contains(&format!("stage=dispatch operation={operation} status=200 outcome={outcome}")));
+            assert!(record.rsplit_once("elapsed_ms=").unwrap().1.parse::<u128>().unwrap() >= 17);
+        }
+        assert!(!stderr.contains("generated-"));
+        return;
+    }
+    let r = Running::start().await;
+    let state = Arc::new(State {
+        origin:"https://mcp-fixture.invalid".into(), log_level:crate::config::LogLevel::Debug,
+        authorizer:r.fixture.clone(), backend:r.fixture.clone(), admission:r.control.0.clone(),
+    });
+    let diagnostic_request = |name: &str, arguments: Value, lease: Arc<Lease>| {
+        let value = body("tools/call", json!({"name":name,"arguments":arguments}));
+        let operation = DiagnosticOperation::classify(&value);
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let dispatch = wire::validate(&axum::http::HeaderMap::new(), value, &bytes).ok().unwrap();
+        let mut request = Request::new(Body::empty());
+        request.extensions_mut().insert(RequestAuthority { authority:FixtureAuthority("a"), dispatch, _lease:lease });
+        request.extensions_mut().insert(DiagnosticContext {
+            started:std::time::Instant::now() - Duration::from_millis(17), operation,
+        });
+        request
+    };
+    for (name, arguments, expected) in [
+        ("search_notes", json!({"note_id":"9007199254740993"}), Outcome::Success),
+        ("edit_note", json!({"note_id":"1","revision":"generated-stale","fields":{}}), Outcome::ToolError(ToolFailure::Conflict)),
+    ] {
+        let lease = Arc::new(Lease { _permit:r.control.0.slots.clone().try_acquire_owned().unwrap() });
+        let response = dispatch(AxumState(state.clone()), diagnostic_request(name, arguments, lease.clone())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.extensions().get::<Diagnostic>().unwrap().outcome, expected);
+        let retained = retain(response, Body::empty(), Some(lease), state.clone());
+        assert_eq!(r.control.0.slots.available_permits(), CAPACITY - 1);
+        assert_eq!(retained.extensions().get::<Diagnostic>().unwrap().outcome, expected);
+        assert!(retained.extensions().get::<DiagnosticEmitted>().is_some());
+        // The outside middleware sees the same marker after synchronous retention.
+        emit_diagnostic(state.log_level, std::time::Instant::now(), &retained);
+        drop(retained);
+        assert_eq!(r.control.0.slots.available_permits(), CAPACITY);
+    }
+    let lease = Arc::new(Lease { _permit:r.control.0.slots.clone().try_acquire_owned().unwrap() });
+    let request = diagnostic_request("create_note", json!({"deck_id":"1", "note_type_id":"1",
+        "fields":{"Front":"generated"}}), lease);
+    let mut caller = Box::pin(dispatch(AxumState(state.clone()), request));
+    // On this current-thread runtime, poll only far enough to spawn the worker.
+    poll_fn(|cx| {
+        assert!(std::future::Future::poll(caller.as_mut(), cx).is_pending());
+        Poll::Ready(())
+    }).await;
+    assert_eq!(r.fixture.calls.lock().unwrap().len(), 2);
+    drop(caller);
+    tokio::time::timeout(Duration::from_secs(5), r.control.idle()).await.unwrap();
+    assert_eq!(r.fixture.calls.lock().unwrap().last(), Some(&("a", "create_note")));
+    drop(state);
+    r.stop().await;
+}
+
+#[tokio::test]
+async fn transport_rejections_keep_busy_retry_and_body_boundary() {
+    let r = Running::start().await;
+    let permits = r.control.0.slots.clone().acquire_many_owned(CAPACITY as u32).await.unwrap();
+    let response = r.message(SUPPORTED_REVISIONS[1], "generated-fixture-a", "ping", json!({})).send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()["retry-after"], "1");
+    assert_eq!(response.text().await.unwrap(), TransportFailure::Busy.message());
+    drop(permits);
+    let response = r.request(SUPPORTED_REVISIONS[1], "generated-fixture-a")
+        .header("content-type", "text/plain").body("generated-private-body").send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(response.text().await.unwrap(), TransportFailure::ContentType.message());
+    let mut at_limit = Body::from(vec![b' '; MAX_REQUEST_BYTES]);
+    assert_eq!(read(&mut at_limit).await.unwrap().len(), MAX_REQUEST_BYTES);
+    let mut over_limit = Body::from(vec![b' '; MAX_REQUEST_BYTES + 1]);
+    assert_eq!(read(&mut over_limit).await.unwrap_err(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(r.fixture.calls.lock().unwrap().is_empty());
     r.stop().await;
 }

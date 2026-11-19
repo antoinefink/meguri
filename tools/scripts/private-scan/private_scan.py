@@ -840,15 +840,19 @@ PUBLIC_ARTIFACTS = {
     'server/tests/mcp_oauth.rs':
         'f86fc4956ddf11a21b42432345dad9211890be57ea97f9531d4ad08fe882704f',
     'server/src/mcp_service/transport.rs':
-        '7481f58597155c7531c5679487fcead2f8b039b4ced23d0fb78258e3727fb8ec',
+        '6c0fed2e3865fbdf02cd4faa84340fc70e8b888f3834cd64529ade113705bab9',
     'server/src/mcp_service/authority_tests.rs':
         '838db9c2d104b449d041dce05dda4fc44f5d5f6b9e5fc7828c868c4c58b16e2d',
     'server/src/mcp_transport/backend.rs':
-        '3a7192b670af868ce26f82b52748d53ce19b9df88c3824a3f0629d120bffa872',
+        '3632c2986b074bfcce7243302242f3d5ed504c9735e6e8aa676b57082a4f9643',
+    'server/src/mcp_transport/diagnostics.rs':
+        '3e03a73d427f6d33145db2ded9a456c7e28f500dd725f780ce5bcfd998d57bda',
+    'server/src/mcp_transport/inputs.rs':
+        '170b1cf74ccb75c963e9350399af64521729fc77e11009f4ff7cfdaf1c1bdcac',
     'server/src/mcp_transport/mod.rs':
-        'c79902eaf9eca1d7449a3d938e495f20bcb415b53afb3c421f80b9c3c4d9bd09',
+        '6b852054131da7a1bf66c372461188d278cd6647c0117a1fde22e774f410b30b',
     'server/src/mcp_transport/tests.rs':
-        '7867fe6cc86ff4e597702fee81222018be3aa557e0d3d9b01cb7daeec00e95a2',
+        '8d70b80220be300bab08739d2bc2bdfdf79e274f9dc6b1d833d3ada4ae5d546a',
     'server/src/collection/mcp/tests.rs':
         '78ee3ea5c3baaeac36c969d1d284165afba8651aeba1301ad8119cdebd0e7ccd',
     'server/src/collection/mcp/tests/size_scaling.rs':

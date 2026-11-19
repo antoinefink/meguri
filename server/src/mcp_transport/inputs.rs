@@ -5,6 +5,45 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
+/// Public validation reasons and messages contain no request-derived text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValidationError {
+    Json, Envelope, Parameters, Version, HeaderMismatch, Method,
+    Arguments, MissingFilter, ExactIdCombination, Page, Search, CatalogKind, Create, Edit, NoChange,
+}
+impl ValidationError {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Json => "invalid_json", Self::Envelope => "invalid_envelope",
+            Self::Parameters => "invalid_parameters", Self::Version => "unsupported_version",
+            Self::HeaderMismatch => "protocol_header_mismatch", Self::Method => "unsupported_method",
+            Self::Arguments => "invalid_arguments", Self::MissingFilter => "missing_filter",
+            Self::ExactIdCombination => "exact_id_combination", Self::Page => "invalid_pagination",
+            Self::Search => "invalid_search", Self::CatalogKind => "invalid_catalog_kind",
+            Self::Create => "invalid_create", Self::Edit => "invalid_edit", Self::NoChange => "missing_change",
+        }
+    }
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Json => "Send one valid JSON object with no duplicate members and within the structure limits.",
+            Self::Envelope => "Send a JSON-RPC 2.0 request object with a supported method and a string or integer id.",
+            Self::Parameters => "Use the published parameters for this MCP method.",
+            Self::Version => "Use one of the supported MCP protocol versions.",
+            Self::HeaderMismatch => "Make the MCP protocol, method and tool headers agree with the request metadata.",
+            Self::Method => "Use a supported MCP method. To list tools, call tools/list.",
+            Self::Arguments => "Use the tool's published argument names and types. Omit optional values instead of sending null.",
+            Self::MissingFilter => "Provide query, deck_id or tag to search notes, or provide note_id alone for an exact lookup.",
+            Self::ExactIdCombination => "Use note_id alone, without filters, limit or cursor.",
+            Self::Page => "Use a limit from 1 to 50 and a cursor within the published size limit.",
+            Self::Search => "Use positive decimal string IDs and search text within the published size limits.",
+            Self::CatalogKind => "Use kind all, deck or note_type, or omit kind.",
+            Self::Create => "Provide deck_id and note_type_id as positive decimal strings, with fields and tags within the published limits.",
+            Self::Edit => "Provide note_id as a positive decimal string. Use the revision returned for that note. Keep fields and tags within the published limits.",
+            Self::NoChange => "Provide fields, add_tags or remove_tags to edit the note.",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SearchNotes {
@@ -77,44 +116,51 @@ fn page(limit: Option<u32>, cursor: &Option<String>) -> bool {
 }
 
 /// The byte-level preflight must run first: a Value cannot retain duplicate keys.
-pub fn parse(name: &str, arguments: Map<String, Value>) -> Result<ToolCall, ()> {
+pub fn parse(name: &str, arguments: Map<String, Value>) -> Result<ToolCall, ValidationError> {
+    use ValidationError as V;
     // Optional does not admit explicit null: published schemas require real values.
-    if arguments.values().any(Value::is_null) { return Err(()); }
+    if arguments.values().any(Value::is_null) { return Err(V::Arguments); }
     let value = Value::Object(arguments);
     let call = match name {
         "search_notes" => {
-            let v: SearchNotes = serde_json::from_value(value).map_err(|_| ())?;
+            let v: SearchNotes = serde_json::from_value(value).map_err(|_| V::Arguments)?;
             let filters = v.query.is_some() || v.deck_id.is_some() || v.tag.is_some();
-            if !page(v.limit, &v.cursor)
-                || v.query.as_ref().is_some_and(|v| !string(v, MAX_FILTER_BYTES))
+            if v.note_id.is_some() && (filters || v.limit.is_some() || v.cursor.is_some()) {
+                return Err(V::ExactIdCombination);
+            }
+            if v.note_id.is_none() && !filters { return Err(V::MissingFilter); }
+            if !page(v.limit, &v.cursor) { return Err(V::Page); }
+            if v.query.as_ref().is_some_and(|v| !string(v, MAX_FILTER_BYTES))
                 || v.tag.as_ref().is_some_and(|v| !string(v, MAX_FILTER_BYTES))
                 || v.deck_id.as_ref().is_some_and(|v| !id(v))
                 || v.note_id.as_ref().is_some_and(|v| !id(v))
-                || if v.note_id.is_some() { filters || v.limit.is_some() || v.cursor.is_some() } else { !filters }
-            { return Err(()); }
+            { return Err(V::Search); }
             ToolCall::SearchNotes(v)
         }
         "list_decks_and_note_types" => {
-            let v: ListCatalog = serde_json::from_value(value).map_err(|_| ())?;
-            if !page(v.limit, &v.cursor) { return Err(()); }
+            if value.get("kind").is_some_and(|v| !matches!(v.as_str(), Some("all" | "deck" | "note_type"))) {
+                return Err(V::CatalogKind);
+            }
+            let v: ListCatalog = serde_json::from_value(value).map_err(|_| V::Arguments)?;
+            if !page(v.limit, &v.cursor) { return Err(V::Page); }
             ToolCall::ListDecksAndNoteTypes(v)
         }
         "create_note" => {
-            let v: CreateNote = serde_json::from_value(value).map_err(|_| ())?;
-            if !id(&v.deck_id) || !id(&v.note_type_id) || !fields(&v.fields) || !tags(&v.tags) { return Err(()); }
+            let v: CreateNote = serde_json::from_value(value).map_err(|_| V::Arguments)?;
+            if !id(&v.deck_id) || !id(&v.note_type_id) || !fields(&v.fields) || !tags(&v.tags) { return Err(V::Create); }
             ToolCall::CreateNote(v)
         }
         "edit_note" => {
-            let v: EditNote = serde_json::from_value(value).map_err(|_| ())?;
+            let v: EditNote = serde_json::from_value(value).map_err(|_| V::Arguments)?;
+            if v.fields.is_none() && v.add_tags.is_none() && v.remove_tags.is_none() { return Err(V::NoChange); }
             if !id(&v.note_id) || !string(&v.revision, MAX_HANDLE_BYTES)
-                || (v.fields.is_none() && v.add_tags.is_none() && v.remove_tags.is_none())
                 || v.fields.as_ref().is_some_and(|v| !fields(v))
-                || !tags(&v.add_tags) || !tags(&v.remove_tags) { return Err(()); }
+                || !tags(&v.add_tags) || !tags(&v.remove_tags) { return Err(V::Edit); }
             // Case-folding/canonical tag overlap requires the collection's tag
             // rules; the backend rejects it before mutation, under its authority.
             ToolCall::EditNote(v)
         }
-        _ => return Err(()),
+        _ => return Err(V::Arguments),
     };
     Ok(call)
 }

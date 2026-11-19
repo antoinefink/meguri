@@ -99,7 +99,7 @@ impl ToolOutput {
 
 /// Fixed public outcomes prevent SQL, collection text or bearer material from
 /// entering protocol errors. Busy certifies that no write committed.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolFailure {
     NotFound,
     Conflict,
@@ -107,17 +107,31 @@ pub enum ToolFailure {
     ResultTooLarge,
     UnsupportedCollection,
     Busy,
+    Internal,
 }
 impl ToolFailure {
-    pub(super) fn value(self) -> serde_json::Value {
-        let code = match self {
+    pub(super) fn code(self) -> &'static str {
+        match self {
             Self::NotFound => "not_found", Self::Conflict => "conflict",
             Self::InvalidInput => "invalid_input", Self::ResultTooLarge => "result_too_large",
             Self::UnsupportedCollection => "unsupported_collection", Self::Busy => "busy",
+            Self::Internal => "internal_error",
+        }
+    }
+    pub(super) fn value(self) -> serde_json::Value {
+        let code = self.code();
+        let message = match self {
+            Self::NotFound => "The note was not found. Search for the note again before editing.",
+            Self::Conflict => "The note, layout or collection changed. Restart the search or list, or fetch the current note before editing.",
+            Self::InvalidInput => "Check the tool arguments against the published schema and fetch current IDs or revisions when needed.",
+            Self::ResultTooLarge => "The data exceeds the tool's size limit. Send less content, narrow the search or request a smaller page.",
+            Self::UnsupportedCollection => "This collection is not supported for this operation. Use a supported collection.",
+            Self::Busy => "The collection is busy. The write did not commit. Retry after one second.",
+            Self::Internal => "The operation could not be completed. Check the current collection state before deciding whether to try again.",
         };
         if matches!(self, Self::Busy) {
-            serde_json::json!({"error":{"code":code, "retryable":true, "retry_after_ms":1000,
+            serde_json::json!({"error":{"code":code, "message":message, "retryable":true, "retry_after_ms":1000,
                 "write_committed":false}})
-        } else { serde_json::json!({"error":{"code":code}}) }
+        } else { serde_json::json!({"error":{"code":code, "message":message}}) }
     }
 }

@@ -2,7 +2,7 @@
 //! Application-owned transport seams; protocol metadata never selects authority.
 use super::*;
 use crate::mcp_transport::{self as transport, Access, AuthorizationRequest, BoxFuture,
-    DispatchFailure, ToolCall, ToolFailure, ToolOutput};
+    DispatchFailure, ToolCall, ToolFailure, ToolOutput, AuthorizationDecision};
 use axum::{http::HeaderMap, response::{IntoResponse, Response}};
 use serde_json::json;
 
@@ -22,7 +22,8 @@ fn bearer(headers: &HeaderMap) -> std::result::Result<&str, oauth::BearerFailure
 impl McpService {
     fn denial(&self, failure: oauth::BearerFailure, write: bool) -> Response {
         let challenge = self.service.mcp_challenge(failure, write);
-        (challenge.status, [("www-authenticate", challenge.value)]).into_response()
+        transport::authorization_response(
+            (challenge.status, [("www-authenticate", challenge.value)]).into_response(), AuthorizationDecision::Challenge)
     }
 }
 impl transport::Authorizer<oauth::Authority> for McpService {
@@ -36,7 +37,8 @@ impl transport::Authorizer<oauth::Authority> for McpService {
             let authority = self.service.mcp_authority(token, false).await
                 .map_err(|error| match error.code {
                     "invalid_token" => self.denial(oauth::BearerFailure::Invalid, write),
-                    _ => axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response(),
+                    _ => transport::authorization_response(axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response(),
+                        AuthorizationDecision::Unavailable),
                 })?;
             if write && !authority.can_write() {
                 if authority.client_id() == "https://chatgpt.com/oauth/client.json"
@@ -50,8 +52,8 @@ impl transport::Authorizer<oauth::Authority> for McpService {
                         result["resultType"] = json!("complete");
                         result["_meta"]["io.modelcontextprotocol/protocolVersion"] = json!(transport::SUPPORTED_REVISIONS[0]);
                     }
-                    return Err(axum::Json(json!({"jsonrpc":"2.0","id":request.rpc_id,
-                        "result":result})).into_response());
+                    return Err(transport::authorization_response(axum::Json(json!({"jsonrpc":"2.0","id":request.rpc_id,
+                        "result":result})).into_response(), AuthorizationDecision::StepUp));
                 }
                 return Err(self.denial(oauth::BearerFailure::InsufficientScope, true));
             }
@@ -66,8 +68,9 @@ fn failure(error: Error) -> ToolFailure {
         "invalid_input" => ToolFailure::InvalidInput,
         "result_too_large" => ToolFailure::ResultTooLarge,
         "busy" => ToolFailure::Busy,
+        "unsupported_collection" => ToolFailure::UnsupportedCollection,
         // Never reclassify unknown/storage/post-commit failures as retryable.
-        _ => ToolFailure::UnsupportedCollection,
+        _ => ToolFailure::Internal,
     }
 }
 impl McpService {
@@ -128,7 +131,10 @@ mod tests {
     #[test]
     fn busy_mapping_stays_distinct_from_storage_failure() {
         assert!(matches!(failure(mcp::busy()),ToolFailure::Busy));
-        assert!(matches!(failure(Error::new("storage_unavailable")),ToolFailure::UnsupportedCollection));
+        assert!(matches!(failure(Error::new("unsupported_collection")),ToolFailure::UnsupportedCollection));
+        for code in ["storage_unavailable", "generated_unknown_fault"] {
+            assert!(matches!(failure(Error::new(code)),ToolFailure::Internal));
+        }
     }
     #[test]
     fn bearer_is_single_exact_and_has_no_cookie_fallback() {

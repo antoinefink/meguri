@@ -124,12 +124,20 @@ tools/mg sync-server-local start
 Remove the private password file after recovery. Keep failed MG evidence. This
 workflow does not publish, deploy, upgrade, back up or restore a service.
 
-Native collection diagnostics are opt-in for `serve` through
+Native collection and MCP diagnostics are opt-in for `serve` through
 `MEGURI_SYNC_LOG_LEVEL=off|info|debug` (default `off`). Only these exact lowercase
 values are accepted; empty, whitespace, unknown and non-Unicode values fail
 before opening storage with `validation_failed field=log_level`. Administrative
 commands ignore this setting. Compose passes the same environment variable into
 the container; it is read at process startup and is not stored in the instance.
+
+For MCP, `off` emits nothing and `info` records failures and rejections.
+`debug` emits one `mcp_response_ready` record per prepared MCP response.
+Records contain a fixed stage, operation or tool name, HTTP status, outcome
+and reason. Debug records also include elapsed milliseconds. HTTP 200
+success, invalid parameters, tool errors and permission requests have
+distinct outcomes. Each record describes response preparation. MCP diagnostics never include request values,
+IDs, headers, paths, credentials, collection content or internal error text.
 
 For an existing instance whose pinned image includes this option, enable it and
 restart through the existing lifecycle commands (the volume is retained):
@@ -148,7 +156,7 @@ environment does not change the running process. To disable, set
 `MEGURI_SYNC_LOG_LEVEL=off` and repeat stop/start. These commands reuse the pinned
 image; building a new image alone does not upgrade an existing instance.
 
-`info` emits only native collection milestones and fixed failure codes. Milestones
+For native collection sync, `info` emits milestones and fixed failure codes. Milestones
 are `meta_response_ready`, `upload_published`, `download_snapshot_ready` and
 `normal_committed`, plus the existing sanity comparison as `match` or `mismatch`.
 `debug` emits one request completion line for each allowlisted collection method,

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 //! Tools-only wire validation. No identity is inferred from protocol metadata.
-use super::{SUPPORTED_REVISIONS, ToolCall, descriptors, inputs, rpc_error};
+use super::{SUPPORTED_REVISIONS, ToolCall, descriptors, inputs, rpc_error, diagnostics::{Diagnostic, Stage, Outcome}};
 use axum::{http::{HeaderMap, StatusCode}, response::{IntoResponse, Response}};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Map, Value, json};
+use inputs::ValidationError as V;
 
 pub(super) const VERSION: &str = "io.modelcontextprotocol/protocolVersion";
 pub(super) const CLIENT_INFO: &str = "io.modelcontextprotocol/clientInfo";
@@ -56,21 +57,22 @@ fn decoded_name(value: &str) -> Result<String, ()> {
     } else { Ok(value.to_owned()) }
 }
 fn unsupported_version(id: Value, requested: &str) -> Response {
-    (StatusCode::BAD_REQUEST, axum::Json(json!({
+    let response = (StatusCode::BAD_REQUEST, axum::Json(json!({
         "jsonrpc":"2.0", "id":id,
-        "error":{"code":-32022, "message":"Unsupported protocol version",
-            "data":{"supported":SUPPORTED_REVISIONS,"requested":requested}}
-    }))).into_response()
+        "error":{"code":-32022, "message":V::Version.message(),
+            "data":{"supported":SUPPORTED_REVISIONS,"requested":requested,"reason":V::Version.reason()}}
+    }))).into_response();
+    Diagnostic::new(Stage::Protocol, Outcome::Protocol(V::Version)).attach(response)
 }
 
 pub(super) fn validate(headers: &HeaderMap, value: Value, bytes: &[u8]) -> Result<Dispatch, Response> {
     let object = value.as_object().ok_or_else(||
-        rpc_error(StatusCode::BAD_REQUEST, Value::Null, -32600, "Invalid request"))?;
+        rpc_error(StatusCode::BAD_REQUEST, Value::Null, -32600, V::Envelope))?;
     let id = object.get("id").filter(|v| v.is_string() || v.as_i64().is_some()
         || v.as_u64().is_some()).cloned().unwrap_or(Value::Null);
-    let invalid = || rpc_error(StatusCode::BAD_REQUEST, id.clone(), -32600, "Invalid request");
-    let mismatch = || rpc_error(StatusCode::BAD_REQUEST, id.clone(), -32020, "Protocol header mismatch");
-    let params_error = || rpc_error(StatusCode::OK, id.clone(), -32602, "Invalid parameters");
+    let invalid = || rpc_error(StatusCode::BAD_REQUEST, id.clone(), -32600, V::Envelope);
+    let mismatch = || rpc_error(StatusCode::BAD_REQUEST, id.clone(), -32020, V::HeaderMismatch);
+    let params_error = || rpc_error(StatusCode::OK, id.clone(), -32602, V::Parameters);
     if !members(object, &["jsonrpc", "id", "method", "params"])
         || object.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
         || (object.contains_key("id") && id.is_null()) { return Err(invalid()); }
@@ -144,15 +146,17 @@ pub(super) fn validate(headers: &HeaderMap, value: Value, bytes: &[u8]) -> Resul
             if descriptors::access(name).is_none() { return Err(params_error()); }
             // Parse original argument bytes before transport map conversion.
             // The bounded JSON preflight has also rejected nested duplicates.
-            backend_arguments(bytes, name).map_err(|_| params_error())?;
+            let raw_validation = backend_arguments(bytes, name);
             let arguments = match params.get("arguments") {
                 Some(v) => v.as_object().ok_or_else(params_error)?.clone(),
                 None => Map::new(),
             };
-            let call = inputs::parse(name, arguments).map_err(|_| params_error())?;
+            let call = inputs::parse(name, arguments).map_err(|reason|
+                rpc_error(StatusCode::OK, id.clone(), -32602, reason))?;
+            raw_validation.map_err(|_| rpc_error(StatusCode::OK, id.clone(), -32602, V::Arguments))?;
             Operation::Call { name:name.to_owned(), call }
         }
-        _ => return Err(rpc_error(StatusCode::NOT_FOUND, id, -32601, "Method not found")),
+        _ => return Err(rpc_error(StatusCode::NOT_FOUND, id, -32601, V::Method)),
     };
     if id.is_null() && !matches!(operation, Operation::Initialized) { return Err(invalid()); }
     Ok(Dispatch { id, modern, operation })
