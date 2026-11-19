@@ -42,8 +42,11 @@ struct ReviewTerminalContent: View {
                         .foregroundStyle(.token(.textSecondary))
                 }
                 .multilineTextAlignment(.center)
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(.isHeader)
+                // One element with its own label: a combined element's text is
+                // a label on touch but a value on the Mac.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("\(Text(summary.cards, format: .number)), \(Self.caption(summary, locale: locale))"))
+                .reviewStateHeading()
                 .accessibilityIdentifier("review.session.summary")
                 ReviewStateActions { actions }
             }

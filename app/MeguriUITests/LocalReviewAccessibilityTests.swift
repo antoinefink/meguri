@@ -96,6 +96,36 @@ final class LocalReviewAccessibilityTests: XCTestCase {
         }
     }
 
+    /// N16.5: the end of a session with both actions, from its fixed route
+    /// (the live fixture never has learning cards ready again at its end).
+    func testSessionEndWithKeepGoingAtEveryTextSizeAndAppearance() throws {
+        let suppressions = try AuditSuppressions.bundled()
+        var results: [AccessibilityAudit.StateResult] = []
+        #if !os(macOS)
+        let appearance = XCUIDevice.shared.appearance
+        defer { XCUIDevice.shared.appearance = appearance }
+        #endif
+        for variant in AccessibilityAudit.Variant.all {
+            variant.apply()
+            let app = XCUIApplication()
+            app.launchArguments = MeguriLaunch(locale: "en_US", animations: false,
+                route: "review/congratulations/ready-to-continue", extra: variant.launchArguments).arguments
+            app.launch()
+            defer { app.terminate() }
+            addTeardownBlock { @MainActor in app.terminate() }
+            try require(element(app, "review.session.done"), "Done, \(variant)")
+            try require(element(app, "review.session.continue"), "Keep Going, \(variant)")
+            try require(element(app, "review.session.summary"), "summary, \(variant)")
+            results.append(try audit(app, variant: variant, suppressions: suppressions))
+        }
+        XCTAssertEqual(results.count, AccessibilityAudit.Variant.all.count)
+        add(AccessibilityAudit.screenReport("review.congratulations", states: results))
+        for state in results {
+            AccessibilityAudit.assertClean(state.findings)
+            TouchTargets.assertMet(state.touchTargets)
+        }
+    }
+
     private func audit(_ app: XCUIApplication, variant: AccessibilityAudit.Variant,
                        suppressions: [AuditSuppression]) throws -> AccessibilityAudit.StateResult {
         let findings = try AccessibilityAudit.run(app, variant: variant.description, suppressions: suppressions)

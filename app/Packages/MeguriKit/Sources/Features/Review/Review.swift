@@ -314,7 +314,7 @@ struct ReviewStateMessage<Actions: View>: View {
         VStack(spacing: Spacing.large) {
             VStack(spacing: Spacing.xSmall) {
                 title.font(.title2.bold()).foregroundStyle(.token(.textPrimary))
-                    .accessibilityAddTraits(.isHeader)
+                    .reviewStateHeading()
                 message?.foregroundStyle(.token(.textSecondary))
             }
             .multilineTextAlignment(.center)
@@ -328,15 +328,16 @@ extension ReviewStateMessage where Actions == EmptyView {
     init(title: Text, message: Text? = nil) { self.init(title: title, message: message) { EmptyView() } }
 }
 
-/// State actions side by side, stacked when they do not fit: standard
-/// bordered buttons with a full touch target.
+/// State actions side by side, stacked at the accessibility text sizes:
+/// standard bordered buttons with a full touch target. One copy of each
+/// button: under ViewThatFits the Dynamic Type audit fails them (N14.3).
 struct ReviewStateActions<Content: View>: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ViewBuilder let content: () -> Content
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Spacing.small) { content() }
-            VStack(spacing: Spacing.small) { content() }
-        }
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: Spacing.small)) : AnyLayout(HStackLayout(spacing: Spacing.small))
+        layout { content() }
         .buttonStyle(.bordered)
         #if !os(macOS)
         .controlSize(.large)
@@ -356,6 +357,16 @@ extension Text {
     }
 }
 extension View {
+    /// A heading on touch. On the Mac the trait turns the text into a heading
+    /// element, which is no longer a static text: tests and scripts that
+    /// look the title up as text would miss it, so it stays plain text there.
+    func reviewStateHeading() -> some View {
+        #if os(macOS)
+        self
+        #else
+        accessibilityAddTraits(.isHeader)
+        #endif
+    }
     /// The Mac's standard button is shorter than the minimum pointer target.
     func reviewStateTarget() -> some View {
         #if os(macOS)
