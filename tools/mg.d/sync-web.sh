@@ -296,9 +296,27 @@ mg_sync_web__fixture_cleanup() {
   return "$rc"
 }
 
+mg_sync_web__verify_counts() {
+  local frontend="$1" counts key value
+  # Revalidate the child's TAP-validated report; build/install steps earn no tests.
+  counts="$(jq -n --slurpfile frontend "$frontend/test-counts.json" \
+      --slurpfile browser "$MG_RUN_DIR/test-counts.json" '
+    {frontend:$frontend[0], browser:$browser[0]} |
+    select(all(.[]; .errors == [] and .counts.total > 0 and
+      .counts.total == .counts.completed and .counts.total == .counts.passed))
+  ')" || return 1
+  [ -n "$counts" ] || return 1
+  mg_detail test_groups "$counts"
+  mg_artifact json "$frontend/test-counts.json" "Frontend child counts bound to retained TAP"
+  counts="$(jq -c '[.[].counts | to_entries[]] | group_by(.key) |
+      map({key:.[0].key,value:(map(.value)|add)}) | from_entries' <<<"$counts")" || return 1
+  while IFS=$'\t' read -r key value; do mg_count "$key" "$value"; done \
+    < <(jq -r 'to_entries[] | [.key,.value] | @tsv' <<<"$counts")
+}
+
 # Same-shell body: return to the owner for checked cleanup on every outcome.
 mg_sync_web__verify_body() {
-  local name="$1" owner="$2" image="$3" binary_dir="$4" frontend="$5" cid binary_hash counts key value
+  local name="$1" owner="$2" image="$3" binary_dir="$4" frontend="$5" cid binary_hash
   docker create --init --read-only --cap-drop ALL --security-opt no-new-privileges --user 0:0 \
       --name "$name" --label "meguri.mg.run-id=$MG_RUN_ID" --label "meguri.sync.owner=$owner" \
       --network none --tmpfs /tmp:noexec --tmpfs /work:exec \
@@ -352,20 +370,7 @@ mg_sync_web__verify_body() {
   ' || return 1
   mg_artifact directory "$MG_RUN_DIR/fixture" "Fresh synthetic HTTPS readiness and actual binary/assets identity"
   mg_sync_web__browser "$MG_RUN_DIR/fixture" "$cid" "$image" || return 1
-  # Revalidate the child's TAP-validated report; build/install steps earn no tests.
-  counts="$(jq -n --slurpfile frontend "$frontend/test-counts.json" \
-      --slurpfile browser "$MG_RUN_DIR/test-counts.json" '
-    {frontend:$frontend[0], browser:$browser[0]} |
-    select(all(.[]; .errors == [] and .counts.total > 0 and
-      .counts.total == .counts.completed and .counts.total == .counts.passed))
-  ')" || return 1
-  [ -n "$counts" ] || return 1
-  mg_detail test_groups "$counts"
-  mg_artifact json "$frontend/test-counts.json" "Frontend child counts bound to retained TAP"
-  counts="$(jq -c '[.[].counts | to_entries[]] | group_by(.key) |
-      map({key:.[0].key,value:(map(.value)|add)}) | from_entries' <<<"$counts")" || return 1
-  while IFS=$'\t' read -r key value; do mg_count "$key" "$value"; done \
-    < <(jq -r 'to_entries[] | [.key,.value] | @tsv' <<<"$counts")
+  mg_sync_web__verify_counts "$frontend" || return 1
 }
 
 mg_sync_web_verify() {
@@ -577,20 +582,5 @@ PY
   mg_sync_server__remove_container "$name" "$owner" || rc=1
   mg_sync_package__stop || rc=1
   if [ "$rc" -ne 0 ]; then mg_sync_web__failure "Exact-image full browser journey or checked cleanup failed"; return 1; fi
-  jq -ne --slurpfile frontend "$frontend/test-counts.json" --slurpfile browser "$MG_RUN_DIR/test-counts.json" '
-    $frontend[0].errors==[] and $frontend[0].counts.total==9 and $frontend[0].counts.passed==9 and
-    $browser[0].errors==[] and $browser[0].counts.total==1 and $browser[0].counts.passed==1' >/dev/null || return 1
-  local screenshot screenshot_file
-  for screenshot in accounts-narrow accounts-wide anonymous-login-wide \
-    collection-member-320 collection-member-390 connection-admin-320 connection-admin-390 \
-    connection-member-320 connection-member-390 connection-wide invite-conflict-narrow \
-    invite-narrow password-settings-narrow reset-wide setup-wide; do
-    screenshot_file="$MG_RUN_DIR/browser-artifacts/$screenshot.png"
-    if [ -L "$screenshot_file" ] || [ ! -f "$screenshot_file" ] || [ ! -s "$screenshot_file" ]; then
-      mg_sync_web__failure "Missing audited browser screenshot: $screenshot.png"
-      return 1
-    fi
-  done
-  mg_detail test_groups "$(jq -nc --slurpfile frontend "$frontend/test-counts.json" --slurpfile browser "$MG_RUN_DIR/test-counts.json" '{frontend:$frontend[0],browser:$browser[0]}')"
-  mg_count total 10; mg_count passed 10; mg_count completed 10; mg_count selected 10
+  mg_sync_web__verify_counts "$frontend" || return 1
 }

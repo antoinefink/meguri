@@ -837,7 +837,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '8c73e1d4285cfc433b641dd0b1185ed7fb16e29b8a965ded115c9512c127f205',
+        'a712130b7db6600e3434f5473ba719d5c54d4d30b364c673fca743e60e44467f',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1032,7 +1032,7 @@ PUBLIC_ARTIFACTS = {
     'tools/gate/tiers.yaml':
         '9d5a1f79a08e96ac1699a4d7d1ba3ebb2c44a47d53ff1f5c1cda53c58c6c7d35',
     'tools/mg.d/sync-web.sh':
-        'ef5c3c4caa1ee5a6417fb6246cc7d0ed243cb40d98acfd1a0595ffbeaf6515d5',
+        '5eac87b061115351ba2287844f0c26425e20d1619c254ca573cf501ce1621914',
     'server/web/THIRD_PARTY_NOTICES.txt':
         '793118f2c4b41d07e802a9d465a3eb7424d68add574e1bf7695580e539e15ab9',
     'server/web/src/IBMPlexSans-Variable.woff2':

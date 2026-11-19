@@ -42,7 +42,7 @@ Starting commit `97146fc1fe28e9a9bed4b96fcd9fe3eb8b07a195`. Package smoke
 native seed/check phases. Its full exact-image browser child
 `sync-web-verify/20261119T091831Z-89015` passed the journey, then the
 receipt check refused fifteen audited screenshots because it expected
-nine. The package check now requires each named nonempty regular file.
+nine. The first fix required each named nonempty regular file.
 Verified the fifteen names against the retained exact-image captures.
 Independent reviewer `registry_review` reviewed the complete tooling
 export `cleanroom/20261119T092120Z-6816` and the final symlink guard.
@@ -52,3 +52,21 @@ The first packaging attempt with the revised wrapper
 `sync-server-package-test/20261119T092531Z-35737` stopped at the
 frontend build-control audit. The assessment now binds the exact
 revised wrapper bytes.
+
+## Release-check simplification
+
+The Playwright audit awaits screenshot writes directly to the retained
+output directory. At Antoine's request, the packaging wrapper relies on
+those writes and shares the existing report validation with the fixture
+lane. The two lanes report the actual passing test totals from the
+validated reports. The separate screenshot inventory and fixed test
+totals are removed.
+
+Starting commit `89935a9e7`. Filtered export
+`cleanroom/20261119T093457Z-88457`. Independent reviewer `registry_review`
+verified these complete public files.
+
+| File | SHA-256 |
+| --- | --- |
+| `tools/mg.d/sync-web.sh` | `5eac87b061115351ba2287844f0c26425e20d1619c254ca573cf501ce1621914` |
+| `server/web/scripts/audit-assessment.json` | `a712130b7db6600e3434f5473ba719d5c54d4d30b364c673fca743e60e44467f` |

@@ -285,8 +285,8 @@
         "sha256": "8ae4752a6c3951f74a376ab363517fbd18a788c6fd2d098423d19fca6a177a22"
       },
       "tools/mg.d/sync-web.sh": {
-        "bytes": 35187,
-        "sha256": "ef5c3c4caa1ee5a6417fb6246cc7d0ed243cb40d98acfd1a0595ffbeaf6515d5"
+        "bytes": 34117,
+        "sha256": "5eac87b061115351ba2287844f0c26425e20d1619c254ca573cf501ce1621914"
       }
     }
   },
