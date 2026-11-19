@@ -4,7 +4,7 @@ Spec: sync/meguri-provider
 Requirements: Antoine's explicit 2026-11-16 two-service decision; existing-unit mapping in docs/process/review-log/meguri-provider-contract-20261116.md#implementation-mapping
 Anki: none (original Meguri provider policy)
 Scenarios: none (focused and cross-layer acceptance in docs/process/review-log/meguri-provider-contract-20261116.md#follow-on-acceptance)
-Status: Reviewed for implementation 2026-11-16 (delegated decision; MP1–MP5). MP6 (2026-11-19, Antoine's round 2 decisions) and the lines that begin "Changed 2026-11-19 (MP6" in MP1 to MP5 are not reviewed; do not implement them until the contract review of MP6 is recorded here.
+Status: Reviewed for implementation 2026-11-16 (delegated decision; MP1–MP5). MP6 (2026-11-19, Antoine's round 2 decisions) and the lines that begin "Changed 2026-11-19 (MP6" in MP1 to MP5 are approved for implementation 2026-11-19 by Antoine after an independent review in three passes (`docs/process/review-log/redesign-specs-20261119.md`).
 Review: docs/process/review-log/meguri-provider-contract-20261116.md#contract-review
 
 Antoine explicitly requested iCloud Sync and Meguri Sync using Meguri's own server on 2026-11-16. Root adopted MP1–MP5 after independent contract review and closure of the media-exclusion finding. This is delegated routine implementation authority, not technical acceptance or owner approval of every detailed clause. It changes no existing CloudKit record/recovery wire contract and does not authorize legacy Anki transfers or AnkiWeb work.

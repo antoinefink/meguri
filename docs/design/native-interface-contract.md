@@ -445,7 +445,7 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 
 ## N15. Round 2 Settings and sync decisions (2026-11-19)
 
-Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`: `settings.root`, `settings.accountSync`, `sync.connect`, `sync.status`, `sync.serviceSwitch`). Where earlier text differs, this section wins. The behaviour is `sync/policy` P25, `sync/cloudkit-recovery` V27 and `sync/meguri-provider` MP6; all text is `sync/status-strings` T19. Those spec sections are under review; this section is built when they are approved. The points raised for the owner are in P25.6, V27.9 and MP6.8; two of them (no device backup of a replaced iCloud collection, and Cancel removing the Meguri Sync sign-in) were decided on 2026-11-19 and are marked there.
+Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`: `settings.root`, `settings.accountSync`, `sync.connect`, `sync.status`, `sync.serviceSwitch`). Where earlier text differs, this section wins. The behaviour is `sync/policy` P25, `sync/cloudkit-recovery` V27 and `sync/meguri-provider` MP6; all text is `sync/status-strings` T19. Those spec sections were approved on 2026-11-19 (`docs/process/review-log/redesign-specs-20261119.md`). The points raised for the owner are in P25.6, V27.9 and MP6.8; two of them (no device backup of a replaced iCloud collection, and Cancel removing the Meguri Sync sign-in) were decided on 2026-11-19 and are marked there.
 
 ### N15.1 Settings page
 
@@ -651,5 +651,5 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsShee
 - String Catalog keys (decided 2026-11-19 (review F12)): `onboarding.welcome.title`, `onboarding.welcome.message`, and for each choice its title and explanation: `onboarding.welcome.sync.title`, `.sync.detail`, `onboarding.welcome.import.title`, `.import.detail`, `onboarding.welcome.startEmpty.title`, `.startEmpty.detail`. The explanation lines are accepted as specified.
 - Identifiers: `onboarding.welcome.sync`, `onboarding.welcome.import`, `onboarding.welcome.startEmpty`. `onboarding.welcome.connect` is retired.
 - Mac: Meguri › Settings… and Quit stay available. On iPhone and iPad Settings is not reachable from the welcome screen except through Set Up Sync's sheet.
-- Not decided here: N15 is built when its spec sections are approved. Until then Set Up Sync opens the sync settings that exist.
+- Until N15 is built, Set Up Sync opens the sync settings that exist.
 - Replaces: R157's and R1591's "Connect to iCloud" as the first choice and its disabled state with a reason line; the `onboarding.welcome` screen contract's three buttons, its prominent style rules and its line about private iCloud; the empty state's separate sync buttons. `sync/status-strings` T12's `sync.connect.action` is no longer shown here (T19.8).

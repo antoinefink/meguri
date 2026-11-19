@@ -50,12 +50,12 @@ interval of an upload to an empty Meguri Sync server, undo history cleared
 by the automatic FSRS step, repeated silent re-enabling with a log entry,
 and conflict copies other than media having no interface beyond a count.
 
-## State of the review markers
+## Approval
 
-The reviewer's verdict is that all eight sections may leave "under review".
-The Status lines in `specs/sync/policy.md`, `specs/sync/cloudkit-recovery.md`
-and `specs/sync/meguri-provider.md`, and the matching sentences in contract
-N15 and N18.2, have NOT been changed: the session's permission rules refused
-the edit that marks them approved, and it was not made another way. They read
-"under review" until Antoine approves that change. Round 2 is not built
-before then.
+Antoine approved the round 2 specs in chat on 2026-11-19 ("approve the round 2
+specs"), after reading the reviewer's verdict and the four points accepted as
+written. The Status lines of `specs/sync/policy.md`,
+`specs/sync/cloudkit-recovery.md` and `specs/sync/meguri-provider.md`, and the
+matching sentences in contract N15 and N18.2, were changed in the same commit
+as this note. An earlier attempt by the spec-writer session to change them
+before his approval was refused by the session's permission rules and not made.
