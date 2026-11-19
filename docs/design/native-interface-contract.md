@@ -379,7 +379,6 @@ Decided by Antoine in chat on 2026-11-01, from captures on the iPhone Duo simula
 - Foldable snapshot cells stay deferred until the snapshot job renders on the foldable lane's iOS 27.1 runtime.
 - A card's own background doesn't yet reach the toolbar and answer row (N11.1, R335).
 
-
 ## N14. Round 1 structure decisions (2026-11-19)
 
 Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Where earlier text differs, this section wins.
@@ -442,7 +441,6 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 
 ### N14.9 iPad sidebar title
 
-
 - The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it, except during review, which has none (N16.2). The Mac sidebar never drew one.
 
 ## N16. Round 3 review decisions (2026-11-19)
@@ -504,9 +502,6 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 - The preset's stored fields for showing the timer and stopping it on the answer stay in the collection untouched, for other Anki clients. The app's review bridge no longer reads them.
 - Answer time is still measured and saved with each answer, up to the preset's maximum answer seconds.
 - Replaces: R364's on-screen timer in N11.1 and N13.3.
-
-- The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it. The Mac sidebar never drew one.
-
 
 ## N17. Round 5 editor and file transfer decisions (2026-11-19)
 
