@@ -276,3 +276,12 @@ The parent reports physical OS ENOSPC proof PASS 1/1 in
 The earlier `035005` attempt observed zero ENOSPC events and is not passing
 ENOSPC evidence. The private 16 MiB mount and 32 MiB maximum fill fixture,
 existing assertions, locks and all other source are unchanged by this fixer.
+
+## Collection MCP card positions
+
+The server pins `rand` 0.9.4 with defaults disabled and `std_rng` enabled to
+match `notes/deck-placement-and-position#P4`. The seed is the stored position
+counter. OAuth and collection secrets still use the existing OS randomness
+path. `sync-server-deps/20261119T151112Z-72539` records the locked graph,
+advisory check and package notices for this change. The MCP adapter uses the
+existing HTTP stack. Its SDK trial was rejected by the dependency audit.

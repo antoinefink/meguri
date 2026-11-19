@@ -21,12 +21,19 @@ pub fn derive_values(stored: &str, sort_field_index: usize) -> DerivedNoteValues
     let normalized: Vec<String> = fields(stored).map(|field| {
         field.chars().filter(|c| !c.is_ascii_control() || matches!(*c, '\t' | '\n')).collect()
     }).collect();
-    let first = comparison_text(&normalized[0]);
-    let sort_field = normalized.get(sort_field_index).map(|s| comparison_text(s)).unwrap_or_default();
+    derive_saved_values(&normalized.join("\u{1f}"), sort_field_index)
+}
+
+/// C7 patches preserve omitted field bytes; derive columns from that saved text
+/// without applying sync-ingest normalization to the complete note again.
+pub(super) fn derive_saved_values(stored: &str, sort_field_index: usize) -> DerivedNoteValues {
+    let values: Vec<_> = fields(stored).collect();
+    let first = comparison_text(values[0]);
+    let sort_field = values.get(sort_field_index).map(|s| comparison_text(s)).unwrap_or_default();
     // RustCrypto owns the primitive. This legacy checksum is not authentication.
     let digest = Sha1::digest(first.as_bytes());
     let checksum = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]);
-    DerivedNoteValues { fields: normalized.join("\u{1f}"), sort_field, checksum }
+    DerivedNoteValues { fields: stored.to_owned(), sort_field, checksum }
 }
 
 fn comparison_text(field: &str) -> String {

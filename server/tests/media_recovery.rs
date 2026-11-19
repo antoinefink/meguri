@@ -236,7 +236,8 @@ async fn offline_v1_migration_preserves_existing_credentials_collections_and_unk
     let root=meguri_sync_server::DataRoot::acquire(&path,false).unwrap();
     // Restore the pre-media metadata shape in this stopped synthetic fixture.
     let c=rusqlite::Connection::open(root.database()).unwrap();
-    c.execute_batch("DROP TRIGGER deletion_id_reserved; DROP TRIGGER reservation_retained; DROP TABLE account_deletions;
+    c.execute_batch("DROP TABLE oauth_tokens; DROP TABLE oauth_codes; DROP TABLE oauth_pending; DROP TABLE oauth_grants;
+DROP TRIGGER deletion_id_reserved; DROP TRIGGER reservation_retained; DROP TABLE account_deletions;
 CREATE TRIGGER reservation_retained BEFORE DELETE ON provisioning_reservations BEGIN SELECT RAISE(ABORT,'retained reservation'); END;
 DROP TABLE media_names; DROP TABLE media_blobs; ALTER TABLE accounts DROP COLUMN media_usn; PRAGMA user_version=1;").unwrap();drop(c);
     let unknown=account.join("media/operator-kept");std::fs::write(&unknown,b"unknown preserved bytes").unwrap();
@@ -277,7 +278,8 @@ async fn process_kill_before_media_migration_commit_preserves_v1_and_restarts_mi
     // Restore only this stopped synthetic fixture's pre-media schema. Its real
     // credentials, provisioning proofs, collection and unknown media survive.
     let db = rusqlite::Connection::open(root.database()).unwrap();
-    db.execute_batch("DROP TRIGGER deletion_id_reserved; DROP TRIGGER reservation_retained; DROP TABLE account_deletions;
+    db.execute_batch("DROP TABLE oauth_tokens; DROP TABLE oauth_codes; DROP TABLE oauth_pending; DROP TABLE oauth_grants;
+DROP TRIGGER deletion_id_reserved; DROP TRIGGER reservation_retained; DROP TABLE account_deletions;
 CREATE TRIGGER reservation_retained BEFORE DELETE ON provisioning_reservations BEGIN SELECT RAISE(ABORT,'retained reservation'); END;
 DROP TABLE media_names; DROP TABLE media_blobs; ALTER TABLE accounts DROP COLUMN media_usn; PRAGMA user_version=1;").unwrap();
     drop(db);
@@ -337,7 +339,7 @@ DROP TABLE media_names; DROP TABLE media_blobs; ALTER TABLE accounts DROP COLUMN
     let root = meguri_sync_server::DataRoot::acquire(&path, false).unwrap();
     root.check_initialized().unwrap();
     let db = rusqlite::Connection::open_with_flags(root.database(), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-    assert_eq!(db.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0)).unwrap(), 3);
+    assert_eq!(db.pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0)).unwrap(), 4);
     assert_eq!(db.query_row("SELECT count(*) FROM pragma_table_info('accounts') WHERE name='media_usn'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
     assert_eq!(db.query_row("SELECT media_usn FROM accounts WHERE id=?1", [id], |r| r.get::<_, i64>(0)).unwrap(), 1);
     drop(db);

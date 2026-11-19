@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pub(crate) mod ingress;
+mod oauth;
 #[cfg(test)]
 mod tests;
 
@@ -185,7 +186,16 @@ async fn authority(service: &Service, headers: &HeaderMap) -> Result<BrowserAuth
 }
 
 pub fn router(service: Arc<Service>) -> Router {
-    Router::new().fallback(handle).with_state(service)
+    mounted_router(service).0
+}
+fn mounted_router(service: Arc<Service>) -> (Router, crate::mcp_transport::Control) {
+    let bridge = Arc::new(crate::mcp_service::McpService::new(service.clone()));
+    let (mcp, control) = crate::mcp_transport::router(&service.config, bridge.clone(), bridge);
+    let router = Router::new().fallback(handle).with_state(service).merge(mcp)
+        .layer(axum::middleware::from_fn(|request: Request, next: axum::middleware::Next| async move {
+            secure(next.run(request).await)
+        }));
+    (router, control)
 }
 /// Closing admission wakes unfinished body readers before graceful shutdown.
 /// Never time out/drop the server future: accepted workers and response bodies
@@ -197,33 +207,41 @@ pub async fn serve(
 ) -> std::io::Result<()> {
     let owner = service.clone();
     let stopping = service.clone();
+    let (router, mcp) = mounted_router(service);
+    let stopping_mcp = mcp.clone();
     let result = axum::serve(
         listener,
-        router(service).into_make_service_with_connect_info::<SocketAddr>(),
+        router.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
         shutdown.await;
+        stopping_mcp.close();
         stopping.browser_ingress.close();
         stopping.native_ingress.close();
     })
     .await;
+    mcp.close();
     owner.browser_ingress.close();
     owner.native_ingress.close();
     owner.browser_ingress.idle().await;
     owner.native_ingress.idle().await;
+    mcp.idle().await;
     result
 }
 async fn handle(State(service): State<Arc<Service>>, request: Request) -> Response {
     if request.uri().path().starts_with("/sync/") || request.uri().path().starts_with("/msync/") {
         return secure(crate::protocol::handle(service, request).await);
     }
-    let browser = request.uri().path().starts_with("/api/");
+    let browser_api = request.uri().path().starts_with("/api/");
+    let oauth_route = oauth::route(request.uri().path());
+    let browser = browser_api || oauth_route;
     let exempt = request.method() == Method::GET && request.uri().path() == "/api/status";
     let (parts, body) = request.into_parts();
     // Keep the incoming receiver alive until the closing response is finished.
     // Dropping it on a refusal could enable HTTP/1 background unread-body drain.
     let response = if browser {
-        let early = if !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS) {
+        let early = if (browser_api && !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS))
+            || (oauth_route && parts.headers.contains_key("origin")) {
             origin(&parts.headers, &service)
         } else {
             Ok(())
@@ -311,6 +329,9 @@ async fn dispatch_browser(
     body: &mut Body,
     deadline: tokio::time::Instant,
 ) -> Result<Response> {
+    if oauth::route(parts.uri.path()) {
+        return oauth::dispatch(service, parts, body, deadline).await;
+    }
     if parts.uri.query().is_some() {
         return Err(Error::new("invalid_request"));
     }
@@ -337,10 +358,15 @@ fn mutation(path: &str) -> bool {
             | "/api/password"
             | "/api/admin/invitations"
             | "/api/resets/claim"
+            | "/api/mcp/authorization/preview"
+            | "/api/mcp/authorization/read"
+            | "/api/mcp/authorization/decide"
     ) || path
         .strip_prefix("/api/admin/accounts/")
         .and_then(|s| s.split_once('/'))
         .is_some_and(|(id, action)| !id.is_empty() && matches!(action, "reset" | "disable" | "delete"))
+        || path.strip_prefix("/api/me/mcp-grants/").and_then(|s| s.split_once('/'))
+            .is_some_and(|(id, action)| !id.is_empty() && action == "revoke")
 }
 async fn dispatch(
     service: &Service,
@@ -388,6 +414,10 @@ async fn dispatch(
                 let a = authority(service, &parts.headers).await?;
                 Ok(data(serde_json::json!(service.own_storage(a).await?), false))
             }
+            "/api/me/mcp-grants" => {
+                let a = authority(service, &parts.headers).await?;
+                Ok(data(service.oauth_grants(a).await?, false))
+            }
             "/api/admin/accounts" => {
                 let a = authority(service, &parts.headers).await?;
                 Ok(data(
@@ -410,6 +440,23 @@ async fn dispatch(
     let (ip, _https) = effective_peer(&parts.headers, socket, service);
     let bytes = bytes.ok_or(Error::new("invalid_request"))?;
     match path {
+        "/api/mcp/authorization/preview" => {
+            let body: crate::accounts::oauth::ReadRequest = parse(bytes)?;
+            service.attempts.capability(ip, &body.request)?;
+            Ok(data(service.oauth_consent_preview(&body.request).await?, false))
+        }
+        "/api/mcp/authorization/read" => {
+            let body: crate::accounts::oauth::ReadRequest = parse(bytes)?;
+            service.attempts.capability(ip, &body.request)?;
+            let a = authority(service, &parts.headers).await?;
+            Ok(data(service.oauth_consent_read(a, &body.request).await?, false))
+        }
+        "/api/mcp/authorization/decide" => {
+            let body: crate::accounts::oauth::DecisionRequest = parse(bytes)?;
+            service.attempts.capability(ip, &body.request)?;
+            let a = authority(service, &parts.headers).await?;
+            Ok(data(serde_json::json!({"redirect_to":service.oauth_consent_decide(a, &body.request, &body.decision).await?}), false))
+        }
         "/api/setup" | "/api/invitations/claim" => {
             let body: Claim = parse(bytes)?;
             Ok(data(
@@ -468,6 +515,13 @@ async fn dispatch(
             Ok(data((), false))
         }
         _ => {
+            if let Some((id, "revoke")) = path.strip_prefix("/api/me/mcp-grants/").and_then(|s| s.split_once('/')) {
+                if !id.is_empty() {
+                    let _: Empty = parse(bytes)?;
+                    let a = authority(service, &parts.headers).await?;
+                    return Ok(data(service.oauth_revoke(a, id.into()).await?, false));
+                }
+            }
             if let Some(suffix) = path.strip_prefix("/api/admin/accounts/") {
                 if let Some((id, action)) = suffix.split_once('/') {
                     if !id.is_empty() && matches!(action, "reset" | "disable" | "delete") {

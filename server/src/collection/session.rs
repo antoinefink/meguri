@@ -42,6 +42,23 @@ struct Entry { slot: Arc<Slot>, _gate: Arc<PublicationBarrier> }
 #[derive(Default)]
 pub(crate) struct Sessions(Mutex<HashMap<String,Entry>>);
 impl Sessions {
+    /// Inspect only: callers own the account publication barrier. Even an idle
+    /// retained round owns its writer until native cleanup retires it. Registry
+    /// or slot contention is conservatively active; never allocate or prune.
+    pub(crate) fn has_retained_writer(&self, id: &str) -> Result<bool> {
+        use std::sync::TryLockError;
+        let slot = match self.0.try_lock() {
+            Ok(map) => map.get(id).map(|entry| entry.slot.clone()),
+            Err(TryLockError::WouldBlock) => return Ok(true),
+            Err(TryLockError::Poisoned(_)) => return Err(Error::new("storage_unavailable")),
+        };
+        let Some(slot) = slot else { return Ok(false); };
+        match slot.0.try_lock() {
+            Ok(state) => Ok(state.is_some()),
+            Err(TryLockError::WouldBlock) => Ok(true),
+            Err(TryLockError::Poisoned(_)) => Err(Error::new("storage_unavailable")),
+        }
+    }
     pub fn new() -> Arc<Self> {
         let sessions=Arc::new(Self::default());
         let weak=Arc::downgrade(&sessions);
