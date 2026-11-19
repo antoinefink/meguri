@@ -259,7 +259,7 @@ async function connectionLayout(page: Page, username: string, admin: boolean) {
     await expect(main.getByLabel("Server URL", { exact: true })).not.toHaveValue("");
     await expect(main.getByLabel("Username", { exact: true })).toHaveValue(username);
     await expect(main.getByText("Sign in to a compatible client with your username and account password.", { exact: true })).toBeVisible();
-    await expect(main.getByText("Replacing your password revokes existing client sign-ins. Sign in again on each device afterward.", { exact: true })).toBeVisible();
+    await expect(main.getByText("Replacing your password revokes existing client sign-ins. Sign in again on each device afterward.", { exact: true })).toHaveCount(0);
     await expect(main).not.toContainText(/Client guidance|Desktop 26\.09\.4|AnkiMobile 26\.10|Exact server fields|Review the client’s explicit confirmation/);
     await page.setViewportSize({ width: 1280, height: 900 });
     await accountShell(page, username, admin);

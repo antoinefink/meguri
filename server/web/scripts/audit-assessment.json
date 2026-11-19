@@ -150,8 +150,8 @@
         "sha256": "ebb16f232b58ddc19a8354cd6c2b1cca3c9fcd43c5f062169efac8100d0acd95"
       },
       "src/connection.tsx": {
-        "bytes": 7222,
-        "sha256": "fd495daa78faea74df487d0e200fec570acbd788bc856af12819fcee802577a3"
+        "bytes": 6728,
+        "sha256": "7b4be18452ad974895d818ba5533f13f301b9f8bbfa274fda6fe3068258f67f0"
       },
       "src/consent.tsx": {
         "bytes": 9008,
@@ -194,12 +194,12 @@
         "sha256": "9cefc3723cf52869ccaf3d2dbe1b775b0668c77570945ea3e448f971cf4ccad8"
       },
       "tests/browser/accounts.spec.ts": {
-        "bytes": 44262,
-        "sha256": "608ff299ccd4686fa5bca418585ee385e89689d484c5a64ca382c487bb9d9f8b"
+        "bytes": 44263,
+        "sha256": "fa8fd59e883eeefa9509fc558e2f8a49b505d7300bd4a6361a6f1341f8c07446"
       },
       "tests/browser/mcp.spec.ts": {
-        "bytes": 36798,
-        "sha256": "70e9f19d193a32c555cd86cbd7dcc362a27d05e678fa1120b336d050e7410219"
+        "bytes": 37427,
+        "sha256": "9f421dde95afcdd9e58f4ae8ae98f97a8a7f9326e13be6d6eed0ecda69366ca4"
       },
       "tests/policy.test.ts": {
         "bytes": 1397,

@@ -24,7 +24,7 @@ async function synthetic(page: Page, origin: string, signedIn = true) {
   const state = {
     account: { id: "synthetic-account", username: "synthetic.member" }, identities: 0, lists: 0,
     session: signedIn, options: ["read", "read_write"] as MCPAccess[], grants: [firstGrant, secondGrant],
-    readError: 0, decideError: 0, listError: 0, revokeError: 0, loseDecisionResponse: false,
+    readError: 0, decideError: 0, listError: 0, listAccount: null as string | null, revokeError: 0, loseDecisionResponse: false,
     previewError: 0, previewName: client as unknown, previews: [] as object[], previewResponses: 0, pausePreview: null as Promise<void> | null,
     reads: [] as object[], decisions: [] as { request: string; decision: string }[], revocations: [] as string[],
     pauseDecision: null as Promise<void> | null, pauseRevoke: null as Promise<void> | null,
@@ -103,7 +103,7 @@ async function synthetic(page: Page, origin: string, signedIn = true) {
     }
     if (path === "/api/me/mcp-grants") {
       state.lists++;
-      const result = { account_id: state.account.id, grants: [...state.grants] };
+      const result = { account_id: state.listAccount ?? state.account.id, grants: [...state.grants] };
       await state.pauseList;
       if (state.listError) return error(state.listError);
       return data(result);
@@ -367,6 +367,7 @@ test("Connection lists and copies MCP details, confirms or cancels revocation, a
   const state = await synthetic(page, baseURL!); await page.goto("/connection");
   const section = page.getByRole("region", { name: "MCP connections", exact: true });
   await expect(section.getByLabel("MCP URL", { exact: true })).toHaveValue(`${baseURL}/mcp`);
+  await expect(section.getByRole("button", { name: "Refresh connections", exact: true })).toHaveCount(0);
   await section.getByRole("button", { name: "Copy MCP URL", exact: true }).click();
   await expect(section.getByRole("status").filter({ hasText: /Copied\.|text is selected/ })).toBeVisible();
   const row = section.getByRole("listitem", { name: `Connection ${client}`, exact: true });
@@ -395,11 +396,16 @@ test("Connection lists and copies MCP details, confirms or cancels revocation, a
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await audit(page, "revoke-narrow");
   await section.getByRole("button", { name: `Confirm revoke ${secondGrant.client_name}`, exact: true }).click();
-  await expect(section.getByText("No MCP connections", { exact: true })).toBeVisible();
+  await consumed(page, `/api/me/mcp-grants/${secondGrant.id}/revoke`, 1);
+  await expect(section.getByRole("status").filter({ hasText: `Revoked ${secondGrant.client_name}.` })).toBeVisible();
+  await expect(section.getByRole("listitem")).toHaveCount(0);
+  await expect(section.getByRole("list")).toHaveCount(0);
   await expect(section).toBeFocused();
-  await section.getByRole("button", { name: "Refresh connections", exact: true }).click();
-  await expect(section.getByText("No MCP connections", { exact: true })).toBeVisible();
-  await page.reload(); await expect(section.getByText("No MCP connections", { exact: true })).toBeVisible();
+  await page.reload(); await consumed(page, "/api/me/mcp-grants", 1);
+  await expect(section.getByText("Loading MCP connections…", { exact: true })).toHaveCount(0);
+  await expect(section.getByText("No MCP connections", { exact: true })).toHaveCount(0);
+  await expect(section.getByRole("listitem")).toHaveCount(0);
+  await expect(section.getByRole("list")).toHaveCount(0);
 });
 
 for (const width of [320, 390]) {
@@ -416,7 +422,7 @@ for (const width of [320, 390]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await audit(page, `connection-${width}`);
     state.grants = [{ ...firstGrant, client_name: "Synthetic client with a much longer name for collection research and editing" }];
-    await page.getByRole("button", { name: "Refresh connections", exact: true }).click();
+    await page.reload();
     await expect(page.getByRole("listitem", { name: `Connection ${state.grants[0]!.client_name}`, exact: true })).toBeVisible();
     await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -424,11 +430,11 @@ for (const width of [320, 390]) {
   });
 }
 
-test("Connection load failure can refresh; failed and pending revokes retain controls and never duplicate", async ({ page, baseURL }) => {
+test("Connection load failure can recover on reload; failed and pending revokes retain controls and never duplicate", async ({ page, baseURL }) => {
   const state = await synthetic(page, baseURL!); state.listError = 500; await page.goto("/connection");
   const section = page.getByRole("region", { name: "MCP connections", exact: true });
   await expect(section.getByRole("alert")).toBeFocused(); state.listError = 0;
-  await section.getByRole("button", { name: "Refresh connections", exact: true }).click();
+  await page.reload();
   await section.getByRole("button", { name: `Revoke ${client}`, exact: true }).click();
   const confirm = section.getByRole("button", { name: `Confirm revoke ${client}`, exact: true });
   state.revokeError = 500;
@@ -446,24 +452,22 @@ test("Connection load failure can refresh; failed and pending revokes retain con
 });
 
 test("a grant list for another session stays hidden and refreshes screen identity", async ({ page, baseURL }) => {
-  const state = await synthetic(page, baseURL!); await page.goto("/connection");
+  const state = await synthetic(page, baseURL!), identity = barrier();
+  state.pauseIdentity = identity.promise;
+  state.listAccount = otherAccount.id; state.grants = [otherGrant];
+  await page.goto("/connection");
   const section = page.getByRole("region", { name: "MCP connections", exact: true });
-  await expect(section.getByRole("button", { name: `Revoke ${client}`, exact: true })).toBeVisible();
-  await consumed(page, "/api/me", 2);
-  const identity = barrier(); state.pauseIdentity = identity.promise;
-  state.account = otherAccount; state.grants = [otherGrant];
-  await section.getByRole("button", { name: "Refresh connections", exact: true }).click();
   await expect.poll(() => state.identities).toBe(3);
-  await consumed(page, "/api/me/mcp-grants", 2);
+  await consumed(page, "/api/me/mcp-grants", 1);
   await expect(page.getByLabel("Username", { exact: true })).toHaveValue("synthetic.member");
   await expect(section.getByRole("listitem")).toHaveCount(0);
   await expect(section).not.toContainText(otherGrant.client_name);
   await expect(section.getByRole("alert")).toContainText("Your account changed");
-  identity.release();
+  state.account = otherAccount; state.listAccount = null; identity.release();
   await expect(page.getByLabel("Username", { exact: true })).toHaveValue(otherAccount.username);
   await expect(section.getByRole("listitem", { name: `Connection ${otherGrant.client_name}`, exact: true })).toBeVisible();
   await expect(section.getByRole("listitem", { name: `Connection ${client}`, exact: true })).toHaveCount(0);
-  expect(state.lists).toBe(3);
+  expect(state.lists).toBe(2);
 });
 
 test("an absent-target revoke by a different caller clears confirmation without announcing success", async ({ page, baseURL }) => {
@@ -492,19 +496,30 @@ test("an absent-target revoke by a different caller clears confirmation without 
 for (const status of [200, 401]) {
   test(`identity change fences a late grant-list completion (${status})`, async ({ page, baseURL }) => {
     const state = await synthetic(page, baseURL!), identity = barrier(), list = barrier();
-    state.pauseIdentity = identity.promise; await page.goto("/connection");
+    // Only this test's initial grant fetch ignores transport cancellation, so its
+    // late success/401 reaches the unchanged screen's account and abort fences.
+    await page.addInitScript(() => {
+      const original = window.fetch.bind(window);
+      let initialList = true;
+      window.fetch = (input, init) => {
+        if (initialList && input === "/api/me/mcp-grants") {
+          initialList = false;
+          return original(input, { ...init, signal: null });
+        }
+        return original(input, init);
+      };
+    });
+    state.pauseIdentity = identity.promise; state.pauseList = list.promise; await page.goto("/connection");
     const section = page.getByRole("region", { name: "MCP connections", exact: true });
-    await expect(section.getByRole("button", { name: `Revoke ${client}`, exact: true })).toBeVisible();
+    await expect(section.getByText("Loading MCP connections…", { exact: true })).toBeVisible();
     await expect.poll(() => state.identities).toBe(2);
-    state.pauseList = list.promise;
-    await section.getByRole("button", { name: "Refresh connections", exact: true }).click();
-    await expect.poll(() => state.lists).toBe(2);
+    await expect.poll(() => state.lists).toBe(1);
     state.account = otherAccount; state.grants = [otherGrant]; state.pauseList = null; identity.release();
     await expect(page.getByLabel("Username", { exact: true })).toHaveValue(otherAccount.username);
     await expect(section.getByRole("button", { name: `Revoke ${otherGrant.client_name}`, exact: true })).toBeVisible();
-    await consumed(page, "/api/me/mcp-grants", 2);
+    await consumed(page, "/api/me/mcp-grants", 1);
     state.listError = status === 200 ? 0 : status; list.release();
-    await consumed(page, "/api/me/mcp-grants", 3);
+    await consumed(page, "/api/me/mcp-grants", 2);
     await expect(page.getByLabel("Username", { exact: true })).toHaveValue(otherAccount.username);
     await expect(section.getByRole("listitem")).toHaveCount(1);
     await expect(section.getByRole("button", { name: `Revoke ${otherGrant.client_name}`, exact: true })).toBeVisible();
@@ -526,7 +541,7 @@ for (const status of [200, 401]) {
     await expect(page.getByLabel("Username", { exact: true })).toHaveValue(otherAccount.username);
     await expect(section.getByRole("button", { name: `Revoke ${otherGrant.client_name}`, exact: true })).toBeVisible();
     await expect(section.getByRole("region")).toHaveCount(0);
-    await expect(section.getByRole("button", { name: "Refresh connections", exact: true })).toHaveAttribute("aria-disabled", "false");
+    await expect(section.getByRole("button", { name: `Revoke ${otherGrant.client_name}`, exact: true })).toHaveAttribute("aria-disabled", "false");
     state.revokeError = status === 200 ? 0 : status; revoke.release();
     await consumed(page, `/api/me/mcp-grants/${firstGrant.id}/revoke`, 1);
     await expect(page.getByLabel("Username", { exact: true })).toHaveValue(otherAccount.username);

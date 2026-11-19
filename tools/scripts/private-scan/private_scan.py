@@ -1077,7 +1077,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/app.tsx':
         '7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63',
     'server/web/tests/browser/accounts.spec.ts':
-        '608ff299ccd4686fa5bca418585ee385e89689d484c5a64ca382c487bb9d9f8b',
+        'fa8fd59e883eeefa9509fc558e2f8a49b505d7300bd4a6361a6f1341f8c07446',
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
@@ -1162,7 +1162,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        'df95f9d7c15f66688c40b1890d115c30cf486ce1ab899adfc2a170714ceaacb4',
+        'db50da0c732146e4d5b3fa4d629502d8d7c3f5114c09b0c5fcea122630b6eb9b',
     "specs/servers/meguri-collection-mcp.md":
         "013e3aa719a920b3d97e4a0792071b5f9d19b9a710e36f6082c1b399fe954fc8",
     "specs/conformance/meguri-sync-server.md":

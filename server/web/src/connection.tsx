@@ -40,7 +40,7 @@ export function Connection({ me, sessionLoss, refreshIdentity }: { me: Me; sessi
   }, [grants]);
   function accountMismatch() {
     setGrants(null); setPending(false); setLoading(false); focusIndex.current = null;
-    setOutcome({ error: true, text: "Your account changed. Refreshing your account identity. Refresh connections to check current access." });
+    setOutcome({ error: true, text: "Your account changed. Refreshing your account identity." });
     refreshIdentity();
   }
   async function load(signal?: AbortSignal) {
@@ -78,19 +78,16 @@ export function Connection({ me, sessionLoss, refreshIdentity }: { me: Me; sessi
       if (!alive.current) return;
       const error = asError(caught);
       if (error.status === 401 || error.code === "stale_authority") { sessionLoss(); return; }
-      setOutcome({ error: true, text: `${errorMessage(error)} Revocation is not confirmed. Refresh connections to check current access.` });
+      setOutcome({ error: true, text: `${errorMessage(error)} Revocation is not confirmed.` });
     } finally { busy.current = false; if (alive.current) setPending(false); }
   }
   return <div className="stack"><header className="page-heading"><p className="eyebrow">Your account</p><h1>Connect your devices</h1><p>Use the same account in your browser and native clients.</p></header>
-    <Card><CardHeader><CardTitle level={2}>Connection details</CardTitle><CardDescription>Sign in to a compatible client with your username and account password.</CardDescription></CardHeader><CardContent className="stack"><CopyValue label="Server URL" value={me.server_url} /><CopyValue label="Username" value={me.username} /><p>Replacing your password revokes existing client sign-ins. Sign in again on each device afterward.</p></CardContent></Card>
+    <Card><CardHeader><CardTitle level={2}>Connection details</CardTitle><CardDescription>Sign in to a compatible client with your username and account password.</CardDescription></CardHeader><CardContent className="stack"><CopyValue label="Server URL" value={me.server_url} /><CopyValue label="Username" value={me.username} /></CardContent></Card>
     <Card ref={section} tabIndex={-1} aria-labelledby="mcp-connections"><CardHeader><CardTitle level={2} id="mcp-connections">MCP connections</CardTitle><CardDescription>Manage clients with access to your synced collection.</CardDescription></CardHeader>
       <CardContent className="stack"><CopyValue label="MCP URL" value={new URL("/mcp", me.server_url).href} />
-        <div><Button variant="outline" aria-disabled={loading || pending} onClick={() => void load()}>Refresh connections</Button>
-          <Outcome value={outcome} />
-          {loading ? <p role="status">Loading MCP connections…</p> : grants === null ? <p>Connections could not be loaded. Use Refresh connections to try explicitly.</p>
-            : grants.length === 0 ? <p role="status">No MCP connections</p>
-            : <ul className="grant-list">{grants.map(grant => <GrantRow key={grant.id} grant={grant} pending={pending} revoke={() => revoke(grant)} />)}</ul>}
-        </div>
+        <Outcome value={outcome} />
+        {loading ? <p role="status">Loading MCP connections…</p>
+          : grants && grants.length > 0 && <ul className="grant-list">{grants.map(grant => <GrantRow key={grant.id} grant={grant} pending={pending} revoke={() => revoke(grant)} />)}</ul>}
       </CardContent>
     </Card>
   </div>;
