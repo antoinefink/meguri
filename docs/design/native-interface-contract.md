@@ -443,6 +443,16 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 
 - The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it, except during review, which has none (N16.2). The Mac sidebar never drew one.
 
+### N14.10 Today row beside Today
+
+- iPhone at regular width with the list beside the detail (the Duo unfolded and held wide): the deck list starts with a "Today" row in a group of its own, above the decks. It has the sidebar layouts' `sun.max` symbol, the title "Today" and, trailing, the cards waiting across the collection (new + learning + to review of the top-level decks), hidden at zero like a deck row's number.
+- It is selected on arrival, while the detail shows Today. A tap returns the detail to Today after a deck was picked, as the sidebar's Today row does.
+- The selected row, Today or the deck whose page shows, has the system's grey selected-cell fill; its number takes the primary label colour there. A deck row is marked this way only in this list. When a collapsed deck hides the selected subdeck, the collapsed deck's row is marked.
+- The Today row is the top of the list: scrolling to the top, and returning to a list that was at its first deck, show it. Its target is at least the minimum height.
+- Compact width (an ordinary iPhone, the Duo folded or held tall) has no such row and marks no row. iPad and Mac keep the sidebar's own Today row (N14.1).
+- Search results replace the whole list, the Today row included (N14.2).
+- Accessibility: `home.today.row`, labelled "Today", with "N cards waiting" as its value and the selected trait; the selected deck row has that trait too.
+
 ## N15. Round 2 Settings and sync decisions (2026-11-19)
 
 Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`: `settings.root`, `settings.accountSync`, `sync.connect`, `sync.status`, `sync.serviceSwitch`). Where earlier text differs, this section wins. The behaviour is `sync/policy` P25, `sync/cloudkit-recovery` V27 and `sync/meguri-provider` MP6; all text is `sync/status-strings` T19. Those spec sections were approved on 2026-11-19 (`docs/process/review-log/redesign-specs-20261119.md`). The points raised for the owner are in P25.6, V27.9 and MP6.8; two of them (no device backup of a replaced iCloud collection, and Cancel removing the Meguri Sync sign-in) were decided on 2026-11-19 and are marked there.
@@ -653,3 +663,21 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsShee
 - Mac: Meguri › Settings… and Quit stay available. On iPhone and iPad Settings is not reachable from the welcome screen except through Set Up Sync's sheet.
 - Until N15 is built, Set Up Sync opens the sync settings that exist.
 - Replaces: R157's and R1591's "Connect to iCloud" as the first choice and its disabled state with a reason line; the `onboarding.welcome` screen contract's three buttons, its prominent style rules and its line about private iCloud; the empty state's separate sync buttons. `sync/status-strings` T12's `sync.connect.action` is no longer shown here (T19.8).
+
+### N18.3 Welcome screen
+
+- Home with no collection shows a welcome in place of the "No Collection" state and its four equal buttons: the large title "Welcome to Meguri", the secondary line "Choose how to start. You can change this later in Settings.", and one system grouped list of three rows.
+- Each row has a leading symbol, a title, one line of explanation and a trailing disclosure chevron, in this order:
+  1. Set Up Sync (`cloud`): "Get your collection from Meguri Sync or iCloud." It opens Account & Sync (`home.collection.accountSync`): the sheet on touch, the Settings window on Mac. The separate Connect to iCloud… button and its reason line are gone; Account & Sync says why a service is unavailable.
+  2. Import a Collection File (`folder`): "Open a .colpkg file exported from Meguri or Anki." It opens the file picker (N17.2; `home.collection.import`).
+  3. Start Empty (`plus`): "Begin with no decks and add your own notes." (`home.collection.startEmpty`).
+- A row is disabled only where its button was: Set Up Sync and Import while another sheet or flow owns the window, Start Empty while it cannot start. A disabled row stays visible.
+- The rows are buttons in a grouped form, at least the minimum target high. The chevron is drawn, because a row that acts in place gets none from the system. Title and explanation wrap at every text size. At the accessibility sizes the symbol and the chevron are left out and the text takes the row, as the state views leave out their symbols: a label there wraps each text around its symbol. VoiceOver reads the title as the row's label and the explanation as its hint; the title of the screen is a header.
+- Compact width: the title and line lead the list as its header, at the top of the page. In the tab layout the navigation bar has no title here: the welcome's own title is the page's header.
+- iPad and Mac: the same list in a centred column of the readable width in the detail area, from the top. The page is still titled "Today" where the sidebar's first row says so (N14.1).
+- iPhone at regular width, wider than tall and at least 480 points high, below the accessibility text sizes (the Duo unfolded and held wide): no list beside a detail. A large iPhone in landscape is too short for it and keeps the column, as the accessibility sizes do. The title and line are vertically centred on the leading half and the three rows on the trailing half, either side of the fold, which the layout reads as the answer row does (N13.1); without a fold in the view, two equal halves. A form has no vertical alignment of its own, so the rows' measured height sets its top margin. Rows that leave less than 48 points above and below, or that an error or the previous session follows, keep the system's margin and scroll from the top: the margin never follows scrolling.
+- While the collection is still opening, the tab layout keeps the arrangement it last showed and starts a launch on the single column, so no list beside a detail shows for a moment before the welcome.
+- On touch the navigation bar over the welcome is opaque, in the page's grouped background colour: nothing shows at rest, and rows that scroll under it are covered. Under the system's translucent bar the contrast audit failed a row title seen through the bar, at the largest text size in dark.
+- An error from the last attempt and the previous session's line follow the rows, each in its own group.
+- Start Empty, the import and sync themselves did not change.
+- Replaces: N2's centred "No Collection" state for this page, `workflow.md`'s empty-collection Import button as a button, and `screen-inventory.yaml`'s `onboarding.welcome` layout (app icon, three bordered buttons, the reason line under Connect to iCloud… and its identifiers `onboarding.welcome.*`).

@@ -353,16 +353,6 @@
         }
       }
     },
-    "Import, sync or start an empty collection.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Import, sync or start an empty collection."
-          }
-        }
-      }
-    },
     "Learning": {
       "localizations": {
         "en": {
@@ -409,16 +399,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "New Subdeck…"
-          }
-        }
-      }
-    },
-    "No Collection": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No Collection"
           }
         }
       }
@@ -791,6 +771,76 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "Welcome to Meguri": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Welcome to Meguri"
+          }
+        }
+      }
+    },
+    "Choose how to start. You can change this later in Settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose how to start. You can change this later in Settings."
+          }
+        }
+      }
+    },
+    "Set Up Sync": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set Up Sync"
+          }
+        }
+      }
+    },
+    "Get your collection from Meguri Sync or iCloud.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get your collection from Meguri Sync or iCloud."
+          }
+        }
+      }
+    },
+    "Import a Collection File": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import a Collection File"
+          }
+        }
+      }
+    },
+    "Open a .colpkg file exported from Meguri or Anki.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open a .colpkg file exported from Meguri or Anki."
+          }
+        }
+      }
+    },
+    "Begin with no decks and add your own notes.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Begin with no decks and add your own notes."
           }
         }
       }

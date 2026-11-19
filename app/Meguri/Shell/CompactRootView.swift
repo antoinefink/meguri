@@ -12,6 +12,12 @@ struct CompactRootView: View {
     let features: ShellFeatures
     let configuration: LaunchConfiguration
     let hasDecks: Bool
+    /// Whether Decks shows the list beside the deck at regular width. N18.3: with no
+    /// collection the welcome takes the whole width instead. Nil while the collection is
+    /// still opening: the layout last shown stays, and a launch starts on the stack, so
+    /// no split shows for a moment before a welcome.
+    var besideDetail: Bool? = true
+    @State private var lastBesideDetail = false
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var isUpright = false
 
@@ -32,6 +38,9 @@ struct CompactRootView: View {
             }
         }
         .onGeometryChange(for: Bool.self) { $0.size.height > $0.size.width } action: { isUpright = $0 }
+        .onChange(of: besideDetail, initial: true) { _, known in
+            if let known { lastBesideDetail = known }
+        }
         .fullScreenCover(item: Binding(get: { navigation.review }, set: { if $0 == nil { navigation.endReview() } })) { review in
             features.review(review, navigation)
                 .modifier(LaunchEnvironment(configuration: configuration))
@@ -43,7 +52,7 @@ struct CompactRootView: View {
     /// Unfolded and held wide, Decks shows the list beside the deck. Held tall the
     /// system would hide the list behind a toggle, so it keeps its stack (N13).
     @ViewBuilder private func stack(_ tab: CompactTab) -> some View {
-        if tab == .decks, sizeClass == .regular, !isUpright {
+        if tab == .decks, sizeClass == .regular, !isUpright, besideDetail ?? lastBesideDetail {
             NavigationSplitView(columnVisibility: .constant(.doubleColumn)) {
                 decksList
                     .navigationSplitViewColumnWidth(min: 280, ideal: 475, max: 475)

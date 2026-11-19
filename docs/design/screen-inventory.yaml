@@ -80,53 +80,35 @@ screens:
     variants: pairwise
     references: [onboarding]
     purpose: >-
-      First launch with no collection (U151's CollectionStore in NoCollection; R157, R161, R163,
-      R2046; native-interface-contract N11.8). It replaces the whole root content: no sidebar, tab bar
-      or toolbar sync button. Mac: Meguri › Settings… (⌘,) and Quit stay available. Decided
-      2026-10-27: on iPhone and iPad Settings is a tab or sidebar section of the main window (N11.4),
-      which Welcome replaces, so Settings is not reachable from Welcome there; each choice leads to
-      Home or a sheet, and no extra control is added. Layout (onboarding): the
-      app icon, the title "Welcome to Meguri", one line saying Meguri studies flashcards on this
-      device and syncs through the user's private iCloud, then three buttons in R157's order:
-      `sync.connect.action` ("Connect to iCloud…", prominent), "Import a File…" (bordered) and
-      "Start Empty" (bordered);
-      full width on iPhone, content-sized and centred on Mac and iPad. No feature rows, walkthrough,
-      sample deck or Anki login (R157, R163). Line texts are Meguri's own (String Catalog); the iCloud
-      text is sync/status-strings' (T12 names this choice, T14 and T8 the reasons). Connect to iCloud
-      opens sync.connect
-      (cloudkit-recovery V13). Import a File… opens onboarding.collectionImport now and U162's full
-      file intake once it lands; the imported collection stays local, and its iCloud choice is the
-      first connection (V12.2). Start Empty creates the collection with only the Default deck and the
-      stock note types (R161), local only, and opens Home; it never asks for an Apple account.
-      Connect to iCloud needs the account status `available` with an identity read in this process
-      (V13.1). Decided 2026-10-27: Welcome's state is `localOnly` (sync/policy P14.2 row 1), which
-      has no unavailableReason (P14.4 sets it in state 2 only), so the reason comes from P14.4's
-      `account` field (its status, and whether the identity was read in this process; sync/policy
-      P14.4 should name this second part) and from reachability: `noAccount`
-      `sync.settings.account.none`, `restricted` `sync.settings.account.restricted`,
-      `temporarilyUnavailable` or `couldNotDetermine` `sync.settings.account.temporary`,
-      `configuration` `sync.settings.account.setupNeeded`; `available` with no identity read yet
-      `sync.error.offline` when not reachable, else `sync.settings.account.temporary` (V9.1). While
-      one applies the button stays visible and disabled, the reason shows in one line under it as
-      text only (T3's details speak of "this collection", which Welcome does not have yet), with no
-      link that changes system accounts and no Apple password field (R102, R117, R2065), and Start
-      Empty takes the prominent style; the button enables as soon as a later account read succeeds
-      (V9.1's read points). Decided 2026-10-27: only Welcome disables Connect to iCloud, since its
-      other two choices sit beside it; Account & Sync's, the empty Home's and sync.status's Connect
-      to iCloud… stay enabled and open sync.connect, which shows
-      `sync.recovery.error.accountUnavailable` (T13.6) with Try Again. Error: a failed Start Empty (disk full) shows
-      its cause in one line and the screen stays. Decided
-      2026-10-27: an iCloud download interrupted by a relaunch has no error state here: V14.3 deletes
-      its staging and op row at restart and no core fact records it, so Welcome shows as usual and
-      Connect to iCloud starts V13 case b again. Keyboard: Tab moves through
-      the buttons; Return activates the prominent one. VoiceOver: the title is a header; the reason
-      line is its own text element, read in order after Connect to iCloud, and is also that button's
-      hint, so it is heard with hints off. Identifiers onboarding.welcome.connect,
-      onboarding.welcome.import, onboarding.welcome.startEmpty. Core: the account status from U151's
-      SyncStatusModel (P14.4's `account` field and reachability), the empty-collection create of R161;
-      no zone or record read and no CloudKit write starts before Connect to iCloud (R2046). V9.1's
-      account-status and identity reads, which read no Meguri data, run at their read points here
-      as everywhere.
+      No collection on this device (U151's CollectionStore in NoCollection; R157, R161, R163, R2046;
+      native-interface-contract N18.3, decided 2026-11-19, which replaces the earlier layout of an
+      app icon and three bordered buttons). Welcome is Home's content in that state, inside the
+      shell: the sidebar or the tabs, Settings and the toolbar's sync button stay. Layout: the large
+      title "Welcome to Meguri", the line "Choose how to start. You can change this later in
+      Settings.", and one grouped list of three rows, each a symbol, a title, one line of
+      explanation and a chevron: Set Up Sync ("Get your collection from Meguri Sync or iCloud."),
+      Import a Collection File ("Open a .colpkg file exported from Meguri or Anki.") and Start Empty
+      ("Begin with no decks and add your own notes."). Compact width: the title and line head the
+      list at the top. iPad and Mac: the same list in a centred column of the readable width.
+      iPhone at regular width held wide (the Duo unfolded): the title and line centred on the
+      leading half, the rows on the trailing half, either side of the fold; a short window or an
+      accessibility text size keeps the one column. No feature rows, walkthrough, sample deck or
+      Anki login (R157, R163). Texts are Meguri's own (String Catalog). Set Up Sync opens Account &
+      Sync (the sheet on touch, the Settings window on Mac), where the service is chosen and its
+      own control starts the first connection (sync.connect, cloudkit-recovery V13); Welcome has no
+      Connect to iCloud… button and shows no account reason, which Account & Sync shows. Import a
+      Collection File opens the file picker and then onboarding.collectionImport (N17.2); the
+      imported collection stays local, and its iCloud choice is the first connection (V12.2).
+      Start Empty creates the collection with only the Default deck and the stock note types
+      (R161), local only, and shows the deck list; it never asks for an Apple account. A row is
+      disabled, and stays visible, only while another sheet or flow owns the window or Start Empty
+      cannot start. Error: a failed Start Empty shows its cause in a group under the rows and the
+      screen stays. An iCloud download interrupted by a relaunch has no error state here (V14.3
+      deletes its staging and op row at restart). Keyboard: Tab moves through the rows. VoiceOver:
+      the title is a header; each row reads its title as the label and its explanation as the
+      hint. Identifiers home.welcome.title, home.welcome.message, home.collection.accountSync,
+      home.collection.import, home.collection.startEmpty. Core: the empty-collection create of
+      R161; no zone or record read and no CloudKit write starts from this screen (R2046).
 
   - id: onboarding.collectionImport
     title: Import Collection
@@ -1392,9 +1374,9 @@ screens:
     purpose: >-
       The first connection and its two-collections decision (cloudkit-recovery V13, V9.2; R158,
       R159, R160, R1592, R2055; N11.8). Text: sync/status-strings T11, T12 and T13.6, except page a's,
-      which is U166's own (T12: that file adds none). Entry points: Welcome's Connect to iCloud
-      (onboarding.welcome), Account & Sync's `sync.connect.action`, the empty Home's Connect to iCloud
-      (R161), and sync.status's Connect to iCloud… and Resume Syncing. It needs account status
+      which is U166's own (T12: that file adds none). Entry points: Account & Sync's
+      `sync.connect.action`, which Welcome's Set Up Sync row leads to (onboarding.welcome, N18.3),
+      and sync.status's Connect to iCloud… and Resume Syncing. It needs account status
       `available` with an identity read in this process (V13.1); during a review session it does not
       start and shows `sync.recovery.error.sessionActive` (V20, T9.2); while the user's pause is on
       its entry points are disabled with `sync.status.paused.user`, since V26.1 runs no preview read
@@ -1457,7 +1439,7 @@ screens:
       `sync.recovery.error.replaceIncomplete` with `sync.recovery.tryAgain` and no
       `sync.cancelOp.adopt.message`; in case b `sync.error.cloudError` with Try Again. After a relaunch during a download chosen in the
       decision, recovery_state() shows the decision again with Try Again (V14.3); in case b no op row
-      survives the restart, so Welcome shows as usual and its Connect to iCloud starts V13 again. Overflow: the
+      survives the restart, so Welcome shows as usual and Account & Sync's connect control starts V13 again. Overflow: the
       largest text sizes stack the groups and wrap every value; long kind lists scroll above the
       choices. Keyboard: Tab through the controls; Esc is Cancel while it is allowed; Return
       activates the prominent button of pages a, c and f; page d, the decision page and the previews
