@@ -39,7 +39,6 @@ public final class ReviewCoordinator {
     private var timer = ReviewActiveTime()
     private var activeTime = ReviewActiveTime()
     private var sideIsAnswer = false
-    private var frozenDisplaySeconds: UInt64?
     private var presentedKey: ReviewRenderKey?
     private var terminalState: ReviewTerminalState?
     // Presentation ownership survives refresh's phase changes. Head facts remain
@@ -119,22 +118,18 @@ public final class ReviewCoordinator {
     public var canRate: Bool { phase == .answer && !busy && !paused }
     public var canUndo: Bool { if case .available = undoStatus { return !busy && !paused && phase != .ended }; return false }
     public var canRedo: Bool { if case .available = redoStatus { return !busy && !paused && phase != .ended }; return false }
-    public var progress: Double {
-        let answered = Double(record.answers.count)
-        let remaining = Double(counts.new) + Double(counts.learning) + Double(counts.review)
-        return answered + remaining == 0 ? 0 : answered / (answered + remaining)
+    public var progress: Double { sessionProgress.fraction }
+    /// Answers given and cards left in this session, for the bottom-edge bar (N16.1).
+    public var sessionProgress: ReviewSessionProgress {
+        ReviewSessionProgress(answered: record.answers.count,
+            remaining: Int(counts.new) + Int(counts.learning) + Int(counts.review))
     }
-    public var timerPresentation: ReviewTimerPresentation {
-        let cap = item?.homePreset.maximumAnswerSeconds ?? 60
-        let milliseconds = frozenDisplaySeconds.map { $0 * 1_000 }
-            ?? timer.milliseconds(at: uptime(), capSeconds: cap)
-        return ReviewTimerPresentation(milliseconds: milliseconds, capSeconds: cap,
-            isVisible: terminalPresentation == nil && item?.homePreset.showTimer == true,
-            isCounting: timer.isRunning && !paused && frozenDisplaySeconds == nil,
-            clockIdentity: timer.displayClockIdentity)
+    /// What the end of a session states (N16.5). Active time is the monotonic
+    /// study clock, which stops while the session is paused or at its end.
+    public var sessionSummary: ReviewSessionSummary {
+        ReviewSessionSummary(cards: Set(record.answers.map(\.cardID)).count,
+            seconds: activeTime.milliseconds(at: uptime(), capSeconds: UInt32.max) / 1_000)
     }
-    public var timerText: String { timerPresentation.text }
-    public var remainingDescription: String { "\(counts.new) new, \(counts.learning) learning, \(counts.review) to review" }
     #if DEBUG
     private var startObservation: ReviewStartObservation?
     public var debugSessionStatus: String {
@@ -271,9 +266,6 @@ public final class ReviewCoordinator {
                     }
                     try Task.checkCancellation()
                     sideIsAnswer = true
-                    if item?.homePreset.stopTimerOnAnswer == true {
-                        frozenDisplaySeconds = timer.milliseconds(at: uptime(), capSeconds: item?.homePreset.maximumAnswerSeconds ?? 60) / 1_000
-                    }
                     phase = .answer
                 }
             } catch { nativeInput?.failed(error); fail(error) }
@@ -652,7 +644,6 @@ public final class ReviewCoordinator {
             sideIsAnswer = false
             timer.start(at: uptime())
             if paused { timer.pause(at: uptime()) }
-            frozenDisplaySeconds = nil
             if keepAnswer { try await surface.reveal(inputTime: uptime()); sideIsAnswer = true }
         }
         try Task.checkCancellation()

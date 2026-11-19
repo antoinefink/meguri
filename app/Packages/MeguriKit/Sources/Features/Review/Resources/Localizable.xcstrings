@@ -1,16 +1,6 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "review.timer.capped": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@, limit reached"
-          }
-        }
-      }
-    },
     "Again": {
       "localizations": {
         "en": {
@@ -46,7 +36,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Continue"
+            "value": "Keep Going"
           }
         }
       }
@@ -171,16 +161,6 @@
         }
       }
     },
-    "Your answers have been recorded. You can go back to your last answer or close the session.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your answers have been recorded. You can go back to your last answer or close the session."
-          }
-        }
-      }
-    },
     "Your next learning card is not ready yet.": {
       "localizations": {
         "en": {
@@ -197,6 +177,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Back to Decks"
+          }
+        }
+      }
+    },
+    "Try Again": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again"
+          }
+        }
+      }
+    },
+    "card in %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "card in %@"
+          }
+        }
+      }
+    },
+    "cards in %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "cards in %@"
+          }
+        }
+      }
+    },
+    "%lld of %lld": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld of %2$lld"
           }
         }
       }

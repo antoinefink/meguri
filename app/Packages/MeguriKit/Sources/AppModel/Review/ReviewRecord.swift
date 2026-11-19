@@ -76,9 +76,6 @@ public struct ReviewActiveTime {
     private var accumulated: TimeInterval = 0
     public init() {}
     public var isRunning: Bool { began != nil }
-    public var displayClockIdentity: ReviewTimerPresentation.ClockIdentity {
-        .init(began: began, accumulated: accumulated)
-    }
     public mutating func start(at instant: TimeInterval) { accumulated = 0; began = instant }
     public mutating func pause(at instant: TimeInterval) {
         if let began { accumulated += max(0, instant - began) }
@@ -88,5 +85,28 @@ public struct ReviewActiveTime {
     public func milliseconds(at instant: TimeInterval, capSeconds: UInt32) -> UInt64 {
         let seconds = accumulated + (began.map { max(0, instant - $0) } ?? 0)
         return UInt64(min(Double(capSeconds), max(0, seconds)) * 1_000)
+    }
+}
+
+/// Answers given against the answers plus the cards still to come.
+public nonisolated struct ReviewSessionProgress: Equatable, Sendable {
+    public let answered: Int
+    public let total: Int
+    public init(answered: Int, remaining: Int) {
+        self.answered = max(0, answered)
+        total = self.answered + max(0, remaining)
+    }
+    public var fraction: Double { total == 0 ? 0 : Double(answered) / Double(total) }
+}
+
+/// The two facts a finished session shows: distinct cards answered and active study time.
+public nonisolated struct ReviewSessionSummary: Equatable, Sendable {
+    public let cards: Int
+    public let seconds: UInt64
+    public init(cards: Int, seconds: UInt64) { self.cards = cards; self.seconds = seconds }
+    /// The time as shown: whole minutes from one minute up (rounded, never
+    /// below one), seconds before that.
+    public var duration: Duration {
+        seconds < 60 ? .seconds(Int64(seconds)) : .seconds(Int64((seconds + 30) / 60) * 60)
     }
 }

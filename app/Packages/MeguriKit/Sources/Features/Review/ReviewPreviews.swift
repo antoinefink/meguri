@@ -3,20 +3,6 @@ import CoreBridge
 import DesignSystem
 import SwiftUI
 
-/// Fixed samples of the production timer label.
-/// These are component fixtures, not placement or live-progression evidence.
-public struct ReviewTimerPreview: View {
-    public nonisolated enum State: String, CaseIterable, Sendable { case running, frozen, capped }
-    public let state: State
-    public init(state: State) { self.state = state }
-    public var body: some View {
-        ReviewTimerLabel(presentation: ReviewTimerPresentation(milliseconds: state == .capped ? 60_000 : 12_000,
-                // Every fixture is a static sample, including the running
-                // question-side appearance; none advances an answer clock.
-                capSeconds: 60, isVisible: true, isCounting: false))
-    }
-}
-
 /// Fixed presentation data. Real WebKit/core evidence belongs to the shell UI
 /// Preview cases exercise the toolbar, answer buttons and available width.
 public enum ReviewQuestionPreview: PreviewStates {
@@ -50,14 +36,13 @@ private struct ReviewFinishedFixture: View {
     private var waiting: Bool { state == .waitingUnavailable || state == .readyToContinue }
     private var ready: Bool { state == .readyToContinue || state == .finishedWithNewWork }
     var body: some View {
-        ReviewLayout(progress: waiting || state == .finishedWithNewWork ? 0.9 : 1,
-            remaining: state == .finishedWithNewWork ? "0 new, 0 learning, 1 to review" :
-                (waiting ? "0 new, 1 learning, 0 to review" : "0 new, 0 learning, 0 to review"),
+        ReviewLayout(progress: ReviewSessionProgress(answered: 9, remaining: waiting || state == .finishedWithNewWork ? 1 : 0),
             notice: nil, undoDescription: "Undo Answer Card", canUndo: true, canRedo: false,
             phase: waiting ? .waiting : .finished, states: nil, enabled: true,
             close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in }) {
                 ReviewStatusLayout {
-                    ReviewTerminalContent(waiting: waiting, continueAvailable: ready, canContinue: ready,
+                    ReviewTerminalContent(waiting: waiting, summary: ReviewSessionSummary(cards: 42, seconds: 12 * 60),
+                        continueAvailable: ready, canContinue: ready,
                         canRefresh: true, canFinish: true, refresh: {}, continueReview: {}, close: {})
                 }
             }
@@ -69,7 +54,7 @@ private struct ReviewFixture: View {
     let state: PreviewState
     let answer: Bool
     var body: some View {
-        ReviewLayout(progress: 0.4, remaining: "4 new, 2 learning, 12 to review",
+        ReviewLayout(progress: ReviewSessionProgress(answered: 12, remaining: 18),
             notice: state == .error ? "Couldn’t save the answer. Please answer this card again." : nil,
             undoDescription: "Undo Answer Card", canUndo: true, canRedo: false,
             phase: state == .loading ? .loading : (answer ? .answer : .question), states: states,

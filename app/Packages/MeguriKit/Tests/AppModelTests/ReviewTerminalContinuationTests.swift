@@ -16,18 +16,17 @@ extension ReviewCoordinatorTests {
         fixture.model.continueReview()
         #expect(fixture.client.headReads == 0)
         fixture.now = 50
-        fixture.client.currentHead = Self.head(2, showTimer: true)
+        fixture.client.currentHead = Self.head(2)
         fixture.model.requestRefresh()
         #expect(fixture.model.phase == terminalPhase, "Refresh must not flash a retained card via transition")
         await fixture.model.settled()
         #expect(fixture.model.phase == terminalPhase && fixture.model.item?.cardId == 2)
         #expect(fixture.model.counts == Self.head(2).counts)
         #expect(fixture.surface.calls == ["load"] && fixture.surface.presented.isEmpty)
-        #expect(fixture.model.visibleMediaNames.isEmpty && !fixture.model.timerPresentation.isCounting)
-        #expect(!fixture.model.timerPresentation.isVisible)
+        #expect(fixture.model.visibleMediaNames.isEmpty)
         #expect(fixture.model.record.activeMilliseconds == 0 && fixture.model.canContinue)
         fixture.now = 100
-        fixture.client.currentHead = Self.head(3, showTimer: true)
+        fixture.client.currentHead = Self.head(3)
         let reads = fixture.client.headReads
         fixture.model.continueReview(); fixture.model.continueReview()
         await fixture.model.settled()
@@ -35,8 +34,6 @@ extension ReviewCoordinatorTests {
         #expect(fixture.model.phase == .question && fixture.model.item?.cardId == 3)
         #expect(fixture.surface.presented == [3] && fixture.surface.calls == ["load", "render", "present"])
         #expect(fixture.model.record.activeMilliseconds == 0 && !fixture.model.canContinue)
-        #expect(fixture.model.timerPresentation.isVisible && fixture.model.timerPresentation.isCounting)
-        #expect(fixture.model.timerPresentation.milliseconds == 0)
         fixture.now = 103
         fixture.model.reveal(); await fixture.model.settled()
         fixture.model.rate(.good); await fixture.model.settled()
@@ -94,7 +91,7 @@ extension ReviewCoordinatorTests {
         try await fixture.model.resume()
         #expect(!fixture.model.paused && fixture.model.phase == phase && fixture.model.canContinue)
         #expect(fixture.model.item?.cardId == 3 && fixture.surface.presented.isEmpty)
-        #expect(!fixture.surface.calls.contains("render") && !fixture.model.timerPresentation.isCounting)
+        #expect(!fixture.surface.calls.contains("render"))
         fixture.model.continueReview(); await fixture.model.settled()
         #expect(fixture.surface.presented == [3] && fixture.model.phase == .question)
         #expect(fixture.model.record.activeMilliseconds == 0)
@@ -177,7 +174,7 @@ extension ReviewCoordinatorTests {
         fixture.model.rate(.good); await fixture.model.settled()
         let phase = fixture.model.phase
         let calls = fixture.surface.calls
-        fixture.client.currentHead = Self.head(1, showTimer: true)
+        fixture.client.currentHead = Self.head(1)
         // Ignore this event: its session identifier differs from the session under review.
         fixture.model.receive(CoreEvent(.init(seq: 1, generation: 1, causeSeq: nil,
             kind: .currentCardChanged(sessionId: 99, cardId: 1, change: .eligible))))
@@ -191,7 +188,6 @@ extension ReviewCoordinatorTests {
         #expect(fixture.model.phase == phase && fixture.model.canContinue)
         #expect(fixture.client.headReads == 2 && fixture.surface.calls == calls)
         #expect(fixture.surface.presented == [1] && fixture.model.record.activeMilliseconds == 5_000)
-        #expect(!fixture.model.timerPresentation.isCounting && !fixture.model.timerPresentation.isVisible)
         fixture.model.continueReview(); await fixture.model.settled()
         #expect(fixture.model.phase == .question && fixture.surface.presented == [1, 1])
         #expect(fixture.surface.reveals == 1, "Continue must reset even the same card to its question")
@@ -278,7 +274,6 @@ extension ReviewCoordinatorTests {
         #expect(fixture.client.headReads == (action == "failure" ? 2 : 1) && fixture.client.answers == 1)
         #expect(fixture.model.record.answers.count == (action == "redo" ? 1 : 0))
         #expect(fixture.model.record.undone.count == (action == "undo" ? 1 : 0))
-        #expect(fixture.model.timerPresentation.milliseconds == 0)
         #expect(await fixture.model.end())
     }
 

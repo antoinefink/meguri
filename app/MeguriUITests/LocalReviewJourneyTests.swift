@@ -461,6 +461,12 @@ final class LocalReviewJourneyTests: XCTestCase {
                 XCTFail("All-Easy must reach exhaustion, got \(state)")
                 return nil
             }
+            // N16.1, N16.2: the bottom-edge bar says how far the session is, and
+            // a collection with sync off shows no sync status button in review.
+            let progress = element(app, "review.session.progress")
+            XCTAssertTrue(progress.waitForExistence(timeout: 10))
+            XCTAssertEqual(progress.value as? String, "\(answers) of 4")
+            XCTAssertFalse(element(app, "sync.status.button").exists)
             try reveal(app, bundleIdentifier: bundleIdentifier)
             try click(element(app, "review.session.rate.easy"), in: app, bundleIdentifier: bundleIdentifier)
             answers += 1
@@ -471,6 +477,11 @@ final class LocalReviewJourneyTests: XCTestCase {
         XCTAssertFalse(element(app, "review.session.refresh").exists)
         XCTAssertFalse(waitingTitle(app).exists)
         XCTAssertEqual(answers, 4, "each of the four due text cards must be answered exactly once")
+        // N16.5: the number of cards and the time; no bar on the end screen.
+        let summary = element(app, "review.session.summary")
+        XCTAssertTrue(summary.exists)
+        XCTAssertTrue(summary.label.hasPrefix("4"), "the end of the session must state the four cards, got \(summary.label)")
+        XCTAssertFalse(element(app, "review.session.progress").exists)
         return answers
     }
 

@@ -14,12 +14,12 @@ public struct ReviewView: View {
         self.model = model; self.visibilityChanged = visibilityChanged; self.close = close
     }
     public var body: some View {
-        ReviewLayout(progress: model.progress, remaining: model.remainingDescription, notice: model.notice,
+        ReviewLayout(progress: model.sessionProgress, notice: model.notice,
             undoDescription: undoDescription, canUndo: model.canUndo, canRedo: model.canRedo,
             phase: model.phase, states: model.item?.nextStates, enabled: !model.paused,
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
             reveal: model.reveal, rate: model.rate,
-            status: status, timerPresentation: { model.timerPresentation }) {
+            status: status) {
             ZStack {
                 if let pair = model.pair {
                     #if os(macOS)
@@ -50,7 +50,7 @@ public struct ReviewView: View {
                 #endif
         case .waiting, .finished:
             ReviewStatusLayout {
-                ReviewTerminalContent(waiting: model.phase == .waiting,
+                ReviewTerminalContent(waiting: model.phase == .waiting, summary: model.sessionSummary,
                     continueAvailable: model.continueAvailable, canContinue: model.canContinue,
                     canRefresh: model.canRefresh, canFinish: model.canFinish,
                     refresh: model.retry, continueReview: model.continueReview, close: close)
@@ -60,14 +60,18 @@ public struct ReviewView: View {
             #endif
         case .error:
             ReviewStatusLayout {
-                ErrorStateView(Text("Review Paused", bundle: .module), message: Text(verbatim: model.notice ?? ""),
-                    retryIdentifier: "review.session.retry", retry: model.retry)
+                ReviewStateMessage(title: Text("Review Paused", bundle: .module),
+                    message: model.notice.map { Text(verbatim: $0) }) {
+                    Button(action: model.retry) { Text("Try Again", bundle: .module) }
+                        .accessibilityIdentifier("review.session.retry")
+                        .reviewStateTarget()
+                }
             }
             #if DEBUG
             .debugStatusAccessibilityValue(model.debugSessionStatus)
             #endif
         case .ended:
-            ReviewStatusLayout { Text("Session Ended", bundle: .module) }
+            ReviewStatusLayout { ReviewStateMessage(title: Text("Session Ended", bundle: .module)) }
                 #if DEBUG
                 .debugStatusAccessibilityValue(model.debugSessionStatus)
                 #endif
@@ -127,8 +131,7 @@ struct ReviewStatusLayout<Content: View>: View {
 
 
 struct ReviewLayout<Card: View>: View {
-    let progress: Double
-    let remaining: String
+    let progress: ReviewSessionProgress
     let notice: String?
     let undoDescription: String
     let canUndo: Bool
@@ -142,7 +145,6 @@ struct ReviewLayout<Card: View>: View {
     let reveal: () -> Void
     let rate: (ReviewRating) -> Void
     var status: AnyView? = nil
-    var timerPresentation: (() -> ReviewTimerPresentation)? = nil
     @State private var noticeContentHeight: CGFloat?
     @ViewBuilder let card: () -> Card
     var body: some View {
@@ -156,8 +158,10 @@ struct ReviewLayout<Card: View>: View {
     /// The window's own toolbar holds the corners (N3); the card sits between it and the answers.
     private var macBody: some View {
         VStack(spacing: 0) {
-            cardRegion
+            readingColumn
             ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
+            // The window has no bottom inset: the bar is its last row (N16.1).
+            if showsProgress { ReviewProgressBar(progress: progress) }
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -169,12 +173,6 @@ struct ReviewLayout<Card: View>: View {
                 .accessibilityIdentifier("review.session.close")
             }
             ToolbarSpacer()
-            // Plain text stays off the status button's glass.
-            if timerPresentation != nil {
-                ToolbarItem(placement: .primaryAction) { timer }
-                    .sharedBackgroundVisibility(.hidden)
-                ToolbarSpacer(.fixed, placement: .primaryAction)
-            }
             if let status {
                 ToolbarItem(placement: .primaryAction) { status }
             }
@@ -194,17 +192,20 @@ struct ReviewLayout<Card: View>: View {
     private var touchBody: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                VStack(spacing: Spacing.xSmall) {
-                    HStack(spacing: Spacing.small) {
-                        sessionProgress
-                        timer
-                    }
-                    .padding(.horizontal)
-                    cardRegion
-                }
+                readingColumn
                 ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
             }
             .background(.token(.cardPage))
+            // On the screen's bottom edge, under the home indicator, in every
+            // fold position; it is not a control, so it may cross a fold (N16.1).
+            .overlay {
+                if showsProgress {
+                    Color.clear
+                        .overlay(alignment: .bottom) { ReviewProgressBar(progress: progress) }
+                        .ignoresSafeArea(.container, edges: .bottom)
+                        .allowsHitTesting(false)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(action: close) {
@@ -255,6 +256,7 @@ struct ReviewLayout<Card: View>: View {
                         .font(.callout)
                         .padding(Spacing.small)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { noticeContentHeight = $0 }
                         .accessibilityIdentifier("review.session.notice")
                     }
@@ -265,24 +267,88 @@ struct ReviewLayout<Card: View>: View {
             }
         }
     }
-    private var sessionProgress: some View {
-        VStack(alignment: .leading, spacing: Spacing.xxSmall) {
-            Text(verbatim: remaining).font(.caption)
-                .fixedSize(horizontal: false, vertical: true)
-            ProgressView(value: progress)
-        }
-        .foregroundStyle(.token(.textPrimary))
-        .layoutPriority(1)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("Session Progress", bundle: .module))
-        .accessibilityValue(remaining)
-        .accessibilityIdentifier("review.session.progress")
-        .help(remaining)
+    private var showsProgress: Bool { phase == .question || phase == .answer || phase == .transition }
+    /// iPad and Mac keep the card, its notice and the states in one centred
+    /// column, the answer row's width; iPhone keeps the full width (N16.4).
+    private var readingColumn: some View {
+        cardRegion
+            .frame(maxWidth: Self.columnWidth)
+            .frame(maxWidth: .infinity)
     }
-    @ViewBuilder private var timer: some View {
-        if let timerPresentation {
-            OnScreenTimerView(read: timerPresentation)
+    private static var columnWidth: CGFloat? {
+        #if os(macOS)
+        ContentWidth.readable
+        #else
+        // By idiom, as the shell chooses its layout (N13.1): an unfolded
+        // iPhone is wide too, and its answer row splits at the fold instead.
+        UIDevice.current.userInterfaceIdiom == .pad ? ContentWidth.readable : nil
+        #endif
+    }
+}
+
+/// The session's progress as a thin grey system bar: no text, no accent
+/// colour, and not a control (N16.1).
+struct ReviewProgressBar: View {
+    let progress: ReviewSessionProgress
+    var body: some View {
+        ProgressView(value: progress.fraction)
+            .progressViewStyle(.linear)
+            .tint(.secondary)
+            .accessibilityLabel(Text("Session Progress", bundle: .module))
+            .accessibilityValue(Text("\(progress.answered) of \(progress.total)", bundle: .module))
+            .accessibilityIdentifier("review.session.progress")
+    }
+}
+
+/// A review state said in plain text: a title, an optional message and its
+/// actions, centred, with no symbol (N16.6).
+struct ReviewStateMessage<Actions: View>: View {
+    let title: Text
+    var message: Text?
+    @ViewBuilder let actions: () -> Actions
+    var body: some View {
+        VStack(spacing: Spacing.large) {
+            VStack(spacing: Spacing.xSmall) {
+                title.font(.title2.bold()).foregroundStyle(.token(.textPrimary))
+                    .accessibilityAddTraits(.isHeader)
+                message?.foregroundStyle(.token(.textSecondary))
+            }
+            .multilineTextAlignment(.center)
+            ReviewStateActions(content: actions)
         }
+        .padding()
+        .frame(maxWidth: .infinity)
+    }
+}
+extension ReviewStateMessage where Actions == EmptyView {
+    init(title: Text, message: Text? = nil) { self.init(title: title, message: message) { EmptyView() } }
+}
+
+/// State actions side by side, stacked when they do not fit: standard
+/// bordered buttons with a full touch target.
+struct ReviewStateActions<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Spacing.small) { content() }
+            VStack(spacing: Spacing.small) { content() }
+        }
+        .buttonStyle(.bordered)
+        #if !os(macOS)
+        .controlSize(.large)
+        .buttonBorderShape(.roundedRectangle)
+        .tint(ColorToken.textPrimary.color)
+        #endif
+    }
+}
+extension View {
+    /// The Mac's standard button is shorter than the minimum pointer target.
+    func reviewStateTarget() -> some View {
+        #if os(macOS)
+        frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget).contentShape(Rectangle())
+        #else
+        self
+        #endif
     }
 }
 
@@ -370,13 +436,17 @@ public struct ReviewAnswerBar: View {
                         .accessibilityHidden(true)
                 }
                 if phase == .question {
-                    if dynamicTypeSize.isAccessibilitySize, fold.acrossWidth == nil {
-                        revealButton
-                    } else {
+                    if fold.acrossWidth != nil {
+                        // A centred button would sit on the fold (R9): it keeps the trailing side.
                         FoldAvoidingRow(fold: fold.acrossWidth, spacing: Spacing.xSmall) {
                             Color.clear.frame(height: 0)
                             revealButton
                         }
+                    } else if dynamicTypeSize.isAccessibilitySize {
+                        revealButton
+                    } else {
+                        // Centred, two answers wide (N16.3).
+                        CentredHalfRow(spacing: Spacing.xSmall) { revealButton }
                     }
                 }
             }
@@ -468,3 +538,21 @@ public struct ReviewAnswerBar: View {
         return (label.lessThan ? "<" : "") + label.amount + suffix
     }
 }
+
+#if !os(macOS)
+/// One child, centred, as wide as one of two equal columns in the row.
+private struct CentredHalfRow: Layout {
+    let spacing: CGFloat
+    private func childWidth(_ width: CGFloat) -> CGFloat { max(0, width - spacing) / 2 }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        guard let width = proposal.width, width.isFinite else { return child.sizeThatFits(proposal) }
+        let size = child.sizeThatFits(ProposedViewSize(width: childWidth(width), height: proposal.height))
+        return CGSize(width: width, height: size.height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: CGPoint(x: bounds.midX, y: bounds.minY), anchor: .top,
+            proposal: ProposedViewSize(width: childWidth(bounds.width), height: bounds.height))
+    }
+}
+#endif
