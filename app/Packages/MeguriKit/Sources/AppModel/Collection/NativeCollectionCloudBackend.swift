@@ -256,6 +256,10 @@ final class NativeCollectionCloudBackend: SyncCoordinatorBackend {
             shutdownTrace.policyProbe = .failed
             throw error
         }
+        // The coordinator joined the fenced app reader, results and ACKs before
+        // final close. Retire only its exact request before stop revokes the SDK;
+        // the adapter's separate identityReads set cannot retire this request.
+        if !replaced { try await accounts.retireClosedRead() }
         shutdownTrace.adapterDrain = .running
         do {
             try await adapter.stop()

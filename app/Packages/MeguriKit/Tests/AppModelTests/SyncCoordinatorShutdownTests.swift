@@ -39,6 +39,208 @@ extension ReviewCollectionStartupTests {
             } catch { _ = await reopened.owner.close(); throw error }
         }
     }
+    @Test(.timeLimit(.minutes(1))) func serviceSelectionBypassesHeldAccountAuthorityBeforeMeguriHandoff() async throws {
+        try await withShutdownHarness(mediaEnabled: false) { app in
+            let original = app.sync
+            let backend = try app.backend
+            await original.drainOperations()
+            try #require(original.providerState?.selection == .iCloud)
+            var admittedReads = 0
+            backend.beforeAdmittedAccountCompletion = { _ in admittedReads += 1 }
+            defer { backend.beforeAdmittedAccountCompletion = nil }
+            let gate = SyncOwnerGate()
+            let held = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let entered = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let resolverReturned = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let released = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let authorityStarted = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let authorityDone = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let prepared = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let permitHandoff = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let selectionDone = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            defer {
+                held.continuation.finish(); entered.continuation.finish(); resolverReturned.continuation.finish()
+                released.continuation.finish(); authorityStarted.continuation.finish(); authorityDone.continuation.finish()
+                prepared.continuation.finish(); permitHandoff.continuation.finish(); selectionDone.continuation.finish()
+            }
+            var rawReleased = false, authorityFinished = false
+            // The resolver awaits this independently owned hold, so cancellation
+            // of CloudAccountResolution cannot make the raw provider return.
+            let rawHold = Task {
+                held.continuation.yield(true)
+                await gate.hold()
+                rawReleased = true
+                released.continuation.yield(true)
+            }
+            var authority: Task<Void, any Error>?
+            var selection: Task<Bool, any Error>?
+            var rawJoined = false, authorityJoined = false, selectionJoined = false, resolverAdmitted = false
+            @MainActor func joinFixture() async throws {
+                gate.release()
+                permitHandoff.continuation.yield(true)
+                if !rawJoined {
+                    try #require(try await serviceAppSignal(released.stream, stage: "selection raw hold released"))
+                    await rawHold.value
+                    rawJoined = true
+                }
+                if let selection, !selectionJoined {
+                    try #require(try await serviceAppSignal(selectionDone.stream, stage: "selection task joined"))
+                    _ = await selection.result
+                    selectionJoined = true
+                }
+                if let authority, !authorityJoined {
+                    try #require(try await serviceAppSignal(authorityDone.stream, stage: "authority task joined"))
+                    _ = await authority.result
+                    authorityJoined = true
+                }
+                if resolverAdmitted {
+                    try #require(try await serviceAppSignal(resolverReturned.stream, stage: "late resolver fixture returned"))
+                    resolverAdmitted = false
+                }
+            }
+            do {
+                try #require(try await serviceAppSignal(held.stream, stage: "selection raw hold installed"))
+                await app.factory.holdNextAccountRead {
+                    entered.continuation.yield(true)
+                    await rawHold.value
+                    resolverReturned.continuation.yield(true)
+                }
+                await original.accountChanged()
+                try #require(try await serviceAppSignal(entered.stream, stage: "selection actual account resolver held"))
+                resolverAdmitted = true
+                authority = Task {
+                    defer { authorityFinished = true; authorityDone.continuation.yield(true) }
+                    authorityStarted.continuation.yield(true)
+                    try await app.owner.prepareCloudConnectionHost()
+                }
+                try #require(try await serviceAppSignal(authorityStarted.stream, stage: "ordinary authority preparation started"))
+                selection = Task {
+                    defer { selectionDone.continuation.yield(true) }
+                    try await app.owner.prepareSyncServiceSelection()
+                    prepared.continuation.yield(true)
+                    try #require(try await serviceAppSignal(permitHandoff.stream, stage: "selection handoff permitted"))
+                    return await original.changeProvider(to: .meguri)
+                }
+                try #require(try await serviceAppSignal(prepared.stream, stage: "local selection prepared with account held"))
+                #expect(!rawReleased && !authorityFinished,
+                    "Ordinary preparation still requires authority; selection must share only local Host readiness")
+                permitHandoff.continuation.yield(true)
+                try #require(try await serviceAppSignal(selectionDone.stream, stage: "Meguri handoff committed with resolver held"))
+                selectionJoined = true
+                #if DEBUG
+                // Fixed safe categories only; latestValue is a process-global
+                // cross-check, not evidence of this attempt's original cause.
+                try #require(try await selection?.value == true,
+                    """
+                    heldAccountHandoff closed=\(backend.closed) closeReturned=\(backend.closeReturned == 1) \
+                    rawReleased=\(rawReleased) authorityFinished=\(authorityFinished) replaced=\(app.sync !== original) \
+                    operationFailed=\(original.operationFailed) hasConnectionFailure=\(original.connectionFailure != nil) \
+                    globalLatestCrossCheck=\(DebugCloudDiagnostics.latestValue ?? "absent")
+                    """)
+                #else
+                try #require(try await selection?.value == true)
+                #endif
+                #expect(!rawReleased, "Handoff must reach the existing account cancellation fence before the raw resolver returns")
+                #expect(backend.closed && backend.closeReturned == 1 && app.sync !== original)
+                #expect(app.sync.providerState?.selection == .meguri && app.sync.providerState?.phase == .setupRequired)
+                let successor = try app.backend
+                let before = try await successor.workflow.durableSnapshot()
+                let guardBefore = try await successor.workflow.currentGuard()
+                try await joinFixture()
+                #expect(admittedReads == 0, "The cancelled old account read must never reach admitted proof completion")
+                #expect(try await successor.workflow.durableSnapshot() == before)
+                #expect(try await successor.workflow.currentGuard() == guardBefore)
+                #expect(!app.sync.operationFailed && app.sync.failureRevision == 0)
+            } catch {
+                try await joinFixture()
+                throw error
+            }
+        }
+    }
+    @Test(.timeLimit(.minutes(1))) func accountPreparationKeepsOriginalAttachmentSuccessBeforeProviderHandoff() async throws {
+        try await withShutdownHarness(mediaEnabled: false) { app in
+            let original = app.sync
+            let backend = try app.backend
+            await original.drainOperations()
+            let generation = app.owner.generation, revision = original.meguriSignInAttachmentRevision
+            var admittedReads = 0, completions = 0
+            backend.beforeAdmittedAccountCompletion = { _ in admittedReads += 1 }
+            defer { backend.beforeAdmittedAccountCompletion = nil }
+            let release = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let released = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let entered = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let returned = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let started = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(2))
+            let finished = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(2))
+            defer {
+                release.continuation.finish(); released.continuation.finish()
+                entered.continuation.finish(); returned.continuation.finish()
+                started.continuation.finish(); finished.continuation.finish()
+            }
+            // Buffer the release so even failure before resolver admission can
+            // join the independently owned raw provider without cancelling it.
+            let rawHold = Task {
+                for await _ in release.stream { break }
+                released.continuation.yield(true)
+            }
+            var preparations: [Task<Void, any Error>] = []
+            var resolverAdmitted = false, rawJoined = false
+            var joinedPreparations = 0
+            @MainActor func joinFixture() async throws {
+                release.continuation.yield(true)
+                if !rawJoined {
+                    try #require(try await serviceAppSignal(released.stream, stage: "successful original raw hold released"))
+                    await rawHold.value
+                    rawJoined = true
+                }
+                while joinedPreparations < preparations.count {
+                    try #require(try await serviceAppSignal(finished.stream, stage: "original authority caller joined"))
+                    joinedPreparations += 1
+                }
+                for task in preparations { _ = await task.result }
+                if resolverAdmitted {
+                    try #require(try await serviceAppSignal(returned.stream, stage: "successful original resolver returned"))
+                    resolverAdmitted = false
+                }
+            }
+            do {
+                await app.factory.holdNextAccountRead {
+                    entered.continuation.yield(true)
+                    await rawHold.value
+                    returned.continuation.yield(true)
+                }
+                await original.accountChanged()
+                try #require(try await serviceAppSignal(entered.stream, stage: "successful original account resolver held"))
+                resolverAdmitted = true
+                preparations = (0..<2).map { _ in
+                    Task {
+                        defer { completions += 1; finished.continuation.yield(true) }
+                        started.continuation.yield(true)
+                        try await app.owner.prepareCloudConnectionHost()
+                    }
+                }
+                for _ in 0..<2 {
+                    try #require(try await serviceAppSignal(started.stream, stage: "original authority caller started"))
+                }
+                #expect(completions == 0 && admittedReads == 0,
+                    "Both ordinary callers must still require account authority")
+                try await joinFixture()
+                for task in preparations { try await task.value }
+                #expect(completions == 2 && admittedReads == 1)
+                #expect(app.sync === original && app.owner.generation == generation)
+                #expect(original.generation == generation && original.meguriSignInAttachmentRevision == revision)
+                #expect(!backend.closed && !original.operationFailed && original.failureRevision == 0)
+                try await app.owner.prepareSyncServiceSelection()
+                try #require(await original.changeProvider(to: .meguri))
+                #expect(backend.closed && backend.closeReturned == 1 && app.sync !== original)
+                try await app.owner.prepareCloudConnectionHost()
+                #expect(app.sync.setupState == .attached && !app.sync.operationFailed && app.sync.failureRevision == 0)
+            } catch {
+                try await joinFixture()
+                throw error
+            }
+        }
+    }
     @Test func providerHandoffJoinsTheOriginalCoreCommandBeforeCommittingMeguriSetup() async throws {
         try await withShutdownHarness { harness in
             var originalCoordinator: SyncCoordinator? = harness.sync

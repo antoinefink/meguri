@@ -535,7 +535,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var deckTreeRevision: UInt64 = 0
     private var lifecycleTask: Task<Void, Never>?
     private var openTask: Task<Void, Never>?
-    private var cloudPreparationTask: Task<Void, any Error>?
+    private var cloudPreparationTasks: [ObjectIdentifier: Task<Void, any Error>] = [:]
+    private var cloudHostPreparationTask: Task<Void, any Error>?
     private var meguriSignInPreparationTask: Task<Void, Never>?
     public private(set) var meguriSignInPreparing = false
     private var cloudActivationCompletion: Task<Void, Never>?
@@ -686,7 +687,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             }
             // Use the retained Host's ordinary setup path. Attachment failures
             // belong to this current coordinator and its explicit Retry action.
-            try await prepareCloudConnectionHost()
+            try await prepareLocalCloudConnectionHost()
             guard sync === current, generation == expected, !closing, !closed else {
                 throw BridgeError.unavailable(reason: "collectionUnavailable")
             }
@@ -896,8 +897,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         try await subscribe()
         return try await Self.prepareOpenLocation(configuration.collectionLocation, providerDirectory: providerDirectory)
     }
-    /// Local native service selection shares ordinary Host admission.
-    public func prepareSyncServiceSelection() async throws { try await prepareCloudConnectionHost() }
+    /// Selection needs local Host admission before handoff can cancel the old
+    /// account owner. It must not join that owner's account-authority wait.
+    public func prepareSyncServiceSelection() async throws { try await prepareLocalCloudConnectionHost() }
     /// Explicit account action only. Preparing a NoCollection Host grants no
     /// collection choice, transfer or permission to create a collection.
     public func signInMeguri(endpoint: String, username: String, password: String) {
@@ -967,23 +969,43 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
     }
     func waitForMeguriSignInPreparation() async { await meguriSignInPreparationTask?.value }
+    /// Account-dependent callers share this wait, separately from local Host
+    /// readiness so selection can reach the guarded handoff's cancellation.
     func prepareCloudConnectionHost() async throws {
-        if let cloudPreparationTask { try await cloudPreparationTask.value; return }
+        let original = sync, owner = ObjectIdentifier(sync)
+        if let task = cloudPreparationTasks[owner] { try await task.value; return }
         guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         let task = Task {
-            defer { cloudPreparationTask = nil }
+            defer { cloudPreparationTasks[owner] = nil }
+            try await prepareLocalCloudConnectionHost()
+            let expected = generation, revision = original.meguriSignInAttachmentRevision
+            guard sync === original, original.generation == expected else { throw CancellationError() }
+            await original.prepareConnectionAuthority()
+            guard sync === original, generation == expected, original.generation == expected,
+                  original.meguriSignInAttachmentRevision == revision else { throw CancellationError() }
+            guard original.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+        }
+        // Keep retired waits retained until their actual completion, without
+        // making a successor join them or letting their cleanup erase its wait.
+        cloudPreparationTasks[owner] = task
+        try await task.value
+    }
+    private func prepareLocalCloudConnectionHost() async throws {
+        if let cloudHostPreparationTask { try await cloudHostPreparationTask.value; return }
+        guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
+        let task = Task {
+            defer { cloudHostPreparationTask = nil }
             if let openTask { await openTask.value }
             guard !closing, !closed, !opening else { throw BridgeError.busy(runningOperation: "collection preparation") }
             let location = try await prepareEntry()
             try Task.checkCancellation()
             guard !closing, !closed else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
             guard sync.setupState != .configurationUnavailable else { throw BridgeError.unavailable(reason: "configuration") }
-            if sync.connectionService != nil { await sync.prepareConnectionAuthority(); return }
+            if sync.connectionService != nil { return }
             // An existing file follows the owner's ordinary open path. Neither
             // discovery nor its UI may create or replace that file.
             if await Self.exists(configuration.collectionLocation.collectionFile), state != .ready {
                 await start()
-                await sync.prepareConnectionAuthority()
                 guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
                 return
             }
@@ -995,16 +1017,15 @@ public final class ReviewCollection: ChangeFanoutSink {
             sync.setMeguriLocalCollection(false)
             await sync.completeOpenedHost(generation: retainedGeneration)
             try sync.requireProviderAttachment()
-            await sync.prepareConnectionAuthority()
             guard sync.connectionService != nil else { throw BridgeError.unavailable(reason: "collectionUnavailable") }
         }
-        cloudPreparationTask = task
+        cloudHostPreparationTask = task
         try await task.value
     }
     var entryAllowed: Bool { allowsEntryActivation() }
     var manualAllowed: Bool { allowsManualActivation() }
     private func allowsManualActivation(entry: CollectionEntryCoordinator? = nil) -> Bool {
-        !meguriSignInPreparing && !sync.providerHandoffInProgress && cloudPreparationTask == nil && !deckNamesReserved &&
+        !meguriSignInPreparing && !sync.providerHandoffInProgress && cloudPreparationTasks.isEmpty && cloudHostPreparationTask == nil && !deckNamesReserved &&
             (entryOwner?.busy != true || (entry != nil && entryOwner === entry)) && exportOwner?.busy != true &&
             !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed)
     }
@@ -1750,7 +1771,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         await entryOwner?.cancelAndDrain()
         await exportOwner?.cancelAndDrain()
         await openTask?.value
-        _ = await cloudPreparationTask?.result
+        _ = await cloudHostPreparationTask?.result
+        for task in Array(cloudPreparationTasks.values) { _ = await task.result }
         await cloudActivationCompletion?.value
         await lifecycleTask?.value
         // Preserve the owner's no-file/unopened cleanup admission, including a

@@ -144,6 +144,8 @@ public final class CloudAppAccountReader {
     private var closed = false
     private var epoch: UInt64 = 0
     private var latest: UInt64?
+    // Keep the exact Core request after the local admission fence clears latest.
+    private var issuedRead: UInt64?
     private var replayPermit = CloudAccountReplayPermit()
     private var committing = 0
     private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -161,6 +163,7 @@ public final class CloudAppAccountReader {
         replayPermit.revoke(); replayPermit = CloudAccountReplayPermit(); latest = nil
         let expected = epoch
         let id = try await workflow.beginIdentityRead(transition: transition)
+        issuedRead = id
         guard !closed, !frozen, expected == epoch else { throw CancellationError() }
         latest = id
         await adapter.accountReadBegan(id: id)
@@ -302,4 +305,17 @@ public final class CloudAppAccountReader {
     }
     public func resumeAfterCoreResume() { if !closed { frozen = false } }
     public func close() async { closed = true; await freeze() }
+    /// Final close only, after the caller joins the original app read and its
+    /// result/ACK lane, while the original SDK still permits exact completion.
+    public func retireClosedRead() async throws {
+        guard closed, frozen, resolutions.isEmpty, committing == 0 else {
+            throw BridgeError.busy(runningOperation: "cloud account read close")
+        }
+        guard let id = issuedRead else { return }
+        let accepted = try await workflow.completeIdentityRead(id: id, status: .couldNotDetermine, identity: nil)
+        if accepted { issuedRead = nil }
+        // ReadFailed performs no account adoption, projection or replay. False
+        // leaves Core untouched: it can mean already completed OR stale/different
+        // authority, never proof of absence. Core's handoff exclusions still apply.
+    }
 }
