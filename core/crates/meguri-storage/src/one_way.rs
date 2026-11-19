@@ -78,7 +78,59 @@ impl LocalTransferFacts {
     }
 }
 
+/// `sync/cloudkit-recovery#V27.1`: the rows that make a collection hold user
+/// content. Presets, config and tags do not count. The media rule (no tracked
+/// file, no live media name) belongs to the caller, which owns that inventory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UserContentRows {
+    pub notes: u64,
+    pub cards: u64,
+    pub reviews: u64,
+    /// Decks other than id 1.
+    pub other_decks: u64,
+    /// Note types whose row is not a stock one as created (`mtime_secs` not 0).
+    pub saved_notetypes: u64,
+}
+
+impl UserContentRows {
+    /// True only when every count is zero. A failed read is never "none":
+    /// the caller treats an error as user content.
+    pub fn none(&self) -> bool {
+        self.notes == 0 && self.cards == 0 && self.reviews == 0 && self.other_decks == 0 && self.saved_notetypes == 0
+    }
+}
+
+fn user_content(conn: &rusqlite::Connection) -> Result<UserContentRows, StorageError> {
+    // One statement, one read view: no table is counted later.
+    Ok(conn.query_row(
+        "SELECT (SELECT count(*) FROM notes),
+         (SELECT count(*) FROM cards),
+         (SELECT count(*) FROM revlog),
+         (SELECT count(*) FROM decks WHERE id != 1),
+         (SELECT count(*) FROM notetypes WHERE mtime_secs != 0)",
+        [],
+        |row| {
+            let count = |index| -> rusqlite::Result<u64> {
+                let count: i64 = row.get(index)?;
+                u64::try_from(count).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, count))
+            };
+            Ok(UserContentRows {
+                notes: count(0)?,
+                cards: count(1)?,
+                reviews: count(2)?,
+                other_decks: count(3)?,
+                saved_notetypes: count(4)?,
+            })
+        },
+    )?)
+}
+
 impl Reader {
+    /// V27.1's row test on the open collection, in one read view.
+    pub fn user_content_rows(&self) -> Result<UserContentRows, StorageError> {
+        user_content(&self.conn)
+    }
+
     /// O3: a single SELECT fixes one consistent view for every fact, without
     /// any write or explicit transaction. An already-open snapshot is reused
     /// and remains owned by its caller; this never begins or ends it.
@@ -130,6 +182,11 @@ impl Reader {
 }
 
 impl ReadSnapshot<'_> {
+    /// V27.1's row test inside the caller's pinned view.
+    pub fn user_content_rows(&self) -> Result<UserContentRows, StorageError> {
+        user_content(self.conn())
+    }
+
     /// Same O3 read, retaining the caller's pinned view and transaction.
     pub fn transfer_facts(&self) -> Result<LocalTransferFacts, StorageError> {
         facts(self.conn())
@@ -229,6 +286,18 @@ fn transform_upload(scope: &mut WriteScope<'_>, at: EpochMillis) -> Result<(), S
 /// sidecar, journal-mode change or SQLite write is permitted here. Legacy
 /// schemas can be packaged but have unknown O3 facts until explicitly upgraded.
 pub fn verify_server_copy(path: &std::path::Path) -> Result<Option<LocalTransferFacts>, ReplaceError> {
+    Ok(inspect_server_copy(path)?.map(|(facts, _)| facts))
+}
+
+/// The same read-only gate, with V27.1's row test of the served file. `None`
+/// (a legacy schema) proves nothing: the caller treats it as user content.
+pub fn server_copy_user_content(path: &std::path::Path) -> Result<Option<UserContentRows>, ReplaceError> {
+    Ok(inspect_server_copy(path)?.map(|(_, rows)| rows))
+}
+
+fn inspect_server_copy(
+    path: &std::path::Path,
+) -> Result<Option<(LocalTransferFacts, UserContentRows)>, ReplaceError> {
     use crate::schema::{refuse, version};
     for suffix in ["-wal", "-shm", "-journal"] {
         if crate::connections::sibling(path, suffix).symlink_metadata().is_ok() {
@@ -262,7 +331,7 @@ pub fn verify_server_copy(path: &std::path::Path) -> Result<Option<LocalTransfer
                 missing_tables: checked.missing_tables,
             }));
         }
-        Some(facts(&conn)?)
+        Some((facts(&conn)?, user_content(&conn)?))
     } else {
         None
     };

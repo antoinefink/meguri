@@ -18,6 +18,7 @@ use meguri_storage::{
     OpenOptions, OpenedCollection, ReadRows, ReaderRole, StampMode, StorageError,
     one_way::{
         CollectionStamps, CollectionTotals, LocalTransferFacts, PendingContent, PendingDefinitions, PendingRows,
+        UserContentRows,
     },
     open_collection,
     verified_replace::{self, ReplaceError, ReplacementStage},
@@ -471,4 +472,118 @@ fn full_download_uses_the_existing_typed_caller_transform() {
         (EpochMillis(3000), EpochMillis(3000), EpochMillis(2000), Usn(4))
     );
     copy.close().unwrap();
+}
+
+// sync/cloudkit-recovery V27.8, first row: the V27.1 row test.
+
+#[test]
+fn user_content_rows_count_only_what_v27_1_names() {
+    let (_dir, path) = empty_collection();
+    let collection = managed(&path);
+    let reader = collection.open_reader(ReaderRole::Sync).unwrap();
+    // A new collection holds none, whatever stock note types it was created with.
+    let created = reader.user_content_rows().unwrap();
+    assert_eq!(created, UserContentRows::default());
+    assert!(created.none());
+
+    // Presets, config and tags do not count.
+    let frozen = clock();
+    let mut scope = collection
+        .writer()
+        .begin_write(StampMode::CallerSupplied, &frozen, None)
+        .unwrap();
+    let mut preset = common::preset("Changed preset");
+    preset.id = DeckConfigId(77);
+    preset.mtime = EpochSecs(105);
+    scope.put(&preset).unwrap();
+    scope.put(&common::tag("changed")).unwrap();
+    scope
+        .put_config_entry(&ConfigEntry {
+            key: "changed".into(),
+            usn: Usn(-1),
+            mtime: EpochSecs(106),
+            value: b"1".to_vec(),
+        })
+        .unwrap();
+    scope.commit().unwrap();
+    assert!(reader.user_content_rows().unwrap().none());
+
+    // Each of a note, a card, a review, a second deck and a saved note type counts alone.
+    let cases: [(&str, fn(&mut UserContentRows)); 5] = [
+        ("note", |rows| rows.notes = 1),
+        ("card", |rows| rows.cards = 1),
+        ("review", |rows| rows.reviews = 1),
+        ("deck", |rows| rows.other_decks = 1),
+        ("notetype", |rows| rows.saved_notetypes = 1),
+    ];
+    for (case, expect) in cases {
+        let (_dir, path) = empty_collection();
+        let collection = managed(&path);
+        let mut scope = collection
+            .writer()
+            .begin_write(StampMode::CallerSupplied, &frozen, None)
+            .unwrap();
+        match case {
+            "note" => {
+                let mut note = common::note(10, &["question", "answer"]);
+                note.id = NoteId(10);
+                scope.put(&note).unwrap();
+            }
+            "card" => {
+                let mut card = common::card(NoteId(10), 0);
+                card.id = CardId(10);
+                scope.put(&card).unwrap();
+            }
+            "review" => {
+                let mut review = common::revlog(CardId(10), 1234);
+                review.id = RevlogId(10);
+                scope.put(&review).unwrap();
+            }
+            "deck" => {
+                let mut deck = common::deck("Second");
+                deck.id = DeckId(10);
+                scope.put(&deck).unwrap();
+            }
+            _ => {
+                let mut notetype = common::notetype("Made here", &["Front", "Back"], &["Card"]);
+                notetype.id = NotetypeId(10);
+                notetype.mtime = EpochSecs(103);
+                scope.put_notetype(&notetype).unwrap();
+            }
+        }
+        scope.commit().unwrap();
+        let mut expected = UserContentRows::default();
+        expect(&mut expected);
+        let rows = collection.open_reader(ReaderRole::Sync).unwrap().user_content_rows().unwrap();
+        assert_eq!(rows, expected, "{case}");
+        assert!(!rows.none(), "{case}");
+    }
+}
+
+#[test]
+fn stock_notetype_as_created_is_not_user_content_until_saved() {
+    let (_dir, path) = empty_collection();
+    let collection = managed(&path);
+    let frozen = clock();
+    let mut scope = collection
+        .writer()
+        .begin_write(StampMode::CallerSupplied, &frozen, None)
+        .unwrap();
+    // storage/new-collection B7 writes a stock row with mtime_secs 0.
+    let mut stock = common::notetype("Stock", &["Front", "Back"], &["Card"]);
+    stock.id = NotetypeId(20);
+    stock.mtime = EpochSecs(0);
+    scope.put_notetype(&stock).unwrap();
+    scope.commit().unwrap();
+    let reader = collection.open_reader(ReaderRole::Sync).unwrap();
+    assert!(reader.user_content_rows().unwrap().none());
+    // notetypes/records N3.2: every local save stamps the row with the current time.
+    let mut scope = collection
+        .writer()
+        .begin_write(StampMode::CallerSupplied, &frozen, None)
+        .unwrap();
+    stock.mtime = EpochSecs(1_894_701_960);
+    scope.put_notetype(&stock).unwrap();
+    scope.commit().unwrap();
+    assert_eq!(reader.user_content_rows().unwrap().saved_notetypes, 1);
 }
