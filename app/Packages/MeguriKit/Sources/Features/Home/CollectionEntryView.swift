@@ -322,7 +322,8 @@ struct CollectionEntryContent: View {
         }
         .presentationSizing(.form)
         #if os(iOS)
-        .presentationDetents([.medium])
+        // Recovery receipts need the room; the ordinary steps do not.
+        .presentationDetents(presentation.showsRetainedDetails ? [.large] : [.medium])
         #endif
         .interactiveDismissDisabled(presentation.busy || presentation.requiresRecovery)
     }
