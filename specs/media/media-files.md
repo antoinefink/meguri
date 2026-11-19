@@ -195,7 +195,7 @@ Ignored files are never tracked (M7.1), so they are never pending or synced and 
 
 ## M10. Trash (R2018)
 
-The trash holds every media file Meguri removes. Emptying it is the only permanent deletion of media bytes, and runs only when the user asks (U130's Empty Trash, `maintenance/check-media#C17`); nothing empties it automatically (R1650). The trash is never synced and is not part of the media sync state. It survives relaunch. Changed, decided 2026-11-19 (review F7): one automatic removal exists. A trash entry that a sync replacement made is removed 30 days after it was made (`sync/cloudkit-recovery#V27.7`). Every other entry stays until the user empties the trash. This change is under review with `sync/cloudkit-recovery#V27` and is not implemented before it is approved.
+The trash holds every media file Meguri removes. Emptying it is the only permanent deletion of media bytes, and runs only when the user asks (U130's Empty Trash, `maintenance/check-media#C17`); nothing empties it automatically (R1650). The trash is never synced and is not part of the media sync state. It survives relaunch.
 
 ### M10.1 Moving files to the trash
 

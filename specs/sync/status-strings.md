@@ -1103,7 +1103,7 @@ The same four rules make the main status. The first condition that applies decid
 | Key | English | Use |
 |---|---|---|
 | `sync.trouble.replacedMedia` | Show Replaced Media | row; opens the copies' folder in the Files app, or in Finder on Mac |
-| `sync.trouble.replacedMedia.footer` | Media files that sync replaced are kept here for 30 days. | the row's footer |
+| `sync.trouble.replacedMedia.footer` | Media files that sync replaced are kept here until you delete them. | the row's footer |
 
 ### T19.7 Sync Now (T6, T18.7)
 

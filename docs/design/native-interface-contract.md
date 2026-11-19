@@ -500,7 +500,7 @@ One page inside Sync, for both services, with these rows:
 5. Sync Log, a page of real recorded attempts under N7's rules: nothing fabricated, missing fields as "Not recorded", no secrets or card content
 6. Copy Debug Info
 7. for iCloud, one plain line with the number of saved conflict copies, with no action, while there are any
-8. Show Replaced Media, only while replaced-media copies exist: it opens their folder in the Files app, or in Finder on Mac. Its footer says the copies are kept for 30 days (V27.7; decided 2026-11-19 (review F7))
+8. Show Replaced Media, only while replaced-media copies exist: it opens their folder in the Files app, or in Finder on Mac. Its footer says the copies stay until the person deletes them (V27.7; decided 2026-11-19 (review F7))
 
 - Each replace entry opens its preview sheet and changes nothing; the preview's destructive button is the confirmation (N11.8, N8).
 - Opening the page may start iCloud's read-only preview reads (N11.8); it starts no Meguri Sync request (N8, MP2).
@@ -515,7 +515,7 @@ One page inside Sync, for both services, with these rows:
 - **N11.8**, bullet 8: the sheet that opens by itself is N15.3's; its Cancel takes the place of the earlier dismiss button.
 - **N11.8**, bullets 1, 2, 7, 9 and 10 are unchanged.
 - **N12.4**, first bullet: "Account & Sync offers iCloud Sync and Meguri Sync" becomes N15.2's Service row. Second bullet: MP2's native controls and N11.8's safety rules stay; N11.8's iCloud controls are replaced as above. The other bullets are unchanged.
-- **Plan text**: R122 (the media setting); R117's Enable and Pause controls; R2046's "explicit connection action" and "a paused connection"; R125's "advanced recovery actions", for their place only (their previews, backups and confirmations stay); R2054's Review Conflicts action in the needs-attention state and Settings, which is met by N15.3's sheet together with Show Replaced Media (decided 2026-11-19 (review F7)); R1650 and R2018, for the 30-day removal of replaced-media copies; U161's Account & Sync layout.
+- **Plan text**: R122 (the media setting); R117's Enable and Pause controls; R2046's "explicit connection action" and "a paused connection"; R125's "advanced recovery actions", for their place only (their previews, backups and confirmations stay); R2054's Review Conflicts action in the needs-attention state and Settings, which is met by N15.3's sheet together with Show Replaced Media (decided 2026-11-19 (review F7)); U161's Account & Sync layout.
 - **Screen contracts**: `settings.accountSync`, `sync.status`, `sync.connect`, `sync.publicationChoice`, `sync.serviceSwitch` and `sync.meguriSetup` need new versions for this section; `sync.reviewConflicts` is not shown; `sync.keepCollection` is new.
 
 ## N16. Round 3 review decisions (2026-11-19)
