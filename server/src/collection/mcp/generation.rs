@@ -178,7 +178,6 @@ pub(super) fn generate(c: &Connection, id: i64, nt: &Notetype, fields: &str, tag
                 random=Some(value);value
             } else {p}
         };
-        runtime.permit_new_card()?;
         let card=write::allocate(c,"cards",now)?;
         c.execute("INSERT INTO cards(id,nid,did,ord,mod,usn,type,queue,due,ivl,factor,reps,lapses,left,odue,odid,flags,data) VALUES(?1,?2,?3,?4,?5,?6,0,0,?7,0,0,0,0,0,0,0,0,'{}')",
             params![card,id,deck,ord,now.div_euclid(1000),usn,position as i32]).map_err(sql_error)?;

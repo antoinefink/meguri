@@ -21,8 +21,6 @@ pub(crate) struct McpService {
     service: Arc<Service>,
     backend: Arc<Backend>,
     #[cfg(any(test, feature = "test-hooks"))]
-    generated_tests: bool,
-    #[cfg(any(test, feature = "test-hooks"))]
     probe: Option<Arc<dyn Fn(TestBoundary) + Send + Sync>>,
 }
 
@@ -31,19 +29,8 @@ impl McpService {
         Self {
             backend: Arc::new(Backend::new(service.mcp_key)), service,
             #[cfg(any(test, feature = "test-hooks"))]
-            generated_tests: false,
-            #[cfg(any(test, feature = "test-hooks"))]
             probe: None,
         }
-    }
-
-    /// Disposable generated-account harness only. No production configuration,
-    /// request argument or administrator action can enable unproved allocation.
-    #[cfg(any(test, feature = "test-hooks"))]
-    pub(crate) fn for_generated_tests(service: Arc<Service>) -> Self {
-        let mut bridge = Self::new(service);
-        bridge.generated_tests = true;
-        bridge
     }
 
     /// Synchronous worker boundaries, for cancellation/invalidation ordering.
@@ -52,13 +39,6 @@ impl McpService {
     pub(crate) fn with_test_probe(mut self, probe: Arc<dyn Fn(TestBoundary) + Send + Sync>) -> Self {
         self.probe = Some(probe);
         self
-    }
-
-    fn generation_allowed(&self) -> bool {
-        #[cfg(any(test, feature = "test-hooks"))]
-        { self.generated_tests }
-        #[cfg(not(any(test, feature = "test-hooks")))]
-        { false }
     }
 
     pub(crate) async fn search_notes(&self, authority: oauth::Authority, input: SearchInput) -> Result<SearchResult> {
@@ -70,19 +50,14 @@ impl McpService {
     }
 
     pub(crate) async fn create_note(&self, authority: oauth::Authority, input: CreateInput) -> Result<WriteResult> {
-        let allow = self.generation_allowed();
         self.execute(authority, true, move |backend, path, a| {
-            if !allow { return Err(allocation_unproved()); }
-            backend.create_note(path, a, input, &Runtime { allow_generation: allow })
+            backend.create_note(path, a, input, &Runtime)
         }).await
     }
 
     pub(crate) async fn edit_note(&self, authority: oauth::Authority, input: EditInput) -> Result<WriteResult> {
-        let allow = self.generation_allowed();
         self.execute(authority, true, move |backend, path, a| {
-            backend.edit_note(path, a, input, &Runtime {
-                allow_generation: allow,
-            })
+            backend.edit_note(path, a, input, &Runtime)
         }).await
     }
 
@@ -183,26 +158,17 @@ fn check_oauth(root: &DataRoot, original: &oauth::Authority, write: bool) -> Res
 }
 
 fn secret() -> Result<[u8; 32]> { crypto::bearer(&crypto::random_token()?) }
-fn allocation_unproved() -> Error { Error::new("unsupported_collection") }
-
-struct Runtime {
-    allow_generation: bool,
-}
+struct Runtime;
 impl WriteRuntime for Runtime {
-    fn permit_new_card(&self) -> Result<()> {
-        if self.allow_generation { Ok(()) } else { Err(allocation_unproved()) }
-    }
     fn now_millis(&self) -> Result<i64> {
         i64::try_from(time::OffsetDateTime::now_utc().unix_timestamp_nanos().div_euclid(1_000_000))
             .map_err(|_| Error::new("storage_unavailable"))
     }
     fn guid_random_u64(&self) -> Result<u64> {
-        if !self.allow_generation { return Err(allocation_unproved()); }
         let bytes = secret()?;
         Ok(u64::from_le_bytes(bytes[..8].try_into().expect("eight bytes")))
     }
     fn random_position(&self, counter: u32) -> Result<u32> {
-        if !self.allow_generation { return Err(allocation_unproved()); }
         Ok(StdRng::seed_from_u64(u64::from(counter)).random_range(1..counter.max(1000)))
     }
 }
@@ -217,20 +183,11 @@ mod tests {
 
     #[test]
     fn p4_uses_the_pinned_seeded_generator() {
-        let runtime = Runtime { allow_generation: true };
+        let runtime = Runtime;
         for (counter, expected) in [(0,801), (1,825), (2,82), (3,647), (998,779),
             (999,574), (1000,998), (1001,661), (5000,4542),
             (123456789,33597438), (u32::MAX,2331729548)] {
             assert_eq!(runtime.random_position(counter).unwrap(), expected);
         }
-    }
-
-    #[test]
-    fn unproved_allocation_has_no_permit_or_randomness_escape() {
-        let runtime = Runtime { allow_generation: false };
-        assert!(runtime.now_millis().unwrap() > 0);
-        assert_eq!(runtime.permit_new_card().unwrap_err().code, "unsupported_collection");
-        assert_eq!(runtime.guid_random_u64().unwrap_err().code, "unsupported_collection");
-        assert_eq!(runtime.random_position(1).unwrap_err().code, "unsupported_collection");
     }
 }

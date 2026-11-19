@@ -39,7 +39,7 @@ Independent clean-room passes `20261119T145357Z-93571`, `20261119T150618Z-52478`
 - `sync-web-verify/20261119T153414Z-64251` passed nine frontend checks and 42 browser cases using generated accounts and test-only client responses.
 - `sync-server-mcp-bench/20261119T153614Z-73452` measured approximately 20 and 200 MB generated fixtures in the shared release Docker environment. The larger fixture's highest warm p95 across three workers was 0.44 ms exact lookup, 4.89 ms one-field edit and 4.13 ms note and card creation. The retained SQLite writer returned busy within 0.38 ms across both sizes. Warm read appended zero WAL frames. The p95 edit touched five frames on both sizes. Incremental worker memory was roughly 6 MiB on both. The run used a warm OS cache and shared Docker resources. Full M7 acceptance still needs the dedicated environment and transport measurements.
 
-Production allocation that can create cards remains gated on C7's native identity and position evidence. Local tests use generated databases. Hosted ChatGPT and Claude sessions and the integration gate remain pending.
+At this stage, the server blocked production writes that would create cards. Local tests used generated databases.
 
 ### Approved consent and final draft verification
 
@@ -50,3 +50,13 @@ Antoine approved the compact single-card consent flow, stacked permission choice
 - `sync-web-verify/20261119T154355Z-90093` passed all 51 checks on the final source, including 42 Chrome cases and nine frontend checks. The approved sign-in typography and other screenshots came from this build.
 
 `workflow_review` and `mcp_agent_strategy` independently read the complete candidate files flagged by the local privacy scan. Both classified the scoped implementation, specification and generated test fixtures as public. The orchestrator matched the reviewed bytes to the whole-file SHA-256 entries in `tools/scripts/private-scan/private_scan.py`. This includes the browser specification digest `df95f9d7c15f66688c40b1890d115c30cf486ce1ab899adfc2a170714ceaacb4` and the normal test module digest `f025e206aa100c5bc0a62117c9d250dc9c74630c02b6fa2f38cc79f169e228bf`.
+
+### Production note creation and card generation
+
+Antoine approved the existing timestamp IDs and native conflict rules for rare offline ID overlaps. Starting commit `c7caf3301`. The C7 amendment enables creation and card-generating edits under those rules. It keeps the native wire format and verifies incremental delivery with distinct IDs.
+
+- Filtered implementation `20261119T160905Z-70906` and independent read-only review `20261119T161347Z-77135` found no remaining review defects. The requests use the regular OAuth write scope and existing guarded transaction.
+- `sync-server-test/20261119T161410Z-78657` verified creation through the mounted OAuth route and two native incremental rounds. The first delivered the new note and card. The second delivered the edited note and added card, excluded the unchanged sibling, and checked stable IDs, tag and counter state, and successful sync finish.
+- `sync-server-lint/20261119T161609Z-80251` passed. The browser source is unchanged from the approved verification above. Live ChatGPT and Claude sessions, dedicated performance acceptance and the integration gate remain pending.
+
+`workflow_review` independently classified the complete plan, amended specs and seven source files as public. The allowlist records the exact digests for the files with existing entries. The reviewer verified both ledger appends as public operational metadata. The record SHA-256 values, including newline, are `c9b266847f9f4d12351119a82a8057f807c4bac64616396c9bda6f6ae9a769ad` at `61c7a4521` and `b037b6a5e5826ecce02e4f3218e9b597978f7fc655d77154b35b7a963ef329e0` at `8775779ea`.
