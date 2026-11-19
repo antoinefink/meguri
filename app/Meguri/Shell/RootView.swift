@@ -56,7 +56,7 @@ struct RootView: View {
     }
 
     #if os(iOS)
-    /// The tab layout's list beside the deck: not for the welcome (N18.1), and not
+    /// The tab layout's list beside the deck: not for the welcome (N18.3), and not
     /// decided while the collection is still opening.
     private var besideDetail: Bool? {
         guard let collection else { return true }

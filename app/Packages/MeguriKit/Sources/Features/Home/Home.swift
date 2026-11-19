@@ -211,7 +211,7 @@ public struct HomeView: View {
         // The sidebar's first row says Today in every collection state, so its page does too.
         guard let deckID else {
             #if !os(macOS)
-            // N18.1: the welcome names itself in the content; the tab layout's bar repeats nothing over it.
+            // N18.3: the welcome names itself in the content; the tab layout's bar repeats nothing over it.
             if collection.state == .noFile, shellLayout == .compact { return "" }
             #endif
             return HomeHeading.rootTitle(showsToday: showsToday)
@@ -290,7 +290,7 @@ public struct HomeView: View {
     @ViewBuilder private var content: some View {
         switch collection.state {
         case .unopened, .loading: LoadingStateView(Text("Opening collection…", bundle: .module))
-        case .noFile: EmptyView() // The welcome owns the page (N18.1).
+        case .noFile: EmptyView() // The welcome owns the page (N18.3).
         case .unavailable:
             LoadingStateView(Text("Collection is busy…", bundle: .module))
         case .creationRecovery:
@@ -310,7 +310,7 @@ public struct HomeView: View {
         }
     }
 
-    /// N18.1: one row for sync, the Account & Sync entry; then the import and the empty collection.
+    /// N18.3: one row for sync, the Account & Sync entry; then the import and the empty collection.
     private var welcome: some View {
         HomeWelcome(
             sync: .init(enabled: collection.navigation.sheet == nil) {

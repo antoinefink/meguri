@@ -5,7 +5,7 @@ import SwiftUI
 import AppKit
 #endif
 
-/// The three ways to start without a collection (N18.1), in the order the screen lists them.
+/// The three ways to start without a collection (N18.3), in the order the screen lists them.
 nonisolated enum WelcomeChoice: CaseIterable, Sendable {
     case sync, importFile, startEmpty
 
@@ -40,7 +40,7 @@ nonisolated enum WelcomeChoice: CaseIterable, Sendable {
     }
 }
 
-/// How the welcome screen arranges its heading and its choices (N18.1).
+/// How the welcome screen arranges its heading and its choices (N18.3).
 nonisolated enum WelcomeArrangement: Equatable, Sendable {
     /// The heading over the list, in one column.
     case column
@@ -73,7 +73,7 @@ nonisolated enum WelcomeArrangement: Equatable, Sendable {
     }
 }
 
-/// Home without a collection (N18.1): a welcome, one line, and one grouped list of the ways to start.
+/// Home without a collection (N18.3): a welcome, one line, and one grouped list of the ways to start.
 struct HomeWelcome: View {
     struct Action {
         var enabled = true

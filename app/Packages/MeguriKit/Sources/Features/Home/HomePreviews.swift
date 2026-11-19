@@ -11,7 +11,7 @@ public enum HomeDeckListPreview: PreviewStates {
                     HomeDeckTree(nodes: nodes(overflow: state == .overflow), select: { _ in })
                 } else {
                     if state == .empty {
-                        // The live screen's three rows, enabled (N18.1).
+                        // The live screen's three rows, enabled (N18.3).
                         HomeWelcome(sync: .init(), importFile: .init(), startEmpty: .init())
                     } else {
                         GeometryReader { geometry in

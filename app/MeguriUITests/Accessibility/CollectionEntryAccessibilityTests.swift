@@ -83,7 +83,7 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
         }
     }
 
-    /// N18.1: the welcome's three rows, each brought into reach at every text size.
+    /// N18.3: the welcome's three rows, each brought into reach at every text size.
     func testWelcomePassesTheAuditAtEveryTextSizeAndAppearance() throws {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()

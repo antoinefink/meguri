@@ -81,7 +81,7 @@ screens:
     references: [onboarding]
     purpose: >-
       No collection on this device (U151's CollectionStore in NoCollection; R157, R161, R163, R2046;
-      native-interface-contract N18.1, decided 2026-11-19, which replaces the earlier layout of an
+      native-interface-contract N18.3, decided 2026-11-19, which replaces the earlier layout of an
       app icon and three bordered buttons). Welcome is Home's content in that state, inside the
       shell: the sidebar or the tabs, Settings and the toolbar's sync button stay. Layout: the large
       title "Welcome to Meguri", the line "Choose how to start. You can change this later in
@@ -1473,7 +1473,7 @@ screens:
       The first connection and its two-collections decision (cloudkit-recovery V13, V9.2; R158,
       R159, R160, R1592, R2055; N11.8). Text: sync/status-strings T11, T12 and T13.6, except page a's,
       which is U166's own (T12: that file adds none). Entry points: Account & Sync's
-      `sync.connect.action`, which Welcome's Set Up Sync row leads to (onboarding.welcome, N18.1),
+      `sync.connect.action`, which Welcome's Set Up Sync row leads to (onboarding.welcome, N18.3),
       and sync.status's Connect to iCloud… and Resume Syncing. It needs account status
       `available` with an identity read in this process (V13.1); during a review session it does not
       start and shows `sync.recovery.error.sessionActive` (V20, T9.2); while the user's pause is on

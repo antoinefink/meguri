@@ -127,7 +127,7 @@ import notify
         let accountSyncButtons = app.buttons.matching(identifier: "home.collection.accountSync")
         let accountSync = try XCTUnwrap(waitForHittable(accountSyncButtons), app.debugDescription)
         XCTAssertEqual(accountSyncButtons.count, 1)
-        // N18.1: one row for sync, which opens Account & Sync.
+        // N18.3: one row for sync, which opens Account & Sync.
         XCTAssertEqual(accountSync.label, "Set Up Sync")
         XCTAssertTrue(accountSync.isEnabled)
         XCTAssertTrue(app.staticTexts["Welcome to Meguri"].exists)

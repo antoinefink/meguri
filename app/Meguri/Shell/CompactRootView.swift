@@ -12,7 +12,7 @@ struct CompactRootView: View {
     let features: ShellFeatures
     let configuration: LaunchConfiguration
     let hasDecks: Bool
-    /// Whether Decks shows the list beside the deck at regular width. N18.1: with no
+    /// Whether Decks shows the list beside the deck at regular width. N18.3: with no
     /// collection the welcome takes the whole width instead. Nil while the collection is
     /// still opening: the layout last shown stays, and a launch starts on the stack, so
     /// no split shows for a moment before a welcome.
