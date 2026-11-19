@@ -328,6 +328,30 @@ impl Authority {
     pub fn save_settings_for_owner(&self, settings: LegacySettings, generation: u64, publication: Option<Publication>) -> Result<ProviderDocument, StorageError> {
         self.save_settings_with_facts(settings, Some((generation, publication)))
     }
+    /// Runtime/Host retain the exact initial adoption through `publish`.
+    /// L1 precedes the Runtime check; State/tracking are released before I/O.
+    pub(crate) fn save_initial_adoption_pause(
+        &self, settings: LegacySettings, generation: u64,
+        publish: impl FnOnce(&mut dyn FnMut() -> Result<(), meguri_engine::EngineError>) -> Result<bool, meguri_engine::EngineError>,
+    ) -> Result<bool, meguri_engine::EngineError> {
+        let mut failure = self.publication_failure.lock().unwrap_or_else(PoisonError::into_inner);
+        publish(&mut || {
+            // An owner-scoped failure cannot be retried by ordinary settings
+            // recovery after this adoption has gone away.
+            self.update_publication_locked(&mut failure, Some((generation, None)), false, |_, doc| {
+                let mut expected = doc.settings;
+                expected.paused = settings.paused;
+                if doc.selection != Selection::ICloud || !doc.settings.enabled || doc.handoff.is_some()
+                    || doc.binding.is_some() || !doc.legacy_binding_pending
+                    || doc.icloud_settings != doc.settings || settings != expected
+                { return Err(invalid()); }
+                doc.settings.paused = settings.paused;
+                doc.icloud_settings.paused = settings.paused;
+                Ok(())
+            })?;
+            Ok(())
+        })
+    }
     fn save_settings_with_facts(&self, settings: LegacySettings, facts: Option<(u64, Option<Publication>)>) -> Result<ProviderDocument, StorageError> {
         self.update_publication(facts, true, |_, doc| {
             if doc.handoff.is_some() || (doc.selection == Selection::Meguri && ((settings.automatic && doc.meguri_binding.is_none()) || !settings.media)) { return Err(invalid()); }

@@ -450,6 +450,46 @@ impl CoreHost {
         })
     }
 
+    /// Only the live confirmed no-file adoption may borrow its actual slot for
+    /// Pause/Resume. Absence of that owner leaves the ordinary path in charge;
+    /// a failed owner check never falls back to another publication authority.
+    pub(crate) fn save_initial_adoption_pause(
+        &self, generation: meguri_engine::Generation, settings: meguri_sync::provider::LegacySettings,
+    ) -> Result<bool, EngineError> {
+        let (Some(live), Some(runtime)) = (&self.no_collection_identity_owner, &self.cloud) else { return Ok(false); };
+        fn lease<T>(lock: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, EngineError> {
+            match lock.try_lock() {
+                Ok(guard) => Ok(guard),
+                Err(std::sync::TryLockError::Poisoned(error)) => Ok(error.into_inner()),
+                Err(std::sync::TryLockError::WouldBlock) => Err(EngineError::Busy {
+                    running_op: "initial adoption settings original host owner".into(),
+                }),
+            }
+        }
+        let identity = lease(live)?;
+        let closed = lease(&self.closed)?;
+        if !*identity || !matches!(*closed, CloseState::Active) {
+            return Err(EngineError::CollectionUnavailable { reason: "initial adoption settings host closed".into() });
+        }
+        // identity -> close -> provider publication -> adoption/task -> State
+        // (released) -> Engine control/state -> local sidecars/provider cache.
+        // Engine control acquisition is nonblocking. Never reenter Runtime here.
+        runtime.save_initial_adoption_pause(&self.engine, generation, live, &self.provider, settings, |slot, write| {
+            self.engine.with_initial_adoption_metadata_publication(slot, generation, || {
+                match self.provider_collection_path.symlink_metadata() {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(meguri_storage::StorageError::from(error).into()),
+                    Ok(_) => return Err(EngineError::CollectionUnavailable { reason: "existing collection requires open".into() }),
+                }
+                let device = meguri_engine::device_state::DeviceState::for_collection(&self.provider_collection_path);
+                if device.settled_publication()?.is_some() || device.publication_decision()?.is_some() {
+                    return Err(EngineError::CollectionUnavailable { reason: "initial adoption publication changed".into() });
+                }
+                write()
+            })
+        })
+    }
+
     pub(crate) fn media_space_provider(&self) -> &dyn meguri_storage::space::SpaceProvider {
         self.backup_inputs.space.as_ref()
     }

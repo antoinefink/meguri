@@ -29,6 +29,7 @@ use std::{
 };
 
 pub(super) struct AdoptionOwner {
+    id: [u8; 16],
     slot: SlotGuard,
     generation: meguri_engine::Generation,
     pub(super) cleanup_evidence: Mutex<
@@ -497,6 +498,76 @@ impl Runtime {
             .clone()
             .ok_or(RuntimeError::StaleIncarnation)
     }
+    /// Host holds this exact identity-owner's live lease and close lease.
+    /// Do not call with_initial_adoption_state here: it reacquires that lease
+    /// and queries Engine while holding State. The slot callback runs only
+    /// after State/tracking are released, with incumbent/task ownership held.
+    pub fn save_initial_adoption_pause(
+        &self, engine: &Engine, generation: meguri_engine::Generation,
+        live: &Arc<Mutex<bool>>, provider: &Arc<crate::provider::Authority>,
+        settings: crate::provider::LegacySettings,
+        publish: impl FnOnce(&SlotGuard, &mut dyn FnMut() -> Result<(), EngineError>) -> Result<(), EngineError>,
+    ) -> Result<bool, EngineError> {
+        let stale = || EngineError::CollectionUnavailable { reason: "initial adoption settings owner changed".into() };
+        provider.save_initial_adoption_pause(settings, generation.0, |write| {
+            // Confirmation can hold adoption while taking the live identity
+            // lease. Host already holds that lease: never wait in reverse.
+            fn lease<T>(lock: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, EngineError> {
+                match lock.try_lock() {
+                    Ok(guard) => Ok(guard),
+                    Err(std::sync::TryLockError::Poisoned(error)) => Ok(error.into_inner()),
+                    Err(std::sync::TryLockError::WouldBlock) => Err(EngineError::Busy {
+                        running_op: "initial adoption settings incumbent".into(),
+                    }),
+                }
+            }
+            let held = lease(&self.adoption)?;
+            let Some(owner) = held.as_ref() else { return Ok(false); };
+            // A completed initial adoption leaves the prepared Host alive.
+            // Its old identity generation must not intercept ordinary settings.
+            let identity = self.no_collection_identity_owner.lock().unwrap_or_else(PoisonError::into_inner)
+                .clone().ok_or_else(stale)?;
+            if identity.generation != generation
+                || !identity.live.upgrade().is_some_and(|owner| Arc::ptr_eq(&owner, live))
+            { return Err(stale()); }
+            let next = lease(&owner.next)?;
+            if owner.generation != generation || !owner.slot.belongs_to(engine)
+                || !identity.engine.upgrade().is_some_and(|engine| owner.slot.belongs_to(&engine))
+                || owner.uncertain_activation.load(std::sync::atomic::Ordering::Acquire)
+                // Refuse an in-flight claim before taking State: that worker
+                // may need next to settle while it holds State.
+                || !matches!(*next, AdoptionNext::Pending(_))
+            { return Err(stale()); }
+            let op = {
+                let s = self.state();
+                if s.incarnation != identity.incarnation || s.bound.is_some() || s.cloud.generation.is_some()
+                    || s.suspended_adoption_cleanup.is_some() || s.adapter.sdk.is_some()
+                    || !s.provider.as_ref().is_some_and(|current| Arc::ptr_eq(current, provider))
+                { return Err(stale()); }
+                with_tracking_access(|| -> Result<AdoptOp, Error> {
+                    let store = s.store.as_ref().ok_or(Error::Database)?;
+                    if store.publication_op()?.is_some() { return Err(Error::InvalidData); }
+                    store.adoption_op()?.ok_or(Error::InvalidData)
+                }).map_err(|error| EngineError::CollectionUnavailable { reason: error.to_string() })?
+            };
+            // Only the pending task/step pairs produced by this original
+            // adoption may borrow its slot. Holding next through publication
+            // excludes reply/local claims, cancellation and activation effects.
+            let pending = matches!((&*next, op.step),
+                (AdoptionNext::Pending(AdoptionTask::ReadActive | AdoptionTask::ReadEpoch
+                    | AdoptionTask::ReadMediaRoot | AdoptionTask::Fetch { .. }
+                    | AdoptionTask::FetchPayload { .. }), AdoptStep::Staging)
+                | (AdoptionNext::Pending(AdoptionTask::Validate), AdoptStep::Staged)
+                | (AdoptionNext::Pending(AdoptionTask::RecheckActive | AdoptionTask::Activate), AdoptStep::Ready)
+            );
+            if !pending || op.id != owner.id || op.file_before.is_some()
+                || op.before.is_some() || op.binding_before.is_some()
+                || owner.directory.file_name().and_then(|name| name.to_str()) != Some(op.staging_name.as_str())
+            { return Err(stale()); }
+            publish(&owner.slot, write)?;
+            Ok(true)
+        })
+    }
     pub fn adoption_op(&self) -> Result<Option<AdoptOp>, RuntimeError> {
         self.read_recovery_op(TrackingStore::adoption_op)
     }
@@ -837,6 +908,7 @@ impl Runtime {
             })
             .transpose()?;
         let owner = Arc::new(AdoptionOwner {
+            id,
             slot,
             generation: engine.generation(),
             cleanup_evidence: Mutex::new(cleanup_evidence),

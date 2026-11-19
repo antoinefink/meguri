@@ -223,6 +223,11 @@ impl CoreHost {
     /// inside the actual metadata publication, not as publication authority.
     pub fn save_provider_settings_for_generation(&self, generation: meguri_engine::Generation, settings: meguri_sync::provider::LegacySettings) -> Result<(), EngineError> {
         self.provider.close_admission();
+        if self.save_initial_adoption_pause(generation, settings)? {
+            // No qualification/reload here: this metadata write grants no
+            // binding or writer authority. Resume still needs fresh proof.
+            return Ok(());
+        }
         self.publish_provider_metadata(generation, |publication| {
             self.provider.save_settings_for_owner(settings, generation.0, publication)?;
             Ok(())

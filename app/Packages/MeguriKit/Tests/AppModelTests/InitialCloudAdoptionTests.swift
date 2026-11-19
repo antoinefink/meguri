@@ -570,6 +570,9 @@ extension ReviewCollectionStartupTests {
         let harness = try InitialCloudHarness(fixture: fixture)
         defer { harness.release(); harness.removeTemporaryStorage() }
         var transition: Task<Void, Never>?
+        let proof = SyncOwnerGate()
+        let proofEntered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer { proof.release(); proofEntered.continuation.finish(); harness.factory.beforeAccountReturn = nil }
         do {
             try await harness.beginAndWaitForPage()
             let generation = harness.owner.generation
@@ -581,6 +584,15 @@ extension ReviewCollectionStartupTests {
                 transition = Task { harness.owner.setForeground(false); await harness.owner.waitForLifecycle() }
             }
             try await harness.page.waitForCancellation()
+            // After cancellation, join the durable settings write while the
+            // original transport page is still held outside the Core phase.
+            // Read the committed snapshot without reloading account admission.
+            await harness.sync.waitForInputs()
+            let provider = try await CoreProviderService.attached()
+            let heldSettings = try await provider.state()
+            #expect(heldSettings.selection == .iCloud)
+            #expect(heldSettings.settings == .init(enabled: true, paused: hold == .pause, automatic: false, media: true))
+            #expect(harness.sync.settings.paused == (hold == .pause) && !harness.sync.operationFailed)
             #expect(harness.requests.count == requestsBefore && !harness.collectionExists)
             #expect(harness.sync.initialAdoptionActive && harness.persistedEnabled == true)
             #expect(!harness.page.replyReturned)
@@ -593,18 +605,38 @@ extension ReviewCollectionStartupTests {
             #expect(harness.sync.initialAdoptionActive && harness.sync.recovery != nil)
             #expect(harness.sync.settings.enabled && harness.persistedEnabled == true)
             #expect(harness.factory.created.isEmpty && harness.backends.count == 1)
+            let reads = harness.factory.accountReads
+            harness.factory.beforeAccountReturn = {
+                proofEntered.continuation.yield(())
+                await proof.hold()
+            }
             if hold == .pause {
                 harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
-                await harness.sync.waitForInitialOwnResume()
+                await harness.sync.waitForInputs()
+                let resumedSettings = try await provider.state()
+                #expect(resumedSettings.settings == .init(enabled: true, paused: false, automatic: false, media: true))
+                transition = Task { await harness.sync.waitForInitialOwnResume() }
             } else {
                 harness.owner.setForeground(true)
-                await harness.owner.waitForLifecycle()
-                await harness.sync.prepareConnectionAuthority()
-                await harness.sync.waitForConnectionPreview()
+                transition = Task {
+                    await harness.owner.waitForLifecycle()
+                    await harness.sync.prepareConnectionAuthority()
+                    await harness.sync.waitForConnectionPreview()
+                }
             }
+            try await initialCloudSignal(proofEntered.stream, stage: "initial-adoption-fresh-resume-proof")
+            // The original page and drain have settled. Before returning this
+            // new account proof, no successor or further request may exist.
+            #expect(harness.factory.accountReads == reads + 1)
+            #expect(harness.requests.count == requestsBefore && !harness.collectionExists)
+            #expect(harness.backends.count == 1 && harness.factory.created.isEmpty)
+            harness.factory.beforeAccountReturn = nil
+            proof.release()
+            await transition?.value
             await harness.sync.waitForReplacement()
             await harness.owner.waitForCloudActivation()
             await harness.sync.prepareConnectionAuthority()
+            try #require(harness.backends.count == 2, "Resume must retain exactly one successor before indexing")
             try await harness.backends[1].waitForStart()
             #expect(harness.backends[1].starts.count == 1 && harness.backends[1].starts.first?.succeeded == true)
             #expect(harness.backends[1].starts.first?.automatic == false)
@@ -617,7 +649,7 @@ extension ReviewCollectionStartupTests {
             #expect(harness.factory.fetches.isEmpty)
             #expect(try await harness.backends[1].workflow.fetchDrains().isEmpty)
             #expect(await harness.owner.close())
-        } catch { harness.release(); await transition?.value; await harness.cleanup(); throw error }
+        } catch { proof.release(); harness.factory.beforeAccountReturn = nil; harness.release(); await transition?.value; await harness.cleanup(); throw error }
     }
 
     @Test(arguments: [false, true])

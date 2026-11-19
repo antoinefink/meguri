@@ -728,6 +728,33 @@ impl Engine {
         publish(path)
     }
 
+    /// Local Pause/Resume metadata for a Runtime's retained initial adoption.
+    /// The caller proves the actual AdoptionOwner and absent original path.
+    /// No Runtime State/tracking, callbacks or lifecycle reentry in `publish`.
+    pub fn with_initial_adoption_metadata_publication<T>(
+        &self,
+        slot: &SlotGuard,
+        generation: Generation,
+        publish: impl FnOnce() -> Result<T, EngineError>,
+    ) -> Result<T, EngineError> {
+        if !slot.belongs_to(self) || slot.op() != LongOp::CloudAdopt {
+            return Err(EngineError::unavailable("initial adoption metadata requires its own slot"));
+        }
+        let _control = self.job_control_lane()?;
+        let state = self.lock_state();
+        let current = self.generation();
+        if current != generation {
+            return Err(EngineError::StaleGeneration { planned: generation, current });
+        }
+        slot.check_held(&state)?;
+        if state.suspended || state.recovery_ownership.is_some() || state.current.is_some()
+            || !matches!(state.state, LifecycleState::NoCollection)
+        {
+            return Err(EngineError::unavailable("initial adoption metadata requires NoCollection"));
+        }
+        publish()
+    }
+
     pub fn close(&self) -> Result<(), EngineError> {
         self.close_inner(None::<fn(Option<Collection>) -> Result<(), EngineError>>)
     }

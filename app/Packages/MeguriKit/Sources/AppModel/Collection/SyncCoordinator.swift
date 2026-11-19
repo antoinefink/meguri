@@ -1634,7 +1634,13 @@ public final class SyncCoordinator {
             let previous = providerSettingsTask
             let next = CloudPolicyDeviceSettings(enabled: settings.enabled, paused: paused, automatic: automatic, media: media)
             desiredProviderSettings = next
-            if paused { initialOwnAdmission.setOpen(false) }
+            if paused {
+                initialOwnAdmission.setOpen(false)
+                // Stop admission and cancel the original page before local
+                // provider I/O. The original operation may join this settings
+                // task, so the settings task must never join its drain.
+                if initialAdoptionEnabledBefore != nil { drainInitialOwnWork() }
+            }
             providerSettingsTask = Task {
                 await previous?.value
                 do {

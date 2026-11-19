@@ -985,6 +985,9 @@ PUBLIC_ARTIFACTS = {
         '0a1a65dce24702eda82b38a3c229604bf613a28c69c134735b02d1097775757f',
     "docs/process/review-log/meguri-provider-admission-20261117.md":
         "31af001e272ebcc61ca299e3d932f6f29bc5da69551389305956ef92cd9f0e40",
+    # Complete public-file review: owned_cleanup_diagnosis, 2026-11-19.
+    "core/crates/meguri-sync/src/cloud/adoption_runtime.rs":
+        "512d13afe657d46086656e5854e3566f1b6ad7b2ef4e92a255b42f193d1f5c1a",
     # Complete public-source review; future bytes remain checked.
     "core/crates/meguri-sync/src/provider.rs":
         "793880794f47d8c5a5c2da40314556eb63b2a21d3a5a00e4d41948cf0948354f",
