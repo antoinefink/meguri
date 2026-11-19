@@ -23,6 +23,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 - Verification (updated goal, 2026-10-25): keep focused checks, independent review, separate commits and provenance/privacy/similarity checks per unit. Group 3–5 related units in dependency order, including Swift/FFI, with one full gate at the coherent batch boundary. Pure Rust internals may cover at most 20 units per full gate. Always gate milestone boundaries; record the original batch base and resolve technical failures before the next batch. See `docs/process/tiers.md`.
 
+- For each edit, run the smallest `tools/mg` checks that cover the change. After an authorized push, use GitHub Actions for the broader public Linux suites it covers. Reserve full local suites for required gates or failures that focused checks cannot diagnose. Use each hosted receipt only for its verified scope in `docs/process/tiers.md`.
+
 - Failure discipline (Antoine, 2026-11-16): read `docs/process/verification-status.md` on resume and before a batch. Repair required active failures before unrelated features. Focused passes do not clear a failed gate. Maintain the register under `docs/process/merge.md`.
 
 - Antoine (2026-11-14): continue as many repair/review rounds as needed for this goal; do not ask for round-count extensions. Keep independent review, failure evidence and all required checks. See `docs/process/review-log/repair-rounds-authorization-20261114.md`.
