@@ -56,6 +56,8 @@ pub enum ProviderBootstrapFailure {
     Transfer { failure: TransferFailure },
     /// MP6.3: the facts of a setup decision changed, or the choice does not fit them.
     SetupLocalChanged, SetupRemoteChanged, SetupChoice,
+    /// A collection file is on this device but is closed or damaged.
+    SetupLocalUnusable,
 }
 #[derive(Clone, uniffi::Enum)]
 pub enum ProviderBootstrapOutcome {
@@ -85,6 +87,7 @@ fn failure(error: MeguriBootstrapError) -> ProviderBootstrapOutcome {
         E::SetupChanged(MeguriSetupChange::Local) => F::SetupLocalChanged,
         E::SetupChanged(MeguriSetupChange::Remote) => F::SetupRemoteChanged,
         E::SetupChanged(MeguriSetupChange::Choice) => F::SetupChoice,
+        E::LocalUnusable => F::SetupLocalUnusable,
         E::Ready(R::NoIntent) => F::NoIntent, E::Ready(R::OperationMismatch) => F::OperationMismatch,
         E::Ready(R::NotComplete) => F::NotComplete, E::Ready(R::AccountChanged) => F::AccountChanged,
         E::Ready(R::PublicationChanged) => F::PublicationChanged, E::Ready(R::DocumentChanged) => F::DocumentChanged,
@@ -110,7 +113,7 @@ fn setup_refused(error: MeguriBootstrapError) -> ProviderSetupDecisionOutcome {
 fn invalid() -> CoreError { CoreError::InvalidArgument { message: "Meguri bootstrap decision or owner changed".into() } }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum ProviderSetupRow { Download, DownloadOverEmptyDevice, UploadToEmptyServer, Ask, AskUploadOnly }
+pub enum ProviderSetupRow { Download, DownloadOverEmptyDevice, UploadToEmptyServer, Ask, AskUploadOnly, AskDownloadOnly }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum ProviderSetupChoice { NoQuestion, KeepDevice, KeepServer }
 impl From<ProviderSetupChoice> for MeguriSetupChoice {
@@ -144,7 +147,8 @@ impl ProviderSetupDecision {
                 MeguriSetupRow::Download => ProviderSetupRow::Download,
                 MeguriSetupRow::DownloadOverEmptyDevice => ProviderSetupRow::DownloadOverEmptyDevice,
                 MeguriSetupRow::UploadToEmptyServer => ProviderSetupRow::UploadToEmptyServer,
-                MeguriSetupRow::Ask => ProviderSetupRow::Ask, MeguriSetupRow::AskUploadOnly => ProviderSetupRow::AskUploadOnly },
+                MeguriSetupRow::Ask => ProviderSetupRow::Ask, MeguriSetupRow::AskUploadOnly => ProviderSetupRow::AskUploadOnly,
+                MeguriSetupRow::AskDownloadOnly => ProviderSetupRow::AskDownloadOnly },
             device: self.inner.device.map(Into::into), server: self.inner.server.map(Into::into), unsent: self.inner.unsent })
     }
 }
@@ -157,7 +161,8 @@ pub enum ProviderSetupDecisionOutcome {
 pub enum ProviderSetupSettlement {
     Accepted { operation: Arc<ProviderBootstrapOperation>, local_unchanged: bool },
     NotAccepted { operation: Arc<ProviderBootstrapOperation> },
-    Neither,
+    /// The upload is recorded as overtaken; the next preparation asks which collection to keep.
+    Neither { operation: Arc<ProviderBootstrapOperation> },
 }
 #[derive(Clone, uniffi::Record)]
 pub struct ProviderBootstrapMediaEffects {
@@ -287,7 +292,11 @@ impl ProviderBootstrapResult {
                         self.owner.host.refresh_provider_admission();
                         ProviderBootstrapOutcome::Settled { settlement: ProviderSetupSettlement::NotAccepted { operation: operation(inner) } }
                     }
-                    Ok(MeguriSetupSettlement::Neither) => ProviderBootstrapOutcome::Settled { settlement: ProviderSetupSettlement::Neither },
+                    Ok(MeguriSetupSettlement::Neither { operation: inner }) => {
+                        // The exclusion was released by the recorded outcome.
+                        self.owner.host.refresh_provider_admission();
+                        ProviderBootstrapOutcome::Settled { settlement: ProviderSetupSettlement::Neither { operation: operation(inner) } }
+                    }
                     Err(error) => transfer_failure(error),
                 }
             }),
@@ -510,6 +519,21 @@ impl ProviderConnection {
         self.setup_step(credentials, &decision, &download, |access, shown, preview|
             self.owner.host.confirm_meguri_setup_download(access, shown, preview, choice.into()), |task| Source::Operation(Arc::new(task)))
     }
+    /// MP6.9 accepted: confirms the recovery preview only while this device is
+    /// still what the upload sent. A refusal changed nothing and leaves the
+    /// preview usable for the user's own Finish Setup.
+    pub fn start_setup_activation_confirm(&self, credentials: ProviderCredentials, recovery: Arc<ProviderBootstrapPreview>) -> Result<ProviderBootstrapJob, CoreError> {
+        callback::enter("ProviderConnection.start_setup_activation_confirm");
+        self.owner.validate()?;
+        self.same_current_owner(&recovery.owner, &recovery.connection)?;
+        let access = match self.access(credentials) { Ok(access) => access, Err(error) => return Ok(self.job(Source::Cell(failure(error)))) };
+        let mut consumed = recovery.consumed.lock().unwrap_or_else(PoisonError::into_inner);
+        if *consumed { return Err(invalid()); }
+        Ok(self.job(match self.owner.host.confirm_meguri_setup_activation(access, recovery.inner.clone()) {
+            Ok(task) => { *consumed = true; Source::Operation(Arc::new(task)) }
+            Err(error) => Source::Cell(failure(error)),
+        }))
+    }
     /// MP6.9: one read of the server's facts. Starts no upload.
     pub fn start_setup_settle(&self, credentials: ProviderCredentials) -> Result<ProviderBootstrapJob, CoreError> {
         callback::enter("ProviderConnection.start_setup_settle");
@@ -584,6 +608,16 @@ mod tests {
             failure: ProviderBootstrapFailure::NotSelected, .. }));
         connection.owner.host.close().unwrap();
         assert!(connection.bootstrap_readiness().is_err());
+    }
+    #[test]
+    fn an_unusable_local_collection_and_an_overtaken_upload_keep_their_own_names() {
+        assert!(matches!(failure(MeguriBootstrapError::LocalUnusable), ProviderBootstrapOutcome::Refused {
+            failure: ProviderBootstrapFailure::SetupLocalUnusable, accounting: None }));
+        // "This device changed" stays a different refusal.
+        assert!(matches!(failure(MeguriBootstrapError::SetupChanged(MeguriSetupChange::Local)),
+            ProviderBootstrapOutcome::Refused { failure: ProviderBootstrapFailure::SetupLocalChanged, accounting: None }));
+        assert_eq!(TransferAcceptance::from(meguri_sync::policy::Acceptance::Overtaken), TransferAcceptance::Overtaken);
+        assert_ne!(TransferAcceptance::Overtaken, TransferAcceptance::PossiblyAccepted);
     }
     #[test]
     fn opaque_decision_is_consumed_once() {

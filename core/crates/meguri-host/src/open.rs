@@ -277,7 +277,7 @@ pub struct CoreHost {
     pub(crate) backup_inputs: meguri_package::entry::EntryInputs,
     // The same composition-time authority used by ordinary engine open.
     // Metadata publication must not resolve the caller's directory again.
-    provider_collection_path: PathBuf,
+    pub(crate) provider_collection_path: PathBuf,
     initial_open: OpenConfig,
     queues: Arc<meguri_engine::sched::queue::QueueProvider>,
     review: Arc<meguri_engine::session::ReviewService>,

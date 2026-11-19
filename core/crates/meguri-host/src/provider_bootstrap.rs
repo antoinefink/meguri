@@ -15,6 +15,9 @@ pub enum MeguriBootstrapError {
     Transfer(TransferError),
     /// MP6.3: the facts a setup decision was made on no longer hold.
     SetupChanged(crate::provider_setup::MeguriSetupChange),
+    /// A collection file is on this device but is not open: closed or damaged.
+    /// Setup can neither read it nor treat the device as holding none.
+    LocalUnusable,
 }
 impl fmt::Debug for MeguriBootstrapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -22,7 +25,8 @@ impl fmt::Debug for MeguriBootstrapError {
             Self::Ready(error) => f.debug_tuple("Ready").field(error).finish(),
             _ => f.write_str(match self { Self::NotSelected => "NotSelected", Self::ConnectionChanged => "ConnectionChanged",
                 Self::Busy => "Busy", Self::AlreadyBound => "AlreadyBound", Self::Username => "Username",
-                Self::Transfer(_) => "Transfer", Self::SetupChanged(_) => "SetupChanged", _ => "Engine" }),
+                Self::Transfer(_) => "Transfer", Self::SetupChanged(_) => "SetupChanged",
+                Self::LocalUnusable => "LocalUnusable", _ => "Engine" }),
         }
     }
 }
@@ -90,8 +94,9 @@ impl CoreHost {
                     // the actual old policy row can prove this mismatch safe.
                     // Preparation captures actual_generation before activation.
                     let old = self.manual_transfer_history().get(intent.operation()).map_err(TransferError::from)?;
+                    // An overtaken upload (MP6.9 neither) is settled and inactive too.
                     if !matches!(old.phase, Phase::Cancelled | Phase::Failed)
-                        || !matches!(old.acceptance, Acceptance::NotSent | Acceptance::Refused)
+                        || !matches!(old.acceptance, Acceptance::NotSent | Acceptance::Refused | Acceptance::Overtaken)
                         || old.id == op.id || old.account != op.account || old.scope != op.scope
                         || old.configured_endpoint != connection.endpoint
                         || old.activation_identity.is_some()
@@ -140,6 +145,8 @@ impl CoreHost {
         })()))?;
         // Original-owner publication gates, Flight and policy locks are released.
         self.refresh_provider_admission();
+        // It sent nothing and replaced nothing: what it alone owned goes with it.
+        if let Ok(cancelled) = &result { self.sweep_discarded_preparation(cancelled); }
         result
     }
     /// Explicit offline exposure of the existing recovery decision. In
@@ -187,7 +194,7 @@ impl CoreHost {
     /// `retest` arms MP6.3 row 2's test inside the replacement's exclusive
     /// phase for this one confirmation; every other confirmation disarms it.
     pub(crate) fn confirm_meguri_bootstrap_retesting(&self, access: MeguriAccess, preview: Preview,
-        retest: Option<crate::provider_setup::RetestMedia>) -> Result<ManualTransferTask<Operation>> {
+        retest: Option<crate::provider_setup::Retest>) -> Result<ManualTransferTask<Operation>> {
         self.setup_retest.disarm();
         let generation = self.cloud_connection_generation()?;
         self.check_meguri_bootstrap(access.connection())?;
@@ -198,7 +205,7 @@ impl CoreHost {
         self.publish_provider_metadata(generation, |publication| Ok(self.provider_authority().record_meguri_bootstrap_intent(
             access.connection(), access.username(), &preview, generation.0, publication)))??;
         let access = access.into_transfer_access()?;
-        if let Some(media) = retest { self.setup_retest.arm(media); }
+        if let Some(retest) = retest { self.setup_retest.arm(retest); }
         let task = self.confirm_manual_transfer(access, preview.confirmation);
         if task.is_err() { self.setup_retest.disarm(); }
         Ok(task?)

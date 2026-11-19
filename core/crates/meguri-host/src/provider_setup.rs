@@ -9,7 +9,11 @@ use meguri_engine::{
         BackupProtection, BackupReceipt, BackupService, GuardedBackup, GuardedTransferBackup, TransferBackup,
     },
 };
-use meguri_storage::{ReaderRole, media::MediaStore, one_way::UserContentRows};
+use meguri_storage::{
+    ReaderRole,
+    media::MediaStore,
+    one_way::{ContentWitness, UserContentRows},
+};
 use meguri_sync::{
     Job,
     oneway::{Preview, TransferError},
@@ -20,7 +24,7 @@ use meguri_sync::{
     provider::{MeguriConnection, MeguriReadyRefusal, canonical_username, native_endpoint},
 };
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError},
 };
 
@@ -39,6 +43,10 @@ pub enum MeguriSetupRow {
     Ask,
     /// A changed endpoint or account with an empty server: upload or Cancel.
     AskUploadOnly,
+    /// No collection on this device, but media files, or a media folder that
+    /// cannot be read: download or Cancel. The media reconciliation that
+    /// follows a download touches those files, so row 1 does not apply.
+    AskDownloadOnly,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MeguriSetupChoice {
@@ -79,40 +87,62 @@ pub struct MeguriSetupDecision {
     local: Option<LocalFacts>,
     served: Option<LocalFacts>,
     served_rows: Option<UserContentRows>,
+    served_content: Option<ServedContent>,
+}
+/// What the retained server copy holds, for comparing a later download with
+/// it. Read through the package's own upgrade for a legacy schema, so it is
+/// never a proof of emptiness: `served_rows` alone is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ServedContent {
+    rows: UserContentRows,
+    last_review: Option<i64>,
+    /// Absent for a legacy schema, whose upgrade may write it.
+    schema_modified: Option<i64>,
 }
 pub enum MeguriSetupSettlement {
-    /// The exact acceptance is recorded. `local_unchanged` is false when this
-    /// device changed since the upload: finishing then needs the user.
+    /// The exact acceptance is recorded. `local_unchanged` is a hint read
+    /// outside any exclusive phase; only
+    /// [`CoreHost::confirm_meguri_setup_activation`] decides whether local
+    /// activation may run with no question.
     Accepted { operation: Operation, local_unchanged: bool },
     /// Nothing reached the server; the exclusion is released.
     NotAccepted { operation: Operation },
-    /// The server holds something else. Nothing was recorded.
-    Neither,
+    /// The server holds something else. The upload is recorded as overtaken,
+    /// its artifacts are kept, the exclusion is released, and the next
+    /// preparation gives the sheet (never rows 2 or 3).
+    Neither { operation: Operation },
 }
 
-/// The media store whose inventory row 2's exclusive-phase test reads.
-pub(crate) struct RetestMedia(Option<MediaStore>);
+/// What one confirmation tests again inside the replacement's exclusive phase.
+pub(crate) enum Retest {
+    /// Row 2: the collection about to be replaced still holds no user content.
+    NoUserContent(Option<MediaStore>),
+    /// Row 1: a device with no collection still has no media file.
+    NoDeviceMedia(PathBuf),
+    /// MP6.9 accepted: the collection about to be replaced is still the one the upload sent.
+    Unchanged(ContentWitness),
+}
 
-/// Armed for one confirmation of row 2; consumed by its safety backup, which
-/// the retained replacement takes inside its exclusive phase.
+/// Armed for one confirmation; consumed by its safety backup, which the
+/// retained replacement takes inside its exclusive phase.
 #[derive(Default)]
 pub(crate) struct SetupRetest {
-    armed: Mutex<Option<RetestMedia>>,
+    armed: Mutex<Option<Retest>>,
 }
 impl SetupRetest {
-    pub(crate) fn arm(&self, media: RetestMedia) {
-        *self.armed.lock().unwrap_or_else(PoisonError::into_inner) = Some(media);
+    pub(crate) fn arm(&self, retest: Retest) {
+        *self.armed.lock().unwrap_or_else(PoisonError::into_inner) = Some(retest);
     }
     pub(crate) fn disarm(&self) {
         *self.armed.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
-    fn take(&self) -> Option<RetestMedia> {
+    fn take(&self) -> Option<Retest> {
         self.armed.lock().unwrap_or_else(PoisonError::into_inner).take()
     }
 }
 /// The transfers' backup port. It forwards every call; while armed it first
-/// tests the collection about to be replaced, and refuses the backup, and so
-/// the activation, when that collection holds user content.
+/// tests the side about to be replaced, and refuses the backup, and so the
+/// activation, when that side is not what the decision was made on.
 pub(crate) struct RetestingBackup {
     inner: Arc<dyn BackupService>,
     retest: Arc<SetupRetest>,
@@ -156,16 +186,27 @@ impl BackupService for RetestingBackup {
         collection: Option<&Collection>,
         cancel: &CancelToken,
     ) -> std::result::Result<TransferBackup, EngineError> {
-        if let Some(media) = self.retest.take()
-            && let Some(collection) = collection
-            && !holds_no_user_content(collection, media.0.as_ref())
-        {
-            // Typed as a local change: nothing is backed up or replaced, and
-            // the caller returns to preparation.
-            return Err(EngineError::StaleGeneration {
-                planned: collection.generation(),
-                current: collection.generation(),
-            });
+        if let Some(retest) = self.retest.take() {
+            let holds = match (&retest, collection) {
+                (Retest::NoUserContent(media), Some(collection)) => holds_no_user_content(collection, media.as_ref()),
+                (Retest::NoDeviceMedia(folder), None) => folder_files(folder) == Some(0),
+                (Retest::Unchanged(sent), Some(collection)) => collection
+                    .reader(ReaderRole::Query)
+                    .ok()
+                    .and_then(|reader| reader.content_witness().ok())
+                    .is_some_and(|now| &now == sent),
+                // The side being replaced is not the side the decision saw.
+                _ => false,
+            };
+            if !holds {
+                // Typed as a local change: nothing is backed up or replaced,
+                // and the caller returns to preparation or to the question.
+                let generation = collection.map_or(meguri_engine::Generation(0), Collection::generation);
+                return Err(EngineError::StaleGeneration {
+                    planned: generation,
+                    current: generation,
+                });
+            }
         }
         self.inner.before_manual_transfer(collection, cancel)
     }
@@ -190,8 +231,13 @@ fn holds_no_user_content(collection: &Collection, media: Option<&MediaStore>) ->
 /// the journal. `None` when either cannot be read.
 fn media_files(media: &MediaStore) -> Option<u64> {
     let tracked = media.tracked_names().ok()?.len() as u64;
+    Some(tracked.max(folder_files(media.media_dir())?))
+}
+/// Entries of a media folder that are not directories. An absent folder holds
+/// none; `None` when it cannot be read.
+fn folder_files(folder: &Path) -> Option<u64> {
     let mut present = 0u64;
-    match std::fs::read_dir(media.media_dir()) {
+    match std::fs::read_dir(folder) {
         Ok(entries) => {
             for entry in entries {
                 if !entry.ok()?.file_type().ok()?.is_dir() {
@@ -202,7 +248,7 @@ fn media_files(media: &MediaStore) -> Option<u64> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return None,
     }
-    Some(tracked.max(present))
+    Some(present)
 }
 fn plain_name(name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', '\0'])
@@ -219,7 +265,11 @@ fn side(facts: &LocalFacts, media_files: Option<u64>, last_change_ms: Option<i64
 /// A transfer that completed, or that may have reached a server: this device
 /// has, or had, something in common with a server.
 fn earlier_exchange(op: &Operation) -> bool {
-    op.collection_complete || matches!(op.acceptance, Acceptance::PossiblyAccepted | Acceptance::ExactOk)
+    op.collection_complete
+        || matches!(
+            op.acceptance,
+            Acceptance::PossiblyAccepted | Acceptance::ExactOk | Acceptance::Overtaken
+        )
 }
 
 impl CoreHost {
@@ -251,11 +301,25 @@ impl CoreHost {
         drop(reader);
         Some((rows, self.setup_media().as_ref().and_then(media_files)))
     }
-    /// Row test of the retained server copy of an upload preview. `None`
-    /// proves nothing: an unverified copy, a changed file, a legacy schema.
-    fn served_rows(&self, operation: &Operation) -> Option<UserContentRows> {
+    /// The media folder of a device with no open collection.
+    fn device_media_folder(&self) -> PathBuf {
+        self.provider_collection_path.with_file_name("collection.media")
+    }
+    /// A collection file, or its write-ahead log, is on this device. An
+    /// entry that cannot be examined counts as present.
+    fn collection_file_present(&self) -> bool {
+        ["collection.anki2", "collection.anki2-wal"].iter().any(|name| {
+            !matches!(
+                self.provider_collection_path.with_file_name(name).symlink_metadata(),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound
+            )
+        })
+    }
+    /// What the retained server copy of an upload preview holds. `None`: an
+    /// unverified copy, a changed file, a package that cannot be read.
+    fn served_content(&self, operation: &Operation) -> Option<ServedContent> {
         let copy = operation.server_copy.as_ref()?;
-        if copy.kind != CopyKind::VerifiedPackage || copy.served_facts.is_none() || !plain_name(&copy.artifact.name) {
+        if copy.kind != CopyKind::VerifiedPackage || !plain_name(&copy.artifact.name) {
             return None;
         }
         let path = self.backup_inputs.backups_directory.join(&copy.artifact.name);
@@ -273,9 +337,14 @@ impl CoreHost {
             is_cancelled: &|| false,
         };
         let inspected = meguri_package::inspect_collection_package(&path, &context).ok()?;
-        meguri_storage::one_way::server_copy_user_content(&inspected.collection_path())
-            .ok()
-            .flatten()
+        let collection = inspected.collection_path();
+        let facts = meguri_storage::one_way::verify_server_copy(&collection).ok().flatten()?;
+        let rows = meguri_storage::one_way::server_copy_user_content(&collection).ok().flatten()?;
+        Some(ServedContent {
+            rows,
+            last_review: facts.last_review.map(|at| at.0),
+            schema_modified: copy.served_facts.as_ref().map(|served| served.schema_modified),
+        })
     }
     fn retained_candidate(&self, operation: &Operation) -> Option<PathBuf> {
         let candidate = operation.candidate.as_ref()?;
@@ -310,6 +379,10 @@ impl CoreHost {
     pub fn prepare_meguri_setup(&self, access: MeguriAccess) -> Result<ManualTransferTask<Preview>> {
         let direction = if self.collection().is_ok() {
             MeguriBootstrapDirection::UseDeviceCollection
+        } else if self.collection_file_present() {
+            // A collection that is closed or damaged is neither row 1's "no
+            // collection" nor a collection this setup can read. No request is made.
+            return Err(MeguriBootstrapError::LocalUnusable);
         } else {
             MeguriBootstrapDirection::UseServerCollection
         };
@@ -324,9 +397,14 @@ impl CoreHost {
         username: &str,
         preview: &Preview,
     ) -> Result<MeguriSetupDecision> {
+        // A download is decided only for a device with no collection file at
+        // all. One that is present but not open is refused under its own name.
+        if preview.operation.direction == Direction::Import && self.collection().is_err() && self.collection_file_present() {
+            return Err(MeguriBootstrapError::LocalUnusable);
+        }
         let account = self.check_setup_preview(connection, username, preview)?;
         let op = &preview.operation;
-        let decision = |row, device, server, served_rows| MeguriSetupDecision {
+        let decision = |row, device, server, served_content: Option<ServedContent>| MeguriSetupDecision {
             row,
             device,
             server,
@@ -338,7 +416,11 @@ impl CoreHost {
             revision: op.revision,
             local: op.local.clone(),
             served: op.server_copy.as_ref().and_then(|copy| copy.served_facts.clone()),
-            served_rows,
+            // A legacy schema proves nothing about emptiness (MP6.3).
+            served_rows: served_content
+                .filter(|content| content.schema_modified.is_some())
+                .map(|content| content.rows),
+            served_content,
         };
         if op.direction == Direction::Import {
             // Row 1 only. A download prepared over a collection is judged by
@@ -348,9 +430,26 @@ impl CoreHost {
                 && op.guard.as_ref().is_some_and(|guard| guard.closed_main.is_none() && guard.closed_wal.is_none())
                 && self.collection().is_err();
             if !absent {
-                return Err(MeguriBootstrapError::SetupChanged(MeguriSetupChange::Local));
+                return Err(if self.collection().is_err() && self.collection_file_present() {
+                    MeguriBootstrapError::LocalUnusable
+                } else {
+                    MeguriBootstrapError::SetupChanged(MeguriSetupChange::Local)
+                });
             }
-            return Ok(decision(MeguriSetupRow::Download, None, None, None));
+            // Media files with no collection are still this device's content:
+            // the reconciliation after a download can replace or delete them.
+            let media = folder_files(&self.device_media_folder());
+            if media == Some(0) {
+                return Ok(decision(MeguriSetupRow::Download, None, None, None));
+            }
+            let device = MeguriSetupSide {
+                notes: 0,
+                cards: 0,
+                reviews: 0,
+                media_files: media,
+                last_change_ms: None,
+            };
+            return Ok(decision(MeguriSetupRow::AskDownloadOnly, Some(device), None, None));
         }
         let history = self
             .manual_transfer_history()
@@ -376,8 +475,9 @@ impl CoreHost {
         // Unreadable, changed since the preview, or an unreadable media
         // inventory: all are user content.
         let device_empty = device.is_some_and(|(rows, media)| rows.none() && media == Some(0));
-        let served_rows = self.served_rows(op);
-        let server_empty = served_rows.is_some_and(|rows| rows.none())
+        let served_content = self.served_content(op);
+        let server_empty = served_content
+            .is_some_and(|content| content.schema_modified.is_some() && content.rows.none())
             && op.remote.as_ref().is_some_and(|remote| remote.media_usn == 0);
         let row = if first && device_empty {
             MeguriSetupRow::DownloadOverEmptyDevice
@@ -399,7 +499,7 @@ impl CoreHost {
                 let none = op.remote.as_ref().is_some_and(|remote| remote.media_usn == 0);
                 side(facts, none.then_some(0), None)
             });
-        Ok(decision(row, device_side, server_side, served_rows))
+        Ok(decision(row, device_side, server_side, served_content))
     }
     fn same_decision(&self, connection: &MeguriConnection, username: &str, preview: &Preview,
         shown: &MeguriSetupDecision) -> Result<()> {
@@ -409,7 +509,10 @@ impl CoreHost {
         }
         Err(MeguriBootstrapError::SetupChanged(if fresh.local != shown.local || fresh.device != shown.device {
             MeguriSetupChange::Local
-        } else if fresh.served != shown.served || fresh.served_rows != shown.served_rows || fresh.server != shown.server {
+        } else if fresh.served != shown.served
+            || fresh.served_content != shown.served_content
+            || fresh.server != shown.server
+        {
             MeguriSetupChange::Remote
         } else {
             MeguriSetupChange::Choice
@@ -432,7 +535,13 @@ impl CoreHost {
         use MeguriSetupChoice as C;
         use MeguriSetupRow as R;
         match (shown.row, choice, preview.operation.direction) {
-            (R::Download, C::NoQuestion, Direction::Import)
+            // Row 1 tests the media folder again where the replacement holds
+            // the collection directory.
+            (R::Download, C::NoQuestion, Direction::Import) => {
+                let folder = self.device_media_folder();
+                self.confirm_meguri_bootstrap_retesting(access, preview, Some(Retest::NoDeviceMedia(folder)))
+            }
+            (R::AskDownloadOnly, C::KeepServer, Direction::Import)
             | (R::UploadToEmptyServer, C::NoQuestion, Direction::Export)
             | (R::Ask | R::AskUploadOnly, C::KeepDevice, Direction::Export) => {
                 self.confirm_meguri_bootstrap(access, preview)
@@ -467,10 +576,13 @@ impl CoreHost {
     }
 
     /// Confirms the download prepared by [`Self::prepare_meguri_setup_download`]
-    /// only when both sides are still what `shown` held. Serving a download
-    /// rewrites the server's modification time and sequence number, so the
-    /// server is compared by content: counts, rows, schema time, last review.
-    /// Row 2 tests this device again here and inside the exclusive phase.
+    /// only while this device is what `shown` held. Row 2 takes any readable
+    /// server collection (MP6.3) and tests this device again here and inside
+    /// the exclusive phase. "Keep the server's collection" also needs the
+    /// server the sheet showed: serving a download rewrites the server's
+    /// modification time and sequence number, so it is compared by content
+    /// (rows, last review, and the schema time unless the retained copy had a
+    /// legacy schema, whose content is read through the package's upgrade).
     pub fn confirm_meguri_setup_download(
         &self,
         access: MeguriAccess,
@@ -487,20 +599,19 @@ impl CoreHost {
         if op.local.is_none() || op.local != shown.local {
             return Err(MeguriBootstrapError::SetupChanged(MeguriSetupChange::Local));
         }
-        let remote = MeguriBootstrapError::SetupChanged(MeguriSetupChange::Remote);
-        let (Some(shown_facts), Some(shown_rows)) = (&shown.served, &shown.served_rows) else { return Err(remote) };
-        let Some(candidate) = self.retained_candidate(op) else { return Err(remote) };
-        let facts = meguri_storage::one_way::verify_server_copy(&candidate).ok().flatten().map(LocalFacts::from);
-        let rows = meguri_storage::one_way::server_copy_user_content(&candidate).ok().flatten();
-        let (Some(facts), Some(rows)) = (facts, rows) else { return Err(remote) };
-        if &rows != shown_rows
-            || facts.notes != shown_facts.notes
-            || facts.cards != shown_facts.cards
-            || facts.reviews != shown_facts.reviews
-            || facts.schema_modified != shown_facts.schema_modified
-            || facts.last_review != shown_facts.last_review
-        {
-            return Err(remote);
+        if choice == MeguriSetupChoice::KeepServer {
+            let remote = MeguriBootstrapError::SetupChanged(MeguriSetupChange::Remote);
+            let Some(sheet) = &shown.served_content else { return Err(remote) };
+            let Some(candidate) = self.retained_candidate(op) else { return Err(remote) };
+            let facts = meguri_storage::one_way::verify_server_copy(&candidate).ok().flatten().map(LocalFacts::from);
+            let rows = meguri_storage::one_way::server_copy_user_content(&candidate).ok().flatten();
+            let (Some(facts), Some(rows)) = (facts, rows) else { return Err(remote) };
+            if rows != sheet.rows
+                || facts.last_review != sheet.last_review
+                || sheet.schema_modified.is_some_and(|schema| schema != facts.schema_modified)
+            {
+                return Err(remote);
+            }
         }
         let retest = if choice == MeguriSetupChoice::NoQuestion {
             let empty = self
@@ -509,11 +620,102 @@ impl CoreHost {
             if !empty {
                 return Err(MeguriBootstrapError::SetupChanged(MeguriSetupChange::Local));
             }
-            Some(RetestMedia(self.setup_media()))
+            Some(Retest::NoUserContent(self.setup_media()))
         } else {
             None
         };
         self.confirm_meguri_bootstrap_retesting(access, download, retest)
+    }
+
+    /// MP6.9 "accepted": completes local activation with no question, for the
+    /// recovery preview of [`Self::prepare_meguri_bootstrap_recovery`], only
+    /// while this device is still what the upload sent. Refused with
+    /// `SetupChanged(Local)` otherwise: nothing is replaced, the operation
+    /// keeps its recorded acceptance, and finishing needs the user's own
+    /// action. Three checks, each where it is used:
+    /// - the facts that the recovery preparation captured inside its
+    ///   exclusive phase are the facts captured for the upload;
+    /// - the retained confirmation requires, inside its own exclusive phase,
+    ///   the guard and facts of that recovery capture;
+    /// - there too, before any backup or replacement, the open collection's
+    ///   [`ContentWitness`] is the retained candidate's.
+    pub fn confirm_meguri_setup_activation(
+        &self,
+        access: MeguriAccess,
+        recovery: Preview,
+    ) -> Result<ManualTransferTask<Operation>> {
+        self.check_meguri_bootstrap(access.connection())?;
+        let account = self.setup_account(access.connection(), access.username())?;
+        let op = &recovery.operation;
+        let active = self.manual_transfer_history().active().map_err(|_| MeguriBootstrapError::Busy)?;
+        if active.as_ref() != Some(op) || op.phase != Phase::Preview {
+            return Err(MeguriBootstrapError::Busy);
+        }
+        if op.account != account || op.configured_endpoint != access.connection().endpoint {
+            return Err(MeguriReadyRefusal::AccountChanged.into());
+        }
+        if op.direction != Direction::Export || op.acceptance != Acceptance::ExactOk || op.recovery_guard.is_none() {
+            return Err(MeguriReadyRefusal::OperationMismatch.into());
+        }
+        if op.local.is_none() || op.recovery_local != op.local {
+            return Err(MeguriBootstrapError::SetupChanged(MeguriSetupChange::Local));
+        }
+        let sent = self
+            .retained_candidate(op)
+            .and_then(|path| meguri_storage::one_way::closed_content_witness(&path).ok().flatten())
+            .ok_or(MeguriBootstrapError::Transfer(TransferError::Artifact))?;
+        self.confirm_meguri_bootstrap_retesting(access, recovery, Some(Retest::Unchanged(sent)))
+    }
+
+    /// Deletes what a discarded preparation owned, when it sent nothing and
+    /// replaced nothing: its retained candidate, the private copy of its
+    /// safety backup, and the server copy it downloaded. Left in place: the
+    /// published safety backup (an ordinary backup, which the backup list and
+    /// its retention own, and which the last-backup record may name) and
+    /// every artifact of a record that does not pass all of the tests below.
+    pub(crate) fn sweep_discarded_preparation(&self, op: &Operation) {
+        let unused = op.phase == Phase::Cancelled
+            && op.acceptance == Acceptance::NotSent
+            && op.activation_identity.is_none()
+            && !op.collection_complete
+            && op.resulting_publication.is_none()
+            && op.receipt.is_none()
+            && op.recovery_guard.is_none()
+            && op.media == meguri_sync::policy::MediaOutcome::default();
+        // Only the durable record decides, and never for the active operation.
+        let history = self.manual_transfer_history();
+        if !unused
+            || !plain_name(op.id.as_str())
+            || history.get(&op.id).ok().as_ref() != Some(op)
+            || !history.active().is_ok_and(|active| active.as_ref().map(|active| &active.id) != Some(&op.id))
+        {
+            return;
+        }
+        let remove = |path: &Path| {
+            if path.symlink_metadata().is_ok_and(|found| found.file_type().is_file()) {
+                let _ = std::fs::remove_file(path);
+            }
+        };
+        // The operation's own directory holds nothing another operation made.
+        let owned = self.manual_transfer_directory.join(op.id.as_str());
+        for artifact in [&op.candidate, &op.original].into_iter().flatten() {
+            if plain_name(&artifact.name) {
+                remove(&owned.join(&artifact.name));
+            }
+        }
+        // Succeeds only when nothing else is left in it.
+        let _ = std::fs::remove_dir(&owned);
+        let _ = meguri_storage::atomic_file::sync_directory(&self.manual_transfer_directory);
+        // The server copy was created under a new name by this preparation;
+        // it is removed only while it is still the file that was recorded.
+        if let Some(copy) = &op.server_copy {
+            let name = &copy.artifact.name;
+            let path = self.backup_inputs.backups_directory.join(name);
+            if plain_name(name) && name.starts_with("server-copy-") && copy.artifact.matches_file(&path) {
+                remove(&path);
+                let _ = meguri_storage::atomic_file::sync_directory(&self.backup_inputs.backups_directory);
+            }
+        }
     }
 
     /// MP6.9: one read of the server's facts, compared with the retained
@@ -562,7 +764,11 @@ impl CoreHost {
                 let server = RemoteFacts::from(&read?.server);
                 let (outcome, operation) = service.policy().settle_upload(&op, &candidate, &server)?;
                 Ok(match outcome {
-                    UploadSettlement::Neither => MeguriSetupSettlement::Neither,
+                    // Nothing was learned or recorded: the state stays unknown.
+                    UploadSettlement::Indistinct => {
+                        return Err(TransferError::NeedsDecision(meguri_sync::policy::Boundary::RemoteCompletionUnknown));
+                    }
+                    UploadSettlement::Neither => MeguriSetupSettlement::Neither { operation },
                     UploadSettlement::NotAccepted => MeguriSetupSettlement::NotAccepted { operation },
                     UploadSettlement::Accepted => {
                         let local_unchanged = engine
@@ -573,6 +779,7 @@ impl CoreHost {
                                 reader.transfer_facts().ok().map(LocalFacts::from)
                             })
                             .is_some_and(|facts| Some(&facts) == operation.local.as_ref());
+                        // A hint for the caller only; see `confirm_meguri_setup_activation`.
                         MeguriSetupSettlement::Accepted { operation, local_unchanged }
                     }
                 })
@@ -640,13 +847,13 @@ mod tests {
         assert_eq!(inner.0.load(Ordering::SeqCst), 1);
 
         // Armed over a collection with no user content: the backup is taken, once armed once.
-        retest.arm(RetestMedia(host.setup_media()));
+        retest.arm(Retest::NoUserContent(host.setup_media()));
         assert!(backup.before_manual_transfer(Some(&collection), &cancel).is_ok());
         assert_eq!(inner.0.load(Ordering::SeqCst), 2);
         assert!(retest.take().is_none());
 
         // An unreadable media inventory is user content.
-        retest.arm(RetestMedia(None));
+        retest.arm(Retest::NoUserContent(None));
         assert!(matches!(
             backup.before_manual_transfer(Some(&collection), &cancel),
             Err(EngineError::StaleGeneration { .. })
@@ -658,13 +865,13 @@ mod tests {
         std::fs::create_dir_all(media.media_dir()).unwrap();
         let file = media.media_dir().join("sound.mp3");
         std::fs::write(&file, b"synthetic").unwrap();
-        retest.arm(RetestMedia(host.setup_media()));
+        retest.arm(Retest::NoUserContent(host.setup_media()));
         assert!(backup.before_manual_transfer(Some(&collection), &cancel).is_err());
         std::fs::remove_file(&file).unwrap();
 
         // A deck made after the decision is user content: no backup, no activation.
         meguri_engine::decks::add(&collection, "Made late".into()).unwrap();
-        retest.arm(RetestMedia(host.setup_media()));
+        retest.arm(Retest::NoUserContent(host.setup_media()));
         assert!(matches!(
             backup.before_manual_transfer(Some(&collection), &cancel),
             Err(EngineError::StaleGeneration { .. })
@@ -673,6 +880,36 @@ mod tests {
         // The refusal consumed the arming; a disarmed backup passes through again.
         assert!(backup.before_manual_transfer(Some(&collection), &cancel).is_ok());
         assert_eq!(inner.0.load(Ordering::SeqCst), 3);
+
+        // MP6.9 accepted: only the collection the upload sent is replaced with no question.
+        let witness = |collection: &Collection| collection.reader(ReaderRole::Query).unwrap().content_witness().unwrap();
+        let sent = witness(&collection);
+        retest.arm(Retest::Unchanged(sent));
+        assert!(backup.before_manual_transfer(Some(&collection), &cancel).is_ok());
+        assert_eq!(inner.0.load(Ordering::SeqCst), 4);
+        meguri_engine::decks::add(&collection, "Made after the upload".into()).unwrap();
+        assert_ne!(witness(&collection), sent);
+        retest.arm(Retest::Unchanged(sent));
+        assert!(matches!(
+            backup.before_manual_transfer(Some(&collection), &cancel),
+            Err(EngineError::StaleGeneration { .. })
+        ));
+        // A test armed for one side never passes for the other.
+        retest.arm(Retest::Unchanged(sent));
+        assert!(backup.before_manual_transfer(None, &cancel).is_err());
+        retest.arm(Retest::NoDeviceMedia(root.path().join("absent")));
+        assert!(backup.before_manual_transfer(Some(&collection), &cancel).is_err());
+        assert_eq!(inner.0.load(Ordering::SeqCst), 4);
+
+        // Row 1: a device without a collection still has no media file.
+        let folder = root.path().join("loose.media");
+        retest.arm(Retest::NoDeviceMedia(folder.clone()));
+        assert!(backup.before_manual_transfer(None, &cancel).is_ok());
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("sound.mp3"), b"synthetic").unwrap();
+        retest.arm(Retest::NoDeviceMedia(folder));
+        assert!(backup.before_manual_transfer(None, &cancel).is_err());
+        assert_eq!(inner.0.load(Ordering::SeqCst), 5);
         host.close().unwrap();
     }
 }
