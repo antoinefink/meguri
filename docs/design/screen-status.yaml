@@ -1539,3 +1539,9 @@ screens:
   sync.meguriSetup:
     status: sketch
     fix_rounds: 0
+  settings.troubleshooting:
+    status: sketch
+    fix_rounds: 0
+  sync.keepCollection:
+    status: sketch
+    fix_rounds: 0
