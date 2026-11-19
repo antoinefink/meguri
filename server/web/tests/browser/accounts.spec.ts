@@ -75,6 +75,40 @@ async function accountShell(page: Page, username: string, admin: boolean) {
     const link = navigation.getByRole("link", { name, exact: true });
     await expect(link).toBeVisible();
     await expect(link.locator('svg[aria-hidden="true"][focusable="false"]')).toHaveCount(1);
+    const target = await link.boundingBox();
+    expect(target?.width).toBeGreaterThanOrEqual(44);
+    expect(target?.height).toBeGreaterThanOrEqual(44);
+    await link.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(link).toBeFocused();
+    await expect(link).toHaveCSS("outline-style", "solid");
+  }
+  if (page.viewportSize()!.width <= 768) {
+    const links = await navigation.getByRole("link").evaluateAll(elements => elements.map(element => {
+      const bounds = element.getBoundingClientRect();
+      const menu = element.closest("ul")!.getBoundingClientRect();
+      const icon = element.querySelector("svg")!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(element.lastChild!);
+      const label = range.getBoundingClientRect();
+      return { left: bounds.left, right: bounds.right, top: bounds.top, width: bounds.width,
+        menuLeft: menu.left, menuRight: menu.right,
+        iconOffset: (icon.left + icon.right - bounds.left - bounds.right) / 2,
+        labelOffset: (label.left + label.right - bounds.left - bounds.right) / 2,
+        fits: label.left >= bounds.left && label.right <= bounds.right && icon.bottom <= label.top
+          && label.bottom <= bounds.bottom && element.scrollWidth <= element.clientWidth };
+    }));
+    expect(links[0]!.left).toBeCloseTo(links[0]!.menuLeft, 0);
+    expect(links.at(-1)!.right).toBeCloseTo(links[0]!.menuRight, 0);
+    for (const [index, link] of links.entries()) {
+      expect(link.width).toBeCloseTo(links[0]!.width, 0);
+      expect(link.top).toBeCloseTo(links[0]!.top, 0);
+      expect(Math.abs(link.iconOffset)).toBeLessThanOrEqual(1);
+      expect(Math.abs(link.labelOffset)).toBeLessThanOrEqual(1);
+      expect(link.fits).toBe(true);
+      if (index) expect(link.left - links[index - 1]!.right).toBeGreaterThanOrEqual(0);
+    }
   }
   const identity = page.getByRole("group", { name: "Signed-in account", exact: true });
   await expect(identity.getByText(username, { exact: true })).toBeVisible();
@@ -109,7 +143,30 @@ async function accountShell(page: Page, username: string, admin: boolean) {
         && child.scrollWidth <= child.clientWidth && child.scrollHeight <= child.clientHeight;
     });
   })).toBe(true);
+  if (page.viewportSize()!.width > 768) {
+    const footer = await identity.boundingBox();
+    const sidebar = await page.locator('[data-slot="sidebar"]').boundingBox();
+    const bottom = sidebar!.y + sidebar!.height;
+    expect(bottom).toBe(page.viewportSize()!.height);
+    expect(bottom - footer!.y - footer!.height).toBeCloseTo(8, 0);
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}
+
+async function connectionLayout(page: Page, username: string, admin: boolean) {
+  const viewport = page.viewportSize()!;
+  try {
+    await page.setViewportSize({ width: 320, height: 844 });
+    await accountShell(page, username, admin);
+    const main = page.getByRole("main");
+    await expect(main.locator('[data-slot="card"]')).toHaveCount(1);
+    await expect(main.getByRole("heading", { name: "Connection details", exact: true })).toBeVisible();
+    await expect(main.getByLabel("Server URL", { exact: true })).not.toHaveValue("");
+    await expect(main.getByLabel("Username", { exact: true })).toHaveValue(username);
+    await expect(main.getByText("Sign in to a compatible client with your username and account password.", { exact: true })).toBeVisible();
+    await expect(main.getByText("Replacing your password revokes existing client sign-ins. Sign in again on each device afterward.", { exact: true })).toBeVisible();
+    await expect(main).not.toContainText(/Client guidance|Desktop 26\.09\.4|AnkiMobile 26\.10|Exact server fields|Review the client’s explicit confirmation/);
+  } finally { await page.setViewportSize(viewport); }
 }
 
 async function openCapability(page: Page, url: string) {
@@ -263,6 +320,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   expect(logout.ok()).toBe(true);
   await signIn(page, "root.admin", initialPassword);
   await accountShell(page, "root.admin", true);
+  await connectionLayout(page, "root.admin", true);
   await audit(page, "connection-wide");
   await page.getByRole("link", { name: "Accounts", exact: true }).click();
   await expect(page.getByRole("heading", { name: "root.admin (you)" })).toBeVisible();
@@ -309,6 +367,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await member.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(member.getByRole("heading", { name: "Connect your devices" })).toBeVisible();
   await accountShell(member, memberUsername, false);
+  await connectionLayout(member, memberUsername, false);
   await expect(member.getByText("Collection", { exact: true })).toHaveCount(0);
   await expect(member.getByText("Total", { exact: true })).toHaveCount(0);
   await expect(member.getByRole("link", { name: "Accounts", exact: true })).toHaveCount(0);

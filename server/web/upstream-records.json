@@ -33,7 +33,7 @@
       "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/page.tsx",
       "adapted_into": "src/app.tsx",
       "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links replace sample navigation and panels.",
-      "adapted_sha256": "2e784565dde9f5b7dbaa767ceeeb08df8f61220e0e11ff56d4443c9a22afd0c6"
+      "adapted_sha256": "7cfe3589678fe43b0b3b04a8960dde340a69083edf0661484c9c8d3806f30662"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
@@ -41,14 +41,14 @@
       "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
       "adapted_into": "src/app.tsx",
       "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links replace sample navigation and panels.",
-      "adapted_sha256": "2e784565dde9f5b7dbaa767ceeeb08df8f61220e0e11ff56d4443c9a22afd0c6"
+      "adapted_sha256": "7cfe3589678fe43b0b3b04a8960dde340a69083edf0661484c9c8d3806f30662"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/ui/sidebar.tsx",
       "sha256": "2ba1a9b9422f4172373f4cd0587b675d2331a41f4fa68f65dab2b23ca98fd9d2",
       "path": "apps/v4/registry/new-york-v4/ui/sidebar.tsx",
       "adapted_into": "src/ui.tsx",
-      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery. Local sidebar CSS reduces footer padding/gaps to give ordinary usernames more room and tightens narrow menu padding/icon gaps; long usernames and narrow menus still wrap naturally.",
+      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery. Local CSS keeps the account row close to the bottom of the desktop sidebar. On narrow screens, equal-width links center each icon above its label. Long usernames wrap.",
       "adapted_sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
     },
     {
