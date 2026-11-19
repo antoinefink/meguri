@@ -275,6 +275,12 @@ public enum SyncKinds {
                 case "sync.meguri.setup.error.storage":
                     return .init(.needsYou, "sync.needsYou.meguri.storage", .meguriTryAgain)
                 case "sync.meguri.setup.error.cancelled": return .init(nil, nil)
+                case MeguriSetupSequence.overtakenKey:
+                    // MP6.9 neither: T19.5's "full sync required" row.
+                    return .init(.needsYou, MeguriSetupSequence.overtakenKey, .chooseCollection)
+                case MeguriSetupSequence.localUnusableKey:
+                    // A collection file that is closed or damaged: setup cannot read it.
+                    return .init(.needsYou, MeguriSetupSequence.localUnusableKey, .copyDebugInfo)
                 default:
                     // remoteUnavailable, remoteChanged, localChanged, backupFailed, server,
                     // invalidDownload, and a failure with no typed key: all precede activation.

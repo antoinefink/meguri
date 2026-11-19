@@ -1006,7 +1006,12 @@ public final class SyncCoordinator {
         meguriOperation = operation; meguriReceipt = operation.receipt
         let receipt = operation.receipt
         meguriChoiceAllowed = false
-        if receipt.acceptance == .possiblyAccepted || receipt.boundary == .remoteCompletionUnknown {
+        if receipt.acceptance == .overtaken {
+            // MP6.9 neither: settled and inactive. Its artifacts stay in the
+            // core; setup runs again and the core gives the sheet.
+            meguriOperation = nil; meguriFailureKey = MeguriSetupSequence.overtakenKey
+            meguriStage = .failed; meguriChoiceAllowed = true
+        } else if receipt.acceptance == .possiblyAccepted || receipt.boundary == .remoteCompletionUnknown {
             meguriStage = .acceptanceUnknown
         } else if MeguriSyncStatusPresentation.canRecover(receipt) {
             meguriStage = .acceptedLocalIncomplete
@@ -1191,9 +1196,12 @@ public final class SyncCoordinator {
     public func startMeguriSetup(keepingService: Bool = false) {
         guard meguriCanChoose, providerChangeAllowed(), meguriSetupDecision == nil,
               let facade = meguriBootstrap, let owner = meguriConnectionOwner else { return }
-        meguriSetupKeepsService = keepingService
+        let overtaken = meguriStage == .failed && meguriFailureKey == MeguriSetupSequence.overtakenKey
+        meguriSetupKeepsService = MeguriSetupSequence.keepsService(requested: keepingService, stage: meguriStage,
+                                                                   failureKey: meguriFailureKey)
         issueMeguri { id in
-            self.meguriSetupNoticeKey = nil
+            // The sentence of the row that opened the sheet is its first line (T19.3).
+            self.meguriSetupNoticeKey = overtaken ? MeguriSetupSequence.overtakenKey : nil
             await self.prepareMeguriSetup(id: id, facade: facade, owner: owner, reloads: 1)
         }
     }
@@ -1250,7 +1258,7 @@ public final class SyncCoordinator {
     static func meguriSetupStep(_ row: MeguriSetupRow) -> MeguriSetupStep {
         switch row {
         case .download, .downloadOverEmptyDevice, .uploadToEmptyServer: .run(.noQuestion)
-        case .ask, .askUploadOnly: .ask
+        case .ask, .askUploadOnly, .askDownloadOnly: .ask
         }
     }
     /// The choices the sheet offers for a row; a row that asks nothing offers none.
@@ -1258,6 +1266,7 @@ public final class SyncCoordinator {
         switch row {
         case .ask: [.keepDevice, .keepServer]
         case .askUploadOnly: [.keepDevice]
+        case .askDownloadOnly: [.keepServer]
         case .download, .downloadOverEmptyDevice, .uploadToEmptyServer: []
         }
     }
@@ -1265,6 +1274,8 @@ public final class SyncCoordinator {
     static func meguriSetupConfirmsPreview(_ row: MeguriSetupRow, _ choice: MeguriSetupChoice) -> Bool? {
         switch (row, choice) {
         case (.download, .noQuestion), (.uploadToEmptyServer, .noQuestion), (.ask, .keepDevice), (.askUploadOnly, .keepDevice): true
+        // With no collection on this device the prepared transfer is already the download.
+        case (.askDownloadOnly, .keepServer): true
         case (.downloadOverEmptyDevice, .noQuestion), (.ask, .keepServer): false
         default: nil
         }
@@ -1274,7 +1285,7 @@ public final class SyncCoordinator {
         case .download: .downloaded(backup: false)
         case .downloadOverEmptyDevice: .downloaded(backup: true)
         case .uploadToEmptyServer: .uploaded
-        case .ask, .askUploadOnly: nil
+        case .ask, .askUploadOnly, .askDownloadOnly: nil
         }
     }
     /// The facts changed under a decision: both sides are read again (T19.3).
@@ -1306,27 +1317,24 @@ public final class SyncCoordinator {
     private func runMeguriSetup(id: UUID, facade: MeguriProviderBootstrapService, owner: MeguriProviderConnectionOwner,
                                 decision: MeguriSetupDecision, preview: MeguriBootstrapPreview,
                                 choice: MeguriSetupChoice, reloads: Int) async {
-        guard let confirmsPreview = Self.meguriSetupConfirmsPreview(decision.facts.row, choice) else { return }
+        guard Self.meguriSetupConfirmsPreview(decision.facts.row, choice) != nil else { return }
         meguriSetupDonePending = choice == .noQuestion ? Self.meguriSetupDone(decision.facts.row) : nil
         let current = await runMeguriCollection(id: id, facade: facade, owner: owner,
             held: { self.meguriSetupPreview === preview },
             discard: { try await facade.discard(preview) },
             release: { self.meguriSetupPreview = nil; self.meguriSetupDecision = nil },
             perform: {
-                let progress = self.progressForMeguri(id)
-                if confirmsPreview {
-                    return try await facade.confirmSetup(decision, preview: preview, choice: choice, progress: progress)
-                }
-                let prepared = try await facade.prepareSetupDownload(decision, preview: preview, choice: choice, progress: progress)
-                guard case .preview(let download) = prepared.outcome else { return prepared }
-                return try await facade.confirmSetupDownload(decision, download: download, choice: choice, progress: progress)
+                guard let result = try await MeguriSetupSequence.transfer(facade, decision: decision, preview: preview,
+                    choice: choice, progress: self.progressForMeguri(id)) else { throw CancellationError() }
+                return result
             })
         meguriSetupDonePending = nil
         // Changed facts stopped the transfer with nothing replaced. Both sides
         // are read again once; the row they give now decides, and two
         // collections get the sheet with a new choice.
-        guard let current, reloads > 0, let command = current.meguriCollectionCommand,
-              let key = Self.meguriSetupChangeKey(command.outcome), current.meguriChoiceAllowed,
+        guard let current,
+              let key = MeguriSetupSequence.reloadNotice(after: current.meguriCollectionCommand?.outcome, reloads: reloads,
+                                                         choiceAllowed: current.meguriChoiceAllowed),
               let facade = current.meguriBootstrap, let owner = current.meguriConnectionOwner else { return }
         current.meguriSetupNoticeKey = key
         current.meguriSetupKeepsService = self.meguriSetupKeepsService
@@ -1348,10 +1356,10 @@ public final class SyncCoordinator {
         issueMeguri { _ in
             self.meguriActiveFacade = facade
             do {
-                let result = try await facade.discard(preview)
-                self.retainMeguri(result)
-                if case .refused = result.outcome { self.applyMeguriOutcome(result.outcome) }
-                else { self.meguriOperation = nil; self.meguriStage = .required; self.meguriChoiceAllowed = true }
+                let cancelled = try await MeguriSetupSequence.cancel(facade, preview: preview)
+                self.retainMeguri(cancelled.result)
+                if cancelled.discarded { self.meguriOperation = nil; self.meguriStage = .required; self.meguriChoiceAllowed = true }
+                else { self.applyMeguriOutcome(cancelled.result.outcome) }
             } catch { self.meguriLastError = error; self.meguriStage = .failed }
             // The sheet always closes: Cancel is never a dead end.
             if self.meguriSetupPreview === preview { self.meguriSetupPreview = nil; self.meguriSetupDecision = nil }
@@ -1374,19 +1382,26 @@ public final class SyncCoordinator {
                 let result = try await facade.settleSetup()
                 self.retainMeguri(result)
                 guard self.meguriCurrent(owner, expected, revision) else { return }
-                switch Self.meguriSettled(result.outcome) {
-                case .accepted(let operation, let localUnchanged):
-                    // Local activation remains. It runs now only when this
-                    // device did not change since the upload; otherwise
-                    // Finish Setup asks for it (T19.5).
+                switch MeguriSetupSequence.settled(result.outcome) {
+                case .accepted(let operation, let hintUnchanged):
+                    // Local activation remains. It is tried now only on the
+                    // hint that this device did not change since the upload,
+                    // and then only through the core's own test of that;
+                    // otherwise Finish Setup asks for it (T19.5).
                     self.showMeguriOperation(operation)
-                    finish = localUnchanged
+                    finish = hintUnchanged
+                case .overtaken:
+                    // Neither: another client changed the server. The core
+                    // recorded it, kept every artifact and released the
+                    // exclusion; the sheet decides (MP6.9, T19.5).
+                    self.meguriOperation = nil; self.meguriFailureKey = MeguriSetupSequence.overtakenKey
+                    self.meguriStage = .failed; self.meguriChoiceAllowed = true
                 case .notAccepted:
                     // Nothing reached the server and nothing was replaced.
                     self.meguriOperation = nil; self.meguriFailureKey = "sync.meguri.setup.error.server"
                     self.meguriStage = .failed; self.meguriChoiceAllowed = true
                 case .unknown:
-                    // Neither, or not readable: the state and the exclusion stay.
+                    // Not readable: the state and the exclusion stay.
                     self.meguriStage = .acceptanceUnknown
                 }
             } catch { self.meguriLastError = error; self.meguriStage = .acceptanceUnknown }
@@ -1396,16 +1411,7 @@ public final class SyncCoordinator {
             await waitForMeguriAction()
             guard meguriFinishAfterSettle else { return }
             meguriFinishAfterSettle = false
-            finishMeguriSetup()
-        }
-    }
-    enum MeguriSettled { case accepted(MeguriBootstrapOperation, localUnchanged: Bool), notAccepted, unknown }
-    static func meguriSettled(_ outcome: MeguriBootstrapOutcome) -> MeguriSettled {
-        guard case .settled(let settlement) = outcome else { return .unknown }
-        switch settlement {
-        case .accepted(let operation, let localUnchanged): return .accepted(operation, localUnchanged: localUnchanged)
-        case .notAccepted: return .notAccepted
-        case .neither: return .unknown
+            finishMeguriSetup(asked: false)
         }
     }
     /// MP6.9 for a routine round: the next round's first step is the read of
@@ -1416,7 +1422,10 @@ public final class SyncCoordinator {
         meguriRoutine = .pending
         requestMeguriWake(automatic: false)
     }
-    public func finishMeguriSetup() {
+    /// `asked` is false only for the continuation of a settled acceptance: the
+    /// core then replaces this device's collection only while it is still what
+    /// the upload sent, and otherwise leaves Finish Setup to the user (S1).
+    public func finishMeguriSetup(asked: Bool = true) {
         guard meguriCanFinish, let operation = meguriOperation, let facade = meguriBootstrap,
               let owner = meguriConnectionOwner,
               let prepareEditorReplacement, let finishEditorReplacement,
@@ -1446,17 +1455,14 @@ public final class SyncCoordinator {
             var candidateActive = false
             do {
                 try decision.admitEffect()
-                let preparation = try await facade.prepareRecovery(operation, progress: self.progressForMeguri(id))
-                guard current() else { throw CancellationError() }
-                self.meguriRecoveryPreparation = preparation
-                self.retainMeguri(preparation)
-                let result: MeguriBootstrapCommandResult
-                if case .preview(let recoveryPreview) = preparation.outcome {
-                    // Finish Setup continues the original, already confirmed
-                    // ExactOk operation. Core's recovery preview is not a new
-                    // upload choice and is confirmed only on this same facade.
-                    result = try await facade.confirm(recoveryPreview, progress: self.progressForMeguri(id))
-                } else { result = preparation }
+                // Finish Setup continues the original, already confirmed
+                // ExactOk operation. Core's recovery preview is not a new
+                // upload choice and is confirmed only on this same facade.
+                let finished = try await MeguriSetupSequence.finish(facade, operation: operation, asked: asked,
+                    progress: self.progressForMeguri(id), current: current)
+                self.meguriRecoveryPreparation = finished.preparation
+                self.retainMeguri(finished.preparation)
+                let result = finished.confirmation ?? finished.preparation
                 self.retainMeguriCollectionResult(result)
                 if case .refused(.transfer(let failure), _) = result.outcome { candidateActive = failure.candidateActive }
             } catch {

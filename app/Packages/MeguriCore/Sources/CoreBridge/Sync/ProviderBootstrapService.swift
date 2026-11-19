@@ -13,6 +13,8 @@ public enum MeguriBootstrapFailure: Sendable {
     case transfer(ManualTransferFailure)
     /// MP6.3: the facts of a setup decision changed, or the choice does not fit them.
     case setupLocalChanged, setupRemoteChanged, setupChoice
+    /// A collection file is on this device but is closed or damaged.
+    case setupLocalUnusable
     init(_ raw: MeguriCoreBindings.ProviderBootstrapFailure) {
         self = switch raw {
         case .notSelected: .notSelected
@@ -38,6 +40,7 @@ public enum MeguriBootstrapFailure: Sendable {
         case .setupLocalChanged: .setupLocalChanged
         case .setupRemoteChanged: .setupRemoteChanged
         case .setupChoice: .setupChoice
+        case .setupLocalUnusable: .setupLocalUnusable
         }
     }
 }
@@ -67,6 +70,10 @@ public struct MeguriBootstrapMediaEffects: Sendable {
     public let stage: ManualMediaStage
     public let uploadedFiles: UInt64, downloadedFiles: UInt64, uploadedDeletions: UInt64, downloadedDeletions: UInt64
     public let oversized: [String], empty: [String], awaiting: UInt64, remoteOutcomeUnknown: Bool
+    init(stage: ManualMediaStage) {
+        self.stage = stage; uploadedFiles = 0; downloadedFiles = 0; uploadedDeletions = 0; downloadedDeletions = 0
+        oversized = []; empty = []; awaiting = 0; remoteOutcomeUnknown = false
+    }
     init(_ raw: MeguriCoreBindings.ProviderBootstrapMediaEffects) {
         stage = .init(raw.stage); uploadedFiles = raw.uploadedFiles; downloadedFiles = raw.downloadedFiles
         uploadedDeletions = raw.uploadedDeletions; downloadedDeletions = raw.downloadedDeletions
@@ -79,6 +86,13 @@ public struct MeguriBootstrapReceipt: Sendable {
     public let boundary: ManualTransferBoundary?, local: ManualTransferCounts?, remote: ManualTransferObservation?
     public let remoteHasNoCards: Bool?, servedCounts: ManualTransferCounts?, copies: [ManualTransferCopy]
     public let media: MeguriBootstrapMediaEffects
+    /// A receipt with no core behind it, for tests of the callers of a bridge.
+    init(direction: ManualTransferDirection, phase: ManualTransferPhase, acceptance: ManualTransferAcceptance,
+         boundary: ManualTransferBoundary? = nil) {
+        self.direction = direction; self.phase = phase; self.acceptance = acceptance; self.boundary = boundary
+        local = nil; remote = nil; remoteHasNoCards = nil; servedCounts = nil; copies = []
+        media = .init(stage: .awaitingConsent)
+    }
     init(_ raw: MeguriCoreBindings.ProviderBootstrapRecord) {
         direction = .init(raw.direction); phase = .init(raw.phase); acceptance = .init(raw.acceptance)
         boundary = raw.boundary.map(ManualTransferBoundary.init); local = raw.local.map(ManualTransferCounts.init)
@@ -97,9 +111,17 @@ public struct MeguriBootstrapMediaProgress: Sendable {
     }
 }
 public final class MeguriBootstrapPreview: Sendable {
-    fileprivate let raw: MeguriCoreBindings.ProviderBootstrapPreview
+    private let handle: MeguriCoreBindings.ProviderBootstrapPreview?
     public let receipt: MeguriBootstrapReceipt
-    fileprivate init(_ raw: MeguriCoreBindings.ProviderBootstrapPreview, _ receipt: MeguriBootstrapReceipt) { self.raw = raw; self.receipt = receipt }
+    fileprivate init(_ raw: MeguriCoreBindings.ProviderBootstrapPreview, _ receipt: MeguriBootstrapReceipt) { handle = raw; self.receipt = receipt }
+    /// A handle with no core behind it, for tests of the callers of a bridge. The service refuses it.
+    init(detached receipt: MeguriBootstrapReceipt) { handle = nil; self.receipt = receipt }
+    fileprivate var raw: MeguriCoreBindings.ProviderBootstrapPreview {
+        get throws {
+            guard let handle else { throw BridgeError.internal("A detached Meguri bootstrap handle has no core") }
+            return handle
+        }
+    }
 }
 public final class MeguriBootstrapMediaConsent: Sendable {
     fileprivate let raw: MeguriCoreBindings.ProviderBootstrapMediaConsent
@@ -107,13 +129,23 @@ public final class MeguriBootstrapMediaConsent: Sendable {
     fileprivate init(_ raw: MeguriCoreBindings.ProviderBootstrapMediaConsent, _ receipt: MeguriBootstrapReceipt) { self.raw = raw; self.receipt = receipt }
 }
 public final class MeguriBootstrapOperation: Sendable {
-    fileprivate let raw: MeguriCoreBindings.ProviderBootstrapOperation
+    private let handle: MeguriCoreBindings.ProviderBootstrapOperation?
     public let receipt: MeguriBootstrapReceipt
-    fileprivate init(_ raw: MeguriCoreBindings.ProviderBootstrapOperation, _ receipt: MeguriBootstrapReceipt) { self.raw = raw; self.receipt = receipt }
+    fileprivate init(_ raw: MeguriCoreBindings.ProviderBootstrapOperation, _ receipt: MeguriBootstrapReceipt) { handle = raw; self.receipt = receipt }
+    /// A handle with no core behind it, for tests of the callers of a bridge. The service refuses it.
+    init(detached receipt: MeguriBootstrapReceipt) { handle = nil; self.receipt = receipt }
+    fileprivate var raw: MeguriCoreBindings.ProviderBootstrapOperation {
+        get throws {
+            guard let handle else { throw BridgeError.internal("A detached Meguri bootstrap handle has no core") }
+            return handle
+        }
+    }
 }
 /// MP6.3's table row for one finished preparation.
 public enum MeguriSetupRow: Sendable, Equatable {
     case download, downloadOverEmptyDevice, uploadToEmptyServer, ask, askUploadOnly
+    /// No collection on this device, but media files: download or Cancel.
+    case askDownloadOnly
 }
 public enum MeguriSetupChoice: Sendable, Equatable { case noQuestion, keepDevice, keepServer }
 /// One side's counts. A nil value is a fact the core does not have.
@@ -138,16 +170,28 @@ public struct MeguriSetupFacts: Sendable, Equatable {
 }
 /// The core's decision for one preview. Only the core that made it can use it.
 public final class MeguriSetupDecision: Sendable {
-    fileprivate let raw: MeguriCoreBindings.ProviderSetupDecision
+    private let handle: MeguriCoreBindings.ProviderSetupDecision?
     public let facts: MeguriSetupFacts
-    fileprivate init(_ raw: MeguriCoreBindings.ProviderSetupDecision, _ facts: MeguriCoreBindings.ProviderSetupFacts) {
-        self.raw = raw
+    /// The account that was signed in to when the core decided, as the user typed it.
+    public let account: String
+    /// A decision with no core behind it, for tests of the callers of a bridge. The service refuses it.
+    init(detached facts: MeguriSetupFacts, account: String = "") { handle = nil; self.facts = facts; self.account = account }
+    fileprivate var raw: MeguriCoreBindings.ProviderSetupDecision {
+        get throws {
+            guard let handle else { throw BridgeError.internal("A detached Meguri setup decision has no core") }
+            return handle
+        }
+    }
+    fileprivate init(_ raw: MeguriCoreBindings.ProviderSetupDecision, _ facts: MeguriCoreBindings.ProviderSetupFacts,
+                     account: String) {
+        handle = raw; self.account = account
         let row: MeguriSetupRow = switch facts.row {
         case .download: .download
         case .downloadOverEmptyDevice: .downloadOverEmptyDevice
         case .uploadToEmptyServer: .uploadToEmptyServer
         case .ask: .ask
         case .askUploadOnly: .askUploadOnly
+        case .askDownloadOnly: .askDownloadOnly
         }
         self.facts = .init(row: row, device: facts.device.map(MeguriSetupSide.init), server: facts.server.map(MeguriSetupSide.init),
                            unsent: facts.unsent)
@@ -158,7 +202,9 @@ public enum MeguriSetupDecisionOutcome: Sendable {
 }
 /// The outcomes of MP6.9's settling step. An unreadable server is an error, not a case here.
 public enum MeguriSetupSettlement: Sendable {
-    case accepted(MeguriBootstrapOperation, localUnchanged: Bool), notAccepted(MeguriBootstrapOperation), neither
+    case accepted(MeguriBootstrapOperation, localUnchanged: Bool), notAccepted(MeguriBootstrapOperation)
+    /// The upload is recorded as overtaken; the next preparation asks which collection to keep.
+    case neither(MeguriBootstrapOperation)
 }
 public enum MeguriBootstrapOutcome: Sendable {
     case preview(MeguriBootstrapPreview), mediaConsent(MeguriBootstrapMediaConsent), operation(MeguriBootstrapOperation)
@@ -321,7 +367,7 @@ public actor MeguriProviderBootstrapService {
             switch settlement {
             case .accepted(let raw, let localUnchanged): return .settled(.accepted(try await operation(raw), localUnchanged: localUnchanged))
             case .notAccepted(let raw): return .settled(.notAccepted(try await operation(raw)))
-            case .neither: return .settled(.neither)
+            case .neither(let raw): return .settled(.neither(try await operation(raw)))
             }
         case .ready, .refused, .pending: throw BridgeError.internal("Meguri bootstrap has no terminal result")
         }
@@ -516,7 +562,7 @@ public actor MeguriProviderBootstrapService {
         case .refused(let failure): return .refused(.init(failure))
         case .decision(let decision):
             let facts = try await MaintenanceLane.shared.call(.providerBootstrapReadiness) { try decision.facts() }
-            return .decision(.init(decision, facts))
+            return .decision(.init(decision, facts, account: credentials.username))
         }
     }
     /// Row 1, row 3 or "keep this device's collection".
@@ -540,6 +586,14 @@ public actor MeguriProviderBootstrapService {
         let choice = Self.rawChoice(choice)
         return try await worker(.providerBootstrapConfirm, progress: progress, mediaProgress: { _ in }, start: .credentials {
             try $0.startSetupDownloadConfirm(credentials: $1, decision: decision.raw, download: download.raw, choice: choice)
+        })
+    }
+    /// MP6.9 accepted: confirms the recovery preview only while this device is
+    /// still what the upload sent; refused as `setupLocalChanged` otherwise.
+    public func confirmSetupActivation(_ recovery: MeguriBootstrapPreview,
+                                       progress: @escaping @Sendable (CoreProgress) -> Void = { _ in }) async throws -> MeguriBootstrapCommandResult {
+        try await worker(.providerBootstrapConfirm, progress: progress, mediaProgress: { _ in }, start: .credentials {
+            try $0.startSetupActivationConfirm(credentials: $1, recovery: recovery.raw)
         })
     }
     /// MP6.9: one read of the server's facts. Starts no upload.

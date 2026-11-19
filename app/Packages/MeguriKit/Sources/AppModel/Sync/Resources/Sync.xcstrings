@@ -4860,6 +4860,72 @@
         }
       }
     },
+    "sync.keep.uploadOnly.title": {
+      "comment": "Proposed for sync/status-strings T19.3 by the round 2 setup fix (2026-11-19), not yet approved; shown only for the corresponding typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload This Device’s Collection?"
+          }
+        }
+      }
+    },
+    "sync.keep.uploadOnly.message.meguri": {
+      "comment": "Proposed for sync/status-strings T19.3 by the round 2 setup fix (2026-11-19), not yet approved; shown only for the corresponding typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device synced with another server or account before. The account you signed in to has no collection yet, so Meguri can only upload this device’s collection to it."
+          }
+        }
+      }
+    },
+    "sync.keep.uploadOnly.confirm": {
+      "comment": "Proposed for sync/status-strings T19.3 by the round 2 setup fix (2026-11-19), not yet approved; shown only for the corresponding typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload This Device’s Collection"
+          }
+        }
+      }
+    },
+    "sync.keep.downloadOnly.title.meguri": {
+      "comment": "Proposed for sync/status-strings T19.3 by the round 2 setup fix (2026-11-19), not yet approved; shown only for the corresponding typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download the Meguri Sync Collection?"
+          }
+        }
+      }
+    },
+    "sync.keep.downloadOnly.message.meguri": {
+      "comment": "Proposed for sync/status-strings T19.3 by the round 2 setup fix (2026-11-19), not yet approved; shown only for the corresponding typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device has media files but no collection. Meguri can only download the collection from your Meguri Sync server."
+          }
+        }
+      }
+    },
+    "sync.keep.downloadOnly.confirm": {
+      "comment": "Proposed for sync/status-strings T19.3 by the round 2 setup fix (2026-11-19), not yet approved; shown only for the corresponding typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download the Collection"
+          }
+        }
+      }
+    },
     "sync.status.off.title": {
       "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
       "localizations": {

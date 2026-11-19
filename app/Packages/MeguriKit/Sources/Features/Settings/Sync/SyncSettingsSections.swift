@@ -259,7 +259,7 @@ struct MeguriAccountRows: View {
         // decision opens it; no view state can.
         .sheet(isPresented: Binding(get: { sync.meguriSetupDecision != nil }, set: { _ in })) {
             if let decision = sync.meguriSetupDecision {
-                MeguriKeepCollectionSheet(collection: collection, facts: decision.facts)
+                MeguriKeepCollectionSheet(collection: collection, facts: decision.facts, account: decision.account)
             }
         }
         .sheet(isPresented: Binding(get: { sync.meguriPreview != nil }, set: { _ in })) {
@@ -301,11 +301,30 @@ struct MeguriAccountRows: View {
 struct MeguriKeepCollectionSheet: View {
     let collection: ReviewCollection
     let facts: MeguriSetupFacts
+    /// The account the core decided for; the one-direction forms name it (MP6.3).
+    var account = ""
     @Environment(\.appClock) private var clock
     @State private var cancelling = false
     private var sync: SyncCoordinator { collection.sync }
     private var choices: [MeguriSetupChoice] { SyncCoordinator.meguriSetupChoices(facts.row) }
     private var working: Bool { cancelling || sync.meguriBusy }
+    /// The one-direction forms (MP6.3): a changed endpoint or account whose
+    /// server is empty, or media files on a device with no collection.
+    private var oneDirection: Bool { facts.row == .askUploadOnly || facts.row == .askDownloadOnly }
+    private var titleKey: String {
+        switch facts.row {
+        case .askUploadOnly: "sync.keep.uploadOnly.title"
+        case .askDownloadOnly: "sync.keep.downloadOnly.title.meguri"
+        default: "sync.keep.title"
+        }
+    }
+    private var messageKey: String {
+        switch facts.row {
+        case .askUploadOnly: "sync.keep.uploadOnly.message.meguri"
+        case .askDownloadOnly: "sync.keep.downloadOnly.message.meguri"
+        default: "sync.keep.message"
+        }
+    }
     var body: some View {
         NavigationStack {
             Form {
@@ -313,21 +332,33 @@ struct MeguriKeepCollectionSheet: View {
                     if let key = sync.meguriSetupNoticeKey {
                         Text(SyncText.value(key)).accessibilityIdentifier("sync.keepCollection.changed")
                     }
-                    Text(SyncText.value("sync.keep.message"))
+                    Text(SyncText.value(messageKey))
                         .accessibilityIdentifier("sync.keepCollection.message")
                 }
                 if let device = facts.device {
-                    Section(SyncText.value("sync.counts.thisDevice")) { rows(device) }
+                    Section(SyncText.value("sync.counts.thisDevice")) {
+                        if facts.row == .askDownloadOnly {
+                            // No collection on this device: only its media files are counted.
+                            if let media = device.mediaFiles {
+                                LabeledContent(SyncText.value("sync.counts.mediaFiles"), value: media.formatted(.number))
+                            }
+                        } else { rows(device) }
+                    }
                 }
-                if let server = facts.server {
+                if facts.server != nil || oneDirection {
                     Section(SyncText.value("sync.service.meguri")) {
                         LabeledContent(SyncText.value("sync.meguri.preview.server"), value: sync.meguriEndpoint)
-                        rows(server)
+                        if oneDirection, !account.isEmpty {
+                            LabeledContent(SyncText.value("sync.settings.account"), value: account)
+                                .accessibilityIdentifier("sync.keepCollection.account")
+                        }
+                        if let server = facts.server { rows(server) }
                     }
                 }
                 if choices.contains(.keepDevice) {
                     Section {
-                        Button(SyncText.value("sync.keep.device"), role: .destructive) { sync.answerMeguriSetup(.keepDevice) }
+                        Button(SyncText.value(facts.row == .askUploadOnly ? "sync.keep.uploadOnly.confirm" : "sync.keep.device"),
+                               role: .destructive) { sync.answerMeguriSetup(.keepDevice) }
                             .disabled(working)
                             .accessibilityIdentifier("sync.keepCollection.keepDevice")
                     } footer: {
@@ -339,12 +370,14 @@ struct MeguriKeepCollectionSheet: View {
                 }
                 if choices.contains(.keepServer) {
                     Section {
-                        Button(SyncText.value("sync.keep.service.meguri"), role: .destructive) { sync.answerMeguriSetup(.keepServer) }
+                        Button(SyncText.value(facts.row == .askDownloadOnly ? "sync.keep.downloadOnly.confirm" : "sync.keep.service.meguri"),
+                               role: .destructive) { sync.answerMeguriSetup(.keepServer) }
                             .disabled(working)
                             .accessibilityIdentifier("sync.keepCollection.keepService")
                     } footer: {
                         VStack(alignment: .leading) {
-                            Text(SyncText.value("sync.keep.service.effect"))
+                            // With no collection on this device nothing is replaced or backed up.
+                            if facts.row != .askDownloadOnly { Text(SyncText.value("sync.keep.service.effect")) }
                             if facts.unsent { Text(SyncText.value("sync.meguri.preview.unsent")) }
                         }
                     }
@@ -357,7 +390,7 @@ struct MeguriKeepCollectionSheet: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle(SyncText.value("sync.keep.title"))
+            .navigationTitle(SyncText.value(titleKey))
             #if !os(macOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
