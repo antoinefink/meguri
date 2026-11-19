@@ -24,6 +24,28 @@ extension ReviewCoordinatorTests {
         #expect(ReviewSessionSummary(cards: 1, seconds: 12 * 60 + 20).duration == .seconds(12 * 60))
     }
 
+    @Test func answerTimeStopsAtThePresetLimitAndTheNextCardUsesItsOwn() async throws {
+        let fixture = Fixture()
+        fixture.client.currentHead = Self.head(1) // 60 seconds
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.head(2, maximumAnswerSeconds: 120),
+            marks: [], removed: [1]), leech: false, suspended: false, rolledOver: false)
+        await fixture.model.start()
+        fixture.now = 75
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.now = 90
+        fixture.model.rate(.good); await fixture.model.settled()
+        #expect(fixture.client.elapsed == [60_000], "90 seconds on a card stop at its 60 second limit")
+        #expect(fixture.model.record.answers.map(\.elapsedMilliseconds) == [60_000])
+        // The second card starts from zero and has 120 seconds.
+        fixture.client.answerHead = .accepted(headDiff: .init(head: Self.emptyHead(.finished), marks: [], removed: [2]),
+                                               leech: false, suspended: false, rolledOver: false)
+        fixture.now = 190
+        fixture.model.reveal(); await fixture.model.settled()
+        fixture.model.rate(.good); await fixture.model.settled()
+        #expect(fixture.client.elapsed == [60_000, 100_000])
+        #expect(await fixture.model.end())
+    }
+
     @Test func finishedSessionReportsDistinctCardsAndActiveTime() async throws {
         let fixture = Fixture()
         await fixture.model.start()
