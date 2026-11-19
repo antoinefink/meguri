@@ -372,9 +372,6 @@ screens:
   home.sessionSummary:
     status: sketch
     fix_rounds: 0
-  home.fsrsSheet:
-    status: sketch
-    fix_rounds: 0
   review.question:
     status: sketch
     fix_rounds: 0

@@ -207,15 +207,9 @@ screens:
       "No missed cards". Overflow: many missed cards scroll inside the sheet; the toolbar stays. The
       deck page's "Last Session" opens the same sheet read-only: title "Last Session", no Undo,
       Continue or Unbury. No chart.
-  - id: home.fsrsSheet
-    title: FSRS optimization sheet
-    units: [U51]
-    signature: false
-    platforms: [iphone, ipad, mac]
-    states: [typical, error, loading]
-    variants: pairwise
-    references: [sheet-form]
-    purpose: The FSRS-only notice and parameter optimization status for a collection.
+  # home.fsrsSheet was removed on 2026-11-19 (decisions.md, native-interface-contract N18.1):
+  # FSRS is always on and nothing is shown for it. A study entry point that is refused shows
+  # the system alert of sched/app-coordination F5.3, which is no screen of its own.
 
   - id: review.question
     title: Review, question side
@@ -984,7 +978,7 @@ screens:
       (M5 gives no count for it). Never shown (R752, O3's hidden options):
       the FSRS switch, parameters, Optimize and Evaluate, the simulator, Easy Days, Custom scheduling
       and the SM-2 options; parameter optimization runs by itself (sched/optimizer) and reports in
-      home.fsrsSheet and settings.diagnostics. Decided 2026-10-27: no notice for an unsupported preset
+      settings.diagnostics. Decided 2026-10-27: no notice for an unsupported preset
       (sched/fsrs-policy U1) here, since the snapshot has no such fact; its parameter lists are hidden
       options that a save keeps (sched/presets V8), and the study refusal (U51) names it. Every option
       row: the label; "Global" in secondary text after it for the three global options (R735); the
