@@ -26,6 +26,7 @@ struct RootView: View {
     @Environment(\.layoutFollowsForcedSizeClass) private var layoutFollowsForcedSizeClass
     #else
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     #endif
 
     init(configuration: LaunchConfiguration, navigation: AppNavigation, features: ShellFeatures, uiStateStore: UIStateStore, collection: ReviewCollection? = nil) {
@@ -77,6 +78,10 @@ struct RootView: View {
         // Hide only the presenting shell; sheets and alerts own their AX tree.
         .accessibilityHidden(launchSheet || launchAlert || linkRefusal != nil || hasModalSheet)
         .background(AddNoteWindowGuard(navigation: navigation))
+        // Here, not in the status button: review mounts that button only while sync needs the person (N16.2).
+        .onChange(of: collection?.syncPresentation.settingsRequest) { _, request in
+            if request != nil, collection?.sync.providerState?.selection == .meguri { openSettings() }
+        }
         #endif
         .modifier(PresentationHost(
             navigation: navigation, features: features, configuration: configuration,

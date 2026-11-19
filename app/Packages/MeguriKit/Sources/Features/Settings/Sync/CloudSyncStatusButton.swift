@@ -57,11 +57,6 @@ public struct CloudSyncStatusButton: View {
                     .presentationCompactAdaptation(.sheet)
                     .presentationDetents([.medium, .large])
             }
-            #if os(macOS)
-            .onChange(of: collection.syncPresentation.settingsRequest) { _, request in
-                if meguri, request != nil { openSettings() }
-            }
-            #endif
             #if os(iOS)
             // Keep status and connection separate; native dismissal, rather
             // than a delay or view disappearance, orders the compact handoff.
