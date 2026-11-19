@@ -66,11 +66,13 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
                 state: state, launch: MeguriLaunch(locale: "en_US", animations: false, route: "home/deck-list/\(state)"),
                 waitFor: "home.collection.screen", suppressions: suppressions,
                 ready: { app in
-                    try self.scrollToRequiredControls(app.scrollViews.firstMatch, app: app, build: build,
+                    // The welcome and the deck tree are system lists: a collection view on touch.
+                    let list = app.collectionViews.firstMatch
+                    try self.scrollToRequiredControls(list.exists ? list : app.scrollViews.firstMatch, app: app, build: build,
                                                       identifiers: ["home.collection.import"])
                     let action = app.buttons["home.collection.import"]
                     XCTAssertTrue(action.isHittable)
-                    XCTAssertEqual(action.label, "Import Collection")
+                    XCTAssertEqual(action.label, "Import a Collection File")
                 }
             )
         }
@@ -90,7 +92,17 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
         var individually = false
         for gesture in 0...24 {
             let viewport = scroll.frame.intersection(app.windows.firstMatch.frame)
-            guard !viewport.isEmpty, controls.allSatisfy({ $0.exists }) else { break }
+            guard !viewport.isEmpty else { break }
+            guard controls.allSatisfy({ $0.exists }) else {
+                // A system list makes its rows as they scroll in: at the largest text sizes a later row is not there yet.
+                guard gesture < 24 else { break }
+                #if os(macOS)
+                scroll.scroll(byDeltaX: 0, deltaY: -viewport.height / 2)
+                #else
+                scroll.swipeUp()
+                #endif
+                continue
+            }
             let frames = controls.map(\.frame)
             let required = frames.reduce(CGRect.null) { $0.union($1) }
             let visible = controls.indices.filter {
@@ -117,7 +129,14 @@ final class CollectionEntryAccessibilityTests: XCTestCase {
             #if os(macOS)
             scroll.scroll(byDeltaX: 0, deltaY: (towardsBottom ? -1 : 1) * viewport.height / 2)
             #else
-            if towardsBottom { scroll.swipeUp() } else { scroll.swipeDown() }
+            // Drag by a set distance and hold. At the largest text sizes a row can be
+            // more than half the screen tall, and a swipe overshoots it both ways.
+            _ = towardsBottom
+            let reach = viewport.height / 3
+            let move = max(-reach, min(reach, viewport.midY - target.midY))
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)),
+                        withVelocity: .slow, thenHoldForDuration: 0.2)
             #endif
         }
         XCTFail("Every required control must be fully inside the scroll viewport and hittable after at most 24 gestures: \(identifiers)\n\(app.debugDescription)")

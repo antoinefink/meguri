@@ -29,7 +29,7 @@ import notify
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
 
-        XCTAssertTrue(app.staticTexts["No Collection"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Welcome to Meguri"].waitForExistence(timeout: 10))
         let settings = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.settings",
             sidebarIdentifier: "shell.root.sidebar.settings", compactLabel: "Settings", timeout: 10), app.debugDescription)
         try click(settings, app, bundle)
@@ -127,20 +127,25 @@ import notify
         let accountSyncButtons = app.buttons.matching(identifier: "home.collection.accountSync")
         let accountSync = try XCTUnwrap(waitForHittable(accountSyncButtons), app.debugDescription)
         XCTAssertEqual(accountSyncButtons.count, 1)
-        XCTAssertEqual(accountSync.label, "Account & Sync")
+        // N18.1: one row for sync, which opens Account & Sync.
+        XCTAssertEqual(accountSync.label, "Set Up Sync")
         XCTAssertTrue(accountSync.isEnabled)
-        XCTAssertTrue(app.staticTexts["No Collection"].exists)
-        XCTAssertTrue(app.staticTexts["Import, sync or start an empty collection."].exists)
+        XCTAssertTrue(app.staticTexts["Welcome to Meguri"].exists)
+        XCTAssertTrue(app.staticTexts["Choose how to start. You can change this later in Settings."].exists)
+        XCTAssertFalse(app.staticTexts["No Collection"].exists)
         let startEmptyButtons = app.buttons.matching(identifier: "home.collection.startEmpty")
         let startEmpty = try XCTUnwrap(waitForHittable(startEmptyButtons), app.debugDescription)
         XCTAssertEqual(startEmptyButtons.count, 1)
         XCTAssertEqual(startEmpty.label, "Start Empty")
         XCTAssertTrue(startEmpty.isEnabled)
         let importCollection = app.buttons["home.collection.import"].firstMatch
-        let connect = app.buttons["home.collection.connect"].firstMatch
         XCTAssertTrue(importCollection.exists && importCollection.isEnabled && importCollection.isHittable)
-        XCTAssertTrue(connect.exists && connect.isHittable)
-        XCTAssertEqual(connect.label, "Connect to iCloud…")
+        XCTAssertEqual(importCollection.label, "Import a Collection File")
+        // The former second route to sync is gone.
+        XCTAssertFalse(element(app, "home.collection.connect").exists)
+        let choices = ["home.collection.accountSync", "home.collection.import", "home.collection.startEmpty"]
+            .map { app.buttons[$0].firstMatch.frame.minY }
+        XCTAssertEqual(choices, choices.sorted(), "Sync, then the file, then the empty collection")
         XCTAssertFalse(element(app, "settings.accountSync.content").exists)
         try click(accountSync, app, bundle)
 
@@ -176,16 +181,14 @@ import notify
             predicate: NSPredicate(format: "exists == false"), object: content)], timeout: 10), .completed)
         _ = try XCTUnwrap(waitForHittable(accountSyncButtons), app.debugDescription)
         XCTAssertTrue(element(app, "home.collection.screen").exists)
-        XCTAssertTrue(app.staticTexts["No Collection"].exists, "Opening Account & Sync must leave Home without a collection")
-        XCTAssertTrue(app.staticTexts["Import, sync or start an empty collection."].exists)
+        XCTAssertTrue(app.staticTexts["Welcome to Meguri"].exists, "Opening Account & Sync must leave Home without a collection")
         _ = try XCTUnwrap(waitForHittable(startEmptyButtons), app.debugDescription)
         XCTAssertEqual(startEmptyButtons.count, 1)
         XCTAssertEqual(startEmpty.label, "Start Empty")
         XCTAssertTrue(startEmpty.isEnabled)
         XCTAssertFalse(app.staticTexts["No Decks"].exists)
         XCTAssertTrue(importCollection.exists && importCollection.isEnabled && importCollection.isHittable)
-        XCTAssertTrue(connect.exists && connect.isHittable)
-        XCTAssertEqual(connect.label, "Connect to iCloud…")
+        XCTAssertFalse(element(app, "home.collection.connect").exists)
         XCTAssertFalse(element(app, "settings.accountSync.done").exists)
     }
 
