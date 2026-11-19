@@ -92,8 +92,6 @@ final class HomeTests: XCTestCase {
         app.launchArguments = launchArguments(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"))
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
-        let enable = app.buttons["home.policy.enable"]
-        if enable.waitForExistence(timeout: 5) { enable.tap() }
         return app
         #endif
     }

@@ -22,7 +22,7 @@ extension ReviewCollectionStartupTests {
             owner.entry.present(); owner.entry.inspect(source)
             await owner.entry.waitForCompletion()
             try #require(owner.entry.preview != nil)
-            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             try #require(owner.state == .ready)
             await sync.waitForInputs()
             await sync.waitForReplacement()

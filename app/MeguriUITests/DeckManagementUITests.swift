@@ -18,8 +18,6 @@ final class DeckManagementUITests: XCTestCase {
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
         app.launch()
         defer { app.terminate() }
-        let enable = element(app, "home.policy.enable")
-        if enable.waitForExistence(timeout: 5) { try click(enable, app: app, bundle: bundle) }
         XCTAssertTrue(element(app, "home.collection.createDeck").waitForExistence(timeout: 20))
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("n", modifierFlags: [.command, .option])
@@ -108,8 +106,6 @@ final class DeckManagementUITests: XCTestCase {
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
         app.launch()
         defer { app.terminate() }
-        let enable = element(app, "home.policy.enable")
-        if enable.waitForExistence(timeout: 5) { try click(enable, app: app, bundle: bundle) }
         XCTAssertTrue(element(app, "home.collection.createDeck").waitForExistence(timeout: 20))
 
         let paths = ["QZ90::QZ91", "QZ90::QZ92"]
@@ -295,8 +291,6 @@ final class DeckManagementUITests: XCTestCase {
             now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
         app.launch()
         defer { app.terminate() }
-        let enable = element(app, "home.policy.enable")
-        if enable.waitForExistence(timeout: 5) { try click(enable, app: app, bundle: bundle) }
         XCTAssertTrue(element(app, "home.collection.createDeck").waitForExistence(timeout: 20))
 
         let name = "QZCreate" + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8)

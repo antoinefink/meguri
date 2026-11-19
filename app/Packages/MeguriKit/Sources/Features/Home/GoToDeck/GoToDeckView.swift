@@ -25,7 +25,7 @@ public final class GoToDeckModel {
     public private(set) var hasSavedResult = false
     public var liveLayout: ShellLayout = .sidebar
     public private(set) var message: Message?
-    public enum Message: Equatable { case loadFailed, lookupFailed, activationFailed, unavailable, filtered, filteredParent, tooDeep, saved }
+    public enum Message: Equatable { case loadFailed, lookupFailed, activationFailed, unavailable, filtered, filteredParent, tooDeep, saved, studyRefused }
     private var presentation: UInt64?
     private var generation: UInt64 = 0
     private var revision: UInt64 = 0
@@ -185,6 +185,7 @@ public final class GoToDeckModel {
             case .tooDeep: message = .tooDeep
             case .unavailable: message = .unavailable
             case .failed: message = .activationFailed
+            case .studyRefused: message = .studyRefused
             case .saved: hasSavedResult = true; message = .saved
             }
         }
@@ -374,6 +375,8 @@ public struct GoToDeckView: View {
         case .filteredParent: Text("A filtered deck can’t contain subdecks. Choose another path.", bundle: .module)
         case .tooDeep: Text("This path has too many new parent decks. Choose a shorter path.", bundle: .module)
         case .saved: Text("The deck was saved. Couldn’t open it. Try Go again, or cancel.", bundle: .module)
+        // F5.3: Go is the control that tries again here.
+        case .studyRefused: Text("study.prepare.failed", bundle: .module)
         }
     }
 }

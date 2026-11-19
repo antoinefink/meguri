@@ -62,9 +62,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         XCTAssertEqual(homeScreens.count, 1)
         // N14.1: the sidebar is the Mac's only deck outline.
         _ = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
-        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "home.policy.enable"))
-            .element(boundBy: 0).exists, "The generated recipe must already enable FSRS")
-        XCTAssertEqual(app.sheets.count, 0, "Unexpected admission sheets are fixture prerequisite failures")
+        XCTAssertEqual(app.sheets.count, 0, "Nothing asks before Home (N18.1)")
 
         func waitFor(_ predicate: @escaping () -> Bool, _ message: String) {
             let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in predicate() }, object: nil)
@@ -448,8 +446,6 @@ final class MacHomeHierarchyTests: XCTestCase {
         app.launchArguments = launchArguments(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"))
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
-        let enable = element(app, "home.policy.enable")
-        if enable.waitForExistence(timeout: 5) { try click(enable, app: app, bundle: bundle) }
         try showDecksRoot(app, bundle: bundle)
         return (app, bundle)
     }

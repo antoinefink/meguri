@@ -716,6 +716,8 @@ nonisolated func serviceAppSignal(_ stream: AsyncStream<Bool>, stage: String, tr
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: makeSync(),
             providerDirectory: root.appending(path: "synthetic-installation", directoryHint: .isDirectory))
         owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
+        // These fixtures script every collection write and exchange.
+        owner.studyPreparation.runsUnprompted = false
         return owner
     }()
     init(root: URL, wire: ServiceWorkflowWire, defaults: UserDefaults? = nil,

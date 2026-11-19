@@ -795,19 +795,14 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
                 #expect(app.sync.settings == settings)
                 #expect(app.sync.meguriPreview == nil && app.sync.meguriLastCommand == nil)
                 #expect(app.sync.meguriStatus.route == .account("sync.meguri.setup.continue"))
-                try #require(app.owner.policy == .needsEnable)
-                try #require(app.owner.navigation.sheet == .fsrsAdmission)
-                #if os(macOS)
-                #expect(app.owner.syncPresentation.settingsRequest == nil)
-                #endif
-                #expect(!app.owner.requestSyncNow())
-                #if os(macOS)
-                #expect(app.owner.syncPresentation.settingsRequest == nil)
-                #endif
-                // Public admission action on this disposable synthetic collection.
+                // No sheet asks (N18.1): the step runs by itself and study joins it.
+                try #require(app.owner.navigation.sheet == nil)
                 await app.owner.enableFsrs()
                 try #require(try await Core.fsrsPolicyStatus() == .ok)
-                try #require(app.owner.navigation.sheet == nil)
+                try #require(app.owner.policy == .ok && app.owner.navigation.sheet == nil)
+                #if os(macOS)
+                #expect(app.owner.syncPresentation.settingsRequest == nil)
+                #endif
                 #expect(app.owner.requestSyncNow())
                 #if os(macOS)
                 #expect(app.owner.syncPresentation.settingsRequest != nil)

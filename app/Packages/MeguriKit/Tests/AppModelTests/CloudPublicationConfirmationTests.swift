@@ -461,8 +461,11 @@ extension ReviewCollectionStartupTests {
     private func makeOwner() -> ReviewCollection {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
-        return ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: providerDirectory)
+        // This fixture scripts every collection write and exchange.
+        owner.studyPreparation.runsUnprompted = false
+        return owner
     }
     init(realAccountProof _: Bool = false) throws {
         defaults = try #require(UserDefaults(suiteName: suite))

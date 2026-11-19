@@ -905,7 +905,7 @@ extension ReviewCollectionStartupTests {
             await owner.start()
             owner.entry.inspect(try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg")))
             await owner.entry.waitForCompletion()
-            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             try #require(owner.state == .ready)
             if owner.policy != .ok { await owner.enableFsrs() }
             owner.navigation.dismissSheet()

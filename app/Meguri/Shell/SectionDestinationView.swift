@@ -82,7 +82,6 @@ struct ShellFeatures {
             case .collectionEntry: AnyView(CollectionEntryView(coordinator: collection.entry))
             case .deckName: AnyView(DeckNameSheet(model: collection.deckActions))
             case .collectionExport: AnyView(CollectionExportDestination(coordinator: collection.collectionExport))
-            case .fsrsAdmission: AnyView(FsrsAdmissionView(collection: collection))
             case .manualTransfer:
                 AnyView(ManualTransferWorkflowView(model: collection.manualTransfers, close: navigation.dismissSheet)
                     #if os(macOS)
