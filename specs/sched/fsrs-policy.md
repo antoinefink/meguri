@@ -7,6 +7,8 @@ Scenarios: conformance/scenarios/sched/compat/
 
 Meguri schedules only with FSRS, on Anki's current scheduler, through the `fsrs` crate at 6.6.2 (`sched/fsrs-transitions#T1`). This file says what Meguri does with a collection that is not in that state: the global FSRS switch is off (R702, R703), a preset holds parameters Meguri cannot use (R704), or the collection is still on the previous scheduler (R705). It also lists the scheduling data that Meguri keeps but never uses or runs (R763, R764).
 
+Changed 2026-11-19 (A1): FSRS is always on. The app turns it on by itself when a collection opens without it, with no sheet, no prompt and no option. The lines marked "Changed 2026-11-19" point to A1; the core's status, mark and op (S1 to S3, E1 to E5) are otherwise as written.
+
 Terms and readers come from other specs:
 
 - home deck, home preset, built-in defaults, parameter list, decay and desired retention in force: `sched/presets` V1, V6 and V7;
@@ -31,6 +33,7 @@ Terms and readers come from other specs:
 - The status does not look at presets. A collection with FSRS on and an unsupported preset (U1, U2) is `ok`.
 - A new collection holds no `fsrs` key, as in Anki (U28), so its status is `needsEnable`.
 - `needsEnable`'s `firstTime` is true: this device has no seen-on mark. A repeat enable is `needsReEnable`; card history and a different device's state do not decide the wording.
+- Changed 2026-11-19 (A1.2): the app shows nothing for any status. The third column of the table is withdrawn: `needsEnable` and `needsReEnable` both lead to the same silent `enableFsrs`, and the two statuses differ only in the diagnostic record (A1.5).
 
 ## S2. The seen-on mark (R703)
 
@@ -40,13 +43,14 @@ The mark records that this device has seen FSRS on in this collection, so that M
 - It is device-only state (KTD12, `storage/config-table` C8): never in the collection file, never synced, exported or backed up with it, and never in the CloudKit tracking store. It belongs to the collection's place on the device, so it survives a replacement of the collection file (Replace local collection from iCloud, one-way download, restore, `.colpkg` import). It is removed only with the collection.
 - In Meguri's own collection, `fsrs` changes only through `enableFsrs`, syncs and replacements. So `needsReEnable` means that another client turned FSRS off after this device saw it on.
 - A lost mark only changes the wording: the next status is `needsEnable` instead of `needsReEnable`.
+- Changed 2026-11-19 (A1.5): no wording depends on the mark any more. It stays, with every rule of this section, so that the diagnostic record can tell "turned off by another client" from "never on".
 - The mark is durable device state, loaded on open and retained across process restarts. A read failure is treated as a lost mark and reported diagnostically; it does not refuse the collection. A write failure keeps the in-memory seen-on state for this host, reports a diagnostic and can be retried at the next S2 lifecycle check. It must not fail or roll back an already committed collection operation, or report that `enableFsrs` left FSRS off. Loss of the mark after restart still has only the wording consequence above.
 
 ## S3. Study while the status is not `ok`
 
 - `startSession` refuses with `FsrsPolicyPending` while the status is not `ok`, and writes nothing (U43's C5 result). This check comes before the preset check of U4.
 - A review session that is already open goes on when a sync (a `CloudIncoming` op included) turns `fsrs` off: answering, undo and the session's queue never look at the status, and the newest answer stays undoable.
-- The app runs `enableFsrs` after `endSession`. When the app ends first, the next open finds `needsReEnable` (S2) and the app runs it then.
+- The app runs `enableFsrs` after `endSession`. When the app ends first, the next open finds `needsReEnable` (S2) and the app runs it then. Changed 2026-11-19 (A1.3): it runs with no sheet, as part of the open or in the background.
 - `enableFsrs` refuses with `SessionActive` while a review session is open (E4), so nothing clears the session's undo history.
 - The engine has no timer for the policy and publishes no event for it. The app reads the status after every open and after every sync, including a `CloudIncoming` change set that changes `fsrs` (U51, `sched/app-coordination#F1`).
 - Review-session admission and `enableFsrs` use the same collection-owned admission state, serialized on the writer. `enableFsrs` checks it when its write begins, not just before submission. U43 must atomically check the current policy and reserve that state before exposing a session, then release it only after `endSession` drains the session's writes. An earlier admission makes enable refuse; an earlier enable completes before admission checks the resulting policy. A caller-supplied boolean is not evidence that no session exists. Until U43 lands, the guard admits no review session; U43 owns the real acquire/release path and its race tests.
@@ -61,6 +65,55 @@ One op that turns FSRS on:
 4. After the commit it sets the seen-on mark (S2).
 
 It never runs by itself: the app runs it after its sheet (U51). Opening a collection never runs it.
+
+Changed 2026-11-19 (A1.1): "after its sheet" is withdrawn; there is no sheet. The engine still never runs the op by itself, and an engine open still never runs it: the app's collection store runs it, without asking, before it presents a collection whose status is not `ok` (A1.2).
+
+## A1. FSRS always on, with no prompt (2026-11-19)
+
+Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`, `home.fsrsSheet`; `docs/design/native-interface-contract.md` N18.1): FSRS is always enabled. Meguri turns it on by itself when a collection opens without it, with no prompt and no option anywhere. Where S1, S2, S3, E1 and `sched/app-coordination` F1 to F4 differ, this section wins. It replaces the sheet of R702 and R703 and AE29's "after the one-time sheet"; what `enableFsrs` writes (E1 to E4, AE29's result) is unchanged. The app side is `sched/app-coordination#F5`.
+
+### A1.1 What stays in the core
+
+- `fsrsPolicyStatus()` (S1), the seen-on mark (S2), the admission rules (S3), `enableFsrs` (E1 to E4) and the scheduler switch at open (V2) are unchanged. No new op, config key, event or open step is added.
+- The engine's open still writes nothing for the policy (S1, E1). The conformance sessions of V3 and `conformance/fsrs-policy-ops` are therefore unchanged: a scenario's collection gets FSRS on only through its `enable_fsrs` op, and `sched/compat/re-enable`'s "the open with FSRS off writes nothing" still holds for the engine.
+- `startSession` still refuses with `FsrsPolicyPending` while the status is not `ok` (S3). It is the backstop that keeps Meguri from scheduling a card in a collection whose switch is off; with A1.2 the user never meets it in an opened collection, except during A1.3's window.
+
+### A1.2 At open
+
+- A collection is presented to the user only with the status `ok`. After the engine reaches `Ready` (`engine/lifecycle` L2) and before the app presents the collection, the app reads the status; when it is `needsEnable` or `needsReEnable` it runs `enableFsrs` at once, with no question (`sched/app-coordination#F5.1`).
+- This holds for every way a collection comes to be open on a device: a launch, a new empty collection (which holds no `fsrs` key, S1), an imported or restored collection, and a collection that a sync service's setup or replacement put on the device.
+- While the op runs, the user sees the app's normal opening state, the one every open shows. Nothing names FSRS, memory states or a count of cards, and nothing is asked. The op's progress (E4) may drive the opening state's own indicator.
+- No cancel is offered. When the app quits or is killed while the op runs, the transaction rolls back (E4): `fsrs` is still off, no card changed, and the next open runs the op again from the start.
+- With the status `ok` the open reads the status and writes nothing; an open of a collection that already has FSRS on costs one config read.
+
+### A1.3 When another client turns FSRS off
+
+- Another client can turn `fsrs` off, and a sync brings that to this device (S2). Meguri turns it on again, each time, with no message: at the next open by A1.2, and, when the collection is open as the change arrives, in the background as soon as no review session is open (`sched/app-coordination#F5.2`; spec-writer choice, see A1.6).
+- An open review session goes on as S3 says; the op runs after `endSession`.
+- Between the sync's commit and the op's commit, `startSession` refuses with `FsrsPolicyPending` (S3); study entry points wait for the op and then go on (`sched/app-coordination#F4`).
+- A replaced collection (`CollectionReplaced`) is treated as an open: it is presented again only with the status `ok`.
+
+### A1.4 When the op fails
+
+- At open (A1.2): the app closes the collection and shows its failed-to-open state with one plain sentence and Try Again (`sched/app-coordination#F5.3`). The collection never opens in a state where `fsrs` reads off. A failed op wrote nothing (E4), so the file is as it was before the open, apart from what the open itself writes (the gate's upgrade, V2, the day clock's first check).
+- Try Again opens the collection again and repeats A1.2. There is no way to open the collection with FSRS off, and no option to skip.
+- An error that repeats on every try keeps the collection unopened in Meguri. Known cause: a preset whose stored ignore-date text `sched/fsrs-items#I1.3` refuses fails the whole op (`sched/memory-state#M4.3`, E5). Unsupported presets do not fail it: their cards are skipped (E2, U4). See A1.6.
+- In the background (A1.3): the collection stays open, since it was opened with FSRS on. Study stays refused (S3); a study entry point shows the same plain sentence with Try Again. The next open applies A1.2.
+
+### A1.5 Sync, and what is recorded
+
+- The op's writes are ordinary local changes: the `fsrs` config row (`usn` -1) and each changed card (`mod` now, `usn` -1; E3). They sync like any other change, by whichever service is connected, at its next sync; they force no full sync and start no sync by themselves. Other clients then have FSRS on (E5's last item).
+- The app records each automatic enable in its diagnostic log, with the status that caused it (`needsEnable` or `needsReEnable`), the number of cards computed and the result. Nothing of it is shown in the interface; Copy Debug Info includes it.
+- The op clears the undo history (E4). At open there is none. In the background (A1.3) the history that the sync left is cleared.
+
+### A1.6 For the owner
+
+- **No consent before the first write.** Opening a collection that has FSRS off now changes it at once: the switch, and the memory state of every reviewed card. Due dates and intervals do not change (E4). After the next sync every other client of that collection has FSRS on too. The sheet used to say this before it happened; now nothing does.
+- **Unsynced work on another device can lose to the recompute.** The op stamps each changed card with the current time. In a sync that resolves a card changed on both sides by the newer modification time, a review made on another device before this open and synced after it loses its card state for that card (the review-log row is kept). The sheet flow had the same write; the difference is that it now happens with no warning, on the first open. This spec adds no "sync first" rule, because the decision does not ask for one and the open must not depend on a network.
+- **A client that keeps turning FSRS off** makes every Meguri open rewrite the reviewed cards and sync them again (A1.3). Nothing limits it.
+- **Meguri may be unable to open a collection at all** (A1.4): when the op fails on every try, the rule "never opens with FSRS off" leaves only Try Again, a backup, another file or another client. Before, such a collection opened for browsing and editing with study refused. The simplest remedy would be to let the op skip a preset with a refused ignore-date text as it skips an unsupported preset; that changes `sched/memory-state#M4.3` and is not specified here.
+- **A large collection opens slowly once**: the first open computes the memory state of every reviewed card before anything is shown, with no cancel.
+- **Spec-writer choices**: the app, not the engine's open, runs the op (A1.1), so that conformance sessions and raw opens stay as the oracle's; the background re-enable while the collection is open (A1.3), where the decision's words cover only the open, because waiting for the next open would leave study refused with no way forward; the diagnostic record in place of the re-enabled text (A1.5); no FSRS wording in the opening state or the error (A1.2, A1.4).
 
 ## E2. The cards it computes
 
@@ -124,7 +177,7 @@ In Anki the user turns FSRS on in the deck options screen and saves. The oracle'
 - Anki gives a deck whose preset is missing the preset of the deck the screen was opened for, and computes its cards with that preset. Meguri leaves the deck as it is and computes with the built-in defaults (E2).
 - Anki fails the whole save when the parameter list of a preset it sends or computes with cannot be built. Meguri skips those presets (U4).
 - Anki writes every computed card, changed or not. Meguri writes only changed cards (R687, `sched/memory-state#M4.2`). No golden of this unit has a computed card whose values stay the same, so it needs no deviation entry; a scenario that has one joins the deviations `memory-recompute-unchanged-mod` and `memory-recompute-unchanged-usn`.
-- Anki lets the user keep FSRS off. Meguri turns it on, and that change syncs to the other clients (R702).
+- Anki lets the user keep FSRS off. Meguri turns it on, and that change syncs to the other clients (R702). Changed 2026-11-19 (A1): with no sheet and no question.
 
 ## U1. Presets Meguri cannot schedule (R704)
 
@@ -253,7 +306,7 @@ A step whose op has not landed when this unit does is added by the unit that lan
 | Scenario | Covers |
 |---|---|
 | `sched/compat/enable-fsrs` | AE29, E1 to E4: crafted SM-2 history; memory states, `dr` and `decay` per card; new cards and cards without history unchanged; due, interval, queue and type unchanged; only `fsrs` among other rows changes |
-| `sched/compat/enable-fsrs-live` | AE29 as a live chain: Anki studies a week with SM-2, Meguri turns FSRS on, the golden is Anki turning it on |
+| `sched/compat/enable-fsrs-live` | AE29 (its sheet withdrawn, A1) as a live chain: Anki studies a week with SM-2, Meguri turns FSRS on, the golden is Anki turning it on |
 | `sched/compat/re-enable` | R703, E1, E3: FSRS turned off by another client and on again; the open with FSRS off writes nothing; enabling while on writes nothing |
 | `sched/compat/v3-switch/missing`, `false`, `number`, `string` | V1, V2 with deviation `sched-v3-switch-at-open` |
 | `sched/compat/v3-switch/already-on` | V2: nothing written |
@@ -272,6 +325,7 @@ Goldens are recorded by the oracle maintainer with the driver ops of `conformanc
 - U1 to U4: a preset of each row of the U1 and U2 tables is reported unsupported or not, through U45's check; the deck-tree query that U43's `startSession` uses returns the unsupported home presets' ids, ascending, and none for a tree without such a card; the preset row and its cards keep their bytes through open, a save of another preset and a `SyncIncoming` op.
 - V2: a `schedVer` 2 collection without `sched2021` opens with it on, `creationOffset` untouched (also when missing); direct test `v3_switch_at_open`. Raw reopen remains unchanged until an engine operation promotes it (V3).
 - K3: the preservation test.
+- A1 adds no core test: the op and the status are unchanged. Its tests are the app's (`sched/app-coordination#T1`).
 
 ## T3. Tests that land with later units
 

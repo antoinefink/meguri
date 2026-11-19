@@ -614,3 +614,35 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`,
 - Removed: Prepare Export, Choose Save Location, Discard Prepared Export, Done, "Ready to Save" and the explanation paragraphs.
 - Replaces: N9's "Keep the current pre-export explanation" and the prepared file that outlived its sheet.
 
+## N18. Round 4 first-run decisions (2026-11-19)
+
+Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsSheet` rows; round 4 option 1B for the welcome screen, which has no row in `decisions.md` yet and is recorded here from the round's brief). Where earlier text differs, this section wins. The behaviour of N18.1 is `sched/fsrs-policy` A1 and `sched/app-coordination` F5.
+
+### N18.1 FSRS is always on
+
+- No FSRS sheet, prompt, notice, setting, menu command or option exists on any platform. The screen `home.fsrsSheet` is removed, with its view, strings and snapshots.
+- A collection that opens with FSRS off gets it turned on before anything of the collection is shown. Meanwhile the person sees the normal opening state, with nothing about FSRS and no Cancel.
+- When that step fails, the collection stays unopened: the failed-to-open state shows "Meguri couldn’t finish opening this collection." and Try Again. No route opens it with FSRS off.
+- When another client turns FSRS off, Meguri turns it on again at the next open, or in the background while the collection is open, and says nothing. Study waits for it.
+- The change syncs like any other change. Its risks for the owner are in `sched/fsrs-policy` A1.6.
+- Replaces: R702's and R703's sheet, U51's `FsrsEnabledSheet`, AE29's "after the one-time sheet".
+
+### N18.2 Welcome
+
+- With no collection, the root content is the welcome screen (`onboarding.welcome`), as before: no sidebar, tab bar or sync button.
+- Its title block: the app icon, the title "Welcome to Meguri" and one line of secondary text. Its choices: three, in this order, each a title with one line of explanation under it in secondary text:
+  1. **Set Up Sync**: "Use Meguri Sync or iCloud to bring your collection to this device and keep your devices in step."
+  2. **Import a Collection File**: "Open a collection file exported from Meguri or Anki."
+  3. **Start Empty**: "Begin with a new, empty collection on this device."
+- The explanations and the title block's line are spec-writer wording (2026-11-19), open to Antoine's edit; the three titles are decided. Apple's title capitalisation (N16).
+- The choices are rows of one system inset grouped list, each a button over its whole row with the system's disclosure indicator. No choice is prominent or the default; Return activates the focused row. No symbol is required. The four equal buttons, and the two that led to the same sync flow, are gone.
+- **Set Up Sync** presents N15.2's Sync section in a sheet, with its Service control at Off. Choosing a service there is the consent to set it up (V27.2 rows 1 and 2, MP6.3 row 1); the sheet closes when a collection is open, and Cancel returns to the welcome screen with the service Off. The row is never disabled for an iCloud account state: that state shows in the Sync section, where Meguri Sync can still be chosen. iCloud carries its Beta label there (N15.2).
+- **Import a Collection File** opens the system file picker at once (N17.2). With no collection to replace, the confirmation's Import is the prominent default.
+- **Start Empty** creates the collection with the Default deck and the stock note types (R161), local only, and opens it; N18.1 applies with no prompt. A failure shows its cause in one line on the welcome screen, which stays.
+- iPhone, and the iPhone Duo folded or held tall: the title block above the choices, in one scrolling column. iPad and Mac: the same order in one centred column no wider than the readable width; the Mac window shows no clipped control at its minimum size.
+- iPhone Duo opened wide: the title block is centred in one half and the choices' list fills the other; nothing sits on or crosses the fold (R9). The sheets and the file picker that a choice opens follow their own rules for that position.
+- At the accessibility text sizes each row's explanation wraps under its title, and the screen scrolls. VoiceOver: the title is a header; each row reads its title, then its explanation, as one button.
+- Identifiers: `onboarding.welcome.sync`, `onboarding.welcome.import`, `onboarding.welcome.startEmpty`. `onboarding.welcome.connect` is retired.
+- Mac: Meguri › Settings… and Quit stay available. On iPhone and iPad Settings is not reachable from the welcome screen except through Set Up Sync's sheet.
+- Not decided here: N15 is built when its spec sections are approved. Until then Set Up Sync opens the sync settings that exist.
+- Replaces: R157's and R1591's "Connect to iCloud" as the first choice and its disabled state with a reason line; the `onboarding.welcome` screen contract's three buttons, its prominent style rules and its line about private iCloud; the empty state's separate sync buttons. `sync/status-strings` T12's `sync.connect.action` is no longer shown here (T19.8).
