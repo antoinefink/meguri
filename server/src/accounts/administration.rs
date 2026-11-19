@@ -28,30 +28,7 @@ impl Service {
         let mut accounts = Vec::with_capacity(rows.len());
         for (mut account, media) in rows {
             if let Some(media_bytes) = media {
-                // No metadata writer or other account barrier is held here.
-                // Move the guard into the blocking job so cancellation cannot
-                // release publication ownership before the snapshot closes.
-                if let Ok(gate) = self.barriers.get(&account.identity.id) {
-                    let guard = gate.enter().await;
-                    let id = account.identity.id.clone();
-                    account.storage = self.metadata.files(move |root| {
-                        let _publication = (gate, guard);
-                        let path = root.collection_path(&id)?;
-                        let mut c = crate::collection::schema::open(&path, false)?;
-                        let tx = c.transaction()?;
-                        // Establish one read snapshot before reading both PRAGMAs.
-                        tx.query_row("SELECT count(*) FROM sqlite_schema", [], |r| r.get::<_, i64>(0))?;
-                        let pages: i64 = tx.pragma_query_value(None, "page_count", |r| r.get(0))?;
-                        let page_size: i64 = tx.pragma_query_value(None, "page_size", |r| r.get(0))?;
-                        let pages = u64::try_from(pages).map_err(|_| Error::new("storage_unavailable"))?;
-                        let page_size = u64::try_from(page_size).map_err(|_| Error::new("storage_unavailable"))?;
-                        let collection_bytes = pages.checked_mul(page_size)
-                            .filter(|n| *n > 0).ok_or(Error::new("storage_unavailable"))?;
-                        let total_bytes = collection_bytes.checked_add(media_bytes)
-                            .ok_or(Error::new("storage_unavailable"))?;
-                        Ok(AccountStorage { collection_bytes, media_bytes, total_bytes })
-                    }).await.ok();
-                }
+                account.storage = self.collection_storage(account.identity.id.clone(), media_bytes).await;
             }
             accounts.push(account);
         }
@@ -63,6 +40,50 @@ impl Service {
             Ok(())
         }).await?;
         Ok(accounts)
+    }
+    pub async fn own_storage(&self, authority: BrowserAuthority) -> Result<Option<AccountStorage>> {
+        let actor = authority.clone();
+        let (id, media) = self.metadata.run(move |c| {
+            let tx = c.transaction()?;
+            admission(&tx)?;
+            let account = check_browser(&tx, &actor, "authentication_failed")?;
+            let id = account.identity.id;
+            let media = crate::media::index::storage_bytes(&tx, &id).ok();
+            Ok((id, media))
+        }).await?;
+        // The metadata read is released before acquiring publication ownership.
+        let storage = match media {
+            Some(bytes) => self.collection_storage(id, bytes).await,
+            None => None,
+        };
+        self.pause("own_storage_before_return").await;
+        // Revalidate the same session even when measurement was unavailable.
+        self.me(authority).await?;
+        Ok(storage)
+    }
+    async fn collection_storage(&self, id: String, media_bytes: u64) -> Option<AccountStorage> {
+        // No metadata writer or other account barrier is held here.
+        // Move the guard into the blocking job so cancellation cannot
+        // release publication ownership before the snapshot closes.
+        let gate = self.barriers.get(&id).ok()?;
+        let guard = gate.enter().await;
+        self.metadata.files(move |root| {
+            let _publication = (gate, guard);
+            let path = root.collection_path(&id)?;
+            let mut c = crate::collection::schema::open(&path, false)?;
+            let tx = c.transaction()?;
+            // Establish one read snapshot before reading both PRAGMAs.
+            tx.query_row("SELECT count(*) FROM sqlite_schema", [], |r| r.get::<_, i64>(0))?;
+            let pages: i64 = tx.pragma_query_value(None, "page_count", |r| r.get(0))?;
+            let page_size: i64 = tx.pragma_query_value(None, "page_size", |r| r.get(0))?;
+            let pages = u64::try_from(pages).map_err(|_| Error::new("storage_unavailable"))?;
+            let page_size = u64::try_from(page_size).map_err(|_| Error::new("storage_unavailable"))?;
+            let collection_bytes = pages.checked_mul(page_size)
+                .filter(|n| *n > 0).ok_or(Error::new("storage_unavailable"))?;
+            let total_bytes = collection_bytes.checked_add(media_bytes)
+                .ok_or(Error::new("storage_unavailable"))?;
+            Ok(AccountStorage { collection_bytes, media_bytes, total_bytes })
+        }).await.ok()
     }
     pub async fn invitation(&self, authority: BrowserAuthority) -> Result<CapabilityLink> {
         self.create_capability(authority, None).await

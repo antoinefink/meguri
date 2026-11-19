@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 import type { Page, Response } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { storageValue } from "../../src/storage";
 const fixture: { setup_token: string } = JSON.parse(readFileSync("/fixture/fixture.json", "utf8"));
 const initialPassword = " Synthetic initial password ";
 const replacedPassword = "é".repeat(6);
@@ -12,7 +13,7 @@ const memberUsername = "member." + "long".repeat(14) + "x"; // Maximum 64-charac
 const fontResponses = new WeakMap<Page, Response[]>();
 async function loadedFont(page: Page) {
   const evidence = await page.evaluate(async () => {
-    const text = "Meguri Sync 0123456789 ilMW";
+    const text = "Meguri 0123456789 ilMW";
     const faces = await document.fonts.load('normal 650 16px "IBM Plex Sans"', text);
     await document.fonts.ready;
     return {
@@ -45,8 +46,19 @@ async function loadedFont(page: Page) {
 }
 async function brand(page: Page) {
   const lockup = page.locator(".brand");
+  await expect(page).toHaveTitle("Meguri");
   await expect(lockup).toHaveCount(1);
-  await expect(lockup.getByText("Meguri Sync", { exact: true })).toBeVisible();
+  await expect(lockup.getByText("Meguri", { exact: true })).toBeVisible();
+  const brandLink = page.getByRole("link", { name: "Meguri", exact: true });
+  if (await lockup.evaluate(element => element.classList.contains("auth-brand"))) {
+    await expect(brandLink).toHaveCount(0);
+    expect(await lockup.evaluate(element => element.tagName)).toBe("P");
+  } else {
+    await expect(brandLink).toBeVisible();
+    await expect(brandLink).toHaveAttribute("href", "/connection");
+    await expect(brandLink).toHaveCSS("text-decoration-line", "none");
+    expect(await brandLink.evaluate(element => getComputedStyle(element).color === getComputedStyle(element.parentElement!).color)).toBe(true);
+  }
   const image = lockup.locator('img[alt=""]');
   await expect(image).toBeVisible();
   await expect(image).toHaveAttribute("width", "28");
@@ -68,13 +80,17 @@ async function brand(page: Page) {
 }
 async function accountShell(page: Page, username: string, admin: boolean) {
   await brand(page);
+  const mobile = page.viewportSize()!.width <= 768;
   const navigation = page.getByRole("navigation", { name: "Account", exact: true });
-  const names = admin ? ["Connection", "Password", "Accounts"] : ["Connection", "Password"];
+  const names = admin ? ["Collection", "Connection", "Password", "Accounts"] : ["Collection", "Connection", "Password"];
   await expect(navigation.getByRole("link")).toHaveCount(names.length);
+  await expect(navigation.getByRole("link")).toHaveText(names);
   for (const name of names) {
     const link = navigation.getByRole("link", { name, exact: true });
     await expect(link).toBeVisible();
     await expect(link.locator('svg[aria-hidden="true"][focusable="false"]')).toHaveCount(1);
+    if (mobile) await expect(link.locator("svg")).toBeHidden();
+    else await expect(link.locator("svg")).toBeVisible();
     const target = await link.boundingBox();
     expect(target?.width).toBeGreaterThanOrEqual(44);
     expect(target?.height).toBeGreaterThanOrEqual(44);
@@ -84,19 +100,20 @@ async function accountShell(page: Page, username: string, admin: boolean) {
     await expect(link).toBeFocused();
     await expect(link).toHaveCSS("outline-style", "solid");
   }
-  if (page.viewportSize()!.width <= 768) {
+  if (mobile) {
+    const brandTarget = await page.getByRole("link", { name: "Meguri", exact: true }).boundingBox();
+    expect(brandTarget?.height).toBeGreaterThanOrEqual(44);
     const links = await navigation.getByRole("link").evaluateAll(elements => elements.map(element => {
       const bounds = element.getBoundingClientRect();
       const menu = element.closest("ul")!.getBoundingClientRect();
-      const icon = element.querySelector("svg")!.getBoundingClientRect();
-      const range = document.createRange();
-      range.selectNodeContents(element.lastChild!);
-      const label = range.getBoundingClientRect();
+      const label = element.querySelector("span")!.getBoundingClientRect();
+      const text = document.createRange();
+      text.selectNodeContents(element.querySelector("span")!);
       return { left: bounds.left, right: bounds.right, top: bounds.top, width: bounds.width,
+        labelLines: text.getClientRects().length,
         menuLeft: menu.left, menuRight: menu.right,
-        iconOffset: (icon.left + icon.right - bounds.left - bounds.right) / 2,
-        labelOffset: (label.left + label.right - bounds.left - bounds.right) / 2,
-        fits: label.left >= bounds.left && label.right <= bounds.right && icon.bottom <= label.top
+        groupOffset: (label.left + label.right - bounds.left - bounds.right) / 2,
+        fits: label.left >= bounds.left && label.right <= bounds.right
           && label.bottom <= bounds.bottom && element.scrollWidth <= element.clientWidth };
     }));
     expect(links[0]!.left).toBeCloseTo(links[0]!.menuLeft, 0);
@@ -104,23 +121,53 @@ async function accountShell(page: Page, username: string, admin: boolean) {
     for (const [index, link] of links.entries()) {
       expect(link.width).toBeCloseTo(links[0]!.width, 0);
       expect(link.top).toBeCloseTo(links[0]!.top, 0);
-      expect(Math.abs(link.iconOffset)).toBeLessThanOrEqual(1);
-      expect(Math.abs(link.labelOffset)).toBeLessThanOrEqual(1);
+      expect(Math.abs(link.groupOffset)).toBeLessThanOrEqual(1);
       expect(link.fits).toBe(true);
+      expect(link.labelLines).toBe(1);
+      expect(link.width).toBeGreaterThanOrEqual(44);
       if (index) expect(link.left - links[index - 1]!.right).toBeGreaterThanOrEqual(0);
+    }
+    for (const link of await navigation.getByRole("link").all()) {
+      await expect(link).toHaveCSS("border-bottom-width", "2px");
+      if (await link.getAttribute("aria-current") === "page") {
+        await expect(link).toHaveCSS("border-bottom-color", "rgb(38, 38, 38)");
+        await expect(link).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await expect(link).toHaveCSS("font-weight", "650");
+      } else {
+        await expect(link).toHaveCSS("border-bottom-color", "rgba(0, 0, 0, 0)");
+      }
     }
   }
   const identity = page.getByRole("group", { name: "Signed-in account", exact: true });
+  await expect(identity).toHaveCount(1);
   await expect(identity.getByText(username, { exact: true })).toBeVisible();
-  if (username === "root.admin") {
+  await expect(identity.getByText(username, { exact: true })).toHaveAttribute("title", username);
+  expect(await identity.ariaSnapshot()).toContain(username);
+  if (mobile || username === "root.admin") {
     expect(await identity.getByText(username, { exact: true }).evaluate(element => {
       const range = document.createRange();
       range.selectNodeContents(element);
-      return range.getClientRects().length;
+      return new Set(Array.from(range.getClientRects(), rect => rect.top)).size;
     })).toBe(1);
   }
-  await expect(identity.getByText(admin ? "Administrator" : "Member", { exact: true })).toBeVisible();
-  await expect(identity.locator(':scope > svg[aria-hidden="true"][focusable="false"]')).toBeVisible();
+  if (mobile) {
+    const name = identity.locator(".identity");
+    await expect(name).toHaveCSS("white-space", "nowrap");
+    await expect(name).toHaveCSS("overflow", "hidden");
+    await expect(name).toHaveCSS("text-overflow", "ellipsis");
+    if (username.length === 64) expect(await name.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+  } else {
+    await expect(identity.locator(".identity")).toHaveCSS("white-space", "normal");
+    if (username.length === 64) expect(await identity.locator(".identity").evaluate(element => {
+      const text = document.createRange();
+      text.selectNodeContents(element);
+      return text.getClientRects().length;
+    })).toBeGreaterThan(1);
+  }
+  await expect(identity.getByText(/^(Administrator|Member)$/)).toHaveCount(0);
+  const silhouette = identity.locator(':scope > svg[aria-hidden="true"][focusable="false"]');
+  if (mobile) await expect(silhouette).toBeHidden();
+  else await expect(silhouette).toBeVisible();
   const signOut = identity.getByRole("button", { name: "Sign out", exact: true });
   await expect(signOut).toBeVisible();
   await expect(signOut).toBeEnabled();
@@ -134,16 +181,53 @@ async function accountShell(page: Page, username: string, admin: boolean) {
   await page.keyboard.press("Tab");
   await expect(signOut).toBeFocused();
   await expect(signOut).toHaveCSS("outline-style", "solid");
+  // The hidden account presentation must never add a keyboard stop.
+  await page.getByRole("link", { name: "Skip to content", exact: true }).focus();
+  const brandLink = page.getByRole("link", { name: "Meguri", exact: true });
+  await page.keyboard.press("Tab");
+  await expect(brandLink).toBeFocused();
+  await expect(brandLink).toHaveCSS("outline-style", "solid");
+  expect(await brandLink.evaluate(element => parseFloat(getComputedStyle(element).outlineWidth))).toBeGreaterThan(0);
+  const rowLinks = await navigation.getByRole("link").all();
+  for (const control of mobile ? [signOut, ...rowLinks] : [...rowLinks, signOut]) {
+    await page.keyboard.press("Tab");
+    await expect(control).toBeFocused();
+  }
+  const firstMainControl = page.getByRole("main").locator('a[href], button:not(:disabled), input:not(:disabled)').first();
+  if (await firstMainControl.count()) {
+    await page.keyboard.press("Tab");
+    await expect(firstMainControl).toBeFocused();
+  }
   await page.getByRole("main").focus();
   expect(await identity.evaluate(element => {
     const sidebar = element.closest("aside")!.getBoundingClientRect();
     return [element, ...element.querySelectorAll<HTMLElement>("p, button, .footer-identity")].every(child => {
       const bounds = child.getBoundingClientRect();
       return bounds.left >= sidebar.left && bounds.right <= sidebar.right
-        && child.scrollWidth <= child.clientWidth && child.scrollHeight <= child.clientHeight;
+        && (child.scrollWidth <= child.clientWidth || (child.matches(".mobile-account .identity")
+          && getComputedStyle(child).textOverflow === "ellipsis" && getComputedStyle(child).overflow === "hidden"))
+        && child.scrollHeight <= child.clientHeight;
     });
   })).toBe(true);
-  if (page.viewportSize()!.width > 768) {
+  if (mobile) {
+    await expect(identity.locator(".footer-identity")).toHaveCSS("text-align", "right");
+    const alignment = await identity.evaluate(element => {
+      const header = element.closest('[data-slot="sidebar-header"]')!.getBoundingClientRect();
+      const brand = element.parentElement!.querySelector(".brand")!.getBoundingClientRect();
+      const account = element.getBoundingClientRect();
+      const button = element.querySelector("button")!.getBoundingClientRect();
+      const nav = element.closest("aside")!.querySelector("nav")!.getBoundingClientRect();
+      return { brandLeft: brand.left - header.left, accountRight: header.right - account.right,
+        buttonRight: header.right - button.right, centers: (brand.top + brand.bottom - account.top - account.bottom) / 2,
+        rowGap: nav.top - header.bottom };
+    });
+    expect(alignment.brandLeft).toBeCloseTo(0, 0);
+    expect(alignment.accountRight).toBeCloseTo(0, 0);
+    expect(alignment.buttonRight).toBeCloseTo(0, 0);
+    expect(Math.abs(alignment.centers)).toBeLessThanOrEqual(1);
+    expect(alignment.rowGap).toBeGreaterThanOrEqual(0);
+    expect(alignment.rowGap).toBeLessThanOrEqual(8);
+  } else {
     const footer = await identity.boundingBox();
     const sidebar = await page.locator('[data-slot="sidebar"]').boundingBox();
     const bottom = sidebar!.y + sidebar!.height;
@@ -156,8 +240,13 @@ async function accountShell(page: Page, username: string, admin: boolean) {
 async function connectionLayout(page: Page, username: string, admin: boolean) {
   const viewport = page.viewportSize()!;
   try {
-    await page.setViewportSize({ width: 320, height: 844 });
-    await accountShell(page, username, admin);
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await accountShell(page, username, admin);
+      await expect(page.getByRole("status").filter({ hasText: /^Signed in\.$/ })).toBeVisible();
+      await expect(page.locator(".outcome").filter({ hasText: /^Signed in\.$/ })).toHaveCSS("background-color", "rgb(245, 247, 245)");
+      await audit(page, `connection-${admin ? "admin" : "member"}-${width}`);
+    }
     const main = page.getByRole("main");
     await expect(main.locator('[data-slot="card"]')).toHaveCount(1);
     await expect(main.getByRole("heading", { name: "Connection details", exact: true })).toBeVisible();
@@ -166,6 +255,50 @@ async function connectionLayout(page: Page, username: string, admin: boolean) {
     await expect(main.getByText("Sign in to a compatible client with your username and account password.", { exact: true })).toBeVisible();
     await expect(main.getByText("Replacing your password revokes existing client sign-ins. Sign in again on each device afterward.", { exact: true })).toBeVisible();
     await expect(main).not.toContainText(/Client guidance|Desktop 26\.09\.4|AnkiMobile 26\.10|Exact server fields|Review the client’s explicit confirmation/);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await accountShell(page, username, admin);
+    await page.setViewportSize({ width: 320, height: 844 });
+    // Text zoom wraps tab labels; only the mobile username may ellipsize.
+    await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(await page.locator('[data-slot="sidebar-menu-button"], [data-slot="sidebar-menu-button"] span, .mobile-account, .mobile-account p').evaluateAll(elements =>
+      elements.every(element => (element.scrollWidth <= element.clientWidth || (element.matches(".mobile-account .identity")
+        && getComputedStyle(element).textOverflow === "ellipsis" && getComputedStyle(element).overflow === "hidden"))
+        && element.scrollHeight <= element.clientHeight))).toBe(true);
+    const identity = page.locator(".mobile-account .identity");
+    await expect(identity).toHaveText(username);
+    await expect(identity).toHaveAttribute("title", username);
+    expect(await page.locator(".mobile-account").ariaSnapshot()).toContain(username);
+    expect(await page.getByRole("link", { name: "Connection", exact: true }).locator("span").evaluate(element => {
+      const text = document.createRange();
+      text.selectNodeContents(element);
+      return text.getClientRects().length;
+    })).toBeGreaterThan(1);
+    for (const link of await page.getByRole("navigation", { name: "Account", exact: true }).getByRole("link").all()) {
+      const target = await link.boundingBox();
+      expect(target!.width).toBeGreaterThanOrEqual(44);
+      expect(target!.height).toBeGreaterThanOrEqual(44);
+    }
+  } finally {
+    await page.evaluate(() => { document.documentElement.style.removeProperty("font-size"); });
+    await page.setViewportSize(viewport);
+  }
+  try {
+    for (const width of [1280, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 });
+      const documentTime = await page.evaluate(() => performance.timeOrigin);
+      await page.getByRole("link", { name: "Collection", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Collection", exact: true })).toBeVisible();
+      await expect(page).toHaveURL(/\/collection$/);
+      const logo = page.getByRole("link", { name: "Meguri", exact: true });
+      if (width === 1280) await logo.locator("img").click();
+      else { await logo.focus(); await page.keyboard.press("Enter"); }
+      await expect(page).toHaveURL(/\/connection$/);
+      await expect(page.getByRole("heading", { name: "Connect your devices", exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Connection", exact: true })).toHaveAttribute("aria-current", "page");
+      await expect(page.getByRole("main")).toBeFocused();
+      expect(await page.evaluate(() => performance.timeOrigin)).toBe(documentTime);
+    }
   } finally { await page.setViewportSize(viewport); }
 }
 
@@ -179,6 +312,7 @@ async function fillPassword(page: Page, value: string) {
 async function signIn(page: Page, username: string, password: string) {
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
+  await expect(page.getByText("Use your Meguri username and password.", { exact: true })).toBeVisible();
   await expect(page.getByRole("main")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Username", { exact: true })).toBeFocused();
@@ -197,6 +331,12 @@ async function audit(page: Page, name?: string) {
   const result = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
   expect(result.violations.map(item => ({ id: item.id, impact: item.impact }))).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  for (const outcome of await page.locator(".outcome:not(:empty)").all()) {
+    await expect(outcome).toHaveCSS("border-top-style", "solid");
+    await expect(outcome).toHaveCSS("border-top-width", "1px");
+    await expect(outcome).toHaveCSS("background-color", await outcome.evaluate(element => element.classList.contains("error") ? "rgb(255, 242, 243)" : "rgb(245, 247, 245)"));
+    expect(await outcome.evaluate(element => getComputedStyle(element, "::before").content)).toBe("none");
+  }
   const borders = await page.locator('[data-slot="input"]').evaluateAll(inputs => {
     function rgb(color: string) { return (color.match(/[\d.]+/g) ?? []).map(Number); }
     function luminance(color: string) {
@@ -225,7 +365,7 @@ async function audit(page: Page, name?: string) {
     const canvasWidths = [computedStack, "system-ui", "ui-sans-serif", "sans-serif", "monospace"].map(family => {
       if (!canvas) return { family, width: null };
       canvas.font = `16px ${family}`;
-      return { family, width: canvas.measureText("Meguri Sync 0123456789 ilMW").width };
+      return { family, width: canvas.measureText("Meguri 0123456789 ilMW").width };
     });
     return { computedStack, canvasWidths };
   });
@@ -266,7 +406,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   }
   observe(page);
   await openCapability(page, `/setup#token=${fixture.setup_token}`);
-  await expect(page.getByRole("heading", { name: "Set up Meguri Sync" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Set up Meguri" })).toBeVisible();
   await expect(page.getByLabel("One-time setup code", { exact: true })).toHaveAttribute("autocomplete", "off");
   await expect(page.getByText("Find the code in the server’s first-start console or Docker logs, or in the protected state/setup-token file.", { exact: true })).toBeVisible();
   await expect(page.getByText("Use a long password or passphrase. Spaces and letter case are preserved.", { exact: true })).toBeVisible();
@@ -275,7 +415,7 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await page.getByLabel("Username", { exact: true }).fill("Root.Admin");
   await fillPassword(page, initialPassword);
   await page.getByLabel("Confirm new password", { exact: true }).press("Tab");
-  await expect(page.getByRole("button", { name: "Set up Meguri Sync", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Set up Meguri", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
   await audit(page);
@@ -368,9 +508,36 @@ test("setup, invitation, member settings, reset and admin actions over private H
   await expect(member.getByRole("heading", { name: "Connect your devices" })).toBeVisible();
   await accountShell(member, memberUsername, false);
   await connectionLayout(member, memberUsername, false);
-  await expect(member.getByText("Collection", { exact: true })).toHaveCount(0);
+  await expect(member.getByRole("main").getByText("Collection", { exact: true })).toHaveCount(0);
   await expect(member.getByText("Total", { exact: true })).toHaveCount(0);
   await expect(member.getByRole("link", { name: "Accounts", exact: true })).toHaveCount(0);
+  const ownResponse = await context.request.get(`${baseURL}/api/me/storage`);
+  expect(ownResponse.status()).toBe(200);
+  const ownStorage = (await ownResponse.json()).data;
+  expect(Object.keys(ownStorage).sort()).toEqual(["collection_bytes", "media_bytes", "total_bytes"]);
+  expect(ownStorage.collection_bytes).toBeGreaterThan(0);
+  expect(ownStorage.media_bytes).toBe(0);
+  expect(ownStorage.total_bytes).toBe(ownStorage.collection_bytes + ownStorage.media_bytes);
+  await member.getByRole("link", { name: "Collection", exact: true }).click();
+  await expect(member.getByRole("heading", { name: "Collection", exact: true })).toBeVisible();
+  await expect(member.getByRole("heading", { name: "Storage on server", exact: true })).toBeVisible();
+  for (const [label, bytes] of [["Collection database", ownStorage.collection_bytes], ["Media", ownStorage.media_bytes], ["Total", ownStorage.total_bytes]] as [string, number][]) {
+    const row = member.locator(".collection-storage > div").filter({ has: member.getByRole("term").filter({ hasText: label }) });
+    await expect(row.getByRole("term")).toHaveText(label);
+    await expect(row.getByRole("definition")).toHaveText(storageValue(bytes));
+  }
+  for (const width of [390, 320]) {
+    await member.setViewportSize({ width, height: 844 });
+    await accountShell(member, memberUsername, false);
+    await member.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+    try {
+      expect(await member.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await member.locator('[data-slot="sidebar-menu-button"], .collection-storage dt, .collection-storage dd').evaluateAll(elements => elements.every(element => element.scrollWidth <= element.clientWidth))).toBe(true);
+    } finally { await member.evaluate(() => { document.documentElement.style.removeProperty("font-size"); }); }
+    await expect(member.getByRole("link", { name: "Collection", exact: true })).toHaveAttribute("aria-current", "page");
+    await audit(member, `collection-member-${width}`);
+  }
+  await member.setViewportSize({ width: 390, height: 844 });
   const denial = await context.request.get(`${baseURL}/api/admin/accounts`);
   expect(denial.status()).toBe(403); expect((await denial.json()).error.code).toBe("permission_denied");
   await member.goto("/accounts");

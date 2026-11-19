@@ -1220,3 +1220,34 @@ async fn delayed_account_storage_list_revalidates_original_admin_session() {
     error(list.await.unwrap(), 401, "authentication_failed").await;
     h.stop().await;
 }
+
+#[tokio::test]
+async fn delayed_own_storage_revalidates_member_session_even_when_unavailable() {
+    for unavailable in [false, true] {
+        let h = Harness::new().await;
+        h.setup().await;
+        let admin = h.login("root.admin", PASSWORD).await;
+        let member = h.member(&admin, "storage.member").await;
+        let cookie = h.login("storage.member", PASSWORD).await;
+        if unavailable {
+            let id = member["id"].as_str().unwrap();
+            let manifest = h.path().join("state/accounts").join(id).join("current-collection");
+            std::fs::write(manifest, b"invalid synthetic manifest").unwrap();
+        }
+        let pause = h.service.hooks.arm("own_storage_before_return");
+        let client = h.client.clone();
+        let base = h.base.clone();
+        let original_cookie = cookie.clone();
+        let storage = tokio::spawn(async move {
+            client.get(format!("{base}/api/me/storage")).header("cookie", original_cookie).send().await.unwrap()
+        });
+        pause.arrived().await;
+        assert_eq!(h.post("/api/logout", json!({}), Some(&cookie)).await.status(), 200);
+        // A newer session cannot replace the authority captured by the request.
+        let replacement = h.login("storage.member", PASSWORD).await;
+        assert_eq!(h.get("/api/me", Some(&replacement)).await.status(), 200);
+        pause.resume();
+        error(storage.await.unwrap(), 401, "authentication_failed").await;
+        h.stop().await;
+    }
+}

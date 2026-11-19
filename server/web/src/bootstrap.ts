@@ -14,5 +14,5 @@ void import("./mount").then(({ mount }) => {
   mount();
 }).catch(() => {
   token = "";
-  document.getElementById("root")!.textContent = "Meguri Sync could not load. Reload this page. If a link was cleared, reopen the original invitation or reset link.";
+  document.getElementById("root")!.textContent = "Meguri could not load. Reload this page. If a link was cleared, reopen the original invitation or reset link.";
 });

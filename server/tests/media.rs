@@ -193,13 +193,20 @@ async fn authenticated_media_upload_storage_tracks_live_blobs_per_account() {
     let member = h.member(&admin, "media.member").await;
     let member_key = h.service.native_login(IP, "media.member", PASSWORD.into()).await.unwrap().1;
     let key = login(&h).await;
-    async fn assert_sizes(h: &Harness, admin: &str, id: &str, member_id: &str, bytes: u64) {
+    let member_cookie = h.login("media.member", PASSWORD).await;
+    async fn assert_sizes(h: &Harness, admin: &str, member_cookie: &str, id: &str, member_id: &str, bytes: u64) {
         let response = h.get("/api/admin/accounts", Some(admin)).await;
         assert_eq!(response.status(), 200);
         let list = response.json::<Value>().await.unwrap();
         let accounts = list["data"]["accounts"].as_array().unwrap();
         for (id, expected) in [(id, bytes), (member_id, 5)] {
             let storage = &accounts.iter().find(|a| a["id"] == id).unwrap()["storage"];
+            let cookie = if id == member_id { member_cookie } else { admin };
+            let own = h.get("/api/me/storage", Some(cookie)).await;
+            assert_eq!(own.status(), 200);
+            let own = own.json::<Value>().await.unwrap();
+            assert_eq!(&own["data"], storage);
+            assert_eq!(own["data"].as_object().unwrap().len(), 3);
             assert_eq!(storage["media_bytes"], expected);
             assert_eq!(storage["total_bytes"].as_u64().unwrap(), storage["collection_bytes"].as_u64().unwrap() + expected);
         }
@@ -208,13 +215,13 @@ async fn authenticated_media_upload_storage_tracks_live_blobs_per_account() {
     assert_eq!(media(&h, &member_key, "uploadChanges", &addition("one.bin", b"other")).await, json!([1,1]));
     let id = identity["id"].as_str().unwrap();
     let member_id = member["id"].as_str().unwrap();
-    assert_sizes(&h, &admin, id, member_id, 0).await;
+    assert_sizes(&h, &admin, &member_cookie, id, member_id, 0).await;
     assert_eq!(media(&h, &key, "uploadChanges", &addition("one.bin", &[0xff])).await, json!([1,1]));
-    assert_sizes(&h, &admin, id, member_id, 1).await;
+    assert_sizes(&h, &admin, &member_cookie, id, member_id, 1).await;
     assert_eq!(media(&h, &key, "uploadChanges", &addition("one.bin", b"replace")).await, json!([1,2]));
-    assert_sizes(&h, &admin, id, member_id, 7).await;
+    assert_sizes(&h, &admin, &member_cookie, id, member_id, 7).await;
     assert_eq!(media(&h, &key, "uploadChanges", &deletion("one.bin")).await, json!([1,3]));
-    assert_sizes(&h, &admin, id, member_id, 0).await;
+    assert_sizes(&h, &admin, &member_cookie, id, member_id, 0).await;
     let _ = h.stop().await;
 }
 

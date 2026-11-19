@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 export type Identity = { id: string; username: string; role: "admin" | "member" };
 export type Me = Identity & { server_url: string };
-export type Account = Identity & { enabled: boolean; provisioning_state: "provisioning" | "ready"; storage?: { collection_bytes: number; media_bytes: number; total_bytes: number } | null };
+export type AccountStorage = { collection_bytes: number; media_bytes: number; total_bytes: number };
+export type Account = Identity & { enabled: boolean; provisioning_state: "provisioning" | "ready"; storage?: AccountStorage | null };
 export type GeneratedLink = { url: string; expires_at: string };
 export type ErrorField = "username" | "password" | "token" | "current_password" | "new_password" | "confirmation";
 export class ApiError extends Error {

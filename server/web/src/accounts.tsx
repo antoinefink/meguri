@@ -4,6 +4,7 @@ import { api, asError, errorMessage } from "./api";
 import type { Account, GeneratedLink, Me } from "./api";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, CopyValue, Outcome } from "./ui";
 import type { OutcomeValue } from "./ui";
+import { storageValue } from "./storage";
 
 function LinkResult({ link }: { link: GeneratedLink }) {
   return <div className="link-result"><CopyValue label="One-time link" value={link.url}>
@@ -16,12 +17,6 @@ function checkLink(link: GeneratedLink, path: "/invite" | "/reset"): GeneratedLi
     if (url.origin !== location.origin || url.pathname !== path || url.search || !/^#token=[A-Za-z0-9_-]{43}$/.test(url.hash) || !Number.isFinite(Date.parse(link.expires_at))) throw new Error();
   } catch { throw new Error("Invalid link result"); }
   return link;
-}
-function storageValue(bytes: number): string {
-  const units = ["B", "kB", "MB", "GB", "TB", "PB", "EB"];
-  let unit = 0;
-  while (bytes >= 1000 && unit < units.length - 1) { bytes /= 1000; unit++; }
-  return `${new Intl.NumberFormat("en", { maximumSignificantDigits: 3 }).format(bytes)} ${units[unit]}`;
 }
 function AccountRow({ account, me, sessionLoss, disabled }: { account: Account; me: Me; sessionLoss: () => void; disabled: (id: string) => void }) {
   const [confirm, setConfirm] = useState(false), [busy, setBusy] = useState(false);

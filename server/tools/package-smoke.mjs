@@ -236,11 +236,11 @@ try {
       if (phase === 'seed') {
         const token = (await readFile('/data/owner/state/setup-token', 'utf8')).trim();
         await page.goto(`/setup#token=${encodeURIComponent(token)}`);
-        await expect(page.getByRole('heading', { name: 'Set up Meguri Sync', exact: true })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Set up Meguri', exact: true })).toBeVisible();
         await page.getByLabel('Username', { exact: true }).fill(credentials.username);
         await page.getByLabel('New password', { exact: true }).fill(credentials.password);
         await page.getByLabel('Confirm new password', { exact: true }).fill(credentials.password);
-        await page.getByRole('button', { name: 'Set up Meguri Sync', exact: true }).click();
+        await page.getByRole('button', { name: 'Set up Meguri', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
       }
       await page.goto('/login');

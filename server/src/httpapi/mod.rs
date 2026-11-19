@@ -384,6 +384,10 @@ async fn dispatch(
                     false,
                 ))
             }
+            "/api/me/storage" => {
+                let a = authority(service, &parts.headers).await?;
+                Ok(data(serde_json::json!(service.own_storage(a).await?), false))
+            }
             "/api/admin/accounts" => {
                 let a = authority(service, &parts.headers).await?;
                 Ok(data(

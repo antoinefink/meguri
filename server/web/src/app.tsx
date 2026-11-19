@@ -9,15 +9,18 @@ import { navigation, protectedPath } from "./policy";
 import { CredentialsForm } from "./forms";
 import type { FormMode } from "./forms";
 import { Accounts } from "./accounts";
+import { Collection } from "./collection";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, CopyValue, Outcome, Sidebar, SidebarContent, SidebarGroup, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "./ui";
 import type { OutcomeValue } from "./ui";
 import pomegranate from "./favicon-64.png";
 
-function Brand({ auth = false }: { auth?: boolean }) {
-  return <p className={auth ? "brand auth-brand" : "brand"}>
+function Brand({ auth = false, onClick }: { auth?: boolean; onClick?: (event: MouseEvent<HTMLAnchorElement>) => void }) {
+  const content = <>
     <img src={pomegranate} alt="" width={28} height={28} />
-    <span>Meguri Sync</span>
-  </p>;
+    <span>Meguri</span>
+  </>;
+  return auth ? <p className="brand auth-brand">{content}</p>
+    : <a className="brand" href="/connection" onClick={onClick}>{content}</a>;
 }
 
 // Original decorative identity and sign-out drawings; no account menu.
@@ -32,9 +35,10 @@ function SignOutIcon() {
   </svg>;
 }
 
-// Original, decorative line drawings for the three existing destinations.
+// Original, decorative line drawings for the account destinations.
 function NavigationIcon({ path }: { path: string }) {
   const drawing = path === "/connection" ? <><path d="M3 8h6m6 8h6M7 4v8m10 0v8M9 8h3v8h3" /></>
+    : path === "/collection" ? <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0" /></>
     : path === "/settings" ? <><circle cx="8" cy="9" r="4" /><path d="m11 12 8 8m-3-3 3-3m-6 0 3-3" /></>
     : <><circle cx="8" cy="7" r="3" /><path d="M2 20v-3a6 6 0 0 1 12 0v3m2-16a3 3 0 0 1 0 6m2 3a5 5 0 0 1 4 5v2" /></>;
   return <svg className="navigation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{drawing}</svg>;
@@ -133,42 +137,45 @@ export function App() {
   const capabilityPage = ["/setup", "/invite", "/reset"].includes(page.path);
   const accountShell = me !== null && !capabilityPage && page.path !== "/login";
   let content: ReactNode;
-  if (loading) content = <p role="status">Opening Meguri Sync…</p>;
+  if (loading) content = <p role="status">Opening Meguri…</p>;
   else if (bootstrapError) content = <Card><CardHeader><CardTitle>Could not open your account</CardTitle></CardHeader><CardContent><Outcome value={bootstrapError} /><Button onClick={() => void bootstrap()}>Try loading again</Button></CardContent></Card>;
-  else if (!navigation.some(path => path === page.path)) content = <Card><CardHeader><CardTitle>Page not found</CardTitle><CardDescription>This address does not match a Meguri Sync account page.</CardDescription></CardHeader><CardContent>{link(me ? "/connection" : "/login", me ? "Go to Connection" : "Go to sign in")}</CardContent></Card>;
+  else if (!navigation.some(path => path === page.path)) content = <Card><CardHeader><CardTitle>Page not found</CardTitle><CardDescription>This address does not match a Meguri account page.</CardDescription></CardHeader><CardContent>{link(me ? "/connection" : "/login", me ? "Go to Connection" : "Go to sign in")}</CardContent></Card>;
   else if (capabilityPage && me) content = <Card className="auth-card"><CardHeader><CardTitle>Check your account</CardTitle><CardDescription>You are signed in as {me.username} ({me.role === "admin" ? "administrator" : "member"}).</CardDescription></CardHeader><CardContent className="stack"><p>This link may be intended for a different account. Sign out before using it.</p><Button aria-disabled={signingOut} onClick={() => void logout(true)}>{signingOut ? "Signing out…" : `Sign out ${me.username}`}</Button>{link("/connection", "Return to your account")}</CardContent></Card>;
   else if (page.path === "/accounts" && me?.role !== "admin") content = <Card><CardHeader><CardTitle>Administrator access required</CardTitle><CardDescription>Your member account does not have permission to manage accounts.</CardDescription></CardHeader><CardContent>{link("/connection", "Return to Connection")}</CardContent></Card>;
   else if (page.path === "/accounts" && me) content = <Accounts me={me} sessionLoss={sessionLoss} />;
+  else if (page.path === "/collection" && me) content = <Collection key={page.visit} sessionLoss={sessionLoss} />;
   else if (page.path === "/connection" && me) content = <Connection me={me} />;
   else if (page.path === "/login" && me) content = <Card className="auth-card"><CardHeader><CardTitle>Signed in as {me.username}</CardTitle></CardHeader><CardContent className="stack">{link("/connection", "Open Connection")}<Button variant="outline" aria-disabled={signingOut} onClick={() => void logout()}>Sign out</Button></CardContent></Card>;
   else if (["/login", "/setup", "/invite", "/reset", "/settings"].includes(page.path) && (!protectedPath(page.path) || me)) content = <CredentialsForm key={page.visit} mode={page.path.slice(1) as FormMode} token={page.token} clearToken={clearToken} onLogin={identity => { setMe(identity); go("/connection", "Signed in.", true); }} onSuccess={message => { setMe(null); if (page.path === "/setup") setSetup(false); go("/login", message, true); }} onSessionLoss={sessionLoss} link={link} />;
   else content = <p role="status">Opening account page…</p>;
-  const links: [string, string][] = [["/connection", "Connection"], ["/settings", "Password"], ...(me?.role === "admin" ? [["/accounts", "Accounts"] as [string, string]] : [])];
+  const links: [string, string][] = [["/collection", "Collection"], ["/connection", "Connection"], ["/settings", "Password"], ...(me?.role === "admin" ? [["/accounts", "Accounts"] as [string, string]] : [])];
+  const accountIdentity = me && <>
+    <IdentityIcon />
+    <div className="footer-identity">
+      <p className="identity" title={me.username}>{me.username}</p>
+    </div>
+    <Button className="sign-out" variant="outline" disabled={signingOut}
+      title={signingOut ? "Signing out…" : "Sign out"}
+      aria-label={signingOut ? "Signing out…" : "Sign out"} onClick={() => void logout()}>
+      <SignOutIcon />
+    </Button>
+  </>;
   return <div className={accountShell ? "account-layout" : "auth-layout"}>
     <a className="skip-link" href="#main" onClick={event => { event.preventDefault(); main.current?.focus(); }}>Skip to content</a>
     {accountShell && <Sidebar>
-      <SidebarHeader><Brand /></SidebarHeader>
+      <SidebarHeader><Brand onClick={event => intercept(event, "/connection")} />
+        <div className="sidebar-footer mobile-account" role="group" aria-label="Signed-in account">{accountIdentity}</div>
+      </SidebarHeader>
       <SidebarContent>
         <SidebarGroup aria-label="Account"><SidebarMenu>
           {links.map(([path, label]) => <SidebarMenuItem key={path}>
             <SidebarMenuButton href={path} aria-current={page.path === path ? "page" : undefined} onClick={event => intercept(event, path)}>
-              <NavigationIcon path={path} />{label}
+              <NavigationIcon path={path} /><span>{label}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>)}
         </SidebarMenu></SidebarGroup>
       </SidebarContent>
-      <div className="sidebar-footer" role="group" aria-label="Signed-in account">
-        <IdentityIcon />
-        <div className="footer-identity">
-          <p className="identity">{me.username}</p>
-          <p className="muted">{me.role === "admin" ? "Administrator" : "Member"}</p>
-        </div>
-        <Button className="sign-out" variant="outline" disabled={signingOut}
-          title={signingOut ? "Signing out…" : "Sign out"}
-          aria-label={signingOut ? "Signing out…" : "Sign out"} onClick={() => void logout()}>
-          <SignOutIcon />
-        </Button>
-      </div>
+      <div className="sidebar-footer desktop-account" role="group" aria-label="Signed-in account">{accountIdentity}</div>
     </Sidebar>}
     <SidebarInset id="main" ref={main} tabIndex={-1}>
       {!accountShell && <Brand auth />}

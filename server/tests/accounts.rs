@@ -18,6 +18,9 @@ async fn actual_http_setup_invite_login_admin_me_logout_and_restart() {
     let admin = h.login("ROOT.ADMIN", PASSWORD).await;
     let member = h.member(&admin, "member.one").await;
     let member_cookie = h.login(" MEMBER.ONE ", PASSWORD).await;
+    error(h.get("/api/me/storage", None).await, 401, "authentication_failed").await;
+    error(h.get("/api/me/storage?target=root.admin", Some(&member_cookie)).await, 400, "invalid_request").await;
+    error(h.get("/api/me/storage/root.admin", Some(&member_cookie)).await, 404, "route_not_found").await;
     let other_member_session = h.login("member.one", PASSWORD).await;
     let member_host = h
         .service
@@ -78,8 +81,10 @@ async fn actual_http_setup_invite_login_admin_me_logout_and_restart() {
         "authentication_failed",
     )
     .await;
+    error(h.get("/api/me/storage", Some(&format!("__Host-meguri-session={native}"))).await, 401, "authentication_failed").await;
     assert!(h.service.validate_hostkey(secret(&admin)).await.is_err());
     let r = h.post("/api/logout", json!({}), Some(&member_cookie)).await;
+    error(h.get("/api/me/storage", Some(&member_cookie)).await, 401, "authentication_failed").await;
     assert_eq!(r.status(), 200);
     assert!(
         r.headers()["set-cookie"]
@@ -551,6 +556,7 @@ async fn admin_storage_reads_committed_sqlite_pages_and_preserves_unmeasurable_r
     h.setup().await;
     let admin = h.login("root.admin", PASSWORD).await;
     let member = h.member(&admin, "member").await;
+    let member_cookie = h.login("member", PASSWORD).await;
     let id = member["id"].as_str().unwrap();
     let path = h.path().join("state/accounts").join(id).join("generations/initial/collection.anki2");
     let c = meguri_sync_server::collection::schema::open(&path, true).unwrap();
@@ -567,6 +573,9 @@ async fn admin_storage_reads_committed_sqlite_pages_and_preserves_unmeasurable_r
     assert_eq!(list["data"]["accounts"][0]["storage"], json!({
         "collection_bytes": expected, "media_bytes": 0, "total_bytes": expected
     }));
+    let own = h.get("/api/me/storage", Some(&member_cookie)).await;
+    assert_eq!(own.status(), 200);
+    assert_eq!(own.json::<Value>().await.unwrap()["data"], list["data"]["accounts"][0]["storage"]);
     c.execute_batch("ROLLBACK;").unwrap();
     drop(c);
     // A bad active manifest affects only that row, not list authority/actions.
@@ -579,6 +588,9 @@ async fn admin_storage_reads_committed_sqlite_pages_and_preserves_unmeasurable_r
     assert_eq!(list["data"]["accounts"][0]["id"], id);
     assert!(list["data"]["accounts"][0]["storage"].is_null());
     assert!(list["data"]["accounts"][1]["storage"].is_object());
+    let own = h.get("/api/me/storage", Some(&member_cookie)).await;
+    assert_eq!(own.status(), 200);
+    assert!(own.json::<Value>().await.unwrap()["data"].is_null());
     error(h.get("/api/admin/accounts", None).await, 401, "authentication_failed").await;
     std::fs::write(&manifest, saved).unwrap();
     h.reset_link(&admin, id).await;

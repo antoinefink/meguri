@@ -17,7 +17,7 @@
       "path": "apps/v4/registry/new-york-v4/blocks/login-01/page.tsx",
       "adapted_into": "src/forms.tsx",
       "adaptation": "Centered card, header/content and FieldGroup composition retained; username/password and capability forms replace email, social login and signup.",
-      "adapted_sha256": "b5b7f29af3d0d92e4778de9342cad20686bfdd1e9ee0a5d0b8965a7938557af0"
+      "adapted_sha256": "35611dcca44e02851d1e29ae225d867828a5e99a38bf585b7092a51c76d7568d"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/login-01/components/login-form.tsx",
@@ -25,30 +25,30 @@
       "path": "apps/v4/registry/new-york-v4/blocks/login-01/components/login-form.tsx",
       "adapted_into": "src/forms.tsx",
       "adaptation": "Centered card, header/content and FieldGroup composition retained; username/password and capability forms replace email, social login and signup.",
-      "adapted_sha256": "b5b7f29af3d0d92e4778de9342cad20686bfdd1e9ee0a5d0b8965a7938557af0"
+      "adapted_sha256": "35611dcca44e02851d1e29ae225d867828a5e99a38bf585b7092a51c76d7568d"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/sidebar-01/page.tsx",
       "sha256": "3587d625ceb2fadf4ca2cddf262b426b40d4dc142a880ce79c747eb2f04400fa",
       "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/page.tsx",
       "adapted_into": "src/app.tsx",
-      "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links replace sample navigation and panels.",
-      "adapted_sha256": "7cfe3589678fe43b0b3b04a8960dde340a69083edf0661484c9c8d3806f30662"
+      "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links including own Collection replace sample navigation and panels. Narrow screens use a compact brand/account row before equal-width text-only navigation; desktop keeps its sidebar and account footer.",
+      "adapted_sha256": "ba611ea71b0c038c66cbd2d544120318e20fb37b6edcf164daa99f6328ec5128"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
       "sha256": "0a12fbafd0752d3ee24d5dead49255e41243c5412cbaae9cda3bc4ca7fbe430a",
       "path": "apps/v4/registry/new-york-v4/blocks/sidebar-01/components/app-sidebar.tsx",
       "adapted_into": "src/app.tsx",
-      "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links replace sample navigation and panels.",
-      "adapted_sha256": "7cfe3589678fe43b0b3b04a8960dde340a69083edf0661484c9c8d3806f30662"
+      "adaptation": "Sidebar header/content/group/menu and inset composition retained; actual account links including own Collection replace sample navigation and panels. Narrow screens use a compact brand/account row before equal-width text-only navigation; desktop keeps its sidebar and account footer.",
+      "adapted_sha256": "ba611ea71b0c038c66cbd2d544120318e20fb37b6edcf164daa99f6328ec5128"
     },
     {
       "url": "https://raw.githubusercontent.com/shadcn-ui/ui/e62c9435fff729a175f38983dee73b2cb4f6a069/apps/v4/registry/new-york-v4/ui/sidebar.tsx",
       "sha256": "2ba1a9b9422f4172373f4cd0587b675d2331a41f4fa68f65dab2b23ca98fd9d2",
       "path": "apps/v4/registry/new-york-v4/ui/sidebar.tsx",
       "adapted_into": "src/ui.tsx",
-      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery. Local CSS keeps the account row close to the bottom of the desktop sidebar. On narrow screens, equal-width links center each icon above its label. Long usernames wrap.",
+      "adaptation": "Used slot structure and styles adapted to semantic HTML and local CSS; only used primitives retained; no cn, CVA, Radix, icons, cookies, mobile sheet or collapse machinery. Local CSS keeps the account row close to the bottom of the desktop sidebar. On narrow screens, the brand and right-aligned account share the white first header row, with the identity glyph hidden. Equal-width text-only links hide decorative navigation icons on the second row and use wrapping labels and a dark active underline. Only the mobile account presentation before navigation or the desktop footer after navigation is displayed, preserving keyboard order. Long desktop usernames wrap; mobile usernames ellipsize on one line with complete DOM/accessibility text, a native title and the full copyable field on Connection.",
       "adapted_sha256": "c10c24f7dd3bf08a13e1bbd55bf6f912c453f29e8f68c134e70c774c5e4e117a"
     },
     {

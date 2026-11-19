@@ -837,7 +837,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/scripts/audit-applicability.py':
         '974bea89755ce61df03b7a8139ec7938cdbabd141339f30ae4904c64b1cfd5ad',
     'server/web/scripts/audit-assessment.json':
-        '028cf1fb75cea50542de8827885a6ac06616c83886cac88f0aaf4aa3abf1c963',
+        'df15913462bed471cf7ad98ea1a2ed59e098dc579d29525b17633a0c51448b02',
     'tools/tests/meguri_sync.bats':
         '28f47c0344b00e5586431b8e2efca2e3f870b650d23ba5f6f268d191c4a9d4b5',
     'tools/tests/sync_web_applicability_test.py':
@@ -1038,11 +1038,13 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/IBMPlexSans-Variable.woff2':
         'e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d',
     'server/web/upstream-records.json':
-        '26bd94c9535be5dbc6ad6d5ff3e3fa1615fec595111ccaa0ad106405a014608b',
+        'd58d484cde4905b07a9e188632341dbd03a9bd5a5b287d9f2b95461b27d233ea',
     'server/web/src/style.css':
-        'a92032c83a4e55240567b309b97c3b6a27398043259da4f9c38900dd8a9f97e9',
+        '6a0fdbdf6a892c051129c554b5b940271763bfda3641b0a1fecfa5f5b7583e9f',
     'server/web/src/app.tsx':
-        '7cfe3589678fe43b0b3b04a8960dde340a69083edf0661484c9c8d3806f30662',
+        'ba611ea71b0c038c66cbd2d544120318e20fb37b6edcf164daa99f6328ec5128',
+    'server/web/tests/browser/accounts.spec.ts':
+        '0beb4817bf0fe207d83cc018a3425c2b294a755d266ff1e43672c641cb74bd56',
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
@@ -1125,7 +1127,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        '94c2148f2528dd91396d4d6c2f2b4d1bf5ebbab3ab621a4f005a84750ddeb7c1',
+        'e10d6dd3c36b9f286d78576d72d059df0afadef296c5ec271ed180fca9f953eb',
     "specs/conformance/meguri-sync-server.md":
         '4c0e7651ab72236ad31320925e8c1c163c6dc7f1904e9c0c3e52df50e8f9e479',
     "conformance/schema/meguri-sync-server.schema.json":

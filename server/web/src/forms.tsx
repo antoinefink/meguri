@@ -8,9 +8,9 @@ import { canonicalUsername, passwordError, usernameError } from "./policy";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, FieldDescription, FieldGroup, Outcome, TextField } from "./ui";
 import type { OutcomeValue } from "./ui";
 export type FormMode = "login" | "setup" | "invite" | "reset" | "settings";
-const titles: Record<FormMode, string> = { login: "Sign in", setup: "Set up Meguri Sync", invite: "Create your account", reset: "Reset your password", settings: "Change password" };
+const titles: Record<FormMode, string> = { login: "Sign in", setup: "Set up Meguri", invite: "Create your account", reset: "Reset your password", settings: "Change password" };
 const descriptions: Record<FormMode, string> = {
-  login: "Use your Meguri Sync username and password.",
+  login: "Use your Meguri username and password.",
   setup: "Create the first administrator. The one-time setup code stops someone else from claiming your server first.",
   invite: "Choose a username and password to accept your invitation.",
   reset: "Choose a new password for the account associated with this link. This does not enable a disabled account.",
