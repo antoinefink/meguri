@@ -37,6 +37,8 @@ struct SidebarRootView: View {
     private var workspace: some View {
         NavigationSplitView(columnVisibility: $navigation.columnVisibility) {
             SidebarView(navigation: navigation, features: features)
+                // The sidebar stays away for the whole review (N11.1), its toggle with it.
+                .toolbar(removing: navigation.review == nil ? nil : .sidebarToggle)
                 #if os(macOS)
                 // The iPad's system width (320 points) already fits a deck tree.
                 .navigationSplitViewColumnWidth(
