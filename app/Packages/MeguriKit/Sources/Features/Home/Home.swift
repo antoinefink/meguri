@@ -277,11 +277,6 @@ public struct HomeView: View {
         case .noFile:
             HomeCollectionEmptyContent(canPresent: collection.entry.canPresent,
                 importAction: { collection.entry.present() },
-                connectTitleKey: collection.sync.status?.controls.resumeBindingOffered == true
-                    ? "sync.action.resume" : "sync.connect.action",
-                connectUnavailableReason: collection.cloudPreviewEntryUnavailableReason(.connect),
-                canPresentConnect: collection.navigation.sheet == nil || collection.navigation.sheet == .accountSync,
-                connectAction: { collection.presentCloudSync(.connect) },
                 canPresentAccountSync: collection.navigation.sheet == nil,
                 accountSyncAction: {
                     guard collection.navigation.sheet == nil else { return }
@@ -544,10 +539,6 @@ private struct HomeDeckSearchResults: View {
 struct HomeCollectionEmptyContent: View {
     var canPresent: Bool = true
     var importAction: (() -> Void)? = nil
-    var connectTitleKey: String = "sync.connect.action"
-    var connectUnavailableReason: String? = nil
-    var canPresentConnect: Bool = true
-    var connectAction: () -> Void = {}
     var canPresentAccountSync: Bool = true
     var accountSyncAction: (() -> Void)? = nil
     var canStartEmpty: Bool = false
@@ -556,18 +547,12 @@ struct HomeCollectionEmptyContent: View {
     var body: some View {
         EmptyStateView(Text("No Collection", bundle: .module), systemImage: "rectangle.stack",
             description: Text("Import, sync or start an empty collection.", bundle: .module)) {
-            Button(SyncText.value(connectTitleKey), action: connectAction)
-                .disabled(connectUnavailableReason != nil || !canPresentConnect)
-                .help(SyncText.value(connectUnavailableReason ?? connectTitleKey))
-                .accessibilityIdentifier("home.collection.connect")
-            if let connectUnavailableReason {
-                Text(SyncText.value(connectUnavailableReason)).foregroundStyle(.secondary)
-            }
+            // T19.1: no Connect action. Choosing a service in the Sync section sets it up.
             if let importAction {
                 HomeCollectionImportButton(canPresent: canPresent, action: importAction)
             }
             if let accountSyncAction {
-                Button(SyncText.value("sync.settings.section"), action: accountSyncAction)
+                Button(SyncText.value("sync.settings.sync.section"), action: accountSyncAction)
                     .disabled(!canPresentAccountSync)
                     .accessibilityIdentifier("home.collection.accountSync")
             }

@@ -11,8 +11,12 @@ public struct SettingsView: View {
     #if !os(macOS)
     @Environment(\.shellLayout) private var shellLayout
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @AppStorage("settings.selectedSection") private var selectedSection = "accountSync"
+    /// Wider than tall, measured without the keyboard: a focused field must not change the layout.
+    @State private var wide = false
     #endif
+    @State private var draft = MeguriSignInDraft()
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
         content
@@ -23,27 +27,39 @@ public struct SettingsView: View {
             #endif
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("settings.root.content")
+            .onDisappear { draft.password = "" }
+            #if !os(macOS)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.onChange(of: proxy.size, initial: true) { _, size in wide = size.width > size.height }
+                }
+                .ignoresSafeArea(.keyboard)
+            }
+            .onAppear(perform: consumeSyncRequest)
+            .onChange(of: collection.syncPresentation.settingsRequest) { _, _ in consumeSyncRequest() }
+            #endif
     }
     @ViewBuilder private var content: some View {
         #if os(macOS)
         flat
         #else
-        // The tab layout at regular width and wider than tall: an unfolded iPhone held wide.
+        // The tab layout at regular width and height, wider than tall: an unfolded
+        // iPhone held wide. A phone in landscape has a compact height and stays flat.
         GeometryReader { proxy in
-            if shellLayout == .compact, sizeClass == .regular, proxy.size.width > proxy.size.height {
+            if shellLayout == .compact, sizeClass == .regular, verticalSizeClass == .regular, wide {
                 HStack(spacing: 0) {
                     List(selection: Binding<String?>(get: { section }, set: { if let value = $0 { selectedSection = value } })) {
                         ForEach([SettingsPage.accountSync, .collection], id: \.self) { page in
                             SettingsPageLabel(page: page)
                                 .tag(page.rawValue)
-                                .accessibilityIdentifier("settings.root.\(page.rawValue)")
+                                .accessibilityIdentifier(page.rowIdentifier)
                         }
                     }
                     .frame(width: proxy.size.width / 3)
                     NavigationStack {
                         Form {
                             if section == "collection" { SettingsCollectionFilesSection(collection: collection) }
-                            else { SyncSettingsSections(collection: collection) }
+                            else { SyncSettingsSections(collection: collection, draft: draft) }
                         }
                         .formStyle(.grouped)
                     }
@@ -54,10 +70,16 @@ public struct SettingsView: View {
     }
     #if !os(macOS)
     private var section: String { selectedSection == "collection" ? "collection" : "accountSync" }
+    /// A request to show the Sync section selects it where sections are a list.
+    private func consumeSyncRequest() {
+        guard collection.syncPresentation.settingsRequest != nil else { return }
+        selectedSection = "accountSync"
+        collection.syncPresentation.settingsRequest = nil
+    }
     #endif
     private var flat: some View {
         Form {
-            SyncSettingsSections(collection: collection)
+            SyncSettingsSections(collection: collection, draft: draft)
             SettingsCollectionFilesSection(collection: collection)
             if SettingsPage.showsAnkiServer {
                 // The hidden legacy interface keeps its pages for its own suites.
@@ -221,7 +243,7 @@ public struct MacSettingsView: View {
                 ForEach(SettingsPage.visible.filter(matchesSearch), id: \.self) { page in
                     SettingsPageLabel(page: page)
                         .tag(page.rawValue)
-                        .accessibilityIdentifier("settings.root.\(page.rawValue)")
+                        .accessibilityIdentifier(page.rowIdentifier)
                 }
             }
             .searchable(text: Binding(get: { collection.syncPresentation.settingsSearch },

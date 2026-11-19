@@ -6,6 +6,8 @@ import SwiftUI
 struct SyncSettingsSections: View {
     let collection: ReviewCollection
     var host: AppNavigation.SheetHost = .main
+    /// The sign-in fields' text, owned above any layout that rebuilds this section.
+    var draft: MeguriSignInDraft
     private var sync: SyncCoordinator { collection.sync }
     private var selection: SyncProviderSelection? {
         switch sync.providerState?.selection {
@@ -17,7 +19,7 @@ struct SyncSettingsSections: View {
     var body: some View {
         Section {
             SyncServiceRows(collection: collection, host: host)
-            if selection == .meguri { MeguriAccountRows(collection: collection) }
+            if selection == .meguri { MeguriAccountRows(collection: collection, draft: draft) }
             if selection != nil || sync.providerNeedsAttention {
                 SyncMainStatusRows(collection: collection, host: host)
             }
@@ -49,6 +51,16 @@ struct SyncSettingsSections: View {
             }
         }
     }
+}
+
+/// What the person typed into the Meguri Sync sign-in fields. The Settings page
+/// owns it, so a layout change that rebuilds the section keeps the text. The
+/// password leaves it at submission and when the page goes away.
+@Observable public final class MeguriSignInDraft {
+    public var address = ""
+    public var username = ""
+    public var password = ""
+    public init() {}
 }
 
 /// The service's name; iCloud carries its Beta label as separate text (T19.1).
@@ -92,11 +104,8 @@ struct SyncServiceRows: View {
         case .localOnly, nil: "localOnly"
         }
     }
-    /// V27.5: Off is refused while an `adopt` or `publish` op could restore the binding before.
-    private var opBlocksChange: Bool {
-        guard sync.providerState?.selection == .iCloud, let recovery = sync.recovery else { return false }
-        return !recovery.switchConflict
-    }
+    /// V27.5: refused while an op could restore the binding before, or could not be read.
+    private var opBlocksChange: Bool { sync.serviceChangeRefusedForOperation }
     var body: some View {
         Picker(SyncText.value("sync.service.control"), selection: Binding(get: { selected }, set: choose)) {
             Text(SyncText.value("sync.service.off")).tag("localOnly")
@@ -152,12 +161,13 @@ struct SyncServiceRows: View {
             do {
                 try await collection.prepareSyncServiceSelection()
                 let current = collection.sync
+                // A choice in the Service control clears the update hold, by writing
+                // `paused: false` before the change itself is asked for (P25.2).
+                guard await current.clearUpdateHold() else { failed = true; changing = false; return }
                 let succeeded: Bool
                 if value == "localOnly", source == .iCloud {
                     // V27.5's rows, through the retained operations.
-                    if current.status?.controls.bindingActive == true { await current.stopUsingICloud() }
-                    else { await current.keepLocalOnly() }
-                    succeeded = collection.sync.providerState?.selection != .iCloud
+                    succeeded = await current.turnOffICloud()
                 } else {
                     let target: SyncProviderSelection = value == "meguri" ? .meguri : value == "iCloud" ? .iCloud : .localOnly
                     succeeded = await current.changeProvider(to: target, removeMeguriCredentials: source == .meguri)
@@ -165,8 +175,6 @@ struct SyncServiceRows: View {
                 failed = !succeeded
                 if succeeded {
                     destination = nil
-                    // A choice in the Service control clears the update hold (P25.2).
-                    await collection.sync.clearUpdateHold()
                     if value == "iCloud" { collection.presentCloudSync(.connect, host: host) }
                 }
             } catch { failed = true }
@@ -178,10 +186,11 @@ struct SyncServiceRows: View {
 /// N15.2 row 2 and MP6.1: the sign-in fields until signed in, then one Account row.
 struct MeguriAccountRows: View {
     let collection: ReviewCollection
-    @State private var address = ""
-    @State private var username = ""
-    @State private var password = ""
+    let draft: MeguriSignInDraft
     @State private var choosing = false
+    private var address: String { get { draft.address } nonmutating set { draft.address = newValue } }
+    private var username: String { get { draft.username } nonmutating set { draft.username = newValue } }
+    private var password: String { get { draft.password } nonmutating set { draft.password = newValue } }
     private var sync: SyncCoordinator { collection.sync }
     private var changing: Bool { collection.syncPresentation.serviceChanging }
     private var signedIn: Bool { sync.meguriPhase == .setupRequired && sync.meguriRoutine != .authentication }
@@ -230,8 +239,21 @@ struct MeguriAccountRows: View {
                         .accessibilityIdentifier("settings.sync.meguri.signInError")
                 }
             } else {
-                LabeledContent(SyncText.value("sync.settings.account"), value: sync.meguriEndpoint)
-                    .accessibilityIdentifier("settings.sync.meguri.account")
+                // N15.2 row 2: the username is the row's value; the page has both facts.
+                NavigationLink {
+                    Form {
+                        LabeledContent(SyncText.value("sync.meguri.address"), value: sync.meguriEndpoint)
+                            .accessibilityIdentifier("settings.sync.meguri.account.address")
+                        LabeledContent(SyncText.value("sync.meguri.username"), value: sync.meguriUsername ?? "")
+                            .accessibilityIdentifier("settings.sync.meguri.account.username")
+                    }
+                    .formStyle(.grouped)
+                    .navigationTitle(SyncText.value("sync.settings.account"))
+                    .accessibilityIdentifier("settings.sync.meguri.account.content")
+                } label: {
+                    LabeledContent(SyncText.value("sync.settings.account"), value: sync.meguriUsername ?? "")
+                }
+                .accessibilityIdentifier("settings.sync.meguri.account")
             }
             if collection.meguriSignInPreparing {
                 ProgressView(SyncText.value("sync.meguri.signIn.preparing"))
@@ -242,10 +264,9 @@ struct MeguriAccountRows: View {
                 } else { ProgressView() }
             }
         }
-        .onAppear { address = sync.meguriEndpoint; startSetupIfAsked() }
+        .onAppear { if address.isEmpty { address = sync.meguriEndpoint }; startSetupIfAsked() }
         .onChange(of: sync.meguriEndpoint) { _, endpoint in address = endpoint; password = "" }
         .onChange(of: sync.meguriCanChoose) { _, _ in startSetupIfAsked() }
-        .onDisappear { password = "" }
         .sheet(isPresented: Binding(
             get: { choosing || collection.syncPresentation.keepCollectionRequested },
             set: { choosing = $0; if !$0 { collection.syncPresentation.keepCollectionRequested = false } })) {
@@ -449,13 +470,14 @@ struct SyncMainStatusRows: View {
             }
         case .resumeOp:
             if let recovery = sync.recovery {
-                Button(title) {
-                    if recovery.adoptionTransportWait { sync.resumeWaitingAdoption() } else { sync.resumeConnection() }
-                }
-                .disabled(recovery.switchConflict || recovery.step == .cancelling)
-                .accessibilityIdentifier(id)
+                // `resume_recovery_op` clears the update hold first (P25.2).
+                Button(title) { Task { await sync.resumeRecoveryOperation() } }
+                    .disabled(recovery.switchConflict || recovery.step == .cancelling)
+                    .accessibilityIdentifier(id)
             }
-        case .copyDebugInfo:
+        case .copyDebugInfo, .repair:
+            // The damaged-collection screen (V19) is not built: Copy Debug Info
+            // is the one action that can run for that row.
             if let callbacks = collection.configuration.fieldDiagnostics {
                 SyncCopyDebugInfoButton(callbacks: callbacks, identifier: id)
             }
@@ -494,7 +516,7 @@ struct SyncMainStatusRows: View {
             if sync.meguriCanFinish {
                 Button(title) { sync.finishMeguriSetup() }.accessibilityIdentifier(id)
             }
-        case .meguriSignIn, .meguriRetryMedia, .repair, .abandon, .checkDatabase:
+        case .meguriSignIn, .meguriRetryMedia, .abandon, .checkDatabase:
             // The sign-in fields are in the section; the others have no entry here.
             EmptyView()
         }
@@ -608,9 +630,6 @@ struct SyncTroubleshootingPage: View {
         }
         .formStyle(.grouped)
         .navigationTitle(SyncText.value("sync.settings.troubleshooting"))
-        .sheet(isPresented: Binding(get: { meguri && sync.meguriPreview != nil }, set: { _ in })) {
-            if let preview = sync.meguriPreview { MeguriSetupPreviewSheet(collection: collection, preview: preview) }
-        }
         .accessibilityIdentifier("sync.trouble.content")
     }
 }
