@@ -1,5 +1,6 @@
 use super::*;
 use crate::cloud::policy::PolicyWork;
+use super::resume_impl::ResumeReconciliation;
 use crate::cloud::{
     row_payload::{self, View},
     workflow::*,
@@ -233,10 +234,21 @@ impl Runtime {
         }
         Ok(())
     }
+    fn with_reconciliation_scan<T>(
+        &self, guard: &ScanGuard, collection: &Collection, resume: Option<&ResumeReconciliation>,
+        work: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        match resume {
+            Some(resume) if Self::resume_reconciliation_matches(resume, guard) =>
+                self.with_resume_reconciliation(resume, collection, work),
+            Some(_) => Err(RuntimeError::StaleIncarnation),
+            None => self.with_scan(guard, collection, work),
+        }
+    }
     fn classify_snapshot_row(&self, guard: &ScanGuard, collection: &Collection,
-        classification: &super::super::RowClassification) -> Result<bool, RuntimeError>
+        resume: Option<&ResumeReconciliation>, classification: &super::super::RowClassification) -> Result<bool, RuntimeError>
     {
-        self.with_scan(guard, collection, |s| {
+        self.with_reconciliation_scan(guard, collection, resume, |s| {
             let result = s.store.as_mut().ok_or(Error::Database)?.classify_row(guard.binding, classification);
             if result.is_err() {
                 s.tracking_stopped = true;
@@ -248,12 +260,13 @@ impl Runtime {
     }
     fn flush_scan_rows(&self, guard: &ScanGuard, collection: &Collection,
         rows: &mut Vec<super::super::workflow_store::ScanRow>, publishing: bool,
+        resume: Option<&ResumeReconciliation>,
         recovered: &mut Vec<String>, count: &mut usize,
     ) -> Result<(), RuntimeError> {
         if rows.is_empty() { return Ok(()); }
         let rows = std::mem::take(rows);
         let row_count = rows.len();
-        let names = self.with_scan(guard, collection, |s| {
+        let names = self.with_reconciliation_scan(guard, collection, resume, |s| {
             let result = s.store.as_mut().ok_or(Error::Database)?.merge_scan_batch(guard.binding, rows, publishing);
             if matches!(&result, Err(RuntimeError::Tracking(Error::Io(_) | Error::Database | Error::Constraint))) {
                 s.tracking_stopped = true;
@@ -782,11 +795,35 @@ impl Runtime {
         media: &meguri_engine::media::MediaService,
         timeout: Duration,
     ) -> Result<NoteScanProof, RuntimeError> {
-        self.settle_before_transition(collection, timeout).map_err(|e| self.remember_layout_refusal(collection, e))?;
+        self.reconcile_binding_inner(collection, media, timeout, None)
+    }
+
+    pub(super) fn reconcile_resumed_binding(
+        &self, collection: &Collection, media: &meguri_engine::media::MediaService,
+        timeout: Duration, resume: ResumeReconciliation,
+    ) -> Result<NoteScanProof, RuntimeError> {
+        self.reconcile_binding_inner(collection, media, timeout, Some(&resume))
+    }
+
+    fn reconcile_binding_inner(
+        &self, collection: &Collection, media: &meguri_engine::media::MediaService,
+        timeout: Duration, resume: Option<&ResumeReconciliation>,
+    ) -> Result<NoteScanProof, RuntimeError> {
+        let settled = match resume {
+            Some(resume) => self.settle_resumed_binding(collection, timeout, resume),
+            None => self.settle_before_transition(collection, timeout),
+        };
+        settled.map_err(|e| self.remember_layout_refusal(collection, e))?;
+        if let Some(resume) = resume {
+            self.with_resume_reconciliation(resume, collection, |_| Ok(()))?;
+        }
         #[cfg(feature = "test-hooks")]
         let mut scan_pause = self.scan_pause.lock().unwrap_or_else(PoisonError::into_inner).take();
-        let guard = {
+        let claim_scan = || {
             let mut s = self.state();
+            if let Some(resume) = resume {
+                self.check_resume_reconciliation_locked(resume, &s, collection)?;
+            }
             let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
             if !b.usable || !b.verified {
                 #[cfg(feature = "test-hooks")]
@@ -806,8 +843,12 @@ impl Runtime {
             };
             s.scan_running = true;
             s.whole_complete = false;
-            g
+            Ok(g)
         };
+        let guard = match resume {
+            Some(resume) => resume.with_publication_ownership(claim_scan),
+            None => claim_scan(),
+        }?;
         let publishing = self.publication_op()?.is_some_and(|op| {
             op.binding_after == Some(guard.binding) && op.step == crate::cloud::publication::PublishStep::Zones
         });
@@ -817,7 +858,7 @@ impl Runtime {
             // Ready delivery can still be queued after a fetch restart. Scan
             // only local facts alongside it; ApplyReady owns its envelope,
             // cursor and acknowledged base, and must settle before any send.
-            self.with_scan(&guard, collection, |_| Ok(()))?;
+            self.with_reconciliation_scan(&guard, collection, resume, |_| Ok(()))?;
             #[cfg(feature = "test-hooks")]
             Self::pause_scan(&mut scan_pause, ScanPausePoint::BeforeSnapshot)?;
             let lease = collection.reader(ReaderRole::Cloud)?;
@@ -848,7 +889,7 @@ impl Runtime {
             let mut retained_tombstones = Vec::new();
             let mut after_classification: Option<(codec::Kind, Vec<u8>)> = None;
             loop {
-                let page = self.with_scan(&guard, collection, |s| {
+                let page = self.with_reconciliation_scan(&guard, collection, resume, |s| {
                     Ok(s.store.as_ref().ok_or(Error::Database)?.row_classification_page(
                         guard.binding, after_classification.as_ref().map(|(k,key)| (*k,key.as_slice())))?)
                 })?;
@@ -862,7 +903,7 @@ impl Runtime {
                             generation: snapshot.generation().0, file: guard.file,
                             raw_digest: None, logical_digest: None, failure: None,
                         };
-                        self.classify_snapshot_row(&guard, collection, &absent)?;
+                        self.classify_snapshot_row(&guard, collection, resume, &absent)?;
                     }
                 }
             }
@@ -875,7 +916,7 @@ impl Runtime {
                 let mut after = None;
                 let mut tombstones = 0;
                 loop {
-                    let page = self.with_scan(&guard, collection, |s| {
+                    let page = self.with_reconciliation_scan(&guard, collection, resume, |s| {
                         Ok(s.store.as_ref().ok_or(Error::Database)?.entity_keys_page(
                             guard.binding,
                             kind,
@@ -890,7 +931,7 @@ impl Runtime {
                             .row(table, &super::super::workflow_store::row_key(kind, &key)?)?
                             .is_none()
                         {
-                            let e = self.with_scan(&guard, collection, |s| {
+                            let e = self.with_reconciliation_scan(&guard, collection, resume, |s| {
                                 Ok(s.store
                                     .as_ref()
                                     .ok_or(Error::Database)?
@@ -901,7 +942,7 @@ impl Runtime {
                             if matches!(kind, codec::Kind::Revlog | codec::Kind::Deck | codec::Kind::Notetype)
                                 && !e.sent && e.server_erev == 0 && e.in_flight.is_empty()
                             {
-                                let removed = self.with_scan(&guard, collection, |s| {
+                                let removed = self.with_reconciliation_scan(&guard, collection, resume, |s| {
                                     Ok(s.store.as_mut().ok_or(Error::Database)?.remove_unsent_scan_entity(
                                         guard.binding,
                                         kind,
@@ -948,7 +989,7 @@ impl Runtime {
                             let key = row_payload::key(kind, &row)?;
                             cursor = Some(RowKey::from_stored(table, &row).map_err(meguri_storage::StorageError::from)?);
                             // Copy only one tracking body per projection, then release guards.
-                            let existing = self.with_scan(&guard, collection, |s| {
+                            let existing = self.with_reconciliation_scan(&guard, collection, resume, |s| {
                                 Ok(s.store
                                     .as_ref()
                                     .ok_or(Error::Database)?
@@ -991,15 +1032,15 @@ impl Runtime {
                             };
                             #[cfg(feature = "test-hooks")]
                             if scan_pause.as_ref().is_some_and(|pause| pause.point == ScanPausePoint::BeforeRowMerge(kind)) {
-                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count)?;
+                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, resume, &mut recovered, &mut count)?;
                                 copied_bytes = 0;
                             }
                             #[cfg(feature = "test-hooks")]
                             Self::pause_scan(&mut scan_pause, ScanPausePoint::BeforeRowMerge(kind))?;
                             if classification.failure.is_some() {
-                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count)?;
+                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, resume, &mut recovered, &mut count)?;
                                 copied_bytes = 0;
-                                self.classify_snapshot_row(&guard, collection, &classification)?;
+                                self.classify_snapshot_row(&guard, collection, resume, &classification)?;
                                 count += 1;
                                 continue;
                             }
@@ -1023,7 +1064,7 @@ impl Runtime {
                             if !pending.is_empty() && (pending.len() == super::super::workflow_store::SCAN_BATCH_ROWS
                                 || next_bytes > super::super::workflow_store::SCAN_BATCH_BYTES)
                             {
-                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count)?;
+                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, resume, &mut recovered, &mut count)?;
                                 copied_bytes = 0;
                             }
                             // Fix the slot allocation before admitting the first row.
@@ -1038,7 +1079,7 @@ impl Runtime {
                                 || super::super::workflow_store::scan_batch_copied_bytes(copied_bytes, pending.len(), pending.capacity())
                                     >= super::super::workflow_store::SCAN_BATCH_BYTES
                             {
-                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count)?;
+                                self.flush_scan_rows(&guard, collection, &mut pending, publishing, resume, &mut recovered, &mut count)?;
                                 copied_bytes = 0;
                             }
                         }
@@ -1049,19 +1090,23 @@ impl Runtime {
                         // or hook errors. A failed flush consumed its chunk, so it
                         // is never retried. Keep the original error if cleanup fails;
                         // flush_scan_rows still records a tracking failure stop.
-                        let _ = self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count);
+                        let _ = self.flush_scan_rows(&guard, collection, &mut pending, publishing, resume, &mut recovered, &mut count);
                         return Err(error);
                     }
-                    self.flush_scan_rows(&guard, collection, &mut pending, publishing, &mut recovered, &mut count)?;
+                    self.flush_scan_rows(&guard, collection, &mut pending, publishing, resume, &mut recovered, &mut count)?;
                 }
                 counts.push((kind, count));
             }
-            self.consume_media_feed(collection, media)?;
+            if let Some(resume) = resume {
+                self.consume_resumed_media_feed(collection, media, resume)?;
+            } else {
+                self.consume_media_feed(collection, media)?;
+            }
             let feed = media.store().media_feed_snapshot().map_err(|_| Error::InvalidData)?;
             if !feed.status.complete {
                 return Err(RuntimeError::Incomplete(Incomplete::WholeBindingReconciliation));
             }
-            let media_count = self.with_scan(&guard, collection, |s| {
+            let media_count = self.with_reconciliation_scan(&guard, collection, resume, |s| {
                 let store = s.store.as_ref().ok_or(Error::Database)?;
                 let mut after = None;
                 let mut count = 0u64;
@@ -1085,7 +1130,7 @@ impl Runtime {
                 receipt,
                 recovered_names: recovered,
             };
-            self.with_scan(&guard, collection, |s| {
+            self.with_reconciliation_scan(&guard, collection, resume, |s| {
                 s.store.as_mut().ok_or(Error::Database)?.finish_runtime_note_scan(
                     guard.binding,
                     guard.open,
@@ -1158,48 +1203,58 @@ impl Runtime {
                 meguri_engine::device_state::DeviceState::for_collection(collection.path()).publication()?;
             Ok((proof, file, publication))
         });
-        let mut s = self.state();
-        let result = if s.incarnation == guard.incarnation {
-            s.scan_running = false;
-            let result = result.and_then(|(proof, file, publication)| {
-                let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
-                if file != guard.file || file.created_nanos >= 1_000_000_000 {
-                    return Err(RuntimeError::FileIdentityUnavailable);
+        let finish = || {
+            let mut s = self.state();
+            let result = if s.incarnation == guard.incarnation {
+                s.scan_running = false;
+                let result = result.and_then(|(proof, file, publication)| {
+                    if let Some(resume) = resume {
+                        self.check_resume_reconciliation_locked(resume, &s, collection)?;
+                    }
+                    let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+                    if file != guard.file || file.created_nanos >= 1_000_000_000 {
+                        return Err(RuntimeError::FileIdentityUnavailable);
+                    }
+                    if (b.binding.id, b.open_counter, b.evidence.generation, b.file)
+                        != (guard.binding, guard.open, guard.generation, guard.file)
+                        || !b.usable
+                        || !b.verified
+                        || s.invalidation != guard.invalidation
+                        || s.invalidation_exhausted
+                        || !collection.is_current()
+                        || collection.generation() != guard.generation
+                        || !publication.as_ref().is_some_and(|p| {
+                            p.identity == b.binding.facts.publication
+                                && p.decision == meguri_engine::device_state::PublicationDecision::Clear
+                        })
+                    {
+                        return Err(RuntimeError::StaleIncarnation);
+                    }
+                    if Self::gate_locked(&s).is_ok() {
+                        s.cloud.deferred.clear();
+                        let snapshot = with_tracking_access(|| Self::sendables_locked(&s))?;
+                        s.actions.update(UpdateKind::Full, snapshot, BTreeSet::new());
+                    }
+                    Ok(proof)
+                });
+                if matches!(&result, Err(RuntimeError::Tracking(Error::Io(_) | Error::Database | Error::Constraint))) {
+                    s.tracking_stopped = true;
                 }
-                if (b.binding.id, b.open_counter, b.evidence.generation, b.file)
-                    != (guard.binding, guard.open, guard.generation, guard.file)
-                    || !b.usable
-                    || !b.verified
-                    || s.invalidation != guard.invalidation
-                    || s.invalidation_exhausted
-                    || !collection.is_current()
-                    || collection.generation() != guard.generation
-                    || !publication.as_ref().is_some_and(|p| {
-                        p.identity == b.binding.facts.publication
-                            && p.decision == meguri_engine::device_state::PublicationDecision::Clear
-                    })
-                {
-                    return Err(RuntimeError::StaleIncarnation);
+                if result.is_err() {
+                    s.scan_required = true;
+                    s.whole_complete = false;
                 }
-                if Self::gate_locked(&s).is_ok() {
-                    s.cloud.deferred.clear();
-                    let snapshot = with_tracking_access(|| Self::sendables_locked(&s))?;
-                    s.actions.update(UpdateKind::Full, snapshot, BTreeSet::new());
-                }
-                Ok(proof)
-            });
-            if matches!(&result, Err(RuntimeError::Tracking(Error::Io(_) | Error::Database | Error::Constraint))) {
-                s.tracking_stopped = true;
-            }
-            if result.is_err() {
-                s.scan_required = true;
-                s.whole_complete = false;
-            }
+                result
+            } else {
+                Err(RuntimeError::StaleIncarnation)
+            };
+            drop(s);
             result
-        } else {
-            Err(RuntimeError::StaleIncarnation)
         };
-        drop(s);
+        let result = match resume {
+            Some(resume) => resume.with_publication_ownership(finish),
+            None => finish(),
+        };
         result.map_err(|e| self.remember_layout_refusal(collection, e))
     }
     /// A completed SDK fetch at the current no-state point, with no root-zone
@@ -1648,7 +1703,7 @@ impl Runtime {
                                 raw_digest: Some(row_payload::raw_identity(&row_payload::ReadView(&*snapshot), e.kind, &row)?),
                                 logical_digest: Some(row_payload::logical_identity(&row_payload::ReadView(&*snapshot), e.kind, &row)?), failure: Some(failure),
                             };
-                            self.classify_snapshot_row(&guard, collection, &classification)?;
+                            self.classify_snapshot_row(&guard, collection, None, &classification)?;
                         }
                         deferred.insert(name.clone());
                         return Ok(None);

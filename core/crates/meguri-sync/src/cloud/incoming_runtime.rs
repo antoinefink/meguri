@@ -1,5 +1,6 @@
 //! The shared host/SDK ordinary receive and collection-apply path.
 use super::*;
+use super::resume_impl::ResumeReconciliation;
 use crate::cloud::{incoming::*, incoming_merge, row_payload, workflow::Saved};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,6 +20,7 @@ struct IncomingGuard {
     scan: ScanGuard,
     recovery: Option<RecoveryGuard>,
     sdk: Option<String>,
+    resume: Option<ResumeReconciliation>,
 }
 #[derive(Clone)]
 struct RecoveryGuard {
@@ -197,7 +199,22 @@ impl Runtime {
         collection: &Collection,
         timeout: Duration,
     ) -> Result<(), RuntimeError> {
+        self.settle_before_transition_inner(collection, timeout, None)
+    }
+
+    pub(super) fn settle_resumed_binding(
+        &self, collection: &Collection, timeout: Duration, resume: &ResumeReconciliation,
+    ) -> Result<(), RuntimeError> {
+        self.settle_before_transition_inner(collection, timeout, Some(resume))
+    }
+
+    fn settle_before_transition_inner(
+        &self, collection: &Collection, timeout: Duration, resume: Option<&ResumeReconciliation>,
+    ) -> Result<(), RuntimeError> {
         self.wait_incoming_idle();
+        if let Some(resume) = resume {
+            self.with_resume_reconciliation(resume, collection, |_| Ok(()))?;
+        }
         let status = self.status()?;
         let transition_media = {
             let s = self.state();
@@ -210,14 +227,24 @@ impl Runtime {
                 Ok(if let Some(owner) = owner { store.apply_intents(owner.id)?.iter().any(|i| i.media.is_some()) } else { false })
             })?
         };
-        if transition_media { self.replay_transition_media_intents(collection, &self.media_service(collection)?)?; }
+        if transition_media {
+            if resume.is_some() { return Err(Error::RecoveryRefused.into()); }
+            self.replay_transition_media_intents(collection, &self.media_service(collection)?)?;
+        }
         if let Some(binding) = status.binding.as_ref().filter(|_| status.stored_usable && status.identity_verified) {
             let has_media = {
                 let s = self.state();
                 with_tracking_access(|| s.store.as_ref().ok_or(Error::Database)?.apply_intents(binding.id))?
                     .iter().any(|i| i.media.is_some())
             };
-            if has_media { self.replay_media_intents(collection, &self.media_service(collection)?)?; }
+            if has_media {
+                let media = self.media_service(collection)?;
+                if let Some(resume) = resume {
+                    self.replay_resumed_media_intents(collection, &media, resume)?;
+                } else {
+                    self.replay_media_intents(collection, &media)?;
+                }
+            }
         }
         let has_work = {
             let s = self.state();
@@ -250,8 +277,11 @@ impl Runtime {
         let account = self.publication_account()?;
         let decision = self.publication_decision()?;
         let file = self.inputs.files.identity(collection.path())?;
-        let guard = {
+        let claim_incoming = || {
             let mut s = self.state();
+            if let Some(resume) = resume {
+                self.check_resume_reconciliation_locked(resume, &s, collection)?;
+            }
             if s.incoming.running {
                 return Err(EngineError::Busy {
                     running_op: "cloud incoming".into(),
@@ -336,6 +366,7 @@ impl Runtime {
                 }))
             })?;
             let guard = if let Some(recovery) = recovery {
+                if resume.is_some() { return Err(Error::RecoveryRefused.into()); }
                 let open = with_tracking_access(|| {
                     s.store
                         .as_ref()
@@ -351,11 +382,12 @@ impl Runtime {
                     },
                     recovery: Some(recovery),
                     sdk: None,
+                    resume: None,
                 }
             } else {
                 // A recovery row with no intents must not grant a full receive.
                 if !b.usable || !b.verified {
-                    return Ok(());
+                    return Ok(None);
                 }
                 if account != b.binding.facts.account {
                     return Err(RuntimeError::StaleIncarnation);
@@ -364,22 +396,38 @@ impl Runtime {
                     scan: anchor,
                     recovery: None,
                     sdk: None,
+                    resume: resume.cloned(),
                 }
             };
             s.incoming.running = true;
-            guard
+            Ok(Some(guard))
         };
+        let guard = match resume {
+            Some(resume) => resume.with_publication_ownership(claim_incoming),
+            None => claim_incoming(),
+        }?;
+        let Some(guard) = guard else { return Ok(()); };
         let running = Running(self.state.clone(), self.incoming_idle.clone());
         self.with_incoming(&guard, collection, |_| Ok(()))?;
         self.replay_ordinary(collection, &guard, timeout, guard.recovery.is_some())?.into_result()?;
         drop(running);
         if guard.recovery.is_some() && self.apply_intents(guard.binding)?.is_empty() {
-            self.settle_before_transition(collection, timeout)?;
+            self.settle_before_transition_inner(collection, timeout, resume)?;
         }
         Ok(())
     }
 
+    fn with_incoming_resume_ownership<T>(guard: &IncomingGuard, work: impl FnOnce() -> T) -> T {
+        match &guard.resume {
+            Some(resume) => resume.with_publication_ownership(work),
+            None => work(),
+        }
+    }
+
     fn check_incoming_locked(s: &State, guard: &IncomingGuard) -> Result<(), RuntimeError> {
+        if let Some(resume) = &guard.resume {
+            resume.check_tracking_locked(s)?;
+        }
         if let Some(sdk) = &guard.sdk {
             Self::sdk_locked(s, sdk)?;
         }
@@ -428,6 +476,15 @@ impl Runtime {
         collection: &Collection,
         work: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
     ) -> Result<T, RuntimeError> {
+        if let Some(resume) = &guard.resume {
+            if guard.recovery.is_some() || guard.sdk.is_some() || guard.scan != resume.scan_guard() {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            return self.with_resume_reconciliation(resume, collection, |s| {
+                Self::check_incoming_locked(s, guard)?;
+                work(s)
+            });
+        }
         let Some(r) = &guard.recovery else {
             return self.with_scan(&guard.scan, collection, |s| {
                 Self::check_incoming_locked(s, guard)?;
@@ -834,6 +891,7 @@ impl Runtime {
         let guard = IncomingGuard {
             scan: guard,
             recovery: None,
+            resume: None,
             sdk: sdk.map(str::to_owned),
         };
         let _running = Running(self.state.clone(), self.incoming_idle.clone());
@@ -1048,9 +1106,12 @@ impl Runtime {
                     }
                     mapped
                 };
-                let applied = {
+                let applied = Self::with_incoming_resume_ownership(&writer_guard, || {
                     let crt = ctx.scope().col()?.created.0;
                     let mut s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
+                    if let Some(resume) = &writer_guard.resume {
+                        resume.check_locked(&s)?;
+                    }
                     with_tracking_access(|| {
                         Self::check_incoming_locked(&s, &writer_guard)?;
                         if !Self::writer_crt_equal_locked(&s, binding, crt)? {
@@ -1062,8 +1123,7 @@ impl Runtime {
                             apply(ctx, &mut s, &writer_guard, &directory, entries, replay_of)
                         }
                     })
-                    .map_err(capture)?
-                };
+                }).map_err(capture)?;
                 // Still inside the journalled writer, before collection COMMIT,
                 // but neither runtime state nor TRACKING_ACCESS is held.
                 if applied.is_some() {
@@ -1078,10 +1138,15 @@ impl Runtime {
                 }
                 // A callback may have invalidated the opening while paused.
                 let crt = ctx.scope().col()?.created.0;
-                let s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
-                let equal = with_tracking_access(|| {
-                    Self::check_incoming_locked(&s, &writer_guard)?;
-                    Self::writer_crt_equal_locked(&s, binding, crt)
+                let equal = Self::with_incoming_resume_ownership(&writer_guard, || {
+                    let s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
+                    if let Some(resume) = &writer_guard.resume {
+                        resume.check_locked(&s)?;
+                    }
+                    with_tracking_access(|| {
+                        Self::check_incoming_locked(&s, &writer_guard)?;
+                        Self::writer_crt_equal_locked(&s, binding, crt)
+                    })
                 }).map_err(capture)?;
                 if applied.is_some() && !equal {
                     return Err(EngineError::Cancelled);

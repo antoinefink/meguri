@@ -165,7 +165,18 @@ pub(crate) struct AdmissionClosures {
     ordinary: Arc<()>,
     handoff_revision: Option<u64>,
 }
+/// An observation only: Runtime's committed Resume owns any local authority.
+#[derive(Clone)]
+pub(crate) struct LocalResumeObservation {
+    document: ProviderDocument,
+    closures: AdmissionClosures,
+    pub(crate) local_only: bool,
+}
 impl AdmissionClosures {
+    pub(crate) fn unchanged_since(&self, issued: &Self) -> bool {
+        Arc::ptr_eq(&self.ordinary, &issued.ordinary)
+            && self.handoff_revision == issued.handoff_revision
+    }
     pub(crate) fn owns_handoff_since(&self, issued: &Self, handoff: &HandoffIntent) -> bool {
         Arc::ptr_eq(&self.ordinary, &issued.ordinary)
             && self.handoff_revision == Some(handoff.revision())
@@ -296,6 +307,40 @@ impl Authority {
             && state.document.as_ref().is_ok_and(|doc| doc.permits_icloud()
                 && doc.binding.as_ref().is_some_and(|b| b.matches(binding)));
         sample(&state.document, permits, &state.closures)
+    }
+    pub(crate) fn observe_local_resume(&self, binding: &Binding) -> Result<Option<LocalResumeObservation>, StorageError> {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let doc = state.document.as_ref().map_err(Clone::clone)?;
+        if !self.open.load(Ordering::SeqCst) || doc.selection != Selection::ICloud
+            || doc.settings.paused || doc.handoff.is_some() || state.closures.handoff_revision.is_some()
+        { return Err(invalid()); }
+        let matched = doc.binding.as_ref().is_some_and(|b| b.matches(binding));
+        if !doc.legacy_binding_pending
+            && (matched || (doc.settings.enabled && doc.binding.is_none())) {
+            return Ok(Some(LocalResumeObservation {
+                document: doc.clone(), closures: state.closures.clone(),
+                local_only: !doc.settings.enabled || doc.binding.is_none(),
+            }));
+        }
+        // Existing ordinary mapped and pending legacy qualification retain their
+        // original admission path. No foreign mapping can activate through Resume.
+        if doc.settings.enabled && (matched || (doc.legacy_binding_pending && doc.binding.is_none())) {
+            Ok(None)
+        } else {
+            Err(invalid())
+        }
+    }
+    /// Terminal bounded L3 comparison: no callbacks, I/O or other lock acquisition.
+    pub(crate) fn local_resume_is_current(&self, issued: &LocalResumeObservation, binding: &Binding) -> bool {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        self.open.load(Ordering::SeqCst) && (issued.local_only || self.writers.load(Ordering::SeqCst))
+            && Arc::ptr_eq(&state.closures.ordinary, &issued.closures.ordinary)
+            && state.closures.handoff_revision.is_none()
+            && state.document.as_ref().is_ok_and(|doc| doc == &issued.document
+                && doc.selection == Selection::ICloud && !doc.settings.paused && doc.handoff.is_none()
+                && !doc.legacy_binding_pending
+                && (doc.binding.as_ref().is_some_and(|b| b.matches(binding))
+                    || (doc.settings.enabled && doc.binding.is_none())))
     }
     /// Original completions can settle during a durable handoff. Native enqueue
     /// continues to use permits_icloud_binding, which closes immediately.

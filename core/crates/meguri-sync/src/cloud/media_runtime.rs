@@ -1,5 +1,6 @@
 use super::*;
 use crate::cloud::policy::PolicyWork;
+use super::resume_impl::ResumeReconciliation;
 use crate::cloud::{
     incoming::{ApplyIntent, ApplyKey, ApplyKeyRole},
     media::{self as m, *},
@@ -13,7 +14,9 @@ use std::collections::{BTreeMap, BTreeSet};
 mod sdk;
 
 #[derive(Clone)]
-struct MediaRecoveryAuthority(Authority, Option<crate::cloud::adoption::RecoveryKind>);
+struct MediaRecoveryAuthority(
+    Authority, Option<crate::cloud::adoption::RecoveryKind>, Option<ResumeReconciliation>,
+);
 impl std::ops::Deref for MediaRecoveryAuthority {
     type Target = Authority;
     fn deref(&self) -> &Authority {
@@ -32,6 +35,7 @@ type MediaFeedApplyCommit = (
 enum MediaFeedAuthority<'a> {
     Ordinary(Option<&'a Authority>),
     Transition(&'a MediaRecoveryAuthority),
+    Resume(&'a MediaRecoveryAuthority),
 }
 
 struct PendingMediaApply {
@@ -234,17 +238,24 @@ impl Runtime {
             binding: b.binding.id, open: b.open_counter, incarnation: s.incarnation,
             generation: evidence.generation.0, file, account, adapter_token: Self::adapter_guard_locked(&s).token,
             media_epoch: s.media.epoch,
-        }, Some(op));
+        }, Some(op), None);
         Self::check_media_recovery_locked(&s, &a)?;
         Ok(a)
     }
     fn validate_media_recovery_file(&self, collection: &Collection, a: &MediaRecoveryAuthority) -> Result<(), RuntimeError> {
+        if let Some(resume) = &a.2 {
+            self.with_resume_reconciliation(resume, collection, |_| Ok(()))?;
+        }
         let current = if a.1.is_some() { self.transition_media_authority(collection)? }
-            else { MediaRecoveryAuthority(self.media_authority_for_completion(collection, true)?, None) };
+            else { MediaRecoveryAuthority(self.media_authority_for_completion(collection, true)?, None, a.2.clone()) };
         if current.0 != a.0 || current.1 != a.1 { return Err(RuntimeError::StaleIncarnation); }
         Ok(())
     }
     fn check_media_recovery_locked(s: &State, a: &MediaRecoveryAuthority) -> Result<(), RuntimeError> {
+        if let Some(resume) = &a.2 {
+            resume.check_locked(s)?;
+            with_tracking_access(|| resume.check_tracking_locked(s))?;
+        }
         let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
         let transition = if let Some(op) = &a.1 {
             with_tracking_access(|| -> Result<bool, Error> {
@@ -275,14 +286,24 @@ impl Runtime {
         }
         Ok(())
     }
+    fn with_media_recovery_ownership<T>(
+        a: Option<&MediaRecoveryAuthority>, work: impl FnOnce() -> T,
+    ) -> T {
+        match a.and_then(|a| a.2.as_ref()) {
+            Some(resume) => resume.with_publication_ownership(work),
+            None => work(),
+        }
+    }
     fn with_media_recovery<T>(
         &self,
         a: &MediaRecoveryAuthority,
         work: impl FnOnce(&mut TrackingStore) -> Result<T, Error>,
     ) -> Result<T, RuntimeError> {
-        let mut s = self.state();
-        Self::check_media_recovery_locked(&s, a)?;
-        with_tracking_access(|| work(s.store.as_mut().ok_or(Error::Database)?)).map_err(Into::into)
+        Self::with_media_recovery_ownership(Some(a), || {
+            let mut s = self.state();
+            Self::check_media_recovery_locked(&s, a)?;
+            with_tracking_access(|| work(s.store.as_mut().ok_or(Error::Database)?)).map_err(Into::into)
+        })
     }
     // Durable intent replay is local recovery even while device sync is disabled.
     // Selecting READY input and persisting a NEW intent still require admission.
@@ -291,6 +312,8 @@ impl Runtime {
         a: &MediaRecoveryAuthority,
         work: impl FnOnce(&mut TrackingStore) -> Result<T, Error>,
     ) -> Result<T, RuntimeError> {
+        // A Resume can replay its retained intents, never admit a new one.
+        if a.2.is_some() { return Err(Error::RecoveryRefused.into()); }
         let mut s = self.state();
         Self::check_media_recovery_locked(&s, a)?;
         if !s.bound.as_ref().is_some_and(Bound::crt_equal)
@@ -323,14 +346,16 @@ impl Runtime {
     ) -> Result<T, RuntimeError> {
         self.validate_media_recovery_file(collection, a)?;
         let crt = snapshot.col()?.created.0;
-        let s = self.state();
-        Self::check_media_recovery_locked(&s, a)?;
-        if !s.bound.as_ref().is_some_and(|b| b.current_crt.1 == crt && b.crt_equal())
-            || !with_tracking_access(|| Self::writer_crt_equal_locked(&s, a.binding, crt))?
-        {
-            return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
-        }
-        work()
+        Self::with_media_recovery_ownership(Some(a), || {
+            let s = self.state();
+            Self::check_media_recovery_locked(&s, a)?;
+            if !s.bound.as_ref().is_some_and(|b| b.current_crt.1 == crt && b.crt_equal())
+                || !with_tracking_access(|| Self::writer_crt_equal_locked(&s, a.binding, crt))?
+            {
+                return Err(RuntimeError::Incomplete(Incomplete::RootConfirmationAndSending));
+            }
+            work()
+        })
     }
     fn put_media_state(&self, a: &Authority, ledger: &Ledger) -> Result<(), RuntimeError> {
         let _ = self.adapter_now();
@@ -458,14 +483,14 @@ impl Runtime {
         a: &MediaRecoveryAuthority,
         apply_commit: Option<MediaFeedApplyCommit>,
     ) -> Result<usize, RuntimeError> {
-        if a.1.is_none() {
+        if a.1.is_none() && a.2.is_none() {
             return self.consume_media_feed_inner(collection, media, apply_commit, None);
         }
         self.project_and_commit_media_feed(
             collection,
             media,
             apply_commit,
-            MediaFeedAuthority::Transition(a),
+            if a.2.is_some() { MediaFeedAuthority::Resume(a) } else { MediaFeedAuthority::Transition(a) },
             &mut PolicyWork::default(),
         )
     }
@@ -485,8 +510,8 @@ impl Runtime {
                 }
                 (a, None)
             }
-            MediaFeedAuthority::Transition(authority) => {
-                if authority.1.is_none() {
+            MediaFeedAuthority::Transition(authority) | MediaFeedAuthority::Resume(authority) => {
+                if authority.1.is_none() && authority.2.is_none() {
                     return Err(Error::RecoveryRefused.into());
                 }
                 self.validate_media_recovery_file(collection, authority)?;
@@ -494,11 +519,45 @@ impl Runtime {
             }
         };
         media.check_generation(a.generation)?;
-        media
-            .store()
-            .check_changes_with_boundary(&mut || work.media_effect())
-            .map_err(|error| work.media_error(error))?;
-        let (mut feed_state, intents) = {
+        if let Some((authority, resume)) = recovery.and_then(|a| a.2.as_ref().map(|resume| (a, resume))) {
+            resume.with_publication_ownership(|| {
+                // Full proof: L1 -> file/publication -> State -> bounded L3
+                // -> tracking. Release State/tracking before the file scan.
+                self.with_resume_reconciliation_owned(resume, collection, |_| Ok(()))?;
+                let mut refused = None;
+                let result = media.store().check_changes_with_boundary(&mut || {
+                    // folder.rs also calls this while holding its media DB.
+                    // Never wait for State/L1 or enter tracking/engine reads.
+                    // The only provider sample is terminal, bounded cached L3;
+                    // it detects close/reopen even while L1 excludes reload.
+                    let check = || {
+                        let s = self.state.try_lock().map_err(|_| RuntimeError::StaleIncarnation)?;
+                        self.check_resume_reconciliation_locked(resume, &s, collection)?;
+                        if s.media.epoch != authority.media_epoch
+                            || s.adapter.sdk.as_ref().is_some_and(|sdk| sdk.stopping && sdk.guard == Self::adapter_guard_locked(&s))
+                        {
+                            return Err(RuntimeError::StaleIncarnation);
+                        }
+                        Ok(())
+                    };
+                    if let Err(error) = check() {
+                        refused = Some(error);
+                        return Err(meguri_storage::media::MediaError::Cancelled);
+                    }
+                    work.media_effect()
+                });
+                // Preserve stale Resume rather than reclassifying it as a
+                // policy cancellation or a generic media I/O failure.
+                if let Some(error) = refused { return Err(error); }
+                result.map_err(|error| work.media_error(error))
+            })?;
+        } else {
+            media
+                .store()
+                .check_changes_with_boundary(&mut || work.media_effect())
+                .map_err(|error| work.media_error(error))?;
+        }
+        let (mut feed_state, intents) = Self::with_media_recovery_ownership(recovery, || {
             let state = self.state();
             if let Some(authority) = recovery {
                 Self::check_media_recovery_locked(&state, authority)?;
@@ -506,8 +565,8 @@ impl Runtime {
             with_tracking_access(|| -> Result<_, Error> {
                 let store = state.store.as_ref().ok_or(Error::Database)?;
                 Ok((store.media_ledger(a.binding)?, store.apply_intents(a.binding)?))
-            })?
-        };
+            }).map_err(RuntimeError::from)
+        })?;
         if let Some((authority, _, proposed_ledger, _, _)) = &apply_commit {
             if authority.0 != a || feed_state.revision != proposed_ledger.revision {
                 #[cfg(feature = "test-hooks")]
@@ -518,10 +577,17 @@ impl Runtime {
         }
         let status = media.store().media_feed_status().map_err(media_error)?;
         if status.floor.is_none() {
-            media
-                .store()
-                .set_media_feed_floor(status.feed_id, Some(status.counter))
-                .map_err(media_error)?;
+            if let Some(resume) = recovery.and_then(|a| a.2.as_ref()) {
+                self.with_resume_media_write(resume, collection, |s| {
+                    if s.media.epoch != a.media_epoch
+                        || s.adapter.sdk.as_ref().is_some_and(|sdk| sdk.stopping && sdk.guard == Self::adapter_guard_locked(s))
+                    { return Err(RuntimeError::StaleIncarnation); }
+                    work.effect()?;
+                    media.store().set_media_feed_floor(status.feed_id, Some(status.counter)).map_err(media_error)
+                })?;
+            } else {
+                media.store().set_media_feed_floor(status.feed_id, Some(status.counter)).map_err(media_error)?;
+            }
         }
         let cursor_start = feed_state.feed.filter(|(id, cursor)| {
             *id == status.feed_id.0
@@ -598,7 +664,7 @@ impl Runtime {
                 continue;
             }
             flags.media_changed = None;
-            let tracked = {
+            let tracked = Self::with_media_recovery_ownership(recovery, || {
                 let state = self.state();
                 if let Some(authority) = recovery {
                     Self::check_media_recovery_locked(&state, authority)?;
@@ -609,8 +675,8 @@ impl Runtime {
                     let name = codec::entity_name(&binding.facts.record_key.0, codec::Kind::MediaName, case.as_bytes())
                         .map_err(|_| Error::InvalidData)?;
                     store.entity_facts(a.binding, &name)
-                })?
-            };
+                }).map_err(RuntimeError::from)
+            })?;
             let ack = tracked.as_ref().and_then(|e| e.acked_payload.as_ref()).and_then(|p| {
                 if let codec::Payload::MediaName(v) = p {
                     Some(v)
@@ -728,55 +794,67 @@ impl Runtime {
         }
         media.check_generation(a.generation)?;
         let now_ms = self.media_now()?;
-        let mut state = self.state();
-        if let Some(authority) = recovery {
-            Self::check_media_recovery_locked(&state, authority)?;
-        }
-        let bound = state.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
-        if bound.binding.id != a.binding
-            || bound.open_counter != a.open
-            || state.incarnation != a.incarnation
-            || bound.file != a.file
-        {
-            return Err(RuntimeError::StaleIncarnation);
-        }
-        if let Some((authority, ..)) = &apply_commit {
-            Self::check_media_recovery_locked(&state, authority)?;
-        }
-        state.media.observed_now_ms = now_ms;
-        let (changed_work, retained_floor) = with_tracking_access(|| -> Result<_, Error> {
-            let store = state.store.as_mut().ok_or(Error::Database)?;
-            let changed_work = store.commit_media_feed(
-                a.binding,
-                &feed_state,
-                &file_changes,
-                (a.open, collection.last_seq().0, a.generation),
-                now_ms,
-                apply_commit
-                    .as_ref()
-                    .map(|(_, intent, _, proposals, clear)| (intent, proposals.as_slice(), *clear)),
-            );
-            #[cfg(feature = "test-hooks")]
-            let changed_work = changed_work.inspect_err(|error| {
-                let (kind, variant) = RuntimeError::Tracking(*error).refusal_tags_for_testing();
-                eprintln!("cloudMedia.commitRefused site=feedCommit errorKind={kind} variant={variant}");
-            });
-            let changed_work = changed_work?;
-            Ok((changed_work, store.media_floor(feed.status.feed_id.0)?))
+        let retained_floor = Self::with_media_recovery_ownership(recovery, || {
+            let mut state = self.state();
+            if let Some(authority) = recovery {
+                Self::check_media_recovery_locked(&state, authority)?;
+            }
+            let bound = state.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+            if bound.binding.id != a.binding
+                || bound.open_counter != a.open
+                || state.incarnation != a.incarnation
+                || bound.file != a.file
+            {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            if let Some((authority, ..)) = &apply_commit {
+                Self::check_media_recovery_locked(&state, authority)?;
+            }
+            state.media.observed_now_ms = now_ms;
+            let (changed_work, retained_floor) = with_tracking_access(|| -> Result<_, Error> {
+                let store = state.store.as_mut().ok_or(Error::Database)?;
+                let changed_work = store.commit_media_feed(
+                    a.binding,
+                    &feed_state,
+                    &file_changes,
+                    (a.open, collection.last_seq().0, a.generation),
+                    now_ms,
+                    apply_commit
+                        .as_ref()
+                        .map(|(_, intent, _, proposals, clear)| (intent, proposals.as_slice(), *clear)),
+                );
+                #[cfg(feature = "test-hooks")]
+                let changed_work = changed_work.inspect_err(|error| {
+                    let (kind, variant) = RuntimeError::Tracking(*error).refusal_tags_for_testing();
+                    eprintln!("cloudMedia.commitRefused site=feedCommit errorKind={kind} variant={variant}");
+                });
+                let changed_work = changed_work?;
+                Ok((changed_work, store.media_floor(feed.status.feed_id.0)?))
+            })?;
+            if recovery.is_some() {
+                // notify_media_pending_locked may emit immediately. A later
+                // ordinary admitted handler owns that notification.
+                state.media.pending_notification |= changed_work;
+            } else {
+                self.notify_media_pending_locked(&mut state, changed_work)?;
+            }
+            drop(state);
+            Ok::<_, RuntimeError>(retained_floor)
         })?;
-        if recovery.is_some() {
-            // notify_media_pending_locked may emit immediately. A later
-            // ordinary admitted handler owns that notification.
-            state.media.pending_notification |= changed_work;
-        } else {
-            self.notify_media_pending_locked(&mut state, changed_work)?;
-        }
-        drop(state);
         if let Some(retained_floor) = retained_floor {
-            media
-                .store()
-                .set_media_feed_floor(MediaFeedId(feed.status.feed_id.0), Some(retained_floor))
-                .map_err(media_error)?;
+            if let Some(resume) = recovery.and_then(|a| a.2.as_ref()) {
+                self.with_resume_media_write(resume, collection, |s| {
+                    if s.media.epoch != a.media_epoch
+                        || s.adapter.sdk.as_ref().is_some_and(|sdk| sdk.stopping && sdk.guard == Self::adapter_guard_locked(s))
+                    { return Err(RuntimeError::StaleIncarnation); }
+                    work.effect()?;
+                    media.store().set_media_feed_floor(MediaFeedId(feed.status.feed_id.0), Some(retained_floor))
+                        .map_err(media_error)
+                })?;
+            } else {
+                media.store().set_media_feed_floor(MediaFeedId(feed.status.feed_id.0), Some(retained_floor))
+                    .map_err(media_error)?;
+            }
         }
         Ok(feed.items.len())
     }
@@ -1809,7 +1887,7 @@ impl Runtime {
         pending: PendingMediaApply,
     ) -> Result<(), RuntimeError> {
         self.with_media(a, |_| Ok(()))?;
-        self.begin_local_media_apply(collection, media, &MediaRecoveryAuthority(a.clone(), None), pending)
+        self.begin_local_media_apply(collection, media, &MediaRecoveryAuthority(a.clone(), None, None), pending)
     }
     fn begin_local_media_apply(
         &self,
@@ -2039,7 +2117,7 @@ impl Runtime {
                     return Err(engine_error("media rewrite generation"));
                 }
                 let crt = ctx.scope().col()?.created.0;
-                {
+                Self::with_media_recovery_ownership(Some(&authority), || {
                     let s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
                     Self::check_media_recovery_locked(&s, &authority).map_err(engine_error)?;
                     if !with_tracking_access(|| Self::writer_crt_equal_locked(&s, authority.binding, crt))
@@ -2047,7 +2125,8 @@ impl Runtime {
                     {
                         return Err(EngineError::Cancelled);
                     }
-                }
+                    Ok(())
+                })?;
                 for k in &mut planned.keys {
                     let id = i64::from_be_bytes(
                         k.key
@@ -2091,14 +2170,16 @@ impl Runtime {
                     k.after_payload = Some(after.clone());
                     crate::cloud::row_payload::stage_payload(ctx.scope(), &after).map_err(engine_error)?;
                 }
-                let mut s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
-                Self::check_media_recovery_locked(&s, &authority).map_err(engine_error)?;
-                with_tracking_access(|| -> Result<(), EngineError> {
-                    if !Self::writer_crt_equal_locked(&s, authority.binding, crt).map_err(engine_error)? {
-                        return Err(EngineError::Cancelled);
-                    }
-                    s.store.as_mut().ok_or(Error::Database).map_err(engine_error)?
-                        .update_media_intent(&planned).map_err(engine_error)
+                Self::with_media_recovery_ownership(Some(&authority), || {
+                    let mut s = StateGuard::new(shared.lock().unwrap_or_else(PoisonError::into_inner));
+                    Self::check_media_recovery_locked(&s, &authority).map_err(engine_error)?;
+                    with_tracking_access(|| -> Result<(), EngineError> {
+                        if !Self::writer_crt_equal_locked(&s, authority.binding, crt).map_err(engine_error)? {
+                            return Err(EngineError::Cancelled);
+                        }
+                        s.store.as_mut().ok_or(Error::Database).map_err(engine_error)?
+                            .update_media_intent(&planned).map_err(engine_error)
+                    })
                 })?;
                 Ok(planned)
             },
@@ -2125,7 +2206,7 @@ impl Runtime {
         if intent.native_file != a.file {
             return Err(RuntimeError::FileIdentityUnavailable);
         }
-        if a.1.is_some() {
+        if a.1.is_some() || a.2.is_some() {
             self.validate_media_recovery_file(collection, a)?;
         }
         let _job = media.try_job(MediaJobKind::CheckMedia)?;
@@ -2321,7 +2402,7 @@ impl Runtime {
         moved_ran: bool,
         snapshot: &meguri_engine::Snapshot<'_>,
     ) -> Result<(), RuntimeError> {
-        if a.1.is_some() {
+        if a.1.is_some() || a.2.is_some() {
             self.validate_media_recovery_file(collection, a)?;
         }
         let apply = intent.media.as_ref().ok_or(Error::InvalidData)?;
@@ -2633,7 +2714,7 @@ impl Runtime {
         a: &MediaRecoveryAuthority,
         intent: &ApplyIntent,
     ) -> Result<bool, RuntimeError> {
-        if a.1.is_some() {
+        if a.1.is_some() || a.2.is_some() {
             self.validate_media_recovery_file(collection, a)?;
         }
         self.with_media_recovery(a, |_| Ok(()))?;
@@ -2692,12 +2773,45 @@ impl Runtime {
         }
         Ok(())
     }
+    fn resumed_media_authority(
+        &self, collection: &Collection, resume: &ResumeReconciliation,
+    ) -> Result<MediaRecoveryAuthority, RuntimeError> {
+        self.with_resume_reconciliation(resume, collection, |_| Ok(()))?;
+        let a = MediaRecoveryAuthority(
+            self.media_authority_for_completion(collection, true)?, None, Some(resume.clone()),
+        );
+        self.validate_media_recovery_file(collection, &a)?;
+        Ok(a)
+    }
+
+    pub(super) fn consume_resumed_media_feed(
+        &self, collection: &Collection, media: &MediaService, resume: &ResumeReconciliation,
+    ) -> Result<usize, RuntimeError> {
+        let a = self.resumed_media_authority(collection, resume)?;
+        self.consume_recovery_media_feed(collection, media, &a, None)
+    }
+
+    pub(super) fn replay_resumed_media_intents(
+        &self, collection: &Collection, media: &MediaService, resume: &ResumeReconciliation,
+    ) -> Result<(), RuntimeError> {
+        let a = self.resumed_media_authority(collection, resume)?;
+        let intents = self.with_media_recovery(&a, |s| s.apply_intents(a.binding))?;
+        for intent in intents.into_iter().filter(|i| i.media.is_some()) {
+            if self.state().bound.as_ref().is_some_and(Bound::crt_equal) {
+                self.execute_media_apply(collection, media, &a, intent)?;
+            } else if !self.settle_committed_media(collection, media, &a, &intent)? {
+                return Err(Error::RecoveryRefused.into());
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn replay_media_intents(
         &self,
         collection: &Collection,
         media: &MediaService,
     ) -> Result<usize, RuntimeError> {
-        let a = MediaRecoveryAuthority(self.media_authority(collection, true)?, None);
+        let a = MediaRecoveryAuthority(self.media_authority(collection, true)?, None, None);
         let intents = self.with_media_recovery(&a, |s| s.apply_intents(a.binding))?;
         if intents.iter().all(|intent| intent.media.is_none()) {
             return Ok(0);
@@ -2900,7 +3014,7 @@ impl Runtime {
         media: &MediaService,
     ) -> Result<usize, RuntimeError> {
         self.consume_media_feed(collection, media)?;
-        let a = MediaRecoveryAuthority(self.media_authority(collection, true)?, None);
+        let a = MediaRecoveryAuthority(self.media_authority(collection, true)?, None, None);
         self.media_recovery_io(collection, &a, || Ok(()))?;
         // Recovery above still settles required local feed/intent work. Only
         // selection of NEW media input is skipped after permanent media loss.
@@ -3523,7 +3637,7 @@ mod recovery_authority_tests {
         state.adapter.paused = true;
         state.media.paused = true;
         state.media.enabled = Some(false);
-        (state, MediaRecoveryAuthority(authority, None))
+        (state, MediaRecoveryAuthority(authority, None, None))
     }
 
     #[test]

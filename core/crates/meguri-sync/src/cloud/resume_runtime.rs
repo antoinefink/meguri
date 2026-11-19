@@ -9,7 +9,93 @@ use std::collections::{BTreeMap, BTreeSet};
 
 type ResumeUnsentCountsWithExactnessAndDependencyHolds = (BTreeMap<codec::Kind, u64>, bool, BTreeSet<String>);
 
+/// Owned by one validated, durably committed Resume and its local retained
+/// intent replay. No SDK/intake API or runtime field retains this authority.
+#[derive(Clone)]
+pub(super) struct ResumeReconciliation {
+    runtime: std::sync::Weak<Mutex<State>>,
+    scan: ScanGuard,
+    collection: Collection,
+    binding: Binding,
+    adapter: super::super::adapter::Guard,
+    decision: DecisionSnapshot,
+    provider: Option<(Arc<crate::provider::Authority>, Option<crate::provider::LocalResumeObservation>)>,
+}
+
 impl Runtime {
+    pub(super) fn with_resume_reconciliation<T>(
+        &self,
+        resume: &ResumeReconciliation,
+        collection: &Collection,
+        work: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        // L1 -> file/publication reads -> L2 -> bounded L3 sample (released)
+        // -> local tracking. Never acquire L1 from State or tracking access.
+        resume.with_publication_ownership(|| self.with_resume_reconciliation_owned(resume, collection, work))
+    }
+
+    /// Caller retains Resume's publication ownership; never reacquire L1 here.
+    pub(super) fn with_resume_reconciliation_owned<T>(
+        &self,
+        resume: &ResumeReconciliation,
+        collection: &Collection,
+        work: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        self.with_resume_checked_state_owned(resume, collection, true, work)
+    }
+
+    /// Short local media writes retain L1 and checked State, but not tracking.
+    pub(super) fn with_resume_media_write<T>(
+        &self,
+        resume: &ResumeReconciliation,
+        collection: &Collection,
+        work: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        resume.with_publication_ownership(|| {
+            self.with_resume_checked_state_owned(resume, collection, false, work)
+        })
+    }
+
+    /// Caller retains L1. Sample the provider before tracking; keep State until
+    /// work returns. Only tracking callbacks serialize work with tracking access.
+    fn with_resume_checked_state_owned<T>(
+        &self,
+        resume: &ResumeReconciliation,
+        collection: &Collection,
+        serialize_work: bool,
+        work: impl FnOnce(&mut State) -> Result<T, RuntimeError>,
+    ) -> Result<T, RuntimeError> {
+        if self.publication_decision()? != resume.decision {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        self.with_scan_file(&resume.scan, collection.path(), |s| {
+            self.check_resume_reconciliation_locked(resume, s, collection)?;
+            if serialize_work {
+                with_tracking_access(|| {
+                    resume.check_tracking_locked(s)?;
+                    work(s)
+                })
+            } else {
+                with_tracking_access(|| resume.check_tracking_locked(s))?;
+                work(s)
+            }
+        })
+    }
+
+    /// State is already held; this must precede global tracking access.
+    pub(super) fn check_resume_reconciliation_locked(
+        &self, resume: &ResumeReconciliation, s: &State, collection: &Collection,
+    ) -> Result<(), RuntimeError> {
+        if std::sync::Weak::as_ptr(&resume.runtime) != Arc::as_ptr(&self.state)
+            || collection.path() != resume.collection.path()
+            || !collection.is_current() || collection.generation() != resume.scan.generation
+        { return Err(RuntimeError::StaleIncarnation); }
+        resume.check_locked(s)
+    }
+
+    pub(super) fn resume_reconciliation_matches(resume: &ResumeReconciliation, scan: &ScanGuard) -> bool {
+        &resume.scan == scan
+    }
     /// R11: a completed matching process read can reaffirm the original stopped
     /// owner's ready preview. This grants no usability or SDK verification.
     pub(super) fn resume_account_reaffirmation_locked(
@@ -249,7 +335,7 @@ impl Runtime {
         &self,
         work: &mut PolicyWork,
     ) -> Result<Option<BindingId>, RuntimeError> {
-        let (context, preview) = {
+        let (context, preview, provider) = {
             let s = self.state();
             work.check()?;
             let Some((p, ready)) = s.publication.preview.as_ref() else {
@@ -261,11 +347,38 @@ impl Runtime {
             let Some(context) = s.publication.resume.clone() else {
                 return Ok(None);
             };
-            (context, p.clone())
+            // Committed Pause hides this offer without reading the account or
+            // consuming the original decision. Disabled alone is not Pause.
+            let provider = s.provider.as_ref().map(|provider| {
+                let (paused, closures) = provider.with_admission_sample(&context.binding, |document, _, closures| {
+                    (document.as_ref().is_ok_and(|doc| doc.selection == crate::provider::Selection::ICloud
+                        && doc.settings.paused && doc.handoff.is_none()), closures.clone())
+                });
+                (provider.clone(), paused, closures)
+            });
+            if provider.as_ref().is_some_and(|(_, paused, _)| *paused) {
+                return Ok(None);
+            }
+            (context, p.clone(), provider)
         };
-        if self.validate_resume_providers(&context, &preview).is_err() {
-            let mut s = self.state();
-            work.check()?;
+        let validation = self.validate_resume_providers(&context, &preview);
+        let mut s = self.state();
+        work.check()?;
+        // A configured transition during the provider read makes its result
+        // stale. Sample bounded L3 under State before clearing or offering.
+        match (&provider, &s.provider) {
+            (Some((issued, _, closures)), Some(current)) if Arc::ptr_eq(issued, current) => {
+                let current = current.with_admission_sample(&context.binding, |document, _, current| {
+                    current.unchanged_since(closures)
+                        && !document.as_ref().is_ok_and(|doc| doc.selection == crate::provider::Selection::ICloud
+                            && doc.settings.paused && doc.handoff.is_none())
+                });
+                if !current { return Ok(None); }
+            }
+            (None, None) => (),
+            _ => return Ok(None),
+        }
+        if validation.is_err() {
             if s.publication.preview.as_ref().is_some_and(|(p, _)| p.id == preview.id) && s.publication.resume.is_some()
             {
                 work.effect()?;
@@ -273,8 +386,6 @@ impl Runtime {
             }
             return Ok(None);
         }
-        let s = self.state();
-        work.check()?;
         if s.publication.preview.as_ref() != Some(&(preview.clone(), true))
             || !Self::resume_reads_match(&context, &preview)
         {
@@ -294,7 +405,11 @@ impl Runtime {
 
     pub fn confirm_connection_resume(&self, preview: &Preview, collection: &Collection) -> Result<(), RuntimeError> {
         self.resume_binding_retained(
-            preview.resume_binding.ok_or(PublicationError::NotOffered)?,
+            preview.resume_binding.ok_or_else(|| {
+                #[cfg(feature = "test-hooks")]
+                eprintln!("cloudResume.refused site=requestedBindingMissing");
+                PublicationError::NotOffered
+            })?,
             Some(preview),
             collection,
         )
@@ -308,8 +423,16 @@ impl Runtime {
     ) -> Result<(), RuntimeError> {
         let (context, preview) = {
             let mut s = self.state();
-            let c = s.publication.resume.as_ref().ok_or(PublicationError::NotOffered)?;
-            let (p, ready) = s.publication.preview.as_ref().ok_or(PublicationError::NotOffered)?;
+            let c = s.publication.resume.as_ref().ok_or_else(|| {
+                #[cfg(feature = "test-hooks")]
+                eprintln!("cloudResume.refused site=retainedContextMissing");
+                PublicationError::NotOffered
+            })?;
+            let (p, ready) = s.publication.preview.as_ref().ok_or_else(|| {
+                #[cfg(feature = "test-hooks")]
+                eprintln!("cloudResume.refused site=retainedPreviewMissing");
+                PublicationError::NotOffered
+            })?;
             if !ready
                 || p.decision != ConnectDecision::ConfirmResume
                 || c.binding.id != binding
@@ -317,6 +440,8 @@ impl Runtime {
                 || !Self::resume_reads_match(c, p)
                 || expected.is_some_and(|expected| expected != p)
             {
+                #[cfg(feature = "test-hooks")]
+                eprintln!("cloudResume.refused site=retainedPreviewChanged");
                 return Err(PublicationError::NotOffered.into());
             }
             let retained = (c.clone(), p.clone());
@@ -325,28 +450,60 @@ impl Runtime {
             s.publication.resume = None;
             retained
         };
-        self.validate_resume_providers(&context, &preview)?;
-        self.validate_resume_context_locked(&self.state(), &context)?;
+        self.validate_resume_providers(&context, &preview).inspect_err(|_| {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudResume.refused site=initialProviders");
+        })?;
+        {
+            let s = self.state();
+            self.validate_resume_context_locked(&s, &context).inspect_err(|_| {
+                #[cfg(feature = "test-hooks")]
+                eprintln!("cloudResume.refused site=initialContext adapterGuardDiffers={}",
+                    Self::adapter_guard_locked(&s) != context.adapter);
+            })?;
+        }
         self.wait_incoming_idle();
         let lease = collection.reader(ReaderRole::Cloud)?;
         if !collection.is_current()
             || collection.generation() != context.scan.generation
             || collection.path() != context.collection.path()
         {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudResume.refused site=collectionChanged");
             return Err(PublicationError::NotOffered.into());
         }
         // Immediate precommit provider reads run outside both guards.
-        self.validate_resume_providers(&context, &preview)?;
+        self.validate_resume_providers(&context, &preview).inspect_err(|_| {
+            #[cfg(feature = "test-hooks")]
+            eprintln!("cloudResume.refused site=commitProviders");
+        })?;
         let durable_file =
             DurableFileIdentity::from_evidence(collection.open_evidence()?.cloud_file, context.scan.file)?;
-        {
+        let provider = self.state().provider.clone();
+        let activate = || {
             let mut s = self.state();
-            self.validate_resume_context_locked(&s, &context)?;
+            self.validate_resume_context_locked(&s, &context).inspect_err(|_| {
+                #[cfg(feature = "test-hooks")]
+                eprintln!("cloudResume.refused site=commitContext adapterGuardDiffers={}",
+                    Self::adapter_guard_locked(&s) != context.adapter);
+            })?;
             if s.publication.preview.as_ref() != Some(&(preview, false)) || s.incoming.running {
+                #[cfg(feature = "test-hooks")]
+                eprintln!("cloudResume.refused site=commitPreviewChangedOrIncomingRunning");
                 return Err(PublicationError::NotOffered.into());
             }
             let incarnation = s.incarnation.checked_add(1).ok_or(Error::InvalidData)?;
             let token = s.adapter.token.checked_add(1).ok_or(Error::InvalidData)?;
+            let mut active = context.binding.clone();
+            active.facts.state = BindingState::Active;
+            // Observe closure provenance before activation. Qualification must
+            // not turn a close/reopen during this Resume into fresh authority.
+            if s.provider.as_ref().map(Arc::as_ptr) != provider.as_ref().map(Arc::as_ptr) {
+                return Err(RuntimeError::StaleIncarnation);
+            }
+            let provider = provider.as_ref().map(|p| {
+                p.observe_local_resume(&active).map(|observation| (p.clone(), observation))
+            }).transpose().map_err(|_| RuntimeError::IdentityUnverified)?;
             let resumed = with_tracking_access(|| {
                 s.store.as_mut().ok_or(Error::Database)?.resume_isolated_binding(
                     &context.binding,
@@ -396,12 +553,45 @@ impl Runtime {
             b.file = context.scan.file;
             b.usable = true;
             b.verified = true;
-        }
+            let binding = b.binding.clone();
+            Ok(ResumeReconciliation {
+                runtime: Arc::downgrade(&self.state),
+                scan: ScanGuard { incarnation, ..context.scan.clone() },
+                collection: collection.clone(),
+                binding,
+                adapter: Self::adapter_guard_locked(&s),
+                decision: context.decision.clone(),
+                provider,
+            })
+        };
+        let mut reconciliation = match &provider {
+            Some(provider) => provider.with_publication_ownership(activate),
+            None => activate(),
+        }?;
         drop(lease);
-        self.qualify_provider_binding()?;
+        // Qualification of an unmapped service choice would close the exact
+        // pre-accept observation. Only ordinary mapped/legacy callers qualify.
+        if !reconciliation.is_local_resume() {
+            self.qualify_provider_binding()?;
+            // Legacy qualification may publish its real mapping. Freeze that
+            // completed ordinary authority before any retained work is held.
+            if let Some((provider, None)) = &reconciliation.provider {
+                let observation = provider.with_publication_ownership(|| {
+                    self.with_scan_file(&reconciliation.scan, collection.path(), |s| {
+                        self.check_resume_reconciliation_locked(&reconciliation, s, collection)?;
+                        provider.observe_local_resume(&reconciliation.binding)
+                            .map_err(|_| RuntimeError::IdentityUnverified)?
+                            .ok_or(RuntimeError::IdentityUnverified)
+                    })
+                })?;
+                if let Some((_, retained)) = &mut reconciliation.provider {
+                    *retained = Some(observation);
+                }
+            }
+        }
         // V2.4 step 8: reconcile_binding first settles re-key, ordinary apply,
         // and media apply intents, then takes the whole held-snapshot scan.
-        self.reconcile_binding(collection, &self.media_service(collection)?, Duration::from_secs(30))?;
+        self.reconcile_resumed_binding(collection, &self.media_service(collection)?, Duration::from_secs(30), reconciliation)?;
         Ok(())
     }
 
@@ -570,5 +760,58 @@ impl Runtime {
             *counts.get_mut(&kind).ok_or(Error::InvalidData)? += 1;
         }
         Ok((counts, exact, dependency_held))
+    }
+}
+
+impl ResumeReconciliation {
+    /// Caller has sampled the provider and now holds tracking access.
+    pub(super) fn check_tracking_locked(&self, s: &State) -> Result<(), RuntimeError> {
+        let store = s.store.as_ref().ok_or(Error::Database)?;
+        let tracked = store.runtime_binding(self.scan.binding)?;
+        if store.binding(self.scan.binding)?.as_ref() != Some(&self.binding)
+            || tracked.file != Some(self.scan.file) || tracked.open_counter != self.scan.open {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        Ok(())
+    }
+
+    pub(super) fn scan_guard(&self) -> ScanGuard { self.scan.clone() }
+
+    pub(super) fn is_local_resume(&self) -> bool {
+        self.provider.as_ref().is_some_and(|(_, observation)| observation.as_ref().is_some_and(|o| o.local_only))
+    }
+
+    pub(super) fn with_publication_ownership<T>(&self, work: impl FnOnce() -> T) -> T {
+        match &self.provider {
+            Some((provider, _)) => provider.with_publication_ownership(work),
+            None => work(),
+        }
+    }
+
+    // Also used by journalled rewrites before effects and final commit.
+    // The bounded provider sample ends before any tracking access.
+    pub(super) fn check_locked(&self, s: &State) -> Result<(), RuntimeError> {
+        let b = s.bound.as_ref().ok_or(RuntimeError::StaleIncarnation)?;
+        let scan = ScanGuard { invalidation: s.invalidation, binding: b.binding.id, open: b.open_counter,
+            generation: b.evidence.generation, file: b.file, incarnation: s.incarnation };
+        if scan != self.scan || s.invalidation_exhausted || s.tracking_stopped || !b.usable || !b.verified
+            || !self.collection.is_current() || self.collection.generation() != self.scan.generation
+            || b.binding != self.binding || b.binding.facts.state != BindingState::Active
+            || Runtime::adapter_guard_locked(s) != self.adapter
+        { return Err(RuntimeError::StaleIncarnation); }
+        match (&self.provider, &s.provider) {
+            (Some((issued, observation)), Some(current)) if Arc::ptr_eq(issued, current) => {
+                if let Some(observation) = observation {
+                    if !current.local_resume_is_current(observation, &b.binding) {
+                        return Err(RuntimeError::StaleIncarnation);
+                    }
+                } else {
+                    Runtime::provider_admission_locked(s)?;
+                }
+            }
+            (None, None) => (),
+            _ => return Err(RuntimeError::StaleIncarnation),
+        }
+        Ok(())
     }
 }

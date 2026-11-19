@@ -4633,21 +4633,31 @@ fn explicit_resume_after_real_isolated_edit_and_review_is_cursorless_and_require
 
 #[test]
 fn explicit_resume_with_retained_sdk_settles_real_media_intent_before_scan() {
-    resume_media_fixture(false, false);
+    resume_media_fixture(false, false, false);
 }
 
 #[test]
 fn disabled_settings_resume_settles_accepted_media_intent_before_scan_and_enable() {
-    resume_media_fixture(true, false);
+    resume_media_fixture(true, false, false);
 }
 
 #[test]
 fn disabled_settings_refuse_ready_media_intent_admission_and_network_reply() {
-    resume_media_fixture(true, true);
+    resume_media_fixture(true, true, false);
+}
+
+#[test]
+fn reselected_icloud_resume_settles_accepted_media_intent_before_scan_and_acceptance() {
+    resume_media_fixture(false, false, true);
 }
 
 fn disable_device_sync(host: &CoreHost) {
     use cloud::policy::{DeviceEvent, DeviceSettings};
+    let mut settings = host.provider_authority().snapshot().unwrap().settings;
+    settings.enabled = false;
+    settings.paused = false;
+    settings.automatic = false;
+    host.save_provider_settings(settings).unwrap();
     host.cloud_policy_input(DeviceEvent::Settings(DeviceSettings {
         enabled: false,
         paused: false,
@@ -4672,6 +4682,7 @@ fn disabled_settings_resume_with_empty_media_intents_finishes_scan_before_enable
     assert!(runtime.incoming_sdk_instance_for_testing().is_none());
     runtime.adapter_stop_syncing().unwrap();
     disable_device_sync(&host); // The real Settings driver calls adapter_pause(true).
+    let _discovery = host.provider_authority().begin_discovery().unwrap();
     let preview = actual_preview(&host, &mut service, &scope());
     assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
     let requests = service.request_log().unwrap().len();
@@ -4690,7 +4701,7 @@ fn disabled_settings_resume_with_empty_media_intents_finishes_scan_before_enable
     host.close().unwrap();
 }
 
-fn resume_media_fixture(disabled: bool, ready_only: bool) {
+fn resume_media_fixture(disabled: bool, ready_only: bool, reselected: bool) {
     use cloud::entity_codec::{self as codec, Kind, Payload};
     use cloud::runtime::ScanPausePoint;
     use meguri_model::faultpoint::{self, Fault};
@@ -4809,12 +4820,29 @@ fn resume_media_fixture(disabled: bool, ready_only: bool) {
     assert!(runtime.binding_entity(binding.id, &before.name).unwrap().unwrap() == before);
     assert!(runtime.incoming_wal_receipts().is_empty());
     let wal_floor = collection.last_seq();
-    runtime.adapter_stop_syncing().unwrap();
+    if reselected {
+        host.stop_using_icloud().unwrap();
+        runtime.retire_sdk(&old_sdk, false).unwrap();
+        runtime.release_sdk(&old_sdk).unwrap();
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        for destination in [meguri_sync::provider::Selection::LocalOnly, meguri_sync::provider::Selection::ICloud] {
+            let handoff = host.begin_provider_handoff(destination).unwrap();
+            host.finish_provider_handoff(&handoff).unwrap();
+        }
+        let selected = host.provider_authority().snapshot().unwrap();
+        assert_eq!(selected.selection, meguri_sync::provider::Selection::ICloud);
+        assert!(selected.settings.enabled && !selected.settings.paused && selected.binding.is_none());
+        assert!(!selected.legacy_binding_pending && selected.handoff.is_none());
+    } else {
+        runtime.adapter_stop_syncing().unwrap();
+    }
     if disabled {
         disable_device_sync(&host);
     }
     assert!(runtime.apply_intents(binding.id).unwrap() == pending);
     assert!(runtime.inbox_entries(binding.id).unwrap() == inbox);
+    let selected = host.provider_authority().snapshot().unwrap();
+    let _discovery = if disabled { Some(host.provider_authority().begin_discovery().unwrap()) } else { None };
     let preview = actual_preview(&host, &mut service, &scope());
     assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
     let calls = service.request_log().unwrap().len();
@@ -4853,7 +4881,7 @@ fn resume_media_fixture(disabled: bool, ready_only: bool) {
             && receipt.identity().generation().0 == collection.generation().0
             && receipt.through() >= wal_floor
     }));
-    assert_eq!(retained.as_deref(), Some(old_sdk.as_str()));
+    assert_eq!(retained.as_deref(), if reselected { None } else { Some(old_sdk.as_str()) });
     assert!(callback.is_err() && caller.is_err());
     result.expect("Resume worker must not panic").unwrap();
     assert_eq!(service.request_log().unwrap().len(), calls);
@@ -4869,7 +4897,8 @@ fn resume_media_fixture(disabled: bool, ready_only: bool) {
     assert!(!runtime.status().unwrap().scan_required);
     assert!(runtime.register_sdk(false).is_err());
     assert!(runtime.confirm_connection_resume(&preview, &collection).is_err());
-    runtime.release_sdk(&old_sdk).unwrap();
+    assert_eq!(host.provider_authority().snapshot().unwrap(), selected);
+    if !reselected { runtime.release_sdk(&old_sdk).unwrap(); }
     if disabled {
         assert!(!host.cloud_policy_driver().unwrap().state().settings.enabled);
         assert!(runtime.incoming_sdk_instance_for_testing().is_none());
@@ -4878,6 +4907,18 @@ fn resume_media_fixture(disabled: bool, ready_only: bool) {
             "local replay must not unpause the adapter"
         );
     } else {
+        if reselected {
+            assert!(runtime.require_provider_collection_admission().is_err());
+            assert!(runtime.register_sdk(false).is_err());
+            runtime.provider_accept_icloud_connection().unwrap();
+            let settings = host.provider_authority().snapshot().unwrap().settings;
+            host.cloud_policy_input(cloud::policy::DeviceEvent::Settings(cloud::policy::DeviceSettings {
+                enabled: settings.enabled, paused: settings.paused,
+                automatic: settings.automatic, media: settings.media,
+            })).unwrap();
+            let read = runtime.adapter_begin_identity_read(false, None).unwrap();
+            assert!(runtime.adapter_complete_identity_read(read, Account.read_identity(&binding.scope)).unwrap());
+        }
         let (_, cursor, _) = runtime.register_sdk(false).unwrap();
         assert!(cursor.is_none());
     }
@@ -4886,6 +4927,33 @@ fn resume_media_fixture(disabled: bool, ready_only: bool) {
 
 #[test]
 fn cold_stopped_resume_qualifies_current_provider_before_reconciliation() {
+    cold_stopped_resume_fixture(ResumeProviderChoice::EnabledMapped, false);
+}
+
+#[test]
+fn cold_stopped_disabled_mapped_resume_scans_before_provider_acceptance() {
+    cold_stopped_resume_fixture(ResumeProviderChoice::DisabledMapped, false);
+}
+
+#[test]
+fn cold_stopped_reselected_icloud_resume_scans_before_provider_acceptance() {
+    cold_stopped_resume_fixture(ResumeProviderChoice::Reselected, false);
+}
+
+#[test]
+fn disabled_mapped_resume_rejects_provider_reload_before_final_coverage() {
+    cold_stopped_resume_fixture(ResumeProviderChoice::DisabledMapped, true);
+}
+
+#[test]
+fn reselected_icloud_resume_rejects_provider_reload_before_final_coverage() {
+    cold_stopped_resume_fixture(ResumeProviderChoice::Reselected, true);
+}
+
+#[derive(Clone, Copy)]
+enum ResumeProviderChoice { EnabledMapped, DisabledMapped, Reselected }
+
+fn cold_stopped_resume_fixture(choice: ResumeProviderChoice, reload_before_merge: bool) {
     use meguri_engine::device_state::DeviceState;
     use meguri_sync::provider::Selection;
 
@@ -4910,6 +4978,33 @@ fn cold_stopped_resume_qualifies_current_provider_before_reconciliation() {
     host.stop_using_icloud().unwrap();
     assert_eq!(DeviceState::for_collection(&dir.join("collection.anki2"))
         .settled_publication().unwrap(), Some(publication.clone()));
+    match choice {
+        ResumeProviderChoice::EnabledMapped => {},
+        ResumeProviderChoice::DisabledMapped => {
+            let mut settings = qualified.settings;
+            settings.enabled = false;
+            host.save_provider_settings(settings).unwrap();
+        }
+        ResumeProviderChoice::Reselected => {
+            for destination in [Selection::LocalOnly, Selection::ICloud] {
+                let handoff = host.begin_provider_handoff(destination).unwrap();
+                host.finish_provider_handoff(&handoff).unwrap();
+            }
+        }
+    }
+    let selected = host.provider_authority().snapshot().unwrap();
+    assert_eq!(selected.selection, Selection::ICloud);
+    assert!(!selected.settings.paused && selected.handoff.is_none() && !selected.legacy_binding_pending);
+    match choice {
+        ResumeProviderChoice::EnabledMapped => assert_eq!(selected, qualified),
+        ResumeProviderChoice::DisabledMapped => {
+            assert!(!selected.settings.enabled);
+            assert_eq!(selected.binding, qualified.binding);
+        }
+        ResumeProviderChoice::Reselected => {
+            assert!(selected.settings.enabled && selected.binding.is_none());
+        }
+    }
     host.close().unwrap();
     drop(host);
 
@@ -4918,7 +5013,8 @@ fn cold_stopped_resume_qualifies_current_provider_before_reconciliation() {
     let host = CoreHost::open(config.clone()).unwrap();
     let runtime = host.cloud_runtime().unwrap();
     let generation = host.cloud_connection_generation().unwrap();
-    assert_eq!(host.provider_authority().snapshot().unwrap(), qualified);
+    assert_eq!(host.provider_authority().snapshot().unwrap(), selected);
+    let _discovery = host.provider_authority().begin_discovery().unwrap();
     assert!(host.provider_authority().permits_icloud_account_read());
     assert_cold_resume_closed(&host, &binding);
     let read = runtime.adapter_begin_identity_read(false, None).unwrap();
@@ -4939,6 +5035,41 @@ fn cold_stopped_resume_qualifies_current_provider_before_reconciliation() {
     assert_eq!(runtime.adapter_guard(), guard);
     assert_eq!(runtime.resume_binding_offer(), Some(binding.id));
 
+    if reload_before_merge {
+        use cloud::runtime::ScanPausePoint;
+        use std::sync::mpsc;
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        runtime.arm_note_scan_pause_for_testing(ScanPausePoint::BeforeMerge, entered_tx, release_rx).unwrap();
+        let (reached, before, reload, selected_after_reload, result) = std::thread::scope(|threads| {
+            let worker = threads.spawn(|| host.resume_cloud_binding(&preview, generation));
+            let reached = entered_rx.recv_timeout(Duration::from_secs(30));
+            let before = runtime.stored_state_for_testing();
+            // Same bytes and a reopened provider still revoke the held Resume.
+            let reload = host.provider_authority().reload();
+            let selected_after_reload = host.provider_authority().snapshot();
+            let _ = release_tx.send(());
+            (reached, before, reload, selected_after_reload, worker.join())
+        });
+        reload.unwrap();
+        assert_eq!(selected_after_reload.unwrap(), selected);
+        reached.expect("Resume reached final coverage after its durable local prefix");
+        assert!(result.unwrap().is_err());
+        let status = runtime.status().unwrap();
+        assert_eq!(status.binding.as_ref(), Some(&binding));
+        assert!(status.scan_required && !status.scan_completed_this_open);
+        assert_eq!(runtime.stored_state_for_testing().unwrap().coverage, before.unwrap().coverage);
+        assert!(runtime.note_scan_proof().is_none());
+        assert!(runtime.require_provider_collection_admission().is_err());
+        assert!(runtime.register_sdk(false).is_err());
+        assert!(runtime.incoming_sdk_instance_for_testing().is_none());
+        assert_eq!(cold_resume_rows(&host), rows);
+        assert_cold_resume_history(&host, &history);
+        assert_eq!(service.request_log().unwrap().len(), requests);
+        host.close().unwrap();
+        return;
+    }
+
     let resumed = host.resume_cloud_binding(&preview, generation);
     // Diagnose the intended red after real activation, rather than accepting
     // a fixture refusal before the retained resume authority was validated.
@@ -4958,9 +5089,15 @@ fn cold_stopped_resume_qualifies_current_provider_before_reconciliation() {
     assert!(status.stored_usable && status.identity_verified && status.scan_completed_this_open);
     assert!(!status.scan_required && !status.tracking_stopped);
     assert_eq!(status.generation, Some(generation));
-    assert!(host.provider_authority().permits_icloud_binding(&binding));
-    runtime.require_provider_collection_admission().unwrap();
-    assert_eq!(host.provider_authority().snapshot().unwrap(), qualified);
+    assert_eq!(host.provider_authority().snapshot().unwrap(), selected);
+    if matches!(choice, ResumeProviderChoice::EnabledMapped) {
+        assert!(host.provider_authority().permits_icloud_binding(&binding));
+        runtime.require_provider_collection_admission().unwrap();
+    } else {
+        assert!(!host.provider_authority().permits_icloud_binding(&binding));
+        assert!(runtime.require_provider_collection_admission().is_err());
+        assert!(runtime.register_sdk(false).is_err());
+    }
     assert_eq!(DeviceState::for_collection(&dir.join("collection.anki2"))
         .settled_publication().unwrap(), Some(publication));
     assert_eq!(cold_resume_rows(&host), rows);
@@ -4972,6 +5109,24 @@ fn cold_stopped_resume_qualifies_current_provider_before_reconciliation() {
         cloud::workflow::TraceEvent::EngineStarted { .. }
         | cloud::workflow::TraceEvent::CollectionBatchBuilt { .. })));
     assert!(runtime.confirm_connection_resume(&preview, &host.collection().unwrap()).is_err());
+    if !matches!(choice, ResumeProviderChoice::EnabledMapped) {
+        runtime.provider_accept_icloud_connection().unwrap();
+        assert!(host.provider_authority().permits_icloud_binding(&binding));
+        runtime.require_provider_collection_admission().unwrap();
+        let settings = host.provider_authority().snapshot().unwrap().settings;
+        host.cloud_policy_input(cloud::policy::DeviceEvent::Settings(cloud::policy::DeviceSettings {
+            enabled: settings.enabled, paused: settings.paused,
+            automatic: settings.automatic, media: settings.media,
+        })).unwrap();
+        let read = runtime.adapter_begin_identity_read(false, None).unwrap();
+        assert!(runtime.adapter_complete_identity_read(read, account.read_identity(&binding.scope)).unwrap());
+        let (sdk, cursor, _) = runtime.register_sdk(false).unwrap();
+        assert!(cursor.is_none());
+        assert_eq!(runtime.incoming_sdk_instance_for_testing().as_deref(), Some(sdk.as_str()));
+        assert!(runtime.register_sdk(false).is_err());
+        runtime.release_sdk(&sdk).unwrap();
+        assert_eq!(service.request_log().unwrap().len(), requests);
+    }
     host.close().unwrap();
 }
 

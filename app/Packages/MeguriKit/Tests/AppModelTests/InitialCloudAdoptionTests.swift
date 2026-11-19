@@ -1040,14 +1040,60 @@ extension ReviewCollectionStartupTests {
                     #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
                 }
             }
+            let readyResumeBefore: Bool = if case .ready(_, let summary) = harness.sync.preview {
+                summary.decision == .confirmResume && summary.resumeBindingId != nil
+            } else { false }
             await harness.sync.confirmResume()
             try #require(waited)
             await harness.sync.waitForInputs()
-            #expect(waited && returned && admitted == !pauseDuringDrain)
-            #expect(harness.sync.preview == nil && harness.sync.connectionFailure == nil)
-            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0)
-            #expect(harness.sync.settings.enabled == !pauseDuringDrain)
-            #expect(harness.persistedEnabled == !pauseDuringDrain)
+            let connectionFailureTag: String = switch harness.sync.connectionFailure {
+            case nil: "none"
+            case .some(.closed): "closed"
+            case .some(.wrongOwner): "wrongOwner"
+            case .some(.consumed): "consumed"
+            case .some(.authorityChanged): "authorityChanged"
+            case .some(.accountUnavailable): "accountUnavailable"
+            case .some(.accountMismatch): "accountMismatch"
+            case .some(.busy): "busy"
+            case .some(.keyUnavailable): "keyUnavailable"
+            case .some(.epochIncomplete): "epochIncomplete"
+            case .some(.unreadableControl): "unreadableControl"
+            case .some(.notOffered): "notOffered"
+            case .some(.incomingStagingUnavailable): "incomingStagingUnavailable"
+            case .some(.mediaApplyUnavailable): "mediaApplyUnavailable"
+            case .some(.resetRecoveryUnavailable): "resetRecoveryUnavailable"
+            case .some(.tracking): "tracking"
+            case .some(.incomplete): "incomplete"
+            case .some(.fileIdentityUnavailable): "fileIdentityUnavailable"
+            }
+            let status = harness.sync.status
+            let resumeDiagnosticParts: [String] = [
+                "connectionFailure=\(connectionFailureTag)",
+                "pauseDuringDrain=\(pauseDuringDrain)",
+                "readyResumeBefore=\(readyResumeBefore)",
+                "waited=\(waited); returned=\(returned); admitted=\(admitted)",
+                "statusPresent=\(status != nil); accountAvailable=\(status?.accountStatus == .available)",
+                "accountMatchesBinding=\(status?.accountMatchesBinding == true)",
+                "bindingUsable=\(status?.controls.bindingUsable == true)",
+                "bindingActive=\(status?.controls.bindingActive == true)",
+                "bindingStopped=\(status?.controls.bindingStopped == true)",
+                "resumeOffered=\(status?.controls.resumeBindingOffered == true)",
+                "decisionRequired=\(status?.controls.decisionRequired == true)",
+                "userPaused=\(status?.controls.userPaused == true)",
+                "enabled=\(harness.sync.settings.enabled); paused=\(harness.sync.settings.paused)",
+                "persistedEnabled=\(harness.persistedEnabled == true)",
+                "previewPresent=\(harness.sync.preview != nil)",
+                "operationFailed=\(harness.sync.operationFailed); failureRevision=\(harness.sync.failureRevision)",
+                "accountReadDelta=\(harness.factory.accountReads - accountReads)",
+                "sdkCreationDelta=\(harness.factory.created.count - starts)",
+                backend.startDiagnostics,
+            ]
+            let resumeDiagnostic = "Resume drain proof: \(resumeDiagnosticParts.joined(separator: "; "))"
+            #expect(waited && returned && admitted == !pauseDuringDrain, "\(resumeDiagnostic)")
+            #expect(harness.sync.preview == nil && harness.sync.connectionFailure == nil, "\(resumeDiagnostic)")
+            #expect(!harness.sync.operationFailed && harness.sync.failureRevision == 0, "\(resumeDiagnostic)")
+            #expect(harness.sync.settings.enabled == !pauseDuringDrain, "\(resumeDiagnostic)")
+            #expect(harness.persistedEnabled == !pauseDuringDrain, "\(resumeDiagnostic)")
             if pauseDuringDrain {
                 #expect(harness.factory.created.count == starts && harness.factory.live.isEmpty)
                 #expect(harness.factory.accountReads == accountReads)
@@ -1336,7 +1382,17 @@ extension ReviewCollectionStartupTests {
             }
             harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
             try await initialCloudSignal(entered.stream, stage: "close-resume-issued-status-entry")
+            try #require(harness.sync.settings.paused)
+            let unpaused = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            defer { unpaused.continuation.finish() }
+            // Observe the committed MainActor assignment before confirmation,
+            // while retaining the original pending StatusChanged command.
+            withObservationTracking { _ = harness.sync.settings.paused } onChange: { [continuation = unpaused.continuation] in
+                continuation.yield(())
+            }
             harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            try await initialCloudSignal(unpaused.stream, stage: "close-resume-settings-unpaused")
+            try #require(!harness.sync.settings.paused)
             harness.sync.observeResumePolicyDrain = { stage in
                 switch stage {
                 case .waiting: waiting.continuation.yield(())
