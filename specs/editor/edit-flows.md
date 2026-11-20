@@ -48,7 +48,7 @@ The host handles the change stream in seq order, holding events while an own pat
 | N `Removed` | W5.4 |
 | N `Updated`, and its stored fields, tags or note type now differ from what the editor last loaded | a reload (W5.2 or W5.3) |
 | N `Updated` with only `mod`, `usn` or other columns the editor does not show changed | nothing shown changes; the editor's baseline takes the new row silently |
-| N's note type, `schema_changed` true | a reload, which takes the `Stale` path of `editor/field-html` S2 for any unsaved edit, whatever the source; with `LocalApi` and an unsaved edit, see the end of W5.3 |
+| N's note type, `schema_changed` true | a reload, which takes the `Stale` path of `editor/field-html` S2 for any unsaved edit, whatever the source; with `LocalApi` and an unsaved edit, see the end of W5.3. The review's Edit Note form sends nothing here: its draft stays until Done, whose patch is then refused (`review/edit-current#E2`) |
 | N's note type, `schema_changed` false | the field options the editor shows refresh (font, size, direction and description, `editor/field-html` F1 and F2); collapsed and HTML mode follow F3, so the session's memory wins while the field count is unchanged; no field text reloads |
 | only N's cards | nothing; the review panel's card is U184's |
 
