@@ -141,6 +141,17 @@ mg_compose() {
   BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -p "$(mg_compose_project)" -f "$MG_ROOT/docker/compose.yml" "$@"
 }
 
+# mg_ci_dev_image: CI only. MEGURI_CI_DEV_IMAGE names a dev image that the
+# hosted workflow pulled, built from this checkout's image inputs
+# (.github/workflows/meguri-verification.yml); give it this checkout's compose
+# name, so `compose run --pull never` takes it instead of a build. Local runs
+# never set it.
+mg_ci_dev_image() {
+  echo "tools/mg: using the prebuilt dev image $MEGURI_CI_DEV_IMAGE" >&2
+  docker image inspect "$MEGURI_CI_DEV_IMAGE" >/dev/null 2>&1 &&
+    docker tag "$MEGURI_CI_DEV_IMAGE" "$(mg_compose_project)-dev"
+}
+
 # ---------------------------------------------------------------------------
 # Dispatcher internals
 
@@ -338,12 +349,22 @@ mg__invoke_docker() {
     mg_status error
     return 2
   fi
-  echo "tools/mg: building image for service '$service'" >&2
-  if ! mg_compose --progress plain build "$service"; then
-    mg_failure image-build "building the '$service' image failed; see log.txt" \
-      "docker compose -p $(mg_compose_project) -f docker/compose.yml build $service"
-    mg_status error
-    return 2
+  # CI only: a prebuilt dev image replaces the build (mg_ci_dev_image).
+  if [ "$service" = dev ] && [ -n "${MEGURI_CI_DEV_IMAGE:-}" ]; then
+    if ! mg_ci_dev_image; then
+      mg_failure image-build "the prebuilt dev image $MEGURI_CI_DEV_IMAGE is not available locally" \
+        "docker pull $MEGURI_CI_DEV_IMAGE"
+      mg_status error
+      return 2
+    fi
+  else
+    echo "tools/mg: building image for service '$service'" >&2
+    if ! mg_compose --progress plain build "$service"; then
+      mg_failure image-build "building the '$service' image failed; see log.txt" \
+        "docker compose -p $(mg_compose_project) -f docker/compose.yml build $service"
+      mg_status error
+      return 2
+    fi
   fi
   local rel="${MG_RUN_DIR#"$MG_ROOT"/}" fixture_env=()
   if [ -n "${MEGURI_INITIAL_ADOPTION_FIXTURE:-}" ]; then
