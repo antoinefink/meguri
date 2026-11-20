@@ -70,3 +70,5 @@ guiEditNote
 preset_deck
 reorderCards
 searchNote
+# Round 8 (browser/workspace V2.4)
+meguriBrowserColumnSets

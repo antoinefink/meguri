@@ -4,6 +4,7 @@ Spec: storage/config-table
 Requirements: R323, R324, R1466, R1468, R1472, R1474
 Anki: 26.09.3
 Scenarios: conformance/scenarios/storage/config/
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of C8 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 The `config` table holds the collection's synced settings: Anki's own keys, keys that other clients and add-ons write, and Meguri's own keys. Meguri reads and writes it without disturbing any key it does not change. Stamping terms (`usn`, `now_s`, `now_ms`, `col.mod`) are those of `ids-usn-mtime.md`.
 
@@ -97,6 +98,8 @@ Some settings are members inside one key's object (U96's heatmap settings, U84 a
 Meguri never writes, re-encodes, reorders or removes a key it does not use (R323, R1466). Examples are `onigiri_sidebar_collapsed`, `_nt_<id>_lastDeck` for a note type Meguri never adds to, `cardStateCustomizer`, easy-days and filtered-deck keys, and keys of clients and add-ons Meguri does not know. Such a key keeps its bytes, `usn` and `mtime_secs` through every local operation. The only exceptions are Anki's own: removing a note type or deck removes its key family (C10), and a sync can replace the whole table (C9). The add-on key `heatmap` is not in this list: Meguri reads it and writes it by C6's rule, but only when the user changes a heatmap setting (`stats/heatmap-config#K2`); until then it keeps its bytes, `usn` and `mtime_secs` like a key Meguri does not use.
 
 ## C8. Meguri's keys and device-only state
+
+Changed 2026-11-20 (round 8): Browse's column sets and their sort (`meguriBrowserColumnSets`, `browser/workspace` V2.4) are synced collection settings, not device-only display toggles, because Anki's own column and sort keys (`activeCols`, `sortType`) travel with the collection the same way, and the round 8 design keeps the Cards / Notes choice across devices (`browserTableShowNotesMode`); keeping the columns with it is a default the Browse plan lists for Antoine. Widths stay device-only.
 
 - Meguri's settings that follow the collection to other devices use keys that begin with `meguri`, followed by a lower-camel-case name (for example `meguriExample`). Anki and other clients keep such keys as unknown keys (R1468).
 - Device-only state never enters the `config` table (R324, R1468): credentials and the host key, the sync server endpoint, sync progress and the auto-sync pause flag, display toggles, answer keys, card zoom, integrations, UI state, and the optimizer's run diagnostics. They live in Swift settings, the core's sidecars or the derived store (KTD12). A sync from an Anki client can replace the whole table (C9), so a device-only value stored there would be lost or would spread to other devices.

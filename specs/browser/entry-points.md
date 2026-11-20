@@ -4,6 +4,7 @@ Spec: browser/entry-points
 Requirements: R1112, R1113, R1114; supports R48, R98, R216, R300, R319, R807, R815, R1092, R1102, R1106, R1109, R1110, R1116, R1153, R1322, R1417, R1615, R1728, R1733, R1782, R1786, R1792
 Anki: 26.09.3 for the Anki rows of E2 to E9 (what Anki's desktop browser does when it opens, when it is handed a card or a search, when a search is committed, what it remembers and how long its field text can be); none for the rest (Meguri design)
 Scenarios: conformance/scenarios/browser/entry/ (recorded, inactive: E11)
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of E2, E3, E4, E5, E6 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 Which search Browse runs when it opens, what each entry point hands it, what a commit does to the field text and which text it runs, which searches the recent-search list records, and what Clear, Select All, Invert Selection and Select Notes do. The field-text rule is `search/join-and-replace` J2, the canonical text `search/canonical-form` (through `search/editing-services` D2), the built items `search/join-and-replace` J3 and J4, the runs, handles and selection mapping `browser/result-sets` H3, H11 and H12, the stored keys `browser/config-keys` K5, K6.1 and K6.4. The query pipeline, debounce and layout are U210's; the field, tokens and inline errors U214's; the suggestions U215's.
 
@@ -17,6 +18,8 @@ Which search Browse runs when it opens, what each entry point hands it, what a c
 - **Result.** The handle Browse shows (`browser/result-sets` H6), with its mode, sort, selection, current row and scroll position.
 
 ## E2. Plain open (R1112)
+
+Changed 2026-11-20 (round 8): for Browse, rules 2, 3 and 6 are replaced by `search/filter-tokens` T14: Browse opens on its kept query (while the app runs, and after a relaunch from the device's stored run text and mode); on a first open it reads `defaultSearchText` into tokens by T7, or uses the whole collection when it is not set. `deck:current` is not the default. A stored text that does not parse becomes literal words (T5, T7 step 1), so there is no parse-error path; a run that fails shows the error state with Try Again (`docs/design/screen-inventory.yaml` `browse.browser`). Nothing is recorded (E6). Rules 1, 5 and 7 stand; rule 4's sort is the column set's (`browser/workspace` V4.3). Entry points with a search: `browser/workspace` V15.
 
 1. **Browse already holds a result** of the open collection (shown before in this collection generation, `engine/lifecycle` L3): a plain open shows it as it was. Nothing runs; the search, mode, selection, current row and scroll position are kept. Selecting the Browse sidebar section or tab is a plain open, and so is ⌘F from Home or the deck page (R216), which also focuses the field and selects its text. Anki: opening its browser while the window exists only brings that window forward; Anki focuses its field on every open.
 2. **Otherwise** Browse runs the default search:
@@ -33,6 +36,8 @@ Which search Browse runs when it opens, what each entry point hands it, what a c
 7. On `CollectionReplaced` Browse drops its result (U210); the next plain open is rule 2's.
 
 ## E3. Open with a search (R1114)
+
+Changed 2026-11-20 (round 8): for Browse, rules 2 to 5 are replaced: the given search is read into tokens by `search/filter-tokens` T7 and replaces the query; Browse never shows its canonical text, a search that does not parse becomes literal words (T5) instead of an error, and nothing is recorded (E6). Rule 3's selection mapping and the table's Selection column stand. In the table, the heatmap row's search is replaced by `browser/workspace` V15's Studied On token (built from the heatmap day's own bounds), and the deck menu's row by V15's Browse Cards. Rules 1 and 6 stand.
 
 1. The text gets J2. A built item's text (J4) is already canonical and J2 changes nothing in it.
 2. It is put in canonical form (`search/editing-services` D2).
@@ -64,6 +69,8 @@ The entry points, what each hands Browse, and the spec that builds it:
 
 ## E4. Open from review (R1113)
 
+Changed 2026-11-20 (round 8): for Browse, rules 2, 5 and 6 are replaced. Show in Browse keeps Browse's kept query (it does not run the default search) and looks the card up as rules 3 and 4 say; when the result does not hold the card, or the kept query's run fails, the query becomes one advanced token `cid:<id>` (`browser/workspace` V15). No canonical text is shown and nothing is recorded (E6). Rules 1, 3, 4, 7 and 8 stand.
+
 Anki: its browser, opened from the review screen, is handed the card the reviewer shows. It runs the default search (E2 rule 2), also when the browser was already open on another search, then selects that card's row alone (in notes mode, the row of the card's note), makes it current and scrolls to it. When the result does not hold the card, nothing is selected. Its search runs to the end before it looks, so nothing can happen in between.
 
 Meguri:
@@ -79,6 +86,8 @@ Meguri:
 
 ## E5. Commit (R1109)
 
+Changed 2026-11-20 (round 8): a commit reads the text into tokens (`search/filter-tokens` T8). Steps 2 to 4 change for Browse: the field never shows canonical text, and a text that does not parse becomes literal words (T5, T7 step 1) instead of an error; no parse error remains for Browse's field.
+
 What commits: Return in the field; accepting a suggestion (U215); a sidebar item or chip action (U216, U223); a token action (`search/editing-services` D4, U214); an open with a search (E3, E4 rule 5).
 
 Before a commit changes the result, the inspector's pending save is flushed and waited for (`browser/inspector` I5). Anki saves its editor before every search it runs.
@@ -93,6 +102,8 @@ Before a commit changes the result, the inspector's pending save is flushed and 
 5. A commit keeps the mode; its selection and current row are mapped from the earlier result (R1154, `browser/result-sets` H12).
 
 ## E6. Recent searches (R1102, R1109)
+
+Changed 2026-11-20 (round 8): for Browse, rules 1 to 6 are replaced. Browse keeps no recent-searches list and records no commit, open or sidebar click: its suggestions show saved searches (`search/filter-tokens` T12.1). It keeps one device list, the accepted-suggestion list of `search/editing-services` D6.1 (`recent`): each accepted suggestion records its value's run text (T4) at the front, an equal entry moved to the front, at most 30 entries, newest first; it only ranks suggestions (T12.3 step 2). It stays on the device, never in the collection, and survives relaunch.
 
 1. The list is newest first and holds at most 30 texts.
 2. Recording a text t removes every entry equal to t (code point for code point), puts t first and drops the entries after the 30th. Anki keeps its search history the same way (30 entries, newest first, an equal entry moved to the front).
