@@ -130,7 +130,7 @@ struct SyncServiceRows: View {
         .sheet(isPresented: Binding(get: { destination != nil }, set: { if !$0 && !changing { destination = nil } })) {
             if let destination, let switchSource {
                 SyncServiceSwitchSheet(collection: collection, source: switchSource, destination: destination, changing: changing,
-                    failed: failed, cancel: { self.destination = nil }, confirm: { change(destination) })
+                    failed: failed, cancel: { self.destination = nil }, confirm: { change(destination, shown: switchSource) })
             }
         }
         if changing {
@@ -160,8 +160,11 @@ struct SyncServiceRows: View {
         if selected != "localOnly" { switchSource = sync.providerState?.selection; destination = value }
         else { change(value) }
     }
-    private func change(_ value: String) {
+    /// `shown`: the service the confirmation sheet named. When the selection is
+    /// no longer that one, the sheet closes and nothing changes.
+    private func change(_ value: String, shown: SyncProviderSelection? = nil) {
         let source = sync.providerState?.selection
+        if let shown, shown != source { destination = nil; return }
         changing = true; failed = false
         Task {
             do {
@@ -323,16 +326,19 @@ struct MeguriAccountRows: View {
         #endif
     }
     private func signIn() {
-        let secret = password; password = ""
-        guard !processing, !changing, !address.isEmpty, !username.isEmpty, !secret.isEmpty else { return }
+        // All three values are those of the tap: an edit made while the hold
+        // clears never sends this password to another address or account.
+        let endpoint = address, account = username, secret = password
+        password = ""
+        guard !processing, !changing, !endpoint.isEmpty, !account.isEmpty, !secret.isEmpty else { return }
         setupAfterSignIn = true
         // A request left by an earlier status action is not this sign-in's:
         // Cancel during this setup leaves the service Off (MP6.3).
         collection.syncPresentation.keepCollectionRequested = false
         Task {
             // Signing in to set the service up is a service choice: it clears the hold.
-            guard await sync.clearUpdateHold() else { return }
-            collection.signInMeguri(endpoint: address, username: username, password: secret)
+            guard await sync.clearUpdateHold(), address == endpoint, username == account else { return }
+            collection.signInMeguri(endpoint: endpoint, username: account, password: secret)
         }
     }
     /// MP6.3: signing in is the consent to set the service up. The core reads
@@ -481,7 +487,9 @@ struct MeguriKeepCollectionSheet: View {
         }
         #if os(macOS)
         // On the stack, so that the toolbar's Cancel is inside the focus scope.
+        // The toolbar joins the key view loop after the form, so focus is also asked for once shown.
         .defaultFocus($cancelFocused, true)
+        .task { cancelFocused = true }
         #endif
         .accessibilityIdentifier("sync.keepCollection.sheet")
     }

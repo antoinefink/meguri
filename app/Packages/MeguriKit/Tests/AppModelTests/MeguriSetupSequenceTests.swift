@@ -110,6 +110,16 @@ import Testing
 
     // S1: after "accepted", this device's collection is replaced with no
     // question only through the core's own test that it is still what was sent.
+    @Test func aCancelBetweenPreparationAndConfirmationDiscardsTheDownload() async throws {
+        let bridge = FakeBridge()
+        bridge.answers = ["prepareSetupDownload": .preview(Self.preview(.import))]
+        await #expect(throws: CancellationError.self) {
+            _ = try await MeguriSetupSequence.transfer(bridge, decision: Self.decision(.ask), preview: Self.preview(),
+                                                       choice: .keepServer, progress: { _ in }, proceed: { false })
+        }
+        #expect(bridge.calls == ["prepareSetupDownload", "discard"])
+    }
+
     @Test func aSettledAcceptanceFinishesOnlyThroughTheCoresUnchangedTest() async throws {
         let bridge = FakeBridge()
         let accepted = Self.operation(.needsDecision, .exactOk)

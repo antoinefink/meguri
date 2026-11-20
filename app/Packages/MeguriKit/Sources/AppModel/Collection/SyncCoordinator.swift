@@ -1429,7 +1429,8 @@ public final class SyncCoordinator {
             release: { self.meguriSetupPreview = nil; self.meguriSetupDecision = nil },
             perform: {
                 guard let result = try await MeguriSetupSequence.transfer(facade, decision: decision, preview: preview,
-                    choice: choice, progress: self.progressForMeguri(id)) else { throw CancellationError() }
+                    choice: choice, progress: self.progressForMeguri(id),
+                    proceed: { !self.meguriCancelling && !self.settings.paused }) else { throw CancellationError() }
                 return result
             })
         meguriSetupDonePending = nil
@@ -1454,17 +1455,30 @@ public final class SyncCoordinator {
         let leavesOff = !meguriSetupKeepsService
         guard let preview = meguriSetupPreview, let facade = meguriBootstrap else {
             meguriSetupDecision = nil; meguriSetupPreview = nil
-            return leavesOff
+            // A transfer that already took the preview is not undone by leaving the service Off.
+            return leavesOff && !meguriBusy
         }
         await waitForMeguriAction()
+        // A confirmation that ran meanwhile consumed the preview: nothing is left to cancel.
+        guard meguriSetupPreview === preview else { return leavesOff && meguriStage == .required }
+        let owner = meguriConnectionOwner
         issueMeguri { _ in
+            let expected = self.generation, revision = self.hostRevision
             self.meguriActiveFacade = facade
+            var discarded = false
             do {
                 let cancelled = try await MeguriSetupSequence.cancel(facade, preview: preview)
                 self.retainMeguri(cancelled.result)
+                discarded = cancelled.discarded
                 if cancelled.discarded { self.meguriOperation = nil; self.meguriStage = .required; self.meguriChoiceAllowed = true }
                 else { self.applyMeguriOutcome(cancelled.result.outcome) }
             } catch { self.meguriLastError = error; self.meguriStage = .failed }
+            // A discard that failed leaves the core to say whether setup can run
+            // again, so that Try Again is offered from its answer.
+            if !discarded, let owner {
+                try? await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+                if self.meguriChoiceAllowed { self.meguriStage = .failed }
+            }
             // The sheet always closes: Cancel is never a dead end.
             if self.meguriSetupPreview === preview { self.meguriSetupPreview = nil; self.meguriSetupDecision = nil }
         }
@@ -1522,7 +1536,9 @@ public final class SyncCoordinator {
     /// the server's facts against the last proved baseline; pending changes
     /// stay pending and that round sends them.
     public func settleMeguriRound() {
-        guard meguriRoutine == .acceptanceUnknown, meguriWake == nil, !meguriBusy else { return }
+        // Unknown stays shown until a round, whose first step is the read, can be admitted.
+        guard meguriRoutine == .acceptanceUnknown, meguriWake == nil, !meguriBusy,
+              meguriCanRun, meguriSchedulingAllowed(automatic: false) else { return }
         meguriRoutine = .pending
         requestMeguriWake(automatic: false)
     }
@@ -1703,6 +1719,10 @@ public final class SyncCoordinator {
                     #endif
                     if meguriRoutine == .fullSyncRequired, let facade = meguriBootstrap {
                         try await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+                        // T19.5 "round failed, full sync required": the needs-you row with its Choose action.
+                        if meguriChoiceAllowed, meguriStage == .required {
+                            meguriStage = .failed; meguriFailureKey = MeguriSetupSequence.fullSyncKey
+                        }
                     }
                     // Preserve only an already queued recovery wake. The next
                     // round consumes the latest revision before suspending.

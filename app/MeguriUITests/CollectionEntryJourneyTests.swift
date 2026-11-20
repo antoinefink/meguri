@@ -106,7 +106,7 @@ import notify
         let decks = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.decks",
             sidebarIdentifier: "shell.root.sidebar.home", compactLabel: "Decks", timeout: 10), app.debugDescription)
         try click(decks, app, bundle)
-        XCTAssertTrue(app.staticTexts["No Collection"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Welcome to Meguri"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.secureTextFields["settings.sync.meguri.password"].exists)
         let reopen = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.settings",
             sidebarIdentifier: "shell.root.sidebar.settings", compactLabel: "Settings", timeout: 10), app.debugDescription)

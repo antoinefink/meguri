@@ -287,6 +287,8 @@ public enum SyncKinds {
                     return .init(.needsYou, "sync.needsYou.meguri.storage", .meguriTryAgain)
                 // MP6.3: a cancelled setup leaves the service Off; no row.
                 case MeguriSyncStatusPresentation.cancelledFailureKey: return .init(nil, nil)
+                case MeguriSetupSequence.fullSyncKey:
+                    return .init(.needsYou, MeguriSetupSequence.overtakenKey, .chooseCollection)
                 case MeguriSetupSequence.overtakenKey:
                     // MP6.9 neither: T19.5's "full sync required" row.
                     return .init(.needsYou, MeguriSetupSequence.overtakenKey, .chooseCollection)

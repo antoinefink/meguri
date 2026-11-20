@@ -28,6 +28,9 @@ enum MeguriSetupSequence {
     /// The failure key that stands for MP6.9's "neither": an existing sentence
     /// of T19.5, whose action opens the keep-collection sheet.
     static let overtakenKey = "sync.needsYou.meguri.chooseCollection"
+    /// A routine round that needs a full sync (MP4): the same sentence and
+    /// action as `overtakenKey`, but Cancel in its sheet keeps the service.
+    static let fullSyncKey = "meguri.setup.fullSyncRequired"
     /// N4: a collection file that is present but closed or damaged. The
     /// closest existing sentence; its action is Copy Debug Info.
     static let localUnusableKey = "sync.attention.collectionCorrupt"
@@ -36,13 +39,20 @@ enum MeguriSetupSequence {
     /// choice is not one the row offers.
     @MainActor static func transfer(_ bridge: any MeguriSetupBridge, decision: MeguriSetupDecision, preview: MeguriBootstrapPreview,
                          choice: MeguriSetupChoice,
-                         progress: @escaping @Sendable (CoreProgress) -> Void) async throws -> MeguriBootstrapCommandResult? {
+                         progress: @escaping @Sendable (CoreProgress) -> Void,
+                         proceed: @MainActor () -> Bool = { true }) async throws -> MeguriBootstrapCommandResult? {
         guard let confirmsPreview = SyncCoordinator.meguriSetupConfirmsPreview(decision.facts.row, choice) else { return nil }
         if confirmsPreview {
             return try await bridge.confirmSetup(decision, preview: preview, choice: choice, progress: progress)
         }
         let prepared = try await bridge.prepareSetupDownload(decision, preview: preview, choice: choice, progress: progress)
         guard case .preview(let download) = prepared.outcome else { return prepared }
+        // A Cancel that landed after the preparation ended reached no job: the
+        // prepared download replaced nothing and is discarded.
+        guard proceed() else {
+            _ = try? await bridge.discard(download)
+            throw CancellationError()
+        }
         return try await bridge.confirmSetupDownload(decision, download: download, choice: choice, progress: progress)
     }
 

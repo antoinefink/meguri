@@ -401,7 +401,10 @@ public actor MeguriProviderConnectionOwner {
             try await store.save(credentials)
             return credentials.username
         }
-        attempt = (expected, Task { _ = try await task.value })
+        // Cancelling the attempt must reach the request itself, not only this wrapper.
+        attempt = (expected, Task {
+            try await withTaskCancellationHandler { _ = try await task.value } onCancel: { task.cancel() }
+        })
         do {
             let saved = try await task.value
             try requireCurrent(expected, ownership)
