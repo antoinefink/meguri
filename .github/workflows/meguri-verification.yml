@@ -63,14 +63,14 @@ jobs:
 
       # The server, conformance and package-smoke suites run for a change to
       # their inputs: app/, conformance/, core/, docker/, server/, specs/,
-      # tools/ or this workflow (the paths that started this workflow before
-      # it ran on every change). Core runs when an input of `tools/mg
-      # core-test` changed: the Rust workspace, the conformance data and specs
-      # its tests read (servers/ specs excepted), its tools/mg job, the dev
-      # image and the timing-sensitive list. A change to docs/ or to Markdown
-      # outside those directories runs neither. Manual runs (unless given a
-      # base), new branches and anything that cannot be compared run every
-      # suite.
+      # tools/, this workflow or the dev image script (the paths that started
+      # this workflow before it ran on every change). Core runs when an input
+      # of `tools/mg core-test` changed: the Rust workspace, the conformance
+      # data and specs its tests read (servers/ specs excepted), its tools/mg
+      # job, the dev image (with .github/dev-image.sh) and the timing-sensitive
+      # list. A change to docs/ or to Markdown outside those directories runs
+      # neither. Manual runs (unless given a base), new branches and anything
+      # that cannot be compared run every suite.
       - name: Select the suites this change affects
         id: select
         shell: bash
@@ -105,11 +105,11 @@ jobs:
           if [[ -n "$base" ]] && changed="$(git diff -z --no-renames --name-only "$base" HEAD | tr '\0' '\n')"; then
             printf 'Changed files:\n%s\n' "$changed"
             linux_dirs='app|conformance|core|docker|server|specs|tools'
-            if ! grep -qE "^(($linux_dirs)/|\.github/workflows/meguri-verification\.yml$)" <<<"$changed"; then
+            if ! grep -qE "^(($linux_dirs)/|\.github/workflows/meguri-verification\.yml$|\.github/dev-image\.sh$)" <<<"$changed"; then
               linux=no
             fi
             core_dirs='core|conformance|specs|tools/conformance'
-            core_files='\.github/workflows/meguri-verification\.yml|\.github/core-timing-sensitive\.txt|tools/mg|tools/mg\.d/core\.sh|tools/mg-result\.schema\.json|docker/compose\.yml|docker/dev\.Dockerfile(\.dockerignore)?'
+            core_files='\.github/workflows/meguri-verification\.yml|\.github/dev-image\.sh|\.github/core-timing-sensitive\.txt|tools/mg|tools/mg\.d/core\.sh|tools/mg-result\.schema\.json|docker/compose\.yml|docker/dev\.Dockerfile(\.dockerignore)?'
             # Filter before testing: under pipefail, `grep -q` exiting early
             # would fail its writer and skip Core on a large change.
             relevant="$(grep -v '^specs/servers/' <<<"$changed" || true)"
@@ -149,13 +149,11 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
 
   # Builds the dev image once per change of its inputs and shares it through
-  # GitHub Container Registry. The tag is a hash of everything the image
-  # build reads: docker/dev.Dockerfile (its bases are digest-pinned), its
-  # .dockerignore (which lets in only core/rust-toolchain.toml), that file,
-  # and docker/compose.yml (the build context and target). Jobs pull it and
-  # tools/mg uses it instead of building (MEGURI_CI_DEV_IMAGE). An empty ref
-  # (cold runs, fork pull requests that cannot push, a registry failure)
-  # makes each job build the image itself, as before.
+  # GitHub Container Registry, tagged with a hash of those inputs
+  # (.github/dev-image.sh names them). Jobs pull it and tools/mg uses it
+  # instead of building (MEGURI_CI_DEV_IMAGE). An empty ref (cold runs, fork
+  # pull requests that cannot push, a registry failure) makes each job build
+  # the image itself, as before.
   image:
     name: Prepare dev image
     needs: suites
@@ -167,59 +165,20 @@ jobs:
       packages: write
     outputs:
       ref: ${{ steps.image.outputs.ref }}
-      hash: ${{ steps.hash.outputs.hash }}
-      cold: ${{ steps.hash.outputs.cold }}
+      hash: ${{ steps.image.outputs.hash }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Hash the image inputs
-        id: hash
-        shell: bash
-        env:
-          COLD: ${{ github.event_name == 'schedule' || inputs.cold == true }}
-        run: |
-          inputs=(docker/dev.Dockerfile docker/dev.Dockerfile.dockerignore core/rust-toolchain.toml docker/compose.yml)
-          hash="$({ echo "meguri-dev v1 target=dev platform=$(uname -m)"; for f in "${inputs[@]}"; do printf '%s\0' "$f"; sha256sum <"$f"; done; } | sha256sum | cut -c1-32)"
-          echo "hash=$hash" >>"$GITHUB_OUTPUT"
-          echo "cold=$COLD" >>"$GITHUB_OUTPUT"
-          echo "Image inputs ${inputs[*]}: $hash (cold: $COLD)"
-
       - name: Find or build the dev image
         id: image
         shell: bash
         env:
-          HASH: ${{ steps.hash.outputs.hash }}
-          COLD: ${{ steps.hash.outputs.cold }}
+          COLD: ${{ github.event_name == 'schedule' || inputs.cold == true }}
           CAN_PUSH: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           TOKEN: ${{ github.token }}
-        run: |
-          summary() { printf '### Dev image\n\n%s\n' "$1" >>"$GITHUB_STEP_SUMMARY"; }
-          if [[ "$COLD" == true ]]; then
-            echo "ref=" >>"$GITHUB_OUTPUT"
-            summary "Cold run: every job builds the image itself."
-            exit 0
-          fi
-          ref="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/meguri-dev:$HASH"
-          if ! printf '%s' "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin; then
-            echo "::warning::Cannot log in to ghcr.io; every job builds the dev image itself."
-            echo "ref=" >>"$GITHUB_OUTPUT"
-            exit 0
-          fi
-          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-          if docker manifest inspect "$ref" >/dev/null 2>&1; then
-            summary "Reused \`$ref\`."
-          elif [[ "$CAN_PUSH" == true ]] &&
-               BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker build --progress plain -f docker/dev.Dockerfile --target dev \
-                 --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" -t "$ref" . &&
-               docker push "$ref"; then
-            summary "Built and pushed \`$ref\`."
-          else
-            echo "::warning::No shared dev image for $HASH; every job builds it itself."
-            ref=
-          fi
-          echo "ref=$ref" >>"$GITHUB_OUTPUT"
+        run: .github/dev-image.sh ensure
 
   core-shard:
     name: Linux · core · shard ${{ matrix.shard }}/${{ strategy.job-total }}
@@ -243,27 +202,20 @@ jobs:
           persist-credentials: false
 
       - name: Pull the shared dev image
+        id: pull
+        if: needs.image.outputs.ref != ''
         shell: bash
         env:
           REF: ${{ needs.image.outputs.ref }}
           TOKEN: ${{ github.token }}
-        run: |
-          if [[ ! "$REF" =~ ^ghcr\.io/[a-z0-9._-]+/meguri-dev:[0-9a-f]{32}$ ]]; then
-            echo "No shared dev image; tools/mg builds it."
-            exit 0
-          fi
-          if printf '%s' "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin && docker pull -q "$REF"; then
-            echo "MEGURI_CI_DEV_IMAGE=$REF" >>"$GITHUB_ENV"
-          else
-            echo "::warning::Could not pull $REF; tools/mg builds the dev image."
-          fi
-          docker logout ghcr.io >/dev/null 2>&1 || true
+        run: .github/dev-image.sh pull
 
       # Third-party crates only (local crates are pruned before saving), keyed
-      # on the image (so the toolchain) and Cargo.lock. Never on cold runs.
+      # on the image hash (so the toolchain) and Cargo.lock. Only with the
+      # shared image, so never on cold runs or with an image built here.
       - name: Restore the Rust dependency cache
         id: rust-cache
-        if: needs.image.outputs.hash != '' && needs.image.outputs.cold != 'true'
+        if: steps.pull.outputs.used == 'yes'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -315,8 +267,8 @@ jobs:
       - name: Keep only third-party crates in the Rust cache
         id: prune
         if: >-
-          matrix.shard == 1 && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.image.outputs.hash != ''
-          && needs.image.outputs.cold != 'true' && steps.rust-cache.outputs.cache-hit != 'true'
+          matrix.shard == 1 && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && steps.pull.outputs.used == 'yes' && steps.rust-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           target="$RUNNER_TEMP/cargo-target"
@@ -388,27 +340,20 @@ jobs:
           persist-credentials: false
 
       - name: Pull the shared dev image
+        id: pull
+        if: needs.image.outputs.ref != ''
         shell: bash
         env:
           REF: ${{ needs.image.outputs.ref }}
           TOKEN: ${{ github.token }}
-        run: |
-          if [[ ! "$REF" =~ ^ghcr\.io/[a-z0-9._-]+/meguri-dev:[0-9a-f]{32}$ ]]; then
-            echo "No shared dev image; tools/mg builds it."
-            exit 0
-          fi
-          if printf '%s' "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin && docker pull -q "$REF"; then
-            echo "MEGURI_CI_DEV_IMAGE=$REF" >>"$GITHUB_ENV"
-          else
-            echo "::warning::Could not pull $REF; tools/mg builds the dev image."
-          fi
-          docker logout ghcr.io >/dev/null 2>&1 || true
+        run: .github/dev-image.sh pull
 
       # Third-party crates only (local crates are pruned before saving), keyed
-      # on the image (so the toolchain) and Cargo.lock. Never on cold runs.
+      # on the image hash (so the toolchain) and Cargo.lock. Only with the
+      # shared image, so never on cold runs or with an image built here.
       - name: Restore the Rust dependency cache
         id: rust-cache
-        if: needs.image.outputs.hash != '' && needs.image.outputs.cold != 'true'
+        if: steps.pull.outputs.used == 'yes'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -588,22 +533,12 @@ jobs:
           persist-credentials: false
 
       - name: Pull the shared dev image
-        if: steps.selected.outputs.run == 'yes'
+        if: steps.selected.outputs.run == 'yes' && needs.image.outputs.ref != ''
         shell: bash
         env:
           REF: ${{ needs.image.outputs.ref }}
           TOKEN: ${{ github.token }}
-        run: |
-          if [[ ! "$REF" =~ ^ghcr\.io/[a-z0-9._-]+/meguri-dev:[0-9a-f]{32}$ ]]; then
-            echo "No shared dev image; tools/mg builds it."
-            exit 0
-          fi
-          if printf '%s' "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin && docker pull -q "$REF"; then
-            echo "MEGURI_CI_DEV_IMAGE=$REF" >>"$GITHUB_ENV"
-          else
-            echo "::warning::Could not pull $REF; tools/mg builds the dev image."
-          fi
-          docker logout ghcr.io >/dev/null 2>&1 || true
+        run: .github/dev-image.sh pull
 
       - name: Run Meguri verification
         if: steps.selected.outputs.run == 'yes'

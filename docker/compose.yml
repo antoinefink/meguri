@@ -3,7 +3,8 @@
 # target volume while CARGO_HOME (registry, git checkouts and cargo's lock
 # files) is shared. MEGURI_DOCKER_CARGO_TARGET and MEGURI_DOCKER_CARGO_HOME
 # may name host directories instead (hosted CI caches them).
-# Images are built locally from digest-pinned bases and never pushed.
+# Images are built locally from digest-pinned bases. Hosted CI alone shares
+# the dev image through GitHub Container Registry (.github/dev-image.sh).
 
 services:
   dev:
