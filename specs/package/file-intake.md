@@ -15,7 +15,7 @@ Every way a file arrives goes through one intake (U162's file intake), never thr
 |---|---|
 | File › Import… (⇧⌘I), through the system file picker | Mac, iPad (menu bar, N11.5) |
 | Settings › Collection's Import…, through the system file picker | all |
-| The empty-collection state's import entry (`home.deckList`'s empty state, N11.5) and Welcome's Import a File… (`onboarding.welcome`) | all |
+| The empty-collection state's import entry (`home.deckList`'s empty state, N11.5) and Welcome's Import a Collection File (`onboarding.welcome`; named Import a File… before 2026-11-20, `docs/design/native-interface-contract.md` N18.2) | all |
 | A drop on a main window (the deck list included) | Mac, iPad |
 | A drop on the Dock icon, and Open or Open With in Finder | Mac |
 | Open in Meguri from Files, Mail or the share sheet | iPhone, iPad |
@@ -23,7 +23,7 @@ Every way a file arrives goes through one intake (U162's file intake), never thr
 - Each source gives one or more file URLs and nothing else. No source reads the file before K3.
 - The system offers Meguri in the Dock, in Finder's Open With and in the share sheet only for the types it declares (K2.2). A file of another type reaches Meguri only through a drop on a window or Finder's Open With › Other… with all applications shown; the Dock refuses it before Meguri sees it, so K3 step 4's message never appears for a Dock drop.
 - Where the sheet opens: on the window the source belongs to (the window a command, a picker or a drop came from, the Settings window included on Mac, as N11.4 does for the restore sheet). A Finder, Dock or Open in delivery goes to the frontmost main window; on Mac, with no main window open, one opens first.
-- Until U162 lands, U166's minimal importer is the only intake and accepts only a collection package from Welcome's picker (R1591); every other source is not yet attached.
+- Until U162 lands, U166's minimal importer is the only intake and accepts only a collection package from Welcome's picker (R1591); every other source is not yet attached. Changed 2026-11-20 (text only; N17.2, N18.2): that picker is the collection-file picker of N17.2, which Welcome's Import a Collection File and the other collection import entries open, limited to collection packages. No drop, Finder, Dock or Open in delivery reaches Meguri yet (not built).
 
 ## K2. File types
 
@@ -52,7 +52,7 @@ The same declarations in the macOS and the iOS/iPadOS Info.plist:
   The identifiers have a fixed prefix, not the build's bundle identifier, so the Debug and Release builds declare the same types. Once K9's question is settled, the identifiers Anki and AnkiMobile export are added to the document types' `LSItemContentTypes`; the declarations stay Meguri's.
 - **Document types** (`CFBundleDocumentTypes`), three, each with `LSItemContentTypes` of one identifier: the deck package, the collection package and `public.zip-archive` (R1595: a `.zip` is read as a deck package, P18). `CFBundleTypeRole` `Viewer`: Meguri reads the file and never writes it back. `LSHandlerRank` `Default` for the two package types; `Alternate` for `public.zip-archive`, so Meguri never becomes the default app for zip files. A rank decides nothing against another app that also declares `Default`; Launch Services then chooses, and the user's own choice in Finder or Files always wins. Whether an installed Anki declares `Owner` is K9's question.
 - iOS and iPadOS: `LSSupportsOpeningDocumentsInPlace` and `UIFileSharingEnabled` stay true (U7's baseline, so the Files app shows `Documents/Backups`: KTD12, R1629). Meguri opens an original in place for reading only (K3); a system copy is handled by K3 step 6.
-- The file pickers of K1 offer the deck package, collection package and zip types, the three package extensions Anki's own picker offers; Welcome's picker before U162 offers the collection package type only. A file without one of these extensions cannot be picked; it reaches Meguri only as K1's second bullet says, and P18 step 2 reads its content.
+- The file pickers of K1 offer the deck package, collection package and zip types, the three package extensions Anki's own picker offers; the collection-file picker before U162 (N17.2, Welcome's Import a Collection File included) offers the collection package type only. A file without one of these extensions cannot be picked; it reaches Meguri only as K1's second bullet says, and P18 step 2 reads its content.
 - `.anki`, `.anki2` and `.ankiaddon` files are not declared. When one arrives anyway (a drop on a window), P18 classifies it `Unsupported` (K3).
 
 ## K3. Reading the file
@@ -107,8 +107,9 @@ The state is the lifecycle state of `engine/lifecycle#L1` when K3 step 5 hands t
 
 U162 path c: a deck package needs a collection, so Start Empty's creation (R161, U166) runs first, then the import sheet opens over Home for the file.
 
-- From Welcome's Import a File…: the user chose to import, so creation follows at once.
-- From any other source (a drop on Welcome's window, a Finder, Dock or Open in delivery): Welcome first asks whether to create a new collection on this device and import the file into it, naming the file, with Cancel and a default Import button (Meguri's wording). Import runs path c; Cancel drops the file, and Welcome stays as it was, its Connect to iCloud… choice untouched.
+- Not built (2026-11-20): no source of K1 can deliver a deck package while there is no collection yet. Welcome's Import a Collection File offers collection packages only (K2.2, N17.2), and drops, Finder, Dock and Open in are not attached (K1). The rules below stand for U162.
+- From Welcome's Import a Collection File, once U162's picker offers deck packages there: the user chose to import, so creation follows at once.
+- From any other source (a drop on Welcome's window, a Finder, Dock or Open in delivery): Welcome first asks whether to create a new collection on this device and import the file into it, naming the file, with Cancel and a default Import button (Meguri's wording). Import runs path c; Cancel drops the file, and Welcome stays as it was, its choices untouched (changed 2026-11-20: Welcome has no Connect to iCloud…, N18.2).
 - Cancelling the import sheet after creation leaves the new collection as Start Empty leaves it (Home, local only). A creation failure shows its error on Welcome and drops the file.
 - A second file arriving while Welcome's question shows replaces the first. Nothing pending survives a relaunch.
 
@@ -139,7 +140,7 @@ UI and unit tests of U162 and U166 (`app/Packages/MeguriKit/Tests/SettingsTests/
 - a drop of `notes.txt`, `a.apkg`, `b.apkg` → the sheet for `a.apkg` with the one-at-a-time line, `b.apkg` never read; a file arriving while that sheet shows → the already-open message;
 - an iOS delivery inside `Documents/Inbox` → the item removed after the flow ends and after a refusal; a launch with a leftover item → removed, while a URL delivered to that launch is kept;
 - every row of K6 with a FakeCore lifecycle, including the review session kept on the same card and side after an `.apkg` sheet closes, the C13 path when the import updated the current card's note, and the `.colpkg` refused during a review with the review continuing;
-- K6.1: Welcome's Import a File… with an `.apkg` → an empty collection created, then the import sheet over Home; an `.apkg` opened from Finder at Welcome → the question; Cancel → Welcome unchanged and no collection file; Import → the same as Import a File…;
+- K6.1 (once U162 attaches the sources; not built 2026-11-20): Welcome's Import a Collection File with an `.apkg` → an empty collection created, then the import sheet over Home; an `.apkg` opened from Finder at Welcome → the question; Cancel → Welcome unchanged and no collection file; Import → the same as Import a File…;
 - the built app's Info.plist on each platform holds K2.2's declarations exactly (identifiers, tags, roles, ranks, both iOS keys true): a plist check in `tools/mg lint-ui` or a unit test.
 
 ## K9. Open questions

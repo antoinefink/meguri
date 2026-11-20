@@ -4,7 +4,7 @@ Spec: sync/cloudkit-recovery
 Requirements: R2051, R2054, R2055, R2056, R1548, R1593 (connecting: V13), R2066 (recovery contract); supports R89, R117, R125, R158, R169, R458, R1553, R1555, R1558, R1559, R1561, R1562, R1592, R2010, R2012, R2043, R2046, R2049, R2057, R2059
 Anki: none (Meguri design)
 Scenarios: none yet
-Status: Approved 2026-10-27 (R2066). Implement U113 and U114 against this contract; first settle the open items of `sync/policy#P24`. Approved 2026-11-12 (R2066) for the new V26.1 paragraphs "Sync Now epoch verification". Every other section remains in force and unchanged. Approved 2026-11-19 (R2066) for the new 2026-11-19 V27 and the ten lines that begin "Changed 2026-11-19 (V27" in V1, V9.2, V11, V12.2, V13.3, V13.5, V16, V17.2, V22 and V24. Approved by Antoine 2026-11-19 after an independent review in three passes (`docs/process/review-log/redesign-specs-20261119.md`). Every other section remains in force and unchanged.
+Status: Approved 2026-10-27 (R2066). Implement U113 and U114 against this contract; first settle the open items of `sync/policy#P24`. Approved 2026-11-12 (R2066) for the new V26.1 paragraphs "Sync Now epoch verification". Every other section remains in force and unchanged. Approved 2026-11-19 (R2066) for the new 2026-11-19 V27 and the ten lines that begin "Changed 2026-11-19 (V27" in V1, V9.2, V11, V12.2, V13.3, V13.5, V16, V17.2, V22 and V24. Approved by Antoine 2026-11-19 after an independent review in three passes (`docs/process/review-log/redesign-specs-20261119.md`). Under review (R2066) for the two lines that begin "Changed 2026-11-20", in V13.1 and V27 (`docs/process/review-log/spec-housekeeping-20261120.md`): they change no rule, and are not approved until Antoine approves them. Every other section remains in force and unchanged.
 
 How Meguri stays correct when something goes wrong around CloudKit sync: the crash windows of every step of sending and receiving, the durability rules for the cursor and the outbox, account and service conditions, conflict copies, the publication fence after a restore or an import, the first connection, the two replace directions, and what the damaged-collection screen may offer. Record formats, merges, tombstones, epochs and structural generations are `sync/cloudkit-records` (the K ids below). Eligibility, hold-back, the Sync Now boundary and status computation are `sync/policy` (the P ids below).
 
@@ -502,7 +502,7 @@ The status is paused with "Choose where to keep the restored collection" (or the
 
 ### V13.1 When
 
-The connect action (Welcome's Connect to iCloud, Account & Sync's Enable, or a V11 action) runs this flow when the device has no usable binding. It needs account status `available` with an identity read in this process, and it starts only outside a review session (V20).
+The connect action (Welcome's Connect to iCloud, Account & Sync's Enable, or a V11 action) runs this flow when the device has no usable binding. It needs account status `available` with an identity read in this process, and it starts only outside a review session (V20). Changed 2026-11-20 (text only; V27.2, `docs/design/native-interface-contract.md` N18.2): Welcome has no Connect to iCloud; its Set Up Sync opens the Sync section, where choosing iCloud in the Service control is the connect action, as Account & Sync's Enable was (V27.2). The conditions above are unchanged.
 
 ### V13.2 What the device reads first
 
@@ -1100,6 +1100,8 @@ Core calls for U161 and U114. Each runs off the main thread, commits before it r
 ## V27. Setup by choosing the service; Off (2026-11-19)
 
 Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`: `sync.connect`, `sync.serviceSwitch`, `sync.status`, `settings.accountSync`; `docs/design/native-interface-contract.md` N15). Where V9.2, V11, V12.2, V13.3, V13.5, V16 and V17.2 differ, this section wins; the lines marked "Changed 2026-11-19" point here. It replaces R2046's "explicit connection action" and R117's Enable and Pause controls. It changes no record, no step of V14 or V15, no crash window, no isolation rule and no recovery call's meaning. The same rules for Meguri Sync are `sync/meguri-provider#MP6`; the text is `sync/status-strings#T19`.
+
+Changed 2026-11-20 (status note, not a behaviour change; Antoine paused iCloud Sync work on 2026-11-20, `docs/design/decisions.md`, `sync.connect`). The core's V27.2 setup decision exists on a branch and may be merged dormant: no view calls it. The app still runs the earlier confirmed flows (V13). In that decision rows 3 and 6 always ask. Row 3 keeps V13.3's "Continue syncing this collection" confirmation, because no durable record yet says whether Meguri Sync reached a ready binding since the stop (V27.6, "not after the other service"). Row 6 is never started without a question, because no prefetch and no switch-time fetch exist to prove the iCloud collection empty (V27.1, V27.2): the iCloud side is not proved empty, so row 7's sheet asks. The rules of V27 are unchanged.
 
 The rule: **choosing iCloud in the Service control is the user's consent to set it up.** There is no Connect step after it. Meguri asks a question only when the user's choice would replace something of the user's.
 
