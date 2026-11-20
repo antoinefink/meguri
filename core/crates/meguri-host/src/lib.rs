@@ -8,6 +8,8 @@ mod manual_transfers;
 mod provider;
 mod provider_bootstrap;
 mod provider_normal;
+mod provider_setup;
+pub use provider_setup::{MeguriSetupChange, MeguriSetupChoice, MeguriSetupDecision, MeguriSetupRow, MeguriSetupSettlement, MeguriSetupSide};
 pub use provider_normal::{MeguriCollectionState, MeguriCollectionResult, MeguriMediaResult, MeguriRoundRecovery, MeguriRoundResult, MeguriRoundStage, MeguriRoundStart, MeguriRoundTask};
 pub use provider_bootstrap::{MeguriAccess, MeguriBootstrapDirection, MeguriBootstrapError};
 pub use provider::ProviderHandoff;

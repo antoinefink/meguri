@@ -739,7 +739,7 @@ extension ReviewCollectionStartupTests {
                 try #require(summary.decision == .chooseCollection || summary.decision == .confirmAdoption)
                 let before = probe.events.last?.seq ?? 0
                 if mode == .refused {
-                    b.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+                    b.sync.setDeviceSettings(paused: true, automatic: false)
                     await b.sync.waitForInputs()
                     try #require(b.sync.settings.paused)
                     guard case .ready = b.sync.preview else { throw ServiceWorkflowFailure.wire }

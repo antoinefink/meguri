@@ -86,7 +86,7 @@ import Testing
     private func status(state: MeguriCoreBindings.CloudPolicyStatusState = .awaitingEvidence,
                         asOf: Int64? = nil, attempt: MeguriCoreBindings.CloudPolicyExchangeRecord? = nil,
                         facts: MeguriCoreBindings.CloudPolicyMediaFacts? = nil) -> CoreBridge.CloudPolicyStatus {
-        .init(MeguriCoreBindings.CloudPolicyStatus(state: state, pending: 0, heldBack: 0, inFlight: 0,
+        .init(MeguriCoreBindings.CloudPolicyStatus(state: state, stateWithoutAttention: nil, pending: 0, heldBack: 0, inFlight: 0,
             incomingWaiting: 0, attention: [], media: facts ?? media(), mediaPaused: false, error: nil,
             accountStatus: .available, accountMatchesBinding: true, asOfMs: asOf,
             lastCompleted: nil, lastAttempt: attempt, syncNow: .available,

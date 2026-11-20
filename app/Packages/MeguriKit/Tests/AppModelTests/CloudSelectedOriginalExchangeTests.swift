@@ -57,7 +57,7 @@ extension ReviewCollectionStartupTests {
             let owned = try await sourceRole.validateOwned() // First binding of this retained role.
             try #require(!owned.qChanged && owned.generation == a.owner.generation)
             if earlierAutomaticACK {
-                a.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+                a.sync.setDeviceSettings(paused: false, automatic: true)
                 await a.sync.waitForInputs(); await a.sync.drainOperations()
             }
             let sdk = try #require(await a.factory.engines.last)
