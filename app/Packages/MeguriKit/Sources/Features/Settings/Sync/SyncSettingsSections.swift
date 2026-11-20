@@ -356,6 +356,10 @@ struct MeguriKeepCollectionSheet: View {
     var account = ""
     @Environment(\.appClock) private var clock
     @State private var cancelling = false
+    #if os(macOS)
+    /// Keyboard focus starts on Cancel: neither replacement reads as the default (N15.3).
+    @FocusState private var cancelFocused: Bool
+    #endif
     private var sync: SyncCoordinator { collection.sync }
     private var choices: [MeguriSetupChoice] { SyncCoordinator.meguriSetupChoices(facts.row) }
     private var working: Bool { cancelling || sync.meguriBusy }
@@ -380,6 +384,12 @@ struct MeguriKeepCollectionSheet: View {
         NavigationStack {
             Form {
                 Section {
+                    #if !os(macOS)
+                    // The title is a question longer than a navigation bar holds: it wraps here.
+                    Text(SyncText.value(titleKey)).font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("sync.keepCollection.title")
+                    #endif
                     if let key = sync.meguriSetupNoticeKey {
                         Text(SyncText.value(key)).accessibilityIdentifier("sync.keepCollection.changed")
                     }
@@ -441,8 +451,10 @@ struct MeguriKeepCollectionSheet: View {
                 }
             }
             .formStyle(.grouped)
+            #if os(macOS)
             .navigationTitle(SyncText.value(titleKey))
-            #if !os(macOS)
+            .defaultFocus($cancelFocused, true)
+            #else
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
@@ -450,6 +462,9 @@ struct MeguriKeepCollectionSheet: View {
                     // Cancel is always available: only its own run disables it.
                     Button(SyncText.value("sync.service.cancel"), role: .cancel, action: cancel)
                         .disabled(cancelling)
+                        #if os(macOS)
+                        .focused($cancelFocused)
+                        #endif
                         .accessibilityIdentifier("sync.keepCollection.cancel")
                 }
             }
@@ -732,7 +747,10 @@ struct SyncTroubleshootingPage: View {
                             .disabled(!sync.meguriCanChoose || collection.lifecycle == .noCollection)
                             .accessibilityIdentifier("sync.trouble.replaceService")
                     } footer: {
-                        if !sync.meguriCanChoose { Text(SyncText.value("sync.switch.busy")) }
+                        // A connected device has a proved baseline, and the core starts no
+                        // full replacement over one (MP4): the entries wait for a setup.
+                        if sync.serviceConnected { Text(SyncText.value("sync.trouble.replace.connected.meguri")) }
+                        else if !sync.meguriCanChoose { Text(SyncText.value("sync.switch.busy")) }
                     }
                 }
                 if sync.meguriCanRetryMedia || sync.meguriRoutine == .mediaBlocked {

@@ -211,8 +211,7 @@ final class MacHomeHierarchyTests: XCTestCase {
             journeyCleanup.pending = true
             try click(signIn, app: app, bundle: bundle)
             // MP6.3: signing in is the consent to set the service up. Both sides hold a
-            // collection, so Meguri asks which one to keep (N15.3). Only the sheet's
-            // current identifiers are asserted: its content is still being built.
+            // collection, so Meguri asks which one to keep (N15.3).
             let keeps = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.keepCollection.keepDevice"))
             let keep = keeps.element(boundBy: 0)
             XCTAssertTrue(keep.waitForExistence(timeout: 60), "Require the keep-collection sheet after sign-in")
@@ -227,30 +226,21 @@ final class MacHomeHierarchyTests: XCTestCase {
             try app.bringToFront(bundleIdentifier: bundle)
             keep.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
             XCTAssertTrue(keep.exists, "Return must confirm neither destructive choice")
-            let keepDevice = unique(keep, "sync.keepCollection.keepDevice")
-            try click(keepDevice, app: app, bundle: bundle)
-            let previews = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.meguriSetup.confirm"))
-            let preview = previews.element(boundBy: 0)
-            XCTAssertTrue(preview.waitForExistence(timeout: 60), "Require the actual setup preview")
-            XCTAssertEqual(previews.count, 1)
-            XCTAssertEqual(settings.sheets.count, 1)
-            let previewCancel = unique(preview, "sync.meguriSetup.cancel")
-            let previewConfirm = unique(preview, "sync.meguriSetup.confirm")
-            for control in [previewCancel, previewConfirm] {
-                XCTAssertEqual(control.elementType, .button)
-                actionable(control)
-            }
+            // N15.3: a button of the sheet is the confirmation, bound by the core to the
+            // facts shown; no preview sheet and no alert follow it.
             for caption in [
-                "The server’s collection will be replaced with this device’s collection. Meguri first backs up this device’s collection and keeps a copy of the server’s collection.",
+                "The collection on your Meguri Sync server is replaced. Meguri first saves a copy of it on this device.",
                 "Stop syncing on your other devices until this finishes. Changes they send to the server meanwhile can be replaced.",
-                "Media then syncs both ways. On either side, files can be added, replaced or deleted. Files that no card uses are kept.",
-                "After setup, Meguri Sync syncs this collection and its media automatically."
+                "Media then syncs both ways. On either side, files can be added, replaced or deleted. Files that no card uses are kept."
             ] {
-                let content = preview.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", caption, caption))
-                XCTAssertTrue(content.element(boundBy: 0).waitForExistence(timeout: 10), "Require ordinary setup consequence content")
+                let content = keep.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", caption, caption))
+                XCTAssertTrue(content.element(boundBy: 0).waitForExistence(timeout: 10), "Require the choice's consequence in the sheet")
                 XCTAssertEqual(content.count, 1)
             }
-            try click(previewConfirm, app: app, bundle: bundle)
+            let keepDevice = unique(keep, "sync.keepCollection.keepDevice")
+            try click(keepDevice, app: app, bundle: bundle)
+            XCTAssertEqual(settings.descendants(matching: .any).matching(identifier: "sync.meguriSetup.confirm").count, 0,
+                "No second confirmation follows the sheet's button")
             waitForJourney({ availableSync() }, "Setup must finish with available native Sync Now and no unresolved setup sheet")
             XCTAssertEqual(unique(settings, "settings.sync.syncNow").elementType, .button)
             // N15.2 row 2: once signed in, one Account row takes the fields' place.

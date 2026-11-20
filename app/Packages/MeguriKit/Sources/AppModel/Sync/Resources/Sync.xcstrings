@@ -4472,6 +4472,17 @@
         }
       }
     },
+    "sync.trouble.replace.connected.meguri": {
+      "comment": "Proposed for sync/status-strings T19.6 by the round 2 integration (2026-11-20), not yet approved; shown only while Meguri Sync is connected.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device is connected to Meguri Sync, so there is no collection to replace now. Meguri asks which collection to keep when setup has to run again."
+          }
+        }
+      }
+    },
     "sync.trouble.replaceService.iCloud": {
       "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
       "localizations": {

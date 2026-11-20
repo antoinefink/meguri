@@ -98,7 +98,7 @@ public struct CloudSyncStatusButton: View {
                 }
                 .formStyle(.grouped)
                 Divider()
-                VStack {
+                VStack(spacing: Spacing.medium) {
                     SyncNowButton(collection: collection)
                     Button(SyncText.value("sync.status.openSettings")) { showSettings() }
                         .accessibilityIdentifier("sync.status.settings")
