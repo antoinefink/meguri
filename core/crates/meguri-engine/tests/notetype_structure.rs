@@ -875,3 +875,40 @@ fn checked_drafts_run_the_template_checks_on_every_path() {
     unchecked.skip_checks = true;
     assert!(!run(&h, unchecked).unwrap().value.written);
 }
+
+/// A removed card with the largest possible id leaves no id above it: a
+/// card the same save would generate is refused (the whole save rolls
+/// back) rather than given the removed card's id.
+#[test]
+fn no_generated_card_takes_the_largest_removed_id() {
+    let (h, _) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    let old = state(&h, id).cards.iter().find(|c| c.2 == 1).unwrap().0;
+    h.collection
+        .run(
+            OpSpec::named("seed largest id", OpSource::UserNonUndoable)
+                .skip_undo()
+                .stamp(StampMode::Raw),
+            move |ctx| {
+                let key = meguri_storage::RowKey::Id(old);
+                let mut image = ctx.scope().row_image(meguri_storage::Table::Cards, &key)?.unwrap();
+                image[0] = meguri_storage::Cell::Integer(i64::MAX);
+                ctx.scope().restore(meguri_storage::Table::Cards, &key, None)?;
+                ctx.scope()
+                    .restore(meguri_storage::Table::Cards, &meguri_storage::RowKey::Id(i64::MAX), Some(&image))?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let before = state(&h, id);
+    let mut draft = draft(&h, id);
+    without_template(&mut draft, "Reverse");
+    draft.templates.push(template("Reverse again", "{{Back}}"));
+    let error = run(&h, draft).unwrap_err();
+    assert!(
+        matches!(error, EngineError::Storage(meguri_storage::StorageError::IdsExhausted { .. })),
+        "{error:?}"
+    );
+    assert_eq!(state(&h, id), before);
+}

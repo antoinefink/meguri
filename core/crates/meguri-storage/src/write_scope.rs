@@ -90,8 +90,9 @@ pub struct WriteScope<'c> {
     /// each was taken.
     savepoints: Vec<bool>,
     /// New card ids are allocated at or above this: ids of cards removed
-    /// earlier in the transaction are never given to a new card.
-    card_id_floor: i64,
+    /// earlier in the transaction are never given to a new card. `None`
+    /// once a removed card had the largest possible id: no id is left above.
+    card_id_floor: Option<i64>,
 }
 
 /// A savepoint inside a write scope (`engine/op-model` O3): one step of a
@@ -142,7 +143,7 @@ impl<'c> WriteScope<'c> {
             open: true,
             normal_stage: false,
             savepoints: Vec::new(),
-            card_id_floor: i64::MIN,
+            card_id_floor: Some(i64::MIN),
         })
     }
 
@@ -404,7 +405,8 @@ impl<'c> WriteScope<'c> {
     fn add<R: Record>(&mut self, record: &R) -> Result<i64, StorageError> {
         let mut at = self.now().0;
         if R::TABLE == Table::Cards {
-            at = at.max(self.card_id_floor);
+            let floor = self.card_id_floor.ok_or(StorageError::IdsExhausted { table: "cards" })?;
+            at = at.max(floor);
         }
         let id = ids::allocate(self.conn, R::TABLE, at)?;
         let mut cells = record.to_cells();
@@ -423,7 +425,10 @@ impl<'c> WriteScope<'c> {
     /// given to a new card in the same transaction, whatever the allocator
     /// (I3) would pick once the row is gone.
     pub fn retire_card_ids_through(&mut self, id: CardId) {
-        self.card_id_floor = self.card_id_floor.max(id.0.saturating_add(1));
+        self.card_id_floor = match (self.card_id_floor, id.0.checked_add(1)) {
+            (Some(floor), Some(next)) => Some(floor.max(next)),
+            _ => None,
+        };
     }
 
     /// Adds a card under a new id (I2, I3).
