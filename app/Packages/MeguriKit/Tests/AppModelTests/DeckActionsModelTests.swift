@@ -363,6 +363,43 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+    /// D19.7 with the core: a Parent Deck changed to None moves the subtree in
+    /// one Rename Deck step, and a trailing space writes nothing.
+    @Test func parentDeckNoneMovesTheSubtreeInOneStepAndATrailingSpaceWritesNothing() async throws {
+        try await withDeckNameOwner { owner in
+            let service = CoreDeckService(), model = owner.deckActions, undo = CoreUndoService()
+            let first = try await service.addDeck(name: "Languages::日本語::QZ61")
+            let second = try await service.addDeck(name: "Languages::日本語::QZ62")
+            await owner.loadCounts()
+            let languages = try #require(owner.decks.first { $0.name == "Languages" })
+            let japanese = try #require(languages.children.first { $0.name == "日本語" })
+            model.present(.rename(japanese.id))
+            #expect(model.name == "日本語" && model.parentID == languages.id && model.footer == .subdecksMove(2))
+            model.parentID = nil
+            #expect(model.composedName == "日本語" && model.canSubmit)
+            model.submit(); await model.waitForCompletion()
+            #expect(model.message == nil && owner.navigation.sheet == nil)
+            #expect(owner.fullDeckName(first.id) == "日本語::QZ61" && owner.fullDeckName(second.id) == "日本語::QZ62")
+            let step = try await undo.peekUndo(scope: .global)
+            #expect(CollectionUndoModel.stepName(step) == "Rename Deck")
+            _ = try await undo.startUndo(scope: .global).value()
+            await owner.loadCounts()
+            #expect(owner.fullDeckName(first.id) == "Languages::日本語::QZ61", "One step restores the whole subtree")
+            #expect(owner.fullDeckName(second.id) == "Languages::日本語::QZ62")
+
+            let plain = try await service.addDeck(name: "QZ63")
+            await owner.loadCounts()
+            model.present(.rename(plain.id))
+            model.name = "QZ63 "
+            #expect(model.canSubmit, "A difference the UI sees; D6 decides")
+            model.submit(); await model.waitForCompletion()
+            #expect(model.message == nil && owner.navigation.sheet == nil, "The form closes as after a rename")
+            #expect(owner.fullDeckName(plain.id) == "QZ63")
+            #expect(CollectionUndoModel.stepName(try await undo.peekUndo(scope: .global)) == "Add Deck",
+                "D6 step 3 wrote nothing and recorded no step")
+        }
+    }
+
     @Test(arguments: [false, true])
     func admittedRenameDrainsBeforeBackgroundOrCloseAndLateCancelKeepsCommit(closing: Bool) async throws {
         try await withDeckNameOwner { owner in

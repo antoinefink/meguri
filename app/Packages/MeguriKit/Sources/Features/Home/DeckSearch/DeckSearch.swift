@@ -47,23 +47,18 @@ public nonisolated struct DeckSearch: Sendable {
     }
 
     public let matches: [Match]
-    /// No deck has the typed name, compared as Go to Deck does, without case.
-    public let offersCreate: Bool
 
-    public init(nodes: [CountedDeckNode], query: String) {
+    /// H6.1: the D17 snapshot's entries in its order, every deck record,
+    /// filtered ones included; the default deck (id 1) only when `listsDefault`.
+    public init(entries: [DeckNameEntry], listsDefault: Bool, query: String) {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { matches = []; return }
         let filter = GoToDeckFilter(query: query)
-        var found: [Match] = [], exists = false
-        func visit(_ node: CountedDeckNode, ancestors: [String]) {
-            let name = node.name.components(separatedBy: "::").last ?? node.name
-            let match = Match(id: node.id, name: name, ancestors: ancestors)
-            if match.fullName.compare(query, options: .caseInsensitive) == .orderedSame { exists = true }
-            if filter.matches(fullName: match.fullName) { found.append(match) }
-            for child in node.children { visit(child, ancestors: ancestors + [name]) }
+        matches = entries.compactMap { entry in
+            guard entry.id != 1 || listsDefault, filter.matches(fullName: entry.fullName) else { return nil }
+            let path = entry.fullName.components(separatedBy: "::")
+            return Match(id: entry.id, name: path.last ?? entry.fullName, ancestors: Array(path.dropLast()))
         }
-        for node in nodes { visit(node, ancestors: []) }
-        matches = query.isEmpty ? [] : found
-        offersCreate = !query.isEmpty && !exists
     }
 }
 
@@ -104,9 +99,16 @@ public extension DeckSearch {
 @Observable @MainActor
 public final class DeckListSearch {
     public var text = "" {
-        // After each edit the first row is highlighted again (H6.3).
-        didSet { if text != oldValue { chosen = nil } }
+        didSet {
+            guard text != oldValue else { return }
+            // After each edit the first row is highlighted again (H6.3).
+            chosen = nil
+            // Typing into a cleared field starts a new search: its reads are its own (D18).
+            if Self.blank(oldValue), !Self.blank(text) { presentation &+= 1 }
+        }
     }
+    /// The search the field holds now; D18's name read belongs to one.
+    public private(set) var presentation: UInt64 = 0
     public var presented = false
     /// The row the Mac's arrow keys chose; see `DeckSearch.highlight`.
     public var chosen: DeckSearchTarget?
@@ -130,9 +132,10 @@ public final class DeckListSearch {
     public struct NameCheckKey: Hashable, Sendable {
         public let name: String
         public let generation: UInt64
+        public let presentation: UInt64
         public let attempt: UInt64
-        public init(name: String, generation: UInt64, attempt: UInt64) {
-            self.name = name; self.generation = generation; self.attempt = attempt
+        public init(name: String, generation: UInt64, presentation: UInt64, attempt: UInt64) {
+            self.name = name; self.generation = generation; self.presentation = presentation; self.attempt = attempt
         }
     }
     /// Raised by Try Again after a failed read.
@@ -141,7 +144,7 @@ public final class DeckListSearch {
     private var nameCheckState: NameCheck?
 
     public func nameCheckKey(generation: UInt64) -> NameCheckKey {
-        NameCheckKey(name: text, generation: generation, attempt: nameCheckAttempt)
+        NameCheckKey(name: text, generation: generation, presentation: presentation, attempt: nameCheckAttempt)
     }
     /// The state of the read for this text and generation; nil before it starts.
     public func nameCheck(generation: UInt64) -> NameCheck? {
@@ -169,6 +172,48 @@ public final class DeckListSearch {
         nameCheckState = state
     }
     public func retryNameCheck() { nameCheckAttempt &+= 1 }
+
+    // MARK: The records searched (D17, H6.1)
+
+    public struct SnapshotKey: Hashable, Sendable {
+        public let generation: UInt64
+        /// Changes whenever the deck tree does, so a write is searched at once.
+        public let tree: Int
+        public let attempt: UInt64
+    }
+    public private(set) var snapshot: DeckNameSnapshot?
+    /// H6.1: the default deck is listed only while a card has `did` 1.
+    public private(set) var listsDefault = false
+    public private(set) var snapshotFailed = false
+    public private(set) var snapshotAttempt: UInt64 = 0
+    private var loadedKey: SnapshotKey?
+
+    public func snapshotKey(generation: UInt64, tree: Int) -> SnapshotKey {
+        SnapshotKey(generation: generation, tree: tree, attempt: snapshotAttempt)
+    }
+    /// The entries of a snapshot of this generation; nil until one is read.
+    public func entries(generation: UInt64) -> [DeckNameEntry]? {
+        guard let snapshot, snapshot.generation == generation else { return nil }
+        return snapshot.decks
+    }
+    /// Reads every deck record (D17); a result for an older key is dropped,
+    /// and one of another generation counts as a failed read.
+    public func loadSnapshot(_ key: SnapshotKey, read: @MainActor () async throws -> DeckNameSnapshot,
+                             defaultHasCards: @MainActor () async throws -> Bool) async {
+        guard loadedKey != key else { return }
+        loadedKey = key; snapshotFailed = false
+        do {
+            let result = try await read()
+            let listed = result.decks.contains { $0.id == 1 } ? try await defaultHasCards() : false
+            guard loadedKey == key, !Task.isCancelled else { return }
+            guard result.generation == key.generation else { snapshot = nil; snapshotFailed = true; return }
+            snapshot = result; listsDefault = listed
+        } catch {
+            guard loadedKey == key, !Task.isCancelled else { return }
+            snapshotFailed = true
+        }
+    }
+    public func retrySnapshot() { snapshotAttempt &+= 1; loadedKey = nil }
     /// H7's blank rule: empty, or Unicode White_Space only.
     static func blank(_ text: String) -> Bool {
         text.unicodeScalars.allSatisfy { $0.properties.isWhitespace }

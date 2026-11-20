@@ -97,19 +97,14 @@ public struct HomeView: View {
             homeFocused = active
         }
         #endif
-        // N20.1: "/" and Find…'s second key, ⇧⌘O, put the focus in the deck search.
-        .onKeyPress(keys: [KeyEquivalent("/"), "o", "O"], phases: .down) { press in
-            let slash = press.key == KeyEquivalent("/") && press.modifiers.isEmpty
-            let find = press.key != KeyEquivalent("/") && press.modifiers == [.command, .shift]
-            guard slash || find, collection.navigation.section == .home,
-                  DeckSearchFocus.available(collection, layout: searchLayout) else { return .ignored }
+        // N20.1, H9.2: "/" from the deck page puts the focus in the deck search
+        // (⇧⌘O is Find…'s key equivalent, the shell's).
+        .onKeyPress(keys: [KeyEquivalent("/")], phases: .down) { press in
+            guard press.modifiers.isEmpty, DeckSearchFocus.available(collection, layout: searchLayout) else { return .ignored }
             #if os(macOS)
             // Native editing, sheet and menu tracking own their input, even if
             // an unhandled event bubbles to Home's key path.
-            guard homeKeyboardActive, NSApp.isActive, let window = NSApp.keyWindow, window.attachedSheet == nil,
-                  !(window.firstResponder is NSTextInputClient),
-                  RunLoop.current.currentMode != .eventTracking,
-                  let event = NSApp.currentEvent, event.type == .keyDown, !event.isARepeat else { return .ignored }
+            guard homeKeyboardActive, DeckSearchFocus.slashAdmitted() else { return .ignored }
             #endif
             DeckSearchFocus.request(collection, layout: searchLayout)
             return .handled

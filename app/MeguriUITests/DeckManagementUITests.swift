@@ -92,6 +92,26 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertTrue(waitForLabel(element(app, "home.deckName.footer"), "Its subdeck moves with it."))
         try click(element(app, "home.deckName.cancel"), app: app, bundle: bundle)
         XCTAssertTrue(element(app, "home.deckName.sheet").waitForNonExistence(timeout: 10))
+
+        // Parent Deck chosen in its menu: New Deck… inside QZ33.
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("n", modifierFlags: [.command, .shift])
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        app.typeText("QZ35")
+        let parent = element(app, "home.deckName.parent")
+        try click(parent, app: app, bundle: bundle)
+        let choice = app.menuItems[renamedName].firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 10))
+        try click(choice, app: app, bundle: bundle)
+        XCTAssertTrue(waitForLabel(element(app, "home.deckName.footer"), "Inside \(renamedName)."))
+        try click(element(app, "home.deckName.confirm"), app: app, bundle: bundle)
+        XCTAssertTrue(element(app, "home.deckName.sheet").waitForNonExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value == %@", "QZ35")).firstMatch.waitForExistence(timeout: 10))
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("r", modifierFlags: [.command, .shift])
+        XCTAssertTrue(waitForLabel(element(app, "home.deckName.footer"), "Inside \(renamedName)."),
+            "Saved as QZ33::QZ35: the parent chosen in the menu")
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
     func testSidebarSearchOpensHighlightedDecksAndKeepsTheQuery() throws {
@@ -129,6 +149,11 @@ final class DeckManagementUITests: XCTestCase {
         app.typeKey("f", modifierFlags: .command)
         app.typeKey("a", modifierFlags: .command)
         app.typeText("QZ90")
+        XCTAssertTrue(waitForValue(search, "QZ90"))
+        // R197: "/" typed in the field is text, not Find.
+        app.typeText("/")
+        XCTAssertTrue(waitForValue(search, "QZ90/"))
+        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
         XCTAssertTrue(waitForValue(search, "QZ90"))
         XCTAssertTrue(secondRow.waitForExistence(timeout: 10))
         try app.bringToFront(bundleIdentifier: bundle)

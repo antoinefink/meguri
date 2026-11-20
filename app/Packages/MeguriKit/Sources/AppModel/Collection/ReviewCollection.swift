@@ -17,7 +17,10 @@ public final class ReviewCollection: ChangeFanoutSink {
     public private(set) var openFailureDiagnosticValue: String?
     #endif
     public private(set) var generation: UInt64 = 0
-    public private(set) var decks: [CountedDeckNode] = []
+    public private(set) var decks: [CountedDeckNode] = [] {
+        // A write changes the tree's counts or names: Edit › Undo's step may have changed.
+        didSet { if decks != oldValue { undoOwner?.scheduleRefresh() } }
+    }
     /// Page content may belong to a deck intentionally absent from the tree.
     public struct DeckPageDetail: Sendable, Hashable {
         public let id: Int64
@@ -241,14 +244,39 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     private var deckNamesReserved: Bool {
         if case .deckName = navigation.sheet { return true }
-        return deckNamesOwner?.busy == true
+        return deckNamesOwner?.busy == true || undoOwner?.busy == true
     }
+    private var undoOwner: CollectionUndoModel?
+    /// Edit › Undo and Redo outside review (N20.4, R173).
+    public var collectionUndo: CollectionUndoModel {
+        if let undoOwner { return undoOwner }
+        let value = CollectionUndoModel(owner: self)
+        undoOwner = value
+        value.scheduleRefresh()
+        return value
+    }
+    /// After an undo or redo: the tree and the shown page read the collection again.
+    func collectionUndoFinished() async {
+        await loadCounts()
+        if let deck = navigation.homeDeckPage?.rawValue, self.deck(deck) != nil {
+            _ = await openDeckPage(deckID: deck).value
+        }
+    }
+    /// Find…, ⇧⌘O and "/" (N20.1, N20.4): the deck workspace shows (the Home
+    /// section), with no review and no sheet or panel owning the keys. The tab
+    /// layout's Search belongs to its deck list (N14.2).
+    public func deckSearchAvailable(layout: ShellLayout) -> Bool {
+        guard case .ready = state, review == nil, navigation.review == nil, navigation.sheet == nil,
+              navigation.section == .home else { return false }
+        return layout == .sidebar || !decks.isEmpty
+    }
+    func collectionUndoFailed() { error = "Couldn’t undo or redo that change. Try again." }
     func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?) -> Bool {
         guard host == .main, foreground, !resuming, !closed, !closing, !sync.providerHandoffInProgress,
               !sync.meguriCollectionWorkHeld,
               !opening, !starting, state == .ready,
               case .ready(let current) = lifecycle, current == generation,
-              review == nil, navigation.review == nil,
+              review == nil, navigation.review == nil, undoOwner?.busy != true,
               entryOwner?.busy != true, entryOwner?.pickerPresented != true, entryOwner?.preview == nil,
               exportOwner?.busy != true,
               exportOwner?.artifact == nil, exportOwner?.providerLease == nil,
@@ -1029,6 +1057,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var canSaveDeckState: Bool { state == .ready && !opening && !closed && !closing && !resuming }
 
     private func invalidateDeckActions() {
+        undoOwner?.generationEnded()
         deckNamesOwner?.invalidate()
         selectedDeckDetail = nil
         selectionRevision &+= 1; collapseRevision &+= 1; countsRevision &+= 1; deckTreeRevision &+= 1

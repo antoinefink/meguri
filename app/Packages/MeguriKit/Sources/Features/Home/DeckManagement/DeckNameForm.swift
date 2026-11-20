@@ -107,19 +107,11 @@ public struct DeckNameForm: View {
     }
 
     private var nameField: some View {
-        TextField(text: $model.name, selection: $selection, prompt: namePrompt) { Text("Name", bundle: .module) }
+        TextField(text: $model.name, selection: $selection) { Text("Name", bundle: .module) }
             .focused($nameFocused)
             .disabled(model.busy || model.needsRefresh)
             .accessibilityIdentifier("home.deckName.name")
             .onSubmit { model.submit() }
-    }
-
-    private var namePrompt: Text? {
-        #if os(macOS)
-        nil
-        #else
-        Text("Required", bundle: .module)
-        #endif
     }
 
     @ViewBuilder private var parentRow: some View {

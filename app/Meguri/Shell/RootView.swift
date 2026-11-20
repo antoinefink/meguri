@@ -90,6 +90,9 @@ struct RootView: View {
             }
         }
         .focusedSceneValue(\.nativeCommandContext, collection.map { NativeCommandContext(collection: $0, host: .main, layout: layout) })
+        .background {
+            if let collection { FindSecondKey(context: NativeCommandContext(collection: collection, host: .main, layout: layout)) }
+        }
         #if os(macOS)
         // Hide only the presenting shell; sheets and alerts own their AX tree.
         .accessibilityHidden(launchSheet || launchAlert || linkRefusal != nil || hasModalSheet)

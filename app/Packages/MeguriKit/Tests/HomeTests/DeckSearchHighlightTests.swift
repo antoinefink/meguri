@@ -6,26 +6,27 @@ import Testing
 /// arrows, and D18's create row.
 @MainActor
 @Suite struct DeckSearchHighlightTests {
-    private func node(_ id: Int64, _ name: String, _ children: [CountedDeckNode] = []) -> CountedDeckNode {
-        CountedDeckNode(id: id, name: name, filtered: false, studyCollapsed: true, browserCollapsed: true,
-            counts: ReviewCounts(new: 0, learning: 0, review: 0), children: children)
+    private var entries: [DeckNameEntry] {
+        [DeckNameEntry(id: 11, fullName: "Languages", filtered: false),
+         DeckNameEntry(id: 12, fullName: "Languages::日本語", filtered: false),
+         DeckNameEntry(id: 13, fullName: "Languages::日本語::文法", filtered: false),
+         DeckNameEntry(id: 14, fullName: "Languages::Español", filtered: false),
+         DeckNameEntry(id: 15, fullName: "Science", filtered: false)]
     }
-    private var tree: [CountedDeckNode] {
-        [node(1, "Languages", [node(2, "日本語", [node(3, "文法")]), node(4, "Español")]), node(5, "Science")]
-    }
+    private func search(_ query: String) -> DeckSearch { DeckSearch(entries: entries, listsDefault: true, query: query) }
 
     @Test func resultsReadAsPathsWithChevrons() {
-        let search = DeckSearch(nodes: tree, query: "文法")
-        #expect(search.matches.map(\.id) == [3])
-        #expect(search.matches.first?.ancestors == ["Languages", "日本語"])
-        #expect(search.matches.first?.spokenPath == "Languages › 日本語 › 文法")
+        let found = search("文法")
+        #expect(found.matches.map(\.id) == [13])
+        #expect(found.matches.first?.ancestors == ["Languages", "日本語"])
+        #expect(found.matches.first?.spokenPath == "Languages › 日本語 › 文法")
     }
 
     @Test func theFirstRowIsHighlightedOrTheCreateRowWhenNothingIsListed() {
-        let listed = DeckSearch(nodes: tree, query: "a").targets(offeringCreate: true)
-        #expect(listed == [.deck(1), .deck(2), .deck(3), .deck(4), .create])
-        #expect(DeckSearch.highlight(nil, in: listed) == .deck(1))
-        let nothing = DeckSearch(nodes: tree, query: "Korean").targets(offeringCreate: true)
+        let listed = search("a").targets(offeringCreate: true)
+        #expect(listed == [.deck(11), .deck(12), .deck(13), .deck(14), .create])
+        #expect(DeckSearch.highlight(nil, in: listed) == .deck(11))
+        let nothing = search("Korean").targets(offeringCreate: true)
         #expect(nothing == [.create])
         #expect(DeckSearch.highlight(nil, in: nothing) == .create)
         #expect(DeckSearch.highlight(nil, in: []) == nil)
@@ -89,4 +90,60 @@ import Testing
         await search.checkName(search.nameCheckKey(generation: 11)) { _ in DeckNameMatch(generation: 11, deck: nil) }
         #expect(search.offersCreate(generation: 11), "\"::\" is not blank (R58)")
     }
+
+    @Test func aLateNameReadNeverOverwritesTheCurrentOne() async {
+        let search = DeckListSearch()
+        search.text = "Kor"
+        let first = search.nameCheckKey(generation: 11)
+        let gate = Gate()
+        let late = Task { await search.checkName(first) { _ in await gate.wait(); return DeckNameMatch(generation: 11, deck: nil) } }
+        await gate.entered()
+        search.text = "Korean"
+        await search.checkName(search.nameCheckKey(generation: 11)) { _ in
+            DeckNameMatch(generation: 11, deck: DeckNameEntry(id: 20, fullName: "Korean", filtered: false))
+        }
+        gate.open(); await late.value
+        #expect(search.nameCheck(generation: 11) == .exists, "The read for \"Kor\" ended last but belongs to an older text")
+        #expect(!search.offersCreate(generation: 11))
+    }
+
+    @Test func aNewSearchHasItsOwnNameRead() async {
+        let search = DeckListSearch()
+        search.text = "Korean"
+        await search.checkName(search.nameCheckKey(generation: 11)) { _ in DeckNameMatch(generation: 11, deck: nil) }
+        #expect(search.offersCreate(generation: 11))
+        let before = search.presentation
+        search.text = ""
+        search.text = "Korean"
+        #expect(search.presentation != before)
+        #expect(!search.offersCreate(generation: 11), "A cleared and retyped field reads again")
+    }
+
+    @Test func theSnapshotIsReadPerGenerationAndTreeAndFollowsTheDefaultRule() async {
+        let search = DeckListSearch()
+        let key = search.snapshotKey(generation: 11, tree: 1)
+        #expect(search.entries(generation: 11) == nil)
+        await search.loadSnapshot(key, read: { DeckNameSnapshot(generation: 11, decks: self.entries) },
+            defaultHasCards: { Issue.record("No id 1 in the snapshot: no read"); return true })
+        #expect(search.entries(generation: 11)?.count == 5 && !search.listsDefault)
+        #expect(search.entries(generation: 12) == nil)
+        // A snapshot of another generation counts as a failed read.
+        await search.loadSnapshot(search.snapshotKey(generation: 12, tree: 1),
+            read: { DeckNameSnapshot(generation: 11, decks: self.entries) }, defaultHasCards: { false })
+        #expect(search.snapshotFailed && search.entries(generation: 12) == nil)
+        let withDefault = [DeckNameEntry(id: 1, fullName: "Default", filtered: false)] + entries
+        await search.loadSnapshot(search.snapshotKey(generation: 12, tree: 2),
+            read: { DeckNameSnapshot(generation: 12, decks: withDefault) }, defaultHasCards: { true })
+        #expect(!search.snapshotFailed && search.listsDefault && search.entries(generation: 12)?.first?.id == 1)
+    }
+}
+
+@MainActor
+private final class Gate {
+    private var waiting: CheckedContinuation<Void, Never>?
+    private var arrival: CheckedContinuation<Void, Never>?
+    private var arrived = false
+    func wait() async { await withCheckedContinuation { waiting = $0; arrived = true; arrival?.resume(); arrival = nil } }
+    func entered() async { if arrived { return }; await withCheckedContinuation { arrival = $0 } }
+    func open() { waiting?.resume(); waiting = nil }
 }

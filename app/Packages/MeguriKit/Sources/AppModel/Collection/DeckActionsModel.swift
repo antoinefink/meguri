@@ -201,8 +201,11 @@ public final class DeckActionsModel {
                     }
                 }
                 let opened: Bool
-                if case .rename = action {
-                    opened = true
+                if case .rename(let id) = action {
+                    // N20.3: Rename shows the deck's page, as Create does; the page
+                    // already showing stays as it is.
+                    if owner.navigation.homeDeckPage?.rawValue == id { opened = true }
+                    else { opened = await owner.openDeckPage(deckID: id).value }
                 } else if let pendingPage {
                     opened = await owner.openDeckPage(pendingPage).value
                 } else {

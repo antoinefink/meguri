@@ -90,6 +90,52 @@ struct NativeCommandContext {
         guard let review else { return false }
         return ReviewInputOwnership.admitsNativeCommand(review)
     }
+
+    // MARK: Undo and Redo (R173, R174)
+
+    /// The main window's own Undo and Redo, while no sheet or panel holds the
+    /// keys: there the system's items keep the text inputs' undo.
+    var replacesUndo: Bool { host == .main && collection.navigation.sheet == nil }
+
+    func undoRoute(redo: Bool) -> EditUndoRouting.Route {
+        var inputs = EditUndoRouting.Inputs()
+        inputs.reviewShown = review != nil
+        #if os(macOS)
+        let responder = MacUndoResponder.shared.firstResponder
+        // In review a focused text input in the card or a control owns it; else a text view.
+        inputs.textOwnsUndo = inputs.reviewShown ? responder != nil && !reviewInputAvailable : responder is NSTextView
+        let manager = responder?.undoManager
+        inputs.textAvailable = (redo ? manager?.canRedo : manager?.canUndo) == true
+        inputs.textTitle = redo ? manager?.redoMenuItemTitle : manager?.undoMenuItemTitle
+        inputs.reviewOwnsKeys = reviewInputAvailable
+        #else
+        // Observable state only: the card host keeps the keys (N11.3).
+        inputs.reviewOwnsKeys = review?.paused == false
+        #endif
+        if let review {
+            let available = redo ? review.canRedo : review.canUndo
+            inputs.reviewStep = available ? CollectionUndoModel.stepName(redo ? review.redoStatus : review.undoStatus) : nil
+        }
+        let history = collection.collectionUndo
+        inputs.collectionStep = (redo ? history.canRedo : history.canUndo) ? (redo ? history.redoName : history.undoName) : nil
+        return EditUndoRouting.route(inputs)
+    }
+
+    func performUndo(redo: Bool) {
+        let route = undoRoute(redo: redo)
+        guard route.enabled else { return }
+        switch route.target {
+        case .text:
+            #if os(macOS)
+            NSApp.sendAction(redo ? Selector(("redo:")) : Selector(("undo:")), to: nil, from: nil)
+            #endif
+        case .review:
+            guard reviewInputAvailable else { return }
+            review?.restore(redo: redo)
+        case .collection:
+            if redo { collection.collectionUndo.redo() } else { collection.collectionUndo.undo() }
+        }
+    }
 }
 
 private struct NativeCommandContextKey: FocusedValueKey { typealias Value = NativeCommandContext }
@@ -122,22 +168,25 @@ struct AppCommands: Commands {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 .disabled(context?.fileActionsAvailable != true || context?.collection.collectionExport.canPresent != true)
         }
-        // A review's answers are the undo target while it shows; otherwise the
-        // system's group keeps text fields' own undo (R173, R174).
-        if context?.review != nil {
+        // One Undo and one Redo (N20.4): the text input's, the review's or the
+        // collection's (EditUndoRouting); a sheet or panel keeps the system's.
+        if let context, context.replacesUndo {
             CommandGroup(replacing: .undoRedo) {
-                Button(undoTitle) { restore(redo: false) }
-                    .keyboardShortcut("z", modifiers: .command)
-                    .disabled(context?.review?.canUndo != true)
+                let undo = context.undoRoute(redo: false), redo = context.undoRoute(redo: true)
+                Button(Self.title(undo.title, redo: false)) { context.performUndo(redo: false) }
+                    .keyboardShortcut(undoKey("z", modifiers: .command, review: context.review != nil))
+                    .disabled(!undo.enabled)
                     .accessibilityIdentifier("shell.command.undo")
-                Button(redoTitle) { restore(redo: true) }
-                    .keyboardShortcut("z", modifiers: [.command, .shift])
-                    .disabled(context?.review?.canRedo != true)
+                Button(Self.title(redo.title, redo: true)) { context.performUndo(redo: true) }
+                    .keyboardShortcut(undoKey("z", modifiers: [.command, .shift], review: context.review != nil))
+                    .disabled(!redo.enabled)
                     .accessibilityIdentifier("shell.command.redo")
             }
         }
-        CommandGroup(replacing: .textEditing) {
-            // ⇧⌘O is its second key, with no item of its own (Home, HomeSidebarDeckSearch).
+        // The system's Find, Spelling, Substitutions and other text groups stay;
+        // Find… comes first, so ⌘F reaches it while the deck workspace shows and
+        // the text inputs' own Find otherwise (when it is disabled).
+        CommandGroup(before: .textEditing) {
             Button("Find…") { context?.find() }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(context?.canFind != true)
@@ -168,8 +217,8 @@ struct AppCommands: Commands {
                 guard context?.reviewInputAvailable == true else { return }
                 context?.review?.reveal()
             }
-            .keyboardShortcut(.space, modifiers: [])
-            .disabled(context?.reviewInputAvailable != true || context?.review?.canReveal != true)
+            .keyboardShortcut(cardKey(.space))
+            .disabled(!cardEnabled(context?.review?.canReveal))
             Divider()
             rating("Again", .again, key: "1")
             rating("Hard", .hard, key: "2")
@@ -180,36 +229,44 @@ struct AppCommands: Commands {
                 guard let context, context.reviewInputAvailable, context.review?.canFinish == true else { return }
                 Task { await context.collection.finishReview() }
             }
-            .keyboardShortcut(.escape, modifiers: [])
-            .disabled(context?.reviewInputAvailable != true || context?.review?.canFinish != true)
+            .keyboardShortcut(cardKey(.escape))
+            .disabled(!cardEnabled(context?.review?.canFinish))
         }
     }
 
     /// R173: "Undo <operation>" while one can be undone, plain "Undo" otherwise.
-    private var undoTitle: String {
-        guard context?.review?.canUndo == true, case .available(let step)? = context?.review?.undoStatus else {
-            return String(localized: "Undo")
+    private static func title(_ title: EditUndoRouting.Title, redo: Bool) -> String {
+        switch title {
+        case .text(let text): text
+        case .named(let name): redo ? String(localized: "Redo \(name)") : String(localized: "Undo \(name)")
+        case .plain: redo ? String(localized: "Redo") : String(localized: "Undo")
         }
-        return String(localized: "Undo \(step.name)")
-    }
-    private var redoTitle: String {
-        guard context?.review?.canRedo == true, case .available(let step)? = context?.review?.redoStatus else {
-            return String(localized: "Redo")
-        }
-        return String(localized: "Redo \(step.name)")
     }
 
-    /// The review's own undo while the card owns the keys; a text field in the
-    /// card keeps its native undo (N4).
-    private func restore(redo: Bool) {
-        guard let context, let review = context.review else { return }
-        guard context.reviewInputAvailable else {
-            #if os(macOS)
-            NSApp.sendAction(redo ? Selector(("redo:")) : Selector(("undo:")), to: nil, from: nil)
-            #endif
-            return
-        }
-        review.restore(redo: redo)
+    /// On iPad the card host keeps its keys during review (N11.3): one key path.
+    private func undoKey(_ key: KeyEquivalent, modifiers: EventModifiers, review: Bool) -> KeyboardShortcut? {
+        #if os(macOS)
+        KeyboardShortcut(key, modifiers: modifiers)
+        #else
+        review ? nil : KeyboardShortcut(key, modifiers: modifiers)
+        #endif
+    }
+    /// The Card menu's unmodified keys: the Mac's menu shows and takes them; on
+    /// iPad the card host owns them (N11.3), so the items carry none.
+    private func cardKey(_ key: KeyEquivalent) -> KeyboardShortcut? {
+        #if os(macOS)
+        KeyboardShortcut(key, modifiers: [])
+        #else
+        nil
+        #endif
+    }
+    /// The Mac reads the card's input ownership; iPad only state SwiftUI observes.
+    private func cardEnabled(_ available: Bool?) -> Bool {
+        #if os(macOS)
+        context?.reviewInputAvailable == true && available == true
+        #else
+        context?.review?.paused == false && available == true
+        #endif
     }
 
     private func rating(_ title: String, _ rating: ReviewRating, key: KeyEquivalent) -> some View {
@@ -217,7 +274,22 @@ struct AppCommands: Commands {
             guard context?.reviewInputAvailable == true else { return }
             context?.review?.rate(rating)
         }
-        .keyboardShortcut(key, modifiers: [])
-        .disabled(context?.reviewInputAvailable != true || context?.review?.canRate != true)
+        .keyboardShortcut(cardKey(key))
+        .disabled(!cardEnabled(context?.review?.canRate))
+    }
+}
+
+/// ⇧⌘O, Find…'s second key (N20.4): a key equivalent of the window with no
+/// menu item of its own, so it also acts while a text input has the focus, as
+/// menu keys do (H9.2). The same action and guard as Find….
+struct FindSecondKey: View {
+    let context: NativeCommandContext
+    var body: some View {
+        Button { context.find() } label: { EmptyView() }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(!context.canFind)
+            .opacity(0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
