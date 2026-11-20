@@ -667,6 +667,14 @@ public final class SyncCoordinator {
             updateProviderBlockedCause()
             if MeguriSyncStatusPresentation.stopsWorkOnBlock(was: oldValue?.phase, now: providerState?.phase,
                 stage: meguriStage, roundRunning: meguriWake != nil) { stopMeguriWorkForBlockedProvider() }
+            // A setup that a block stopped with no choice offered (its readiness
+            // read failed) reads Core again once the phase recovers, so that
+            // Try Again or the sheet returns. A failed read never meant "gone".
+            if oldValue?.phase == .blocked, let state = providerState, state.phase != .blocked,
+               state.phase != .handoffRecovery, state.selection == .meguri,
+               meguriStage == .failed, !meguriChoiceAllowed {
+                Task { self.loadMeguriConnection() }
+            }
         }
     }
     public var providerNeedsAttention: Bool { SyncStatusPresentation.providerNeedsAttention(providerState) }
