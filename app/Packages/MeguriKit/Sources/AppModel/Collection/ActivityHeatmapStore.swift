@@ -107,7 +107,8 @@ public final class ActivityHeatmapStore {
     /// Rollover, a time zone change, or a new `next_day_at`.
     public func dayChanged() { day &+= 1 }
 
-    /// The collection is ready (again): a read that failed meanwhile is asked again.
+    /// The collection is ready (again), or a long op released it: a read that failed
+    /// meanwhile is asked again.
     public func collectionReady() {
         guard failed else { return }
         failed = false

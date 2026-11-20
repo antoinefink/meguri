@@ -1225,6 +1225,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         case .rolledOver, .timeZoneChanged, .nextDayAtChanged: activity.dayChanged()
         case .collectionReplaced(let next): activity.generationChanged(to: next)
         case .sessionEnded: activity.sessionEnded()
+        // A long op released the collection: a read it refused is asked again.
+        case .available: activity.collectionReady()
         default: break
         }
     }

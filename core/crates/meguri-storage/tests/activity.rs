@@ -136,8 +136,13 @@ fn assert_bounded(lines: &[String], context: &str) {
         let scan = line.starts_with("SCAN revlog") || line.starts_with("SCAN r ") || line == "SCAN r";
         assert!(!scan, "{context}: {line} in {lines:#?}");
     }
-    let revlog = lines.iter().filter(|l| l.contains("SEARCH revlog") || l.contains("SEARCH r ")).count();
-    assert!(revlog >= 1, "{context}: the review log is searched: {lines:#?}");
+    let searches: Vec<&String> = lines.iter().filter(|l| l.contains("SEARCH revlog") || l.contains("SEARCH r ")).collect();
+    assert!(!searches.is_empty(), "{context}: the review log is searched: {lines:#?}");
+    // Every read of the review log keeps the window's rowid bound: a search by card
+    // alone would read each card's whole history.
+    for line in searches {
+        assert!(line.contains("rowid>?"), "{context}: {line} drops the window bound in {lines:#?}");
+    }
 }
 
 /// Both halves of the deck scope's card set come through their index.

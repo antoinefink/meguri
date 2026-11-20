@@ -50,6 +50,10 @@ struct ActivityHeatmapSection: View {
     let widths: ActivityRowWidths
     let page: ActivityRowWidths.Page
     @Environment(\.calendar) private var calendar
+    /// This row's own measurement. The shared width only seeds a new row's first frame:
+    /// while two rows of one page overlap (a fold, a layout switch), the one leaving must
+    /// not resize the one that stays.
+    @State private var measured: CGFloat?
 
     /// The narrowest column (a square and its gap) the grid packs before it drops a week.
     #if os(macOS)
@@ -59,7 +63,7 @@ struct ActivityHeatmapSection: View {
     #endif
 
     var body: some View {
-        let width = widths.row(page)
+        let width = measured ?? widths.row(page)
         let geometry = ActivityGrid.Geometry(width: width, minimumPitch: Self.minimumPitch)
         let days = store.days(scope)
         let grid = days.map {
@@ -69,7 +73,15 @@ struct ActivityHeatmapSection: View {
         let shown = grid != nil && geometry.weeks > 0
         // Hidden once a result says the days shown hold no review (AH8); until the first
         // result the group keeps its height, so nothing moves when the squares arrive.
-        if grid?.total != 0 || width == 0 {
+        // Before its width is known the row shows only to measure it, and only when the
+        // scope has a review in any of the 53 weeks: a scope known to be empty never
+        // flashes its header.
+        let visible = if width == 0 {
+            days.map { $0.counts.contains { $0 > 0 } } ?? true
+        } else {
+            grid?.total != 0
+        }
+        if visible {
             Section {
                 VStack(alignment: .leading, spacing: 0) {
                     // Measures the width the row offers, whatever the squares below take: a
@@ -77,7 +89,10 @@ struct ActivityHeatmapSection: View {
                     // measured from, or a stale width would keep itself.
                     Color.clear
                         .frame(maxWidth: .infinity, maxHeight: 0)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths.measuredRow(page, $0) }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
+                            measured = $0
+                            widths.measuredRow(page, $0)
+                        }
                     VStack(alignment: .leading, spacing: Spacing.xSmall) {
                         Group {
                             if let grid, let days {
@@ -110,6 +125,8 @@ struct ActivityHeatmapSection: View {
                 Text("Activity", bundle: .module)
                     .quietText()
                     .accessibilityIdentifier("home.activity.header")
+                    // No empty header for VoiceOver while the grid is not drawn yet.
+                    .accessibilityHidden(!shown)
             }
         }
     }
