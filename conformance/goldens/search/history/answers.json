@@ -291,10 +291,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "b43a514b84e998b50a96972e158c5b54f7be993b27bdfad07264ea19f658d536",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "search/history/answers",
-  "scenario_sha256": "3a9b3aa7b31d3723aadc068400e5db50b3042976d4f526d1b78d87afc64ebe89",
+  "scenario_sha256": "69c47c567776675cdfb586f55103d4e1144df0d3dbc8f262e4b24324cbe40be5",
   "tz": "UTC"
 }
