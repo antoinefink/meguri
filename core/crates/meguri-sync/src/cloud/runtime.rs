@@ -46,6 +46,8 @@ mod policy_impl;
 mod publication_impl;
 #[path = "resume_runtime.rs"]
 mod resume_impl;
+#[path = "setup_runtime.rs"]
+mod setup_impl;
 #[cfg(feature = "test-hooks")]
 #[path = "selected_observation.rs"]
 pub mod selected_observation;

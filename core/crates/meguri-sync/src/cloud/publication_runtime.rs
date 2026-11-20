@@ -160,6 +160,7 @@ impl Runtime {
                 unsent_by_kind: BTreeMap::new(),
                 unsent_counts_exact: true,
                 retained_work,
+                local_content: None,
             },
             false,
         ));
@@ -223,7 +224,14 @@ impl Runtime {
         let incarnation = self.state().incarnation;
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
-        let local = super::super::local_publication::count_local_rows(&*snapshot, media.tracked_names()?.names.len())?;
+        let media_names = media.tracked_names()?;
+        let local = super::super::local_publication::count_local_rows(&*snapshot, media_names.names.len())?;
+        // V27.1, in the same read view as the counts. Any failed read is content.
+        let local_content = super::setup_impl::content_proof(
+            snapshot.user_content_rows().map_err(drop),
+            Ok(media_names.names.len()),
+            &media_names.root,
+        );
         let layout_refused = match self.preview_native_layouts(&*snapshot, file, &account, &decision) {
             Ok(()) => false,
             Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => true,
@@ -305,6 +313,7 @@ impl Runtime {
                 unsent_by_kind,
                 unsent_counts_exact,
                 retained_work,
+                local_content: Some(local_content),
             },
             false,
         ));
@@ -545,9 +554,20 @@ impl Runtime {
     }
     /// Explicit user confirmation. Both full-width keys are obtained before the
     /// first publication commit, outside engine, runtime-state and tracking locks.
+    /// Over an existing `MGActive` it is admitted only for V27.4's "Keep this
+    /// device's collection" (`keep_device_admitted_locked`), with the history
+    /// unknown, as in every shipped core.
     pub fn confirm_connection_publication(
         &self,
         p: &Preview,
+        collection: &Collection,
+    ) -> Result<[u8; 16], RuntimeError> {
+        self.record_connection_publication(p, crate::cloud::setup::OtherServiceEvidence::unknown(), collection)
+    }
+    pub(super) fn record_connection_publication(
+        &self,
+        p: &Preview,
+        other_service: crate::cloud::setup::OtherServiceEvidence,
         collection: &Collection,
     ) -> Result<[u8; 16], RuntimeError> {
         // Confirmed only records authorization. Bind settles old intents and
@@ -560,6 +580,8 @@ impl Runtime {
             if s.publication.preview.as_ref() != Some(&(p.clone(), true)) {
                 return Err(PublicationError::AuthorityChanged.into());
             }
+            // Before any key is drawn: a refusal changes nothing.
+            Self::keep_device_admitted_locked(&s, p, other_service)?;
             if with_tracking_access(|| -> Result<bool, Error> {
                 let store = s.store.as_ref().ok_or(Error::Database)?;
                 Ok(store.publication_op()?.is_some() || store.adoption_op()?.is_some())
@@ -587,6 +609,9 @@ impl Runtime {
         if s.publication.preview.as_ref() != Some(&(p.clone(), true)) {
             return Err(PublicationError::AuthorityChanged.into());
         }
+        // Again under the lock that records the op: bindings read above may
+        // have changed while the keys were drawn.
+        Self::keep_device_admitted_locked(&s, p, other_service)?;
         with_tracking_access(|| -> Result<(), RuntimeError> {
             let store = s.store.as_mut().ok_or(Error::Database)?;
             let before = store.publication_binding_for_account(&p.account)?;
