@@ -71,23 +71,30 @@ struct ActivityHeatmapSection: View {
         // result the group keeps its height, so nothing moves when the squares arrive.
         if grid?.total != 0 || width == 0 {
             Section {
-                VStack(alignment: .leading, spacing: Spacing.xSmall) {
-                    Group {
-                        if let grid, let days {
-                            ActivityGridView(grid: grid, geometry: geometry, today: days.today)
-                        } else {
-                            Color.clear
+                VStack(alignment: .leading, spacing: 0) {
+                    // Measures the width the row offers, whatever the squares below take: a
+                    // remembered width from another column must not widen the row it is
+                    // measured from, or a stale width would keep itself.
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: 0)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths.measuredRow(page, $0) }
+                    VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                        Group {
+                            if let grid, let days {
+                                ActivityGridView(grid: grid, geometry: geometry, today: days.today)
+                            } else {
+                                Color.clear
+                            }
                         }
+                        .frame(width: width, height: geometry.height, alignment: .leading)
+                        summary(grid, weeks: geometry.weeks)
+                            .font(.footnote)
+                            .quietText()
+                            .fixedSize(horizontal: false, vertical: true)
+                            .opacity(shown ? 1 : 0)
                     }
-                    .frame(width: width, height: geometry.height, alignment: .leading)
-                    summary(grid, weeks: geometry.weeks)
-                        .font(.footnote)
-                        .quietText()
-                        .fixedSize(horizontal: false, vertical: true)
-                        .opacity(shown ? 1 : 0)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths.measuredRow(page, $0) }
                 .onAppear { widths.rowAppeared(page) }
                 .onDisappear { widths.rowLeft(page) }
                 // One element: the grid's squares say nothing one by one (N14.11).
