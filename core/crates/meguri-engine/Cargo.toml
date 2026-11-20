@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] targets below build (tests/main.rs is engine_it).
+autotests = false
 
 [features]
 # Test-only hooks (KTD18): the storage and model hooks (armed fault points,
@@ -74,10 +76,78 @@ harness = false
 name = "tags"
 harness = false
 
-[[test]]
-name = "wal_durability"
-required-features = ["test-hooks"]
-
 [[bench]]
 name = "session"
 harness = false
+
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
+[[test]]
+name = "engine_it"
+path = "tests/main.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "derived_lag"
+path = "tests/derived_lag.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "integrity"
+path = "tests/integrity.rs"
+
+# Its #[global_allocator] would serve every test in a shared binary.
+[[test]]
+name = "journal_payload_memory"
+path = "tests/journal_payload_memory.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "kill_loop"
+path = "tests/kill_loop.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "media_ops"
+path = "tests/media_ops.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "notes"
+path = "tests/notes.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "replace"
+path = "tests/replace.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "session_durability"
+path = "tests/session_durability.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "session_faults"
+path = "tests/session_faults.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "session_recovery"
+path = "tests/session_recovery.rs"
+
+# `tools/mg native-durability` builds and runs this whole binary on the Mac.
+[[test]]
+name = "suspend"
+path = "tests/suspend.rs"
+
+# Its #[global_allocator] would serve every test in a shared binary.
+[[test]]
+name = "undo_holdback_memory"
+path = "tests/undo_holdback_memory.rs"
+
+# `tools/mg native-durability` builds and runs this whole binary on the Mac.
+[[test]]
+name = "wal_durability"
+path = "tests/wal_durability.rs"
+required-features = ["test-hooks"]

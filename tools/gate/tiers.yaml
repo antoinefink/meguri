@@ -130,6 +130,8 @@ runs:
     class: static
     triggers: ["core/**/Cargo.toml", core/Cargo.lock, core/deny.toml, tools/mg.d/core.sh]
     budget_s: 600
+  # Explicit arguments: unlike a bare core-test, this run keeps the three
+  # --stress scale cases (docs/process/tiers.md).
   - id: core-test
     job: core-test
     args: [--, --features, meguri-ffi/test-hooks]
