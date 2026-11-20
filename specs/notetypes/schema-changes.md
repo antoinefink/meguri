@@ -4,7 +4,7 @@ Spec: notetypes/schema-changes
 Requirements: R949, R950, R951, R1475, R1476, R1477, R1590 (core side), R2053 (core side), R918, R948 (schema side), R1889 (G9)
 Anki: 26.09.3 for G1's meaning of `scm` and `ls`, G2, G3, G5 and G9's Anki column; G1's CloudKit rules and the scope of `ls`, G4, G6, G7's CloudKit part, G8 and G9's Meguri column are Meguri design from the Product Contract
 Scenarios: conformance/scenarios/notetypes/gate/
-Status: Approved 2026-11-15 (R2066) for the new normal-transfer aggregate cross-reference paragraph in G7. Every other section is in force and unchanged.
+Status: Approved 2026-11-15 (R2066) for the new normal-transfer aggregate cross-reference paragraph in G7. Under review (R915; round 9, decided 2026-11-20) for the paragraph of G4 that begins "Changed 2026-11-20": do not implement it until approved. Every other section is in force and unchanged.
 
 Which operations mark the collection's schema as modified, what that means for the next manual Anki transfer (KTD26) and for CloudKit (R2053), and the guard that keeps a changed note type structure out of an incremental Anki transfer. Meguri asks no confirmation before a schema change (G4). Destructive-mapping previews belong to their units (U34, U35, U121, U200, U201, U203, U210, U232). The manual-transfer side is U106, U107 and U109 (frozen with the Anki server work); the CloudKit side is U113 and U114 (R2053; generation layout: `sync/cloudkit-records#K19`). Columns are `model/row-records` R2 and `storage/ids-usn-mtime` S6.
 
@@ -62,6 +62,8 @@ Changed 2026-10-27. This section replaces the earlier confirmation gate: the `sc
 - The one-way consequence is shown only in the preview of the next manual Anki transfer, before anything is sent or replaced (R1476, KTD26). The engine answers `scm > ls`, read from the live `col` row, for that preview.
 - Every structural edit (G2) takes its safety backup after its preview, if any, is accepted and before its first write (`package/backup-triggers#T6.1`).
 - How Meguri differs from Anki here: G9.
+
+Changed 2026-11-20 (round 9 option 3C; `notetypes/draft-save`). The Note Types section asks once, at Save, in one sheet, when content would be lost or when Meguri Sync is the service and the save is schema-classified (`notetypes/draft-save` D3, D4); with Meguri Sync the save runs as `sync/meguri-provider` MP7's job (round, save, upload). This replaces, for that screen and for Change Note Type and note type deletion, the first two bullets' "commits without asking" and "Ordinary editing shows no … warning", and the separate questions of R922, R932 and R933 (`notetypes/draft-save` D8). What stays: no op takes a confirmation input and none ends with `NeedsSchemaConfirmation` (the draft apply op's confirmed losses, `notetypes/structure-changes` S1.2, are a precondition that refuses with `LossesChanged`, not a confirmation); the question is the app's, asked before the op is submitted; whether it is asked never depends on `scm` or `ls`; the safety backup follows the accepted question.
 
 ## G5. Setting `scm`
 

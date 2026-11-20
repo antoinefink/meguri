@@ -4,6 +4,7 @@ Spec: notetypes/structure-changes
 Requirements: R789 (template edits), R918 (core side), R920, R922, R923, R924, R926, R927, R932, R933, R934, R949, R950, R1475, R1477, R2008 (core side); supports AE34
 Anki: 26.09.3
 Scenarios: conformance/scenarios/notetypes/structure/
+Status: Under review (R915; round 9, decided 2026-11-20) for the lines of S1.2 that begin "Changed 2026-11-20 (round 9)": do not implement them until approved. Every other section is in force and unchanged.
 
 What a save of a note type does to its notes and cards when it adds, removes, moves or renames fields or templates, changes the sort field or a front template; the preview of a template removal; and removing a note type. Restore to Default is `notetypes/restore-to-default`. The note type's own rows, stamps and save normalization are `notetypes/records` (N3, N4, N6); the template checks `notetypes/validation`; which saves are schema changes and how `col.scm` is set `notetypes/schema-changes` (G2, G3, G5, G6); the safety backup of a structural edit `package/backup-triggers` (T6.1, T6.2). Field renames are `notetypes/field-rename` (F1 to F5); this file adds what a save with removals, moves, additions or template changes does on top of them. This file builds on: the note save's field normalization, sort field and checksum (`notes/note-records` N2, `text/checksum-and-sort-field` C1 to C4), card generation for a whole note type (`notes/card-generation` G9) with its placement and positions (`notes/deck-placement-and-position` D4, P2), card and note removal with graves (`notes/note-records` D2, `storage/graves` G3), the template parse result with source spans (`render/template-syntax` T3 to T6, T12), and the plan/commit rules of `engine/op-model` O6 and O7.
 
@@ -31,6 +32,8 @@ Fields and templates are matched to the base by origin only, never by name or id
 The note type's kind (standard or cloze) is not part of the draft; it changes only through Restore to Default with a forced kind and through Change Note Type (U35).
 
 ### S1.2 Refusals
+
+Changed 2026-11-20 (round 9): the draft also carries **confirmed losses** (`notetypes/draft-save` D5 step 5): for each removed base field, the count of notes with content (`text/field-emptiness` E1) the user confirmed, and for each removed base template, the count of cards the user confirmed (zero for each when no question was shown). After refusal 5, inside the write transaction, the op counts them again on the live rows; when any live count is larger than the confirmed one it writes nothing, records no undo step and returns `LossesChanged { summary }`, the summary `notetypes/draft-save` D2 defines, read in that transaction. This is a precondition, like the base token, not a confirmation input (`notetypes/schema-changes` G4). Callers with no question (the local API) pass the counts they read.
 
 Checked in this order; each writes nothing and records no undo step. Before them all, a draft whose origins repeat or lie outside the base (S1.1) is refused with `InvalidArgument`, which also writes nothing and records no undo step.
 
@@ -209,6 +212,8 @@ A read-only query for the template editor's removal confirmation: "Delete the 'X
 Example: a note type with templates `Forward` and `Reverse` where five notes have only their `Reverse` card: the preview for `{1}` gives the `Reverse` card count and 5 notes left with no cards.
 
 ## S12. Removing a note type (R918)
+
+Changed 2026-11-20 (round 9; decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day): the input also carries the **confirmed counts** the delete question showed (W12: the note type's notes and cards). Inside the write transaction the removal counts them again; when either live count is larger it writes nothing, takes no step and returns `LossesChanged { notes, cards }`, and the question shows again with the new counts. A precondition, not a confirmation input.
 
 - **Input**: the note type id. There is no confirmation input: the delete question of R918 ("Delete this note type and all its cards?", or "Delete this unused note type?") is the caller's, accepted before the op is submitted (`notetypes/schema-changes` G4, which supersedes R918's schema-change confirmation).
 - **Refusals**, writing nothing: `LastNotetype` when it is the collection's only note type (R918; Anki's core instead removes it and adds a new stock Basic note type, which Meguri's callers never want); `SafetyBackupFailed` when the safety backup fails (`package/backup-triggers` T6.1 row "deleting a note type", T6.2: taken after planning, before the first write; R2008).

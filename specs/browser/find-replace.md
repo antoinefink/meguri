@@ -4,6 +4,7 @@ Spec: browser/find-replace
 Requirements: R1200, R1201, R1202, R1203, R1204, R1205, R1206, R1207, AE47; supports R1179, R1181, R1182, R1183, R1184, R1185, R1245, R1832, R1860
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/find-replace/
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of F2, F8, F10 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 Browse's Find and Replace rewrites text in the fields or in the tags of notes. This file gives what the sheet offers (F2, F3), how the find text becomes a pattern (F4) and the replacement text (F5), what the operation does to the notes it rewrites (F6, F7), which notes it reads (F8), what it reports (F9), the live preview Meguri adds (F10) and the operation's contract (F11). How a bulk operation runs (job, compute phase, commit phase, cancellation, progress, change set, undo entry) is the Meguri design doc `browser/bulk-framework` (U86); this file says only what the run computes and writes. The selection's ids come from `browser/result-sets` H12 (`resolve_selection`). The scenario ops are `specs/conformance/bulk-ops.md` X1 and X3.
 
@@ -23,6 +24,8 @@ Terms: `now_s` and `now_ms` are the operation's instant in seconds and milliseco
 Anki's backend takes "match case", the inverse of Ignore case, and an empty note list for all notes. Meguri's op takes an explicit all-notes target (F11).
 
 ## F2. The sheet (R1200, R1201)
+
+Changed 2026-11-20 (round 8): the sheet's rows, the Notes choice (Selected or All Found), Match Case, Whole Words and the preview are `browser/workspace` V9. Selected notes only, Ignore case as a checkbox and the all-notes target are replaced there.
 
 - **In** lists, in this order: All Fields, Tags, then the field names of F3. Opened from a field in Browse's sidebar (R1179), the field names are only that field's name, and it is preselected. Otherwise the field names are F3's for the selection as it is when the sheet opens, or, with an empty selection, for every note type (F3's Meguri listing). The list does not change while the sheet is open: turning Selected notes only off or on keeps it and the chosen entry (as in Anki, whose list always comes from the selection). When the sheet is not opened from a sidebar field, the entry chosen first is the remembered In choice when the list offers it again (below), else All Fields.
 - **Selected notes only**: on when the sheet opens; off and disabled when the selection is empty; off, and enabled when there is a selection, when opened from a sidebar field. Off means all notes (F8). The selected notes are the selection's notes: in cards mode the distinct notes of the selected cards, in notes mode the selected notes (`browser/result-sets` H12, target notes).
@@ -151,6 +154,8 @@ Examples (In `Meaning`, literal, Ignore case on, Replace With `$5`):
 
 ## F8. Which notes (R1200)
 
+Changed 2026-11-20 (round 8): Browse no longer offers all notes: "All Found" passes the note ids of the current results (`browser/workspace` V9). The operation's all-notes target stays for other callers.
+
 - **Selected notes only**: the selected notes (F2), as ids. Ids of notes deleted since the selection was taken are skipped.
 - **All notes**: every note of the collection when the operation reads it (the compute phase's snapshot, `browser/bulk-framework`).
 - The considered count of F9 is the number of note ids the operation was given: the selected notes, those the field target skips (F6 step 2) included; for all notes, the number of notes read.
@@ -165,6 +170,8 @@ Examples (In `Meaning`, literal, Ignore case on, Replace With `$5`):
 - `col.mod` becomes `now_ms` when anything was written.
 
 ## F10. Live preview (Meguri, R1206)
+
+Changed 2026-11-20 (round 8): the preview counts notes that would change and lists the first 100 changes (`browser/workspace` V9); F10's error rules stay.
 
 Anki shows neither a count nor an error before Apply. Meguri's sheet shows, while the user types (U86's `find_replace_preview`, run as `browser/bulk-framework` says):
 

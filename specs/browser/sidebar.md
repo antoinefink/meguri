@@ -4,6 +4,7 @@ Spec: browser/sidebar
 Requirements: R1157, R1158, R1159, R1160, R1161, R1162, R1163, R1164, R1165, R1166, R1167, R1168, R1169, R1170, R1171, R1172, R1174, R1175, R1176, R1177, R1178, R1179, R1180, R1268 (sidebar part), AE43 (sidebar part); supports R274, R899, R1173, R66, R67
 Anki: 26.09.3 for S2 to S12 (the desktop browser's sidebar); none for the Meguri rules S15 lists
 Scenarios: conformance/scenarios/browser/sidebar/ (recorded, not active; S16)
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of S2, S7, S9 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 What Browse's filter sidebar (U216, U217) holds and does: its sections and items, the search each item stands for, their order, which items keep their expansion and where, the filter box, how activating items changes the search, and which management action each item offers with the operation it calls. The operations themselves are other files' (named in each section); this file says which one runs, with which input. Layout, icons, colours, labels and gestures are Meguri's (`docs/design/screen-inventory.yaml` `browse.browser`, `browser/browse-strings` W6). Anki's sidebar is a desktop widget the oracle does not run (`conformance/AGENTS.md`), so apart from the searches the items build (S16) Meguri's tests check this file from its tables.
 
@@ -17,6 +18,8 @@ What Browse's filter sidebar (U216, U217) holds and does: its sections and items
 - **Field text**: the search field's text at that moment, typed or committed, as `search/join-and-replace` J2 reads it.
 
 ## S2. Sections and items (R1157 to R1164)
+
+Changed 2026-11-20 (round 8): Browse's sidebar sections, order, counts and folding are `browser/workspace` V6; the Today section is replaced by built-in saved searches (`search/filter-tokens` T13). The item searches of S3 stay the built items the values use (T3).
 
 The sections, always in this order, each with its collapse key (`browser/config-keys` K6.2):
 
@@ -129,6 +132,8 @@ Each item with children is expanded or collapsed. Where the state lives:
 
 ## S7. Tools (R1168, R1170)
 
+Changed 2026-11-20 (round 8): S7 and S8 are replaced for Browse by `search/filter-tokens` T9: one row click sets its kind's token, ⌘-click adds or removes a value, ⌥-click excludes; no Search and Select tools and no multi-selection.
+
 Two tools, as in Anki: **Search** (the tool at every open) and **Select**.
 
 | | Search | Select |
@@ -173,6 +178,8 @@ The item's search I is combined with the field text E (S1) by the input that act
 When E does not parse, `join` and `replace` return its parse error (J1): the search stays as it was and U214 shows the error (`search/errors` E7), as Anki shows a warning and keeps the search. A saved search whose text does not parse reports its error the same way when it is run with `build`; the field text is not changed.
 
 ## S9. Item actions (R1171 to R1180)
+
+Changed 2026-11-20 (round 8): in this version Browse offers only Edit Note Type… on a note type row and Rename… and Delete on a user saved search (`browser/workspace` V6); the other actions of S9 and the drags of S10 wait.
 
 ### S9.1 Which item offers what
 
