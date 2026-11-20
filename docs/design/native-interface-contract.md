@@ -822,7 +822,7 @@ The English text of the screens above. "New" marks text not used before this rou
 Decided 2026-11-20 (`decisions.md`, `home.deckActions`, option 4B). The operation is `decks/decks` D8; its summary D8.5.
 
 - Entries: the deck menu's Delete Deck (N20.2, third group, destructive role, `trash`; filtered decks too) and Deck › Delete Deck (⌘⌫, N20.4), both on that one deck. No other entry; no swipe action (R49).
-- Delete Deck first reads D8.5's summary for the deck. With `cards` 0 the deck is deleted at once, with no question: an empty deck, and a filtered deck, whose cards return home (D9). With `cards` 1 or more Meguri asks first. When the collection changes between the read and the delete (a new generation), the summary is read again before anything is deleted.
+- Delete Deck first reads D8.5's summary for the deck. With `cards` 0 the deck is deleted at once, with no question: an empty deck, and a filtered deck, whose cards return home (D9). With `cards` 1 or more Meguri asks first. After the user confirms, the summary is read again right before the delete; when it differs from the one the question showed and `cards` is 1 or more, Meguri asks again with the new counts instead of deleting. A delete that asked nothing reads it the same way, so a card added after a zero-card read is asked about. A new generation in between ends the delete with nothing written. A card added between that last read and the delete's commit is not caught; binding the delete to the summary the user saw is a core follow-up (`decks/decks` D8.5).
 - The question: the title `Delete “<name>”?` with the deck's last name component, and one message line from the subdecks (S = `decks` − 1, the deck's descendants) and C = `cards`:
 
 | S | C | Message |
