@@ -29,6 +29,7 @@ setup() {
   git -C "$SB" config user.name selftest
   git -C "$SB" config user.email selftest@localhost
   SESSIONS="$SB/docs/process/provenance/sessions.jsonl"
+  RECORDS="$SB/docs/process/provenance/sessions"
 }
 
 # mg <args>: run the sandbox's tools/mg (or $MG_AT/tools/mg).
@@ -43,8 +44,18 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 
 lines_of() { if [ -f "$1" ]; then wc -l <"$1" | tr -d ' '; else echo 0; fi; }
 
-# The session ledger of a checkout.
-ledger() { printf '%s\n' "$1/docs/process/provenance/sessions.jsonl"; }
+# records_of <checkout>: how many record files its working tree holds.
+records_of() { find "$1/docs/process/provenance/sessions" -name '*.json' 2>/dev/null | wc -l | tr -d ' '; }
+
+# record_at <checkout> <id> [rev]: the committed record of a session.
+record_at() { git -C "$1" show "${3:-HEAD}:docs/process/provenance/sessions/$2.json"; }
+
+# newest_record <checkout>: the record the checkout's last commit added.
+newest_record() {
+  local path
+  path="$(git -C "$1" diff-tree -z --no-commit-id --name-only -r --diff-filter=A HEAD -- docs/process/provenance/sessions/ | tr -d '\0')"
+  git -C "$1" show "HEAD:$path"
+}
 
 # trailer <checkout> <key> [rev]: the trailer's value in a commit message.
 trailer() { git -C "$1" log -1 --format="%(trailers:key=$2,valueonly)" "${3:-HEAD}" | sed '/^$/d'; }
@@ -54,7 +65,7 @@ nothing_created() {
   [ ! -e "$BATS_TEST_TMPDIR/repo-wt/$1" ]
   [ -z "$(git -C "$SB" branch --list "unit/$1")" ]
   [ "$(git -C "$SB" worktree list | wc -l | tr -d ' ')" -eq 1 ]
-  [ "$(lines_of "$SESSIONS")" -eq "${2:-0}" ]
+  [ "$(records_of "$SB")" -eq "${2:-0}" ]
   [ -z "$(git -C "$SB" status --porcelain)" ]
 }
 
@@ -71,8 +82,9 @@ commit_with() {
 }
 
 @test "worktree new --role implementer: no oracle/, the deny profile, one session record committed on the branch" {
-  local before head wt marker
-  before="$(lines_of "$SESSIONS")"
+  local before archived head wt marker
+  before="$(records_of "$SB")"
+  archived="$(lines_of "$SESSIONS")"
   head="$(git -C "$SB" rev-parse HEAD)"
   mg worktree new --role implementer w1
   [ "$status" -eq 0 ]
@@ -104,17 +116,21 @@ commit_with() {
   [ "$hook" = "\"$wt/tools/hooks/deny-quarantined-fetch\"" ]
   [ -x "$wt/tools/hooks/deny-quarantined-fetch" ]
 
-  # The record is committed as the branch's first commit, in the worktree's
-  # own ledger; the main checkout's ledger and status are untouched.
-  [ "$(lines_of "$SESSIONS")" -eq "$before" ]
+  # The record is committed as the branch's first commit, as its own file in
+  # the worktree; the archive, the main checkout and its status are untouched.
+  [ "$(records_of "$SB")" -eq "$before" ]
   [ -z "$(git -C "$SB" status --porcelain)" ]
   [ "$(git -C "$wt" rev-parse HEAD~1)" = "$head" ]
-  [ "$(git -C "$wt" diff --name-only HEAD~1 HEAD)" = docs/process/provenance/sessions.jsonl ]
-  [ "$(lines_of "$(ledger "$wt")")" -eq $((before + 1)) ]
-  local rec sum
-  rec="$(git -C "$wt" show HEAD:docs/process/provenance/sessions.jsonl | tail -n 1)"
+  local rec sum id
+  id="$(trailer "$wt" Session)"
+  [ "$(git -C "$wt" diff --name-status HEAD~1 HEAD)" = "$(printf 'A\tdocs/process/provenance/sessions/%s.json' "$id")" ]
+  [ "$(records_of "$wt")" -eq $((before + 1)) ]
+  [ "$(lines_of "$wt/docs/process/provenance/sessions.jsonl")" -eq "$archived" ]
+  rec="$(record_at "$wt" "$id")"
+  [ "$(wc -l <<<"$rec" | tr -d ' ')" -eq 1 ]
   [ "$(trailer "$wt" Role)" = infra ]
-  [ "$(trailer "$wt" Session)" = "$(jq -r .session <<<"$rec")" ]
+  [ "$(jq -r .session <<<"$rec")" = "$id" ]
+  [ "$(git -C "$wt" log -1 --format=%s)" = "Record session $id (implementer, w1)" ]
 
   # One record, role implementer, linked to the profile and the role doc.
   [ "$(jq -r .role <<<"$rec")" = implementer ]
@@ -141,17 +157,18 @@ commit_with() {
   # The commit-msg hook is installed for every worktree.
   grep -q 'tools/hooks/commit-msg' "$SB/.git/hooks/commit-msg"
 
-  # A record appended later on the branch merges into a main checkout that
-  # appended its own (union driver), and the merge is not blocked.
+  # A record made later on the branch merges into a main checkout that
+  # made its own, and the merge is not blocked.
   git -C "$SB" checkout -q -b integration
-  echo '{"session":"s-main"}' >>"$SESSIONS"
-  git -C "$SB" commit -qm "Main record" -m "Role: infra" -- "$SESSIONS"
-  echo '{"session":"s-later"}' >>"$(ledger "$wt")"
-  git -C "$wt" commit -qam "Later record" -m "Role: infra"
+  mg session record --role critic --name main-side
+  local main_id later_id
+  main_id="$(field .details.session.session)"
+  MG_AT="$wt" mg session record --role implementer --name later
+  later_id="$(field .details.session.session)"
   git -C "$SB" merge -q --no-edit unit/w1
-  grep -q '"s-main"' "$SESSIONS"
-  grep -q '"s-later"' "$SESSIONS"
-  grep -q "\"$(jq -r .session <<<"$rec")\"" "$SESSIONS"
+  [ "$(jq -r .session "$RECORDS/$main_id.json")" = "$main_id" ]
+  [ "$(jq -r .session "$RECORDS/$later_id.json")" = "$later_id" ]
+  [ "$(jq -r .session "$RECORDS/$id.json")" = "$id" ]
   [ -z "$(git -C "$SB" status --porcelain)" ]
 }
 
@@ -180,7 +197,7 @@ commit_with() {
   [ "$(field '.failures[0].id')" = bad-profile ]
   [[ "$(field '.failures[0].message')" == *"@HOME_DIR@"* ]]
   validate "$result"
-  nothing_created w9 "$(lines_of "$SESSIONS")"
+  nothing_created w9 "$(records_of "$SB")"
 }
 
 @test "worktree new for a spec writer is a full checkout without a deny profile" {
@@ -191,7 +208,7 @@ commit_with() {
   [ ! -e "$wt/.claude/settings.local.json" ]
   [ "$(git -C "$wt" rev-parse --abbrev-ref HEAD)" = spec/s1 ]
   local rec
-  rec="$(tail -n 1 "$(ledger "$wt")")"
+  rec="$(newest_record "$wt")"
   [ "$(jq -r .role <<<"$rec")" = spec-writer ]
   [ -z "$(git -C "$wt" status --porcelain)" ]
   [ -z "$(git -C "$SB" status --porcelain)" ]
@@ -208,14 +225,14 @@ commit_with() {
   mg worktree new --role fixer again
   [ "$status" -eq 0 ]
   local wt="$BATS_TEST_TMPDIR/repo-wt/again"
-  [ "$(jq -r .base_commit <<<"$(tail -n 1 "$(ledger "$wt")")")" = "$tip" ]
+  [ "$(jq -r .base_commit <<<"$(newest_record "$wt")")" = "$tip" ]
   [ "$(git -C "$SB" rev-parse unit/again~1)" = "$tip" ]
   [ ! -e "$wt/oracle" ]
 }
 
 @test "worktree new rejects a bad role, a bad name or an existing path, and records nothing" {
   local before role
-  before="$(lines_of "$SESSIONS")"
+  before="$(records_of "$SB")"
   mg worktree new --role critic c1
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = bad-role ]
@@ -230,6 +247,12 @@ commit_with() {
   mg worktree new --role implementer "../escape"
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = bad-name ]
+  mg worktree new --role implementer $'w\nx'
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = bad-name ]
+  mg worktree new --role implementer "$(printf 'n%.0s' $(seq 1 65))"
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = bad-name ]
   mkdir -p "$BATS_TEST_TMPDIR/repo-wt/taken"
   mg worktree new --role implementer taken
   [ "$status" -eq 2 ]
@@ -237,22 +260,25 @@ commit_with() {
   mg worktree list
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = usage ]
-  [ "$(lines_of "$SESSIONS")" -eq "$before" ]
+  [ "$(records_of "$SB")" -eq "$before" ]
   [ -z "$(git -C "$SB" branch --list 'unit/*')" ]
 }
 
 @test "session record commits a record for a session without a worktree" {
-  local before
-  before="$(lines_of "$SESSIONS")"
+  local before archive
+  before="$(records_of "$SB")"
+  archive="$(git -C "$SB" rev-parse HEAD:docs/process/provenance/sessions.jsonl)"
   mg session record --role critic --name review-home --note "packet build/critic/1"
   [ "$status" -eq 0 ]
   validate "$result"
-  [ "$(lines_of "$SESSIONS")" -eq $((before + 1)) ]
+  [ "$(records_of "$SB")" -eq $((before + 1)) ]
   local rec
-  rec="$(tail -n 1 "$SESSIONS")"
-  # Committed on the checkout's branch, that file only, with an infra role.
+  rec="$(newest_record "$SB")"
+  # Committed on the checkout's branch, that file only, with an infra role;
+  # the archive is never appended to.
   [ -z "$(git -C "$SB" status --porcelain)" ]
-  [ "$(git -C "$SB" diff --name-only HEAD~1 HEAD)" = docs/process/provenance/sessions.jsonl ]
+  [ "$(git -C "$SB" diff --name-only HEAD~1 HEAD)" = "docs/process/provenance/sessions/$(jq -r .session <<<"$rec").json" ]
+  [ "$(git -C "$SB" rev-parse HEAD:docs/process/provenance/sessions.jsonl)" = "$archive" ]
   [ "$(trailer "$SB" Role)" = infra ]
   [ "$(trailer "$SB" Session)" = "$(jq -r .session <<<"$rec")" ]
   [ "$(jq -r .role <<<"$rec")" = critic ]
@@ -267,14 +293,20 @@ commit_with() {
     [ "$status" -eq 2 ]
     [ "$(field '.failures[0].id')" = bad-role ]
   done
-  [ "$(lines_of "$SESSIONS")" -eq $((before + 1)) ]
+  local name
+  for name in "../up" "a/b" " lead" "tab	name" $'two\nlines' "$(printf 'n%.0s' $(seq 1 81))"; do
+    mg session record --role critic --name "$name"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = bad-name ]
+  done
+  [ "$(records_of "$SB")" -eq $((before + 1)) ]
   [ "$(git -C "$SB" rev-parse HEAD)" = "$head" ]
 }
 
 @test "concurrent session records in one checkout all pass, each in its own commit, and leave a clean tree" {
   local n=8 i head0 before pids=()
   head0="$(git -C "$SB" rev-parse HEAD)"
-  before="$(git -C "$SB" show "HEAD:docs/process/provenance/sessions.jsonl" | wc -l | tr -d ' ')"
+  before="$(records_of "$SB")"
   for i in $(seq 1 "$n"); do
     "$SB/tools/mg" session record --role critic --name "check-$i" >"$BATS_TEST_TMPDIR/out.$i" 2>"$BATS_TEST_TMPDIR/err.$i" &
     pids[${#pids[@]}]=$!
@@ -286,15 +318,15 @@ commit_with() {
     result="$(tail -n 1 "$BATS_TEST_TMPDIR/out.$i")"
     [ "$(field .status)" = pass ] || { field .failures; return 1; }
   done
-  [ "$(git -C "$SB" show "HEAD:docs/process/provenance/sessions.jsonl" | wc -l | tr -d ' ')" -eq $((before + n)) ]
+  [ "$(records_of "$SB")" -eq $((before + n)) ]
   [ -z "$(git -C "$SB" status --porcelain)" ]
   [ "$(git -C "$SB" rev-list --count "$head0..HEAD")" -eq "$n" ]
   # Each commit adds one record and names that record's session.
-  local c
+  local c id
   for c in $(git -C "$SB" rev-list "$head0..HEAD"); do
-    [ "$(git -C "$SB" diff --name-only "$c~1" "$c")" = docs/process/provenance/sessions.jsonl ]
-    [ "$(git -C "$SB" diff "$c~1" "$c" | grep -c '^+{')" -eq 1 ]
-    git -C "$SB" diff "$c~1" "$c" | grep '^+{' | grep -q "\"session\":\"$(trailer "$SB" Session "$c")\""
+    id="$(trailer "$SB" Session "$c")"
+    [ "$(git -C "$SB" diff --name-status "$c~1" "$c")" = "$(printf 'A\tdocs/process/provenance/sessions/%s.json' "$id")" ]
+    [ "$(record_at "$SB" "$id" "$c" | jq -r .session)" = "$id" ]
   done
   [ ! -e "$SB/.git/meguri-session.lock" ]
 }
@@ -330,17 +362,14 @@ commit_with() {
   git -C "$SB" add core/x/lib.rs
   mg session record --role spec-writer
   [ "$status" -eq 0 ]
-  [ "$(git -C "$SB" diff --name-only HEAD~1 HEAD)" = docs/process/provenance/sessions.jsonl ]
+  [ "$(git -C "$SB" diff --name-only HEAD~1 HEAD)" = "docs/process/provenance/sessions/$(field .details.session.session).json" ]
   [ "$(git -C "$SB" diff --cached --name-only)" = core/x/lib.rs ]
 }
 
 @test "a ledger that cannot be written or committed is an error, and worktree new leaves nothing behind" {
-  local before
-  before="$(lines_of "$SESSIONS")"
-  # The ledger is a directory in the checkout: session record cannot append.
-  rm "$SESSIONS"
-  mkdir -p "$SESSIONS"
-  touch "$SESSIONS/x"
+  # The record directory is a file in the checkout: session record cannot write.
+  rm -rf "$RECORDS"
+  echo "not a directory" >"$RECORDS"
   mg session record --role critic
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = session-ledger ]
@@ -362,11 +391,22 @@ commit_with() {
   # A hook tools/mg does not install (it owns commit-msg and pre-commit).
   printf '#!/bin/sh\necho "prepare-commit-msg: refused" >&2\nexit 1\n' >"$SB/.git/hooks/prepare-commit-msg"
   chmod +x "$SB/.git/hooks/prepare-commit-msg"
+  local head0 before
+  head0="$(git -C "$SB" rev-parse HEAD)"
+  before="$(records_of "$SB")"
   mg worktree new --role implementer w5
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = session-commit ]
   validate "$result"
-  nothing_created w5 "$(lines_of "$SESSIONS")"
+  nothing_created w5 "$before"
+  [ "$(git -C "$SB" rev-parse HEAD)" = "$head0" ]
+  # session record leaves nothing behind either, staged or not.
+  mg session record --role critic --name refused
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = session-commit ]
+  [ "$(git -C "$SB" rev-parse HEAD)" = "$head0" ]
+  [ -z "$(git -C "$SB" status --porcelain)" ]
+  nothing_created w5 "$before"
   # An existing branch keeps its tip.
   git -C "$SB" branch unit/w6
   local tip
@@ -385,10 +425,31 @@ commit_with() {
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = session-marker ]
   validate "$result"
-  nothing_created w7 "$(lines_of "$SESSIONS")"
+  nothing_created w7 "$(records_of "$SB")"
 }
 
-@test "session records merge without conflicts when branches append" {
+@test "two branches that each record a session merge without a conflict, with no merge driver" {
+  local a b
+  git -C "$SB" checkout -qb a
+  mg session record --role critic --name side-a
+  a="$(field .details.session.session)"
+  git -C "$SB" checkout -q -
+  git -C "$SB" checkout -qb b
+  mg session record --role critic --name side-b
+  b="$(field .details.session.session)"
+  # The records have no merge attribute: plain merges, as GitHub makes them.
+  [ "$(git -C "$SB" check-attr merge -- "docs/process/provenance/sessions/$a.json" | sed 's/.*: //')" = unspecified ]
+  git -C "$SB" merge -q --no-edit a
+  [ "$(jq -r .session "$RECORDS/$a.json")" = "$a" ]
+  [ "$(jq -r .session "$RECORDS/$b.json")" = "$b" ]
+  [ -z "$(git -C "$SB" status --porcelain)" ]
+  # git merge-tree, the server-side merge, finds no conflict either.
+  git -C "$SB" checkout -q -b c HEAD~2
+  mg session record --role critic --name side-c
+  git -C "$SB" merge-tree --write-tree b c >/dev/null
+}
+
+@test "the archive still merges lines that branches made before the switch append" {
   git -C "$SB" checkout -qb a
   echo '{"session":"s-a"}' >>"$SESSIONS"
   git -C "$SB" commit -qam a
@@ -399,6 +460,455 @@ commit_with() {
   git -C "$SB" merge -q --no-edit a
   grep -q '"s-a"' "$SESSIONS"
   grep -q '"s-b"' "$SESSIONS"
+}
+
+@test "a record the private-token scan refuses is not recorded, and the message never names the word" {
+  local head0 before
+  mkdir -p "$SB/build/private/tokens"
+  printf 'quokkasprung\n' >"$SB/build/private/tokens/tokens.txt"
+  mg hooks install
+  [ "$status" -eq 0 ]
+  head0="$(git -C "$SB" rev-parse HEAD)"
+  before="$(records_of "$SB")"
+  mg session record --role critic --name "quokkasprung check"
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = session-private ]
+  [[ "$(field '.failures[0].message')" == *"another name"* ]]
+  [[ "$(field '[.failures[].message] | join(" ")')" != *quokkasprung* ]]
+  validate "$result"
+  [ "$(git -C "$SB" rev-parse HEAD)" = "$head0" ]
+  [ "$(records_of "$SB")" -eq "$before" ]
+  [ -z "$(git -C "$SB" status --porcelain)" ]
+  [ ! -e "$SB/.git/meguri-session.lock" ]
+  # The note counts too; another name and note record the session.
+  mg session record --role critic --name check --note "about quokkasprung"
+  [ "$(field '.failures[0].id')" = session-private ]
+  mg session record --role critic --name check --note "about the home screen"
+  [ "$status" -eq 0 ]
+  [ "$(records_of "$SB")" -eq $((before + 1)) ]
+  # A worktree whose name the scan refuses is removed again.
+  mg worktree new --role implementer quokkasprung
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = session-private ]
+  nothing_created quokkasprung "$((before + 1))"
+}
+
+# A record file written and committed by hand (sessions.py checks content,
+# not who wrote it).
+# hand_record <checkout> <id> <created_at> [jq edit]: commits a record.
+hand_record() {
+  local dir="$1" id="$2" at="$3" edit="${4:-.}"
+  mkdir -p "$dir/docs/process/provenance/sessions"
+  jq -nc --arg id "$id" --arg at "$at" --arg base "$(git -C "$dir" rev-parse HEAD)" \
+    --arg blob "$(git -C "$dir" rev-parse HEAD:docs/process/roles/critic.md)" \
+    '{session: $id, role: "critic", kind: "session", name: "hand", base_commit: $base,
+      role_doc: "docs/process/roles/critic.md", role_doc_blob: $blob, created_at: $at}' |
+    jq -c "$edit" >"$dir/docs/process/provenance/sessions/$id.json"
+  git -C "$dir" add "docs/process/provenance/sessions/$id.json"
+  git -C "$dir" commit -qm "Record session $id (critic, hand)" -m "Role: infra
+Session: $id"
+}
+
+# archive_line <checkout> <id> <created_at>: appends an old-style record.
+archive_line() {
+  jq -nc --arg id "$2" --arg at "$3" --arg base "$(git -C "$1" rev-parse HEAD)" \
+    --arg blob "$(git -C "$1" rev-parse HEAD:docs/process/roles/critic.md)" \
+    '{session: $id, role: "critic", kind: "session", name: "old", base_commit: $base,
+      role_doc: "docs/process/roles/critic.md", role_doc_blob: $blob, created_at: $at}' \
+    >>"$1/docs/process/provenance/sessions.jsonl"
+  git -C "$1" commit -qm "Record session $2 (critic, old)" -m "Role: infra
+Session: $2" -- docs/process/provenance/sessions.jsonl
+}
+
+sessions_check() { mg static-checks --check sessions --base "$BASE" "$@"; }
+
+@test "the sessions check passes records tools/mg makes and resolves Session: trailers in the archive and the directory" {
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  mg session record --role critic --name one
+  local dir_id archive_id
+  dir_id="$(field .details.session.session)"
+  archive_id="$(head -n 1 "$SESSIONS" | jq -r .session)"
+  [ -n "$archive_id" ]
+  mg worktree new --role implementer w8 --base HEAD
+  sessions_check
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  validate "$result"
+  MG_AT="$BATS_TEST_TMPDIR/repo-wt/w8" sessions_check
+  [ "$status" -eq 0 ]
+  # Trailers naming an archived record and a directory record resolve.
+  echo one >"$SB/docs/notes.md"
+  git -C "$SB" add docs/notes.md
+  git -C "$SB" commit -qm "Notes" -m "Role: infra
+Session: $archive_id
+Session: $dir_id"
+  sessions_check
+  [ "$status" -eq 0 ]
+  # One that names no record does not.
+  echo two >>"$SB/docs/notes.md"
+  git -C "$SB" commit -qam "More notes" -m "Role: infra
+Session: s-20991231T000000Z-00000000"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '.failures[0].message')" == *"Session: s-20991231T000000Z-00000000 names no session record"* ]]
+  validate "$result"
+  # A record the base branch made after the branch left it resolves too.
+  git -C "$SB" checkout -q -b later "$BASE"
+  hand_record "$SB" s-20991231T000000Z-00000000 2026-11-21T00:00:00Z
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  git -C "$SB" checkout -q -
+  sessions_check
+  [ "$status" -eq 0 ]
+}
+
+@test "the sessions check refuses a record that is modified, deleted, renamed or committed with other changes" {
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  hand_record "$SB" s-20261201T000000Z-0000000a 2026-12-01T00:00:00Z
+  sessions_check
+  [ "$status" -eq 0 ]
+  local rec="docs/process/provenance/sessions/s-20261201T000000Z-0000000a.json"
+  jq -c '.name = "edited"' "$SB/$rec" >"$BATS_TEST_TMPDIR/r" && cp "$BATS_TEST_TMPDIR/r" "$SB/$rec"
+  git -C "$SB" commit -qam "Edit a record"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"modifies $rec; session records are only ever added"* ]]
+  git -C "$SB" reset -q --hard HEAD~1
+  git -C "$SB" rm -q "$rec"
+  git -C "$SB" commit -qm "Drop a record"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"deletes $rec"* ]]
+  git -C "$SB" reset -q --hard HEAD~1
+  git -C "$SB" mv "$rec" "docs/process/provenance/sessions/s-20261201T000000Z-0000000b.json"
+  git -C "$SB" commit -qm "Rename a record"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"deletes $rec"* ]]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"holds session"* ]]
+  git -C "$SB" reset -q --hard HEAD~1
+  # A record added with another file, or without its trailers.
+  mkdir -p "$SB/docs/process/provenance/sessions"
+  printf '{"session":"s-20261201T000000Z-0000000c","role":"critic","kind":"session","created_at":"2026-12-01T00:00:00Z","base_commit":"%s","role_doc":"docs/process/roles/critic.md","role_doc_blob":"%s"}\n' \
+    "$(git -C "$SB" rev-parse HEAD)" "$(git -C "$SB" rev-parse HEAD:docs/process/roles/critic.md)" \
+    >"$SB/docs/process/provenance/sessions/s-20261201T000000Z-0000000c.json"
+  echo x >"$SB/docs/other.md"
+  git -C "$SB" add -A docs
+  git -C "$SB" commit -qm "Record and more"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"together with other changes"* ]]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"without the trailers Role: infra and Session: s-20261201T000000Z-0000000c"* ]]
+  git -C "$SB" reset -q --hard HEAD~1
+  # Fields: a role outside the list, a role_doc that is not the role's.
+  hand_record "$SB" s-20261201T000000Z-0000000d 2026-12-01T00:00:00Z '.role = "wizard"'
+  hand_record "$SB" s-20261201T000000Z-0000000e 2026-12-01T00:00:00Z '.role = "implementer"'
+  hand_record "$SB" s-20261201T000000Z-0000000f 2026-12-01T00:00:00Z '.base_commit = "0000000000000000000000000000000000000000"'
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *'has role "wizard"'* ]]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *'0000000e.json has role_doc'* ]]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *'0000000f.json has base_commit'* ]]
+}
+
+@test "the sessions check refuses a merge that drops or rewrites a record" {
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  hand_record "$SB" s-20261201T000000Z-00000001 2026-12-01T00:00:00Z
+  local main
+  main="$(git -C "$SB" rev-parse HEAD)"
+  git -C "$SB" checkout -q -b side "$BASE"
+  echo side >"$SB/docs/side.md"
+  git -C "$SB" add docs/side.md
+  git -C "$SB" commit -qm side
+  git -C "$SB" merge -q --no-commit "$main"
+  git -C "$SB" rm -qf docs/process/provenance/sessions/s-20261201T000000Z-00000001.json
+  git -C "$SB" commit -qm "Merge, dropping a record"
+  BASE="$main" sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"drops docs/process/provenance/sessions/s-20261201T000000Z-00000001.json"* ]]
+  # An archive line removed in a merge fails the same way.
+  git -C "$SB" reset -q --hard HEAD~1
+  git -C "$SB" merge -q --no-commit "$main"
+  sed -i.bak '1d' "$SESSIONS" && rm "$SESSIONS.bak"
+  git -C "$SB" add "$SESSIONS"
+  git -C "$SB" commit -qm "Merge, dropping an archive line"
+  BASE="$main" sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"removes or rewrites 1 line(s) of the archive"* ]]
+}
+
+@test "the archive takes lines only from commits made with the tools from before the switch" {
+  local check="$BATS_TEST_TMPDIR/sessions.py" old new ok
+  cp "$SB/tools/gate/static-checks/sessions.py" "$check"
+  sessions_py() { run python3 -I -B "$check" "$SB" "$@"; }
+  # The switch: before it the tree has no sessions check.
+  git -C "$SB" rm -q tools/gate/static-checks/sessions.py
+  git -C "$SB" commit -qm "Before the switch"
+  old="$(git -C "$SB" rev-parse HEAD)"
+  git -C "$SB" checkout -q HEAD~1 -- tools/gate/static-checks/sessions.py
+  git -C "$SB" commit -qm "The switch"
+  new="$(git -C "$SB" rev-parse HEAD)"
+  # A branch made before the switch appends the old way: it passes against
+  # the new base, before and after it merges that base.
+  git -C "$SB" checkout -q -b old-branch "$old"
+  archive_line "$SB" s-20261126T235959Z-0000000a 2026-11-26T23:59:59Z
+  sessions_py "$new" HEAD
+  [ "$status" -eq 0 ]
+  git -C "$SB" merge -q --no-edit "$new"
+  sessions_py "$new" HEAD
+  [ "$status" -eq 0 ]
+  ok="$(git -C "$SB" rev-parse HEAD)"
+  # A line appended with the new tools in the tree is refused, whatever its
+  # created_at, and the message says what to do.
+  archive_line "$SB" s-20261101T000000Z-0000000b 2026-11-01T00:00:00Z
+  sessions_py "$new" HEAD
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"takes no new records since the switch"*"Move it: remove the line in one commit"* ]]
+  # Moving it clears it, and a commit that cites the session still resolves.
+  echo cite >"$SB/docs/cite.md"
+  git -C "$SB" add docs/cite.md
+  git -C "$SB" commit -qm "Cite the session" -m "Session: s-20261101T000000Z-0000000b"
+  local moved
+  moved="$(tail -n 1 "$SESSIONS")"
+  sed -i.bak '$d' "$SESSIONS" && rm "$SESSIONS.bak"
+  git -C "$SB" commit -qam "Take the line out"
+  mkdir -p "$RECORDS"
+  printf '%s\n' "$moved" >"$RECORDS/s-20261101T000000Z-0000000b.json"
+  git -C "$SB" add "$RECORDS/s-20261101T000000Z-0000000b.json"
+  git -C "$SB" commit -qm "Record session s-20261101T000000Z-0000000b (critic, old)" -m "Role: infra
+Session: s-20261101T000000Z-0000000b"
+  sessions_py "$new" HEAD
+  [ "$status" -eq 0 ]
+  git -C "$SB" reset -q --hard HEAD~1
+  # A valid line the branch added is never taken out again.
+  sed -i.bak '$d' "$SESSIONS" && rm "$SESSIONS.bak"
+  git -C "$SB" commit -qam "Take the valid line out"
+  sessions_py "$new" HEAD
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"removes or rewrites 1 line(s) of the archive"* ]]
+  # Lines that the base holds are never removed or edited.
+  git -C "$SB" reset -q --hard "$ok"
+  sed -i.bak '1s/"role":"[a-z-]*"/"role":"integrator"/' "$SESSIONS" && rm "$SESSIONS.bak"
+  git -C "$SB" commit -qam "Rewrite an archived record"
+  sessions_py "$new" HEAD
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"removes or rewrites 1 line(s) of the archive"* ]]
+  # Admitted lines keep their order.
+  git -C "$SB" reset -q --hard "$ok"
+  { tail -n 1 "$SESSIONS"; sed '$d' "$SESSIONS"; } >"$BATS_TEST_TMPDIR/reordered"
+  cp "$BATS_TEST_TMPDIR/reordered" "$SESSIONS"
+  git -C "$SB" commit -qam "Reorder the archive"
+  sessions_py "$new" HEAD
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"reorders or edits the archive"* ]]
+  # An old-way line with other changes, without its trailers or with wrong
+  # fields is refused.
+  git -C "$SB" checkout -q -b old-mixed "$old"
+  jq -nc --arg base "$old" '{session: "s-20261120T000000Z-0000000c", role: "critic", kind: "session", base_commit: $base,
+    role_doc: "docs/process/roles/critic.md", role_doc_blob: null, created_at: "2026-11-20T00:00:00Z"}' >>"$SESSIONS"
+  echo x >"$SB/docs/other.md"
+  git -C "$SB" add -A docs
+  git -C "$SB" commit -qm "Record and more"
+  sessions_py "$new" HEAD
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"to the archive together with other changes"* ]]
+  git -C "$SB" checkout -q -b old-bad "$old"
+  archive_line "$SB" s-20261120T000000Z-0000000d 2026-11-20T00:00:00Z
+  git -C "$SB" checkout -q -b old-blob "$old"
+  jq -nc --arg base "$old" '{session: "s-20261120T000000Z-0000000e", role: "critic", kind: "session", base_commit: $base,
+    role_doc: "docs/process/roles/critic.md", role_doc_blob: null, created_at: "2026-11-20T00:00:00Z"}' >>"$SESSIONS"
+  git -C "$SB" commit -qam "Record session s-20261120T000000Z-0000000e (critic, old)" -m "Role: infra
+Session: s-20261120T000000Z-0000000e"
+  sessions_py "$new" HEAD
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"has role_doc_blob null"* ]]
+  git -C "$SB" checkout -q -b old-trailers "$old"
+  archive_line "$SB" s-20261120T000000Z-0000000f 2026-11-20T00:00:00Z
+  git -C "$SB" commit -q --amend -m "Record session s-20261120T000000Z-0000000f (critic, old)"
+  sessions_py "$new" HEAD
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"without the trailers Role: infra and Session: s-20261120T000000Z-0000000f"* ]]
+  # A revision that is not a commit: an error, never a finding.
+  sessions_py nope HEAD
+  [ "$status" -eq 2 ]
+  # A session recorded in both places is refused.
+  git -C "$SB" checkout -q old-bad
+  hand_record "$SB" s-20261120T000000Z-0000000d 2026-11-20T00:00:00Z
+  sessions_py "$new" HEAD
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"session s-20261120T000000Z-0000000d is recorded 2 times"* ]]
+}
+
+@test "the sessions check refuses records a merge changes, drops or adds, and passes merges with two merge bases" {
+  local main="$(git -C "$SB" rev-parse HEAD)" rec=docs/process/provenance/sessions/s-20261201T000000Z-00000002.json
+  BASE="$main"
+  git -C "$SB" checkout -q -b side
+  hand_record "$SB" s-20261201T000000Z-00000002 2026-12-01T00:00:00Z
+  git -C "$SB" checkout -q -b main2 "$main"
+  echo m >"$SB/docs/m.md"
+  git -C "$SB" add docs/m.md
+  git -C "$SB" commit -qm main2
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  git -C "$SB" checkout -q side
+  # A merge that edits the record the branch added.
+  git -C "$SB" merge -q --no-commit main2
+  jq -c '.role = "infra" | .role_doc = null | .role_doc_blob = null' "$SB/$rec" >"$BATS_TEST_TMPDIR/r" && cp "$BATS_TEST_TMPDIR/r" "$SB/$rec"
+  git -C "$SB" add "$rec"
+  git -C "$SB" commit -qm "Merge, editing the record"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"changes $rec after the commit that added it"* ]]
+  # ... that deletes it.
+  git -C "$SB" reset -q --hard HEAD~1
+  git -C "$SB" merge -q --no-commit main2
+  git -C "$SB" rm -qf "$rec"
+  git -C "$SB" commit -qm "Merge, dropping the record"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"drops $rec, which"* ]]
+  # ... or that brings a record of its own, or an archive line.
+  git -C "$SB" reset -q --hard HEAD~1
+  git -C "$SB" merge -q --no-commit main2
+  printf '{"session":"s-20261201T000000Z-00000003"}\n' >"$SB/docs/process/provenance/sessions/s-20261201T000000Z-00000003.json"
+  printf '{"session":"s-20261101T000000Z-00000004","created_at":"2026-11-01T00:00:00Z"}\n' >>"$SESSIONS"
+  git -C "$SB" add -A docs
+  git -C "$SB" commit -qm "Merge, adding records"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"s-20261201T000000Z-00000003.json arrives without a commit"* ]]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"the archive gains a line that no commit"* ]]
+  # Each side merges the other's earlier tip: two merge bases.
+  git -C "$SB" reset -q --hard HEAD~1
+  local x1 y1
+  x1="$(git -C "$SB" rev-parse side)"
+  y1="$(git -C "$SB" rev-parse main2)"
+  git -C "$SB" checkout -q -b y2 "$y1"
+  git -C "$SB" merge -q --no-edit "$x1"
+  git -C "$SB" checkout -q -b x2 "$x1"
+  git -C "$SB" merge -q --no-edit "$y1" -m "Merge the other way"
+  echo y >"$SB/docs/y.md"
+  git -C "$SB" add docs/y.md
+  git -C "$SB" commit -qm "More on x2"
+  [ "$(git -C "$SB" merge-base --all x2 y2 | wc -l | tr -d ' ')" -eq 2 ]
+  BASE="$(git -C "$SB" rev-parse y2)" sessions_check
+  [ "$status" -eq 0 ]
+}
+
+@test "the sessions check refuses record files of the wrong shape" {
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  local dir="$SB/docs/process/provenance/sessions" t
+  mkdir -p "$dir/sub"
+  printf '{}\n' >"$dir/sub/s-20261201T000000Z-00000005.json"
+  printf 'notes\n' >"$dir/notes.txt"
+  printf 'not json\n' >"$dir/s-20261201T000000Z-00000006.json"
+  ln -s ../sessions.jsonl "$dir/s-20261201T000000Z-00000007.json"
+  for t in sub/s-20261201T000000Z-00000005.json notes.txt s-20261201T000000Z-00000006.json s-20261201T000000Z-00000007.json; do
+    git -C "$SB" add "docs/process/provenance/sessions/$t"
+    git -C "$SB" commit -qm "Record $t" -m "Role: infra
+Session: ${t%.json}"
+  done
+  # Missing Role:, a role_doc_blob that is not the role doc's, a ref name as base_commit.
+  hand_record "$SB" s-20261201T000000Z-00000008 2026-12-01T00:00:00Z '.role_doc_blob = "0000000000000000000000000000000000000000"'
+  hand_record "$SB" s-20261201T000000Z-00000009 2026-12-01T00:00:00Z '.base_commit = "HEAD"'
+  hand_record "$SB" s-20261201T000000Z-0000000a 2026-12-01T00:00:00Z
+  git -C "$SB" commit -q --amend -m "Record session s-20261201T000000Z-0000000a" -m "Session: s-20261201T000000Z-0000000a"
+  sessions_check
+  [ "$status" -eq 1 ]
+  local all
+  all="$(field '[.failures[].message] | join(" ")')"
+  [[ "$all" == *"sub/s-20261201T000000Z-00000005.json is not a record file"* ]]
+  [[ "$all" == *"notes.txt is not a record file"* ]]
+  [[ "$all" == *"00000006.json is not one JSON object"* ]]
+  [[ "$all" == *"00000007.json is not a regular file (mode 120000)"* ]]
+  [[ "$all" == *"00000008.json has role_doc_blob"* ]]
+  [[ "$all" == *'00000009.json has base_commit "HEAD"'* ]]
+  [[ "$all" == *"0000000a.json without the trailers Role: infra"* ]]
+  # A revision that is not a commit cannot be checked: an error, not a finding.
+  BASE=not-a-commit sessions_check
+  [ "$status" -eq 2 ]
+}
+
+@test "session record writes only inside the checkout, never through a symlinked directory" {
+  local outside="$BATS_TEST_TMPDIR/outside" head0
+  mkdir -p "$outside"
+  head0="$(git -C "$SB" rev-parse HEAD)"
+  rm -rf "$RECORDS"
+  ln -s "$outside" "$RECORDS"
+  mg session record --role critic --name linked
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = session-ledger ]
+  [[ "$(field '.failures[0].message')" == *"is a symlink"* ]]
+  [ -z "$(ls -A "$outside")" ]
+  [ "$(git -C "$SB" rev-parse HEAD)" = "$head0" ]
+}
+
+@test "the sessions check refuses non-JSON numbers, impossible dates, tag ids, missing role docs and gitlinks" {
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  git -C "$SB" tag -a -m tag t1
+  local tag blob
+  tag="$(git -C "$SB" rev-parse t1)"
+  hand_record "$SB" s-20261201T000000Z-00000011 2026-12-01T00:00:00Z '.extra = 1'
+  sed -i.bak 's/"extra":1/"extra":NaN/' "$RECORDS/s-20261201T000000Z-00000011.json" && rm "$RECORDS/s-20261201T000000Z-00000011.json.bak"
+  git -C "$SB" commit -q --amend -a --no-edit
+  hand_record "$SB" s-20261201T000000Z-00000012 2026-02-30T00:00:00Z
+  hand_record "$SB" s-20261201T000000Z-00000013 2026-12-01T00:00:00Z ".base_commit = \"$tag\""
+  git -C "$SB" rm -q docs/process/roles/critic.md
+  git -C "$SB" commit -qm "No critic doc"
+  blob="$(git -C "$SB" rev-parse HEAD~1:docs/process/roles/critic.md)"
+  hand_record "$SB" s-20261201T000000Z-00000014 2026-12-01T00:00:00Z '.role_doc_blob = null'
+  git -C "$SB" update-index --add --cacheinfo "160000,$BASE,docs/process/provenance/sessions/s-20261201T000000Z-00000015.json"
+  git -C "$SB" commit -qm "Record a gitlink" -m "Role: infra
+Session: s-20261201T000000Z-00000015"
+  sessions_check
+  [ "$status" -eq 1 ]
+  local all
+  all="$(field '[.failures[].message] | join(" ")')"
+  [[ "$all" == *"00000011.json is not one JSON object"* ]]
+  [[ "$all" == *"00000012.json has no created_at"* ]]
+  [[ "$all" == *"00000013.json has base_commit \"$tag\""* ]]
+  [[ "$all" == *"00000014.json names role_doc docs/process/roles/critic.md, which its base_commit does not hold"* ]]
+  [[ "$all" == *"00000015.json is not a regular file (mode 160000)"* ]]
+  # An out-of-range number is no JSON number either.
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  hand_record "$SB" s-20261201T000000Z-00000016 2026-12-01T00:00:00Z '.extra = 1'
+  sed -i.bak 's/"extra":1/"extra":1e400/' "$RECORDS/s-20261201T000000Z-00000016.json" && rm "$RECORDS/s-20261201T000000Z-00000016.json.bak"
+  git -C "$SB" commit -q --amend -a --no-edit
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"00000016.json is not one JSON object"* ]]
+  # A file where the records directory goes.
+  git -C "$SB" reset -q --hard "$BASE"
+  git -C "$SB" rm -rq docs/process/provenance/sessions 2>/dev/null || true
+  rm -rf "$RECORDS"
+  echo file >"$RECORDS"
+  git -C "$SB" add docs/process/provenance/sessions
+  git -C "$SB" commit -qm "A file for the directory"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"puts a file at docs/process/provenance/sessions"* ]]
+}
+
+@test "the sessions check refuses a merge that makes a record executable or names an unknown session" {
+  local main rec=docs/process/provenance/sessions/s-20261201T000000Z-00000021.json
+  main="$(git -C "$SB" rev-parse HEAD)"
+  git -C "$SB" checkout -q -b side
+  hand_record "$SB" s-20261201T000000Z-00000021 2026-12-01T00:00:00Z
+  git -C "$SB" checkout -q -b main2 "$main"
+  echo m >"$SB/docs/m.md"
+  git -C "$SB" add docs/m.md
+  git -C "$SB" commit -qm main2
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  git -C "$SB" checkout -q side
+  git -C "$SB" merge -q --no-commit main2
+  git -C "$SB" update-index --chmod=+x "$rec"
+  git -C "$SB" commit -qm "Merge, with a mode change"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"changes $rec, which its parent"* ]]
+  git -C "$SB" reset -q --hard HEAD~1
+  git -C "$SB" merge -q --no-edit main2 -m "Merge main2" -m "Session: s-20991231T000000Z-0000dead"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"Session: s-20991231T000000Z-0000dead names no session record"* ]]
 }
 
 @test "hooks install puts a shim in the shared hooks dir and refuses a foreign hook" {

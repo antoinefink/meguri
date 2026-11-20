@@ -10,6 +10,17 @@ struct SidebarView: View {
     let features: ShellFeatures
 
     var body: some View {
+        // N20.1: the deck search's field tops the sidebar; its results replace this list.
+        features.sidebarSearch(AnyView(list))
+            .sidebarColumnChrome()
+            .navigationTitle(Text(verbatim: "Meguri"))
+            #if !os(macOS)
+            // N14.9: the column keeps its name for accessibility; the bar does not draw it.
+            .toolbar(removing: .title)
+            #endif
+    }
+
+    private var list: some View {
         List(selection: Binding<SidebarItem?>(get: { navigation.sidebarSelection }, set: { item in
             if let item { navigation.select(item) }
         })) {
@@ -55,12 +66,6 @@ struct SidebarView: View {
                 }
             }
         }
-        .sidebarColumnChrome()
-        .navigationTitle(Text(verbatim: "Meguri"))
-        #if !os(macOS)
-        // N14.9: the column keeps its name for accessibility; the bar does not draw it.
-        .toolbar(removing: .title)
-        #endif
     }
 
     /// N14.1: with a collection, the first row is Today on every sidebar layout.

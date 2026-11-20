@@ -208,6 +208,15 @@ pub trait ReadRows: sealed::Connected {
     fn sched_subtree_empty(&self, decks: &[DeckId]) -> Result<bool, StorageError> {
         crate::queries::sched_queue::empty(self.connection(), decks)
     }
+    /// The activity heatmap's counts of days 0 to 370 before `next_day_at`
+    /// (`stats/activity-heatmap` AH5): one statement, bounded by `id`.
+    fn activity_day_counts(
+        &self,
+        scope: crate::queries::activity::ActivityScope<'_>,
+        next_day_at: i64,
+    ) -> Result<Vec<u32>, StorageError> {
+        crate::queries::activity::day_counts(self.connection(), scope, next_day_at)
+    }
 
     /// Execute the read-only one-column card-id statement compiled by the
     /// search crate. SQL remains inside storage; callers bind typed cells.

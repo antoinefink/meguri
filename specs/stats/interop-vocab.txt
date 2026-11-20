@@ -137,3 +137,10 @@ browser_links_supported
 heatmap_report
 no_data
 sectors
+# Activity heatmap (specs/stats/activity-heatmap.md): the review-log and card
+# columns and the schema-18 indexes its query names.
+usn
+mod
+ix_cards_sched
+idx_cards_odid
+ix_revlog_cid

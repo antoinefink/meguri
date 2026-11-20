@@ -416,9 +416,9 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 - Touch layouts keep the large title in the content (deck pages) or use N14.8's (tab roots).
 - Replaces on Mac: N12.1's leading large title and in-content counts line.
 
-### N14.5 Activity (not built)
+### N14.5 Activity (built: N14.11)
 
-- The heatmap is the minimal form of `decisions.md` (2026-11-19). On a deck page it follows the subdecks, not the counts and Study. Replaces N11.5's "On the deck page it follows the counts and Study" when the heatmap is built.
+- The heatmap is the minimal form of `decisions.md` (2026-11-19). On a deck page it follows the subdecks, not the counts and Study. Replaces N11.5's "On the deck page it follows the counts and Study". Built as N14.11.
 
 ### N14.6 Sidebar deck list
 
@@ -452,6 +452,24 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 - Compact width (an ordinary iPhone, the Duo folded or held tall) has no such row and marks no row. iPad and Mac keep the sidebar's own Today row (N14.1).
 - Search results replace the whole list, the Today row included (N14.2).
 - Accessibility: `home.today.row`, labelled "Today", with "N cards waiting" as its value and the selected trait; the selected deck row has that trait too.
+
+### N14.11 Activity heatmap
+
+The H-A minimal form of `decisions.md` (2026-11-19). Antoine's build direction (chat): it should look good and be simple to ship, and performance matters: it must not slow down the page. Data and rules are `stats/activity-heatmap`. Changes from the H-A page: a day cannot be tapped and has no callout; with no reviews the heatmap is hidden, with no empty grid or message; there are no month labels and no legend; the Mac adds a hover tooltip on each day.
+
+- Grid: small rounded squares, one per day. Weeks are columns, the most recent week trailing; days are rows from the locale's first weekday. Days after today in the current week are not drawn. Standard SwiftUI shapes in a grid: no custom drawing, no gestures.
+- Colour: a day with no reviews uses the system secondary fill. Days with reviews use four steps of the app's accent (tint) colour, from the system's hierarchical styles: level 4 primary, 3 secondary, 2 tertiary, 1 quaternary (levels: `stats/activity-heatmap` AH7). Today's square has a 1 pt outline in the primary label colour. System colours only, so dark mode and Increase Contrast need no extra code.
+- Width: as many whole weeks as fit the row's content width, up to 53. The squares stretch so the strip spans the row from edge to edge; the gap is a fixed fraction of the square. Minimum column pitch: 20 pt on touch, 13 pt on Mac (about 16 weeks on an iPhone, 20 on the folded Duo, up to 53 on iPad, Mac and the Duo opened wide). No horizontal scrolling, date picker, month labels or legend.
+- Text: one line under the grid in footnote secondary text, "312 reviews in the last 16 weeks", pluralised (AH8). It wraps and never truncates.
+- No interaction: a tap does nothing. Accessibility: the grid and its line are one element, `home.activity.grid` (header `home.activity.header`), labelled "Review activity", with the summary line as its value. On Mac only, each square has a hover help tooltip with its date and count.
+- Placement: a group of its own with the section header "Activity" and the side margins of the rows above it (never wider than the rows, never touching the edges). Deck page: after the Subdecks section, before the error line and the previous session. Today: after the decks with cards waiting. The tab layout's deck list (compact: iPhone, the Duo folded or held tall): after the deck rows. The deck list beside Today (Duo held wide) has none; Today has it. Mac: in the detail column, at the same places.
+- Scope: the whole collection on Today and the deck list; the deck and its subdecks on a deck page (AH4).
+- Hidden completely while the days shown have no reviews (AH8). It collapses only after the first result says so.
+- Performance rules:
+  - The page never waits for the heatmap. It loads asynchronously, off the main actor, on the query lane. Its height follows from the row width and is reserved from the first frame, so nothing moves when it appears. Returning to a page shows the cached grid at once while a due refresh runs in the background, without flicker.
+  - One query per scope fetches all 53 weeks. A width change (rotation, window resize, fold) changes only how many weeks are drawn and never queries again.
+- Not in this build: streaks, statistics, tapping a day, month labels, legend, scrolling back, colour choices, settings, the Home Screen widget.
+- Replaces N11.5's Activity bullet for the heatmap only; its studied-today line and streak stats are unchanged by this section.
 
 ## N15. Round 2 Settings and sync decisions (2026-11-19)
 

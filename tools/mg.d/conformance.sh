@@ -52,8 +52,10 @@ mg_conf__dev() {
     mg_compose --progress plain build dev >&2 || return 125
     MG_CONF_DEV_BUILT=1
   fi
+  local MG_GIT_MOUNT
+  mg_git_mount
   mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" ${opts[0]+"${opts[@]}"} \
-    dev bash -c "$1" </dev/null
+    ${MG_GIT_MOUNT[0]+"${MG_GIT_MOUNT[@]}"} dev bash -c "$1" </dev/null
 }
 
 # Edges carry their own purpose/checkout/run ownership, including pre-token

@@ -321,7 +321,7 @@ t_implementer_worktree_and_commit_hook_on_macos() {
       "$(shasum -a 256 "$wt/.claude/settings.local.json" | cut -d' ' -f1)" || return 1
   id="$(jq -r .session "$(git -C "$wt" rev-parse --absolute-git-dir)/meguri-session.json")"
   expect "record committed on the branch" "$(git -C "$wt" log -1 --format=%s)" "Record session $id (implementer, hw1)" &&
-    expect "record in the branch's ledger" "$(tail -n 1 "$wt/docs/process/provenance/sessions.jsonl" | jq -r .session)" "$id" &&
+    expect "record in the branch" "$(jq -r .session "$wt/docs/process/provenance/sessions/$id.json")" "$id" &&
     expect "main checkout's ledger untouched" "$(git -C "$SB" status --porcelain -- docs/process/provenance)" "" &&
     expect "hook installed" "$([ -x "$SB/.git/hooks/commit-msg" ] && echo yes || echo no)" yes || return 1
   mg worktree new --role "implementer fixer" hw2
