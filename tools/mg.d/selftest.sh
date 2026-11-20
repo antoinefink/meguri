@@ -1,7 +1,7 @@
 # tools/mg self-tests. Sourced by tools/mg.
 
 mg_job selftest docker:dev mg_selftest \
-  "tools/mg self-tests (bats, four files at once, sequential within each file) in the dev container; args go to bats, e.g. --filter doctor or --jobs 1"
+  "tools/mg self-tests (bats, four files at once, sequential within each file) in the dev container; args go to bats, e.g. --filter doctor, --jobs 1 or test files by path (tools/tests/gate.bats), which replace the full list"
 mg_job selftest-host host mg_selftest_host \
   "tools/mg host self-tests: macOS bash, real doctor, Docker placement, image rebuild (tools/tests/mg_host_selftest.sh)"
 mg_job selftest-xcframework host mg_selftest_xcframework \
@@ -60,13 +60,28 @@ mg_tap_report() {
 
 mg_selftest() {
   local tap="$MG_RUN_DIR/selftest.tap" rc arg
-  local defaults=(--jobs 4 --no-parallelize-within-files)
+  local defaults=(--jobs 4 --no-parallelize-within-files) files=(tools/tests/*.bats)
   # Bats rejects its file-only flag with one job. An explicit job count
   # therefore replaces both defaults and retains Bats' own CLI semantics.
   for arg in ${1+"$@"}; do
     case "$arg" in --jobs|-j|--jobs=*|-j[0-9]*) defaults=(); break ;; esac
   done
-  bats --formatter tap ${defaults[0]+"${defaults[@]}"} ${1+"$@"} tools/tests/*.bats | tee "$tap"
+  # Named test files replace the whole list: passed beside it, bats ran each
+  # named file twice (two runs of one file share its fixtures and fail).
+  for arg in ${1+"$@"}; do
+    case "$arg" in
+      *.bats)
+        if [ ! -f "$arg" ]; then
+          mg_failure usage "selftest: no test file $arg; name files by their path, e.g. tools/tests/gate.bats" "tools/mg selftest tools/tests/gate.bats"
+          mg_message "selftest: no test file $arg"
+          mg_status error
+          return 0
+        fi
+        files=()
+        ;;
+    esac
+  done
+  bats --formatter tap ${defaults[0]+"${defaults[@]}"} ${1+"$@"} ${files[0]+"${files[@]}"} | tee "$tap"
   rc=${PIPESTATUS[0]}
   mg_artifact tap "$tap"
   mg_tap_report "$tap" "$rc" "tools/mg selftest --filter"
