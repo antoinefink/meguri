@@ -66,6 +66,8 @@ pub mod maintenance_scheduler;
 pub mod media_exact_write;
 #[path = "memory_recompute.rs"]
 pub mod memory_recompute;
+#[path = "note_patch.rs"]
+pub mod note_patch;
 #[path = "notetype_field_rename.rs"]
 pub mod notetype_field_rename;
 #[path = "notetype_records.rs"]
@@ -90,6 +92,8 @@ pub mod regenerate;
 pub mod rendering;
 #[path = "resource_jobs.rs"]
 pub mod resource_jobs;
+#[path = "review_note_patch.rs"]
+pub mod review_note_patch;
 #[path = "rollover.rs"]
 pub mod rollover;
 #[path = "sched_ops.rs"]
