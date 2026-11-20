@@ -99,3 +99,5 @@ CodeRabbit posted four comments. All four were taken:
   server capability.
 - Second AI review (one comment): when the wait ends, the job starts only
   if a new read still finds a status that is not `ok`. Taken.
+- Third AI review (one comment): the rule for the end of the wait must say
+  which status read is used. Now stated as built in F5.2. Taken.
