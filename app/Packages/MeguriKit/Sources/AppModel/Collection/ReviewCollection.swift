@@ -247,6 +247,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         if let deckOptionsOwner { return deckOptionsOwner }
         let value = DeckOptionsPageModel(owner: self)
         deckOptionsOwner = value
+        navigation.onDeckOptionsLeft = { [weak value] in value?.pageLeft() }
         return value
     }
     /// N20.9's entries: the deck's page, then its Deck Options pushed on it.

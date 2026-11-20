@@ -138,14 +138,33 @@ import Testing
         model.setValue(.newPerDay, 25)
         model.changesCommitted(Self.changes(decks: [1]), generation: 11)
         #expect(model.changedElsewhere && model.value(.newPerDay) == 25 && core.opens == 2)
-        model.dismissChangedElsewhere()
-        #expect(!model.changedElsewhere && model.canSave)
-        // A save the core refuses as stale shows the row again; Reload reads anew.
+        // N20.9 has no reload row: Save is refused, says nothing was changed and reads anew.
+        model.save(); await model.waitForCompletion()
+        #expect(core.opens == 3 && model.saveFailure == .failed && !model.changedElsewhere && !model.hasChanges)
+        // A save the core refuses as stale does the same.
+        model.setValue(.newPerDay, 26)
         core.saveResult = .failure(.stale(table: .deckConfig, key: "1"))
         model.save(); await model.waitForCompletion()
-        #expect(model.phase == .editing && model.changedElsewhere && model.outcome == nil)
-        model.reload(); await model.waitForCompletion()
-        #expect(core.opens == 3 && !model.changedElsewhere && !model.hasChanges)
+        #expect(core.opens == 4 && model.saveFailure == .failed && model.outcome == nil && !model.hasChanges)
+    }
+
+    @Test func thePageEndsWhenItLeavesItsStackAndAReopenKeepsAnOpenDraft() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        owner.navigation.setPath([.deckOptions(DeckID(1))], for: .home)
+        let original = try #require(model.value(.newPerDay))
+        model.setValue(.newPerDay, 25)
+        // The same deck again, or another deck, never replaces a changed draft.
+        #expect(!model.canOpen(deckID: 1) && !model.canOpen(deckID: 2))
+        // Text typed but not committed counts as a change (O15.3).
+        model.setValue(.newPerDay, original)
+        #expect(!model.hasChanges)
+        model.fieldText[.newPerDay] = "40"
+        #expect(model.hasChanges)
+        // Back (the page leaves its stack) ends the draft in any phase.
+        owner.navigation.setPath([], for: .home)
+        #expect(model.phase == .closed && model.outcome == .left && core.opens == 1)
     }
 
     @Test func refusedSavesKeepThePageWithItsIssues() async throws {

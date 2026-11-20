@@ -11,36 +11,6 @@
         }
       }
     },
-    "deckOptions.changedElsewhere": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "These options were changed elsewhere."
-          }
-        }
-      }
-    },
-    "deckOptions.changedElsewhere.keepEditing": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keep Editing"
-          }
-        }
-      }
-    },
-    "deckOptions.changedElsewhere.reload": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reload"
-          }
-        }
-      }
-    },
     "deckOptions.discard.discard": {
       "localizations": {
         "en": {

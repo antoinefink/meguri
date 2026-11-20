@@ -28,7 +28,7 @@ public struct DeckOptionsPage: View {
             // N20.9: while the draft differs, Cancel replaces back and swipe back is off.
             .navigationBarBackButtonHidden(model.hasChanges || model.phase == .saving)
             .confirmationDialog(Text("deckOptions.discard.title", bundle: .module), isPresented: Binding(
-                get: { model.confirmingDiscard }, set: { if !$0 { model.keepEditing() } })) {
+                get: { model.confirmingDiscard }, set: { if !$0 { model.keepEditing() } }), titleVisibility: .visible) {
                 Button(role: .destructive) { model.discardChanges() } label: { Text("deckOptions.discard.discard", bundle: .module) }
                 Button(role: .cancel) { model.keepEditing() } label: { Text("deckOptions.discard.keepEditing", bundle: .module) }
             }
@@ -42,6 +42,7 @@ public struct DeckOptionsPage: View {
                 }
             }
             .onChange(of: model.outcome) { _, outcome in
+                // The model already returned to the deck page; the view only acknowledges.
                 guard outcome != nil else { return }
                 model.acknowledgeOutcome()
                 onClose()
@@ -50,8 +51,6 @@ public struct DeckOptionsPage: View {
                 if let previous { model.commit(previous) }
             }
             .onAppear { model.locale = locale }
-            // Back with nothing changed ends the draft; the system's pop already left the page.
-            .onDisappear { if model.phase == .editing, !model.hasChanges { model.requestLeave() } }
     }
 
     @ViewBuilder private var content: some View {
@@ -80,7 +79,6 @@ public struct DeckOptionsPage: View {
 
     private var form: some View {
         Form {
-            if model.changedElsewhere { changedElsewhere }
             Section {
                 presetPicker
             } footer: {
@@ -105,21 +103,6 @@ public struct DeckOptionsPage: View {
         .formStyle(.grouped)
     }
 
-    // N11.9's row; its text is the screen contract's.
-    private var changedElsewhere: some View {
-        Section {
-            Text("deckOptions.changedElsewhere", bundle: .module)
-            HStack {
-                Button { model.reload() } label: { Text("deckOptions.changedElsewhere.reload", bundle: .module) }
-                    .accessibilityIdentifier("deckOptions.options.reload")
-                Spacer()
-                Button { model.dismissChangedElsewhere() } label: { Text("deckOptions.changedElsewhere.keepEditing", bundle: .module) }
-                    .accessibilityIdentifier("deckOptions.options.keepEditing")
-            }
-            .buttonStyle(.borderless)
-        }
-    }
-
     private var presetPicker: some View {
         Picker(selection: Binding(get: { model.selectedPreset }, set: { model.selectPreset($0) })) {
             ForEach(model.presets) { preset in
@@ -132,36 +115,36 @@ public struct DeckOptionsPage: View {
             Text(model.selected?.name ?? "").truncationMode(.middle)
         }
         .pickerStyle(.menu)
-        .accessibilityIdentifier("deckOptions.options.preset.picker")
+        // An error in the selected preset is fixed before another is chosen.
+        .disabled(!model.canSwitchPreset)
+        .accessibilityIdentifier("deckOptions.options.presetPicker")
     }
 
-    private func numberRow(_ row: DeckOptionsPageRow) -> some View {
-        VStack(alignment: .leading) {
-            LabeledContent {
-                field(row)
-            } label: {
-                label(row)
-            }
-            issueLines(row)
+    /// The row itself is the form's row, so the system keeps its label and
+    /// value on one line; its issues follow as rows of their own (N11.9).
+    @ViewBuilder private func numberRow(_ row: DeckOptionsPageRow) -> some View {
+        LabeledContent {
+            field(row)
+        } label: {
+            label(row)
         }
+        issueLines(row)
     }
 
-    private var retentionRow: some View {
-        VStack(alignment: .leading) {
-            LabeledContent {
-                HStack {
-                    field(.desiredRetention)
-                    Stepper(onIncrement: { model.stepRetention(by: 1) }, onDecrement: { model.stepRetention(by: -1) }) {
-                        label(.desiredRetention)
-                    }
-                    .labelsHidden()
-                    .accessibilityIdentifier("deckOptions.options.stepper.desiredRetention")
+    @ViewBuilder private var retentionRow: some View {
+        LabeledContent {
+            HStack {
+                field(.desiredRetention)
+                Stepper(onIncrement: { model.stepRetention(by: 1) }, onDecrement: { model.stepRetention(by: -1) }) {
+                    label(.desiredRetention)
                 }
-            } label: {
-                label(.desiredRetention)
+                .labelsHidden()
+                .accessibilityIdentifier("deckOptions.options.stepper.desiredRetention")
             }
-            issueLines(.desiredRetention)
+        } label: {
+            label(.desiredRetention)
         }
+        issueLines(.desiredRetention)
     }
 
     private func label(_ row: DeckOptionsPageRow) -> Text {
@@ -178,8 +161,6 @@ public struct DeckOptionsPage: View {
         }
         .labelsHidden()
         .multilineTextAlignment(.trailing)
-        // As wide as its value, so the row keeps its label and value on one line.
-        .fixedSize()
         .focused($focused, equals: row)
         .onSubmit { model.commit(row) }
         #if os(iOS)
@@ -206,7 +187,7 @@ public struct DeckOptionsPage: View {
             }
             .font(.footnote)
             .accessibilityHidden(true)
-            .accessibilityIdentifier("deckOptions.options.option.\(row.rawValue).issue")
+            .accessibilityIdentifier("deckOptions.options.issue.\(row.rawValue)-\(String(describing: issue.code))")
         }
     }
 
@@ -219,6 +200,13 @@ public struct DeckOptionsPage: View {
                     .disabled(!model.canSave)
                     .keyboardShortcut("s", modifiers: .command)
                     .accessibilityIdentifier("deckOptions.options.save")
+                    // O15.3: ⌘↩ saves too.
+                    .background {
+                        Button { save() } label: { EmptyView() }
+                            .keyboardShortcut(.return, modifiers: .command)
+                            .disabled(!model.canSave)
+                            .hidden()
+                    }
             }
         }
         if model.hasChanges {

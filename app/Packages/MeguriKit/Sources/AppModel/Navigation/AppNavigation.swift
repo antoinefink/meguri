@@ -67,7 +67,22 @@ public final class AppNavigation {
     /// it to Browse (U210).
     public var browseSearch = ""
 
-    private var paths: [AppSection: [Destination]] = [:]
+    private var paths: [AppSection: [Destination]] = [:] {
+        didSet {
+            // N20.9: the Deck Options page left its stack (back, a pop, another
+            // row or section): its draft ends. A layout switch keeps the stack.
+            let open = { (paths: [AppSection: [Destination]]) in
+                paths.values.contains { $0.contains { if case .deckOptions = $0 { true } else { false } } }
+            }
+            if open(oldValue), !open(paths) { onDeckOptionsLeft?() }
+        }
+    }
+    /// The collection ends the Deck Options draft when its page leaves the stacks.
+    @ObservationIgnored public var onDeckOptionsLeft: (() -> Void)?
+    /// Whether the Deck Options page is on a stack.
+    public var showsDeckOptions: Bool {
+        paths.values.contains { $0.contains { if case .deckOptions = $0 { true } else { false } } }
+    }
     private var scrollPositions: [ScrollAnchorKey: ScrollPosition] = [:]
     /// The sidebar visibility to restore when the review ends (R21).
     private var columnVisibilityBeforeReview: NavigationSplitViewVisibility?

@@ -162,6 +162,9 @@ public final class DeckOptionsPageModel {
     /// normal deck, outside review, with no other collection work holding it.
     public func canOpen(deckID: Int64) -> Bool {
         guard let owner, phase != .saving, owner.deckOptionsAllowed else { return false }
+        // The page already open for this deck stays as it is; a changed draft
+        // of another deck is never replaced without its own leave (N20.9).
+        if phase != .closed, self.deckID == deckID || hasChanges { return false }
         return owner.deck(deckID).map { !$0.filtered } ?? (owner.fullDeckName(deckID) != nil)
     }
 
@@ -245,6 +248,10 @@ public final class DeckOptionsPageModel {
     public var hasChanges: Bool {
         guard let opening else { return false }
         if selectedPreset != opening.openingPreset { return true }
+        // Text typed but not committed yet counts (O15.3).
+        if DeckOptionsPageRow.allCases.contains(where: { row in fieldText[row].map { $0 != formatted(row) } ?? false }) {
+            return true
+        }
         return presets.contains { preset in
             guard let base = opening.presets.first(where: { $0.id == preset.id }) else { return true }
             return DeckOptionsPageRow.allCases.contains { Float(preset[$0]) != Float(base[$0]) }
@@ -252,6 +259,11 @@ public final class DeckOptionsPageModel {
     }
 
     public var hasErrors: Bool { issues.contains { $0.severity == .error } }
+    /// Another preset can be chosen once the selected one has no error, so an
+    /// error never hides behind another preset's rows.
+    public var canSwitchPreset: Bool {
+        phase == .editing && !issues.contains { $0.severity == .error && ($0.preset == nil || $0.preset == selectedPreset) }
+    }
 
     /// The issues shown under a row: the selected preset's, and the row's shared warnings.
     public func issues(for row: DeckOptionsPageRow) -> [DeckOptionsPageIssue] {
@@ -267,8 +279,9 @@ public final class DeckOptionsPageModel {
     /// Selecting a preset makes it the target preset (O17.2); edits to the
     /// first one stay in the draft.
     public func selectPreset(_ id: Int64) {
-        guard phase == .editing, id != selectedPreset, presets.contains(where: { $0.id == id }) else { return }
         commitAll()
+        guard phase == .editing, id != selectedPreset, presets.contains(where: { $0.id == id }),
+              canSwitchPreset else { return }
         selectedPreset = id
         for row in DeckOptionsPageRow.allCases { fieldText[row] = formatted(row) }
         enqueue { try await $0.select(id) }
@@ -364,7 +377,12 @@ public final class DeckOptionsPageModel {
             await editTask?.value
             guard current == revision else { return }
             guard owner.generation == expected else { end(.ended); return }
-            if hasErrors || changedElsewhere { phase = .editing; return }
+            if hasErrors { phase = .editing; return }
+            if changedElsewhere {
+                // N20.9 has no reload row: the save is refused, the page says
+                // nothing was changed, and the options are read again.
+                phase = .editing; reload(); saveFailure = .failed; return
+            }
             do {
                 let committed = try await session.save()
                 guard current == revision else { return }
@@ -375,7 +393,7 @@ public final class DeckOptionsPageModel {
                 phase = .editing
                 switch error as? BridgeError {
                 case .deckOptionsInvalid(let raw)?: issues = raw.compactMap(DeckOptionsPageIssue.init)
-                case .stale?, .notFound?: changedElsewhere = true
+                case .stale?, .notFound?: reload(); saveFailure = .failed
                 case .staleGeneration?: end(.ended)
                 case .cancelled?: break
                 case .busy?, .sessionActive?: saveFailure = .busy
@@ -416,11 +434,21 @@ public final class DeckOptionsPageModel {
 
     private func end(_ outcome: Outcome) {
         revision &+= 1
-        let previous = session
+        let previous = session, closing = deckID
         session = nil; opening = nil; presets = []; issues = []; fieldText = [:]
         changedElsewhere = false; confirmingDiscard = false
         deckID = nil; phase = .closed; self.outcome = outcome
         if let previous { Task { await previous.cancel() } }
+        // The model, not the view, returns to the deck page (a page that is
+        // not on screen, after a layout switch, still closes).
+        if outcome != .ended, let closing { owner?.navigation.popDeckOptions(DeckID(closing)) }
+    }
+
+    /// The page left its stack (`AppNavigation.onDeckOptionsLeft`): the draft
+    /// ends in whatever phase, without asking; a running save completes.
+    func pageLeft() {
+        guard phase != .closed, phase != .saving else { return }
+        end(.left)
     }
 
     // MARK: Collection events
@@ -429,8 +457,8 @@ public final class DeckOptionsPageModel {
     /// decks, presets or config reloads silently while the draft is unchanged,
     /// and otherwise shows N11.9's row.
     func changesCommitted(_ changes: ChangeSet, generation eventGeneration: UInt64) {
-        guard phase == .editing, eventGeneration == generation,
-              changes.wholeCollection || !changes.decks.isEmpty || !changes.deckConfigs.isEmpty || !changes.configKeys.isEmpty
+        guard phase == .editing, eventGeneration == generation, let deckID,
+              changes.wholeCollection || changes.decks.contains(where: { $0.id == deckID }) || !changes.deckConfigs.isEmpty
         else { return }
         if hasChanges || !(owner?.deckOptionsAllowed ?? false) { changedElsewhere = true } else { reload() }
     }
