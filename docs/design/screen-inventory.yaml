@@ -169,8 +169,8 @@ screens:
       the row in the list's half. On iPhone a row swipe shows Options and More, never Delete (R49).
       The menu bar's Deck menu is N20.4's. Delete Deck (N20.7, decks/decks D8): with no card to lose
       (an empty deck, a filtered deck) it deletes at once; otherwise it asks first with the title
-      "Delete “<name>”?" and the subdeck and card counts, as a confirmation dialog from the bottom on
-      compact touch, a popover beside the row at regular width and an alert on Mac, Delete never the
+      "Delete “<name>”?" and the subdeck and card counts, as the system's confirmation dialog on touch
+      (on iOS 27 a popover from the row, at every width) and an alert on Mac, Delete never the
       default. One undo step (Edit › Undo Delete Deck) restores it; no toast. Moves end with an
       Undo toast.
   - id: home.deckName
