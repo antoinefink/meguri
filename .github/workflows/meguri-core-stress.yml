@@ -72,7 +72,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/dev-image-digest
-          key: dev-image-v1-${{ steps.hash.outputs.hash }}
+          key: dev-image-v1-${{ steps.hash.outputs.hash }}-${{ github.run_id }}
+          restore-keys: dev-image-v1-${{ steps.hash.outputs.hash }}-
 
       - name: Pull the shared dev image
         id: pull

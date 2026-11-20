@@ -170,13 +170,15 @@ jobs:
           echo "hash=$hash" >>"$GITHUB_OUTPUT"
 
       # The digest of master's image of this hash. Only master runs save it,
-      # so a pull request cannot change which image master uses.
+      # so a pull request cannot change which image master uses. Entries are
+      # immutable: each new record gets its own key, and the newest wins.
       - name: Restore the record of master's image
         if: github.event_name != 'schedule' && inputs.cold != true
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/dev-image-digest
-          key: dev-image-v1-${{ steps.hash.outputs.hash }}
+          key: dev-image-v1-${{ steps.hash.outputs.hash }}-${{ github.run_id }}
+          restore-keys: dev-image-v1-${{ steps.hash.outputs.hash }}-
 
       - name: Find or build the dev image
         id: image
@@ -194,7 +196,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/dev-image-digest
-          key: dev-image-v1-${{ steps.hash.outputs.hash }}
+          key: dev-image-v1-${{ steps.hash.outputs.hash }}-${{ github.run_id }}
 
   core-shard:
     name: Linux · core · shard ${{ matrix.shard }}/${{ strategy.job-total }}

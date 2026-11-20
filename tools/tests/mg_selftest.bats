@@ -576,6 +576,19 @@ EOF
   validate "$result"
 }
 
+@test "docker invocation takes a CI image named by digest" {
+  docker_invoke_fixture
+  local ref="ghcr.io/owner/meguri-dev@sha256:$(printf '%064d' 0)"
+  MEGURI_CI_DEV_IMAGE="$ref" mg fx-docker one
+  [ "$status" -eq 0 ]
+  jq -es --arg ref "$ref" '
+    map(select(.[0] == "compose")) as $compose
+    | ($compose | length) == 1 and $compose[0][5:8] == ["run", "--pull", "never"]
+      and map(select(.[0] == "tag")) == [["tag", $ref, ($compose[0][2] + "-dev")]]
+  ' "$STUB_LOG"
+  validate "$result"
+}
+
 @test "docker invocation errs, and neither builds nor runs, when the CI image named by MEGURI_CI_DEV_IMAGE is absent" {
   docker_invoke_fixture
   STUB_IMAGE_RC=1 MEGURI_CI_DEV_IMAGE=ghcr.io/owner/meguri-dev:0123abcd mg fx-docker

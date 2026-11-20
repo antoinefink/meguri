@@ -70,7 +70,7 @@ build() {
   BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -p "$project" -f docker/compose.yml --progress plain build dev &&
     printf 'FROM %s\nLABEL %s=%s org.opencontainers.image.source=https://github.com/%s\n' \
       "$project-dev" "$label" "$1" "$GITHUB_REPOSITORY" |
-    docker build -q -t "$2" - >/dev/null
+    BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker build -q -t "$2" - >/dev/null
 }
 
 login() { printf '%s' "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null; }
@@ -81,8 +81,10 @@ ensure() {
   local h ref
   h="$(hash)"
   echo "hash=$h" >>"$GITHUB_OUTPUT"
+  local record=no
   report() {
     echo "ref=$1" >>"$GITHUB_OUTPUT"
+    echo "record=$record" >>"$GITHUB_OUTPUT"
     printf '### Dev image\n\n%s\n' "$2" >>"$GITHUB_STEP_SUMMARY"
     echo "$2"
   }
@@ -95,7 +97,6 @@ ensure() {
   pr="$(ref_of "$h" pr)"
   target="$pr"
   [[ "$TRUSTED" != true ]] || target="$(ref_of "$h")"
-  echo "record=no" >>"$GITHUB_OUTPUT"
   if ! login; then
     echo "::warning::Cannot log in to ghcr.io; every job builds the dev image itself."
     report "" "No shared image (registry login failed): every job builds it."
@@ -112,7 +113,7 @@ ensure() {
     elif d="$(docker image inspect -f '{{ range .RepoDigests }}{{ println . }}{{ end }}' "$target" |
                grep -m1 "^$(repo_of)@sha256:" | cut -d@ -f2)" && [[ -n "$d" ]]; then
       printf '%s\n' "$d" >"$DIGEST_FILE"
-      echo "record=yes" >>"$GITHUB_OUTPUT"
+      record=yes
       report "$(repo_of)@$d" "Built and pushed \`$(repo_of)@$d\`."
     else
       echo "::warning::No digest for the pushed $target; every job builds the dev image itself."
