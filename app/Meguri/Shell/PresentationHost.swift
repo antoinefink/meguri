@@ -12,12 +12,15 @@ struct PresentationHost: ViewModifier {
     let configuration: LaunchConfiguration
     let isActive: Bool
     var host: AppNavigation.SheetHost = .main
+    /// The tab layout's list beside the detail: the naming form shows there (N20.3).
+    var deckNameBesideList = false
 
     private var hostedSheet: SheetRoute? {
         guard isActive, navigation.sheetHost == host else { return nil }
         #if os(macOS)
         if features.nativeMacWorkspace, case .add = navigation.sheet { return nil }
         #endif
+        if deckNameBesideList, case .deckName = navigation.sheet { return nil }
         return navigation.sheet
     }
 
