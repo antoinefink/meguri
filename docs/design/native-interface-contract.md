@@ -832,7 +832,7 @@ The English text of the screens above. "New" marks text not used before this rou
 | Find… | Edit menu | new |
 | Deck Options… | the Deck menu, the deck menu | N20.9 |
 | Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
-| Edit Note | the Card menu, the card's context menu (Mac), the touch review toolbar button, the form's title | N20.8 |
+| Edit Note | the Card menu, the card's context menu (Mac), the touch review's More menu, the form's title | N20.8 |
 
 - No longer used: "Go to Deck…", "Create Deck", "Overview", "Deck Actions", "Deck name", "Rename Deck…", "Close Review", the Study menu's title and its "Undo Answer" and "Redo Answer" items (Edit's Undo still reads "Undo Answer Card" after an answer, from the core's step name), "Import…", "Export…".
 
