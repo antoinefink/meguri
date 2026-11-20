@@ -1946,12 +1946,46 @@ fn actual_preview_after_begin(host: &CoreHost, service: &mut Service<SeededRando
     }
 }
 
+/// V27.4's "Keep this device's collection" over a `stopped` binding that
+/// could resume. The core offers it only after the other service was ready
+/// (V27.6), the history stated here; the plain confirmation, whose history
+/// is unknown, refuses such a preview because Resume is then the question.
+fn keep_device_over_resumable(
+    runtime: &cloud::runtime::Runtime,
+    p: &Preview,
+    collection: &meguri_engine::Collection,
+) -> Result<[u8; 16], cloud::runtime::RuntimeError> {
+    assert_eq!(p.decision, ConnectDecision::ConfirmResume);
+    let after_other = cloud::setup::OtherServiceEvidence::for_testing(cloud::setup::OtherServiceHistory::ReadySinceStop);
+    runtime.confirm_setup_publication(p, after_other, collection)
+}
+
 fn publish_actual_collection(host: &CoreHost, service: &mut Service<SeededRandom>) -> cloud::Binding {
+    publish_actual(host, service, None)
+}
+/// The same publication again, from a preview whose decision is `expected`.
+/// Where this collection's own `stopped` binding could resume
+/// (`ConfirmResume`), it is the sheet's "Keep this device's collection".
+fn republish_actual_collection(
+    host: &CoreHost,
+    service: &mut Service<SeededRandom>,
+    expected: ConnectDecision,
+) -> cloud::Binding {
+    publish_actual(host, service, Some(expected))
+}
+fn publish_actual(host: &CoreHost, service: &mut Service<SeededRandom>, expected: Option<ConnectDecision>) -> cloud::Binding {
     host.media().unwrap().store().register_full(|_, _| true).unwrap();
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     let p = actual_preview(host, service, &scope());
-    runtime.confirm_connection_publication(&p, &collection).unwrap();
+    if let Some(expected) = &expected {
+        assert_eq!(&p.decision, expected);
+    }
+    if expected == Some(ConnectDecision::ConfirmResume) {
+        keep_device_over_resumable(runtime, &p, &collection).unwrap();
+    } else {
+        runtime.confirm_connection_publication(&p, &collection).unwrap();
+    }
     let request = until_active(host, service);
     let (result, _) = execute_publication_request(service, &scope(), &request, runtime, &collection).unwrap();
     assert!(matches!(&result, OwnResult::Saved(_)));
@@ -2815,7 +2849,15 @@ fn stopped_binding_committed_incoming_transition(resume: bool) {
         return;
     }
     let calls = service.request_log().unwrap().len();
-    let op_id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+    // The plain confirmation over a binding that could resume is refused and
+    // records nothing: no sheet offered this device's collection there.
+    assert!(matches!(
+        runtime.confirm_connection_publication(&p, &collection),
+        Err(cloud::runtime::RuntimeError::Publication(PublicationError::NotOffered))
+    ));
+    assert!(runtime.publication_op().unwrap().is_none());
+    assert_eq!(runtime.status().unwrap().binding.unwrap(), stopped);
+    let op_id = keep_device_over_resumable(runtime, &p, &collection).unwrap();
 
     assert_eq!(runtime.status().unwrap().binding.unwrap(), stopped);
     let op = runtime.publication_op().unwrap().unwrap();
@@ -4366,7 +4408,8 @@ fn republish_pending_native_note(stop_at_capture: bool) {
 
     // Explicit confirmation on the same live collection draws a new record key.
     // The helper drives real scans, Service entity saves/ACKs and the active switch.
-    let new = publish_actual_collection(&host, &mut service);
+    let expected = if stop_at_capture { ConnectDecision::ConfirmResume } else { ConnectDecision::ChooseCollection };
+    let new = republish_actual_collection(&host, &mut service, expected);
     assert_ne!(new.id, old.id);
     assert_ne!(new.facts.epoch, old.facts.epoch);
     assert!(new.facts.record_key.0 != old.facts.record_key.0);
@@ -5486,7 +5529,7 @@ fn stopped_resume_reaffirmation_requires_accepted_read_and_current_original_auth
         match change {
             "stale-context" => runtime.adapter_pause(true).unwrap(),
             "operation" => {
-                runtime.confirm_connection_publication(&preview, &collection).unwrap();
+                keep_device_over_resumable(runtime, &preview, &collection).unwrap();
             }
             "changed-account" => {
                 identity = IdentityStatus::Available(cloud::OpaqueBytes(b"other-account".to_vec()));
@@ -5519,6 +5562,48 @@ fn stopped_resume_reaffirmation_requires_accepted_read_and_current_original_auth
     }
 }
 
+/// V27.2: a review session refuses choosing iCloud with `SessionActive`, so
+/// each no-question setup start refuses and starts nothing.
+#[test]
+fn a_review_session_refuses_every_setup_start_and_changes_nothing() {
+    use cloud::entity_codec::{Kind, Payload};
+    use meguri_engine::session::StartResult;
+    use meguri_model::ids::DeckId;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("setup-during-review");
+    generated(&dir);
+    let host = open_prior_icloud_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(733)).unwrap();
+    publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let card = runtime.entity_facts_page(Kind::Card, None).unwrap().remove(0);
+    let Payload::Card(card) = card.payload else {
+        panic!("published card")
+    };
+    runtime.adapter_stop_syncing().unwrap();
+    let preview = actual_preview(&host, &mut service, &scope());
+    assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
+    let generation = host.cloud_connection_generation().unwrap();
+    let before = runtime.status().unwrap().binding;
+    let StartResult::Started { session_id, .. } = host.review().start(DeckId(card.did), None).unwrap() else {
+        panic!("the local collection is reviewable")
+    };
+    let refused = |result: Result<(), cloud::runtime::RuntimeError>| {
+        assert!(matches!(
+            result,
+            Err(cloud::runtime::RuntimeError::Engine(meguri_engine::EngineError::SessionActive))
+        ));
+    };
+    refused(host.start_cloud_setup_resume(&preview, generation));
+    refused(host.start_cloud_setup_publication(&preview, generation).map(drop));
+    refused(host.start_cloud_setup_adoption(&preview).map(drop));
+    assert!(runtime.publication_op().unwrap().is_none() && runtime.adoption_op().unwrap().is_none());
+    assert_eq!(runtime.status().unwrap().binding, before);
+    host.review().end(session_id).unwrap();
+    host.close().unwrap();
+}
+
 /// Retained authority refuses stale explicit actions without changing the binding.
 #[test]
 fn resume_proof_refuses_changed_account_file_fence_operation_and_replaced_preview() {
@@ -5548,7 +5633,7 @@ fn resume_proof_refuses_changed_account_file_fence_operation_and_replaced_previe
             }
             "fence" | "reopen" => restore_collection(&host, &dir),
             "operation" => {
-                runtime.confirm_connection_publication(&p, &collection).unwrap();
+                keep_device_over_resumable(runtime, &p, &collection).unwrap();
             }
             "preview" => {
                 let newer = actual_preview(&host, &mut service, &scope());
@@ -6564,7 +6649,7 @@ fn accepted_resumable_predecessor_cancel(reason: cloud::IsolationReason) {
         let p = actual_preview(&host, &mut service, &scope());
         assert_eq!(p.decision, ConnectDecision::ConfirmResume);
         assert_eq!(p.resume_binding, Some(predecessor.id));
-        let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+        let id = keep_device_over_resumable(runtime, &p, &collection).unwrap();
         let confirmed = runtime.publication_op().unwrap().unwrap();
         assert_eq!(confirmed.binding_before.as_ref().unwrap().id, predecessor.id);
         assert_eq!(confirmed.binding_before.as_ref().unwrap().state,
@@ -6749,7 +6834,15 @@ fn accepted_unbound_cancel_discovery(local_only: bool, point: Option<&'static st
     let runtime = host.cloud_runtime().unwrap();
     let collection = host.collection().unwrap();
     let p = actual_preview(&host, &mut service, &scope());
-    let id = runtime.confirm_connection_publication(&p, &collection).unwrap();
+    // A kept-local-only predecessor can resume: Resume is the question then,
+    // and only the sheet's "Keep this device's collection" publishes over it.
+    let id = if predecessor.is_some() {
+        keep_device_over_resumable(runtime, &p, &collection)
+    } else {
+        assert_eq!(p.decision, ConnectDecision::ConfirmUpload);
+        runtime.confirm_connection_publication(&p, &collection)
+    }
+    .unwrap();
     runtime.provider_accept_icloud_connection().unwrap();
     host.refresh_provider_admission();
     runtime.perform_publication_local(id, LocalWork::Bind, &collection).unwrap();

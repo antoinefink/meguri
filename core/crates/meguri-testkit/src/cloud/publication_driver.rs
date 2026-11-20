@@ -271,6 +271,51 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
                 .confirm_connection_publication(&preview, &collection)?,
         ),
         Input::AdoptionConfirm(preview) => value(device.host.confirm_cloud_adoption(&preview)?),
+        Input::StopICloud => {
+            device.host.stop_using_icloud()?;
+            value(())
+        }
+        Input::SetupDecision(preview, history) => {
+            let history = meguri_sync::cloud::setup::OtherServiceEvidence::for_testing(history);
+            value(device.runtime()?.connection_setup_decision(&preview, history)?)
+        }
+        Input::SetupStart(preview, history, forced) => {
+            use meguri_sync::cloud::setup::SilentStart;
+            let history = meguri_sync::cloud::setup::OtherServiceEvidence::for_testing(history);
+            let runtime = device.runtime()?;
+            // With no decided start, production's refusing call is made.
+            let start = match forced {
+                Some(start) => start,
+                None => runtime
+                    .connection_setup_decision(&preview, history)?
+                    .silent_start()
+                    .unwrap_or(SilentStart::Publication),
+            };
+            let started: Option<[u8; 16]> = match start {
+                SilentStart::Resume => {
+                    runtime.start_setup_resume(&preview, history, &collection)?;
+                    None
+                }
+                SilentStart::AdoptionInitial | SilentStart::AdoptionOverNoContent => Some(
+                    runtime.start_setup_adoption(&preview, history, Some(&collection), device.host.engine())?,
+                ),
+                SilentStart::Publication => Some(runtime.start_setup_publication(&preview, history, &collection)?),
+            };
+            value(started)
+        }
+        Input::SetupKeepCloud(preview, history) => {
+            let history = meguri_sync::cloud::setup::OtherServiceEvidence::for_testing(history);
+            value(device.runtime()?.confirm_setup_adoption_over_resumable(
+                &preview,
+                history,
+                &collection,
+                device.host.engine(),
+            )?)
+        }
+        Input::SetupKeepDevice(preview, history) => {
+            let history = meguri_sync::cloud::setup::OtherServiceEvidence::for_testing(history);
+            value(device.runtime()?.confirm_setup_publication(&preview, history, &collection)?)
+        }
         Input::AdoptionReply(work, reply) => {
             let mut diagnostic = meguri_sync::cloud::adoption::AdoptionDiagnosticRecorder::new(&work.task);
             let result = device.host.cloud_adoption_reply_with_diagnostic(

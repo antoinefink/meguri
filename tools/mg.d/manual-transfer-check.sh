@@ -50,8 +50,8 @@ mg_manual_transfer_data() {
   esac
   export MEGURI_MANUAL_TRANSFER_DATA_RUN="$MG_ROOT/$relative"
   export MEGURI_MANUAL_TRANSFER_DATA_MODE="$operation"
-  mg_core_test -- --test manual_transfer_data --run-ignored only \
-    -E 'package(meguri-host) & test(=rig_manual_transfer_data)'
+  mg_core_test -- --test host_it --run-ignored only \
+    -E 'package(meguri-host) & test(=manual_transfer_data::rig_manual_transfer_data)'
 }
 
 mg_mt_prepare_data() {

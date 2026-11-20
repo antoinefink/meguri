@@ -436,6 +436,20 @@ pub(crate) enum Input {
     PreviewCancel,
     PublicationConfirm(core::publication::Preview),
     AdoptionConfirm(core::publication::Preview),
+    /// V27.2: the decision for a ready preview, under a supplied history.
+    SetupDecision(core::publication::Preview, core::setup::OtherServiceHistory),
+    /// V27.2: the decided row's recovery call, with no confirmation. A named
+    /// start is called whatever the decision is, to prove that it refuses.
+    SetupStart(
+        core::publication::Preview,
+        core::setup::OtherServiceHistory,
+        Option<core::setup::SilentStart>,
+    ),
+    /// V27.4: "Keep the iCloud collection" over a binding that could resume,
+    /// under a supplied history.
+    SetupKeepCloud(core::publication::Preview, core::setup::OtherServiceHistory),
+    /// V27.4: "Keep this device's collection" under a supplied history.
+    SetupKeepDevice(core::publication::Preview, core::setup::OtherServiceHistory),
     AdoptionReply(core::adoption::AdoptionWork, core::adoption::AdoptionReply),
     AdoptionLocal(core::adoption::AdoptionWork),
     Capacity(Option<u64>),
@@ -463,6 +477,8 @@ pub(crate) enum Input {
     BeginZoneListing(String),
     ZoneListingResult(Option<Vec<String>>),
     CollectionDrained,
+    /// The Service control's Off for an active binding (V27.5, V16).
+    StopICloud,
     DeletionGuard,
     DeletionCheck(core::publication::RecordRead),
     DeleteZone(String),
@@ -1367,6 +1383,11 @@ impl ChildDriver {
             Input::MediaSent(..) => "MediaSent",
             Input::CollectionDrained => "CollectionDrained",
             Input::AdoptionConfirm(..) => "AdoptionConfirm",
+            Input::SetupDecision(..) => "SetupDecision",
+            Input::StopICloud => "StopICloud",
+            Input::SetupStart(..) => "SetupStart",
+            Input::SetupKeepCloud(..) => "SetupKeepCloud",
+            Input::SetupKeepDevice(..) => "SetupKeepDevice",
             Input::AdoptionReply(..) => "AdoptionReply",
             Input::AdoptionLocal(..) => "AdoptionLocal",
             Input::AdoptionCompletion(..) => "AdoptionCompletion",
@@ -3109,7 +3130,11 @@ impl Device {
                 }
                 result
             }
-            input @ (Input::PublicationConfirm(..) | Input::AdoptionConfirm(..)) => {
+            input @ (Input::PublicationConfirm(..)
+            | Input::AdoptionConfirm(..)
+            | Input::SetupStart(..)
+            | Input::SetupKeepCloud(..)
+            | Input::SetupKeepDevice(..)) => {
                 let result = publication_driver::handle(self, input)?;
                 // Only the original successful confirmation can admit setup.
                 self.runtime()?.provider_accept_icloud_connection()?;
@@ -3131,6 +3156,8 @@ impl Device {
             | Input::RootConfirmed
             | Input::PreviewActive(..)
             | Input::PreviewEpoch(..)
+            | Input::SetupDecision(..)
+            | Input::StopICloud
             | Input::PadAdoptionCandidate
             | Input::PublicationNext
             | Input::PublicationCancel(..)

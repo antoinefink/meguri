@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] targets below build (tests/main.rs is template_it).
+autotests = false
 
 [dependencies]
 # Hint ids (specs/render/filters.md F5): a parity pin.
@@ -37,3 +39,14 @@ serde_json.workspace = true
 name = "icount_render"
 path = "benches/icount/render.rs"
 harness = false
+
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
+[[test]]
+name = "template_it"
+path = "tests/main.rs"
+
+# Insta names its snapshot files after the binary's module path.
+[[test]]
+name = "display_snapshots"
+path = "tests/display_snapshots.rs"
