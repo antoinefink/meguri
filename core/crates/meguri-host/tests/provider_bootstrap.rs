@@ -154,6 +154,49 @@ fn meguri_server_download_completes_collection_but_stays_unbound_until_media_acc
     host.close().unwrap();
 }
 
+/// First-run report: the setup transfer closes network admission from its
+/// preview until its media finishes. That closure is the setup transfer's own
+/// (MP4), so the provider phase read from it is not MP1's blocked phase.
+#[test]
+fn meguri_setup_transfer_holds_admission_from_preview_until_media_completes() {
+    let _lane = LANE.lock().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let (host, config) = seeded(&root.path().join("local"));
+    let connection = select(&host);
+    assert!(!host.provider_authority().network_blocked());
+    assert!(!host.meguri_setup_transfer_holds_admission());
+    let (_, data) = server(&root.path().join("server"));
+    let script = collection_script(data, false);
+    let preview = prepare(&host, &connection, &script, D::UseServerCollection);
+    host.refresh_provider_admission();
+    assert!(host.provider_authority().network_blocked());
+    assert!(host.meguri_setup_transfer_holds_admission());
+    let op = confirm(&host, &connection, &script, preview);
+    assert!(op.collection_complete && op.receipt.is_none());
+    host.refresh_provider_admission();
+    assert!(host.provider_authority().network_blocked());
+    assert!(host.meguri_setup_transfer_holds_admission());
+    let partial = media_run(&host, &connection, &Script::new(vec![(Method::MediaBegin, Reply::Lost)]),
+        media_preview(&host, &connection, &op));
+    assert!(partial.receipt.is_none());
+    host.refresh_provider_admission();
+    assert!(host.meguri_setup_transfer_holds_admission());
+    host.close().unwrap();
+    // A launch with the media still pending reads the same.
+    let reopened = CoreHost::open(config).unwrap();
+    settle(&reopened);
+    assert!(reopened.provider_authority().network_blocked());
+    assert!(reopened.meguri_setup_transfer_holds_admission());
+    let done = finish_empty_media(&reopened, &connection, &partial);
+    reopened.complete_meguri_bootstrap(&connection, USER, &done.id).unwrap();
+    assert!(!reopened.provider_authority().network_blocked());
+    assert!(!reopened.meguri_setup_transfer_holds_admission());
+    // Any other closure is not the setup transfer's.
+    reopened.provider_authority().close_admission();
+    assert!(!reopened.meguri_setup_transfer_holds_admission());
+    reopened.close().unwrap();
+}
+
 #[test]
 fn meguri_device_upload_retains_backup_and_server_copy_without_binding() {
     let _lane = LANE.lock().unwrap();
