@@ -118,8 +118,11 @@ import Testing
 
     @Test func cancelLeavesTheServiceOffOnlyWhenTheDownloadWasDiscarded() {
         #expect(MeguriSetupSequence.cancelLeavesOff(keepsService: false, discarded: true))
-        // A refused or failed discard, or one that never ran: Meguri Sync stays selected.
+        // A refused or failed discard: Meguri Sync stays selected.
         #expect(!MeguriSetupSequence.cancelLeavesOff(keepsService: false, discarded: false))
+        // A discard that could not start leaves no action behind: Off, as before.
+        #expect(MeguriSetupSequence.cancelLeavesOff(keepsService: false, discarded: nil))
+        #expect(!MeguriSetupSequence.cancelLeavesOff(keepsService: true, discarded: nil))
         #expect(!MeguriSetupSequence.cancelLeavesOff(keepsService: true, discarded: true))
     }
 

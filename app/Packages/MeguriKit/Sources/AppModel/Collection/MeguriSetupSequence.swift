@@ -111,10 +111,11 @@ enum MeguriSetupSequence {
         return (result, true)
     }
 
-    /// MP6.3: Cancel leaves the service Off only when nothing prepared is
-    /// retained. A discard that the core refused, that failed or that never ran
-    /// is a failure: Meguri Sync stays selected and signed in, with Try Again.
-    static func cancelLeavesOff(keepsService: Bool, discarded: Bool) -> Bool { !keepsService && discarded }
+    /// MP6.3: a discard that the core refused, or that failed, is a failure:
+    /// Meguri Sync stays selected and signed in, with Try Again. A discard
+    /// that could not start (nil) changed no state and offers no action, so
+    /// Cancel leaves the service Off there as after a discard that happened.
+    static func cancelLeavesOff(keepsService: Bool, discarded: Bool?) -> Bool { !keepsService && discarded != false }
 
     /// Cancel in a sheet that a status action opened changes nothing but the
     /// sheet (V27.4). After an overtaken upload it leaves the service Off, as
