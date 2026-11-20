@@ -143,7 +143,9 @@ impl View {
             let NodeKind::Term(term) = &node.kind else { continue };
             let span = node.span.clone();
             let range = negations[index].clone().unwrap_or_else(|| span.clone());
+            // A bare `-` that is no negation's item (`--` negates a `-`).
             if matches!(term, Term::Text(text) if text == "-")
+                && negations[index].is_none()
                 && span.len() == 1
                 && self.chars.get(span.start) == Some(&'-')
                 && span.end == cursor
@@ -402,7 +404,7 @@ fn integer(text: &str, signed: bool, (low, high): (i128, i128)) -> bool {
         if first > most {
             return false;
         }
-        if first + scale - 1 >= least {
+        if first + scale > least {
             return true;
         }
     }

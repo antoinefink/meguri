@@ -133,6 +133,8 @@ fn each_form_needs_its_cursor() {
     assert_eq!(tail("a| -"), Tail::Valid);
     assert_eq!(tail("a \\-"), Tail::Valid);
     assert_eq!(tail("a \"-\""), Tail::Valid);
+    assert_eq!(tail("--"), Tail::Valid);
+    assert_eq!(tail("a --"), Tail::Valid);
     // unclosed_quote and empty_quote: after the opening quote.
     assert_eq!(incomplete("x \"a|b").0, UnclosedQuote);
     assert_eq!(error("x |\"ab"), "unclosed_quote");
@@ -153,10 +155,12 @@ fn each_form_needs_its_cursor() {
     assert_eq!(incomplete("x (and|"), (OperatorWord, 3..6));
     // trailing_escape: only the lone backslash ending at the cursor.
     assert_eq!(error("ab|c\\"), "unknown_escape");
+    assert_eq!(error("abc\\ |"), "unknown_escape");
     assert_eq!(error("a\\ b"), "unknown_escape");
     assert_eq!(error("a\\x"), "unknown_escape");
     // partial_value: unquoted, ending at the cursor.
     assert_eq!(error("is:n|e x"), "invalid_state");
+    assert_eq!(error("is:ne |"), "invalid_state");
     assert_eq!(incomplete("is:ne| x"), (PartialValue, 0..5));
     assert_eq!(incomplete("x -is:ne"), (PartialValue, 2..8));
     assert_eq!(error("is:\"ne\""), "invalid_state");
