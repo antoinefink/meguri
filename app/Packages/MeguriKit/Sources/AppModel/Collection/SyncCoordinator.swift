@@ -1246,7 +1246,8 @@ public final class SyncCoordinator {
                 self.meguriLastError = error
                 // The discard failed: the core says whether setup can run again, so
                 // that a preparation with no sheet is not left without an action.
-                try? await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+                do { try await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision) }
+                catch { if current() { self.meguriStage = .failed }; return nil }
                 if self.meguriChoiceAllowed { release(); self.meguriStage = .failed }
             }
             return nil
