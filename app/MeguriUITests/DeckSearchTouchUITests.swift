@@ -82,9 +82,9 @@ final class DeckSearchTouchUITests: XCTestCase {
         // The system's confirmation dialog, with the exact title and message.
         XCTAssertTrue(app.staticTexts["Delete “Local Review”?"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Its subdeck and 4 cards will also be deleted."].exists)
-        // iOS 27 shows it as a popover from the row with no Cancel: a tap elsewhere cancels.
+        // iOS 27 shows it as a popover from the row with no Cancel: a tap elsewhere (the bar's empty middle) cancels.
         let cancel = app.buttons["Cancel"].firstMatch
-        if cancel.exists { cancel.tap() } else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap() }
+        if cancel.exists { cancel.tap() } else { app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
         XCTAssertTrue(app.staticTexts["Delete “Local Review”?"].waitForNonExistence(timeout: 10))
         XCTAssertTrue(row.exists, "Cancel changes nothing")
         row.press(forDuration: 1.2)

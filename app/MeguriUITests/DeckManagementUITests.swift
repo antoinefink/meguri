@@ -266,6 +266,7 @@ final class DeckManagementUITests: XCTestCase {
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("\r", modifierFlags: [])
         XCTAssertFalse(parent.waitForNonExistence(timeout: 2), "Return deletes nothing")
+        XCTAssertTrue(alert.exists, "No button answers Return: the question stays")
         // Esc cancels.
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
