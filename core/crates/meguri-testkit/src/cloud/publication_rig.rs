@@ -512,6 +512,87 @@ impl PublicationRig {
         self.refresh()?;
         Ok(id)
     }
+    pub fn stop_using_icloud(&mut self) -> Result<()> {
+        self.sdk.get_mut().driver.call::<()>(Input::StopICloud)?;
+        self.work = None;
+        self.refresh()
+    }
+    /// `sync/cloudkit-recovery#V27.2`: the row the core picks for this preview.
+    pub fn setup_decision(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+    ) -> Result<cloud::setup::SetupDecision> {
+        self.sdk
+            .get_mut()
+            .driver
+            .call(Input::SetupDecision(preview.production.clone(), history))
+    }
+    /// The decided row's recovery call, made with no confirmation. `None`
+    /// is a resumed binding; otherwise the recovery op's id.
+    pub fn start_setup(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+    ) -> Result<Option<[u8; 16]>> {
+        self.start_setup_call(preview, history, None)
+    }
+    /// One named no-question start, called whatever the decision is.
+    pub fn force_setup_start(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+        start: cloud::setup::SilentStart,
+    ) -> Result<Option<[u8; 16]>> {
+        self.start_setup_call(preview, history, Some(start))
+    }
+    fn start_setup_call(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+        start: Option<cloud::setup::SilentStart>,
+    ) -> Result<Option<[u8; 16]>> {
+        let started = self
+            .sdk
+            .get_mut()
+            .driver
+            .call(Input::SetupStart(preview.production.clone(), history, start))?;
+        self.work = None;
+        self.refresh()?;
+        Ok(started)
+    }
+    /// V27.4's "Keep the iCloud collection" for a preview whose binding could
+    /// resume, under a supplied history. The recovery op's id.
+    pub fn keep_cloud_over_resumable(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+    ) -> Result<[u8; 16]> {
+        let id = self
+            .sdk
+            .get_mut()
+            .driver
+            .call(Input::SetupKeepCloud(preview.production.clone(), history))?;
+        self.work = None;
+        self.refresh()?;
+        Ok(id)
+    }
+    /// V27.4's "Keep this device's collection" under a supplied history;
+    /// `confirm_publication` is this call with the history unknown.
+    pub fn keep_device_over_active(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+    ) -> Result<[u8; 16]> {
+        let id = self
+            .sdk
+            .get_mut()
+            .driver
+            .call(Input::SetupKeepDevice(preview.production.clone(), history))?;
+        self.work = None;
+        self.refresh()?;
+        Ok(id)
+    }
     pub fn adopt_cloud(&mut self, preview: &ConnectionPreview) -> Result<[u8; 16]> {
         let id = self
             .sdk

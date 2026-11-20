@@ -263,6 +263,16 @@ fn actual_no_collection_host_discovers_without_creating_an_empty_collection_or_p
         assert!(!summary.local_collection_present && !summary.local_empty);
         assert!(summary.local_counts.is_empty() && summary.manifest_counts.is_none());
         assert!(matches!(summary.decision, CloudConnectionDecision::NoCollection));
+        // V27.2 row 1: no collection anywhere needs no question. The create is
+        // the app's existing job, so `start_setup` starts nothing here.
+        let setup = connection.setup_decision(preview.clone()).unwrap();
+        assert_eq!((setup.row, setup.row_number), (CloudSetupRow::CreateAndPublish, 1));
+        assert_eq!((setup.question, setup.reason), (CloudSetupQuestion::None, None));
+        assert!(!setup.keep_device_offered && !setup.keep_cloud_offered);
+        assert!(!setup.device.present && !setup.cloud.present);
+        assert!(!setup.device.holds_user_content && !setup.cloud.holds_user_content);
+        assert!(setup.epoch_id.is_none() && setup.active_change_tag.is_none());
+        failure_is(connection.start_setup(preview.clone()), CloudConnectionFailure::NotOffered);
         failure_is(
             connection.confirm_publication(preview.clone()),
             CloudConnectionFailure::NotOffered,
@@ -807,6 +817,158 @@ fn adoption_preview(connection: &CloudConnection) -> (Arc<CloudConnectionPreview
     assert_eq!(summary.published_at_ms, Some(NOW));
     assert!(summary.manifest_counts.is_some());
     (preview, active)
+}
+/// V27.2 row 2 through the bridge: no collection here and a complete epoch
+/// starts the adoption with no confirmation call, as a confirmed op would.
+#[test]
+fn setup_start_adopts_into_a_device_with_no_collection_with_no_question() {
+    let fixture = Fixture::without_collection(Keys::new([]));
+    let connection = fixture.workflow.connection().unwrap();
+    let (preview, active) = adoption_preview(&connection);
+    let setup = connection.setup_decision(preview.clone()).unwrap();
+    assert_eq!((setup.row, setup.row_number), (CloudSetupRow::AdoptInitial, 2));
+    assert_eq!((setup.question, setup.reason), (CloudSetupQuestion::None, None));
+    assert!(!setup.device.present && !setup.device.holds_user_content);
+    // Manifest counts never prove an empty iCloud collection.
+    assert!(setup.cloud.present && !setup.cloud.counts_exact && setup.cloud.holds_user_content);
+    assert_eq!(setup.active_change_tag, Some(active.system_fields.clone()));
+    assert!(setup.epoch_id.is_some());
+    assert!(fixture.workflow.core.adoption_op().unwrap().is_none(), "the decision starts nothing");
+    let CloudSetupStarted::Operation { operation } = connection.start_setup(preview.clone()).unwrap() else {
+        panic!("row 2 starts an adoption")
+    };
+    let op = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    // Nothing local is replaced, so no row 5 re-test is asked of this op.
+    assert!(!op.requires_no_user_content);
+    let status = connection.recovery_status().unwrap().unwrap();
+    assert!(matches!(status.step, CloudRecoveryStep::Staging) && status.adoption_cancellable);
+    // The start consumed the preview: it confirms nothing afterwards.
+    failure_is(connection.start_setup(preview.clone()), CloudConnectionFailure::Consumed);
+    failure_is(connection.confirm_adoption(preview), CloudConnectionFailure::Consumed);
+    connection.cancel_operation(operation).unwrap();
+    assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+}
+/// V27.2 row 5 through the bridge: a new collection and a complete epoch
+/// start the adoption with no confirmation call, and the op carries the
+/// condition that its exclusive phase tests again.
+#[test]
+fn setup_start_adopts_over_a_new_collection_and_records_the_condition_to_test_again() {
+    let fixture = Fixture::new(Keys::new([]));
+    let connection = fixture.workflow.connection().unwrap();
+    let (preview, active) = adoption_preview(&connection);
+    let setup = connection.setup_decision(preview.clone()).unwrap();
+    assert_eq!((setup.row, setup.row_number), (CloudSetupRow::AdoptOverNoContent, 5));
+    assert_eq!((setup.question, setup.reason), (CloudSetupQuestion::None, None));
+    assert!(!setup.keep_device_offered && !setup.keep_cloud_offered);
+    assert!(setup.device.present && !setup.device.holds_user_content);
+    assert!(setup.cloud.present && setup.cloud.holds_user_content);
+    assert_eq!(setup.active_change_tag, Some(active.system_fields));
+    // Reading the decision twice starts nothing and keeps the preview.
+    assert_eq!(connection.setup_decision(preview.clone()).unwrap().row_number, 5);
+    assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+    // No sheet offers this device's collection for row 5, so no upload
+    // replaces the iCloud collection; the refusal keeps the handle.
+    failure_is(connection.confirm_publication(preview.clone()), CloudConnectionFailure::NotOffered);
+    assert!(fixture.workflow.core.publication_op().unwrap().is_none());
+    let CloudSetupStarted::Operation { operation } = connection.start_setup(preview.clone()).unwrap() else {
+        panic!("row 5 starts an adoption")
+    };
+    assert!(fixture.workflow.core.adoption_op().unwrap().unwrap().requires_no_user_content);
+    assert_eq!(
+        fixture.workflow.host.engine().slot_holder(),
+        Some(meguri_engine::LongOp::CloudAdopt)
+    );
+    failure_is(connection.start_setup(preview), CloudConnectionFailure::Consumed);
+    connection.cancel_operation(operation).unwrap();
+    assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+    assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+    // The user's own confirmation records no such condition.
+    let (preview, _) = adoption_preview(&connection);
+    let operation = connection.confirm_adoption(preview).unwrap();
+    assert!(!fixture.workflow.core.adoption_op().unwrap().unwrap().requires_no_user_content);
+    connection.cancel_operation(operation).unwrap();
+}
+/// V27.2 row 3 and V27.6 through the bridge, with the history the host
+/// itself supplies: no durable record says that no other service was ready
+/// since the stop, so a `stopped` binding that could resume keeps its
+/// confirmation and `start_setup` starts nothing. This pins the production
+/// value; a test's own history never reaches this path.
+#[test]
+fn setup_keeps_the_resume_confirmation_for_a_stopped_binding_and_starts_nothing() {
+    let fixture = Fixture::previously_confirmed(keys());
+    fixture.baseline();
+    let workflow = &fixture.workflow;
+    let bound = workflow.core.status().unwrap().binding.unwrap();
+    assert_eq!(bound.facts.state, c::BindingState::Active);
+    let epoch_bytes = workflow.core.bound_epoch_bytes_for_testing(0, false).unwrap();
+    // Off in the Service control (V27.5, V16).
+    workflow.stop_syncing().unwrap();
+    let stopped = c::BindingState::Isolated(c::IsolationReason::Stopped);
+    let state = || workflow.core.status().unwrap().binding.unwrap().facts.state;
+    assert_eq!(state(), stopped);
+
+    let connection = workflow.connection().unwrap();
+    let active = CloudControlRecord {
+        encrypted: Some(
+            control_codec::Active {
+                epoch: bound.facts.epoch.0,
+                activated_at_ms: NOW,
+                previous: None,
+                replaced_through_ms: None,
+            }
+            .encode()
+            .unwrap(),
+        ),
+        system_fields: vec![1],
+    };
+    let epoch = CloudControlRecord {
+        encrypted: Some(epoch_bytes),
+        system_fields: vec![2],
+    };
+    let CloudConnectionPreviewWork::ReadActive { preview, .. } = connection.begin_connection_preview().unwrap() else {
+        panic!("active")
+    };
+    let CloudConnectionPreviewWork::ReadEpoch { preview, .. } = connection
+        .connection_active_read(preview, CloudControlRead::Found { record: active.clone() })
+        .unwrap()
+    else {
+        panic!("epoch")
+    };
+    let CloudConnectionPreviewWork::Ready { preview, summary } = connection
+        .connection_epoch_read(preview, CloudControlRead::Found { record: epoch })
+        .unwrap()
+    else {
+        panic!("ready")
+    };
+    assert!(matches!(summary.decision, CloudConnectionDecision::ConfirmResume));
+    assert_eq!(summary.resume_binding_id, Some(bound.id.0.to_vec()));
+
+    let setup = connection.setup_decision(preview.clone()).unwrap();
+    assert_eq!((setup.row, setup.row_number), (CloudSetupRow::Resume, 3));
+    assert_eq!(setup.question, CloudSetupQuestion::ConfirmResume);
+    assert_eq!(setup.reason, Some(CloudSetupAskReason::OtherServiceUnknown));
+    assert!(!setup.keep_device_offered && !setup.keep_cloud_offered);
+    assert_eq!(setup.active_change_tag, Some(active.system_fields));
+    // No start runs for the question, and the preview stays for the answer.
+    failure_is(connection.start_setup(preview.clone()), CloudConnectionFailure::NotOffered);
+    failure_is(connection.start_setup(preview.clone()), CloudConnectionFailure::NotOffered);
+    assert_eq!(state(), stopped);
+    assert!(workflow.core.adoption_op().unwrap().is_none() && workflow.core.publication_op().unwrap().is_none());
+    let again = connection.setup_decision(preview.clone()).unwrap();
+    assert_eq!((again.row, again.question), (CloudSetupRow::Resume, CloudSetupQuestion::ConfirmResume));
+    // Neither button of the sheet is offered for it (V27.6): not the
+    // download, and not the upload that would replace this `MGActive`.
+    failure_is(connection.confirm_adoption(preview.clone()), CloudConnectionFailure::NotOffered);
+    failure_is(connection.confirm_publication(preview.clone()), CloudConnectionFailure::NotOffered);
+    assert_eq!(state(), stopped);
+    assert!(workflow.core.adoption_op().unwrap().is_none() && workflow.core.publication_op().unwrap().is_none());
+    assert_eq!(workflow.host.engine().slot_holder(), None);
+    // The refusals left the handle with its preview: the question that was
+    // asked is still answered with it.
+    assert_eq!(connection.setup_decision(preview.clone()).unwrap().question, CloudSetupQuestion::ConfirmResume);
+    connection.resume_binding(preview.clone()).unwrap();
+    assert_eq!(state(), c::BindingState::Active);
+    failure_is(connection.resume_binding(preview), CloudConnectionFailure::Consumed);
 }
 #[test]
 fn bridge_adoption_confirmation_takes_actual_host_slot_and_exact_cancel_releases_it() {
@@ -2389,4 +2551,56 @@ fn post_cancel_unbound_stop_rejects_account_binding_generation_close_and_other_h
         if invalidation < 3 { fixture.workflow.host.close().unwrap(); }
         if let Some(other) = other { other.workflow.host.close().unwrap(); }
     }
+}
+
+#[test]
+fn setup_record_states_each_side_as_it_is_known() {
+    use meguri_sync::cloud::{OpaqueBytes, entity_codec::Kind, setup::*};
+    let counts = |notes| p::Counts { counts: [(Kind::Note, notes)].into(), empty: notes == 0 };
+    let mut preview = p::Preview {
+        id: 1,
+        local: counts(3),
+        cloud: Some(counts(5)),
+        published_at_ms: Some(77),
+        decision: p::ConnectDecision::ChooseCollection,
+        account: OpaqueBytes(vec![1]),
+        native_file: Some(r::NativeFileIdentity { device: 1, inode: 2, created_seconds: 3, created_nanos: 4 }),
+        decision_before: None,
+        active: Some(p::ControlRecord { encrypted: None, system_fields: OpaqueBytes(vec![9, 8]) }),
+        active_epoch: Some(meguri_sync::cloud::EpochId([6; 16])),
+        unpublished_by_kind: Default::default(),
+        resume_binding: None,
+        unsent_by_kind: Default::default(),
+        unsent_counts_exact: true,
+        retained_work: Default::default(),
+        local_content: Some(ContentProof::HoldsOrUnproved),
+    };
+    let ask = SetupDecision {
+        row: SetupRow::KeepCollection,
+        question: SetupQuestion::Keep,
+        reason: Some(AskReason::TwoCollections),
+        keep_device_offered: true,
+        keep_cloud_offered: true,
+    };
+    let record = setup_record(&ask, &preview, Some(40), Some(30));
+    assert_eq!((record.row, record.row_number), (CloudSetupRow::KeepCollection, 7));
+    assert_eq!(record.question, CloudSetupQuestion::Keep);
+    assert_eq!(record.reason, Some(CloudSetupAskReason::TwoCollections));
+    // The buttons bind to exactly what the sheet showed (V27.4).
+    assert_eq!(record.epoch_id, Some(vec![6; 16]));
+    assert_eq!(record.active_change_tag, Some(vec![9, 8]));
+    assert!(record.device.present && record.device.counts_exact && record.device.holds_user_content);
+    assert_eq!((record.device.last_change_ms, record.device.last_review_ms), (Some(40), Some(30)));
+    assert_eq!(record.device.counts.iter().map(|c| c.count).sum::<u64>(), 3);
+    // Manifest counts carry their date and never prove an empty collection.
+    assert!(record.cloud.present && !record.cloud.counts_exact && record.cloud.holds_user_content);
+    assert_eq!(record.cloud.counts_as_of_ms, Some(77));
+    assert_eq!((record.cloud.last_change_ms, record.cloud.last_review_ms), (None, None));
+    assert_eq!(record.cloud.counts.iter().map(|c| c.count).sum::<u64>(), 5);
+    preview.local = counts(0);
+    preview.local_content = Some(ContentProof::ProvedNone);
+    assert!(!setup_record(&ask, &preview, None, None).device.holds_user_content);
+    // A collection whose test was not made is never shown as empty.
+    preview.local_content = None;
+    assert!(setup_record(&ask, &preview, None, None).device.holds_user_content);
 }

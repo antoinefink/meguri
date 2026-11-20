@@ -34,6 +34,7 @@ pub mod publication;
 mod publication_store;
 pub mod row_payload;
 pub mod runtime;
+pub mod setup;
 pub use runtime::diagnostics_export;
 #[cfg(feature = "test-hooks")]
 pub use runtime::selected_observation;

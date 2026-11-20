@@ -91,6 +91,10 @@ pub struct Preview {
     /// False means own work is unknown; the counts are sound lower bounds.
     pub unsent_counts_exact: bool,
     pub retained_work: RetainedWork,
+    /// V27.1 on this device's collection, from the rows and the media
+    /// inventory this preview read. None when there is no collection.
+    #[serde(default)]
+    pub local_content: Option<super::setup::ContentProof>,
 }
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PreviewWork {
