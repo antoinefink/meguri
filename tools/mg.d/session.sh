@@ -22,6 +22,7 @@ mg_job session host mg_session \
 MG_ROLES="spec-writer implementer fixer oracle-maintainer infra critic integrator"
 MG_SESSIONS_ARCHIVE="docs/process/provenance/sessions.jsonl"
 MG_SESSIONS_DIR="docs/process/provenance/sessions"
+MG_SESSIONS_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/gate/static-checks/sessions.py"
 # A session name goes into its record, its commit subject and, for a
 # worktree, a branch and a path: plain words only.
 MG_SESSION_NAME_RE='^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$'
@@ -97,24 +98,27 @@ mg_session_store() {
     MG_SESSION_MESSAGE="$rel already exists; records are never rewritten"
     return 1
   fi
-  if ! { mkdir -p "$(dirname "$file")" && printf '%s\n' "$line" >"$file"; }; then
-    rm -f "$file"
-    mg__session_unlock
-    return 1
-  fi
   err="$(mktemp "${TMPDIR:-/tmp}/meguri-session.XXXXXX")" || {
-    rm -f "$file"
     mg__session_unlock
     return 1
   }
+  MG__SESSION_DROP="$rel" MG__SESSION_DROP_DIR="$dir" MG__SESSION_DROP_ERR="$err"
+  # Cancelled before the record is committed: nothing stays behind.
+  trap 'mg__session_drop; mg__session_unlock; exit 143' TERM
+  trap 'mg__session_drop; mg__session_unlock; exit 129' HUP
+  trap 'mg__session_drop; mg__session_unlock' EXIT
+  if ! { mkdir -p "$(dirname "$file")" && printf '%s\n' "$line" >"$file"; }; then
+    mg__session_drop
+    mg__session_unlock
+    return 1
+  fi
   until mg__ledger_commit "$dir" "$rel" "Record session $id ($role${name:+, $name})
 
 Role: infra
 Session: $id" 2>"$err"; do
     cat "$err" >&2
     if grep -q '^pre-commit: staged lines hold' "$err"; then
-      git -C "$dir" rm -q --cached --ignore-unmatch -- "$rel" >&2 2>&1
-      rm -f "$file" "$err"
+      mg__session_drop
       mg__session_unlock
       MG_SESSION_FAILURE=session-private
       MG_SESSION_MESSAGE="the private-token scan (pre-commit) refused the session record: its name, note, branch or path holds a word from the private collection; nothing was recorded, so run again with another name (and --note, --branch or --path when given). The scan never says which word, and this message does not either"
@@ -122,16 +126,14 @@ Session: $id" 2>"$err"; do
     fi
     tries=$((tries + 1))
     if [ "$tries" -ge 3 ]; then
-      rm -f "$err"
-      # Committed after all (by a commit of its own that reported a failure):
-      # stored. Otherwise nothing stays behind, staged or not.
-      if [ "$(git -C "$dir" rev-parse -q --verify "HEAD:$rel" 2>/dev/null)" = "$(git -C "$dir" hash-object -- "$file")" ] &&
-        [ "$(git -C "$dir" diff-tree --no-commit-id --name-only -r HEAD)" = "$rel" ]; then
+      # Committed after all, by a commit of its own: stored.
+      if mg__session_committed "$dir" "$rel"; then
+        MG__SESSION_DROP=""
+        rm -f "$err"
         mg__session_unlock
         return 0
       fi
-      git -C "$dir" rm -q --cached --ignore-unmatch -- "$rel" >&2 2>&1
-      rm -f "$file"
+      mg__session_drop
       mg__session_unlock
       MG_SESSION_FAILURE=session-commit
       MG_SESSION_MESSAGE="could not commit the record $rel, so nothing was recorded (see log.txt)"
@@ -140,28 +142,42 @@ Session: $id" 2>"$err"; do
     sleep 1
   done
   cat "$err" >&2
+  MG__SESSION_DROP=""
   rm -f "$err"
   mg__session_unlock
 }
 
+# mg__session_committed <checkout> <path>: HEAD is a commit that adds exactly
+# this record, as the working tree holds it.
+mg__session_committed() {
+  [ -f "$1/$2" ] &&
+    [ "$(git -C "$1" rev-parse -q --verify "HEAD:$2" 2>/dev/null)" = "$(git -C "$1" hash-object -- "$1/$2")" ] &&
+    [ "$(git -C "$1" diff-tree --no-commit-id --name-only -r HEAD)" = "$2" ]
+}
+
+# mg__session_drop: removes the record mg_session_store is writing
+# (MG__SESSION_DROP, in checkout MG__SESSION_DROP_DIR) from the index and the
+# working tree unless it was committed, and its temporary file
+# (MG__SESSION_DROP_ERR).
+mg__session_drop() {
+  [ -n "${MG__SESSION_DROP:-}" ] || return 0
+  local dir="$MG__SESSION_DROP_DIR" rel="$MG__SESSION_DROP"
+  MG__SESSION_DROP=""
+  rm -f "$MG__SESSION_DROP_ERR"
+  mg__session_committed "$dir" "$rel" && return 0
+  git -C "$dir" rm -q --cached --ignore-unmatch -- "$rel" >&2 2>&1
+  rm -f "$dir/$rel"
+}
+
 # mg_session_records <checkout> <commit>: every session record committed at
 # <commit>, one compact JSON object per line: the archive's lines, then each
-# file of the records directory. Reads git objects only (never a working tree
-# or a replace ref), so an uncommitted record never counts. Returns non-zero
-# when git cannot read the commit or a record does not parse: callers refuse
-# then, never read it as no records.
+# regular <id>.json of the records directory whose session is its <id>
+# (sessions.py --records). Reads git objects only (never a working tree or a
+# replace ref), so an uncommitted record never counts. Returns non-zero when
+# git cannot read the commit or a record does not parse: callers refuse then,
+# never read it as no records.
 mg_session_records() {
-  (
-    set -o pipefail
-    {
-      if git --no-replace-objects -C "$1" cat-file -e "$2:$MG_SESSIONS_ARCHIVE" 2>/dev/null; then
-        git --no-replace-objects -C "$1" cat-file blob "$2:$MG_SESSIONS_ARCHIVE" || exit 1
-      fi
-      git --no-replace-objects -C "$1" ls-tree -r -z "$2^{commit}" -- "$MG_SESSIONS_DIR/" | tr '\0' '\n' |
-        awk -F '\t' '$2 ~ /\.json$/ { split($1, m, " "); if (m[2] == "blob") print m[3] }' |
-        git --no-replace-objects -C "$1" cat-file --batch='%(rest)'
-    } | jq -c .
-  )
+  python3 -I -B "$MG_SESSIONS_PY" --records "$1" "$2"
 }
 
 # mg_ledger_store <checkout> <ledger path> <record JSON> <commit message>:

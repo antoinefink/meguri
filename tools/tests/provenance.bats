@@ -391,20 +391,22 @@ commit_with() {
   # A hook tools/mg does not install (it owns commit-msg and pre-commit).
   printf '#!/bin/sh\necho "prepare-commit-msg: refused" >&2\nexit 1\n' >"$SB/.git/hooks/prepare-commit-msg"
   chmod +x "$SB/.git/hooks/prepare-commit-msg"
+  local head0 before
+  head0="$(git -C "$SB" rev-parse HEAD)"
+  before="$(records_of "$SB")"
   mg worktree new --role implementer w5
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = session-commit ]
   validate "$result"
-  nothing_created w5 "$(records_of "$SB")"
+  nothing_created w5 "$before"
+  [ "$(git -C "$SB" rev-parse HEAD)" = "$head0" ]
   # session record leaves nothing behind either, staged or not.
-  local head0
-  head0="$(git -C "$SB" rev-parse HEAD)"
   mg session record --role critic --name refused
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = session-commit ]
   [ "$(git -C "$SB" rev-parse HEAD)" = "$head0" ]
   [ -z "$(git -C "$SB" status --porcelain)" ]
-  nothing_created w5 "$(records_of "$SB")"
+  nothing_created w5 "$before"
   # An existing branch keeps its tip.
   git -C "$SB" branch unit/w6
   local tip
@@ -666,6 +668,12 @@ Session: s-20991231T000000Z-00000000"
   git -C "$SB" commit -qam "Take the line out"
   sessions_py "$new" HEAD
   [ "$status" -eq 0 ]
+  # A valid line the branch added is never taken out again.
+  sed -i.bak '$d' "$SESSIONS" && rm "$SESSIONS.bak"
+  git -C "$SB" commit -qam "Take the valid line out"
+  sessions_py "$new" HEAD
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"removes or rewrites 1 line(s) of the archive"* ]]
   # Lines that the base holds are never removed or edited.
   git -C "$SB" reset -q --hard "$ok"
   sed -i.bak '1s/"role":"[a-z-]*"/"role":"integrator"/' "$SESSIONS" && rm "$SESSIONS.bak"
@@ -798,6 +806,58 @@ Session: ${t%.json}"
   # A revision that is not a commit cannot be checked: an error, not a finding.
   BASE=not-a-commit sessions_check
   [ "$status" -eq 2 ]
+}
+
+@test "the sessions check refuses non-JSON numbers, impossible dates, tag ids, missing role docs and gitlinks" {
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  git -C "$SB" tag -a -m tag t1
+  local tag blob
+  tag="$(git -C "$SB" rev-parse t1)"
+  hand_record "$SB" s-20261201T000000Z-00000011 2026-12-01T00:00:00Z '.extra = 1'
+  sed -i.bak 's/"extra":1/"extra":NaN/' "$RECORDS/s-20261201T000000Z-00000011.json" && rm "$RECORDS/s-20261201T000000Z-00000011.json.bak"
+  git -C "$SB" commit -q --amend -a --no-edit
+  hand_record "$SB" s-20261201T000000Z-00000012 2026-02-30T00:00:00Z
+  hand_record "$SB" s-20261201T000000Z-00000013 2026-12-01T00:00:00Z ".base_commit = \"$tag\""
+  git -C "$SB" rm -q docs/process/roles/critic.md
+  git -C "$SB" commit -qm "No critic doc"
+  blob="$(git -C "$SB" rev-parse HEAD~1:docs/process/roles/critic.md)"
+  hand_record "$SB" s-20261201T000000Z-00000014 2026-12-01T00:00:00Z '.role_doc_blob = null'
+  git -C "$SB" update-index --add --cacheinfo "160000,$BASE,docs/process/provenance/sessions/s-20261201T000000Z-00000015.json"
+  git -C "$SB" commit -qm "Record a gitlink" -m "Role: infra
+Session: s-20261201T000000Z-00000015"
+  sessions_check
+  [ "$status" -eq 1 ]
+  local all
+  all="$(field '[.failures[].message] | join(" ")')"
+  [[ "$all" == *"00000011.json is not one JSON object"* ]]
+  [[ "$all" == *"00000012.json has no created_at"* ]]
+  [[ "$all" == *"00000013.json has base_commit \"$tag\""* ]]
+  [[ "$all" == *"00000014.json names role_doc docs/process/roles/critic.md, which its base_commit does not hold"* ]]
+  [[ "$all" == *"00000015.json is not a regular file (mode 160000)"* ]]
+}
+
+@test "the sessions check refuses a merge that makes a record executable or names an unknown session" {
+  local main rec=docs/process/provenance/sessions/s-20261201T000000Z-00000021.json
+  main="$(git -C "$SB" rev-parse HEAD)"
+  git -C "$SB" checkout -q -b side
+  hand_record "$SB" s-20261201T000000Z-00000021 2026-12-01T00:00:00Z
+  git -C "$SB" checkout -q -b main2 "$main"
+  echo m >"$SB/docs/m.md"
+  git -C "$SB" add docs/m.md
+  git -C "$SB" commit -qm main2
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  git -C "$SB" checkout -q side
+  git -C "$SB" merge -q --no-commit main2
+  git -C "$SB" update-index --chmod=+x "$rec"
+  git -C "$SB" commit -qm "Merge, with a mode change"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"changes $rec, which its parent"* ]]
+  git -C "$SB" reset -q --hard HEAD~1
+  git -C "$SB" merge -q --no-edit main2 -m "Merge main2" -m "Session: s-20991231T000000Z-0000dead"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"Session: s-20991231T000000Z-0000dead names no session record"* ]]
 }
 
 @test "hooks install puts a shim in the shared hooks dir and refuses a foreign hook" {

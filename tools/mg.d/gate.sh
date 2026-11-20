@@ -419,7 +419,7 @@ mg_static_checks() {
       0) passed=$((passed + 1)) ;;
       1)
         failed=$((failed + 1))
-        printf '%s\n' "$out" | jq -c --arg repro "tools/mg static-checks --check $c" '
+        printf '%s\n' "$out" | jq -c --arg repro "tools/mg static-checks --check $c --base $base${rev:+ --rev $rev}" '
           if .check == "trailers" then
             {id: ("trailers:" + .commit[0:12]), message: (.commit[0:12] + " (" + .subject + "): " + .message), repro: $repro}
           elif .check == "sessions" then

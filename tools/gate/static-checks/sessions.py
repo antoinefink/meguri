@@ -2,6 +2,7 @@
 """Session records over a branch (R1958, docs/process/provenance.md).
 
     sessions.py <checkout> <base> <rev>
+    sessions.py --records <checkout> <rev>   (the records at <rev>, for readers)
 
 Records live one per file, docs/process/provenance/sessions/<id>.json, and
 are only ever added. docs/process/provenance/sessions.jsonl is the archive of
@@ -19,10 +20,12 @@ the records made before the switch to that layout. For <base>..<rev>:
   and `Session: <the line's session>`, and adds a record that passes the same
   field checks. A line added any other way counts only while it remains: a
   later commit of the branch may take it out again.
-- Between the merge bases and <rev> no record file or archive line is
+- A merge keeps each parent's records and archive lines as they are and
+  adds none. Between the merge bases and <rev> no record file or archive line is
   dropped or changed, and every new one came from such a commit (or the base
   branch already holds it), so a merge cannot drop, change or slip in a record.
-- Each new session id is recorded once, and every `Session:` trailer names a
+- Each new session id is recorded once, and every `Session:` trailer (merges'
+  included) names a
   record committed at <rev> or <base> (archive or directory), except a record
   commit's own (an archive line taken out again leaves it behind).
 
@@ -31,6 +34,7 @@ Prints one JSON line per finding ({check, commit, key, subject, message}); exits
 """
 
 import collections
+import datetime
 import hashlib
 import json
 import re
@@ -135,12 +139,31 @@ def lines(data):
     return [l for l in (data or b"").split(b"\n") if l.strip()]
 
 
+def no_constant(name):
+    raise ValueError("not JSON: " + name)
+
+
 def parse(raw):
     try:
-        value = json.loads(raw.decode("utf-8"))
+        value = json.loads(raw.decode("utf-8"), parse_constant=no_constant)
     except (UnicodeDecodeError, ValueError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def instant(value):
+    if not isinstance(value, str) or not INSTANT.fullmatch(value):
+        return False
+    try:
+        datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return True
+
+
+def regular(files):
+    """The (path, oid) of the regular files of a record_files() map."""
+    return [(path, oid) for path, (mode, oid) in files.items() if mode == "100644"]
 
 
 def session_of(raw):
@@ -186,16 +209,20 @@ class Check:
             return "%s has role %s, not one of: %s" % (what, json.dumps(role), " ".join(ROLES))
         if record.get("kind") not in ("worktree", "session"):
             return "%s has kind %s, not worktree or session" % (what, json.dumps(record.get("kind")))
-        if not isinstance(record.get("created_at"), str) or not INSTANT.fullmatch(record["created_at"]):
+        if not instant(record.get("created_at")):
             return "%s has no created_at (YYYY-MM-DDTHH:MM:SSZ)" % what
         base = record.get("base_commit")
         base_sha = self.repo.commit(base) if isinstance(base, str) and OID.fullmatch(base) else None
+        if base_sha != base:  # a full id of the commit itself, not of a tag
+            base_sha = None
         if base_sha is None or not self.repo.is_ancestor(base_sha, commit):
             return "%s has base_commit %s, not the full id of a commit this one descends from" % (what, json.dumps(base))
         doc = ROLE_DOCS.get(role)
         if record.get("role_doc") != doc:
             return "%s has role_doc %s; role %s works under %s" % (what, json.dumps(record.get("role_doc")), role, json.dumps(doc))
         blob = self.repo.blob_id(base_sha, doc) if doc else None
+        if doc and blob is None:
+            return "%s names role_doc %s, which its base_commit does not hold" % (what, doc)
         if record.get("role_doc_blob") != blob:
             return "%s has role_doc_blob %s, not %s's blob at its base_commit (%s)" % (
                 what, json.dumps(record.get("role_doc_blob")), doc, json.dumps(blob))
@@ -265,7 +292,7 @@ class Check:
                     verb = {"D": "deletes", "M": "modifies", "T": "changes the type of"}.get(status, "changes")
                     self.find(sha, subject, "%s %s; session records are only ever added" % (verb, path))
                     continue
-                self.added_files[path] = oid
+                self.added_files[path] = (mode, oid)
                 session = path[len(RECORDS):-5] if path.endswith(".json") else path
                 problem = self.record_problem(path, mode, self.repo.blobs([oid])[oid] if mode == "100644" else b"", sha)
                 if problem:
@@ -280,9 +307,10 @@ class Check:
                     continue
                 old = collections.Counter(lines(self.repo.blob(parent, ARCHIVE) if parent else None))
                 new = collections.Counter(lines(self.repo.blob(sha, ARCHIVE)))
-                # Taking out a line this range added is allowed; any other is not.
+                # Taking out a refused line this range added is allowed; any
+                # other is not.
                 removed = old - new
-                range_added = self.added_lines + collections.Counter(self.line_problems.keys())
+                range_added = collections.Counter(self.line_problems.keys())
                 if removed - range_added:
                     self.find(sha, subject, "removes or rewrites %d line(s) of the archive %s; session records are never edited or removed"
                               % (sum((removed - range_added).values()), ARCHIVE))
@@ -316,7 +344,7 @@ class Check:
                 continue
             if path not in after:
                 self.find(rev, subject, "drops %s, which %s added; session records are never removed" % (path, self.base[:12] + ".." + rev[:12]))
-            elif after[path][1] != oid:
+            elif after[path] != oid:
                 self.find(rev, subject, "changes %s after the commit that added it (a merge did)" % path)
         for path in sorted(set(after) - set(before) - set(self.added_files)):
             if base_tip.get(path) != after[path]:
@@ -340,11 +368,11 @@ class Check:
                           % (self.base[:12], rev[:12], line[:120].decode("utf-8", "replace")))
         # Each new session recorded once.
         counts = collections.Counter(session_of(l) for l in new.elements())
-        data = self.repo.blobs(oid for _mode, oid in after.values())
-        for path, (_mode, oid) in after.items():
+        data = self.repo.blobs(oid for _path, oid in regular(after))
+        for path, oid in regular(after):
             counts[session_of(data[oid])] += 1
         new_ids = set(session_of(l) for l in arrivals)
-        new_ids |= set(session_of(data[after[p][1]]) for p in set(after) - set(before))
+        new_ids |= set(session_of(data[oid]) for p, oid in regular(after) if p not in before)
         new_ids.discard(None)
         for session in sorted(new_ids):
             if counts[session] > 1:
@@ -352,6 +380,29 @@ class Check:
                           % (session, counts[session], rev[:12]))
         counts.pop(None, None)
         return counts
+
+    def check_merge(self, sha, parents, subject):
+        """A merge keeps every record and archive line of each parent, as it
+        is, and brings none of its own."""
+        files = self.repo.record_files(sha)
+        mine = collections.Counter(lines(self.repo.blob(sha, ARCHIVE)))
+        known, held = set(), collections.Counter()
+        for parent in parents:
+            for path, entry in sorted(self.repo.record_files(parent).items()):
+                known.add(path)
+                if files.get(path) != entry:
+                    self.find(sha, subject, "%s %s, which its parent %s holds; session records are never edited or removed"
+                              % ("drops" if path not in files else "changes", path, parent[:12]))
+            theirs = collections.Counter(lines(self.repo.blob(parent, ARCHIVE)))
+            if theirs - mine:
+                self.find(sha, subject, "removes or rewrites %d line(s) of the archive %s that its parent %s holds"
+                          % (sum((theirs - mine).values()), ARCHIVE, parent[:12]))
+            held |= theirs
+        for path in sorted(set(files) - known):
+            self.find(sha, subject, "adds %s in a merge; a session record is committed alone" % path)
+        if mine - held:
+            self.find(sha, subject, "adds %d archive line(s) in a merge; a session record is committed alone"
+                      % sum((mine - held).values()))
 
     def run(self):
         bases = self.repo.out("merge-base", "--all", self.base, self.rev).decode().split()
@@ -361,13 +412,13 @@ class Check:
         for sha, parents, subject, trailers in commits:
             if len(parents) <= 1:
                 self.check_commit(sha, parents, subject, trailers)
+            else:
+                self.check_merge(sha, parents, subject)
         tip_subject = self.repo.out("log", "-1", "--format=%s", self.rev).decode("utf-8", "replace").strip()
         counts = self.check_range(bases, tip_subject)
         # A record the base branch gained since the branch left it counts too.
         known = set(s for s, n in counts.items() if n) | recorded_ids(self.repo, self.base)
         for sha, parents, subject, trailers in commits:
-            if len(parents) > 1:
-                continue
             for session in trailer_values(trailers).get("session", []):
                 # A record commit's own trailer is checked with its record.
                 if session not in known and (sha, session) not in self.own:
@@ -380,14 +431,52 @@ def recorded_ids(repo, rev):
     """The session ids committed at <rev>, archive and directory."""
     ids = set(session_of(l) for l in lines(repo.blob(rev, ARCHIVE)))
     files = repo.record_files(rev)
-    ids |= set(session_of(d) for d in repo.blobs(oid for _mode, oid in files.values()).values())
+    ids |= set(session_of(d) for d in repo.blobs(oid for _path, oid in regular(files)).values())
     ids.discard(None)
     return ids
 
 
+def records(repo, rev):
+    """Every record committed at <rev>, one compact JSON line each: the
+    archive's lines, then each regular <id>.json directly under RECORDS whose
+    session is its <id> (anything else there is no record). A line or file
+    that is not one JSON object is an error."""
+    out = []
+    for raw in lines(repo.blob(rev, ARCHIVE)):
+        record = parse(raw)
+        if record is None:
+            raise CannotCheck("%s holds a line that is not one JSON object" % ARCHIVE)
+        out.append(record)
+    files = repo.record_files(rev)
+    data = repo.blobs(oid for _path, oid in regular(files))
+    for path, oid in sorted(regular(files)):
+        name = path[len(RECORDS):]
+        if "/" in name or not name.endswith(".json"):
+            continue
+        record = parse(data[oid])
+        if record is None:
+            raise CannotCheck("%s is not one JSON object" % path)
+        if record.get("session") == name[:-5]:
+            out.append(record)
+    return out
+
+
 def main(argv):
+    if len(argv) == 3 and argv[0] == "--records":
+        repo = Repo(argv[1])
+        try:
+            rev = repo.commit(argv[2])
+            if rev is None:
+                raise CannotCheck("%s is not a commit" % argv[2])
+            found = records(repo, rev)
+        except Exception as e:
+            print("sessions: %s" % e, file=sys.stderr)
+            return 2
+        for record in found:
+            print(json.dumps(record, separators=(",", ":")))
+        return 0
     if len(argv) != 3:
-        print("usage: sessions.py <checkout> <base> <rev>", file=sys.stderr)
+        print("usage: sessions.py <checkout> <base> <rev> | --records <checkout> <rev>", file=sys.stderr)
         return 2
     repo = Repo(argv[0])
     try:

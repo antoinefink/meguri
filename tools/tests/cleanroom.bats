@@ -58,6 +58,12 @@
   [ "$output" = "$(git -C "$task" rev-parse HEAD)" ]
   run mg_cleanroom_source_commit worker
   [ "$status" -eq 0 ]
+  # A file whose session is not its name is no record.
+  printf '%s\n' '{"session":"fixer-2","role":"fixer"}' >"$task/$MG_SESSIONS_DIR/fixer-x.json"
+  git -C "$task" add "$MG_SESSIONS_DIR/fixer-x.json"
+  git -C "$task" commit -qm "misnamed session"
+  run mg_cleanroom_source_commit fixer-2
+  [ "$status" -eq 1 ]
   # The same session in both places is ambiguous.
   printf '%s\n' '{"session":"fixer-1","role":"fixer"}' >>"$task/$MG_SESSIONS_ARCHIVE"
   git -C "$task" commit -qam "duplicate session"
