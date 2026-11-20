@@ -8,6 +8,15 @@
 // common;`), as it did in a binary of its own.
 #![allow(clippy::duplicate_mod)]
 
+/// `meguri_testkit::cloud::child_driver` starts its child process as this
+/// binary with `--exact cloud_child_entry`. Here the entries the files define
+/// are `<file>::cloud_child_entry`, so the child runs this one, the same call.
+/// Outside such a child it returns at once, as theirs do.
+#[test]
+fn cloud_child_entry() {
+    meguri_testkit::cloud::child_driver::child_entry().unwrap();
+}
+
 #[path = "cloud_composition_ffi.rs"]
 pub mod cloud_composition_ffi;
 #[path = "cloud_initial_app_fixture.rs"]
