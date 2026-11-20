@@ -131,7 +131,7 @@ The last declaration of a property in the rule is the one read and edited (CSS's
 ## W12. Rename and Delete
 
 - **Rename…**: in place in the list (Return commits; `notetypes/records` N8). Not a structure change.
-- **Delete…**: disabled for the only note type; otherwise asks "Delete “<name>”?" with "Its <n> notes and their <c> cards will be deleted." (or "It has no notes." with 0), Delete (destructive) and Cancel (R918's question, reworded). With Meguri Sync as the service it adds `notetypes/draft-save` D4's sync paragraph and the button "Delete and Upload". The op is `notetypes/structure-changes` S12 through the save flow of D5 and D6.
+- **Delete…**: disabled for the only note type; otherwise asks "Delete “<name>”?" with "Its <n> notes and their <c> cards will be deleted." (or "It has no notes." with 0), Delete (destructive) and Cancel (R918's question, reworded). With a ready Meguri Sync binding it adds `notetypes/draft-save` D4's sync paragraph and the button "Delete and Upload". The op is `notetypes/structure-changes` S12 through the save flow of D5 and D6.
 
 ## W13. iPhone, the folded Duo, and the editor's own undo
 

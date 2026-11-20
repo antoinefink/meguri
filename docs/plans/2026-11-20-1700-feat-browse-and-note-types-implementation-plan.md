@@ -5,7 +5,7 @@ Decisions: `docs/design/decisions.md`, the 2026-11-20 rows `browser`, `home.deck
 Specs: `search/filter-tokens`, `browser/workspace`, `notetypes/workspace`, `notetypes/draft-save`, `sync/meguri-provider` MP7, `notetypes/schema-changes` G4 (changed), the "Changed 2026-11-20" lines in `search/*`, `browser/*`, `notetypes/editor-actions`, `render/preview`, `stats/card-info`; layout `docs/design/native-interface-contract.md` N21 and N22.
 Parent plan: `docs/plans/2026-10-12-1926-feat-meguri-anki-compatible-apple-app-plan.md` (its units U34, U35, U81–U92, U190–U203, U210–U223 are reused below; its superseded requirements carry notes).
 
-**Gate before any unit starts.** Every new spec line above is marked "Under review" in its file's Status line. No unit implements a section until Antoine approves it and the Status line says so (`specs/README-format.md`). The units that only need sections already in force (the existing U81, U82, U84, U85, U88 builder, U34, U35, U92 specs) can start now, without the sections under review that touch them: U84 leaves out `browser/columns` C5's and C7.4's round 8 lines, U85 leaves out `browser/result-sets` H7's `fld:` keys, U92 is unaffected in data (C7's line is placement only), and U88a leaves out T3.1. Those parts start once approved.
+**Gate before any unit starts.** Every new spec line above is marked "Under review" in its file's Status line. No unit implements a section until Antoine approves it and the Status line says so (`specs/README-format.md`). The units that only need sections already in force (the existing U81, U82, U84, U85, U88 builder, U34, U35, U92 specs) can start now, without the sections under review that touch them: U84 leaves out `browser/columns` C5's and C7.4's round 8 lines, U85 leaves out `browser/result-sets` H7's `fld:` keys, U92 is unaffected in data (C7's line is placement only), U88a leaves out T3.1, and U34 leaves out S1.2's round 9 confirmed-losses precondition. Those parts start once approved.
 
 **Round 10.** The decisions of round 10 (`decisions.md`, `home.today`, `sync.statusPopover`, 2026-11-20) change the sidebar and Today: Today becomes a summary where the sidebar is visible, a deck's sidebar number counts every waiting card, and double-click, Return or S on a deck row starts it. A round 10 unit will change the sidebar and Today; Browse's units build on its sidebar. With Browse selected, the sidebar's deck rows are filters (`search/filter-tokens` T9): a click and Return set the Deck token, S and double-click do nothing, and their numbers are Browse's filter counts (T12.4), not waiting counts.
 
@@ -92,7 +92,7 @@ Ids U81–U92, U34, U35 are the parent plan's (their specs are in force). U260 o
 
 | Unit | Scope | Spec sections | Side | Verify | Must not touch |
 |---|---|---|---|---|---|
-| **U34** | The structure draft apply op: fields, templates, sort field, removal, card generation, rewrite, schema reasons, backup | `notetypes/structure-changes` S1–S13 (in force) | core + FFI | `core-test`; `notetypes/structure/*` scenarios | UI |
+| **U34** | The structure draft apply op: fields, templates, sort field, removal, card generation, rewrite, schema reasons, backup; once approved, the confirmed-losses precondition (S1.2, round 9) with its test: a note that gains content in a removed field between the summary read and the commit makes the op return `LossesChanged` and write nothing | `notetypes/structure-changes` S1–S13 (in force) | core + FFI | `core-test`; `notetypes/structure/*` scenarios | UI |
 | **U35** ∥ | Change Note Type op and its info query | `notetypes/change-notetype` M1–M11 (in force) | core + FFI | `core-test`; scenarios | |
 | **U267** | Note Types reads: `draft_summary`, `field_content_counts`, `notes_without_card`, near names; the list's counts | `notetypes/draft-save` D2; `notetypes/workspace` W3.1, W7.1, W8; `notetypes/editor-actions` A2 | core + FFI | `core-test`; bench counts | the save op |
 | **U268** ∥ | Card Text row CSS reading and single-value editing | `notetypes/workspace` W10.1, W10.2 | core (pure function) + FFI | `core-test` with byte-for-byte checks | templates |
@@ -149,6 +149,8 @@ Each carries a note in the parent plan ("Superseded 2026-11-20 …"), with the d
 20. **Column sets** record no undo step and keep the undo steps (the current-deck selection's class), so a column change never removes "Undo Suspend Cards".
 21. **Status lines** name the requirement R1232 (Browse) or R915 (Note Types) with the round, as `specs/README-format.md` asks for a requirement id; the decision rows are the authority.
 22. **Uploading after an offline structural save** reads the server's facts and uploads with no question; if the server changed since this device's last round, it shows the normal collection choice instead (MP7 step 5).
+23. **Loss confirmation is a precondition**: the structure save op takes the losses the user confirmed and refuses with `LossesChanged` when live losses are larger, so content can never be lost without a confirmation (`notetypes/structure-changes` S1.2; decided 2026-11-20 by Claude (coordinator) under Antoine's delegation).
+24. **A heatmap day with no answers** is not a link (the card-ids item refuses an empty list).
 
 ## 7. Open points for the owner
 
