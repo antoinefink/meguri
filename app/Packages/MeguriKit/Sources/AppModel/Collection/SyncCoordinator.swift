@@ -1301,21 +1301,25 @@ public final class SyncCoordinator {
         // MP6.5: a blocked phase starts no activation. It ends this unconfirmed
         // preparation as a refused admission does, so setup can be tried again.
         guard let admission, admission.accepted, !self.providerNeedsAttention else {
+            // A discard that failed or was refused: the core says whether setup can
+            // run again, so that a preparation with no sheet is not left without an
+            // action. A failed read never infers that the preparation is gone.
+            func recoverAfterUnfinishedDiscard() async {
+                do { try await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision) }
+                catch { if current() { self.meguriStage = .failed }; return }
+                if self.meguriChoiceAllowed { release(); self.meguriStage = .failed }
+            }
             do {
                 let result = try await discard()
                 guard self.meguriAction?.id == id, self.meguriCurrent(owner, expected, revision), held() else { return nil }
                 self.retainMeguri(result); self.applyMeguriOutcome(result.outcome)
-                if case .refused = result.outcome { return nil }
+                if case .refused = result.outcome { await recoverAfterUnfinishedDiscard(); return nil }
                 release(); self.meguriOperation = nil
                 self.meguriStage = .required; self.meguriChoiceAllowed = true
             } catch {
                 guard current() else { return nil }
                 self.meguriLastError = error
-                // The discard failed: the core says whether setup can run again, so
-                // that a preparation with no sheet is not left without an action.
-                do { try await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision) }
-                catch { if current() { self.meguriStage = .failed }; return nil }
-                if self.meguriChoiceAllowed { release(); self.meguriStage = .failed }
+                await recoverAfterUnfinishedDiscard()
             }
             return nil
         }
