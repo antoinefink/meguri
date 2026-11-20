@@ -73,3 +73,11 @@ under `local-data/`, `refs/` or `oracle/`.
 - Review status: nothing is marked approved. The 2026-11-20 lines of
   `sync/meguri-provider` and `sync/cloudkit-recovery` stay under review until
   Antoine approves them.
+
+## Third pass
+
+On 557bb2324: no findings. The reviewer checked the K1 bullet against
+Welcome, Settings › Import Collection and the Mac's Import Collection…
+command on master, the three "text not built" marks against the setup-fix
+branch, and "started or joined" against `StudyPreparation.prepare(for:)`.
+Verdict: clean.
