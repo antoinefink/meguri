@@ -4,6 +4,7 @@ Spec: search/editing-services
 Requirements: R1086, R1087, R1088, R1089, R1094, R1095, R1096, R1097, R1098, R1099, R1100, R1101, R1102, R1103, R1104, R1107, R1108, R1109; AE42 (core part)
 Anki: none (Meguri design; it reads text by the 26.09.3 grammar)
 Scenarios: conformance/scenarios/search/errors/ae42.yaml (the commit error kind only); tests in `core/crates/meguri-search/tests/edit_services.rs`
+Status: Under review (round 8, `docs/design/decisions.md` 2026-11-20, row `browser`) for the lines that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 The core services behind Browse's search field (U88): canonical text for a commit, token spans for chips, edits of one token, classification of the text at the cursor while the user types, and suggestions. Anki's search field has none of these; the grammar they read is `grammar.md`, the errors `errors.md`, the text they write `canonical-form.md` and `join-and-replace.md` J3–J5. The field itself is U214, the suggestion list U215, the query pipeline U210. Swift never reads search text by its own rules: every token, tail and suggestion comes from here.
 
@@ -24,9 +25,13 @@ The core services behind Browse's search field (U88): canonical text for a commi
 
 ## D2. Canonical text
 
+Changed 2026-11-20 (round 8): Browse's field no longer shows or commits canonical text: a commit reads the text into filter tokens (`search/filter-tokens` T7, T8). `canonicalize` stays for recent-search keys and for tests.
+
 `canonicalize(text)` gives the canonical text of `canonical-form.md` F1–F6, or the parse error (kind of `errors.md` E1, details of E2, range of E5). U210 calls it to commit (R1109: Return, an accepted suggestion, a sidebar or chip action) and for searches that other screens hand to Browse (R1114), except Stats' joined text, which Browse shows and runs exactly as `stats/browse-queries` Q3 writes it (Q5); for that text U210 calls `canonicalize` only to record its canonical form in recent searches (`browser/entry-points` E3 rule 5, E6), never to show or run it. `dog cat or  fish` gives `dog cat OR fish`; an empty text, or one of spaces only, gives `deck:*` (F2.1). A committed empty search shows `deck:*` in the field, runs `deck:*` and records it, as Anki's browser does (`browser/entry-points` E5 step 3).
 
 ## D3. Token spans (R1086, R1087)
+
+Changed 2026-11-20 (round 8): Browse's tokens are filter tokens (`search/filter-tokens` T1 to T6), not spans of Anki text; D3 and D4 are not used by Browse's field. They stay specified for later use.
 
 `spans(text)` reads the text as `grammar.md` does and returns a list of spans in text order, and the parse error when there is one. An empty text has no spans.
 
@@ -199,6 +204,8 @@ With the cursor at the end of the text unless shown by `|`:
 | (empty) | `Valid` |
 
 ## D6. Suggestions (R1094–R1104)
+
+Changed 2026-11-20 (round 8): Browse's suggestions are `search/filter-tokens` T12. D6 still gives the rows when Anki syntax is being typed at the caret (T12.2), and D6.4, D6.5 and D6.7 are the matching, order and name index T12 reuses. Keywords are never suggested for an empty word.
 
 Decided 2026-10-27: suggestions are computed by this service in the core, as U88 states; U215 shows them, adds recent searches (R1102) and handles the keys (R1105), and needs no reading of search text of its own.
 
