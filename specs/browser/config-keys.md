@@ -211,7 +211,7 @@ True: the previewer shows each card directly on its answer side, so question and
 
 ### K6.4 Default search (`defaultSearchText`, R1112, R1267)
 
-Changed 2026-11-20 (round 8): for Browse, the "not set" rows and sentence are replaced by `browser/entry-points` E2's round 8 line and `search/filter-tokens` T14: a first open without the text runs the whole collection with an empty field, not `deck:current`; a set text is read into tokens by T7 (literal words when it does not parse), never shown as stored text. The set and not-set test above stands.
+Changed 2026-11-20 (round 8): for Browse, both rows of the table and both sentences of the second bullet ("Browse then opens with the stored text … shows it in the field" and "When it is not set, Browse opens with `deck:current` …") are replaced by `browser/entry-points` E2's round 8 line and `search/filter-tokens` T14: a first open without the text runs the whole collection with an empty field, not `deck:current`; a set text is read into tokens by T7 (literal words when it does not parse), never shown as stored text. The set and not-set test below (the second bullet's first sentence) stands. Clear, Esc and the empty state's action are `browser/entry-points` E7's round 8 review line.
 
 - Settings › Browse writes the text exactly as typed, untrimmed.
 - The text **is set** when it still has a character after removing these characters from both ends: U+0009–U+000D, U+001C–U+001F, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000. Browse then opens with the stored text, untrimmed, and shows it in the field. When it is not set, Browse opens with `deck:current` and an empty field with a placeholder (R1112, U210).

@@ -29,3 +29,33 @@ Antoine approved these specs in chat on 2026-11-20 ("I approve. And even more ge
 The Status lines of the round 8 and round 9 specs, MP7 in `sync/meguri-provider`, N11.10, N21 and N22 in the contract, and the inventory entries now say approved. The empty section list in `notetypes/restore-to-default`'s Status line now names D7.
 
 From this date Claude (coordinator) may change specs without asking first; each change still gets an independent review and is recorded with that attribution.
+
+## Review of the confirmed-losses rule (on 8657e4530 and 62e7f72ca)
+
+A second independent read-only review covered the confirmed-losses rule of the four destructive note type ops and the lines around it. It found 17 findings: 4 must-fix, 9 should-fix and 4 nits. The coordinator accepted all of them and chose among the reviewer's options. All are fixed on `unit/confirmed-losses`:
+
+- **Must-fix:**
+  1. M8 now counts with M5's field-content test.
+  2. M8 now confirms M9.1 and M9.2 card removals as one more count.
+  3. The conformance executors (T9, H2, M1, M2) now pass the counts they read at the step.
+  4. Restore to Default has a `restore_summary` read (D7.1, owned by U34).
+- **Should-fix:**
+  - D8 defines the comparison by count, per category.
+  - The four ops count again before the backup and inside the transaction. A staleness refusal wins, a refusal records no undo step, and the backup stays (T6.2 also says so).
+  - MP7 and D5 use one trigger, and the MP7 job now has a defined end.
+  - The G4 paragraph covers all four ops.
+  - The old input and carry-over sentences of M8, M10, S12 and D1 now name the confirmed losses.
+  - Restore carries a digest, and `LossesChanged` replaces the silent replan when losses were confirmed.
+  - A vanished note type is `Stale`.
+  - The plan rows of U34, U35, U267, U269 and U284 list their cases and owners.
+  - K6.4 and E7 now agree with the round 8 field.
+- **Nits:**
+  - The descending-order wording in `browser/sorting` S1.
+  - The restore sync condition in D3.
+  - "The cards S6 and D4.1 remove" in D7.
+  - D4's "No cards." row.
+
+Also checked:
+
+- `package/backup-triggers` T6.1 and T6.2: a new line covers a refusal after the backup.
+- No local API or AnkiConnect action exposes the four ops. AnkiConnect's field, template and model-change actions are unsupported, and the MCP note tools are read-only for note types. D8 says so.

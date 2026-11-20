@@ -153,6 +153,7 @@ Anki's desktop makes a forced backup (interval ignored, T2.1 still applied, the 
 - It writes the record (T2.3, except a T7 copy); the scheduler re-evaluates (T3.3).
 - **Failure**: the op is refused with `SafetyBackupFailed{cause}` (cause: the B4 or T7 error), none of its writes runs and the collection is unchanged. It never proceeds without the backup.
 - **Cancel**: cancelling the op while its backup runs cancels the backup (B4) and the op ends `Cancelled`. A backup already published stays.
+- **Refused after the backup** (Changed 2026-11-20 (round 9 review)): an op refused inside its write transaction after its backup was published (`Stale`, `schema_changed`, `LossesChanged` of `notetypes/draft-save` D8) writes nothing; the backup stays and keeps its protection until the op ends. A retry is a new op: a structural edit within the coalescing window takes no new backup (T6.1), a note type removal always takes one.
 - **Nothing to back up**: with no collection file at the collection path (a first download into an empty directory, or a `CloudAdopt` at a first connection with no local collection, `sync/cloudkit-recovery#V13.3`), the op proceeds without a safety backup.
 
 ## T7. Safety backup of a damaged collection

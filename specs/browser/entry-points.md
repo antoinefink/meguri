@@ -114,6 +114,8 @@ Changed 2026-11-20 (round 8): for Browse, rules 1 to 6 are replaced. Browse keep
 
 ## E7. Clear and the empty state's action (R1092, R1110)
 
+Changed 2026-11-20 (round 8 review): for Browse, the first two bullets are replaced: the clear button, the second Esc (`search/filter-tokens` T10) and the empty state's Clear Search empty the query and run it, which is the whole collection (`search/query-model` Q2); `defaultSearchText` is not read and `deck:current` is not run. Nothing is recorded (E6). The mode, selection mapping and the third bullet stand.
+
 - The field's clear button, and Esc in the search field when no suggestion list is open (Esc first dismisses an open list), empty the field and run the default search as E2 rule 2 does (rule 1 never applies): with `defaultSearchText` set the field then shows the stored text, otherwise it stays empty with its placeholder and `deck:current` runs. Nothing is recorded. The mode is kept; the selection and current row are mapped from the earlier result (R1154).
 - The empty state's action (R1110) does the same. R1110 quotes its text as "Clear search" and the screen contract writes "Clear Search"; which case stands is the open title-case question of `browser/browse-strings` W7, and until it is settled R1110's text stands (W6).
 - Anki's field has no clear button, and Esc closes its browser window (R1092 deviation).
