@@ -399,6 +399,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var closing = false
     private var closeTask: Task<Bool, Never>?
     private var day: ReviewDayMonitor?
+    /// The activity heatmap's cache (N14.11), kept above the layouts so a revisited page draws at once.
+    public let activity = ActivityHeatmapStore()
     private var recoveryDrops: [Int64] = []
 
     public init(configuration: LaunchConfiguration, navigation: AppNavigation, entryService: (any CollectionEntryService)? = nil, exportService: (any CollectionExportService)? = nil, sync: SyncCoordinator? = nil, providerDirectory: URL? = nil) {
@@ -999,6 +1001,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         // Never drop review commit failures behind a coalesced deck refresh.
         review?.receive(event)
         sync.coreEvent(event)
+        routeActivity(event)
         switch event.kind {
         case .lifecycle(let value):
             receiveLifecycle(value)
@@ -1055,6 +1058,19 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
     }
 
+    /// The heatmap cache follows the collection's own change events (N14.11).
+    private func routeActivity(_ event: CoreEvent) {
+        switch event.kind {
+        case .changes(let changes): activity.changesCommitted(changes)
+        case .rolledOver, .timeZoneChanged, .nextDayAtChanged: activity.dayChanged()
+        case .collectionReplaced(let next): activity.generationChanged(to: next)
+        case .sessionEnded: activity.sessionEnded()
+        // A long op released the collection: a read it refused is asked again.
+        case .available: activity.collectionReady()
+        default: break
+        }
+    }
+
     // Also used by focused owner tests; the event consumer is the production caller.
     func receiveLifecycle(_ value: CollectionLifecycle) {
         sync.receiveLifecycle(value)
@@ -1065,8 +1081,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         if state == .creationRecovery { return }
         switch value {
         case .ready(let next):
-            let changed = generation != next
-            if changed {
+            activity.generationChanged(to: next)
+            activity.collectionReady()
+            if generation != next {
                 addFlowOwner?.generationEnded()
                 invalidateDeckActions(); invalidateMedia(); exportOwner?.generationChanged()
             }
@@ -1082,7 +1099,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         case .opening, .upgrading: invalidateDeckActions(); state = .loading
         case .exclusiveBusy: invalidateDeckActions(); state = .unavailable; review?.requestRefresh()
         case .failed(let reason): invalidateDeckActions(); state = .failed(Self.explanation(reason))
-        case .noCollection: invalidateDeckActions(); state = releasedManualHostState ?? .unopened
+        case .noCollection: invalidateDeckActions(); activity.generationChanged(to: nil); state = releasedManualHostState ?? .unopened
         }
     }
 
