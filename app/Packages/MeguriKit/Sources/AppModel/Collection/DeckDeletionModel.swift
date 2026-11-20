@@ -133,6 +133,9 @@ public final class DeckDeletionModel {
         task = Task {
             defer { busy = false; task = nil }
             let isCurrent = { self.revision == current && owner.generation == expected }
+            // The deck and its descendants before any write: a refresh after the
+            // commit can drop them from the tree, and a lost result needs them.
+            let processed = owner.deckSubtree(deckID)
             do {
                 let summary = try await readSummary([deckID])
                 // A deck that is already gone (a sync removed it) writes nothing.
@@ -145,7 +148,6 @@ public final class DeckDeletionModel {
                 }
                 // Backgrounding before the write starts stops it; the alert says nothing was deleted.
                 try Task.checkCancellation()
-                let processed = owner.deckSubtree(deckID)
                 let deleted = try await deleteDecks([deckID])
                 guard isCurrent(), deleted.summary.generation == expected else { return }
                 let removed = deleted.summary.changes.decks.filter { $0.change == .removed }.map(\.id)
@@ -153,7 +155,7 @@ public final class DeckDeletionModel {
             } catch BridgeError.commitCompleted {
                 // The write committed; only its result was lost.
                 guard isCurrent() else { return }
-                await finish(processed: owner.deckSubtree(deckID), owner: owner, generation: expected)
+                await finish(processed: processed, owner: owner, generation: expected)
             } catch {
                 guard isCurrent() else { return }
                 failure = Failure(deckID: deckID, name: name,
