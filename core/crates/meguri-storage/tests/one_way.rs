@@ -212,6 +212,26 @@ const PRESERVED: &[&str] = &[
 ];
 
 #[test]
+fn content_witness_moves_with_a_row_that_no_collection_stamp_records() {
+    let (_directory, path) = empty_collection();
+    let collection = managed(&path);
+    seed(&collection);
+    let reader = collection.open_reader(ReaderRole::Query).unwrap();
+    let before = reader.content_witness().unwrap();
+    let facts = reader.transfer_facts().unwrap();
+    assert_eq!(reader.content_witness().unwrap(), before);
+    // A row stamped again with no pending mark and no change of col.mod.
+    exec(collection.writer(), "UPDATE decks SET mtime_secs = (SELECT max(mtime_secs) + 5 FROM decks) WHERE id = (SELECT min(id) FROM decks)");
+    assert_eq!(reader.transfer_facts().unwrap(), facts);
+    assert_ne!(reader.content_witness().unwrap(), before);
+    let stamped = reader.content_witness().unwrap();
+    // A row added with no pending mark moves a count.
+    exec(collection.writer(), "INSERT INTO tags (tag, usn, collapsed) VALUES ('witness', 0, 0)");
+    assert_eq!(reader.transfer_facts().unwrap(), facts);
+    assert_ne!(reader.content_witness().unwrap(), stamped);
+}
+
+#[test]
 fn upload_transforms_only_the_copy_includes_wal_and_finalises_transformed_statistics() {
     let (directory, path) = empty_collection();
     let collection = managed(&path);
@@ -243,6 +263,11 @@ fn upload_transforms_only_the_copy_includes_wal_and_finalises_transformed_statis
     assert_eq!(sync_reader.transfer_facts().unwrap(), seeded_facts());
     assert_eq!(&fs::read(stage.path()).unwrap()[18..20], &[1, 1]);
     assert_eq!(listing(stage.directory()), ["collection.anki2".to_owned()].into());
+
+    // The witness reads no usn and no collection stamp: the collection and the
+    // candidate prepared from it give the same value, graves and all.
+    let witness = sync_reader.content_witness().unwrap();
+    assert_eq!(meguri_storage::one_way::closed_content_witness(&stage.path()).unwrap(), Some(witness));
 
     // Immutable read cannot change the prepared header or create sidecars.
     let uri = format!("file:{}?mode=ro&immutable=1", stage.path().display());
@@ -586,4 +611,74 @@ fn stock_notetype_as_created_is_not_user_content_until_saved() {
     scope.put_notetype(&stock).unwrap();
     scope.commit().unwrap();
     assert_eq!(reader.user_content_rows().unwrap().saved_notetypes, 1);
+}
+
+// sync/meguri-provider MP6.3: the row test of a retained server copy.
+
+fn fixture(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("collection.anki2");
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance/fixtures/storage").join(name),
+        &path,
+    )
+    .unwrap();
+    (dir, path)
+}
+
+#[test]
+fn server_copy_user_content_reads_the_served_file_without_changing_it() {
+    use meguri_storage::one_way::{server_copy_user_content, verify_server_copy};
+    // A served collection that holds none.
+    let (_dir, path) = empty_collection();
+    let before = fs::read(&path).unwrap();
+    let rows = server_copy_user_content(&path).unwrap().unwrap();
+    assert!(rows.none());
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(listing(path.parent().unwrap()).into_iter().collect::<Vec<_>>(), ["collection.anki2"]);
+
+    // One deck beside the default is user content, though the file has no card.
+    let collection = managed(&path);
+    let frozen = clock();
+    let mut scope = collection
+        .writer()
+        .begin_write(StampMode::CallerSupplied, &frozen, None)
+        .unwrap();
+    let mut deck = common::deck("Second");
+    deck.id = DeckId(10);
+    scope.put(&deck).unwrap();
+    scope.commit().unwrap();
+    collection.close().unwrap();
+    let rows = server_copy_user_content(&path).unwrap().unwrap();
+    assert_eq!(
+        rows,
+        UserContentRows {
+            other_decks: 1,
+            ..UserContentRows::default()
+        }
+    );
+    assert!(!rows.none());
+    // The two reads of one gate agree on what was served.
+    assert!(!verify_server_copy(&path).unwrap().unwrap().has_cards());
+}
+
+#[test]
+fn server_copy_user_content_proves_nothing_for_a_legacy_or_refused_file() {
+    use meguri_storage::one_way::server_copy_user_content;
+    // A legacy schema is packaged but not read: no rows, so nothing is proved.
+    let (_dir, path) = fixture("schema-11.anki2");
+    let before = fs::read(&path).unwrap();
+    assert_eq!(server_copy_user_content(&path).unwrap(), None);
+    assert_eq!(fs::read(&path).unwrap(), before);
+
+    // Refused versions, a leftover journal and a file that is no collection are errors, never "none".
+    let (_dir, path) = fixture("ver-19-delete.anki2");
+    assert!(server_copy_user_content(&path).is_err());
+    let (_dir, path) = empty_collection();
+    fs::write(path.with_file_name("collection.anki2-wal"), b"").unwrap();
+    assert!(server_copy_user_content(&path).is_err());
+    let (_dir, path) = empty_collection();
+    fs::write(&path, b"not a collection").unwrap();
+    assert!(server_copy_user_content(&path).is_err());
+    assert!(server_copy_user_content(&path.with_file_name("absent.anki2")).is_err());
 }

@@ -13,6 +13,11 @@ pub enum MeguriBootstrapDirection { UseServerCollection, UseDeviceCollection }
 pub enum MeguriBootstrapError {
     NotSelected, ConnectionChanged, Busy, AlreadyBound, Username, Ready(MeguriReadyRefusal), Engine(EngineError),
     Transfer(TransferError),
+    /// MP6.3: the facts a setup decision was made on no longer hold.
+    SetupChanged(crate::provider_setup::MeguriSetupChange),
+    /// A collection file is on this device but is not open: closed or damaged.
+    /// Setup can neither read it nor treat the device as holding none.
+    LocalUnusable,
 }
 impl fmt::Debug for MeguriBootstrapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -20,7 +25,8 @@ impl fmt::Debug for MeguriBootstrapError {
             Self::Ready(error) => f.debug_tuple("Ready").field(error).finish(),
             _ => f.write_str(match self { Self::NotSelected => "NotSelected", Self::ConnectionChanged => "ConnectionChanged",
                 Self::Busy => "Busy", Self::AlreadyBound => "AlreadyBound", Self::Username => "Username",
-                Self::Transfer(_) => "Transfer", _ => "Engine" }),
+                Self::Transfer(_) => "Transfer", Self::SetupChanged(_) => "SetupChanged",
+                Self::LocalUnusable => "LocalUnusable", _ => "Engine" }),
         }
     }
 }
@@ -54,7 +60,7 @@ impl MeguriAccess {
         let transport = None;
         (self.key, self.options, transport)
     }
-    fn into_transfer_access(self) -> Result<TransferAccess> {
+    pub(crate) fn into_transfer_access(self) -> Result<TransferAccess> {
         let configured = native_endpoint(&self.connection.endpoint).map_err(|_| MeguriBootstrapError::ConnectionChanged)?;
         let access = TransferAccess::new(configured, &self.username, self.key, self.options)
             .map_err(|_| MeguriBootstrapError::ConnectionChanged)?;
@@ -67,7 +73,7 @@ impl CoreHost {
     /// Local inspection is allowed while retained preparation closes network
     /// admission. Snapshot and policy reads finish before cancellation/refresh;
     /// no provider sidecar callback contains a second sidecar read.
-    fn active_meguri_preparation(&self, connection: &MeguriConnection) -> Result<Option<Operation>> {
+    pub(crate) fn active_meguri_preparation(&self, connection: &MeguriConnection) -> Result<Option<Operation>> {
         let doc = self.provider_authority().snapshot().map_err(MeguriReadyRefusal::Storage)?;
         if doc.selection != Selection::Meguri { return Err(MeguriBootstrapError::NotSelected); }
         if doc.handoff.is_some() || doc.meguri.as_ref() != Some(connection) {
@@ -88,8 +94,9 @@ impl CoreHost {
                     // the actual old policy row can prove this mismatch safe.
                     // Preparation captures actual_generation before activation.
                     let old = self.manual_transfer_history().get(intent.operation()).map_err(TransferError::from)?;
+                    // An overtaken upload (MP6.9 neither) is settled and inactive too.
                     if !matches!(old.phase, Phase::Cancelled | Phase::Failed)
-                        || !matches!(old.acceptance, Acceptance::NotSent | Acceptance::Refused)
+                        || !matches!(old.acceptance, Acceptance::NotSent | Acceptance::Refused | Acceptance::Overtaken)
                         || old.id == op.id || old.account != op.account || old.scope != op.scope
                         || old.configured_endpoint != connection.endpoint
                         || old.activation_identity.is_some()
@@ -138,6 +145,8 @@ impl CoreHost {
         })()))?;
         // Original-owner publication gates, Flight and policy locks are released.
         self.refresh_provider_admission();
+        // It sent nothing and replaced nothing: what it alone owned goes with it.
+        if let Ok(cancelled) = &result { self.sweep_discarded_preparation(cancelled); }
         result
     }
     /// Explicit offline exposure of the existing recovery decision. In
@@ -150,7 +159,7 @@ impl CoreHost {
         self.publish_provider_metadata(generation, |_| Ok(self.check_pending_meguri_preparation(connection, operation)))??;
         Ok(self.prepare_manual_transfer_recovery(operation.id.clone())?)
     }
-    fn check_meguri_bootstrap(&self, connection: &MeguriConnection) -> Result<()> {
+    pub(crate) fn check_meguri_bootstrap(&self, connection: &MeguriConnection) -> Result<()> {
         let doc = self.provider_authority().snapshot().map_err(MeguriReadyRefusal::Storage)?;
         if doc.selection != Selection::Meguri { return Err(MeguriBootstrapError::NotSelected); }
         if doc.handoff.is_some() || doc.meguri.as_ref() != Some(connection) { return Err(MeguriBootstrapError::ConnectionChanged); }
@@ -169,6 +178,7 @@ impl CoreHost {
         Ok(())
     }
     pub fn prepare_meguri_bootstrap(&self, access: MeguriAccess, direction: MeguriBootstrapDirection) -> Result<ManualTransferTask<Preview>> {
+        self.setup_retest.disarm();
         self.check_meguri_bootstrap(access.connection())?;
         if self.provider_authority().network_blocked()
             || self.manual_transfer_history().active().map_err(|_| MeguriBootstrapError::Busy)?.is_some() {
@@ -179,6 +189,13 @@ impl CoreHost {
         Ok(self.prepare_manual_transfer(access.into_transfer_access()?, direction, Scope::CollectionAndMedia)?)
     }
     pub fn confirm_meguri_bootstrap(&self, access: MeguriAccess, preview: Preview) -> Result<ManualTransferTask<Operation>> {
+        self.confirm_meguri_bootstrap_retesting(access, preview, None)
+    }
+    /// `retest` arms MP6.3 row 2's test inside the replacement's exclusive
+    /// phase for this one confirmation; every other confirmation disarms it.
+    pub(crate) fn confirm_meguri_bootstrap_retesting(&self, access: MeguriAccess, preview: Preview,
+        retest: Option<crate::provider_setup::Retest>) -> Result<ManualTransferTask<Operation>> {
+        self.setup_retest.disarm();
         let generation = self.cloud_connection_generation()?;
         self.check_meguri_bootstrap(access.connection())?;
         let active = self.manual_transfer_history().active().map_err(|_| MeguriBootstrapError::Busy)?;
@@ -187,7 +204,11 @@ impl CoreHost {
         }
         self.publish_provider_metadata(generation, |publication| Ok(self.provider_authority().record_meguri_bootstrap_intent(
             access.connection(), access.username(), &preview, generation.0, publication)))??;
-        Ok(self.confirm_manual_transfer(access.into_transfer_access()?, preview.confirmation)?)
+        let access = access.into_transfer_access()?;
+        if let Some(retest) = retest { self.setup_retest.arm(retest); }
+        let task = self.confirm_manual_transfer(access, preview.confirmation);
+        if task.is_err() { self.setup_retest.disarm(); }
+        Ok(task?)
     }
     pub fn prepare_meguri_bootstrap_media(&self, access: MeguriAccess, id: OperationId) -> Result<ManualTransferTask<MediaPreview>> {
         self.check_meguri_bootstrap_operation(access.connection(), &id)?;

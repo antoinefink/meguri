@@ -112,6 +112,8 @@ nonisolated struct SyncCommandResult: Sendable {
 }
 enum SyncOwnerFailure: Error { case configurationUnavailable }
 enum MeguriSignInLocalFailure: Error { case busy, attachment, credentialStore }
+/// T19.3's `sync.setup.done.*` lines for Meguri Sync.
+public enum MeguriSetupDone: Sendable, Equatable { case uploaded, downloaded(backup: Bool) }
 
 // Observation and a single replay budget belong to the original wake.
 // Recording either release signal creates no task and grants no admission.
@@ -738,6 +740,16 @@ public final class SyncCoordinator {
     public private(set) var meguriUsername: String?
     public private(set) var meguriStage: MeguriSetupStage?
     public private(set) var meguriPreview: MeguriBootstrapPreview?
+    /// MP6.3 row 4: the decision the keep-collection sheet shows. Its bound preview stays private.
+    public private(set) var meguriSetupDecision: MeguriSetupDecision?
+    private var meguriSetupPreview: MeguriBootstrapPreview?
+    /// T19.3: shown in the sheet after changed facts reloaded it.
+    public private(set) var meguriSetupNoticeKey: String?
+    /// T19.3: what setup did when it asked nothing, until Meguri is next launched.
+    public private(set) var meguriSetupDone: MeguriSetupDone?
+    private var meguriSetupDonePending: MeguriSetupDone?
+    private var meguriSetupKeepsService = false
+    private var meguriFinishAfterSettle = false
     public private(set) var meguriReceipt: MeguriBootstrapReceipt?
     public private(set) var meguriAccounting: MeguriBootstrapMediaAccounting?
     public private(set) var meguriProgress: CoreProgress?
@@ -757,7 +769,7 @@ public final class SyncCoordinator {
     public private(set) var meguriBusy = false
     public private(set) var meguriCancelling = false
     var meguriCollectionWorkHeld: Bool {
-        meguriPreview != nil || meguriStage == .preparing || meguriStage == .collection
+        meguriPreview != nil || meguriSetupPreview != nil || meguriStage == .preparing || meguriStage == .collection
     }
     public var serviceChangeAvailable: Bool {
         providerChangeAllowed() && !providerActionInProgress && !meguriBusy && !suspended && !replacing
@@ -1098,7 +1110,12 @@ public final class SyncCoordinator {
         meguriOperation = operation; meguriReceipt = operation.receipt
         let receipt = operation.receipt
         meguriChoiceAllowed = false
-        if receipt.acceptance == .possiblyAccepted || receipt.boundary == .remoteCompletionUnknown {
+        if receipt.acceptance == .overtaken {
+            // MP6.9 neither: settled and inactive. Its artifacts stay in the
+            // core; setup runs again and the core gives the sheet.
+            meguriOperation = nil; meguriFailureKey = MeguriSetupSequence.overtakenKey
+            meguriStage = .failed; meguriChoiceAllowed = true
+        } else if receipt.acceptance == .possiblyAccepted || receipt.boundary == .remoteCompletionUnknown {
             meguriStage = .acceptanceUnknown
         } else if MeguriSyncStatusPresentation.canRecover(receipt) {
             meguriStage = .acceptedLocalIncomplete
@@ -1114,6 +1131,7 @@ public final class SyncCoordinator {
         case .operation(let operation): showMeguriOperation(operation)
         case .mediaConsent(let consent): meguriReceipt = consent.receipt; meguriStage = .media
         case .ready(let accounting): meguriAccounting = accounting
+        case .settled: break
         case .refused(let failure, let accounting):
             meguriAccounting = accounting; meguriFailureKey = MeguriSyncStatusPresentation.failureKey(failure)
             meguriStage = accounting == nil ? .failed : .mediaBlocked
@@ -1183,77 +1201,335 @@ public final class SyncCoordinator {
     }
     public func confirmMeguriPreview() {
         guard let preview = meguriPreview, let facade = meguriBootstrap, !settings.paused,
-              let owner = meguriConnectionOwner,
-              let prepareEditorReplacement, let finishEditorReplacement,
-              let beginMeguriActivation, let finishMeguriActivation else { return }
+              let owner = meguriConnectionOwner else { return }
         issueMeguri { id in
-            let expected = self.generation, revision = self.hostRevision
-            self.meguriActiveFacade = facade
-            let current: @MainActor @Sendable () -> Bool = {
-                self.meguriAction?.id == id && self.meguriBootstrap === facade && self.meguriPreview === preview &&
-                    self.meguriCurrent(owner, expected, revision) && !self.meguriCancelling &&
-                    !self.settings.paused && !Task.isCancelled
-            }
-            let decision = ReviewCollection.EditorReplacementDecision()
-            self.meguriEditorDecision = (id, decision)
-            defer { if self.meguriEditorDecision?.owner == id { self.meguriEditorDecision = nil } }
-            let admission = await prepareEditorReplacement("Meguri Sync", decision, current)
-            defer { if let admission { finishEditorReplacement(admission.id) } }
-            guard let admission, admission.accepted else {
-                do {
-                    let result = try await facade.discard(preview)
-                    guard self.meguriAction?.id == id, self.meguriCurrent(owner, expected, revision),
-                          self.meguriPreview === preview else { return }
-                    self.retainMeguri(result); self.applyMeguriOutcome(result.outcome)
-                    if case .refused = result.outcome { return }
-                    self.meguriPreview = nil; self.meguriOperation = nil
-                    self.meguriStage = .required; self.meguriChoiceAllowed = true
-                } catch { if current() { self.meguriLastError = error } }
-                return
-            }
-            let reservation = admission.id
-            guard current() else { return }
-            do { try beginMeguriActivation(reservation) }
-            catch { self.meguriLastError = error; return }
-            let before = self.generation
-            self.meguriActiveFacade = facade; self.meguriStage = .collection
-            // Consume the presentation once. The original facade/preview live
-            // in this task through its terminal read, including activated errors.
-            self.meguriPreview = nil; self.meguriChoiceAllowed = false
-            self.meguriCollectionError = nil
-            var candidateActive = false
-            do {
-                try decision.admitEffect()
-                let result = try await facade.confirm(preview, progress: self.progressForMeguri(id))
-                self.retainMeguriCollectionResult(result)
-                if case .refused(.transfer(let failure), _) = result.outcome { candidateActive = failure.candidateActive }
-            } catch {
-                self.meguriLastError = error; self.meguriCollectionError = error
-                candidateActive = (error as? ManualTransferFailure)?.candidateActive == true
-                self.meguriStage = .failed
-            }
-            candidateActive = candidateActive || before != self.generation
-            // Never drain this connection before its own confirmation. The
-            // existing replacement path joins only the native facade, not us.
-            guard let current = await finishMeguriActivation(candidateActive) else { return }
-            if current !== self {
-                current.meguriLastCommand = self.meguriLastCommand; current.meguriLastError = self.meguriLastError
-                current.meguriReceipt = self.meguriReceipt; current.meguriProgressFailure = self.meguriProgressFailure
-                current.meguriCollectionCommand = self.meguriCollectionCommand; current.meguriCollectionError = self.meguriCollectionError
-                current.meguriFailureKey = self.meguriFailureKey
-            }
-            do {
-                // Reload after Host adoption or validation of the retained
-                // NoCollection attachment. Old opaque handles are never rebound.
-                try await current.refreshMeguriAfterCollection()
-                if let operation = current.meguriOperation,
-                   operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete {
-                    try await current.continueMeguriMedia(operation, id: id)
-                }
-            } catch { current.meguriLastError = error; current.meguriStage = .failed }
+            _ = await self.runMeguriCollection(id: id, facade: facade, owner: owner,
+                held: { self.meguriPreview === preview },
+                discard: { try await facade.discard(preview) },
+                release: { self.meguriPreview = nil },
+                perform: { try await facade.confirm(preview, progress: self.progressForMeguri(id)) })
         }
     }
-    public func finishMeguriSetup() {
+    /// The one path that replaces a collection for Meguri Sync: the editor's
+    /// decision, the activation reservation, the command, then the reload on
+    /// whichever coordinator owns the collection afterwards. `held` says the
+    /// presented decision is still the one being confirmed; `release` forgets it.
+    private func runMeguriCollection(id: UUID, facade: MeguriProviderBootstrapService, owner: MeguriProviderConnectionOwner,
+                                     held: @escaping @MainActor @Sendable () -> Bool,
+                                     discard: @MainActor () async throws -> MeguriBootstrapCommandResult,
+                                     release: @MainActor () -> Void,
+                                     perform: @MainActor () async throws -> MeguriBootstrapCommandResult) async -> SyncCoordinator? {
+        guard !settings.paused, let prepareEditorReplacement, let finishEditorReplacement,
+              let beginMeguriActivation, let finishMeguriActivation else { return nil }
+        let expected = self.generation, revision = self.hostRevision
+        self.meguriActiveFacade = facade
+        let current: @MainActor @Sendable () -> Bool = {
+            self.meguriAction?.id == id && self.meguriBootstrap === facade && held() &&
+                self.meguriCurrent(owner, expected, revision) && !self.meguriCancelling &&
+                !self.settings.paused && !Task.isCancelled
+        }
+        let decision = ReviewCollection.EditorReplacementDecision()
+        self.meguriEditorDecision = (id, decision)
+        defer { if self.meguriEditorDecision?.owner == id { self.meguriEditorDecision = nil } }
+        let admission = await prepareEditorReplacement("Meguri Sync", decision, current)
+        defer { if let admission { finishEditorReplacement(admission.id) } }
+        guard let admission, admission.accepted else {
+            do {
+                let result = try await discard()
+                guard self.meguriAction?.id == id, self.meguriCurrent(owner, expected, revision), held() else { return nil }
+                self.retainMeguri(result); self.applyMeguriOutcome(result.outcome)
+                if case .refused = result.outcome { return nil }
+                release(); self.meguriOperation = nil
+                self.meguriStage = .required; self.meguriChoiceAllowed = true
+            } catch { if current() { self.meguriLastError = error } }
+            return nil
+        }
+        let reservation = admission.id
+        guard current() else { return nil }
+        do { try beginMeguriActivation(reservation) }
+        catch { self.meguriLastError = error; return nil }
+        let before = self.generation
+        self.meguriActiveFacade = facade; self.meguriStage = .collection
+        // Consume the presentation once. The original facade/preview live
+        // in this task through its terminal read, including activated errors.
+        release(); self.meguriChoiceAllowed = false
+        self.meguriCollectionError = nil
+        var candidateActive = false
+        do {
+            try decision.admitEffect()
+            let result = try await perform()
+            self.retainMeguriCollectionResult(result)
+            if case .refused(.transfer(let failure), _) = result.outcome { candidateActive = failure.candidateActive }
+        } catch {
+            self.meguriLastError = error; self.meguriCollectionError = error
+            candidateActive = (error as? ManualTransferFailure)?.candidateActive == true
+            self.meguriStage = .failed
+        }
+        candidateActive = candidateActive || before != self.generation
+        // Never drain this connection before its own confirmation. The
+        // existing replacement path joins only the native facade, not us.
+        guard let current = await finishMeguriActivation(candidateActive) else { return nil }
+        if current !== self {
+            current.meguriLastCommand = self.meguriLastCommand; current.meguriLastError = self.meguriLastError
+            current.meguriReceipt = self.meguriReceipt; current.meguriProgressFailure = self.meguriProgressFailure
+            current.meguriCollectionCommand = self.meguriCollectionCommand; current.meguriCollectionError = self.meguriCollectionError
+            current.meguriFailureKey = self.meguriFailureKey
+        }
+        do {
+            // Reload after Host adoption or validation of the retained
+            // NoCollection attachment. Old opaque handles are never rebound.
+            try await current.refreshMeguriAfterCollection()
+            if let operation = current.meguriOperation,
+               operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete {
+                // T19.3: what setup did when it asked nothing, from the end of the collection's transfer.
+                if let done = self.meguriSetupDonePending { current.meguriSetupDone = done }
+                self.meguriSetupDonePending = nil
+                try await current.continueMeguriMedia(operation, id: id)
+            }
+        } catch { current.meguriLastError = error; current.meguriStage = .failed }
+        return current
+    }
+
+    // MARK: Meguri Sync setup (MP6.3, MP6.9)
+
+    /// Runs after a Sign In made to set the service up, from Try Again, and
+    /// from the status action that asks which collection to keep. The core
+    /// reads both sides and decides: it transfers with no question only what
+    /// MP6.3 rows 1 to 3 allow, and otherwise the keep-collection sheet opens.
+    /// `keepingService`: Cancel in that sheet changes nothing (V27.4).
+    public func startMeguriSetup(keepingService: Bool = false) {
+        guard meguriCanChoose, providerChangeAllowed(), meguriSetupDecision == nil,
+              let facade = meguriBootstrap, let owner = meguriConnectionOwner else { return }
+        let overtaken = meguriStage == .failed && meguriFailureKey == MeguriSetupSequence.overtakenKey
+        meguriSetupKeepsService = MeguriSetupSequence.keepsService(requested: keepingService, stage: meguriStage,
+                                                                   failureKey: meguriFailureKey)
+        issueMeguri { id in
+            // The sentence of the row that opened the sheet is its first line (T19.3).
+            self.meguriSetupNoticeKey = overtaken ? MeguriSetupSequence.overtakenKey : nil
+            await self.prepareMeguriSetup(id: id, facade: facade, owner: owner, reloads: 1)
+        }
+    }
+    private func prepareMeguriSetup(id: UUID, facade: MeguriProviderBootstrapService, owner: MeguriProviderConnectionOwner,
+                                    reloads: Int) async {
+        let expected = self.generation, revision = self.hostRevision
+        self.meguriActiveFacade = facade; self.meguriFailureKey = nil; self.meguriChoiceAllowed = false
+        do {
+            // A preparation that sent nothing is discarded before a new one.
+            if let pending = self.meguriOperation {
+                guard MeguriSyncStatusPresentation.canDiscard(pending.receipt) else { return }
+                let discarded = try await facade.discard(pending)
+                self.retainMeguri(discarded)
+                guard self.meguriCurrent(owner, expected, revision) else { return }
+                if case .refused = discarded.outcome { self.applyMeguriOutcome(discarded.outcome); return }
+                self.meguriOperation = nil
+            }
+            self.meguriStage = .preparing
+            let result = try await facade.prepareSetup(progress: self.progressForMeguri(id))
+            self.retainMeguri(result)
+            guard self.meguriCurrent(owner, expected, revision) else { return }
+            guard case .preview(let preview) = result.outcome else {
+                self.applyMeguriOutcome(result.outcome)
+                if let retry = result.retryOperation { self.showMeguriOperation(retry) }
+                if case .refused = result.outcome {
+                    try await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+                    if self.meguriChoiceAllowed { self.meguriStage = .failed }
+                }
+                return
+            }
+            self.meguriReceipt = preview.receipt
+            let outcome = try await facade.setupDecision(preview)
+            guard self.meguriCurrent(owner, expected, revision) else { return }
+            guard case .decision(let decision) = outcome else {
+                if case .refused(let failure) = outcome { self.meguriFailureKey = MeguriSyncStatusPresentation.failureKey(failure) }
+                self.retainMeguri(try await facade.discard(preview))
+                self.meguriStage = .failed; self.meguriChoiceAllowed = true
+                return
+            }
+            switch Self.meguriSetupStep(decision.facts.row) {
+            case .ask:
+                // Nothing is replaced before the sheet's answer.
+                self.meguriSetupPreview = preview; self.meguriSetupDecision = decision
+                self.meguriStage = .preview
+            case .run(let choice):
+                self.meguriSetupPreview = preview
+                await self.runMeguriSetup(id: id, facade: facade, owner: owner, decision: decision, preview: preview,
+                                          choice: choice, reloads: reloads)
+            }
+        } catch { self.meguriLastError = error; self.meguriStage = .failed }
+    }
+    enum MeguriSetupStep: Equatable { case ask, run(MeguriSetupChoice) }
+    /// Only rows 1 to 3 run without the sheet (MP6.3).
+    static func meguriSetupStep(_ row: MeguriSetupRow) -> MeguriSetupStep {
+        switch row {
+        case .download, .downloadOverEmptyDevice, .uploadToEmptyServer: .run(.noQuestion)
+        case .ask, .askUploadOnly, .askDownloadOnly: .ask
+        }
+    }
+    /// The choices the sheet offers for a row; a row that asks nothing offers none.
+    public static func meguriSetupChoices(_ row: MeguriSetupRow) -> [MeguriSetupChoice] {
+        switch row {
+        case .ask: [.keepDevice, .keepServer]
+        case .askUploadOnly: [.keepDevice]
+        case .askDownloadOnly: [.keepServer]
+        case .download, .downloadOverEmptyDevice, .uploadToEmptyServer: []
+        }
+    }
+    /// True when the prepared upload itself is confirmed; false when the download replaces it.
+    static func meguriSetupConfirmsPreview(_ row: MeguriSetupRow, _ choice: MeguriSetupChoice) -> Bool? {
+        switch (row, choice) {
+        case (.download, .noQuestion), (.uploadToEmptyServer, .noQuestion), (.ask, .keepDevice), (.askUploadOnly, .keepDevice): true
+        // With no collection on this device the prepared transfer is already the download.
+        case (.askDownloadOnly, .keepServer): true
+        case (.downloadOverEmptyDevice, .noQuestion), (.ask, .keepServer): false
+        default: nil
+        }
+    }
+    static func meguriSetupDone(_ row: MeguriSetupRow) -> MeguriSetupDone? {
+        switch row {
+        case .download: .downloaded(backup: false)
+        case .downloadOverEmptyDevice: .downloaded(backup: true)
+        case .uploadToEmptyServer: .uploaded
+        case .ask, .askUploadOnly, .askDownloadOnly: nil
+        }
+    }
+    /// The facts changed under a decision: both sides are read again (T19.3).
+    static func meguriSetupChangeKey(_ outcome: MeguriBootstrapOutcome) -> String? {
+        guard case .refused(let failure, _) = outcome else { return nil }
+        switch failure {
+        case .setupLocalChanged: return "sync.meguri.setup.error.localChanged"
+        case .setupRemoteChanged: return "sync.meguri.setup.error.remoteChanged"
+        case .transfer(let transfer):
+            switch transfer.boundary {
+            case .localChanged: return "sync.meguri.setup.error.localChanged"
+            case .remoteChanged: return "sync.meguri.setup.error.remoteChanged"
+            default: return nil
+            }
+        default: return nil
+        }
+    }
+    /// The sheet's answer. A button is the confirmation (N15.3).
+    public func answerMeguriSetup(_ choice: MeguriSetupChoice) {
+        guard let decision = meguriSetupDecision, let preview = meguriSetupPreview,
+              Self.meguriSetupChoices(decision.facts.row).contains(choice),
+              let facade = meguriBootstrap, let owner = meguriConnectionOwner, !settings.paused else { return }
+        issueMeguri { id in
+            self.meguriSetupNoticeKey = nil
+            await self.runMeguriSetup(id: id, facade: facade, owner: owner, decision: decision, preview: preview,
+                                      choice: choice, reloads: 1)
+        }
+    }
+    private func runMeguriSetup(id: UUID, facade: MeguriProviderBootstrapService, owner: MeguriProviderConnectionOwner,
+                                decision: MeguriSetupDecision, preview: MeguriBootstrapPreview,
+                                choice: MeguriSetupChoice, reloads: Int) async {
+        guard Self.meguriSetupConfirmsPreview(decision.facts.row, choice) != nil else { return }
+        meguriSetupDonePending = choice == .noQuestion ? Self.meguriSetupDone(decision.facts.row) : nil
+        let current = await runMeguriCollection(id: id, facade: facade, owner: owner,
+            held: { self.meguriSetupPreview === preview },
+            discard: { try await facade.discard(preview) },
+            release: { self.meguriSetupPreview = nil; self.meguriSetupDecision = nil },
+            perform: {
+                guard let result = try await MeguriSetupSequence.transfer(facade, decision: decision, preview: preview,
+                    choice: choice, progress: self.progressForMeguri(id)) else { throw CancellationError() }
+                return result
+            })
+        meguriSetupDonePending = nil
+        // Changed facts stopped the transfer with nothing replaced. Both sides
+        // are read again once; the row they give now decides, and two
+        // collections get the sheet with a new choice.
+        guard let current,
+              let key = MeguriSetupSequence.reloadNotice(after: current.meguriCollectionCommand?.outcome, reloads: reloads,
+                                                         choiceAllowed: current.meguriChoiceAllowed),
+              let facade = current.meguriBootstrap, let owner = current.meguriConnectionOwner else { return }
+        current.meguriSetupNoticeKey = key
+        current.meguriSetupKeepsService = self.meguriSetupKeepsService
+        if current === self {
+            await prepareMeguriSetup(id: id, facade: facade, owner: owner, reloads: reloads - 1)
+        } else {
+            current.startMeguriSetup(keepingService: current.meguriSetupKeepsService)
+        }
+    }
+    /// Cancel in the sheet. The prepared upload sent nothing and is discarded.
+    /// Returns whether the caller must also leave the service Off (MP6.3).
+    public func cancelMeguriSetup() async -> Bool {
+        let leavesOff = !meguriSetupKeepsService
+        guard let preview = meguriSetupPreview, let facade = meguriBootstrap else {
+            meguriSetupDecision = nil; meguriSetupPreview = nil
+            return leavesOff
+        }
+        await waitForMeguriAction()
+        issueMeguri { _ in
+            self.meguriActiveFacade = facade
+            do {
+                let cancelled = try await MeguriSetupSequence.cancel(facade, preview: preview)
+                self.retainMeguri(cancelled.result)
+                if cancelled.discarded { self.meguriOperation = nil; self.meguriStage = .required; self.meguriChoiceAllowed = true }
+                else { self.applyMeguriOutcome(cancelled.result.outcome) }
+            } catch { self.meguriLastError = error; self.meguriStage = .failed }
+            // The sheet always closes: Cancel is never a dead end.
+            if self.meguriSetupPreview === preview { self.meguriSetupPreview = nil; self.meguriSetupDecision = nil }
+        }
+        await waitForMeguriAction()
+        if meguriSetupPreview === preview { meguriSetupPreview = nil; meguriSetupDecision = nil }
+        return leavesOff
+    }
+    /// MP6.9 for a setup upload: one read of the server's facts. It starts no upload.
+    public var meguriCanSettle: Bool {
+        !meguriBusy && !settings.paused && meguriStage == .acceptanceUnknown && meguriBootstrap != nil
+    }
+    public func settleMeguriSetup() {
+        guard meguriCanSettle, let facade = meguriBootstrap, let owner = meguriConnectionOwner else { return }
+        issueMeguri { _ in
+            let expected = self.generation, revision = self.hostRevision
+            self.meguriActiveFacade = facade
+            var finish = false
+            do {
+                let result = try await facade.settleSetup()
+                self.retainMeguri(result)
+                guard self.meguriCurrent(owner, expected, revision) else { return }
+                switch MeguriSetupSequence.settled(result.outcome) {
+                case .accepted(let operation, let hintUnchanged):
+                    // Local activation remains. It is tried now only on the
+                    // hint that this device did not change since the upload,
+                    // and then only through the core's own test of that;
+                    // otherwise Finish Setup asks for it (T19.5).
+                    self.showMeguriOperation(operation)
+                    finish = hintUnchanged
+                case .overtaken:
+                    // Neither: another client changed the server. The core
+                    // recorded it, kept every artifact and released the
+                    // exclusion; the sheet decides (MP6.9, T19.5).
+                    self.meguriOperation = nil; self.meguriFailureKey = MeguriSetupSequence.overtakenKey
+                    self.meguriStage = .failed; self.meguriChoiceAllowed = true
+                case .notAccepted:
+                    // Nothing reached the server and nothing was replaced.
+                    self.meguriOperation = nil; self.meguriFailureKey = "sync.meguri.setup.error.server"
+                    self.meguriStage = .failed; self.meguriChoiceAllowed = true
+                case .unknown:
+                    // Not readable: the state and the exclusion stay.
+                    self.meguriStage = .acceptanceUnknown
+                }
+            } catch { self.meguriLastError = error; self.meguriStage = .acceptanceUnknown }
+            if finish { self.meguriFinishAfterSettle = true }
+        }
+        Task {
+            await waitForMeguriAction()
+            guard meguriFinishAfterSettle else { return }
+            meguriFinishAfterSettle = false
+            finishMeguriSetup(asked: false)
+        }
+    }
+    /// MP6.9 for a routine round: the next round's first step is the read of
+    /// the server's facts against the last proved baseline; pending changes
+    /// stay pending and that round sends them.
+    public func settleMeguriRound() {
+        guard meguriRoutine == .acceptanceUnknown, meguriWake == nil, !meguriBusy else { return }
+        meguriRoutine = .pending
+        requestMeguriWake(automatic: false)
+    }
+    /// `asked` is false only for the continuation of a settled acceptance: the
+    /// core then replaces this device's collection only while it is still what
+    /// the upload sent, and otherwise leaves Finish Setup to the user (S1).
+    public func finishMeguriSetup(asked: Bool = true) {
         guard meguriCanFinish, let operation = meguriOperation, let facade = meguriBootstrap,
               let owner = meguriConnectionOwner,
               let prepareEditorReplacement, let finishEditorReplacement,
@@ -1283,17 +1559,14 @@ public final class SyncCoordinator {
             var candidateActive = false
             do {
                 try decision.admitEffect()
-                let preparation = try await facade.prepareRecovery(operation, progress: self.progressForMeguri(id))
-                guard current() else { throw CancellationError() }
-                self.meguriRecoveryPreparation = preparation
-                self.retainMeguri(preparation)
-                let result: MeguriBootstrapCommandResult
-                if case .preview(let recoveryPreview) = preparation.outcome {
-                    // Finish Setup continues the original, already confirmed
-                    // ExactOk operation. Core's recovery preview is not a new
-                    // upload choice and is confirmed only on this same facade.
-                    result = try await facade.confirm(recoveryPreview, progress: self.progressForMeguri(id))
-                } else { result = preparation }
+                // Finish Setup continues the original, already confirmed
+                // ExactOk operation. Core's recovery preview is not a new
+                // upload choice and is confirmed only on this same facade.
+                let finished = try await MeguriSetupSequence.finish(facade, operation: operation, asked: asked,
+                    progress: self.progressForMeguri(id), current: current)
+                self.meguriRecoveryPreparation = finished.preparation
+                self.retainMeguri(finished.preparation)
+                let result = finished.confirmation ?? finished.preparation
                 self.retainMeguriCollectionResult(result)
                 if case .refused(.transfer(let failure), _) = result.outcome { candidateActive = failure.candidateActive }
             } catch {

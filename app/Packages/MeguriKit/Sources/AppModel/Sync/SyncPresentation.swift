@@ -419,8 +419,10 @@ public struct MeguriSyncStatusPresentation {
             && receipt.boundary != .activationInterrupted
     }
     public static func canRecover(_ receipt: MeguriBootstrapReceipt) -> Bool {
+        // An accepted upload in the preview phase is its recovery preview:
+        // a first preview has sent nothing.
         receipt.direction == .export && receipt.acceptance == .exactOk
-            && (receipt.phase == .remoteAccepted || receipt.phase == .activating
+            && (receipt.phase == .remoteAccepted || receipt.phase == .activating || receipt.phase == .preview
                 || receipt.boundary == .activationInterrupted)
     }
     /// A classification only: T19.8 withdraws its text, and no view shows it.
@@ -428,8 +430,9 @@ public struct MeguriSyncStatusPresentation {
     public static func failureKey(_ failure: MeguriBootstrapFailure) -> String? {
         switch failure {
         case .accountChanged, .connectionChanged, .username: "sync.meguri.setup.error.identityChanged"
-        case .publicationChanged: "sync.meguri.setup.error.remoteChanged"
-        case .documentChanged: "sync.meguri.setup.error.localChanged"
+        case .publicationChanged, .setupRemoteChanged: "sync.meguri.setup.error.remoteChanged"
+        case .documentChanged, .setupLocalChanged: "sync.meguri.setup.error.localChanged"
+        case .setupLocalUnusable: MeguriSetupSequence.localUnusableKey
         case .storage, .diskFull: "sync.meguri.setup.error.storage"
         case .cancelled: cancelledFailureKey
         case .transfer(let value): transferFailureKey(value)

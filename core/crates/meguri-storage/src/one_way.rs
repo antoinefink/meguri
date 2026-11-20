@@ -100,6 +100,36 @@ impl UserContentRows {
     }
 }
 
+/// Row counts and newest modification stamps of every synced table. It reads
+/// no `usn` and no stamp of `col`, so a collection and the full-upload
+/// candidate prepared from it give the same value; a row added, removed or
+/// stamped again since gives another. Graves are left out: the candidate has none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContentWitness([Option<i64>; 18]);
+
+fn content_witness(conn: &rusqlite::Connection) -> Result<ContentWitness, StorageError> {
+    // One statement, one read view.
+    Ok(conn.query_row(
+        "SELECT (SELECT count(*) FROM notes), (SELECT max(mod) FROM notes),
+         (SELECT count(*) FROM cards), (SELECT max(mod) FROM cards),
+         (SELECT count(*) FROM revlog), (SELECT max(id) FROM revlog),
+         (SELECT count(*) FROM decks), (SELECT max(mtime_secs) FROM decks),
+         (SELECT count(*) FROM deck_config), (SELECT max(mtime_secs) FROM deck_config),
+         (SELECT count(*) FROM notetypes), (SELECT max(mtime_secs) FROM notetypes),
+         (SELECT count(*) FROM templates), (SELECT max(mtime_secs) FROM templates),
+         (SELECT count(*) FROM config), (SELECT max(mtime_secs) FROM config),
+         (SELECT count(*) FROM fields), (SELECT count(*) FROM tags)",
+        [],
+        |row| {
+            let mut values = [None; 18];
+            for (index, value) in values.iter_mut().enumerate() {
+                *value = row.get(index)?;
+            }
+            Ok(ContentWitness(values))
+        },
+    )?)
+}
+
 fn user_content(conn: &rusqlite::Connection) -> Result<UserContentRows, StorageError> {
     // One statement, one read view: no table is counted later.
     Ok(conn.query_row(
@@ -129,6 +159,11 @@ impl Reader {
     /// V27.1's row test on the open collection, in one read view.
     pub fn user_content_rows(&self) -> Result<UserContentRows, StorageError> {
         user_content(&self.conn)
+    }
+
+    /// See [`ContentWitness`], on the open collection, in one read view.
+    pub fn content_witness(&self) -> Result<ContentWitness, StorageError> {
+        content_witness(&self.conn)
     }
 
     /// O3: a single SELECT fixes one consistent view for every fact, without
@@ -286,18 +321,24 @@ fn transform_upload(scope: &mut WriteScope<'_>, at: EpochMillis) -> Result<(), S
 /// sidecar, journal-mode change or SQLite write is permitted here. Legacy
 /// schemas can be packaged but have unknown O3 facts until explicitly upgraded.
 pub fn verify_server_copy(path: &std::path::Path) -> Result<Option<LocalTransferFacts>, ReplaceError> {
-    Ok(inspect_server_copy(path)?.map(|(facts, _)| facts))
+    Ok(inspect_server_copy(path)?.map(|(facts, _, _)| facts))
+}
+
+/// The same read-only gate, with the [`ContentWitness`] of the closed file.
+/// `None` (a legacy schema) proves nothing.
+pub fn closed_content_witness(path: &std::path::Path) -> Result<Option<ContentWitness>, ReplaceError> {
+    Ok(inspect_server_copy(path)?.map(|(_, _, witness)| witness))
 }
 
 /// The same read-only gate, with V27.1's row test of the served file. `None`
 /// (a legacy schema) proves nothing: the caller treats it as user content.
 pub fn server_copy_user_content(path: &std::path::Path) -> Result<Option<UserContentRows>, ReplaceError> {
-    Ok(inspect_server_copy(path)?.map(|(_, rows)| rows))
+    Ok(inspect_server_copy(path)?.map(|(_, rows, _)| rows))
 }
 
 fn inspect_server_copy(
     path: &std::path::Path,
-) -> Result<Option<(LocalTransferFacts, UserContentRows)>, ReplaceError> {
+) -> Result<Option<(LocalTransferFacts, UserContentRows, ContentWitness)>, ReplaceError> {
     use crate::schema::{refuse, version};
     for suffix in ["-wal", "-shm", "-journal"] {
         if crate::connections::sibling(path, suffix).symlink_metadata().is_ok() {
@@ -331,7 +372,7 @@ fn inspect_server_copy(
                 missing_tables: checked.missing_tables,
             }));
         }
-        Some((facts(&conn)?, user_content(&conn)?))
+        Some((facts(&conn)?, user_content(&conn)?, content_witness(&conn)?))
     } else {
         None
     };

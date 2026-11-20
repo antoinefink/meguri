@@ -1,4 +1,5 @@
 import AppModel
+import CoreBridge
 import SwiftUI
 
 /// Synthetic Sync section examples for routes and previews: the production
@@ -34,7 +35,9 @@ private struct SyncSettingsPreviewScreen: View {
         case .keepCollection:
             // Presented as the sheet it is, over the Settings page.
             NavigationStack { SettingsView(collection: collection) }
-                .sheet(isPresented: .constant(true)) { MeguriKeepCollectionSheet(collection: collection) {} }
+                .sheet(isPresented: .constant(true)) {
+                    MeguriKeepCollectionSheet(collection: collection, facts: Self.keepCollectionFacts(collection))
+                }
         case .statusPopover:
             NavigationStack {
                 Form {}
@@ -43,6 +46,14 @@ private struct SyncSettingsPreviewScreen: View {
                     .task { collection.syncPresentation.statusPresented = true }
             }
         }
+    }
+    /// Invented counts for both sides (MP6.3 row 4); no core decided them.
+    private static func keepCollectionFacts(_ collection: ReviewCollection) -> MeguriSetupFacts {
+        let now = Int64(collection.configuration.clock.now().timeIntervalSince1970 * 1_000)
+        return .init(row: .ask,
+            device: .init(notes: 1_204, cards: 2_318, reviews: 18_452, mediaFiles: 312, lastChangeMs: now - 240_000),
+            server: .init(notes: 1_198, cards: 2_306, reviews: 18_120, mediaFiles: nil, lastChangeMs: now - 86_400_000),
+            unsent: true)
     }
 }
 

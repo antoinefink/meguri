@@ -9,6 +9,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod settle;
+pub use settle::{UploadSettlement, judge_upload};
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountRef(String);
 impl AccountRef {
@@ -74,6 +77,10 @@ pub enum Acceptance {
     PossiblyAccepted,
     ExactOk,
     Refused,
+    /// `sync/meguri-provider#MP6.9` "neither": a later read found the server
+    /// holding neither what this upload sent nor what it was to replace.
+    /// Terminal and never active; every artifact of the record is kept.
+    Overtaken,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Boundary {
@@ -612,6 +619,11 @@ fn decode(doc: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<St
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
             || (unresolved && state.active.as_ref() != Some(&op.id))
+            || (op.acceptance == Acceptance::Overtaken
+                && (op.direction != Direction::Export
+                    || op.phase != Phase::Failed
+                    || op.activation_identity.is_some()
+                    || op.collection_complete))
             || (op.phase == Phase::Complete && (op.receipt.is_none() || !selected_complete(op)))
             || (op.receipt.is_some() && op.phase != Phase::Complete)
         {

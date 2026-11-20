@@ -233,7 +233,7 @@ impl CoreHost {
             |_| Ok(()),
         )
     }
-    fn manual_worker<T: Send + 'static>(
+    pub(crate) fn manual_worker<T: Send + 'static>(
         &self,
         kind: Option<JobKind>,
         work: impl FnOnce(&ManualTransfers, &JobContext, &Arc<Mutex<Option<MediaSnapshot>>>) -> Result<T, TransferError>
