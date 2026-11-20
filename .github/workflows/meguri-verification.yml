@@ -87,8 +87,9 @@ jobs:
           core=yes
           linux=yes
           # -z: git would quote a name with non-ASCII or special bytes, and
-          # the anchored patterns below would miss it.
-          if [[ -n "$base" ]] && changed="$(git diff -z --name-only "$base" HEAD | tr '\0' '\n')"; then
+          # the anchored patterns below would miss it. --no-renames: a moved
+          # file counts for both its old and its new directory.
+          if [[ -n "$base" ]] && changed="$(git diff -z --no-renames --name-only "$base" HEAD | tr '\0' '\n')"; then
             printf 'Changed files:\n%s\n' "$changed"
             linux_dirs='app|conformance|core|docker|server|specs|tools'
             if ! grep -qE "^(($linux_dirs)/|\.github/workflows/meguri-verification\.yml$)" <<<"$changed"; then
@@ -103,6 +104,17 @@ jobs:
               core=no
             fi
           fi
+          # A test added to the timing-sensitive list stops blocking Core: say so.
+          added=
+          if [[ -n "$base" ]]; then
+            added="$(git diff --no-renames -U0 "$base" HEAD -- .github/core-timing-sensitive.txt |
+              grep -E '^\+[^+#[:space:]]' | cut -c2- | awk '{ print $1, $2 }' || true)"
+          fi
+          if [[ -n "$added" ]]; then
+            while IFS= read -r t; do
+              echo "::warning file=.github/core-timing-sensitive.txt::This change makes $t advisory: it no longer blocks Linux · core."
+            done <<<"$added"
+          fi
           echo "Core: $core; server, conformance and package-smoke: $linux"
           {
             echo "core=$core"
@@ -116,6 +128,11 @@ jobs:
             echo
             echo "- Core (4 shards and the timing-sensitive job): **$core**"
             echo "- server, conformance, package-smoke: **$linux**"
+            if [[ -n "$added" ]]; then
+              echo
+              echo "**This change adds tests to .github/core-timing-sensitive.txt; they no longer block Linux · core:**"
+              sed 's/^/- `/; s/$/`/' <<<"$added"
+            fi
           } >>"$GITHUB_STEP_SUMMARY"
 
   # Builds the dev image once per change of its inputs and shares it through
@@ -274,7 +291,8 @@ jobs:
             jq -r '.failures[]? | "- `\(.id)`"' "$artifact" >>"$GITHUB_STEP_SUMMARY"
           fi
           ((rc == 0))
-          want="$(jq -nc '$ARGS.positional' --args "${args[@]:1}")"
+          # Not `jq --args`: jq would read the --quick that follows as its own option.
+          want="$(printf '%s\n' "${args[@]:1}" | jq -Rnc '[inputs]')"
           jq -e --arg sha "$GITHUB_SHA" --argjson want "$want" '
             .status == "pass" and .commit.sha == $sha and .commit.dirty == false
             and .job == "core-test" and .args == $want' "$artifact"
@@ -433,7 +451,8 @@ jobs:
             echo "No core-test receipt; see the log." >>"$GITHUB_STEP_SUMMARY"
           fi
           ((rc == 0))
-          want="$(jq -nc '$ARGS.positional' --args "${args[@]:1}")"
+          # Not `jq --args`: jq would read the --quick that follows as its own option.
+          want="$(printf '%s\n' "${args[@]:1}" | jq -Rnc '[inputs]')"
           jq -e --arg sha "$GITHUB_SHA" --argjson want "$want" '
             .status == "pass" and .commit.sha == $sha and .commit.dirty == false
             and .job == "core-test" and .args == $want' "$artifact"
@@ -486,6 +505,7 @@ jobs:
           [[ "$SHARD_JOBS" == success ]] || fail "The Core shards ended $SHARD_JOBS (failed, cancelled or not started)."
           count="$(jq length <<<"$SHARDS")"
           ((count > 0)) || fail "The shard list is empty."
+          jq -e '. == [range(1; length + 1)]' <<<"$SHARDS" >/dev/null || fail "The shard list $SHARDS is not 1..N."
           {
             echo "### Linux · core: $count shards"
             echo
@@ -509,7 +529,8 @@ jobs:
           {
             echo
             echo "$total passes across the shards (each shard also runs the canaries)."
-            echo "The timing-sensitive tests run in the advisory job **Linux · core (timing-sensitive)**."
+            echo "Not covered here: the tests of .github/core-timing-sensitive.txt, which run in the advisory job **Linux · core (timing-sensitive)**:"
+            jq -r '.details.hosted_selection.listed[]? | "- `\(.)`"' "$receipt"
           } >>"$GITHUB_STEP_SUMMARY"
 
   # !cancelled(), not success(): when "Select suites" fails, each suite must
