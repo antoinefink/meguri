@@ -985,9 +985,17 @@ impl ReviewService {
         &self,
         input: crate::notes::NotePatch,
         session: SessionId,
+        expected: Option<crate::Generation>,
     ) -> Result<crate::OpResult<crate::notes::Updated>, EngineError> {
         let _control = self.control.try_acquire()?;
         let (c, journal) = self.bound()?;
+        // The editor's generation (`editor/field-html` S2), checked on the
+        // collection this op runs on.
+        if let Some(planned) = expected {
+            if c.generation() != planned {
+                return Err(EngineError::StaleGeneration { planned, current: c.generation() });
+            }
+        }
         journal.check(c.generation())?;
         {
             let mut state = self.inner.state.lock().unwrap();

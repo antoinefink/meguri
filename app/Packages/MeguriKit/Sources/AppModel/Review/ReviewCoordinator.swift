@@ -407,6 +407,8 @@ public final class ReviewCoordinator {
                 // the op committed and only showing the next card failed, that
                 // card shows on its question side (A4).
                 notice = String(describing: error)
+                // A committed action is a new step even when its card could not show.
+                if acted { record.undone.removeAll() }
                 let intent = restorationIntent
                 refreshPending = false; forceQuestion = false
                 do { try await apply(client.head(sessionID: sessionID), question: acted, intent: intent) }

@@ -172,8 +172,13 @@ public final class EditNoteFlow {
         if opening { finish(saved: false); return true }
         guardingClose = true
         let work = Task { () -> Bool in
-            _ = await saveTask?.value
-            await reloadTask?.value
+            // A save may start a reload as it ends: wait until neither runs.
+            while saveTask != nil || reloadTask != nil {
+                _ = await saveTask?.value
+                await reloadTask?.value
+                // Let a finished save clear its task before looking again.
+                await Task.yield()
+            }
             guard isPresented, let draft, let host = runtime else { return true }
             let expected = epoch
             // The page's pending input counts as a change; a failed flush keeps it unknown.
@@ -267,6 +272,7 @@ public final class EditNoteFlow {
                     try? await host.release(); held = false
                 } catch {
                     if held, runtime === host { try? await host.release() }
+                    held = false
                     guard epoch == expected else { break }
                     if case .noteNotFound = error as? BridgeError { noteDeleted(droppingChanges: draft.hasChanges); break }
                     self.error = String(describing: error)
