@@ -70,6 +70,30 @@ public struct UpdateNoteRequest: Sendable, Hashable {
     var raw: MeguriCoreBindings.UpdateNoteRequest { .init(id: id, fields: fields, tags: tags) }
 }
 
+/// `editor/field-html` S2: the note type and field layout as the editor
+/// loaded them, the (ordinal, value) pairs it changed and the whole tag list
+/// only when it changed. Core refuses with `noteNotFound`, `stale` or
+/// `invalidArgument` and then writes nothing.
+public struct NoteFieldPatch: Sendable, Hashable {
+    public let id: Int64
+    public let notetype: NotetypeRecord
+    public let fields: [Int: String]
+    public let tags: [String]?
+    public init(id: Int64, notetype: NotetypeRecord, fields: [Int: String], tags: [String]? = nil) {
+        self.id = id
+        self.notetype = notetype
+        self.fields = fields
+        self.tags = tags
+    }
+    var isEmpty: Bool { fields.isEmpty && tags == nil }
+    var raw: MeguriCoreBindings.NotePatchRequest {
+        .init(id: id, notetypeId: notetype.id,
+              fieldLayout: notetype.fields.map { .init(ord: $0.ord, id: $0.id, name: $0.name) },
+              fields: fields.sorted { $0.key < $1.key }.map { .init(ord: UInt32($0.key), html: $0.value) },
+              tags: tags)
+    }
+}
+
 public struct NoteMutation: Sendable, Hashable {
     public let summary: MutationSummary
     public let id: Int64
@@ -177,6 +201,8 @@ public protocol NoteService: Sendable {
     func addNote(_ request: AddNoteRequest) async throws(BridgeError) -> NoteMutation
     func addNoteForScreen(_ request: AddScreenNoteRequest) async throws(BridgeError) -> NoteMutation
     func updateNote(_ request: UpdateNoteRequest) async throws(BridgeError) -> NoteMutation
+    func patchNote(_ request: NoteFieldPatch) async throws(BridgeError) -> NoteMutation
+    func cardDeck(cardId: Int64) async throws(BridgeError) -> Int64
     func readNote(id: Int64) async throws(BridgeError) -> NoteRecord
     func checkNoteFields(notetypeId: Int64, fields: [String], ownNote: Int64?) async throws(BridgeError) -> FieldCheck
     func startDeleteNotes(ids: [Int64]) async throws(BridgeError) -> CoreNoteDeletionJob
@@ -196,6 +222,15 @@ public actor CoreNoteService: NoteService {
     }
     public func updateNote(_ request: UpdateNoteRequest) async throws(BridgeError) -> NoteMutation {
         try await InteractiveLane.shared.call(.updateNote) { NoteMutation(try MeguriCoreBindings.updateNote(request: request.raw)) }
+    }
+    /// The editor's field patch: the same op and "Update Note" step as
+    /// `updateNote`, on the interactive queue.
+    public func patchNote(_ request: NoteFieldPatch) async throws(BridgeError) -> NoteMutation {
+        try await InteractiveLane.shared.call(.patchNote) { NoteMutation(try MeguriCoreBindings.patchNote(request: request.raw)) }
+    }
+    /// The deck the card is in now.
+    public func cardDeck(cardId: Int64) async throws(BridgeError) -> Int64 {
+        try await QueryLane.shared.call(.cardDeck) { try MeguriCoreBindings.cardDeck(cardId: cardId) }
     }
     public func readNote(id: Int64) async throws(BridgeError) -> NoteRecord {
         try await QueryLane.shared.call(.readNote) { NoteRecord(try MeguriCoreBindings.readNote(id: id)) }

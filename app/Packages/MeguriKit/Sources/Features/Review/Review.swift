@@ -3,14 +3,27 @@ import CoreBridge
 import DesignSystem
 import SwiftUI
 
+/// Edit Note's touch entry and the form it presents (N20.8). The shell
+/// supplies the form, so this module does not depend on the editor.
+public struct ReviewEditNote {
+    public let flow: EditNoteFlow
+    public let open: () -> Void
+    public let form: AnyView
+    public init(flow: EditNoteFlow, open: @escaping () -> Void, form: AnyView) {
+        self.flow = flow; self.open = open; self.form = form
+    }
+}
+
 public struct ReviewView: View {
     public let model: ReviewCoordinator
     public let close: () -> Void
     public let status: AnyView?
+    public let editNote: ReviewEditNote?
     public let visibilityChanged: (Bool) -> Void
     @Environment(\.colorScheme) private var colorScheme
-    public init(model: ReviewCoordinator, status: AnyView? = nil, visibilityChanged: @escaping (Bool) -> Void = { _ in }, close: @escaping () -> Void) {
-        self.status = status
+    public init(model: ReviewCoordinator, status: AnyView? = nil, editNote: ReviewEditNote? = nil,
+                visibilityChanged: @escaping (Bool) -> Void = { _ in }, close: @escaping () -> Void) {
+        self.status = status; self.editNote = editNote
         self.model = model; self.visibilityChanged = visibilityChanged; self.close = close
     }
     public var body: some View {
@@ -19,7 +32,7 @@ public struct ReviewView: View {
             phase: model.phase, states: model.item?.nextStates, enabled: !model.paused,
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
             reveal: model.reveal, rate: model.rate,
-            status: status) {
+            status: status, canEditNote: editNote?.flow.canOpen ?? false, editNote: { editNote?.open() }) {
             ZStack {
                 if let pair = model.pair {
                     #if os(macOS)
@@ -36,6 +49,9 @@ public struct ReviewView: View {
                 stateContent
             }
         }
+        #if os(iOS)
+        .modifier(ReviewEditNotePresentation(editNote: editNote))
+        #endif
         .onAppear { visibilityChanged(true) }
         .onDisappear { visibilityChanged(false) }
         .task { await appearance() }
@@ -145,6 +161,8 @@ struct ReviewLayout<Card: View>: View {
     let reveal: () -> Void
     let rate: (ReviewRating) -> Void
     var status: AnyView? = nil
+    var canEditNote = false
+    var editNote: () -> Void = {}
     @State private var noticeContentHeight: CGFloat?
     @ViewBuilder let card: () -> Card
     var body: some View {
@@ -228,6 +246,13 @@ struct ReviewLayout<Card: View>: View {
                         .help(Text("Redo Answer", bundle: .module))
                         .accessibilityIdentifier("review.session.redo")
                     }
+                    // N20.8: after Undo and Redo, before the sync status.
+                    Button(action: editNote) {
+                        Label { Text("Edit Note", bundle: .module) } icon: { Image(systemName: "pencil") }
+                    }
+                    .disabled(!canEditNote)
+                    .help(Text("Edit Note", bundle: .module))
+                    .accessibilityIdentifier("review.session.editNote")
                 }
                 if let status {
                     ToolbarItem(placement: .primaryAction) { status }
@@ -285,6 +310,28 @@ struct ReviewLayout<Card: View>: View {
         #endif
     }
 }
+
+#if os(iOS)
+/// Edit Note's form as Add Note's is placed (N17.1): a sheet, or the whole
+/// screen on an iPhone at regular width. A fold moves the same draft and
+/// page to the other presentation; the swipe down asks as Cancel does.
+private struct ReviewEditNotePresentation: ViewModifier {
+    let editNote: ReviewEditNote?
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var coversScreen: Bool {
+        AddNotePresentation.coversScreen(phone: UIDevice.current.userInterfaceIdiom == .phone, regularWidth: sizeClass == .regular)
+    }
+    private func shown(cover: Bool) -> Binding<Bool> {
+        Binding(get: { editNote?.flow.isPresented == true && coversScreen == cover },
+                set: { if !$0, coversScreen == cover, let flow = editNote?.flow, flow.isPresented { Task { await flow.requestCancel() } } })
+    }
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: shown(cover: false)) { editNote?.form }
+            .fullScreenCover(isPresented: shown(cover: true)) { editNote?.form }
+    }
+}
+#endif
 
 /// The session's progress as a thin grey system bar: no text, no accent
 /// colour, and not a control (N16.1).

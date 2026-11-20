@@ -91,6 +91,16 @@
         }
       }
     },
+    "Edit Note": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit Note"
+          }
+        }
+      }
+    },
     "Preparing review…": {
       "localizations": {
         "en": {

@@ -17,8 +17,9 @@ public enum ReviewInputOwnership {
         guard let pair = model.pair, let pages = model.surface as? ReviewPages,
               pages.presenter.isAvailable else { return false }
         let repeated = NSApp.currentEvent.map { $0.type == .keyDown && $0.isARepeat } ?? false
+        // An open Edit Note form owns the keys like a sheet (N11.1).
         return admits(cardFocused: cardFocused(in: pair.current.webView), editing: model.surface.editing,
-            paused: model.paused, repeated: repeated)
+            paused: model.paused || model.editingNote, repeated: repeated)
     }
     #endif
     static func contains(_ view: CardPlatformView, in container: CardPlatformView) -> Bool {
