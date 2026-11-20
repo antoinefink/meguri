@@ -397,7 +397,10 @@ pub(crate) fn classify(base: Notetype, saved: Notetype, shape: Shape) -> Layout 
         .map(position)
         .filter(|o| !shape.field_origins.contains(&Some(*o)))
         .collect();
-    let fronts_changed = saved.templates.len() != base.templates.len()
+    // S2: a template added, even at the same count with an equal front, or
+    // the fronts by position differ.
+    let fronts_changed = shape.fresh_templates.iter().any(|fresh| *fresh)
+        || saved.templates.len() != base.templates.len()
         || saved
             .templates
             .iter()
@@ -427,7 +430,12 @@ pub(crate) fn classify(base: Notetype, saved: Notetype, shape: Shape) -> Layout 
         })
         .collect();
     let digest = AggregateDigest::of(&base);
+    // A save whose origins move, add or remove parts writes even when its
+    // rows read as the base's (legacy parts without ids and equal options).
     let changed = shape.fresh_fields.iter().chain(&shape.fresh_templates).any(|f| *f)
+        || fields_changed
+        || templates_changed
+        || sort_changed
         || AggregateDigest::of(&saved) != digest;
     Layout {
         report_layout: fields_changed || templates_changed || sort_changed || fields_renamed || templates_renamed,

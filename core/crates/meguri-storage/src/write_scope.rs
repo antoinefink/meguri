@@ -350,6 +350,17 @@ impl<'c> WriteScope<'c> {
         self.put_cells(Table::Cards, image, false)
     }
 
+    /// Renumber a card (`notetypes/structure-changes` S6 step 2): only `ord`
+    /// changes, with the scope's stamps; every other stored column keeps its
+    /// value as stored, imported oddities included.
+    pub fn put_card_ord(&mut self, id: CardId, ord: u16) -> Result<Written, StorageError> {
+        let Some(mut image) = rows::select_image(self.conn, Table::Cards, &RowKey::Id(id.0))? else {
+            return Ok(Written::Unchanged);
+        };
+        image[3] = Cell::Integer(i64::from(ord));
+        self.put_cells(Table::Cards, image, false)
+    }
+
     /// M4's memory-only update. Read once, compare as stored, and name only
     /// data/stamps in UPDATE so unrelated scheduling indexes stay untouched.
     /// Journal the exact before-image and the actual stored after-image.

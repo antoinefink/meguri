@@ -13,7 +13,7 @@ use super::plan::{self, CardOutcome, Layout, Planned};
 use super::{StructureSaved, stale};
 use crate::cardgen::regenerate;
 use crate::executor::op::OpContext;
-use crate::notetypes::{AggregateDigest, random_id, rename};
+use crate::notetypes::{AggregateDigest, random_id, read, rename};
 use crate::{CancelToken, EngineError, ProgressSink};
 
 /// Notes written per page.
@@ -37,14 +37,23 @@ pub(crate) fn commit(ctx: &mut OpContext<'_, '_>, planned: &Planned) -> Result<S
 
 /// The checks of the write phase, on the rows of its own transaction and
 /// before its first write: the base token (S1.2 item 1, `engine/op-model`
-/// O7), then the notes' value counts (item 4: a note added since planning
-/// counts). A precondition on the live rows that must hold for the save to
-/// write anything goes after the base token check, here.
+/// O7), the saved name's uniqueness among the live note types (N4 step 7
+/// was planned on the snapshot), then the notes' value counts (item 4: a
+/// note added since planning counts). A precondition on the live rows that
+/// must hold for the save to write anything goes after the base token
+/// check, here.
 pub(crate) fn check_live(scope: &WriteScope<'_>, layout: &Layout) -> Result<(), EngineError> {
     let id = layout.base.id;
     let live = scope.notetype(id)?.ok_or_else(|| stale(id))?;
     if AggregateDigest::of(&live) != layout.digest {
         return Err(stale(id));
+    }
+    let name = meguri_text::fold::folded(&layout.saved.name);
+    for (other, other_name) in read::names(scope)? {
+        if other != id && meguri_text::fold::folded(&other_name) == name {
+            // Another note type took the name while this save planned.
+            return Err(stale(other));
+        }
     }
     plan::check_note_values(scope, layout, &CancelToken::new(), &ProgressSink::new())
 }
@@ -147,9 +156,9 @@ fn rewrite_cards(scope: &mut WriteScope<'_>, layout: &Layout) -> Result<(u64, u6
             }
             for card in &cards {
                 if let CardOutcome::Move(to) = layout.cards.outcome_of(card.ord) {
-                    let mut card = card.clone();
-                    card.ord = to;
-                    scope.put(&card)?;
+                    // Only `ord` and the stamps change (S6 step 2): the stored
+                    // image is edited, never rebuilt from the typed card.
+                    scope.put_card_ord(card.id, to)?;
                     renumbered += 1;
                 }
             }

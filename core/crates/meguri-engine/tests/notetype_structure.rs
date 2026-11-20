@@ -285,11 +285,13 @@ fn stale_before_planning_and_during_the_backup() {
         styled.config.css = "y".into();
         notetypes::save(c, styled, notetypes::SaveOptions::default()).unwrap();
     });
-    let before_fields = read(&h, id).fields.len();
+    let before = state(&h, id);
     assert!(matches!(run(&h, current).unwrap_err(), EngineError::Stale { .. }));
     assert_eq!(backups.calls(), 1, "one backup, no replan");
+    let after = state(&h, id);
+    assert_eq!((&after.notes, &after.cards, after.graves, after.scm), (&before.notes, &before.cards, before.graves, before.scm));
     let nt = read(&h, id);
-    assert_eq!(nt.fields.len(), before_fields);
+    assert_eq!(nt.fields.len(), 3);
     assert_eq!(nt.config.css, "y");
 }
 
@@ -673,4 +675,155 @@ fn a_schema_change_commits_without_a_confirmation() {
     assert!(col.schema_modified.0 > col.last_sync.0);
     let reader = h.collection.reader(ReaderRole::Query).unwrap();
     assert!(reader.grave(0, GraveKind::Card).unwrap().is_none());
+}
+
+fn template(name: &str, front: &str) -> DraftTemplate {
+    DraftTemplate {
+        origin: None,
+        name: name.into(),
+        front: front.into(),
+        back: String::new(),
+        browser_front: String::new(),
+        browser_back: String::new(),
+        deck: 0,
+        browser_font_name: String::new(),
+        browser_font_size: 0,
+    }
+}
+
+/// S2, S6 row 4, S7: a template removed and a new one with the same front
+/// added at its position is a template added: its cards are generated.
+#[test]
+fn a_template_re_added_with_the_same_front_generates_its_cards() {
+    let (h, _) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    add(&h, id, &["c", "d", ""]);
+    let mut draft = draft(&h, id);
+    without_template(&mut draft, "Reverse");
+    draft.templates.push(template("Reverse again", "{{Back}}"));
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!((saved.cards_removed, saved.cards_added), (2, 2));
+    let after = state(&h, id);
+    assert_eq!(after.cards.iter().filter(|c| c.2 == 1).count(), 2);
+    assert_eq!(after.graves, 2);
+}
+
+/// S6 step 2: a renumbered card changes only its `ord` and stamps; its
+/// other stored columns stay as stored, even ones a typed card would
+/// rewrite.
+#[test]
+fn renumbering_keeps_every_other_stored_column() {
+    let (h, _) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    let card = {
+        let reader = h.collection.reader(ReaderRole::Query).unwrap();
+        let note = reader.notetype_notes_after(id, None, 10).unwrap().remove(0);
+        reader.cards_of_note(note.id).unwrap().into_iter().find(|c| c.ord == 1).unwrap().id
+    };
+    let key = meguri_storage::RowKey::Id(card.0);
+    h.collection
+        .run(
+            OpSpec::named("seed odd data", OpSource::UserNonUndoable)
+                .skip_undo()
+                .stamp(StampMode::Raw),
+            move |ctx| {
+                let mut image = ctx.scope().row_image(meguri_storage::Table::Cards, &key)?.unwrap();
+                image[17] = meguri_storage::Cell::text("not json");
+                ctx.scope().restore(meguri_storage::Table::Cards, &key, Some(&image))?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let image = |h: &Harness| {
+        h.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .row_image(meguri_storage::Table::Cards, &meguri_storage::RowKey::Id(card.0))
+            .unwrap()
+            .unwrap()
+    };
+    let before = image(&h);
+    let mut draft = draft(&h, id);
+    draft.templates.swap(0, 1);
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!(saved.cards_renumbered, 2);
+    let after = image(&h);
+    assert_eq!(after[3], meguri_storage::Cell::Integer(0));
+    for column in (0..after.len()).filter(|c| ![3, 4, 5].contains(c)) {
+        assert_eq!(after[column], before[column], "column {column}");
+    }
+}
+
+/// S5, S13: a save that rewrites every note is one step; undo gives back
+/// each note's values and stamps, redo the rewritten ones.
+#[test]
+fn undo_and_redo_of_a_note_rewrite() {
+    let (h, _) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", "x"]);
+    add(&h, id, &["c", "", "y"]);
+    h.clock.step_ms(60_000);
+    let before = state(&h, id);
+    let mut draft = draft(&h, id);
+    let extra = draft.fields.remove(2);
+    draft.fields.insert(0, extra);
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!(saved.notes_rewritten, 2);
+    let after = state(&h, id);
+    assert!(after.notes.iter().any(|n| n.1 == "x\u{1f}a\u{1f}b"));
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(state(&h, id), before);
+    h.collection.redo(UndoScope::Global).unwrap();
+    let redone = state(&h, id);
+    assert_eq!((redone.notes, redone.scm), (after.notes, after.scm));
+}
+
+/// S5 (O7 re-derivation): a field edit committed while the save planned
+/// survives, moved to its field's new position.
+#[test]
+fn a_field_edit_during_planning_survives_at_its_new_position() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    let nid = add(&h, id, &["a", "b", "x"]);
+    let mut draft = draft(&h, id);
+    draft.fields.swap(0, 2);
+    backups.then(move |c| {
+        notes::update::update(
+            c,
+            notes::update::UpdateNote {
+                id: nid,
+                fields: vec!["edited".into(), "b".into(), "x".into()],
+                tags: Vec::new(),
+            },
+            OpSource::UserUndoable,
+        )
+        .unwrap();
+    });
+    run(&h, draft).unwrap();
+    let note = h.collection.reader(ReaderRole::Query).unwrap().note(nid).unwrap().unwrap();
+    assert_eq!(note.fields, "x\u{1f}b\u{1f}edited");
+}
+
+/// N4 step 7 on the live rows: another note type that took the draft's new
+/// name while the save backed up makes it `Stale`, nothing written.
+#[test]
+fn a_name_taken_during_the_backup_is_stale() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    let mut draft = draft(&h, id);
+    draft.name = "Renamed".into();
+    draft.fields.swap(0, 1);
+    backups.then(|c| {
+        let reader = c.reader(ReaderRole::Query).unwrap();
+        let mut other = notetypes::Draft::of(notetypes::read::by_name(&*reader, "Basic").unwrap().unwrap());
+        drop(reader);
+        other.name = "renamed".into();
+        notetypes::save(c, other, notetypes::SaveOptions::default()).unwrap();
+    });
+    let before = state(&h, id);
+    assert!(matches!(run(&h, draft).unwrap_err(), EngineError::Stale { .. }));
+    assert_eq!(state(&h, id), before);
 }
