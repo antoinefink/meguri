@@ -848,7 +848,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `ho
 ### N21.2 The search field (2A)
 
 - In the window toolbar, after the title and the Cards / Notes control (N21.3), as wide as the toolbar allows; on touch at the top of the list.
-- Tokens are system search tokens (`searchable` with tokens), each the kind label in the secondary style then the values; an **is not** token adds "is not" after the kind; an advanced token is grey and shows its text. A flag value shows its colour dot.
+- Tokens are system search tokens (`searchable` with tokens) where the system's token view supports a token menu and the keys of T10; if it does not, the token view is a custom view, recorded as this screen's exception (need: T10's per-token menu and ⌘-click; verified against the system field's look in the VM screenshots). Each token shows the kind label in the secondary style then the values; an **is not** token adds "is not" after the kind; an advanced token is grey and shows its text. A flag value shows its colour dot.
 - Suggestions are the system's search suggestions list, in sections (T12), each row with its symbol, label, secondary detail and trailing count.
 - No syntax mode, no syntax reference, no error line: the field never shows Anki syntax errors (T5). The prompt is "Search".
 - Esc closes the suggestions, then empties the query. The field's clear button empties it.
@@ -869,7 +869,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `ho
 ### N21.5 Several rows selected (7A)
 
 - The inspector shows a title ("12 Cards Selected"), one secondary line (V7), then the commands as plain buttons in one column, each with its key at the trailing edge, Delete last in red. No toolbar change.
-- The row context menu holds the same commands with their keys, grouped: [Change Deck…, Add Tags…, Remove Tags…] | [Flag ▸, Suspend, Unsuspend, Bury, Unbury] | [Set Due Date…, Forget…] | [Change Note Type…, Find and Replace…] | [Delete].
+- The row context menu holds the same commands with their keys, grouped: [Change Deck…, Add Tags…, Remove Tags…] | [Flag ▸, Suspend, Unsuspend, Bury, Unbury] | [Set Due Date…, Forget…] | [Change Note Type…, Edit Note Type…] | [Find and Replace…, Find Duplicates…] | [Delete].
 
 ### N21.6 Sheets
 
@@ -908,7 +908,7 @@ Round 6's menu bar (N20.4) gains a **Note** menu between Deck and Card, and thes
 | Card | Bury Card(s), Unbury, Suspend Card(s), Unsuspend | ⌘J, none, ⇧⌘J, none (round 7's keys) |
 | Card | Set Due Date…, Forget… | ⇧⌘D, ⌥⌘N |
 
-- The Deck menu's items are disabled while Browse is shown: Browse's deck rows are filters, not the shown deck. So ⌘⌫ is Delete Note there, never Delete Deck.
+- The Deck menu's items are disabled while Browse or Note Types is shown: Browse's deck rows are filters, not the shown deck. So ⌘⌫ is Delete Note in Browse and the focused list's Delete in Note Types, never Delete Deck.
 - Card Info stays ⌥⌘I (R1226), not ⌘I, which is Italic while a field has focus.
 - Separators: Note after Edit Note, Remove Tags… and Edit Note Type…; Card after Show in Browse, Flag, Unsuspend and Forget….
 
@@ -921,14 +921,14 @@ Round 6's menu bar (N20.4) gains a **Note** menu between Deck and Card, and thes
 
 ### N21.10 iPhone and the Duo folded (10A)
 
-- The Browse tab's navigation bar: the inline title Browse, then Filters (`line.3.horizontal.decrease`) and the Add menu as one glass group. The search field under it, with tokens.
+- The Browse tab's navigation bar: the inline title Browse, then the Filters menu (`line.3.horizontal.decrease`: Filters…, Select, Note Types) and the Add menu as one glass group. The search field under it, with tokens.
 - The list is an inset grouped list of two-line rows (V14.3), the count in its footer. Swipes and the context menu as V14.3.
 - Filters is a sheet (Clear, Filters, Done) with Cards / Notes at its top, Sort By, Saved Searches and Filter By rows.
 - A tap pushes round 7's Edit Note form; its More menu holds Preview, Card Info, the card's commands and Delete Note.
 
 ### N21.11 What this replaces
 
-R1076, R1086, R1090, R1093 (canonical text, syntax mode and reference: dropped; pasted Anki syntax is still read), R1131 (middle-cut deck names), R1168 (a sidebar click replaces the whole search: it now replaces only its kind), R1193 and R1228 (Suspend toggle and its keys: two commands with round 7's keys), R1212 (Delete never asks: it asks for more than one note), R1234 (iPhone chips: suggestions and a Filters sheet), and the earlier Browse text of `screen-inventory.yaml` `browse.browser`. Each requirement carries its note in the plan.
+R1076, R1086, R1090, R1093 (canonical text, syntax mode and reference: dropped; pasted Anki syntax is still read), R1131 (middle-cut deck names), R1168 (a sidebar click replaces the whole search: it now replaces only its kind), R1193 and R1228 (Suspend toggle and its keys: two commands with round 7's keys), R1212 (Delete never asks: it asks when more than one note goes or the one note has more than one card), R1234 (iPhone chips: suggestions and a Filters sheet), and the earlier Browse text of `screen-inventory.yaml` `browse.browser`. Each requirement carries its note in the plan.
 
 ## N22. Round 9: Note Types (2026-11-20)
 

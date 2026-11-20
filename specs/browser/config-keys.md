@@ -4,7 +4,7 @@ Spec: browser/config-keys
 Requirements: R1115, R1134, R1135, R1137, R1138, R1141, R1265, R1266, R1267, R1038, R1196, R1198; supports R42, R366, R725, R1037, R1112, R1133, R1139, R1146, R1157, R1171, R1172, R1173, R1218, R2020
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/config/
-Status: Under review (round 8, `docs/design/decisions.md` 2026-11-20, row `browser`) for the lines that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of K4, K6.2, K11 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 Browse, its sidebar, the previewer, Settings › Browse and the search engine keep their synced settings in collection config keys (`storage/config-table`). Meguri reads and writes them with Anki's names and JSON shapes, so Anki clients and Meguri share them through sync. This file gives, for each key, its shape, its default, how a stored value is read, and what each user action writes. Stamping and the compact form are `storage/config-table` C4 and C5.
 
@@ -304,6 +304,8 @@ The undo classes are U25's. The plan reads R42 with R366 and R725 this way, and 
 - The first row differs from Anki, whose browser keeps the user's undo steps across sort, column, mode, section and previewer changes. The plan lists this among its deferred product decisions ("Expand and collapse writes and undo", under Open Questions). Its default is the table above: the `collapse*` keys, like the other writes in the row, clear the history. Its alternative puts the row in the current-deck selection's skip-undo class (R42): no entry, the undo steps kept and the redo history emptied, as in Anki (`engine/undo` M2). If the alternative is chosen, only the row's undo class changes. The stored values, the change reports and the K13 tests that are not about undo stay the same.
 
 ## K11. Device-only Browse state
+
+Changed 2026-11-20 (round 8): there is no syntax mode. Device-only Browse state also holds: column widths per column set and mode (`browser/workspace` V2.3), the sidebar's section folding and its Show All choice (V6), the open state of the inspector's empty-fields row per note type (V12), whether the inspector's preview is folded (V12), the kept query, selection and scroll while the app runs (V1), and Find and Replace's Match Case, Whole Words and Regular Expression (V9).
 
 Column widths (per device and mode, R1136), row density (R1151), the inspector position, whether the inspector is collapsed and which of its tabs it shows (`browser/inspector` I8), the search field's syntax mode, recent searches (Browse's one search history: 30 entries, newest first, an equal entry moved to the front, `browser/entry-points` E6) and the accepted-suggestion list of `search/editing-services` D6.1 stay on the device (KTD12, U210): never in the collection, never synced. Settings › Browse shows them next to the two synced settings of K6.4 and K6.5 (R1267).
 

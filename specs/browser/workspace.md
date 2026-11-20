@@ -1,10 +1,10 @@
 # Browse workspace (round 8)
 
 Spec: browser/workspace
-Requirements: R1080, R1111, R1115 to R1117, R1132 to R1136, R1139 to R1145, R1152 to R1156, R1181 to R1187, R1190, R1193 to R1198, R1200 to R1207, R1212, R1221 to R1224, R1232, R1233, R1235 to R1240, R1241 to R1247, R1825 to R1832; supersedes in part R1131, R1134, R1135, R1157, R1184, R1193, R1212, R1222, R1226 to R1228, R1234 (each noted in the plan)
+Requirements: R1080, R1111, R1115 to R1117, R1132 to R1136, R1139 to R1145, R1152 to R1156, R1181 to R1187, R1190, R1193 to R1198, R1200 to R1207, R1212, R1221 to R1224, R1232, R1233, R1235 to R1240, R1241 to R1247, R1825 to R1832; supersedes in part R1131, R1134, R1135, R1157, R1184, R1193, R1212, R1222, R1226 to R1228, R1234 (the Browse and Note Types plan §5 lists the notes)
 Anki: none (Meguri design, decided by Antoine 2026-11-20, round 8: 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A); the operations it calls keep their own specs and Anki behaviour
 Scenarios: none; tests named in V18
-Status: Under review (round 8, `docs/design/decisions.md` 2026-11-20, rows `browser` and `home.deckList`). Do not implement until approved.
+Status: Under review (R1232; round 8, decided 2026-11-20, `docs/design/decisions.md` rows `browser` and `home.deckList`). Do not implement until approved.
 
 The behaviour of Browse as round 8 decided it: columns and column sets, field columns, the deck and date cells, selection, the commands and when they ask, Find and Replace's preview and scope, Find Duplicates, the status line, the inspector's two tabs, the touch layouts' list, Select mode and swipes, the entry points, and the speed budgets. Layout and presentation are `docs/design/native-interface-contract.md` N21; the search field and the sidebar's meaning are `search/filter-tokens`. Where an older `browser/*` section differs, this file wins and that section carries a "Changed 2026-11-20" note.
 
@@ -24,7 +24,7 @@ The behaviour of Browse as round 8 decided it: columns and column sets, field co
 ### V2.2 Which set is shown
 
 - The **standard set** is used for every list, except: when the query has a Note Type token with exactly one value, set to **is**, the table uses that note type's **own set**.
-- Each set has one column list per mode. A note type's own set starts, when first shown, as a copy of the standard set of that mode; nothing changes on screen until the user changes it.
+- Each set has one column list per mode. A note type has no own set until the user first changes the columns or the sort while that note type's set is in use: until then the standard set is used, live. The first such change writes the own set as a copy of the standard set with the change applied; from then on the two are separate.
 - The status line's trailing menu names the set ("Standard Columns", "<note type name> Columns") and offers Use Standard Columns (shown in an own set: the note type's set is reset to a copy of the standard set) and Edit Note Type… (in an own set; it opens Note Types on that type, `notetypes/workspace` W14).
 
 ### V2.3 Columns
@@ -37,11 +37,11 @@ The behaviour of Browse as round 8 decided it: columns and column sets, field co
 ### V2.4 Where sets are stored
 
 - One synced collection config key, `meguriBrowserColumnSets` (`storage/config-table` C8): a JSON object. Member `std` is the standard set; member `<note type id in decimal>` is that note type's own set. Each set is an object with members `cards` and `notes` (arrays of column keys, V2.3) and `sort` (V4.3). A missing member reads as its default (V2.3); a member of another shape reads as missing and is replaced at the next write of that set; members Meguri does not know are kept.
-- A write changes only the set it concerns, through `storage/config-table` C4, and only on a user change (R1138): showing, hiding or moving a column, changing the sort, Use Standard Columns. Undo class: the first row of `browser/config-keys` K10.2 (non-undoable, as the Anki column keys).
+- A write changes only the set it concerns, through `storage/config-table` C4, and only on a user change (R1138): showing, hiding or moving a column, changing the sort, Use Standard Columns. Undo class: the current-deck selection's skip-undo class (R42, `engine/undo` M2; the alternative `browser/config-keys` K10.2 describes): a write records no undo step, keeps the undo steps and empties the redo history, so changing a column never removes "Undo Suspend Cards". This differs from K10.2's first row on purpose: these writes are frequent display choices.
 - Meguri never reads or writes `activeCols`, `activeNoteCols`, `sortType`, `sortBackwards`, `noteSortType` or `browserNoteSortBackwards` from Browse: other Anki clients keep their own columns and sort (supersedes R1134, R1135, R1141 for Meguri's display; `browser/config-keys` K4 and K5 stay the definition of those keys).
 - A set whose note type no longer exists is ignored and kept as it is (no op removes it; a later note type never reuses the id).
 
-Example: `{"std":{"cards":["noteFld","template","deck","cardDue","cardMod"],"sort":{"cards":["noteFld",false]}},"1700000000001":{"notes":["fld:Word","fld:Back","fld:Notes Field","fld:Word Audio","fld:Image","deck","cardDue"]}}`.
+Example: `{"std":{"cards":["noteFld","template","deck","cardDue","cardMod"],"sort":{"cards":["noteFld",false]}},"1700000000001":{"notes":["fld:Front","fld:Back","fld:Extra","deck","cardDue"]}}`.
 
 ### V2.5 The state column
 
@@ -67,7 +67,7 @@ For `fld:f`, rows compare by, in order:
 
 1. rows whose note type has field f before rows whose note type has none;
 2. among those, non-empty values before empty ones (`text/field-emptiness` E1);
-3. non-empty values: when both values, after V3's HTML removal and trimming, read as decimal numbers (an optional `-`, digits, an optional `.` and digits), numerically; a number before a text; texts by the `unicase` comparison (`text/unicode-primitives` U2), then by code point;
+3. non-empty values: when both values, after V3's HTML removal and trimming, match `^-?[0-9]+(\.[0-9]+)?$` (ASCII digits; so `5.` and `.5` are texts), as binary64 numbers, numerically (equal numbers then by text); a number before a text; texts by the `unicase` comparison (`text/unicode-primitives` U2), then by code point;
 4. then the S8 final key (card id or note id), so the order is total.
 
 Reversing reverses the whole order (rows without the field come first). The key reads stored values, as the other keys do (`browser/sorting` S2). Budget: R1828 (V17).
@@ -135,12 +135,12 @@ Targets are `browser/bulk-actions` B1's (card commands act on every card of a se
 
 - Suspend and Unsuspend are two commands (R1193 and B3's toggle are superseded for Browse; R1228's keys are superseded by round 7's: Bury ⌘J, Suspend ⇧⌘J). The same for Bury and Unbury. With a mix, both are shown.
 - Every command is in the row's context menu, in the Mac menus (N21.8) and, with several rows, in the inspector (V7). Disabled with no selection, except Find and Replace and Find Duplicates.
-- Not in this version: Grade Now, Reposition, Mark Note and Toggle Mark (flags cover marking), Export Notes, Create Copy, Edit Field (batch edit), Clear Unused Tags, Create Filtered Deck. R1192, R1199, R1208 to R1211, R1213, R1214 wait.
+- The first version's set is the table above: the actions round 8 question 7 drew and Antoine chose with "you can do all of them" (decision `browser`, "All bulk actions are in the first version"). The round 8 page listed these under "Later", and they are not in this table: Grade Now, Reposition, Mark Note (flags cover marking), Export Selected Notes, Create Copy, Edit Field across many notes, Clear Unused Tags, Create Filtered Deck (R1192, R1199, R1208 to R1211, R1213, R1214 wait). The plan lists this reading as an open point for Antoine.
 
 ### V8.2 When a command asks
 
 - Nothing asks for Change Deck, Add Tags, Remove Tags, Flag, Suspend, Unsuspend, Bury, Unbury or Set Due Date: each is one undo step. The sheets of Change Deck, Add and Remove Tags, Set Due Date and Forget collect input; they are not questions.
-- **Delete** asks when the target notes are more than one, or when the one target note has more than one card (in Cards mode, deleting a card's row deletes its note and its other cards). One note with one card is deleted at once (R1212's "no confirmation" stands only for that case). The question: title "Delete <n> Notes?" (n ≥ 2) or "Delete “<sort field>”?" (one note, its Sort Field cell text); message "Their <c> cards will also be deleted." or "Its <c> cards will also be deleted." (c the cards that go, c ≥ 2; for n ≥ 2 and c = n the message is left out); buttons as N20.7's (Mac: Cancel and Delete, Delete destructive, not the default; touch: Delete Notes / Delete Note destructive).
+- **Delete** asks when the target notes are more than one, or when the one target note has more than one card (in Cards mode, deleting a card's row deletes its note and its other cards). One note with one card is deleted at once (R1212's "no confirmation" stands only for that case). The question: title "Delete <n> Notes?" (n ≥ 2), or for one note "Delete “<sort field>”?" with its Sort Field cell text (cut to 40 characters with "…"; "Delete Note?" when that text is empty); message "Their <c> cards will also be deleted." or "Its <c> cards will also be deleted." (c the cards that go, c ≥ 2; for n ≥ 2 and c = n the message is left out); buttons as N20.7's (Mac: Cancel and Delete, Delete destructive, not the default; touch: Delete Notes / Delete Note destructive).
 - **Forget…** is a sheet with its two options and the line "Review history is kept."; its button is Forget.
 - **Find and Replace** asks nothing more: its preview is the question (V9).
 - **Change Note Type** asks in its sheet (N22.8).
@@ -155,19 +155,20 @@ Targets are `browser/bulk-actions` B1's (card commands act on every card of a se
 
 The sheet of `browser/find-replace` F2, changed:
 
-- **Rows**: Find; Replace With; In (a menu: All Fields, then the field names of the target notes' note types, grouped under each note type's name when there are several, then Tags); Notes (two choices: "<k> Selected", "All <m> Found"; Selected first and the default when there is a selection, disabled with none); options Match Case, Whole Words, Regular Expression.
+- **Rows**: Find; Replace With; In (a menu: All Fields, then the field names of the target notes' note types, grouped under each note type's name when there are several; a name chosen under one note type still replaces in every target note whose note type has a field of that name, F6; then Tags); Notes (two choices: "<k> Selected", "All <m> Found"; Selected first and the default when there is a selection, disabled with none); options Match Case, Whole Words, Regular Expression.
 - **Notes**: "Selected" is F8's selected notes. "All Found" is every note of the current results (the notes of all result rows), never notes outside them: it replaces F8's all-notes target, which this sheet no longer offers. m is that number of notes.
-- **Match Case** is F1's Ignore case inverted (off by default: case is ignored). **Whole Words** (new): the pattern matches only where neither the character before it nor the one after it is a word character (Unicode alphanumeric or `_`); built as `\b` before and after the pattern on the sides where the find text's first and last characters are word characters, and as `\b(?:` + pattern + `)\b` in regular-expression mode. The three options are remembered per device (F2). Find and Replace With histories stay F2's.
+- **Match Case** is F1's Ignore case inverted (off by default: case is ignored). **Whole Words** (new): word characters are those of the `regex` crate's Unicode `\w` class. In literal mode `\b` is put before the escaped text when its first character is a word character and after it when its last is; in regular-expression mode the pattern becomes `\b(?:` + pattern + `)\b` whatever it holds (the user's pattern decides its own edges). The built pattern then goes through F4. The three options are remembered per device (F2). Find and Replace With histories stay F2's.
 - **Preview** (replaces F10's count): as the user types, the core runs `find_replace_preview` (F10) on the target. It returns how many notes would change (F6 step 6: a match whose replacement gives back the stored value does not count) and, in result order, up to 100 of those notes, each with its Sort Field text, the name of the changed field (shown only with All Fields) and the new text with each removed and each inserted span marked. The sheet shows "<c> of <k> notes will change" above the list: removed text crossed out in red, inserted text in the accent colour; the list scrolls. While it runs it shows "Counting…"; an invalid pattern shows F10's inline error. With c = 0 it shows "No Matches" and the button is disabled.
 - **The button** reads "Replace in <c> Notes" ("Replace in 1 Note"); Cancel beside it; the line "Undo restores every note." at the bottom of the sheet.
 - **After**: the sheet closes, the rows update, Edit shows "Undo Find and Replace". No message (F9's message is superseded; VoiceOver announces "<c> notes changed").
-- Opens on the selection (Selected) when there is one, otherwise on All Found. Opened from a field token or a Field column header's menu, In starts on that field.
+- Opens on the selection (Selected) when there is one, otherwise on All Found; In starts on the remembered choice (F2).
+- **Preview entries**: one entry per changed (note, field) pair, in result order, then field order; Tags count as one field. Each shows the old and new stored values with HTML tags removed (`browser/columns` C7.1's rule) and the difference between the two texts marked by a character diff (the shortest edit script): characters only in the old text crossed out in red, characters only in the new text in the accent colour. The count c is of notes, not entries.
 
 ## V10. Find Duplicates
 
-- A small sheet: **Field** (a menu of every field name, grouped by note type; it starts on the Sort Field of the current row's note type), **Notes** ("All Notes" or "All <m> Found", like V9; All Notes the default), Cancel and Find.
-- Find runs the core's `find_duplicates(field name, target)`: for every target note whose note type has a field of that exact name, its **key** is the field value with HTML tags removed, character references decoded, White_Space runs collapsed to one space and trimmed, then simple case folding (`search/case-folding` C3). Notes with an empty key are left out. Notes with equal keys form a group; groups of two or more are the result.
-- The result replaces the query with one Duplicates token (`search/filter-tokens` T3: "Duplicates in <field>: <g> groups") whose built item is the note ids of every grouped note, switches to Notes mode, and sorts by the field (V4) with the field's column added to the shown set when it is not there (a display change, written as V2.4 says). Removing the token returns to the query Browse had before.
+- A small sheet: **Field** (a menu of every field name, grouped by note type; it starts on the Sort Field of the current row's note type; a name chosen under one note type matches that field name in every note type that has it, as Find and Replace does), **Notes** ("All Notes" or "All <m> Found", like V9; All Notes the default), Cancel and Find.
+- Find runs the core's `find_duplicates(field name, target)`: for every target note whose note type has a field of that exact name, its **key** is the field value with HTML removed as `dupe:` removes it (`search/names-and-ids#N6`, media file names kept), character references decoded, White_Space runs collapsed to one space and trimmed, then simple case folding (`search/case-folding` C3). Notes with an empty key are left out. Notes with equal keys form a group; groups of two or more are the result.
+- The result replaces the query with one Duplicates token (`search/filter-tokens` T3: "Duplicates in <field>: <g> groups") whose built item is the note ids of every grouped note, switches to Notes mode, and sorts by the field (V4) with the field's column shown while the token is present (display only: nothing is written to `meguriBrowserColumnSets`). Browse keeps the query it had before Find as the **previous query**; removing the Duplicates token restores it; any other change of the query drops it.
 - With no group: the sheet stays and says "No duplicates found."
 - Budget: 2 s over 150,000 notes, off the main thread, with progress and Cancel.
 
@@ -214,10 +215,10 @@ Right: the column set menu (V2.2): "Standard Columns" or "<note type name> Colum
 ### V14.3 iPhone and the Duo folded: the Browse tab
 
 - A third tab, Browse (`magnifyingglass`), between Decks and Settings (on the Duo, the middle symbol of the side tab bar).
-- The navigation bar: the title Browse, Filters (`line.3.horizontal.decrease`) and the Add menu. The search field with the same tokens and suggestions (`search/filter-tokens`).
+- The navigation bar: the title Browse, the Filters menu (`line.3.horizontal.decrease`: Filters…, which opens the Filters sheet; Select; Note Types, which pushes the Note Types list) and the Add menu. The search field with the same tokens and suggestions (`search/filter-tokens`).
 - **Rows**: two lines: the Sort Field text; under it, in the secondary colour, the answer (the Answer cell, `browser/columns` C10, computed for visible rows only) and the card type, joined with " · " (Notes mode: the note type and "<k> cards"); trailing, the due date (V5.2) with V2.5's symbol before it. A suspended row is grey.
 - **Filters sheet**: Clear and Done; Cards / Notes; Sort By (a menu of the sortable columns of the standard set and the direction); Saved Searches; Filter By, one row per kind of `search/filter-tokens` T3 with its current values ("Any" when none), each opening the list of its values with checks. What is chosen appears as tokens in the field, and tokens typed in the field show here (one query). R1234's chip row and R1236's Display menu are superseded.
-- **Swipe left** on a row: Suspend or Unsuspend, Flag, Delete (Delete follows V8.2: it asks when the note has more than one card); a full swipe does the first. **Touch and hold**: the row's menu (V8.1). **Select**: in the Filters button's menu, or the system's multiple-selection gesture; the bar of V14.2.
+- **Swipe left** on a row: Suspend or Unsuspend, Flag, Delete (Delete follows V8.2: it asks when the note has more than one card); a full swipe does the first. **Touch and hold**: the row's menu (V8.1). **Select**: in the Filters menu, or the system's multiple-selection gesture; the bar of V14.2.
 - **A tap** opens the note in the Edit Note form (round 7's form, N20.8), with the empty fields folded and audio as a player (V12's field rules); its More menu: Preview, Card Info, then the card's commands (Suspend Card or Unsuspend Card, Flag, Change Deck…), then Delete Note in red. Previous and next move through the results (R1238).
 
 ## V15. Entry points
@@ -246,16 +247,17 @@ New text unless marked. Plurals are String Catalog plural entries.
 | Fields, %lld More Fields, Standard, Size Columns to Fit | header menu |
 | %lld Cards Selected, %lld Notes Selected, %lld notes, %lld decks, %lld suspended, No Selection | V7 |
 | Change Deck…, Add Tags…, Remove Tags…, Flag, No Flag, Suspend Card(s), Unsuspend Card, Unsuspend %lld Cards, Bury Card(s), Unbury Card, Unbury %lld Cards, Set Due Date…, Forget…, Change Note Type…, Find and Replace…, Find Duplicates…, Delete Note, Delete %lld Notes…, Select Sibling Cards, Show in Browse, Browse Cards, Suspended Cards | V8, V15 (Suspend Card and Bury Card exist, `review/reviewer-strings` S18) |
-| Delete %lld Notes?, Delete “%@”?, Their %lld cards will also be deleted., Its %lld cards will also be deleted., Delete, Cancel | V8.2 |
+| Delete %lld Notes?, Delete “%@”?, Delete Note?, Their %lld cards will also be deleted., Its %lld cards will also be deleted., Delete, Delete Note, Delete Notes, Cancel | V8.2 |
 | Review history is kept., Forget, Restore original position where possible, Reset repetition and lapse counts | Forget sheet (the two option labels exist, `browser/browse-strings` W3) |
 | Find, Replace With, In, All Fields, Tags, Notes, %lld Selected, All %lld Found, All Notes, Match Case, Whole Words, Regular Expression, %1$lld of %2$lld notes will change, Counting…, No Matches, Replace in %lld Notes, Undo restores every note. | V9 |
 | Find Duplicates, Field, Find, No duplicates found., Duplicates in %@: %lld groups | V10 |
 | Note, Info, Show Both Sides, Card %1$lld of %2$lld, %lld Empty Fields, Deck, Type, Tags, Review History, Forgetting Curve | V12, V13 |
-| Select, Done, %lld Selected, Select All, Move, Tags, More, Filters, Clear, Sort By, Filter By, Any | V14 |
+| Select, Done, %lld Selected, Select All, Tags, More, Filters, Filters…, Note Types, Clear, Sort By, Filter By, Any | V14 |
+| No Cards, No Notes, Clear Search, Try Again | the empty and error states (`docs/design/screen-inventory.yaml` `browse.browser`) |
 | Undo %@ step names: Change Deck, Add Tags, Remove Tags, Flag, Suspend Card, Suspend Cards, Unsuspend Card, Unsuspend Cards, Bury Card, Bury Cards, Unbury Card, Unbury Cards, Set Due Date, Forget, Change Note Type, Find and Replace, Delete Note, Delete Notes, Edit Note | V8.3 |
 | %lld cards suspended (and the other results), %lld notes changed | VoiceOver announcements |
 
-## V17. Speed (150,000 cards, the owner's collection scaled, U90 and U242 measure)
+## V17. Speed (the 150k fixture, `tools/mg fixtures 150k`; U90 and U242 measure)
 
 | What | Budget | How |
 |---|---|---|
@@ -274,7 +276,7 @@ New text unless marked. Plurals are String Catalog plural entries.
 
 ## V18. Tests
 
-- Core (`core/crates/meguri-engine/tests/` and `meguri-search/tests/`, each added as one `mod` line in its crate's `tests/main.rs`): V2.4's key reading and writing (missing, wrong shapes, unknown members kept, only the changed set written, note type removal drops its set, the Anki keys untouched); V3's cells (missing field dash, empty, media); V4.2's order on a mixed fixture (numbers, texts, empties, rows without the field, both directions, final key); V8.1's targeting (Unsuspend only on suspended targets, Unbury only on buried, Flag sets); V9's preview counts, list and Whole Words; V10's groups and key rule.
+- Core (`core/crates/meguri-engine/tests/` and `meguri-search/tests/`, each added as one `mod` line in its crate's `tests/main.rs`): V2.4's key reading and writing (missing, wrong shapes, unknown members kept, only the changed set written, a set whose note type was removed is ignored and kept, the Anki keys untouched); V3's cells (missing field dash, empty, media); V4.2's order on a mixed fixture (numbers, texts, empties, rows without the field, both directions, final key); V8.1's targeting (Unsuspend only on suspended targets, Unbury only on buried, Flag sets); V9's preview counts, list and Whole Words; V10's groups and key rule.
 - Swift model tests (`MeguriKit/Tests/AppModelTests`): V2.2's set choice, V7's summary line, V8.1's titles and shown-when rules, V8.2's Delete question rule, V8.3's step names, V11's strings, V14.3's swipe actions.
 - VM UI suites (one job at a time): the Mac three panes with a selection of one and of many, the Delete question, the Find and Replace preview, the iPad Select mode, the iPhone Browse tab; screenshots for N21's design review.
 - Benchmarks (U242): V17's rows on the 150k fixture.

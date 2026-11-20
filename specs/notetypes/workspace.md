@@ -1,10 +1,10 @@
 # Note Types workspace (round 9)
 
 Spec: notetypes/workspace
-Requirements: R915 to R917, R919 to R921, R923 to R927, R929 to R938, R940; supersedes in part R915, R919, R920, R925, R929, R931, R932, R938, R940 (each noted in the plan)
+Requirements: R915 to R917, R919 to R921, R923 to R927, R929 to R938, R940; supersedes in part R915, R919, R920, R925, R929, R931, R932, R938, R940 (the Browse and Note Types plan §5 lists the notes)
 Anki: none for the layout (Meguri design, decided by Antoine 2026-11-20, round 9: 1B 2B 3C 4B 5A 6B 7B 8B); the stored data and every save keep `notetypes/records`, `notetypes/structure-changes`, `notetypes/validation` and `render/*`
 Scenarios: none; tests named in W16
-Status: Under review (round 9, `docs/design/decisions.md` 2026-11-20, the two `noteTypes` rows). Do not implement until approved.
+Status: Under review (R915; round 9, decided 2026-11-20, `docs/design/decisions.md` the two `noteTypes` rows). Do not implement until approved.
 
 What the Note Types section shows and does: the list, the Fields tab, the Cards tab with the template editor and its live preview, the Card Text row over the styling, live issues, creating and duplicating, and the read-only touch layouts. Saving is `notetypes/draft-save`. Layout is `docs/design/native-interface-contract.md` N22. Where `notetypes/editor-actions` differs, this file wins for Meguri's screen; its sections that state Anki-matching results (A2's order, A6's copied texts, A10's sort-field tracking, A11, A14, A15) still hold.
 
@@ -19,7 +19,7 @@ What the Note Types section shows and does: the list, the Fields tab, the Cards 
 
 - Every note type with its note count (`notetypes/editor-actions` A2: order, and names first then counts). A filter field above narrows the list by simple case-folded substring of the name.
 - A note type whose draft differs from its base shows "Edited" after its name.
-- The + button opens New Note Type… (W11). The row's context menu: Duplicate (⌘D), Rename…, Restore to Default… (stock kinds only, `notetypes/restore-to-default`; its question stays R914's), Delete… (W12).
+- The + button opens New Note Type… (W11). The row's context menu: Duplicate (⌘D while the list has focus), Rename…, Restore to Default… (stock kinds only, `notetypes/restore-to-default`; its question stays R914's), Delete… (W12).
 
 ## W3. The Fields tab
 
@@ -51,10 +51,10 @@ The inspector beside the table holds, for the selected field:
 
 ## W5. Card types (the Cards tab's list)
 
-- A list of the draft's card types in order, each with the number of cards that exist for it (by base ordinal; 0 for a new one) and a red dot when an issue (W7) names it. + and − under it; double click or Return renames in place (V5's template-name rule, `notetypes/records` N4); dragging reorders.
+- A list of the draft's card types in order, each with the number of cards that exist for it (by base ordinal; 0 for a new one) and a red dot when an issue (W7) names it. + and − under it; double click or Return renames in place (the template-name rule of `notetypes/records` N4); dragging reorders.
 - **Add** (+) duplicates the selected card type as `notetypes/editor-actions` A6 does (its name `Card <n>`, A6's texts), in rename mode. It asks nothing now; the Save sheet says how many cards it creates (`notetypes/draft-save` D2).
 - **Delete** (−, ⌫) crosses the card type out in the draft; it asks nothing now (A7's question moves to the Save sheet, D2). Disabled, with the reason, while one card type remains.
-- Context menu: Rename (↩), Duplicate (⌘D), Deck for New Cards… (A11, with N20.1's deck search; standard note types only), Move Up (⌥⌘↑), Move Down (⌥⌘↓), Delete (⌘⌫).
+- Context menu: Rename (↩), Duplicate (⌘D while the card types list has focus), Deck for New Cards… (A11, with N20.1's deck search; standard note types only), Move Up (⌥⌘↑), Move Down (⌥⌘↓), Delete (⌘⌫).
 - Cloze and Image Occlusion note types have one card type: Add, Duplicate and Delete are disabled with the reason, and the preview gains a Cloze Number menu (W9).
 - Browser Appearance (A12) is not offered in this version; its stored values are kept.
 - Under the list, the **Fields** list: every draft field; the ones the selected card type does not use are grey. Double click or drag inserts `{{<name>}}` at the caret (A14's text).
@@ -64,7 +64,7 @@ The inspector beside the table holds, for the selected field:
 - Three parts: Front, Back, Styling (⌘1, ⌘2, ⌘3; R929). Styling is labelled "Shared by All Card Types"; the preview keeps showing the selected card type.
 - The text is the stored template, byte for byte: Meguri never reformats it (R930, plain quotes, no autocorrection, Tab indents, ⌘/ comments the line with `<!-- -->` in Front and Back and `/* */` in Styling, system find and replace ⌘F).
 - **Colouring** from `render/template-syntax` T12's nodes: field replacements one colour, conditional section tags a second, comments and HTML tags the system's code colours; CSS properties and values in Styling, each colour value with a swatch that opens the system colour picker and rewrites only that value's characters.
-- **Completion**: typing `{{` lists the draft's field names, then the special fields `FrontSide`, `Tags`, `Deck`, `Subdeck`, `Card`, `Type` (`render/special-fields` P1); after a filter prefix (`hint:`, `type:`, `cloze:`, `furigana:`, `text:`) the field names again. Accepting inserts the name and `}}`. Typing `{{#` or `{{^` and accepting a name also inserts the matching `{{/<name>}}` after the caret.
+- **Completion**: typing `{{` lists the draft's field names, then the special fields `FrontSide`, `Tags`, `Deck`, `Subdeck`, `Card`, `CardFlag`, `CardID`, `Type` (`render/special-fields` P1); after a filter prefix (`hint:`, `type:`, `cloze:`, `furigana:`, `text:`) the field names again. Accepting inserts the name and `}}`. Typing `{{#` or `{{^` and accepting a name also inserts the matching `{{/<name>}}` after the caret.
 - **Insert menu** (and ⌃Space), each item inserting at the caret: Field ▸ (`{{<name>}}`), Special Field ▸ (`{{<name>}}`), Show Only If Field Has Content ▸ (`{{#<name>}}` … `{{/<name>}}`), Show Only If Field Is Empty ▸ (`{{^<name>}}` … `{{/<name>}}`), Hint ▸ (`{{hint:<name>}}`), Type-in Answer ▸ (`{{type:<name>}}`), Text Only ▸ (`{{text:<name>}}`), Furigana ▸ (`{{furigana:<name>}}`), Answer Divider (`<hr id=answer>`), and in Styling Dark Appearance Rule (`.card.nightMode {\n}` at the end). With text selected, the two conditionals wrap it.
 - Flip (A15) is in the Back part's context menu.
 
@@ -75,7 +75,7 @@ Shown under the editor for every card type of the draft, recomputed about 300 ms
 | Issue | Colour | Text | Fix (one click) |
 |---|---|---|---|
 | each failure of `notetypes/validation` V4 (V3's kinds) | red; blocks Save | "<card type> · <Front or Back>, line <n>." then the failure in words: "No field is named “<x>”.", "{{#<x>}} is opened but never closed.", "The front repeats “<card type>”.", "The front shows no field.", "A cloze note type needs a cloze field on the front and the back." | unknown field with a near name (W7.1): "Use “<name>”"; unclosed section: "Add {{/<x>}}" at the end of the part |
-| no card for some notes (W8) | yellow; does not block | "<card type> · No card for <k> notes." with the reason "Their <fields> are empty, so the front is blank." when one field decides it | "Show Notes" (opens Browse on them, `browser/workspace` V15) |
+| no card for some notes (W8) | yellow; does not block | "<card type> · The front is blank for <k> notes." with the reason "Their <fields> are empty, so the front is blank." when one field decides it | "Show Notes" (opens Browse on them, `browser/workspace` V15) |
 
 - Clicking an issue moves the caret to its line. Red issues name the line from T12's spans; an issue without a line names the part.
 - The bottom line reads "Fix the <n> red issues to save." while any is red; Save is disabled.
@@ -102,22 +102,22 @@ For an unknown field name x, the suggested name is the draft's field whose name 
 
 - The Styling part is the note type's CSS, saved as typed (`notetypes/records` N3; Meguri never rewrites it).
 - Above the CSS, one **Card Text** row of five controls: Font (a menu of system font families and "System"), Size (points), Alignment (leading, centre, trailing), Text Colour, Background. The row is shown only when the CSS has exactly one **plain `.card` rule** (W10.1); otherwise it is absent, not disabled.
-- Each control shows the value of its declaration in that rule (W10.2), or an empty state when the rule has none. Changing a control edits only that one declaration's value characters, or, when the rule has no such declaration, inserts one line `  <property>: <value>;` before the rule's closing `}`. Nothing else in the text changes: comments, order, spacing and every other rule stay byte for byte.
+- Each control shows the value of its declaration in that rule (W10.2), or an empty state when the rule has none. Changing a control edits only that one declaration's value characters. When the rule has no such declaration, one declaration is added at the end of the rule's block: when the block's last declaration does not end with `;`, a `;` is first put right after it (the only other byte added); then, when the closing `}` stands alone on its line, the line `  <property>: <value>;` is inserted before that line, otherwise ` <property>: <value>; ` is inserted just before `}`. Nothing else in the text changes: comments, order, spacing and every other rule stay byte for byte.
 - The edited line is highlighted briefly in the code, and the preview updates (W9).
 - The Card Text row is not shown on the iPhone or the folded Duo (templates are read-only there, W13).
 
 ### W10.1 The plain `.card` rule
 
-Reading the CSS as CSS Syntax Level 3 tokens: a top-level qualified rule (not inside `@media`, `@supports` or any at-rule) whose prelude, with comments removed and White_Space trimmed, is exactly `.card`. "Exactly one" counts such rules; a CSS that does not tokenize to the end shows no row.
+Reading the CSS as CSS Syntax Level 3 tokens: a top-level qualified rule (not inside `@media`, `@supports` or any at-rule) whose prelude, with comments removed and White_Space trimmed, is exactly `.card`. "Exactly one" counts such rules. The row is also absent when the CSS is not well formed: when its end falls inside an unclosed block, string, `url(` or comment, or when a `}` closes no block.
 
 ### W10.2 Declarations
 
 | Control | Property | Value written |
 |---|---|---|
-| Font | `font-family` | the family name, quoted when it holds a space (`"Hiragino Sans"`); "System" writes `-apple-system, sans-serif` |
-| Size | `font-size` | `<n>px`; the control reads `px` and `pt` values (pt converted ×4/3 for display, written back as px only when changed) and shows no value for other units |
-| Alignment | `text-align` | `left`, `center`, `right` (the control's leading, centre, trailing in a left-to-right interface) |
-| Text Colour | `color` | `#rrggbb` lower case |
+| Font | `font-family` | the family name, quoted when it holds a space (`"Hiragino Sans"`); "System" writes `system-ui, -apple-system, sans-serif`. Read: the control shows the first family of the list; it shows "System" when that family is `system-ui`, `-apple-system` or `BlinkMacSystemFont`; a generic family alone (`serif`, `sans-serif`, `monospace`) is shown by its name. Choosing a family replaces the whole list's value |
+| Size | `font-size` | `<n>px`. Read: the control shows points-as-pixels: a `px` value as its number, a `pt` value × 4/3 rounded to a whole number; any other unit or keyword shows no value. A change writes `px` |
+| Alignment | `text-align` | `left`, `center`, `right`: the control's leading and trailing are left and right in a left-to-right interface, right and left in a right-to-left one. Read: `start` and `end` show as leading and trailing; `justify` and other values show no segment selected |
+| Text Colour | `color` | `#rrggbb` lower case (`#rrggbbaa` when the chosen colour is not opaque). Read: hex forms of 3, 4, 6 or 8 digits, `rgb()`, `rgba()`, `hsl()`, `hsla()` and CSS named colours show their colour; any other value (`var()`, `currentColor`, functions of later levels) shows the well empty, and choosing a colour replaces it |
 | Background | `background-color` | `#rrggbb`; when the rule has a `background` shorthand and no `background-color`, the control shows the shorthand's colour when it is a single colour token and edits that token only |
 
 The last declaration of a property in the rule is the one read and edited (CSS's own cascade within a rule). `!important` stays where it is.
@@ -136,7 +136,7 @@ The last declaration of a property in the rule is the one read and edited (CSS's
 
 - iPhone and the Duo folded or held tall (decision 2026-11-20, 8B): the list, then a note type's page with Card Types and Fields sections. Fields can be added, renamed, reordered (Edit), deleted and given W4's options, and the sort field set; the same draft and Save (D5, D6). A card type opens on its Preview (W9 without the note menu's size; Light and Dark in its More menu), with Front, Back and Styling as read-only coloured code that can be selected and copied, and one line: "To change this card type, unfold your iPhone Duo or use Meguri on an iPad or a Mac." On a plain iPhone the last words are "use Meguri on an iPad or a Mac." No Card Text row.
 - Unfolding the Duo turns the same page into the full editor with the same draft.
-- **The editor's own undo** (⌘Z while Note Types has focus and no text view owns the key) steps back through draft changes (a field marked deleted, a reorder, a rename, a card type added). It is not the collection's undo: the draft is not saved data. After Save, Edit › Undo is the collection's "Undo Update Note Type" (D7).
+- **The editor's own undo** (⌘Z while Note Types has focus and no text view owns the key) steps back through draft changes (a field marked deleted, a reorder, a rename, a card type added). It is not the collection's undo: the draft is not saved data. While Note Types has focus and its draft has steps, Edit › Undo is titled with the draft step ("Undo Delete Field", "Undo Move Field", "Undo Rename Field", "Undo Add Card Type", "Undo Delete Card Type", "Undo Move Card Type", "Undo Rename Card Type", "Undo Change Sort Field", "Undo Change Option") and undoes it; with no draft step it is the collection's Undo (round 6's one Undo, in Edit). After Save, the collection's step is "Undo Update Note Type" (D7); text edits in the code keep the text view's own undo.
 
 ## W14. Ways in and back
 
@@ -148,14 +148,15 @@ The last declaration of a property in the rule is the one read and edited (CSS's
 
 | Text | Where |
 |---|---|
-| Note Types, Fields, Cards, Filter, Edited, Save, Save…, Revert | the section, tabs, list, toolbar |
+| Note Types, Fields, Cards, Filter, Edited, Save, Save…, Revert, %1$lld notes · %2$lld cards | the section, tabs, list, toolbar and its subtitle |
+| Undo Delete Field, Undo Move Field, Undo Rename Field, Undo Add Card Type, Undo Delete Card Type, Undo Move Card Type, Undo Rename Card Type, Undo Change Sort Field, Undo Change Option | W13's draft undo |
 | Name, Sort, Used On, Notes, Not Used, Field %lld | Fields table |
 | Collapsed in Editor, Closed in Add Note until you open it, Right-to-Left, Placeholder, Grey text shown while the field is empty | field inspector |
 | Card Types, Card %lld, Deck for New Cards…, Move Up, Move Down, Duplicate, Rename, Delete, Restore | card types list |
 | Front, Back, Styling, Shared by All Card Types, Insert, Field, Special Field, Show Only If Field Has Content, Show Only If Field Is Empty, Hint, Type-in Answer, Text Only, Furigana, Answer Divider, Dark Appearance Rule | editor |
 | Question, Answer, Cloze Number, %1$lld of %2$lld, Fill Empty Fields | preview |
 | Card Text, Font, System, Size, Alignment, Text Colour, Background | W10 |
-| W7's issue texts, Use “%@”, Add {{/%@}}, Show Notes, Fix the %lld red issues to save., No Issues | W7 |
+| W7's issue texts ("The front is blank for %lld notes." among them), Use “%@”, Add {{/%@}}, Show Notes, Fix the %lld red issues to save., No Issues | W7 |
 | New Note Type, Create, %@ Copy, and K1's six kinds' lines: "A front and a back. One card." (Basic), "Two cards: front to back, and back to front." (Basic (and reversed card)), "The reverse card only for notes where you ask for it." (Basic (optional reversed card)), "You type the answer and Meguri compares." (Basic (type in the answer)), "Hide parts of a sentence. One card per hidden part." (Cloze), "Hide parts of an image. One card per hidden part." (Image Occlusion) | W11; kind names stay Anki's (K1) |
 | Delete “%@”?, Its %lld notes and their %lld cards will be deleted., It has no notes. | W12 |
 | To change this card type, unfold your iPhone Duo or use Meguri on an iPad or a Mac., To change this card type, use Meguri on an iPad or a Mac. | W13 |

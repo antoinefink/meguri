@@ -28,7 +28,7 @@ From a read of `core/` and `app/` (no code changed by this plan):
 - Verify with the smallest `tools/mg` jobs: core units `tools/mg core-test -- <test filter>` (nextest arguments) and `tools/mg core-lint`; Swift model units `tools/mg swift-test --package MeguriKit -- <filter>`; app units `tools/mg build-app --platform mac` and `--platform ios-sim`; UI suites and screenshots only in the macOS test VM (`tools/mg mac-ui`, `tools/mg screenshot`, `tools/mg a11y`), **one VM job at a time**; benchmarks `tools/mg bench --sizes 150k --bench <target>`. Hosted CI runs the Linux suites.
 - At most three implementers at once. Core units run in Docker and can run three wide; Swift units that need the VM queue behind each other for their UI checks.
 
-## 3. Speed budgets (150,000+ cards; the owner's collection scaled)
+## 3. Speed budgets (the 150k fixture and larger)
 
 The budgets are `browser/workspace` V17 (keystroke echo one frame; simple-token first page 100 ms p95; text, field and regex first page 300 ms then streamed; sort 200 ms; Cards/Notes 100 ms; scrolling below 5 ms/s of hitches; Select All 50 ms; bulk on 10,000 notes 2 s; Find and Replace on 150,000 notes 5 s; suggestions one frame; counts 200 ms; Note Types counts 300 ms, "no card" 1 s for 50,000 notes). How they are met:
 
@@ -47,16 +47,17 @@ Ids U81–U92, U34, U35 are the parent plan's (their specs are in force). U260 o
 
 | Unit | Scope | Spec sections | Side | Verify | Must not touch |
 |---|---|---|---|---|---|
-| **U82** | Names, ids, state, flag, property and history terms in SQL: `deck:`, `tag:`, `note:`, `card:`, `is:`, `flag:`, `prop:`, `added:`/`edited:`/`rated:`/`introduced:`/`resched:`, ids, `dupe:` | `search/names-and-ids`, `state-and-flags`, `properties`, `history` (in force) | core | `core-test` search module; activate the search scenarios they unblock | browser, FFI |
+| **U82** | Names, ids, state, flag, property and history terms in SQL: `deck:`, `tag:`, `note:`, `card:`, `is:`, `flag:`, `prop:`, `added:`/`edited:`/`rated:`/`introduced:`/`resched:`, ids, `dupe:`; may land as up to three PRs by term family (names and ids; state and flags; properties and history) | `search/names-and-ids`, `state-and-flags`, `properties`, `history` (in force) | core | `core-test` search module; activate the search scenarios they unblock | browser, FFI |
 | **U81** ∥ | Text matching: plain text, field terms, `re:`, `nc:`, `sc:`, `w:`, folding, excluded fields | `search/text-matching`, `fields`, `case-folding` (in force) | core | `core-test`; bench a plain-text search on 150k | names and ids terms |
-| **U88a** ∥ | The builder: `build` of J3 items (with T3.1's two new field items), J4, J5; `classify_tail` (D5); the in-memory name index (D6.7) with its change-stream rebuild. Not `join`, `replace`, spans or edits | `search/join-and-replace` J1–J5, J8, T3.1; `search/editing-services` D5, D6.7 | core | `core-test` builder module; property test J8 | search execution |
+| **U88a** ∥ | The builder: `build` of J3 items, J4, J5 (T3.1's two new field items are added once `search/filter-tokens` is approved, in U260 if U88a has landed); `classify_tail` (D5); the in-memory name index (D6.7) with its change-stream rebuild. Not `join`, `replace`, spans or edits | `search/join-and-replace` J1–J5, J8; `search/editing-services` D5, D6.7 | core | `core-test` builder module; property test J8 | search execution |
 | **U84** | Rows, columns and sorting (19 columns) | `browser/columns` C1–C15, `browser/sorting` S1–S11 (in force) | core | `core-test`; activate `browser/sort/*`, `browser/columns/*` | sessions |
 | **U85** | Search sessions, handles, paging, streaming, toggle, selection mapping | `browser/result-sets` H1–H16 (in force) | core | `core-test`; bench first page and resort on 150k | Swift |
 | **U260** | Filter token model: kinds and values, run text, text rule, reading Anki text into a query, round-trip property tests | `search/filter-tokens` T1–T7 | core | `core-test filter_tokens`; T16's property test | sessions, FFI |
 | **U261** | Field columns and their sort key; `rows` and `resort` accept `fld:` keys | `browser/workspace` V3, V4.2; `browser/result-sets` H7 note; `browser/sorting` S1 note | core | `core-test`; bench a field sort on 150k | Swift |
 | **U262** ∥ | Column sets key `meguriBrowserColumnSets`: read, write, defaults, undo class | `browser/workspace` V2.3–V2.4, V4.3 | core | `core-test` | Anki browser keys (must stay byte-identical) |
 | **U263** | Suggestions and filter counts | `search/filter-tokens` T12 (T12.4 counts) | core | `core-test`; bench 50 suggestions with 10,000 tags (< 4 ms) and counts on 150k (< 200 ms) | sessions |
-| **U264** | Browse FFI surface: sessions, rows, `qa_cells`, query model, suggestions, counts, column sets, selection summary (counts of suspended, buried, decks, note types of a resolved selection, for V7 and V8.1) | `browser/result-sets` H2–H12 over FFI; `browser/workspace` V7, V8.1's "shown when" | core + CoreBridge Swift wrapper | `core-test`; `swift-test --package MeguriCore` | MeguriKit UI |
+| **U264** | Browse FFI, part 1: sessions, `start_search`, `rows`, `qa_cells`, resort, toggle, selection mapping and `resolve_selection`, with the CoreBridge wrapper | `browser/result-sets` H2–H12 over FFI | core + CoreBridge Swift | `core-test`; `swift-test --package MeguriCore` | MeguriKit UI |
+| **U264a** | Browse FFI, part 2: the query model (T4, T7), suggestions, filter counts, column sets, and the selection summary (counts of suspended, buried, decks and note types of a resolved selection, for V7 and V8.1) | `search/filter-tokens` T4, T7, T12; `browser/workspace` V2.4, V7, V8.1's "shown when" | core + CoreBridge Swift | `core-test`; `swift-test --package MeguriCore` | MeguriKit UI |
 
 ### Lane B: Browse actions core
 
@@ -72,7 +73,8 @@ Ids U81–U92, U34, U35 are the parent plan's (their specs are in force). U260 o
 
 | Unit | Scope | Spec sections | Side | Verify | Must not touch |
 |---|---|---|---|---|---|
-| **U270** | Browse section shell (Mac, iPad regular): Today and Browse rows with symbols, ⇧⌘B, kept state, filters sidebar (V6, T9 clicks, counts), native `Table` with the standard set, state column, deck and date cells, status line | `browser/workspace` V1, V2.1–V2.2, V2.5, V5, V6, V11; `search/filter-tokens` T9, T14; N21.1, N21.3 | Swift | `swift-test --package MeguriKit`; `build-app --platform mac`; VM screenshot of N21.3 | editor, Note Types |
+| **U270** | Browse section shell (Mac, iPad regular): Today and Browse rows with symbols, ⇧⌘B, kept state, the filters sidebar (V6, T9 clicks, counts) | `browser/workspace` V1, V6; `search/filter-tokens` T9, T14; N21.1 | Swift | `swift-test --package MeguriKit`; `build-app --platform mac`; VM screenshot | editor, Note Types |
+| **U270a** | The table: native `Table` with the standard set, the state column, deck and date cells, lazy rows, the status line, Cards / Notes | `browser/workspace` V2.1, V2.2, V2.5, V5, V11, V17's rows; N21.3 | Swift | model tests; VM screenshot of N21.3; `perf-ui` scroll test | sidebar |
 | **U271** | Search field: tokens, live search, commit, token menu, keyboard, suggestions list, Save Search | `search/filter-tokens` T8, T10, T12 (UI), T13; N21.2 | Swift | model tests of T8–T10; VM UI test of the token flow | table internals |
 | **U272** | Column sets UI: header menu, Fields submenu, own sets, widths, reorder, set menu in the status line | `browser/workspace` V2.2–V2.4, V3, V4 (UI) | Swift | model tests; VM screenshot | |
 | **U273** | The inspector's Note tab (V12): card preview, Deck and Type rows, field editing, tags, formatting controls, saving | `browser/workspace` V12; N21.4; `editor/edit-flows` (Browse editor) | Swift (reuses the round 5 editor component) | model tests; VM UI edit-and-undo test | Add Note form behaviour |
@@ -105,9 +107,9 @@ Ids U81–U92, U34, U35 are the parent plan's (their specs are in force). U260 o
 
 - U82, U81 and U88a need nothing new: they start first, in parallel. U84 needs U82 (shared due expression); U85 needs U81, U82, U84. U260 needs U88a; U261 and U262 need U84; U263 needs U260 and U85; U264 needs U85, U260, U262, U263.
 - Lane B: U86 needs U85; U87 needs U86; U265 needs U86; U266 needs U85; U92 is independent (start any time).
-- Lane C: U270 needs U264; U271 needs U270 and U263; U272 needs U270 and U261; U273 needs U270; U274 needs U92; U275 needs U270 and U87; U276 and U277 need U275 (U277 also U265, U266); U278 and U279 need U271 and U275; U280 needs U270.
+- Lane C: U264 needs U85; U264a needs U264, U260, U262, U263; U270 needs U264a; U270a needs U270; U271 needs U270 and U263; U272 needs U270a and U261; U273 needs U270a and U87 (its Deck row runs Change Deck; its Type menu's Change Note Type… stays disabled until U284); U274 needs U92; U275 needs U270a and U87; U276 needs U275; U277 needs U275, U265, U266, U260 and U271 (the Duplicates token); U278 and U279 need U271 and U275; U280 needs U270 and U263 (the Suspended Cards count is a filter count of Deck + Suspended).
 - Lane D: U34 and U35 are independent of lanes A–C and start early; U267 and U268 need nothing beyond what exists (U267's summary needs U34's planner); U269 needs U34; U281 needs U267; U282 and U283 need U281 (U283 also U268); U284 needs U281 and U35; U285 needs U269 and U281; U286 needs U282; U287 needs U281 and U273.
-- Up to three at a time, for example: {U82, U81, U88a} → {U84, U260, U34} → {U85, U262, U267} → {U86, U263, U268} → {U264, U87, U269} → then the Swift lanes two at a time (one VM job at a time), with U92 and U35 slotted in wherever a lane waits.
+- Up to three at a time, for example: {U82, U81, U88a} → {U84, U260, U34} → {U85, U262, U267} → {U86, U263, U268} → {U264, U87, U269} → {U264a, U265, U266} → then the Swift lanes two at a time (one VM job at a time), with U92 and U35 slotted in wherever a lane waits.
 
 ### Recommended first three
 
@@ -119,7 +121,7 @@ U81 is the fourth, as soon as one of these lands.
 
 ## 5. Requirements this plan supersedes
 
-Each carries a note in the parent plan ("Superseded 2026-11-20 …"), with the decision row as authority: R1076, R1086, R1090, R1093 (canonical text, syntax mode, syntax reference; pasted Anki syntax is still read), R1131 (middle-cut deck names), R1168 (a sidebar click replaces only its own kind), R1193 and R1228 (two commands with round 7's keys), R1212 (Delete asks for more than one note), R1234 (suggestions and a Filters sheet). Also noted, in part: R1087–R1089, R1091, R1094–R1101, R1103, R1108, R1109, R1112, R1134, R1135, R1141, R1157, R1159, R1166–R1180 (later), R1184, R1192, R1199, R1208–R1211, R1213, R1214 (later), R1222, R1226, R1236, R1237, R915, R916, R919, R920, R922, R925, R929, R931, R932, R940, R951.
+Each carries a note in the parent plan ("Superseded 2026-11-20 …"), with the decision row as authority: R1076, R1086, R1090, R1093 (canonical text, syntax mode, syntax reference; pasted Anki syntax is still read), R1131 (middle-cut deck names), R1168 (a sidebar click replaces only its own kind), R1193 and R1228 (two commands with round 7's keys), R1212 (Delete asks when more than one note goes or the one note has more than one card), R1234 (suggestions and a Filters sheet). Also noted, in part or as deferred: R1087, R1088, R1089, R1091, R1094, R1101, R1108, R1109, R1111, R1112, R1134, R1135, R1141, R1147, R1157, R1159, R1169, R1170, R1184, R1192, R1199, R1208 (with R1209–R1211), R1213, R1214, R1222, R1226, R1236, R1237, R282, R915, R916, R919, R920, R922, R925, R929, R931, R932, R940, R951. The specs' headers name the other requirements they change in part (R1095–R1100, R1103, R1166–R1180); their sections say how.
 
 ## 6. Decisions and defaults (each an assumption the specs make; the owner can change any)
 
@@ -141,11 +143,18 @@ Each carries a note in the parent plan ("Superseded 2026-11-20 …"), with the d
 16. **Note Types sidebar row** gets a system symbol (`rectangle.stack`) to match Today and Browse; the decision named only those two. **Open: confirm.**
 17. **Card Info rows** stay `stats/card-info` C4's (the design's sketch listed a "State" row, which Anki's Card Info does not have).
 18. **Deck page Suspended Cards row**: shown only while the deck has suspended cards.
+19. **"All bulk actions"** is read as the actions round 8's question 7 drew; the page's "Later" list stays later (`browser/workspace` V8.1).
+20. **Column sets** record no undo step and keep the undo steps (the current-deck selection's class), so a column change never removes "Undo Suspend Cards".
+21. **Status lines** name the requirement R1232 (Browse) or R915 (Note Types) with the round, as `specs/README-format.md` asks for a requirement id; the decision rows are the authority.
+22. **Uploading after an offline structural save** reads the server's facts and uploads with no question; if the server changed since this device's last round, it shows the normal collection choice instead (MP7 step 5).
 
 ## 7. Open points for the owner
 
 - Confirm decision 2 (hide "Use HTML editor by default" and "Exclude from unqualified searches" in the first version).
 - Confirm decision 16 (a symbol on the Note Types sidebar row).
+- Confirm the reading of "all bulk actions in the first version" (decision 19): the actions round 8's question 7 drew, without the round 8 page's "Later" list (Grade Now, Reposition, Mark, Export Selected Notes, Create Copy, Edit Field across notes, Clear Unused Tags, filtered decks from a search).
+- Confirm the deck page's Suspended Cards row (decision 18): the round 8 page drew it under "Ways into Browse", but no decision row names it.
+- Confirm the Delete rule (decision 12): the decision row says "asks when more than one note is selected"; the design's text also asks when the one note has other cards.
 - Approve the spec lines under review (section 8), so the units of section 4 can start.
 
 ## 8. Spec lines awaiting approval

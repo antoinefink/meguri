@@ -1,10 +1,10 @@
 # Filter tokens: Browse's search without syntax
 
 Spec: search/filter-tokens
-Requirements: R1078, R1080, R1084, R1092, R1102, R1104, R1105, R1106, R1107, R1110, R1111, R1114, R1115, R1158, R1165; supersedes in part R1076, R1077, R1086 to R1091, R1093 to R1101, R1103, R1108, R1109, R1112, R1159, R1168 to R1170 (each noted in the plan)
+Requirements: R1078, R1080, R1084, R1092, R1102, R1104, R1105, R1106, R1107, R1110, R1111, R1114, R1115, R1158, R1165; supersedes in part R1076, R1077, R1086 to R1091, R1093 to R1101, R1103, R1108, R1109, R1112, R1159, R1168 to R1170 (the Browse and Note Types plan §5 lists the notes)
 Anki: none (Meguri design, decided by Antoine 2026-11-20, round 8 option 2A; it reads and writes Anki search text by the 26.09.3 grammar)
 Scenarios: none; tests in `core/crates/meguri-search/tests/` (T16)
-Status: Under review (round 8, `docs/design/decisions.md` 2026-11-20, row `browser`). Do not implement until approved.
+Status: Under review (R1232; round 8, decided 2026-11-20, `docs/design/decisions.md` row `browser`). Do not implement until approved.
 
 What Browse's search field holds and means (`docs/design/native-interface-contract.md` N21.2): plain words plus filter tokens, how they combine, how they become one Anki search that the existing search stack runs, how Anki search text typed, pasted or stored is read back into tokens, how the filter sidebar and the tokens stay in step, the suggestions, and the built-in saved searches. The grammar, the term meanings, the canonical writer and the builder stay `search/grammar`, `search/query-model`, `search/canonical-form` and `search/join-and-replace`; this file only says which built items a query makes. No syntax mode, no syntax reference and no canonical text are ever shown.
 
@@ -32,7 +32,7 @@ What Browse's search field holds and means (`docs/design/native-interface-contra
 | Deck | a deck: deck by name with its full name, or J3.5's deck-ids item when J3 refuses the name (the deck and its subdecks either way); Current Deck: current deck | Decks |
 | Tag | a tag: tag by name with its full name (it finds descendants, `search/names-and-ids` N2); Untagged: untagged | Tags |
 | Note Type | a note type: note type by name, or by id when J3.5 refuses the name | Note Types |
-| Card Type | a card type name s: parsed text `card:` + E(s) written by `canonical-form` F4 and F5 (it finds every card type of that name in any note type, `search/names-and-ids` N4.2) | none |
+| Card Type | a card type name s: parsed text `card:` + E(s) written by `canonical-form` F4 and F5 (it finds every card type of that name in any note type, `search/names-and-ids` N4.2); a name made only of ASCII digits would read as an ordinal and is not offered (as J3.3 refuses reserved names) | none |
 | Card State | New `is:new`, Learning `is:learn`, Review `is:review`, Suspended `is:suspended`, Buried `is:buried` (J3 states); Leech: tag by name `leech` | Card State (the five states; Leech through the built-in saved search Leeches, T13) |
 | Flag | Red to Purple, flags 1 to 7, labelled with their shown names (`tags/flags-and-marked` F4); No Flag `flag:0`; Any Flag (NOT `flag:0`) | Flags |
 | Due | Today: due on day 0 (`prop:due=0`); Overdue: group AND (state due, NOT due on day 0), written `is:due -prop:due=0`; Next 7 Days: parsed text `prop:due>=1 prop:due<=7` | none |
@@ -79,7 +79,7 @@ The run text is never shown. It is the text `browser/result-sets` H3 runs, and t
 ## T5. The text
 
 - The text is read by `search/grammar` after `search/join-and-replace` J2.
-- When it parses and every item of its single AND-run (no OR at its top level) is a plain-text term, the negation of one, or a field term whose field name is not a field of any note type, the text stays text. Its items are: each plain-text term and each negation as read (Anki's plain-text meaning, wildcards included, `search/text-matching` T5); each such field term as the literal item of its whole written text (J3, so `10:45` searches the characters `10:45`, not a field named `3`).
+- When it parses and every item of its single AND-run (no OR at its top level) is a plain-text term, the negation of one, or a field term whose field name is not a field of any note type, the text stays text. Its items are: each plain-text term and each negation as read (Anki's plain-text meaning, wildcards included, `search/text-matching#T5`); each such field term as the literal item of its whole written text (J3, so `10:45` searches the characters `10:45`, not a field named `10`).
 - Otherwise the text holds Anki syntax and T7 reads it when it is committed (T8); until then the live search runs T7's result without showing it as tokens.
 - When the text does not parse, each run of non-White_Space characters is a literal item (J3) in its order. No error is shown (R1108 is superseded for the field: Meguri never shows a syntax error, `docs/design/native-interface-contract.md` N21.2).
 - Empty text, or text of White_Space only, gives no items.
@@ -95,10 +95,10 @@ The run text is never shown. It is the text `browser/result-sets` H3 runs, and t
 Input: a text (typed and committed, pasted, a saved search's stored text, `defaultSearchText`, a search another screen hands to Browse, R1114). Output: a query. It never fails.
 
 1. Apply J2, then read the text by `search/grammar`. On a parse error, the result is the text alone, treated by T5's last rule but one (literal words). An empty text, `deck:*` alone, or the whole-collection term gives the empty query.
-2. If the top-level sequence has more than one AND-run (an OR at the top level), the whole text is one advanced token.
+2. If the top-level sequence has more than one AND-run (an OR at the top level), the whole text is read as one group OR and classified by step 3's rows (so the run text of a single OR token, which J4 writes without brackets, gives that token back). Only when no row but the last fits is the whole text one advanced token.
 3. Otherwise take the items of the AND-run in order and classify each by the first row that fits:
 
-Items are compared by their canonical text (`search/canonical-form` F2 to F6), so `Deck:"a"` and `deck:a` are the same item. A value's item may be a group (Overdue, Next 7 Days); at the top level a group's brackets are not written (J4), so first, in the AND-run, two adjacent items `is:due` and `-prop:due=0`, and two adjacent items `prop:due>=1` and `prop:due<=7`, in that order, are each taken as one item (the group of the two).
+Items are compared as follows. A `deck:`, `tag:` or `note:` term in normal mode with no wildcard is a value item when its name names exactly one existing deck, tag or note type by the equality `search/names-and-ids` N3.3, N2.2 and N4.1 use (letter case folded), so `deck:spanish` gives Deck: Spanish; its value is that object. Every other item is compared by its canonical text (`search/canonical-form` F2 to F6), so `Is:New` and `is:new` are the same item. A deck value is labelled with its last name component; its help tag and accessibility label give the path joined with " › ". A value's item may be a group (Overdue, Next 7 Days); at the top level a group's brackets are not written (J4), so first, in the AND-run, two adjacent items `is:due` and `-prop:due=0`, and two adjacent items `prop:due>=1` and `prop:due<=7`, in that order, are each taken as one item (the group of the two).
 
 | Item | Becomes |
 |---|---|
@@ -128,13 +128,13 @@ Examples:
 
 ### T7.1 Round trip
 
-For every query the UI can make from T3 values and text that stays text (T5): reading its run text by T7 gives back the same tokens, values, flags and order, and text that runs the same (T16). The exceptions: a Duplicates token (it comes back advanced); a Deck or Note Type value written by id (J3.5; it comes back advanced); a text that holds Anki syntax (it is converted on commit).
+For every query the UI can make from T3 values and text that stays text (T5): reading its run text by T7 gives back the same tokens, values, flags and order, and text that runs the same (T16). The exceptions: a Duplicates token (it comes back advanced); a Deck or Note Type value written by id (J3.5; it comes back advanced); a text that holds Anki syntax (it is converted on commit); a Tag token holding only `leech` (it comes back as Card State: Leech, which finds the same rows); a value whose object was renamed or deleted since the search was saved (it comes back advanced).
 
 ## T8. When the field changes the query
 
 - **Live** (R1106): every edit of the text runs the query at once (debounce at most 60 ms, a newer run cancels the older, `browser/result-sets` H3). Return is never needed.
-- **Incomplete text** (R1107): while `search/editing-services` D5 classifies the text at the cursor as incomplete (a key with no value, an unclosed quote or bracket, a dangling `-`, `and` or `or`), the last results stay and nothing changes.
-- **Commit**: Return, a paste, accepting a suggestion, or the field losing focus. A commit reads the text by T7 and puts its tokens before the remaining text; text that stays text stays as typed.
+- **Incomplete text** (R1107): while the user is typing (before a commit) and `search/editing-services` D5 classifies the text at the cursor as incomplete (a key with no value, an unclosed quote or bracket, a dangling `-`, `and` or `or`), the last results stay and nothing changes.
+- **Commit**: Return, a paste, accepting a suggestion, or the field losing focus. A commit reads the text by T7 and puts its tokens before the remaining text; text that stays text stays as typed. After a commit, text T7 turned into literal words (it did not parse) runs as those literal words; D5's incomplete rule no longer applies to it.
 - A sidebar click, a token menu action, a Filters sheet change and an entry point (R1114) change the query directly and run it.
 
 ## T9. The sidebar and the tokens
@@ -156,7 +156,7 @@ Browse's sidebar (`browser/sidebar`, changed by `browser/workspace` V6) lists va
 
 ## T10. Editing tokens
 
-- **Token menu** (a click on a value token; on touch a tap): Is and Is Not (one checked); the token's values, each checked, then the other values the kind offers in the suggestion order (T12) up to 8, then "Add Another <kind>…" (it opens the suggestions scoped to that kind); then Remove Filter (⌫). Checking a value adds it, unchecking removes it; unchecking the last removes the token. A Field token lists its tests instead of values ("Contains…", "Is Empty", "Has Content"); "Contains…" edits its text in place.
+- **Token menu** (a click on a value token; on touch a tap): Is and Is Not (one checked; Is Not is disabled while the token holds No Flag, Any Flag or Untagged, which are already negative or positive forms of one another: `flag:0` is read as No Flag, `-flag:0` as Any Flag, `-tag:_*` as Untagged, and "Flag is not: No Flag" is offered as Any Flag); the token's values, each checked, then the other values the kind offers in the suggestion order (T12) up to 8, then "Add Another <kind>…" (it opens the suggestions scoped to that kind); then Remove Filter (⌫). Checking a value adds it, unchecking removes it; unchecking the last removes the token. A Field token lists its tests instead of values ("Contains…", "Is Empty", "Has Content"); "Contains…" edits its text in place.
 - **Keyboard** (Mac, iPad with a keyboard): ⌘F focuses the field and selects its text (`docs/design/native-interface-contract.md` N21.8); ← and → move over tokens as single units; ⌫ with the caret before the first character of the text selects the last token, a second ⌫ removes it; ⌘A then ⌫ empties the query; ⌘C copies the selected tokens and text as their run text (T4); ↓ moves into the suggestions; Return or Tab accepts the highlighted suggestion; Esc closes the suggestions, a second Esc empties the query (R1092).
 - **Clear button** (the field's ✕): empties the query.
 - No token edit asks anything; none is an undo step (the query is not collection data). Edit › Undo is the collection's, never the field's, except that a focused text field keeps its own text undo (N20.4).
@@ -210,7 +210,7 @@ The list under the field while it has focus (Mac, iPad: under the field; iPhone 
 
 ## T14. Opening Browse
 
-- **First open on a device**: the query is T7's reading of `defaultSearchText` (`browser/config-keys` K6.4) when it is set, otherwise the empty query (the whole collection). R1112's `deck:current` is superseded.
+- **First open on a device** (the first time Browse opens after the app is installed on this device, or after the collection is replaced): the query is T7's reading of `defaultSearchText` (`browser/config-keys` K6.4) when it is set, otherwise the empty query (the whole collection). R1112's `deck:current` is superseded.
 - **Later opens**: the query, mode, selection and scroll Browse had when the user left it on this device, while the app runs (`browser/workspace` V1).
 - **With a search** (R1114, `browser/entry-points` E3): T7's reading of the given search replaces the query. Stats' joined text (`stats/browse-queries` Q3) is read by T7 too; it usually gives advanced tokens.
 
@@ -221,7 +221,7 @@ The list under the field while it has focus (Mac, iPad: under the field; iPhone 
 | Search | the field's prompt |
 | Contains “%@” | the first suggestion; %@ the word |
 | Saved Searches, Filter By | suggestion section labels |
-| Deck, Tag, Note Type, Card Type, Card State, Flag, Due, Added, Edited, Studied | kind labels; also section labels of the suggestions (Decks, Tags, Note Types, Card Types, Fields for name sections) |
+| Deck, Tag, Note Type, Card Type, Card State, Flag, Due, Added, Edited, Studied, Field | kind labels; also section labels of the suggestions (Decks, Tags, Note Types, Card Types, Fields for name sections) |
 | Current Deck, Untagged, New, Learning, Review, Suspended, Buried, Leech, No Flag, Any Flag, Today, Overdue, Next 7 Days, Last 7 Days, Last 30 Days | value labels |
 | Contains…, Is Empty, Has Content, contains %@, is empty, has content | Field token tests (menu, then token text) |
 | is not | after a negated token's kind ("Tag is not") |
@@ -243,6 +243,8 @@ The list under the field while it has focus (Mac, iPad: under the field; iPhone 
 | Property: random queries of T3 values (every kind, is and is not, one to four values, Unicode names, names J3.5 refuses) and plain text | T7.1: same query back, except the listed exceptions; and the run text returns the same ids as the query read by `search/query-model` on the fixture collection |
 | Texts `10:45`, `a-b`, `-xyz`, `a_b`, a quoted pair of words, and `deck:` with nothing after it | T5: one literal item; a plain item; a negated plain item; a plain item with a wildcard; one quoted item; the last results kept |
 | Sidebar: click, ⌘-click twice, ⌥-click, saved search click | T9's results; selected rows follow the tokens |
+| Run texts of one OR token (Tag: alpha or beta; Due: Today or Overdue; two sidebar values by ⌘-click) read back by T7 | the same token (step 2) |
+| `flag:0`, `-flag:0`, `-tag:_*`, `deck:spanish` for a deck Spanish, `tag:Alpha` for a tag alpha | No Flag; Any Flag; Untagged; Deck: Spanish; Tag: alpha |
 | Token menu: uncheck the last value; Is Not; Add Another | the token removed; negated; scoped suggestions |
 | Suggestions: empty field; `ch` with a deck Physics, tags part-1 and part-2, a field Part; 10,000 tags | T12's order and limits; under 4 ms for 50 rows |
 | `filter_counts` on the 150k fixture | T12.4's budget; counts equal `search_ids` counts of each value's run text |

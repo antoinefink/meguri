@@ -4,7 +4,7 @@ Spec: notetypes/draft-save
 Requirements: R918, R922, R926, R927, R928, R932, R933, R937, R947, R948, R949, R1475, R1476, R1477; supersedes in part R922's and R932's questions, R951's "no warning" and `notetypes/schema-changes` G4 (each noted where it stands)
 Anki: none (Meguri design, decided by Antoine 2026-11-20, round 9 option 3C); the save itself is `notetypes/structure-changes` S1 and keeps Anki's data effects
 Scenarios: none; tests named in D10
-Status: Under review (round 9, `docs/design/decisions.md` 2026-11-20, row `noteTypes`; changes an approved rule, `notetypes/schema-changes` G4 and `docs/design/native-interface-contract.md` N11.10). Do not implement until approved.
+Status: Under review (R915; round 9 option 3C, decided 2026-11-20, `docs/design/decisions.md` row `noteTypes`; it changes the approved rule of `notetypes/schema-changes` G4 and `docs/design/native-interface-contract.md` N11.10). Do not implement until approved.
 
 How the Note Types section saves: one draft per note type, one Save, and one sheet shown only when content would be lost or Meguri Sync would have its collection replaced. The sheet lists the changes with real counts and states the sync consequence once. With Meguri Sync, Meguri syncs first, then backs up, saves and uploads. The core op is `notetypes/structure-changes` S1 unchanged: it still takes no confirmation input; the question is the app's, asked before the op is submitted.
 
@@ -35,7 +35,8 @@ The Save button reads "Save…" when D3 says the sheet will show, "Save" otherwi
 | structural changes, `loses_content` false (fields or card types added or moved, a new sort field, removed fields empty everywhere) | the sheet with the changes and the sync paragraph; button Save and Upload | no sheet: iCloud carries structure changes without replacing anything (G7) |
 | `loses_content` true | the sheet with the losses and the sync paragraph; button Save and Upload, destructive | the sheet with the losses only; button Save, destructive |
 
-- Removing a note type (W12) and Change Note Type (N22.8) follow the same table with their own losses.
+- Removing a note type (W12) and Change Note Type (N22.8) follow the same table with their own losses. Restore to Default keeps its own question (R914); with a ready Meguri Sync binding and a structure-changing restore, that question gains D4's sync paragraph and its button reads "Restore and Upload".
+- "Meguri Sync" in this table means Meguri Sync with a ready binding (MP5). Meguri Sync chosen but not set up counts as Off here: no sync paragraph; the next setup handles the collection as MP6.3 does.
 - Whether the sheet shows never depends on `scm` or `ls`; it depends on the service and the summary (G4 as changed).
 
 ## D4. The sheet
@@ -65,7 +66,7 @@ The Save button reads "Save…" when D3 says the sheet will show, "Save" otherwi
 1. The live checks (`notetypes/validation` V4) pass, or Save is disabled (W7).
 2. The sheet, when D3 shows one, is accepted.
 3. Deck creations for deck overrides (A11's order).
-4. The S1 op: its safety backup when schema-classified (T6.1), then the save in one transaction and one undo step "Update Note Type" (S1, S13). While it runs the toolbar shows its progress ("Updating <i> of <n> notes", S10) and the note type cannot be edited; the rest of the app stays usable.
+4. The S1 op: its safety backup when schema-classified (`package/backup-triggers#T6.1`), then the save in one transaction and one undo step "Update Note Type" (S1, S13). While it runs the toolbar shows its progress ("Updating <i> of <n> notes", S10) and the note type cannot be edited; the rest of the app stays usable.
 5. On success the draft is gone and the detail shows the saved note type. On a refusal the draft stays with the refusal shown (`Stale`: D1's row; `SafetyBackupFailed`: an alert that nothing was changed; a V3 failure cannot occur after step 1 unless the stored note type changed, and then shows as an issue).
 
 ## D6. Saving with Meguri Sync
@@ -73,9 +74,9 @@ The Save button reads "Save…" when D3 says the sheet will show, "Save" otherwi
 When the service is Meguri Sync and the summary is schema-classified, Save and Upload runs one job (`sync/meguri-provider` MP7):
 
 1. **Sync first**: one normal round (MP5) so this device holds everything the server has. When the round brings a change to this note type, the job stops before saving and the draft meets `Stale` (D1). When the round fails or needs the user, the job stops, nothing is saved and the sync status shows why.
-2. **Back up and save**: D5 steps 3 and 4.
+2. **Back up and save**: D5 steps 3 and 4 (the safety backup of `package/backup-triggers#T6.1`).
 3. **Upload**: the collection replaces the server's (MP7's upload, the MP4 safety mechanics). Its progress shows in the sync status.
-4. When step 3 cannot run or fails after the save committed, the save stays; the sync status shows the needs-you line "Upload this collection to finish your note type changes." with Upload… (`sync/status-strings`, N15.4's needs-you kind). Upload… runs step 3 only (no new question: the sheet was the consent; MP7).
+4. When step 3 cannot run or fails after the save committed, the save stays; the sync status shows the needs-you line "Upload this collection to finish your note type changes." with Upload… (N15.4's needs-you kind). Upload… runs MP7 step 5: admission, a read of the server's facts and the upload, with no new question (the sheet was the consent).
 
 Offline (D4's unreachable case): D5 only, then step 4's needs-you line.
 
@@ -93,7 +94,7 @@ These questions are no longer asked at the moment of the edit; D4's rows replace
 
 ## D9. Strings
 
-`Save Changes to “%@”?`, Save…, Save and Upload, Delete and Upload, Delete Card Type “%@”, %lld cards and their progress are deleted., %lld notes will have no cards., Delete Field “%@”, Its content in %lld notes is deleted., Empty in every note., Add Card Type “%@”, %lld cards will be created., Add Field “%@”, Change the Order of Fields, Change the Order of Card Types, Sort by “%@”, the D4 paragraphs with %@ the device name, Meguri Sync cannot be reached. and its sentence, Upload this collection to finish your note type changes., Upload…, This note type changed on another device., Reload, Keep Editing, Discard changes?, Discard, Revert, Updating %1$lld of %2$lld notes. All new.
+`Save Changes to “%@”?`, Save…, Save and Upload, Delete and Upload, Delete Card Type “%@”, %lld cards and their progress are deleted., %lld notes will have no cards., Delete Field “%@”, Its content in %lld notes is deleted., Empty in every note., Add Card Type “%@”, %lld cards will be created., Add Field “%@”, Change the Order of Fields, Change the Order of Card Types, Sort by “%@”, the D4 paragraphs with %@ the device name, Meguri Sync cannot be reached. and its sentence, Upload this collection to finish your note type changes., Upload…, This note type changed on another device., Reload, Keep Editing, Discard changes?, Discard, Revert, Restore and Upload, Updating %1$lld of %2$lld notes, and the undo step names Update Note Type and Add Note Type (existing core names, shown as "Undo Update Note Type"). All are new except the step names.
 
 ## D10. Tests
 

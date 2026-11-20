@@ -108,7 +108,7 @@ the others use the pairwise set (U252).
 
 | Screen | Id | Units | Platforms | States | Variants | References |
 |---|---|---|---|---|---|---|
-| Browser (signature) | `browse.browser` | U264, U270, U271, U272, U273, U275, U278, U279, U280 | iphone, ipad, mac | empty, typical, overflow, error, loading | full covering set | `table`, `search-tokens`, `sidebar`, `inspector`, `content-unavailable` |
+| Browser (signature) | `browse.browser` | U264, U264a, U270, U270a, U271, U272, U273, U275, U278, U279, U280 | iphone, ipad, mac | empty, typical, overflow, error, loading | full covering set | `table`, `search-tokens`, `sidebar`, `inspector`, `content-unavailable` |
 | Find and Replace | `browse.findReplace` | U265, U277 | iphone, ipad, mac | typical, error | pairwise set | `sheet-form` |
 | Find Duplicates | `browse.findDuplicates` | U266, U277 | iphone, ipad, mac | typical, empty, loading | pairwise set | `sheet-form` |
 | Edit Field | `browse.editField` | U220 | iphone, ipad, mac | typical, error | pairwise set | `sheet-form` |

@@ -4,7 +4,7 @@ Spec: stats/card-info
 Requirements: R1248, R1249, R1250, R1251, R1252, R1253, R1254, R1255, R1256, R1257, R1259, R1260, R1261, R1262, R1263, R1264, R1423, R1424, R1425, R1426, R1427, R1428, R1429, R1430, R1448, R1841
 Anki: 26.09.3
 Scenarios: conformance/scenarios/stats/card-info/
-Status: Under review (round 8, `docs/design/decisions.md` 2026-11-20, row `browser`) for the lines that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of C7 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 The read-only snapshot of one card that the Card Info view shows (U92 builds it, U222 shows it, U103 exports it): the stats rows, the review history, the forgetting curve and the debug dump, plus which card "Previous Card Info" names. Every text here is English and is shown exactly as the core returns it; the UI takes only labels from its String Catalogs (C12; the plan's Open Questions keep these strings verbatim in every locale, R1448).
 

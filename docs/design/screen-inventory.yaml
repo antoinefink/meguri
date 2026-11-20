@@ -492,7 +492,7 @@ screens:
 
   - id: browse.browser
     title: Browser
-    units: [U264, U270, U271, U272, U273, U275, U278, U279, U280]
+    units: [U264, U264a, U270, U270a, U271, U272, U273, U275, U278, U279, U280]
     signature: true
     platforms: [iphone, ipad, mac]
     states: [empty, typical, overflow, error, loading]
