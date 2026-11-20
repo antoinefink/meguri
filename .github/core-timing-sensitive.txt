@@ -21,3 +21,5 @@ meguri-sync::normal_sync sanity_bad_keeps_counts_and_moves_only_scm  # intermitt
 #   collection_export::tests::captured_review_reopens_and_later_answers_do_not_change_ready_file  (acceptance durability deadline exceeded)
 #   collection_entry::tests::public_initial_all_media_import_close_reopen_and_public_export_preserves_r6_evidence  (SuspendDeadline at "resource cutoff")
 #   collection_entry::tests::public_initial_entry_imports_all_media_and_initializes_own_journal  (no terminal event)
+# Hosted run 44736094914 (CI-only change), shard 1:
+#   meguri-host::collection_export_safety normal_export_discard_preserves_real_forced_backup_and_user_destination  (ExportSourceChanged after 0.04 s)

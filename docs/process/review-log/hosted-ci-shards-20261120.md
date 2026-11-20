@@ -75,3 +75,13 @@ found nothing blocking and raised two should-fix items:
   fields when present (`selftest/20261120T130559Z-12142`: 17 of 17).
 
 The added-line warning now also catches indented lines.
+
+CodeRabbit then showed that nextest's JSON cannot tell a library's unit
+tests from an integration test named like the library: both are
+`<package>::<binary name>$<test>`, and the events carry no target kind. The
+`--only-list` check now finds each listed test's binary in `cargo nextest
+list --message-format json`, taken during the settle step, and reports a
+listed test that nextest does not select as `not-found`. The fixture adds a
+same-named integration test (`selftest/20261120T135714Z-63170`: 17 of 17).
+Run `44742037676` on `cebb26125` passed every check, including the advisory
+job with all five listed tests.
