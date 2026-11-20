@@ -17,6 +17,7 @@ use crate::scenario::{ObservationArgs, ObservationRequest, SearchKind, SearchReq
 pub(super) fn register(registry: &mut Registry) {
     registry.observation("search", search);
     registry.observation("canonical_search", canonical_search);
+    registry.observation("search_build", search_build);
     registry.observation("card_extractors", card_extractors);
 }
 
@@ -138,6 +139,124 @@ fn canonical_search(_session: &mut Session<'_>, request: &ObservationRequest) ->
             })
             .collect(),
     ))
+}
+
+/// S6 `search_build`: each S5 item mapped to the core's built item (J3)
+/// and written by `build`; a parse error of a parsed-text part is the
+/// entry's value. Scenarios hold no item J3 refuses, so a refusal is a run
+/// error of the executor.
+fn search_build(_session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    use meguri_search::builder::{BuilderError, build};
+    let items = crate::scenario::SearchBuildRequest::from_list(list(request)?).map_err(|e| invalid(e.to_string()))?;
+    items
+        .iter()
+        .map(|item| match build(&built_item(item)) {
+            Ok(text) => Ok(json!({ "text": text })),
+            Err(BuilderError::Parse { error, .. }) => Ok(error_value(&error)),
+            Err(BuilderError::InvalidItem(reason)) => Err(ExecError::new(
+                "invalid_item",
+                format!("the builder refused an item: {}", reason.reason()),
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Value::Array)
+}
+
+/// S5's neutral item as J3's built item. Groups and negations are mapped
+/// with an explicit stack, children before parents.
+fn built_item(top: &crate::scenario::BuiltSearchItem) -> meguri_search::BuiltItem {
+    use crate::scenario::{BuiltSearchItem as S, SearchFlag, SearchJoiner, SearchState, SearchWord};
+    use meguri_model::ids::NotetypeId;
+    use meguri_search::ast::{CardState, IdKind};
+    use meguri_search::{BuiltItem as B, Joiner};
+    enum Step<'a> {
+        Visit(&'a S),
+        Group(SearchJoiner, usize),
+        Negate,
+    }
+    let mut steps = vec![Step::Visit(top)];
+    let mut made: Vec<B> = Vec::new();
+    while let Some(step) = steps.pop() {
+        let item = match step {
+            Step::Group(joiner, count) => {
+                let items = made.split_off(made.len() - count);
+                let joiner = match joiner {
+                    SearchJoiner::And => Joiner::And,
+                    SearchJoiner::Or => Joiner::Or,
+                };
+                B::Group { joiner, items }
+            }
+            Step::Negate => {
+                let child = made.pop().expect("a negation's child is made first");
+                B::Negated(Box::new(child))
+            }
+            Step::Visit(S::Group { joiner, items }) => {
+                steps.push(Step::Group(*joiner, items.len()));
+                steps.extend(items.iter().rev().map(Step::Visit));
+                continue;
+            }
+            Step::Visit(S::Negated(child)) => {
+                steps.push(Step::Negate);
+                steps.push(Step::Visit(child));
+                continue;
+            }
+            Step::Visit(leaf) => match leaf {
+                S::Word(SearchWord::WholeCollection) => B::WholeCollection,
+                S::Word(SearchWord::CurrentDeck) => B::CurrentDeck,
+                S::Word(SearchWord::AnyDeck) => B::AnyDeck,
+                S::Word(SearchWord::AnyTag) => B::AnyTag,
+                S::Word(SearchWord::Untagged) => B::Untagged,
+                S::Word(SearchWord::AnyNotetype) => B::AnyNotetype,
+                S::Deck(name) => B::Deck(name.clone()),
+                S::Tag(name) => B::Tag(name.clone()),
+                S::Notetype(name) => B::Notetype(name.clone()),
+                S::Template(ordinal) => B::Template(u32::from(*ordinal)),
+                S::FieldPresent(name) => B::FieldPresent(name.clone()),
+                S::Field { name, text } => B::FieldText {
+                    field: name.clone(),
+                    text: text.clone(),
+                },
+                S::Literal(text) => B::Literal(text.clone()),
+                S::Flag(SearchFlag::Any) => B::AnyFlag,
+                S::Flag(SearchFlag::None) => B::NoFlag,
+                S::Flag(SearchFlag::Color(flag)) => B::Flag(*flag),
+                S::State(state) => B::State(match state {
+                    SearchState::New => CardState::New,
+                    SearchState::Learn => CardState::Learn,
+                    SearchState::Review => CardState::Review,
+                    SearchState::Due => CardState::Due,
+                    SearchState::Suspended => CardState::Suspended,
+                    SearchState::Buried => CardState::Buried,
+                }),
+                S::Added(days) => B::Added(u64::from(*days)),
+                S::Edited(days) => B::Edited(u64::from(*days)),
+                S::Introduced(days) => B::Introduced(u64::from(*days)),
+                S::Answered { days, button } => B::Answered {
+                    days: u64::from(*days),
+                    button: *button,
+                },
+                S::Rescheduled(days) => B::Rescheduled(u64::from(*days)),
+                S::DueOn(day) => B::DueOn(i64::from(*day)),
+                S::DueWithin(day) => B::DueWithin(i64::from(*day)),
+                // S5 bounds ids to 0..2^53-1, so they fit.
+                S::NoteIds(ids) => B::Ids {
+                    kind: IdKind::Notes,
+                    ids: ids.iter().map(|id| *id as i64).collect(),
+                },
+                S::Dupe { notetype_id, text } => B::Duplicates {
+                    notetype: NotetypeId(*notetype_id as i64),
+                    text: text.clone(),
+                },
+                S::Text { text, field_text } => B::Parsed {
+                    text: text.clone(),
+                    field_text: *field_text,
+                },
+                S::Group { .. } | S::Negated(_) => unreachable!("visited above"),
+            },
+        };
+        made.push(item);
+    }
+    made.pop().expect("the top item is made last")
 }
 
 /// A config value of the collection, if it is set.
