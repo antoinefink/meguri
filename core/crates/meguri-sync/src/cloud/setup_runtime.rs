@@ -55,24 +55,22 @@ impl Runtime {
     pub fn connection_setup_decision(
         &self,
         preview: &Preview,
-        other_service: OtherServiceHistory,
+        other_service: OtherServiceEvidence,
     ) -> Result<SetupDecision, RuntimeError> {
         Ok(decide(&self.connection_setup_inputs(preview, other_service)?))
     }
 
-    pub fn connection_setup_inputs(
+    fn connection_setup_inputs(
         &self,
         preview: &Preview,
-        other_service: OtherServiceHistory,
+        other_service: OtherServiceEvidence,
     ) -> Result<SetupInputs, RuntimeError> {
         let s = self.state();
         if s.publication.preview.as_ref() != Some(&(preview.clone(), true)) {
             return Err(PublicationError::AuthorityChanged.into());
         }
-        let bindings = with_tracking_access(|| match &s.store {
-            Some(store) => store.setup_bindings(),
-            None => Ok(Vec::new()),
-        })?;
+        let bindings =
+            with_tracking_access(|| retained_setup_bindings(s.store.as_ref(), preview.native_file.is_some()))?;
         let local = match (preview.native_file, preview.local_content) {
             (None, _) => LocalSide::Absent,
             (Some(_), Some(proof)) => LocalSide::Present(proof),
@@ -91,7 +89,7 @@ impl Runtime {
             local,
             cloud,
             resume_offered,
-            other_service,
+            other_service: other_service.history(),
             fence_pending: preview
                 .decision_before
                 .as_ref()
@@ -115,7 +113,7 @@ impl Runtime {
     fn require_silent_start(
         &self,
         preview: &Preview,
-        other_service: OtherServiceHistory,
+        other_service: OtherServiceEvidence,
         starts: &[SilentStart],
     ) -> Result<SilentStart, RuntimeError> {
         match self.connection_setup_decision(preview, other_service)?.silent_start() {
@@ -129,7 +127,7 @@ impl Runtime {
     pub fn start_setup_publication(
         &self,
         preview: &Preview,
-        other_service: OtherServiceHistory,
+        other_service: OtherServiceEvidence,
         collection: &Collection,
     ) -> Result<[u8; 16], RuntimeError> {
         self.require_silent_start(preview, other_service, &[SilentStart::Publication])?;
@@ -144,7 +142,7 @@ impl Runtime {
     pub fn start_setup_adoption(
         &self,
         preview: &Preview,
-        other_service: OtherServiceHistory,
+        other_service: OtherServiceEvidence,
         collection: Option<&Collection>,
         engine: &meguri_engine::Engine,
     ) -> Result<[u8; 16], RuntimeError> {
@@ -156,7 +154,12 @@ impl Runtime {
         if (start == SilentStart::AdoptionInitial) != collection.is_none() {
             return Err(PublicationError::AuthorityChanged.into());
         }
-        self.record_cloud_adoption(preview, collection, engine, start == SilentStart::AdoptionOverNoContent)
+        let admission = if start == SilentStart::AdoptionOverNoContent {
+            AdoptionAdmission::ProvedNoUserContent
+        } else {
+            AdoptionAdmission::Confirmed
+        };
+        self.record_cloud_adoption(preview, collection, engine, admission)
     }
 
     /// Row 3, with no confirmation: only with a durable record that no other
@@ -164,11 +167,57 @@ impl Runtime {
     pub fn start_setup_resume(
         &self,
         preview: &Preview,
-        other_service: OtherServiceHistory,
+        other_service: OtherServiceEvidence,
         collection: &Collection,
     ) -> Result<(), RuntimeError> {
         self.require_silent_start(preview, other_service, &[SilentStart::Resume])?;
         self.confirm_connection_resume(preview, collection)
+    }
+
+    /// V27.4's "Keep the iCloud collection" for a preview whose `stopped`
+    /// binding could resume. The user's confirmation on the sheet, so V14
+    /// runs as for any confirmed adoption: the op is bound to the shown
+    /// `MGActive` and its change tag, the safety backup is step 7's, and
+    /// every check of `confirm_cloud_adoption` is made. It is admitted only
+    /// while the core's own decision for this preview is the sheet with that
+    /// button offered (V27.6: Resume is not offered after the other
+    /// service). While the decision is Resume or its confirmation, this
+    /// refuses with `NotOffered` and changes nothing.
+    pub fn confirm_setup_adoption_over_resumable(
+        &self,
+        preview: &Preview,
+        other_service: OtherServiceEvidence,
+        collection: &Collection,
+        engine: &meguri_engine::Engine,
+    ) -> Result<[u8; 16], RuntimeError> {
+        let decision = self.connection_setup_decision(preview, other_service)?;
+        if decision.question != SetupQuestion::Keep || !decision.keep_cloud_offered {
+            return Err(PublicationError::NotOffered.into());
+        }
+        self.record_cloud_adoption(preview, Some(collection), engine, AdoptionAdmission::KeepOverResumable)
+    }
+}
+
+/// How an adoption was admitted, for `record_cloud_adoption`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AdoptionAdmission {
+    /// The user's confirmation, or row 2 where nothing local is replaced.
+    Confirmed,
+    /// V27.2 row 5: the op tests the local collection again when it replaces it.
+    ProvedNoUserContent,
+    /// The sheet's "Keep the iCloud collection" over a binding that could
+    /// resume. Only `confirm_setup_adoption_over_resumable` gives it.
+    KeepOverResumable,
+}
+
+/// The bindings the decision reads (V27.6). A device with a collection file
+/// always has its tracking store open here, so a missing store is a failed
+/// read, never "no binding": that answer would admit row 4's upload.
+fn retained_setup_bindings(store: Option<&TrackingStore>, local_collection: bool) -> Result<Vec<Binding>, RuntimeError> {
+    match store {
+        Some(store) => Ok(store.setup_bindings()?),
+        None if local_collection => Err(Error::Database.into()),
+        None => Ok(Vec::new()),
     }
 }
 
@@ -211,6 +260,27 @@ mod tests {
         // A file the journal does not track yet is still a file in the folder.
         std::fs::write(folder.path().join("untracked.bin"), b"x").unwrap();
         assert_eq!(content_proof(no_rows(), Ok(0), folder.path()), ContentProof::HoldsOrUnproved);
+    }
+    /// A collection on this device with no tracking store is a failed read.
+    /// With no collection there is no store yet, and no binding to retain.
+    #[test]
+    fn a_missing_tracking_store_beside_a_collection_is_an_error_not_no_binding() {
+        assert!(matches!(
+            retained_setup_bindings(None, true),
+            Err(RuntimeError::Tracking(Error::Database))
+        ));
+        assert!(retained_setup_bindings(None, false).unwrap().is_empty());
+        let directory = tempfile::tempdir().unwrap();
+        let scope = BuildScope {
+            container: ContainerId::new("test.meguri.setup.unit").unwrap(),
+            environment: Environment::Development,
+        };
+        let store = match TrackingStore::open(directory.path(), scope).unwrap() {
+            OpenOutcome::Missing(store) | OpenOutcome::Opened(store) => store,
+            _ => panic!("a new tracking store opens"),
+        };
+        // An open store with no binding is the proved "no retained binding".
+        assert!(retained_setup_bindings(Some(&store), true).unwrap().is_empty());
     }
     #[test]
     fn unreadable_counts_as_content() {

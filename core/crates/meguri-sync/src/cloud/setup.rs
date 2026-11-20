@@ -37,7 +37,8 @@ pub enum CloudSide {
 }
 
 /// V27.6, "not after the other service": whether Meguri Sync reached a ready
-/// binding on this device since the iCloud binding stopped.
+/// binding on this device since the iCloud binding stopped. A fact of the
+/// pure decision; the runtime accepts it only inside `OtherServiceEvidence`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OtherServiceHistory {
     /// Durably known: no other service was ready since the stop.
@@ -46,6 +47,29 @@ pub enum OtherServiceHistory {
     ReadySinceStop,
     /// No durable record answers it. Never treated as `NoneSinceStop`.
     Unknown,
+}
+
+/// The history as the runtime's decision and starts take it. A caller cannot
+/// state one: it has no public field, no `Default` and no decoder, and its
+/// only constructor outside tests is `unknown()`. So row 3 starts with no
+/// question only after a constructor that reads the durable record of
+/// `sync/meguri-provider#MP1` is added here; until that record exists, no
+/// build without `test-hooks` can make a `NoneSinceStop`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OtherServiceEvidence(OtherServiceHistory);
+impl OtherServiceEvidence {
+    /// No durable record answers it: Resume keeps its confirmation.
+    pub const fn unknown() -> Self {
+        Self(OtherServiceHistory::Unknown)
+    }
+    pub const fn history(self) -> OtherServiceHistory {
+        self.0
+    }
+    /// A history that a test states. Never compiled into a shipped core.
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub const fn for_testing(history: OtherServiceHistory) -> Self {
+        Self(history)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,8 +87,9 @@ pub struct SetupInputs {
     /// V27.6: the newest binding other than a salvage binding is another account's.
     pub other_account_binding: bool,
     /// A binding other than a salvage binding is retained in this build scope.
-    /// With no resume, its epoch is gone, switched or untrusted, so an upload
-    /// could recreate lost iCloud content (V27.6, R2054).
+    /// With no resume it is isolated, and V27.4 lists it under "shown for":
+    /// its epoch is gone, switched or untrusted, so an upload could recreate
+    /// lost iCloud content (V27.6, R2054) and neither row 4, 5 nor 6 is taken.
     pub retained_binding: bool,
     /// Unsent, held, isolated or fetched-and-unapplied work that a replacement
     /// would lose (V13.4, R2056).
@@ -123,7 +148,8 @@ pub enum AskReason {
     Fence,
     UnprovedLayout,
     OtherAccount,
-    /// An upload could recreate iCloud content that a retained binding knew.
+    /// A retained binding that cannot resume (V27.4): an upload could recreate
+    /// iCloud content that it knew, and a download would pass over its state.
     RetainedBinding,
     WorkAtRisk,
     CloudUnreadable,
@@ -225,14 +251,22 @@ pub fn decide(inputs: &SetupInputs) -> SetupDecision {
     if inputs.other_account_binding {
         return ask(AskReason::OtherAccount);
     }
+    // A binding that could resume is a retained binding, whatever the caller
+    // says of `retained_binding`: where Resume is not offered it asks.
+    let retained_binding = inputs.retained_binding || inputs.resume_offered;
     match (local, inputs.cloud) {
         (_, CloudSide::Unreadable) => ask(AskReason::CloudUnreadable),
-        (_, CloudSide::NoActive) if inputs.retained_binding => ask(AskReason::RetainedBinding),
+        (_, CloudSide::NoActive) if retained_binding => ask(AskReason::RetainedBinding),
         (_, CloudSide::NoActive) => run(SetupRow::Publish),
+        // V27.4 shows the sheet for an isolated binding, also when this
+        // device holds no user content: row 5 is not taken over one.
+        (ContentProof::ProvedNone, CloudSide::Complete(_)) if retained_binding => {
+            ask(AskReason::RetainedBinding)
+        }
         (ContentProof::ProvedNone, CloudSide::Complete(_)) if inputs.work_at_risk => ask(AskReason::WorkAtRisk),
         (ContentProof::ProvedNone, CloudSide::Complete(_)) => run(SetupRow::AdoptOverNoContent),
         (ContentProof::HoldsOrUnproved, CloudSide::Complete(ContentProof::ProvedNone)) => {
-            if inputs.retained_binding {
+            if retained_binding {
                 ask(AskReason::RetainedBinding)
             } else if inputs.work_at_risk {
                 ask(AskReason::WorkAtRisk)
@@ -449,17 +483,66 @@ mod tests {
         // The one-direction form: nothing in iCloud can be kept.
         assert_eq!((d.reason, d.keep_device_offered, d.keep_cloud_offered), (Some(AskReason::OtherAccount), true, false));
     }
+    /// V27.4 and V27.6: with a local collection, a retained binding takes
+    /// row 3 or the sheet, never row 4, 5 or 6.
     #[test]
-    fn a_retained_binding_never_leads_to_a_silent_upload() {
+    fn a_retained_binding_never_leads_to_a_silent_upload_or_download() {
         for i in every_input() {
             let d = decide(&i);
             if i.retained_binding && matches!(i.local, LocalSide::Present(_)) {
                 assert!(
-                    !matches!(d.row, SetupRow::Publish | SetupRow::PublishOverNoContent),
+                    !matches!(
+                        d.row,
+                        SetupRow::Publish | SetupRow::AdoptOverNoContent | SetupRow::PublishOverNoContent
+                    ),
                     "{i:?}"
                 );
+                assert!(d.question != SetupQuestion::None || d.row == SetupRow::Resume, "{i:?}");
             }
         }
+    }
+    #[test]
+    fn row_5_asks_over_a_retained_binding_that_cannot_resume() {
+        for cloud in [NoContent, Holds] {
+            let mut i = inputs(LocalSide::Present(NoContent), CloudSide::Complete(cloud));
+            i.retained_binding = true;
+            assert_eq!(
+                decide(&i),
+                SetupDecision {
+                    row: SetupRow::KeepCollection,
+                    question: SetupQuestion::Keep,
+                    reason: Some(AskReason::RetainedBinding),
+                    keep_device_offered: true,
+                    keep_cloud_offered: true,
+                }
+            );
+            // The same binding after the other service was ready (V27.6).
+            i.resume_offered = true;
+            i.other_service = OtherServiceHistory::ReadySinceStop;
+            i.work_at_risk = true;
+            assert_eq!(decide(&i).reason, Some(AskReason::RetainedBinding));
+        }
+    }
+    /// A sheet shown where Resume is not offered has both of its buttons.
+    #[test]
+    fn a_resumable_binding_after_the_other_service_offers_both_collections() {
+        for i in every_input() {
+            if i.resume_offered
+                && i.other_service == OtherServiceHistory::ReadySinceStop
+                && matches!(i.local, LocalSide::Present(_))
+                && matches!(i.cloud, CloudSide::Complete(_))
+            {
+                let d = decide(&i);
+                assert_eq!((d.row, d.question), (SetupRow::KeepCollection, SetupQuestion::Keep), "{i:?}");
+                assert!(d.keep_device_offered && d.keep_cloud_offered, "{i:?}");
+            }
+        }
+    }
+    #[test]
+    fn evidence_outside_a_test_is_only_unknown() {
+        assert_eq!(OtherServiceEvidence::unknown().history(), OtherServiceHistory::Unknown);
+        let stated = OtherServiceEvidence::for_testing(OtherServiceHistory::NoneSinceStop);
+        assert_eq!(stated.history(), OtherServiceHistory::NoneSinceStop);
     }
     #[test]
     fn an_unreadable_active_record_never_takes_a_row() {
@@ -496,7 +579,10 @@ mod tests {
                     assert!(matches!(i.local, LocalSide::Present(_)) && i.cloud == CloudSide::NoActive, "{i:?}")
                 }
                 SetupRow::AdoptOverNoContent => assert!(
-                    i.local == LocalSide::Present(NoContent) && matches!(i.cloud, CloudSide::Complete(_)) && !i.work_at_risk,
+                    i.local == LocalSide::Present(NoContent)
+                        && matches!(i.cloud, CloudSide::Complete(_))
+                        && !i.work_at_risk
+                        && !i.retained_binding,
                     "{i:?}"
                 ),
                 SetupRow::PublishOverNoContent => assert!(
@@ -565,6 +651,7 @@ mod tests {
                 (SetupRow::AdoptOverNoContent, Some(SilentStart::AdoptionOverNoContent)) => {
                     assert!(i.local == LocalSide::Present(NoContent) && !i.work_at_risk, "{i:?}");
                     assert!(!i.other_account_binding && !i.fence_pending && !i.layout_unproved, "{i:?}");
+                    assert!(!i.retained_binding, "{i:?}");
                     admitted[2] += 1;
                 }
                 (SetupRow::Resume, Some(SilentStart::Resume)) => {

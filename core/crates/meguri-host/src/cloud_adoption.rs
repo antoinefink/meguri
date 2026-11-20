@@ -186,19 +186,30 @@ impl CoreHost {
                 .unwrap_or(meguri_sync::cloud::publication::PublicationWork::Idle)),
         }
     }
+    /// V14's confirmation. A preview whose `stopped` binding could resume is
+    /// V27.4's "Keep the iCloud collection": the core admits it only while
+    /// its own decision is the sheet with that button offered (V27.6).
     pub fn confirm_cloud_adoption(&self, preview: &Preview) -> Result<[u8; 16], RuntimeError> {
-        self.cloud_runtime().ok_or_else(unavailable)?.confirm_cloud_adoption(
-            preview,
-            self.cloud_adoption_collection()?.as_ref(),
-            self.engine(),
-        )
+        let runtime = self.cloud_runtime().ok_or_else(unavailable)?;
+        let collection = self.cloud_adoption_collection()?;
+        match (&preview.decision, collection.as_ref()) {
+            (meguri_sync::cloud::publication::ConnectDecision::ConfirmResume, Some(collection)) => runtime
+                .confirm_setup_adoption_over_resumable(
+                    preview,
+                    self.cloud_setup_other_service(),
+                    collection,
+                    self.engine(),
+                ),
+            _ => runtime.confirm_cloud_adoption(preview, collection.as_ref(), self.engine()),
+        }
     }
     /// V27.6, "not after the other service". Provider metadata keeps no durable
     /// record that Meguri Sync was never ready since an iCloud stop: a handoff
-    /// clears `meguri_binding`, so its absence proves nothing. Until such a
-    /// record exists this is `Unknown`, and Resume keeps its confirmation.
-    pub fn cloud_setup_other_service_history(&self) -> meguri_sync::cloud::setup::OtherServiceHistory {
-        meguri_sync::cloud::setup::OtherServiceHistory::Unknown
+    /// clears `meguri_binding`, so its absence proves nothing. `unknown()` is
+    /// the only evidence this crate can construct, so Resume keeps its
+    /// confirmation until the core gains a constructor that reads a record.
+    fn cloud_setup_other_service(&self) -> meguri_sync::cloud::setup::OtherServiceEvidence {
+        meguri_sync::cloud::setup::OtherServiceEvidence::unknown()
     }
     /// V27.2: the row the core picked for this ready preview.
     pub fn cloud_setup_decision(
@@ -208,13 +219,13 @@ impl CoreHost {
         self.cloud_connection_generation()?;
         self.cloud_runtime()
             .ok_or_else(unavailable)?
-            .connection_setup_decision(preview, self.cloud_setup_other_service_history())
+            .connection_setup_decision(preview, self.cloud_setup_other_service())
     }
     /// Rows 2 and 5 of V27.2, with no confirmation.
     pub fn start_cloud_setup_adoption(&self, preview: &Preview) -> Result<[u8; 16], RuntimeError> {
         self.cloud_runtime().ok_or_else(unavailable)?.start_setup_adoption(
             preview,
-            self.cloud_setup_other_service_history(),
+            self.cloud_setup_other_service(),
             self.cloud_adoption_collection()?.as_ref(),
             self.engine(),
         )
@@ -234,7 +245,7 @@ impl CoreHost {
         }
         self.cloud_runtime().ok_or_else(unavailable)?.start_setup_publication(
             preview,
-            self.cloud_setup_other_service_history(),
+            self.cloud_setup_other_service(),
             &collection,
         )
     }
@@ -253,7 +264,7 @@ impl CoreHost {
         }
         self.cloud_runtime().ok_or_else(unavailable)?.start_setup_resume(
             preview,
-            self.cloud_setup_other_service_history(),
+            self.cloud_setup_other_service(),
             &collection,
         )
     }

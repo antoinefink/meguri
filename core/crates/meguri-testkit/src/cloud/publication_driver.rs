@@ -276,10 +276,12 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
             value(())
         }
         Input::SetupDecision(preview, history) => {
+            let history = meguri_sync::cloud::setup::OtherServiceEvidence::for_testing(history);
             value(device.runtime()?.connection_setup_decision(&preview, history)?)
         }
         Input::SetupStart(preview, history, forced) => {
             use meguri_sync::cloud::setup::SilentStart;
+            let history = meguri_sync::cloud::setup::OtherServiceEvidence::for_testing(history);
             let runtime = device.runtime()?;
             // With no decided start, production's refusing call is made.
             let start = match forced {
@@ -300,6 +302,15 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
                 SilentStart::Publication => Some(runtime.start_setup_publication(&preview, history, &collection)?),
             };
             value(started)
+        }
+        Input::SetupKeepCloud(preview, history) => {
+            let history = meguri_sync::cloud::setup::OtherServiceEvidence::for_testing(history);
+            value(device.runtime()?.confirm_setup_adoption_over_resumable(
+                &preview,
+                history,
+                &collection,
+                device.host.engine(),
+            )?)
         }
         Input::AdoptionReply(work, reply) => {
             let mut diagnostic = meguri_sync::cloud::adoption::AdoptionDiagnosticRecorder::new(&work.task);

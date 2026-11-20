@@ -1,5 +1,6 @@
 //! Production V14 collection adoption. The platform supplies record replies;
 //! Runtime owns the slot, unpublished stage, validation and durable transitions.
+use super::setup_impl::AdoptionAdmission;
 use super::*;
 use crate::cloud::{
     adoption::*,
@@ -799,16 +800,18 @@ impl Runtime {
         collection: Option<&Collection>,
         engine: &Engine,
     ) -> Result<[u8; 16], RuntimeError> {
-        self.record_cloud_adoption(preview, collection, engine, false)
+        self.record_cloud_adoption(preview, collection, engine, AdoptionAdmission::Confirmed)
     }
-    /// `proved_no_user_content` is V27.2 row 5's condition, recorded in the op
-    /// so the exclusive phase tests it again. Only `start_setup_adoption` sets it.
+    /// `ProvedNoUserContent` is V27.2 row 5's condition, recorded in the op
+    /// so the exclusive phase tests it again; only `start_setup_adoption`
+    /// gives it. `KeepOverResumable` admits a preview whose binding could
+    /// resume, and nothing else: every other check here is the same.
     pub(super) fn record_cloud_adoption(
         &self,
         preview: &Preview,
         collection: Option<&Collection>,
         engine: &Engine,
-        proved_no_user_content: bool,
+        admission: AdoptionAdmission,
     ) -> Result<[u8; 16], RuntimeError> {
         self.wait_incoming_idle();
         if preview.active.is_none() || preview.active_epoch.is_none() {
@@ -833,10 +836,21 @@ impl Runtime {
                 })
             })?;
         }
-        if !matches!(
-            preview.decision,
-            ConnectDecision::ConfirmAdoption | ConnectDecision::ChooseCollection | ConnectDecision::NoCollection
-        ) {
+        let offered = match admission {
+            // The sheet's confirmation over a `stopped` binding that could
+            // resume. That binding becomes the op's binding before, as any
+            // retained binding of this account does (V14.2 step 3).
+            AdoptionAdmission::KeepOverResumable => {
+                collection.is_some()
+                    && preview.decision == ConnectDecision::ConfirmResume
+                    && preview.resume_binding.is_some()
+            }
+            AdoptionAdmission::Confirmed | AdoptionAdmission::ProvedNoUserContent => matches!(
+                preview.decision,
+                ConnectDecision::ConfirmAdoption | ConnectDecision::ChooseCollection | ConnectDecision::NoCollection
+            ),
+        };
+        if !offered {
             return Err(PublicationError::NotOffered.into());
         }
         {
@@ -911,7 +925,7 @@ impl Runtime {
             started_at_ms: self.adapter_now()?,
             transport_wait: false,
             retry_after_ms: None,
-            requires_no_user_content: proved_no_user_content,
+            requires_no_user_content: admission == AdoptionAdmission::ProvedNoUserContent,
         };
         self.check_adoption_preview(preview, collection)?;
         let cleanup_evidence = collection
@@ -957,6 +971,9 @@ impl Runtime {
             })?;
             *held = Some(owner);
             s.publication.preview = None;
+            // The retained resume proof was of that preview. The op now holds
+            // its binding as the binding before, so V9.2 offers no resume.
+            s.publication.resume = None;
             Self::adapter_close_exchange_locked(s);
             Ok(())
         })?;

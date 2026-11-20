@@ -561,6 +561,22 @@ impl PublicationRig {
         self.refresh()?;
         Ok(started)
     }
+    /// V27.4's "Keep the iCloud collection" for a preview whose binding could
+    /// resume, under a supplied history. The recovery op's id.
+    pub fn keep_cloud_over_resumable(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+    ) -> Result<[u8; 16]> {
+        let id = self
+            .sdk
+            .get_mut()
+            .driver
+            .call(Input::SetupKeepCloud(preview.production.clone(), history))?;
+        self.work = None;
+        self.refresh()?;
+        Ok(id)
+    }
     pub fn adopt_cloud(&mut self, preview: &ConnectionPreview) -> Result<[u8; 16]> {
         let id = self
             .sdk
