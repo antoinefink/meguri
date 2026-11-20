@@ -19,8 +19,10 @@ fn reading_next_day_at(sql: String) -> TermSql {
     }
 }
 
-/// An instant beyond the 64-bit range compares as the nearest end would with
-/// every stored id or `mod`.
+/// An instant beyond the 64-bit range becomes the nearest end. Every
+/// comparison then gives what the true instant would, except for a stored
+/// value equal to that end, which only a next-day-at near the ends of the
+/// range can meet.
 fn clamp(value: i128) -> i64 {
     value.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
 }

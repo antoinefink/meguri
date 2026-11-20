@@ -1,5 +1,5 @@
-//! U82: one search statement per term of `specs/search/names-and-ids`
-//! (and, with U82's second part, the other term families), run whole on a working
+//! U82: one search statement per term family of `specs/search/names-and-ids`,
+//! `state-and-flags`, `properties` and `history`, run whole on a working
 //! copy of a generated collection (plan section 3: every unit that adds a
 //! query adds its bench row). Each sample builds the plan and reads every
 //! matching card id, unsorted, on a query reader with the product's SQL
@@ -30,7 +30,7 @@ use meguri_testkit::generate::DEFAULT_NOW_MS;
 static ALLOC: PeakAlloc = PeakAlloc;
 
 /// The benchmark name of each search: `search.terms.<family>.<term>`.
-const SEARCHES: [(&str, &str); 22] = [
+const SEARCHES: [(&str, &str); 25] = [
     ("names.tag", "tag:a*"),
     ("names.tag_regex", "tag:re:^a"),
     ("names.deck", "deck:a*"),
@@ -53,6 +53,10 @@ const SEARCHES: [(&str, &str); 22] = [
     ("history.added_edited", "added:30 OR edited:30"),
     ("history.prop_rated", "prop:rated=-1"),
     ("history.resched", "resched:30"),
+    // Windows over the whole review log.
+    ("history.introduced_wide", "introduced:36500"),
+    ("history.rated_wide", "rated:36500"),
+    ("history.prop_rated_wide", "prop:rated<=0"),
 ];
 
 fn sizes() -> Vec<String> {

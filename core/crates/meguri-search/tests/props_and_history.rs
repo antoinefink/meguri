@@ -173,7 +173,8 @@ fn column_properties_compare_every_card_type() {
         ("prop:ease<-1", vec![]),
     ] {
         assert_eq!(ids(&db, query, &ctx), expected, "{query}");
-        assert!(!plan(query, &ctx).is_slow(), "{query}");
+        let plan = plan(query, &ctx);
+        assert!(!plan.is_slow() && plan.reads().is_empty(), "{query}");
     }
 }
 
@@ -260,6 +261,13 @@ fn due_extremes_follow_sqlite_arithmetic_without_wrapping() {
     assert_eq!(ids(&db, "prop:due<0", &ctx), [1]);
     assert_eq!(ids(&db, "prop:due>=0", &ctx), [2]);
     assert_eq!(ids(&db, "prop:due<-2147483648", &ctx), [1]);
+    // A negative next-day-at overflows the upper end instead.
+    let ctx = SearchContext {
+        next_day_at: -1_000_000,
+        ..ctx
+    };
+    assert_eq!(ids(&db, "prop:due<0", &ctx), [1]);
+    assert_eq!(ids(&db, "prop:due>2147483647", &ctx), [2]);
 }
 
 #[test]
@@ -306,7 +314,8 @@ fn memory_state_properties_compare_with_the_operand_decimal() {
     ] {
         assert_eq!(ids(&db, query, &ctx), expected, "{query}");
         assert_eq!(ids(&db, &format!("-{query}"), &ctx), negated, "-{query}");
-        assert!(plan(query, &ctx).is_slow(), "{query}");
+        let plan = plan(query, &ctx);
+        assert!(plan.is_slow() && plan.reads().is_empty(), "{query}");
     }
     // P6: the stored 0.1 (0.10000000149...) lies above the decimal 0.1.
     assert_eq!(ids(&db, "prop:s>0.1", &ctx), [1, 2, 3, 4]);
@@ -371,7 +380,8 @@ fn custom_data_values_are_text_or_numbers() {
         ("has-cd:K", vec![11]),
     ] {
         assert_eq!(ids(&db, query, &ctx), expected, "{query}");
-        assert!(plan(query, &ctx).is_slow(), "{query}");
+        let plan = plan(query, &ctx);
+        assert!(plan.is_slow() && plan.reads().is_empty(), "{query}");
     }
 }
 
