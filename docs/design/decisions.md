@@ -67,3 +67,4 @@ Columns: date (YYYY-MM-DD), screen id from `screen-inventory.yaml` (or `design-s
 | 2026-11-20 | shell.commands | Mac menus are organised by object: File, Edit, Deck, Card. New Note ⌘N, New Deck… ⇧⌘N, Find… ⌘F, Delete Deck ⌘⌫; one Undo, in Edit | "5B" | chat, round 6 |
 | 2026-11-20 | deck.options | Deck Options first version: the preset, the two daily limits and Desired Retention on one page; the rest under Advanced | "6B" | chat, round 6 |
 | 2026-11-20 | review.editNote | Edit Note from the review toolbar opens the Add Note form on the current note; the card browser comes later | "7A" | chat, round 6 |
+| 2026-11-20 | settings.accountSync | The spec lines dated 2026-11-20 for Meguri Sync setup are approved, and the upload lock is released as built when an upload is judged not accepted | Decided by Claude; Antoine: "Can you please decide for me? Use your best judgment" | chat; `docs/process/review-log/spec-housekeeping-20261120.md` |

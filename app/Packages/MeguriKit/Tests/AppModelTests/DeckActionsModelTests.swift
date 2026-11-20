@@ -401,6 +401,32 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+    /// N20.3: Rename shows the renamed deck's page, unless the person went
+    /// elsewhere while it ran; the committed rename stays either way.
+    @Test(arguments: [false, true])
+    func renameOpensTheRenamedDeckOnlyIfThePersonStayed(navigates: Bool) async throws {
+        try await withDeckNameOwner { owner in
+            let model = owner.deckActions, gate = DeckNameGate(), service = CoreDeckService()
+            let shown = try await service.addDeck(name: "QZ64").id
+            let renamed = try await service.addDeck(name: "QZ65").id
+            await owner.loadCounts()
+            try #require(await owner.openDeckPage(deckID: shown).value)
+            model.startRename = { id, name in
+                let job = try await CoreDeckService().startRenameDeck(id: id, name: name)
+                _ = try await job.value()
+                await gate.hold()
+                return job
+            }
+            model.present(.rename(renamed)); model.name = "QZ66"; model.submit()
+            await gate.entered()
+            if navigates { owner.navigation.openHome() }
+            gate.release(); await model.waitForCompletion()
+            #expect(owner.fullDeckName(renamed) == "QZ66")
+            #expect(owner.navigation.homeDeckPage == (navigates ? nil : DeckID(renamed)))
+            #expect(owner.navigation.sheet == nil && model.message == nil)
+        }
+    }
+
     @Test(arguments: [false, true])
     func admittedRenameDrainsBeforeBackgroundOrCloseAndLateCancelKeepsCommit(closing: Bool) async throws {
         try await withDeckNameOwner { owner in

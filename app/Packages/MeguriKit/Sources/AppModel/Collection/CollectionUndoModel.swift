@@ -39,7 +39,7 @@ public final class CollectionUndoModel {
         guard redo ? canRedo : canUndo, let owner else { return }
         // Reserved before yielding, so a second ⌘Z admits nothing.
         busy = true
-        let expected = owner.generation
+        let expected = owner.generation, intent = owner.navigation.intentRevision
         task = Task {
             defer { busy = false; task = nil }
             do {
@@ -51,7 +51,7 @@ public final class CollectionUndoModel {
                 if expected == owner.generation { owner.collectionUndoFailed() }
             }
             guard expected == owner.generation else { return }
-            await owner.collectionUndoFinished()
+            await owner.collectionUndoFinished(intent: intent)
             // The tree's refresh scheduled a peek; this one replaces it.
             refreshTask?.cancel(); refreshTask = nil
             await refreshNow()

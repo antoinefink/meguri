@@ -24,6 +24,9 @@ public final class DeckActionsModel {
     private var originalName: String?
     /// The full name the last Create or Rename sent.
     private var submittedName: String?
+    /// Where the person was when they confirmed: a Rename opens the renamed
+    /// deck's page only if they have not gone elsewhere since.
+    private var submittedIntent: UInt64?
     public private(set) var busy = false
     public private(set) var cancelling = false
     public private(set) var message: String?
@@ -127,7 +130,7 @@ public final class DeckActionsModel {
         // Reserve synchronously, before the task can yield to another submit.
         busy = true; cancelling = false; message = nil
         let expected = generation, current = revision, draft = composedName
-        submittedName = draft
+        submittedName = draft; submittedIntent = owner.navigation.intentRevision
         task = Task {
             defer { rename = nil; progress = nil; busy = false; task = nil }
             if cancelling, current == revision, expected == owner.generation {
@@ -204,8 +207,12 @@ public final class DeckActionsModel {
                 if case .rename(let id) = action {
                     // N20.3: Rename shows the deck's page, as Create does; the page
                     // already showing stays as it is.
-                    if owner.navigation.homeDeckPage?.rawValue == id { opened = true }
-                    else { opened = await owner.openDeckPage(deckID: id).value }
+                    if owner.navigation.homeDeckPage?.rawValue == id || submittedIntent != owner.navigation.intentRevision {
+                        // Already shown, or the person moved on: the committed rename stays as it is.
+                        opened = true
+                    } else {
+                        opened = await owner.openDeckPage(deckID: id).value
+                    }
                 } else if let pendingPage {
                     opened = await owner.openDeckPage(pendingPage).value
                 } else {
@@ -215,6 +222,8 @@ public final class DeckActionsModel {
                       owner.deckNamesAllowed(host: .main, route: .deckName(action)) else { return }
                 guard opened else {
                     message = "The deck was saved. Couldn’t open it. Try again."
+                    // Try Again opens it from where the person is now.
+                    submittedIntent = owner.navigation.intentRevision
                     cancelling = false
                     return
                 }

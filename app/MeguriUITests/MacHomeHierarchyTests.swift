@@ -376,9 +376,9 @@ final class MacHomeHierarchyTests: XCTestCase {
         try openChildMenu(sidebarChild, deckID: childID, app: app, bundle: bundle)
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-        XCTAssertTrue(menuItem(app, action: "overview", deckID: childID).waitForNonExistence(timeout: 10))
-        try openChildMenu(sidebarChild, deckID: childID, app: app, bundle: bundle)
-        try click(menuItem(app, action: "overview", deckID: childID), app: app, bundle: bundle)
+        XCTAssertTrue(menuItem(app, action: "study", deckID: childID).waitForNonExistence(timeout: 10))
+        // N20.2: the menu has no Overview; the row itself opens the child's page.
+        try click(sidebarChild, app: app, bundle: bundle)
         assertPage(app, deckID: childID)
         try showDecksRoot(app, bundle: bundle)
         assertTodayRoot(app, readyDeckID: childID)

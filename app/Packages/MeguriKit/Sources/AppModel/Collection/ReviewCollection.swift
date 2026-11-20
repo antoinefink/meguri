@@ -263,9 +263,12 @@ public final class ReviewCollection: ChangeFanoutSink {
         return value
     }
     /// After an undo or redo: the tree and the shown page read the collection again.
-    func collectionUndoFinished() async {
+    /// `intent` is the navigation when the undo or redo started.
+    func collectionUndoFinished(intent: UInt64) async {
         await loadCounts()
-        if let deck = navigation.homeDeckPage?.rawValue, self.deck(deck) != nil {
+        // The page shown reads again, unless the person went elsewhere since the
+        // command started, or is not on Home.
+        if intent == navigation.intentRevision, navigation.section == .home, let deck = navigation.homeDeckPage?.rawValue, self.deck(deck) != nil {
             _ = await openDeckPage(deckID: deck).value
         }
     }
@@ -708,8 +711,11 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func completeOpenedHost(loadRecord: Bool) async throws {
         lifecycle = try await collection.lifecycle()
         guard case .ready(let value) = lifecycle else { state = .unavailable; return }
-        if generation != value { invalidateDeckActions(); exportOwner?.generationChanged() }
+        let changed = generation != value
+        if changed { invalidateDeckActions(); exportOwner?.generationChanged() }
         generation = value; state = .ready; error = nil; closed = false; releasedManualHostState = nil
+        // The retained host's history, also after a replacement that kept the generation.
+        undoOwner?.scheduleRefresh()
         try sync.releaseEntryActivation()
         sync.setMeguriLocalCollection(true)
         let startupForeground: (@MainActor () -> Bool)?
@@ -1000,6 +1006,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         case .rolledOver, .timeZoneChanged: refreshCounts()
         case .changes(let changes):
             refreshCounts()
+            // Any write may be a new step (a text-only note edit changes no count); coalesced.
+            if event.generation == generation { undoOwner?.scheduleRefresh() }
             if event.generation == generation,
                changes.wholeCollection || !changes.notetypes.isEmpty || !changes.decks.isEmpty {
                 addFlowOwner?.selectionChanged(generation: event.generation)
@@ -1057,11 +1065,15 @@ public final class ReviewCollection: ChangeFanoutSink {
         if state == .creationRecovery { return }
         switch value {
         case .ready(let next):
-            if generation != next {
+            let changed = generation != next
+            if changed {
                 addFlowOwner?.generationEnded()
                 invalidateDeckActions(); invalidateMedia(); exportOwner?.generationChanged()
             }
             generation = next
+            // A new collection has its own history, even with the same deck tree,
+            // and a collection ready again reads its history again.
+            undoOwner?.scheduleRefresh()
             if !opening {
                 state = .ready
                 if let review { review.onVisibleMediaChanged?(review.visibleMediaNames) }

@@ -58,7 +58,7 @@ public struct HomeView: View {
         // N14.4: the Mac names the page in the toolbar, with what is waiting under it.
         .navigationSubtitle(pageSubtitle)
         #else
-        .modifier(HomeDeckSearch(enabled: showsDeckSearch, search: search))
+        .modifier(HomeDeckSearch(enabled: showsDeckSearch, collection: collection, search: search))
         // The deck page carries its own title in the content: no empty large-title band above it.
         // The tab layout's deck list shares its bar's row with the title (N14.8).
         .toolbarTitleDisplayMode(deckID != nil ? .inline : shellLayout == .compact ? .inlineLarge : .automatic)
@@ -128,16 +128,20 @@ public struct HomeView: View {
     private var addMenu: some View {
         let preset = deckID.flatMap { collection.deck($0)?.filtered == true ? nil : $0 }
         return Menu {
-            Button { collection.navigation.present(.add(deck: preset.map { DeckID($0) })) } label: {
-                Label { Text("New Note", bundle: .module) } icon: { Image(systemName: "square.and.pencil") }
+            Group {
+                Button { collection.navigation.present(.add(deck: preset.map { DeckID($0) })) } label: {
+                    Label { Text("New Note", bundle: .module) } icon: { Image(systemName: "square.and.pencil") }
+                }
+                .disabled(!collection.addNotePresentation.canPresent(presetDeck: preset))
+                .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
+                Button { collection.deckActions.present(.create) } label: {
+                    Label { Text("New Deck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
+                }
+                .disabled(!collection.deckActions.canPresent(.create))
+                .accessibilityIdentifier("home.collection.createDeck")
             }
-            .disabled(!collection.addNotePresentation.canPresent(presetDeck: preset))
-            .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
-            Button { collection.deckActions.present(.create) } label: {
-                Label { Text("New Deck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
-            }
-            .disabled(!collection.deckActions.canPresent(.create))
-            .accessibilityIdentifier("home.collection.createDeck")
+            // N20.1: each item with its system symbol, on the Mac too.
+            .labelStyle(.titleAndIcon)
         } label: {
             Label { Text("Add", bundle: .module) } icon: { Image(systemName: "plus") }
         }
@@ -469,12 +473,20 @@ public struct HomeView: View {
 /// The deck list's search field (N14.2), only where the list is the root.
 private struct HomeDeckSearch: ViewModifier {
     let enabled: Bool
+    let collection: ReviewCollection
     @Bindable var search: DeckListSearch
     func body(content: Content) -> some View {
         if enabled {
             // Out of the way until the toolbar's search button presents it, so the large title stays.
             content.searchable(text: $search.text, isPresented: $search.presented, placement: .navigationBarDrawer(displayMode: .automatic),
                                prompt: Text("Search or Create a Deck", bundle: .module))
+                // N20.5: Return opens the first row, deck or create row, as in the sidebar layouts.
+                .onSubmit(of: .search) {
+                    guard let query = search.query,
+                          let target = DeckSearchRows.results(collection, search, query: query)?
+                              .targets(offeringCreate: search.offersCreate(generation: collection.generation)).first else { return }
+                    DeckSearchActivation.activate(target, collection: collection, search: search, layout: .compact)
+                }
         } else {
             content
         }

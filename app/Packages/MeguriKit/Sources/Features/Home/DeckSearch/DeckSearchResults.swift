@@ -80,7 +80,9 @@ struct DeckSearchRows: View {
                 .accessibilityIdentifier("home.deckSearch.deck.\(match.id)")
             }
             DeckSearchTrailingRows(collection: collection, search: search, listed: !results.matches.isEmpty)
-        } else if search.snapshotFailed {
+        }
+        if search.snapshotFailed {
+            // With the results of an earlier read, if any: Retry replaces them.
             HStack {
                 Text("Couldn’t read the decks. Try again.", bundle: .module)
                     .foregroundStyle(.secondary)
@@ -111,6 +113,11 @@ struct DeckSearchTrailingRows: View {
             Button { DeckSearchActivation.create(collection, search: search) } label: {
                 Label { Text("Create deck named \(search.text)", bundle: .module) } icon: { Image(systemName: "plus") }
             }
+            #if os(macOS)
+            // A sidebar row like the results, in the tint as an action row, not a push button.
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
+            #endif
             .disabled(!collection.deckActions.canPresent(.create))
             .tag(DeckSearchTarget.create)
             .accessibilityIdentifier("home.deckSearch.create")
@@ -165,6 +172,7 @@ private struct DeckSearchReads: ViewModifier {
                     read: { try await CoreDeckService().allDeckNames() },
                     defaultHasCards: { !(try await CoreDeckService().studyState(deckID: 1).empty) })
             }
+            .onChange(of: collection.decks.hashValue, initial: true) { _, tree in search.deckTreeChanged(tree) }
             .task(id: search.nameCheckKey(generation: collection.generation)) {
                 await search.checkName(search.nameCheckKey(generation: collection.generation)) {
                     try await CoreDeckService().matchDeckName(name: $0)
@@ -285,23 +293,22 @@ public struct HomeSidebarDeckSearch<Content: View>: View {
     private func installArrows() {
         guard arrows == nil else { return }
         arrows = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [search, collection, window] event in
-            let arrow = event.keyCode == 125 || event.keyCode == 126
-            let enter = event.keyCode == 36 || event.keyCode == 76
-            guard arrow || enter, !event.isARepeat || arrow,
-                  event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
-                  let host = window.value, let eventWindow = event.window, eventWindow === host, host.isKeyWindow,
+            guard let host = window.value, let eventWindow = event.window, eventWindow === host, host.isKeyWindow,
                   host.attachedSheet == nil,
                   let editor = host.firstResponder as? NSTextView, editor.isFieldEditor,
                   let field = editor.delegate as? NSSearchField, field.window === host,
+                  let key = DeckSearchFieldKey(keyCode: event.keyCode,
+                      modifiers: event.modifierFlags.intersection([.command, .option, .control, .shift]),
+                      repeated: event.isARepeat, composing: editor.hasMarkedText()),
                   let query = search.query else { return event }
             let targets = DeckSearchRows.results(collection, search, query: query)?
                 .targets(offeringCreate: search.offersCreate(generation: collection.generation)) ?? []
             let current = DeckSearch.highlight(search.chosen, in: targets)
-            if enter {
+            if key == .open {
                 // With no row at all, Return does nothing (H6.3).
                 if let current { DeckSearchActivation.activate(current, collection: collection, search: search, layout: .sidebar) }
             } else {
-                search.chosen = DeckSearch.move(current, by: event.keyCode == 125 ? 1 : -1, in: targets)
+                search.chosen = DeckSearch.move(current, by: key == .down ? 1 : -1, in: targets)
             }
             return nil
         }
@@ -314,6 +321,22 @@ public struct HomeSidebarDeckSearch<Content: View>: View {
 }
 
 #if os(macOS)
+/// The sidebar field's own keys on the Mac (H6.3): ↑ and ↓ move the highlight,
+/// Return opens it. Any modifier and a repeated Return leave the key alone, and
+/// while an input method composes text (Japanese, Chinese) every key is its own.
+enum DeckSearchFieldKey: Equatable {
+    case up, down, open
+    init?(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, repeated: Bool, composing: Bool) {
+        guard modifiers.isEmpty, !composing else { return nil }
+        switch keyCode {
+        case 125: self = .down
+        case 126: self = .up
+        case 36 where !repeated, 76 where !repeated: self = .open
+        default: return nil
+        }
+    }
+}
+
 /// A weak reference to the hosting NSWindow.
 final class HostingWindow {
     weak var value: NSWindow?

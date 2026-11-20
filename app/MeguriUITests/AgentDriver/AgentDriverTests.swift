@@ -495,8 +495,8 @@ final class AgentDriver {
         func labelled(_ label: String) throws -> XCUIElement {
             let pieces = label.components(separatedBy: "#")
             let typed = pieces[0].components(separatedBy: "@")
-            let types: [String: XCUIElement.ElementType] = ["textView": .textView, "button": .button, "switch": .switch, "staticText": .staticText, "textField": .textField, "menuBarItem": .menuBarItem, "menuItem": .menuItem]
-            let query = app.descendants(matching: typed.count > 1 ? types[typed[1]] ?? .any : .any).matching(NSPredicate(format: "label == %@ OR title == %@", typed[0], typed[0]))
+            let types: [String: XCUIElement.ElementType] = ["textView": .textView, "button": .button, "switch": .switch, "staticText": .staticText, "textField": .textField, "menuBarItem": .menuBarItem, "menuItem": .menuItem, "searchField": .searchField]
+            let query = app.descendants(matching: typed.count > 1 ? types[typed[1]] ?? .any : .any).matching(NSPredicate(format: "label == %@ OR title == %@ OR placeholderValue == %@", typed[0], typed[0], typed[0]))
             let element = pieces.count > 1 ? query.element(boundBy: Int(pieces[1]) ?? 0) : query.firstMatch
             guard element.waitForExistence(timeout: 5) else { throw StepFailure(message: "no element labelled '\(label)'") }
             return element

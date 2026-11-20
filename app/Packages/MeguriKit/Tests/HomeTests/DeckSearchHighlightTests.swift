@@ -107,6 +107,22 @@ import Testing
         #expect(!search.offersCreate(generation: 11))
     }
 
+    @Test func aDeckTreeChangeReadsTheNameAgain() async {
+        let search = DeckListSearch()
+        search.text = "QZ82"
+        search.deckTreeChanged(1)
+        await search.checkName(search.nameCheckKey(generation: 11)) { _ in DeckNameMatch(generation: 11, deck: nil) }
+        #expect(search.offersCreate(generation: 11))
+        search.deckTreeChanged(1)
+        #expect(search.offersCreate(generation: 11), "The same tree keeps the read")
+        search.deckTreeChanged(2)
+        #expect(!search.offersCreate(generation: 11), "A changed tree is no longer a completed read")
+        await search.checkName(search.nameCheckKey(generation: 11)) { _ in
+            DeckNameMatch(generation: 11, deck: DeckNameEntry(id: 30, fullName: "QZ82", filtered: false))
+        }
+        #expect(search.nameCheck(generation: 11) == .exists && !search.offersCreate(generation: 11))
+    }
+
     @Test func aNewSearchHasItsOwnNameRead() async {
         let search = DeckListSearch()
         search.text = "Korean"
@@ -136,6 +152,77 @@ import Testing
             read: { DeckNameSnapshot(generation: 12, decks: withDefault) }, defaultHasCards: { true })
         #expect(!search.snapshotFailed && search.listsDefault && search.entries(generation: 12)?.first?.id == 1)
     }
+}
+
+
+extension DeckSearchHighlightTests {
+    @Test func aCancelledReadLetsTheNextViewReadTheSameKey() async {
+        let search = DeckListSearch(), gate = Gate()
+        let key = search.snapshotKey(generation: 11, tree: 1)
+        var reads = 0
+        let first = Task {
+            await search.loadSnapshot(key, read: { reads += 1; await gate.wait(); return DeckNameSnapshot(generation: 11, decks: []) },
+                defaultHasCards: { false })
+        }
+        await gate.entered()
+        first.cancel(); gate.open(); await first.value
+        #expect(search.entries(generation: 11) == nil, "A cancelled read publishes nothing")
+        await search.loadSnapshot(key, read: { reads += 1; return DeckNameSnapshot(generation: 11, decks: []) },
+            defaultHasCards: { false })
+        #expect(reads == 2 && search.entries(generation: 11) != nil)
+    }
+
+    @Test func aReplacementViewReadsWhileTheCancelledReadIsStillPending() async {
+        let search = DeckListSearch(), gate = Gate()
+        let key = search.snapshotKey(generation: 11, tree: 1)
+        let stale = [DeckNameEntry(id: 11, fullName: "QZ80", filtered: false)]
+        let fresh = [DeckNameEntry(id: 11, fullName: "QZ81", filtered: false)]
+        let first = Task {
+            await search.loadSnapshot(key, read: { await gate.wait(); return DeckNameSnapshot(generation: 11, decks: stale) },
+                defaultHasCards: { false })
+        }
+        await gate.entered()
+        first.cancel()
+        // The replacement view starts before the first read ends.
+        await search.loadSnapshot(key, read: { DeckNameSnapshot(generation: 11, decks: fresh) }, defaultHasCards: { false })
+        #expect(search.entries(generation: 11) == fresh)
+        gate.open(); await first.value
+        #expect(search.entries(generation: 11) == fresh && !search.snapshotFailed, "The older read changes nothing")
+        var reads = 0
+        await search.loadSnapshot(key, read: { reads += 1; return DeckNameSnapshot(generation: 11, decks: []) },
+            defaultHasCards: { false })
+        #expect(reads == 0, "The key stays read")
+    }
+
+    @Test func aFailedRefreshShowsTheErrorAndARetryReplacesTheResults() async {
+        let search = DeckListSearch()
+        let old = [DeckNameEntry(id: 11, fullName: "QZ67", filtered: false)]
+        let new = [DeckNameEntry(id: 11, fullName: "QZ68", filtered: false)]
+        await search.loadSnapshot(search.snapshotKey(generation: 11, tree: 1),
+            read: { DeckNameSnapshot(generation: 11, decks: old) }, defaultHasCards: { false })
+        await search.loadSnapshot(search.snapshotKey(generation: 11, tree: 2),
+            read: { throw BridgeError.cancelled }, defaultHasCards: { false })
+        #expect(search.snapshotFailed && search.entries(generation: 11) == old, "The error shows with the older results")
+        search.retrySnapshot()
+        await search.loadSnapshot(search.snapshotKey(generation: 11, tree: 2),
+            read: { DeckNameSnapshot(generation: 11, decks: new) }, defaultHasCards: { false })
+        #expect(!search.snapshotFailed && search.entries(generation: 11) == new)
+    }
+
+    #if os(macOS)
+    @Test func theFieldsKeysLeaveAnInputMethodsCompositionAlone() {
+        #expect(DeckSearchFieldKey(keyCode: 125, modifiers: [], repeated: false, composing: false) == .down)
+        #expect(DeckSearchFieldKey(keyCode: 126, modifiers: [], repeated: true, composing: false) == .up)
+        #expect(DeckSearchFieldKey(keyCode: 36, modifiers: [], repeated: false, composing: false) == .open)
+        #expect(DeckSearchFieldKey(keyCode: 76, modifiers: [], repeated: false, composing: false) == .open)
+        #expect(DeckSearchFieldKey(keyCode: 36, modifiers: [], repeated: true, composing: false) == nil, "A held Return opens once")
+        #expect(DeckSearchFieldKey(keyCode: 36, modifiers: .shift, repeated: false, composing: false) == nil)
+        for code: UInt16 in [36, 76, 125, 126] {
+            #expect(DeckSearchFieldKey(keyCode: code, modifiers: [], repeated: false, composing: true) == nil,
+                "Return and the arrows belong to the input method while it composes")
+        }
+    }
+    #endif
 }
 
 @MainActor
