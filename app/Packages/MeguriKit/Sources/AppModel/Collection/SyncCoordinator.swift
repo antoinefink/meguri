@@ -1337,8 +1337,21 @@ public final class SyncCoordinator {
                 return
             }
             self.meguriReceipt = preview.receipt
-            let outcome = try await facade.setupDecision(preview)
+            let outcome: MeguriSetupDecisionOutcome
+            do { outcome = try await facade.setupDecision(preview) } catch {
+                // The read failed after a preparation that sent nothing: Try Again stays possible.
+                self.meguriLastError = error
+                guard self.meguriCurrent(owner, expected, revision) else { return }
+                await self.abandonMeguriSetupPreview(preview, facade: facade, owner: owner, expected: expected, revision: revision)
+                return
+            }
             guard self.meguriCurrent(owner, expected, revision) else { return }
+            if self.meguriCancelling {
+                // Cancel during the read: no sheet opens and nothing runs after it (MP6.3).
+                self.meguriFailureKey = MeguriSyncStatusPresentation.cancelledFailureKey
+                await self.abandonMeguriSetupPreview(preview, facade: facade, owner: owner, expected: expected, revision: revision)
+                return
+            }
             guard case .decision(let decision) = outcome else {
                 if case .refused(let failure) = outcome { self.meguriFailureKey = MeguriSyncStatusPresentation.failureKey(failure) }
                 self.retainMeguri(try await facade.discard(preview))
@@ -1356,6 +1369,21 @@ public final class SyncCoordinator {
                                           choice: choice, reloads: reloads)
             }
         } catch { self.meguriLastError = error; self.meguriStage = .failed }
+    }
+    /// A prepared setup that no decision followed. It sent nothing: it is
+    /// discarded, and after a discard that did not happen the core says
+    /// whether setup can run again.
+    private func abandonMeguriSetupPreview(_ preview: MeguriBootstrapPreview, facade: MeguriProviderBootstrapService,
+                                           owner: MeguriProviderConnectionOwner, expected: UInt64, revision: UInt64) async {
+        var discarded = false
+        if let cancelled = try? await MeguriSetupSequence.cancel(facade, preview: preview) {
+            retainMeguri(cancelled.result); discarded = cancelled.discarded
+        }
+        guard meguriCurrent(owner, expected, revision) else { return }
+        meguriStage = .failed
+        if discarded { meguriChoiceAllowed = true; return }
+        try? await readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+        if meguriChoiceAllowed { meguriStage = .failed }
     }
     enum MeguriSetupStep: Equatable { case ask, run(MeguriSetupChoice) }
     /// Only rows 1 to 3 run without the sheet (MP6.3).

@@ -175,7 +175,10 @@ struct SyncServiceRows: View {
                 guard await current.clearUpdateHold() else { failed = true; changing = false; return }
                 // The selection is not reserved across those waits: a change of it
                 // ends this switch, and the person confirms again.
-                guard current.providerState?.selection == source else { destination = nil; changing = false; return }
+                // No state yet shows as Off, the same as `.localOnly`.
+                guard (current.providerState?.selection ?? .localOnly) == (source ?? .localOnly) else {
+                    destination = nil; changing = false; return
+                }
                 let succeeded: Bool
                 if value == "localOnly", source == .iCloud {
                     // V27.5's rows, through the retained operations.
