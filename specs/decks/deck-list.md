@@ -1,18 +1,18 @@
-# Deck list, deck page and Go to Deck
+# Deck list, deck page and deck search
 
 Spec: decks/deck-list
-Requirements: R26, R27, R40, R41, R50, R53 (list and page side), R57 (name sheets), R70, R71, R72, R73, R74, R75, R77, R78, R79, R80, R196, R198, R199, R202, R221, R222, R223, R224, R225, R226, R766
+Requirements: R26, R27, R40, R41, R50, R53 (list and page side), R57 (name form), R70, R71, R72, R73, R74, R75, R77, R78, R79, R80, R196, R198, R199, R202, R221, R222, R223, R224, R225, R226, R766
 Anki: 26.09.3 (the desktop deck list, deck overview, congratulations page and Study Deck dialog); none for the Meguri rules each section marks
 Scenarios: conformance/scenarios/review/finished/
 
-What Anki's deck list, deck overview and Study Deck dialog do that Meguri's Home (U152), deck page (U155), deck management (U156) and deck-list keys (U158) must match, and which parts are Meguri's own. The records and operations are `decks/decks`; the numbers are `sched/counts`; the finished deck's facts are `sched/counts#C7`; their wording is `review/reviewer-strings` S8 and S9; the unbury operation is `sched/manual-ops#M5`; the description pipeline is `text/description-html`. Layout, controls, colours and Meguri's own texts come from the Product Contract and `docs/design/native-interface-contract.md` (N2, N11.5, N12.1, N13.2), never from Anki's page.
+What Anki's deck list, deck overview and Study Deck dialog do that Meguri's Home (U152), deck page (U155), deck management (U156) and deck-list keys (U158) must match, and which parts are Meguri's own. The records and operations are `decks/decks`; the numbers are `sched/counts`; the finished deck's facts are `sched/counts#C7`; their wording is `review/reviewer-strings` S8 and S9; the unbury operation is `sched/manual-ops#M5`; the description pipeline is `text/description-html`. Layout, controls, colours and Meguri's own texts come from the Product Contract and `docs/design/native-interface-contract.md` (N2, N11.5, N12.1, N13.2, N20), never from Anki's page.
 
 ## H1. Terms
 
 - **Deck list**: Home's deck tree and the sidebar's deck tree (Anki: the deck browser).
 - **Deck page**: one deck's page (Anki: the overview).
 - **Finished state**: the deck page's content when the deck has nothing to study now (Anki: the congratulations page shown in place of the overview).
-- **Go to Deck**: Meguri's quick switcher (Anki: the Study Deck dialog, opened with `/`).
+- **Deck search**: Meguri's way to find, open or create a deck by name: the sidebar's search field (Mac, iPad) and the tab layout's Search (`docs/design/native-interface-contract.md` N20.1, N14.2). It replaces the Go to Deck sheet, Meguri's earlier quick switcher (Anki: the Study Deck dialog, opened with `/`).
 - **Record**: the deck's `DeckStudyState` (`sched/counts#C7`) for the shown deck at the current instant.
 
 ## H2. The deck list (R31, R34, R35, R39, R40, R53)
@@ -42,9 +42,9 @@ Anki redraws the list in three cases: unconditionally every 10 minutes while the
 - **Anki.** Clicking a deck's name selects it (writes `curDeck`, `decks/decks#D11`) and then shows its overview. Shift-clicking the row outside the name only selects it; shift-clicking the name selects it and shows the overview, as a plain click does. Study always starts from the overview, with Study Now or the `s` key (H9). Accepting a deck in Study Deck selects it and shows its overview.
 - **Selection write.** Opening a deck page and starting a review run D11's select op: it writes `curDeck` only when the value changes, and records no undo step (R42).
 - **`activeDecks` (open).** Anki 26.09.3 never writes the `activeDecks` config key after it creates a collection. It computes the studied decks each time it builds the queue (`sched/queue-building#B2`). R41 asks Meguri to write it (the deck plus its descendants), and U152's selection bullet and U157's StudyLauncher repeat that, but this spec and `sched/review-session#C2` step 3 keep the stored value as it is. These cannot all hold. Until the Product Contract decides (amend R41, or specify the value's form and when it is written), implementers keep the stored value, and R41's `activeDecks` clause is not accepted as met.
-- **Meguri gestures (Meguri rule).** In the sidebar layout a single click opens the deck page. A double-click, Return on the selected deck or S starts its review (R74). In the iPhone layout a tap starts review (R75, R766); the row menu's Overview opens the deck page.
-- **Nothing to study (R77).** In Anki a deck with nothing to study has no separate overview: its overview is the congratulations page (H5.1). Clicking it in the deck list, pressing `s` on the list or accepting it in Study Deck shows that page at once. Pressing `s` on the page goes to review, which finds no card and returns to the same page, with no notice. The notice "No cards are due yet." appears only when Study Now is clicked on a normal overview whose content has gone stale, so that review then finds no card. Meguri matches the page: a start of a deck whose record has `finished` or `empty` set opens no review, and the deck page shows H5's finished state or H5.4's empty view. Meguri's own parts: on iPhone, where a tap would start review, the state appears as a sheet; and the stale-overview notice is not used, because a start that finds no card shows the finished state in its place (R77).
-- **Filtered decks (R53, Meguri rule).** A filtered deck is never started and has no deck page. A click in the sidebar, a tap, Return or S on it in the deck list, and activating it in Go to Deck all show R53's explanation (Meguri's text) in place of the deck page, the finished state or review. Its deck menu offers only Rename and Delete (R53). The deck-page keys of H9.2 have nothing to act on.
+- **Meguri gestures (Meguri rule).** In the sidebar layout a single click opens the deck page. A double-click, Return on the selected deck or S starts its review (R74). In the tab layout a tap opens the deck page (N14.2, N20.2; this replaces R75's and R766's tap that starts review). The deck menu has no Overview.
+- **Nothing to study (R77).** In Anki a deck with nothing to study has no separate overview: its overview is the congratulations page (H5.1). Clicking it in the deck list, pressing `s` on the list or accepting it in Study Deck shows that page at once. Pressing `s` on the page goes to review, which finds no card and returns to the same page, with no notice. The notice "No cards are due yet." appears only when Study Now is clicked on a normal overview whose content has gone stale, so that review then finds no card. Meguri matches the page: a start of a deck whose record has `finished` or `empty` set opens no review, and the deck page shows H5's finished state or H5.4's empty view. Meguri's own part: the stale-overview notice is not used, because a start that finds no card shows the finished state in its place (R77).
+- **Filtered decks (R53, Meguri rule).** A filtered deck is never started and has no deck page. A click in the sidebar, a tap, Return or S on it in the deck list, and activating it in the deck search all show R53's explanation (Meguri's text) in place of the deck page, the finished state or review. Its deck menu offers only Rename… and Delete Deck (R53, N20.2). The deck-page keys of H9.2 have nothing to act on.
 
 ## H4. The deck page (R70, R71, R72, R73)
 
@@ -126,7 +126,9 @@ The wakes for the second row follow C7's examples: the page wakes at +300 s (nor
 
 When the record's `empty` is set (`sched/counts#C9`: no card has its `did` or `odid` in the subtree), the deck page shows "This deck is empty" with Add Note (deck preselected, `notes/add-defaults`) instead of the finished state. Anki has no such view: its congratulations page shows for an empty deck too.
 
-## H6. Go to Deck (R26, R27)
+## H6. Deck search (R26, R27)
+
+The rules for the results of N20.1's sidebar search and N14.2's touch Search. The Go to Deck sheet is retired (N20.1).
 
 ### H6.1 The list
 
@@ -140,7 +142,7 @@ A deck is listed when every term of the query occurs in its full human name, ign
 1. Split the query at each U+0020 SPACE. An empty term (from a leading, trailing or repeated space) matches every name. Any other whitespace character is part of its term.
 2. Map the full human name (components joined by `::`) and each term to lower case with Unicode's full lowercase mapping, independent of locale (it includes the Final_Sigma rule; U+0130 becomes `i` U+0307). This is not case folding: `ß` stays `ß`.
 3. A term matches when its code-point sequence occurs contiguously in the lowered name. A term may span components, because the `::` separators are part of the name.
-4. An empty query lists every entry.
+4. An empty query lists every entry; the deck search then shows the deck tree instead of results (H6.3).
 
 This is Anki's rule and supersedes U156's wording ("a substring of some component"): a term is matched against the whole full name, so it may span `::`, and `GoToDeckFilterTests` follow this section.
 
@@ -159,23 +161,25 @@ Meguri applies NFC to the query before step 2. Stored names are NFC (`decks/deck
 
 ### H6.3 Rows, highlight and keys
 
-- **Rows.** The listed entries in H6.1's order, then the create row when it shows. The create row shows when the query is not blank by H7's rule (so never for an empty or whitespace-only query) and D18's read finds no deck with the same name; its text is R27's "Create deck named '<query>'".
-- **Highlight.** When the sheet opens with an empty query, the current deck (D11's read) is highlighted when it is listed, otherwise the first entry. After every edit of the query, the first listed entry is highlighted, or the create row when no entry is listed.
+- **Rows.** While the query is not empty: the listed entries in H6.1's order, each its last name component over its parent path joined with " › " (N20.1), then the create row when it shows. An empty query shows the deck tree, not results. The create row shows when the query is not blank by H7's rule (so never for a whitespace-only query) and D18's read finds no deck with the same name; its text is N20.6's "Create deck named “%@”".
+- **Highlight (Mac).** After every edit of the query, the first listed entry is highlighted, or the create row when no entry is listed. The highlight does not change the detail.
 - ↑ and ↓ move the highlight over all rows, the create row included, and wrap around: ↑ on the first row goes to the last, ↓ on the last to the first.
-- Return or a double-click activates the highlighted row (R27). On an entry, Anki selects the deck and shows its overview in every case; Meguri opens the deck page (sidebar layout) or starts its review (iPhone layout), and a filtered entry shows R53's explanation (H3). On the create row, Return runs D18. With no row at all, Return does nothing.
-- **Empty state.** With no listed entry and no create row (an empty query or a blank one with nothing listed, or a query whose only same-name deck is the default deck that H6.1 leaves out), the sheet shows a one-line no-match message (Meguri's text) under the field. This is the `empty` state of `home.goToDeck`.
-- Anki's dialog also has an Add button (Ctrl+N). It pre-fills the create form with the highlighted name, or with the query when nothing is listed, and then opens the created deck. Meguri's create row (R27, `decks/decks#D18`) replaces it and submits the raw query.
+- Return activates the highlighted row (on iPad, the first row); a click or a tap activates its row (R27). On an entry, Anki selects the deck and shows its overview in every case; Meguri opens its deck page in every layout, compact and sidebar alike, and never starts review (N20.5); a filtered entry shows R53's explanation (H3). The create row opens the New Deck form filled with the query (D18, D19.3). With no row at all, Return does nothing.
+- **Empty state.** With no listed entry and no create row (a blank query with nothing listed, or a query whose only same-name deck is the default deck that H6.1 leaves out), the results show a one-line no-match message (Meguri's text). This is the `empty` state of `home.goToDeck`.
+- Anki's dialog also has an Add button (Ctrl+N). It pre-fills the create form with the highlighted name, or with the query when nothing is listed, and then opens the created deck. Meguri's create row (R27, `decks/decks#D18`) replaces it and fills the New Deck form with the raw query.
 - Anki's Ctrl+1 to Ctrl+9 highlight entries 1 to 9. They are not part of the Product Contract and are not bound (H10).
-- The query field has focus while the sheet is open, so no single-key shortcut fires (R197).
+- While the search field has focus, no single-key shortcut fires (R197).
 
-## H7. Name sheets (R55, R57, R58, R59, R60, R61)
+## H7. Name form (R55, R57, R58, R59, R60, R61)
 
-- **Create.** Anki's Create Deck pre-fills the current deck's full name. Meguri's create sheet starts empty (U156; H10). Anki strips the typed name at both ends of every character its runtime counts as whitespace, which includes U+001C to U+001F, and creates nothing when the result is empty. Meguri passes the typed text to `decks/decks#D5` unchanged: D1's per-component rule removes the same characters (White_Space by trimming, U+001C to U+001F as control characters), so every name Anki creates is stored the same way. The one difference is a text made only of U+001C to U+001F and White_Space, with at least one of the former: it is not blank for R58, so Meguri creates `blank` where Anki creates nothing (H10).
-- **Blank text (R58).** The confirm control is disabled while the text is empty or consists only of Unicode White_Space characters. Text such as `::` is not blank: D1 stores it as `blank␟blank`.
-- **Existing name (R57).** When D5 returns a deck that already existed (D18's `.added` test), nothing is written and no undo step is recorded. The sheet closes and opens that deck as it would open a new one: its deck page in every layout, or R53's explanation for a filtered deck. The final-name report below applies.
-- **Rename.** Anki and Meguri pre-fill the full human name (R60). When the confirmed text equals the pre-filled text, no op is issued and no undo step is recorded. Anki also does nothing for an empty text. Meguri disables the confirm control instead (R58).
-- **New Subdeck** (Meguri, R59): a create (`decks/decks#D5`) pre-filled with `<full name>::`, the cursor at the end. Anki has no such item. Besides R58's rule, the confirm control is disabled while the text starts with the pre-filled `<full name>::` and the rest of it is blank, so the untouched pre-fill never creates `<full name>::blank`.
-- **Final name (R57, R61).** The sheet reports the human form of the stored name that D5 or D6 returns when it differs from the human form of D1's conversion of the typed text. So D1's trimming, control-character removal and `blank` alone are not reported; an adopted spelling (R57) or an appended `+` (R61) is.
+N20.3's form, with its Name and Parent Deck rows; `decks/decks#D19` composes the full name from them. The "typed text" below is that full name.
+
+- **Create.** Anki's Create Deck pre-fills the current deck's full name. Meguri's New Deck form starts with an empty Name and Parent Deck None (D19.3; H10). Anki strips the typed name at both ends of every character its runtime counts as whitespace, which includes U+001C to U+001F, and creates nothing when the result is empty. Meguri passes the typed text to `decks/decks#D5` unchanged: D1's per-component rule removes the same characters (White_Space by trimming, U+001C to U+001F as control characters), so every name Anki creates is stored the same way. The one difference is a text made only of U+001C to U+001F and White_Space, with at least one of the former: it is not blank for R58, so Meguri creates `blank` where Anki creates nothing (H10).
+- **Blank text (R58).** The confirm control is disabled while the Name text is empty or consists only of Unicode White_Space characters. Text such as `::` is not blank: D1 stores it as `blank␟blank`.
+- **Existing name (R57).** When D5 returns a deck that already existed (D18's `.added` test), nothing is written and no undo step is recorded. The form closes and opens that deck as it would open a new one: its deck page in every layout, or R53's explanation for a filtered deck. The final-name report below applies.
+- **Rename.** Anki pre-fills the full human name (R60). Meguri fills the Name with the deck's last name component and Parent Deck with its parent (D19.3), and disables the confirm control while the composed full name equals the current one (D19.4), so no op is issued and no undo step is recorded. Anki also does nothing for an empty text. Meguri disables the confirm control instead (R58).
+- **New Subdeck** (Meguri, R59): a create (`decks/decks#D5`) with an empty Name and Parent Deck set to the deck (D19.3). Anki has no such item. R58's rule keeps the untouched form from creating `<full name>::blank`.
+- **Final name (R57, R61).** The form reports the human form of the stored name that D5 or D6 returns when it differs from the human form of D1's conversion of the typed text. So D1's trimming, control-character removal and `blank` alone are not reported; an adopted spelling (R57) or an appended `+` (R61) is. The report is the form's "Saved As" row with the stored name and a Done button; the form stays open until Done, which opens the deck page (N20.3).
 
 ## H8. Get Decks (R50)
 
@@ -217,12 +221,12 @@ Keyboard focus is in one place at a time, so the two contexts are never active t
 
 | Key | Context | Command | Repeats | Source |
 |---|---|---|---|---|
-| `/` | `decks.list`, `decks.page` | Go to Deck | no | R26; Anki `/` |
-| ⇧⌘O | menu key equivalent | Go to Deck | no | R26 |
+| `/` | `decks.list`, `decks.page` | Find… (focus the deck search, N20.1) | no | R26; Anki `/` |
+| ⌘F, ⇧⌘O | menu key equivalent | Find… | no | R26, N20.4 |
 | ↑, ↓ | `decks.list` | move the selection | yes | R221 |
 | →, ← | `decks.list` | expand or go to the first child; collapse or go to the parent | yes | R221 |
 | ⌥→, ⌥← | `decks.list` | expand or collapse the deck and all its descendants (`decks/decks#D10`) | no | R221, R38 |
-| Return, S | `decks.list` | start review of the selected deck, in every layout (in the iPhone layout this is what a tap does, R75) | no | R74, R222 |
+| Return, S | `decks.list` | start review of the selected deck, in every layout (a tap opens the deck page, H3) | no | R74, R222 |
 | Space, Return, S | `decks.page` | Study | no | R73, R222; Anki: Study Now and `s` |
 | O | `decks.list` (selected deck), `decks.page` | Deck Options | no | R223; Anki `o` |
 | ⌥⌘O | menu key equivalent | Deck Options | no | R223 |
@@ -231,13 +235,13 @@ Keyboard focus is in one place at a time, so the two contexts are never active t
 | ⌘⌫ | menu key equivalent | Delete, with R67's confirmation | no | R225 |
 | Esc | `decks.page`, iPhone layout | back to Home | no | R226 |
 
-- **Menu key equivalents.** ⇧⌘O, ⌥⌘O, ⇧⌘R and ⌘⌫ belong to one menu command each, not to a context. ⇧⌘O works wherever Go to Deck is enabled, also while a text input has focus, as menu key equivalents do (R26 names no exception; R197 limits only single keys); whether Go to Deck is enabled during review is U159's. ⌥⌘O, ⇧⌘R and ⌘⌫ act on the selected deck while `decks.list` is active and on the shown deck while `decks.page` is active, and are disabled otherwise, so ⌘⌫ never takes the key from a text input. ⌥⌘O and O are disabled for a filtered deck (R53, O1); ⇧⌘R and ⌘⌫ are not.
+- **Menu key equivalents.** ⌘F, ⇧⌘O, ⌥⌘O, ⇧⌘R and ⌘⌫ belong to one menu command each, not to a context (N20.4). ⌘F and ⇧⌘O work wherever Find… is enabled (N20.4: not during review, not while a sheet or panel owns the keys), also while a text input has focus, as menu key equivalents do (R26 names no exception; R197 limits only single keys). ⌥⌘O, ⇧⌘R and ⌘⌫ act on the selected deck while `decks.list` is active and on the shown deck while `decks.page` is active, and are disabled otherwise, so ⌘⌫ never takes the key from a text input. ⌥⌘O and O are disabled for a filtered deck (R53, O1); ⇧⌘R and ⌘⌫ are not.
 - `/` outside these two contexts is U159's global key (`review/commands`); in a text input it types `/` (R197).
 - In `decks.list`, Return and S on a selected filtered deck show R53's explanation (H3), and O does nothing.
 - S on the deck page follows Anki's overview `s`. R74 names S for the deck list only. Its deck-page use comes from Anki and adds no conflict: no other `decks.page` binding uses S.
 - **Repeats.** A command marked "no" runs once per key press and ignores auto-repeat, as Anki's shortcuts do (H9.1). This is Meguri's rule for all of them, including the menu key equivalents, where Anki's repeat. R199 requires it for answers and destructive actions. Here it also keeps a held Space or Return from starting a review and then reaching the review screen. Only the selection-moving arrows repeat.
 - **Layouts (R198).** Each single-key binding matches its character first, then the physical key that types it on the US layout. On the Korean 2-set layout the O, U and S keys type `ㅐ`, `ㅕ` and `ㄴ` and still give Deck Options, Unbury and Study.
-- Single-key bindings are off while a text input has focus (R197): the Go to Deck field, the name sheets, the description editor.
+- Single-key bindings are off while a text input has focus (R197): the deck search field, the name form, the description editor.
 
 ## H10. Differences from Anki
 
@@ -245,7 +249,7 @@ These are interface differences. No golden shows them, so `conformance/deviation
 
 - Meguri never writes `activeDecks`. Anki does not write it either. R41 asks for the write; the conflict is open (H3).
 - One click opens the deck page and a double-click, Return or S starts review from the deck list (R74). Anki needs the overview first, and its `s` on the deck list shows the overview.
-- Nothing to study: both show the finished page (R77, H3). Meguri's own parts are the sheet on iPhone and the absence of Anki's "No cards are due yet." notice, which Anki shows only after Study Now on a stale normal overview.
+- Nothing to study: both show the finished page (R77, H3). Meguri's own part is the absence of Anki's "No cards are due yet." notice, which Anki shows only after Study Now on a stale normal overview.
 - An empty deck shows "This deck is empty" (R80, H5.4). Anki shows its congratulations page.
 - The finished state returns to the normal deck page at the ready instant (R79). Anki returns to its normal overview at the first 60-second re-read after the card becomes ready (H5.3).
 - The finished state's notices use C7's native members (S8, S11).
@@ -254,9 +258,9 @@ These are interface differences. No golden shows them, so `conformance/deviation
 - Anki redraws its deck list every 10 minutes; Meguri redraws only on its triggers (H2, R1854).
 - No Custom Study (R436) and no shared-deck "Reviews and Updates" link (H4).
 - Descriptions are sanitized (R82). Anki inserts the HTML unchanged.
-- Go to Deck's create row replaces Anki's Add button (R27). Ctrl+1 to Ctrl+9 are not bound (H6.3).
-- The create sheet starts empty. Anki pre-fills the current deck's name (H7). A name made only of U+001C to U+001F (with or without White_Space) creates `blank`; Anki creates nothing (H7).
-- New Subdeck and the final-name report are Meguri's (H7).
+- The deck search's create row replaces Anki's Add button (R27). Ctrl+1 to Ctrl+9 are not bound (H6.3).
+- The New Deck form starts with an empty Name and Parent Deck None. Anki pre-fills the current deck's name (H7). A name made only of U+001C to U+001F (with or without White_Space) creates `blank`; Anki creates nothing (H7).
+- New Subdeck, the Parent Deck row and the final-name report are Meguri's (H7, D19).
 - No deck-list key auto-repeats except the selection arrows. Anki's menu key equivalents (`/`, Import) repeat (H9).
 - Delete asks first when cards would be removed (R67). Anki deletes at once and offers undo.
 
@@ -266,9 +270,9 @@ The oracle runs Anki's collection library, not its deck list, overview or dialog
 
 | Test (unit) | Covers |
 |---|---|
-| `GoToDeckFilterTests` (U156) | H6.2's table, Final_Sigma and U+0130, NFC of the query, the empty query; H6.1's default-deck rule (empty id 1 with a child: left out; id 1 with one card: listed; id 1's card sitting in a filtered deck with `odid` 1 and `did` elsewhere: left out) and filtered entries listed; H6.3's rows (no create row for a blank query), highlight on open and after an edit (the create row when nothing is listed), the wrap-around over the create row, Return with no row, and the empty state |
+| `GoToDeckFilterTests` (U156) | H6.2's table, Final_Sigma and U+0130, NFC of the query, the empty query; H6.1's default-deck rule (empty id 1 with a child: left out; id 1 with one card: listed; id 1's card sitting in a filtered deck with `odid` 1 and `did` elsewhere: left out) and filtered entries listed; H6.3's rows (no create row for a blank query, the tree for an empty one), highlight after an edit (the create row when nothing is listed), the wrap-around over the create row, Return with no row, and the empty state |
 | `DeckPageStoreTests` (U155) | H4's actions and their conditions; H5.1 and H5.4's choice from `finished` and `empty`; H5.2's paragraphs from a record; H5.3's examples with an injected clock; the reads at each H5.3 trigger; one wake at a time at `next_page_change_at`, cancelled on leaving: a single finished card that splits the queue's and the list's Learn instants (+300 s, +301 s), a normal page that a later card enters Learn on, and a whole simulated day with at most one wake pending at any time and none at or before now |
-| `DeckActionsModelTests` (U156) | H7: blank detection (spaces, U+3000, `::` not blank), New Subdeck's untouched pre-fill disabled, no op for an unchanged rename, an existing name opening that deck with no undo step, the final name report (reported for `+` and adopted case, not for trimming) |
+| `DeckActionsModelTests` (U156) | H7: blank detection (spaces, U+3000, `::` not blank), New Subdeck's untouched form disabled, no op for an unchanged rename, D19.7's cases, an existing name opening that deck with no undo step, the final name report (reported for `+` and adopted case, not for trimming) |
 | `KeyMatcherTests`, `ShortcutConflictTests` (U158) | H9.2's two contexts and their enabled sets, the menu key equivalents' targets and their disabling in text inputs, the repeat column, the Korean physical-key cases for O, U and S |
 | `HomeStoreTests` (U152) | H2's current-deck mark with `curDeck` missing or naming a deleted deck, and no mark for a hidden Default or a deck under a collapsed parent; H3's single select write; a filtered deck showing R53's explanation for click, tap, Return and S |
 
