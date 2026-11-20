@@ -138,6 +138,51 @@ import Testing
         #expect(model.phase == .editing && !model.canSave && model.value(.desiredRetention) == 0.6)
     }
 
+    @Test func aSaveWhosePageLeftEndsTheDraftWhenItFailsAndABackgroundCancelBeforeItStartsHoldsIt() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        owner.navigation.setPath([.deckOptions(DeckID(1))], for: .home)
+        model.setValue(.newPerDay, 30)
+        let gate = PageGate()
+        core.saveGate = gate
+        core.saveResult = .failure(.busy(runningOperation: "sync"))
+        model.save()
+        try #require(model.phase == .saving)
+        await gate.entered()
+        owner.navigation.setPath([], for: .home)
+        #expect(model.phase == .saving)
+        gate.release(); await model.waitForCompletion()
+        #expect(model.phase == .closed && model.outcome == .left)
+        // Background before the save starts: nothing is saved, the draft stays.
+        core.saveResult = .success(11); core.saveGate = nil
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.setValue(.newPerDay, 31)
+        model.save()
+        await model.cancelAndDrain()
+        #expect(model.phase == .editing && model.outcome == nil && model.hasChanges)
+    }
+
+    @Test func aChangeWhileTheSnapshotLoadsReadsItAgain() async throws {
+        let (owner, core) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1)
+        model.changesCommitted(Self.changes(decks: [1]), generation: 11)
+        await model.waitForCompletion(); await model.waitForCompletion()
+        #expect(core.opens == 2 && model.phase == .editing)
+    }
+
+    @Test func textTypedWhileASwitchWaitsCancelsIt() async throws {
+        let (owner, _) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.fieldText[.newPerDay] = "21"
+        model.selectPreset(2)
+        model.fieldText[.newPerDay] = "22"
+        await model.waitForCompletion(); await Task.yield(); await model.waitForCompletion()
+        #expect(model.selectedPreset == 1 && model.fieldText[.newPerDay] == "22")
+    }
+
     @Test func aTypedErrorIsCheckedBeforeAnotherPresetIsChosen() async throws {
         let (owner, _) = await makeOwner()
         let model = owner.deckOptions
@@ -249,6 +294,8 @@ import Testing
         let gate = PageGate()
         core.saveGate = gate
         model.save()
+        // The save was admitted: without this the wait below would never end.
+        try #require(model.phase == .saving)
         await gate.entered()
         #expect(model.phase == .saving && !owner.canStudy && !owner.deckActions.canPresent(.create))
         #expect(!model.requestLeave() && !model.canOpen(deckID: 2))

@@ -206,14 +206,17 @@ public struct DeckOptionsPage: View {
                 Text(DeckOptionsStrings.issue(issue, range: model.range(row), locale: locale))
                     .foregroundStyle(.primary)
             } icon: {
-                switch issue.severity {
-                case .error: Image(systemName: "xmark.octagon").foregroundStyle(.red)
-                case .strongWarning: Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(.red)
-                case .warning: Image(systemName: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
+                // The text is read; the severity symbol is decoration.
+                Group {
+                    switch issue.severity {
+                    case .error: Image(systemName: "xmark.octagon").foregroundStyle(.red)
+                    case .strongWarning: Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(.red)
+                    case .warning: Image(systemName: "exclamationmark.triangle.fill").symbolRenderingMode(.multicolor)
+                    }
                 }
+                .accessibilityHidden(true)
             }
             .font(.footnote)
-            .accessibilityHidden(true)
             .accessibilityIdentifier("deckOptions.options.issue.\(row.rawValue)-\(String(describing: issue.code))")
         }
     }

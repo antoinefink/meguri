@@ -175,6 +175,7 @@ public final class DeckOptionsPageModel {
         let current = revision
         session = nil; opening = nil; presets = []; issues = []; fieldText = [:]
         changedElsewhere = false; confirmingDiscard = false; saveFailure = nil; outcome = nil
+        leftWhileSaving = false; saveCancelled = false; changedWhileLoading = false
         self.deckID = deckID; deckName = owner.fullDeckName(deckID) ?? ""
         generation = owner.generation; phase = .loading
         task = Task { await read(deckID: deckID, revision: current) }
@@ -187,7 +188,7 @@ public final class DeckOptionsPageModel {
         revision &+= 1
         let current = revision
         let previous = session
-        session = nil; changedElsewhere = false; saveFailure = nil; phase = .loading
+        session = nil; changedElsewhere = false; saveFailure = nil; phase = .loading; changedWhileLoading = false
         task = Task {
             await previous?.cancel()
             await read(deckID: deckID, revision: current)
@@ -221,6 +222,7 @@ public final class DeckOptionsPageModel {
         self.issues = issues
         for row in DeckOptionsPageRow.allCases { fieldText[row] = formatted(row) }
         phase = .editing
+        if changedWhileLoading { changedWhileLoading = false; reload() }
     }
 
     // MARK: The draft
@@ -292,10 +294,12 @@ public final class DeckOptionsPageModel {
         if commitAll() {
             // A value typed for the current preset is checked first: its error
             // must show on its own rows, not hide behind another preset's.
-            let current = revision
+            let current = revision, typed = fieldText
             Task { [weak self] in
                 await self?.waitForCompletion()
-                guard let self, self.revision == current else { return }
+                // Text typed while the value was checked cancels the switch,
+                // so the new text is never replaced by the other preset's.
+                guard let self, self.revision == current, self.fieldText == typed else { return }
                 self.switchPreset(to: id)
             }
             return
@@ -402,18 +406,25 @@ public final class DeckOptionsPageModel {
         let allowed = canSave
         commitAll()
         guard allowed, let session, let owner else { return }
-        phase = .saving; saveFailure = nil
+        phase = .saving; saveFailure = nil; saveCancelled = false; leftWhileSaving = false
         let current = revision, expected = generation
         task = Task {
             // The edits committed above reach the core draft first (O15.3).
             await editTask?.value
             guard current == revision else { return }
             guard owner.generation == expected else { end(.ended); return }
-            if hasErrors { phase = .editing; return }
+            // Moving to the background before the save started: it never starts.
+            // The admitted save goes on after its page left the stack; when it
+            // does not save, the draft no page shows ends.
+            let refuse = { [self] in phase = .editing; if leftWhileSaving { end(.left) } }
+            // Moving to the background before the save started: it never starts.
+            if saveCancelled { saveCancelled = false; refuse(); return }
+            if hasErrors { refuse(); return }
             if changedElsewhere {
                 // N20.9 has no reload row: the save is refused, the page says
                 // nothing was changed, and the options are read again.
-                phase = .editing; reload(); saveFailure = .failed; return
+                refuse(); guard phase == .editing else { return }
+                reload(); saveFailure = .failed; return
             }
             do {
                 let committed = try await session.save()
@@ -423,6 +434,7 @@ public final class DeckOptionsPageModel {
             } catch {
                 guard current == revision else { return }
                 phase = .editing
+                if leftWhileSaving { end(.left); return }
                 switch error as? BridgeError {
                 case .deckOptionsInvalid(let raw)?: issues = raw.compactMap(DeckOptionsPageIssue.init)
                 case .stale?, .notFound?: reload(); saveFailure = .failed
@@ -476,9 +488,17 @@ public final class DeckOptionsPageModel {
     /// The page left its stack (`AppNavigation.onDeckOptionsLeft`): the draft
     /// ends in whatever phase, without asking; a running save completes.
     func pageLeft() {
-        guard phase != .closed, phase != .saving else { return }
+        guard phase != .closed else { return }
+        // An admitted save finishes; if it fails, the draft that no page
+        // shows ends then (save()).
+        if phase == .saving { leftWhileSaving = true; return }
         end(.left)
     }
+    private var leftWhileSaving = false
+    /// Background asked to cancel the save in progress (cancelAndDrain).
+    private var saveCancelled = false
+    /// A relevant change arrived while the snapshot was being read.
+    private var changedWhileLoading = false
 
     // MARK: Collection events
 
@@ -486,9 +506,12 @@ public final class DeckOptionsPageModel {
     /// decks, presets or config reloads silently while the draft is unchanged,
     /// and otherwise shows N11.9's row.
     func changesCommitted(_ changes: ChangeSet, generation eventGeneration: UInt64) {
-        guard phase == .editing, eventGeneration == generation, let deckID,
+        guard eventGeneration == generation, let deckID,
               changes.wholeCollection || changes.decks.contains(where: { $0.id == deckID }) || !changes.deckConfigs.isEmpty
         else { return }
+        // The read in flight may predate this change: read again once it lands.
+        if phase == .loading { changedWhileLoading = true; return }
+        guard phase == .editing else { return }
         if hasChanges || !(owner?.deckOptionsAllowed ?? false) { changedElsewhere = true } else { reload() }
     }
 
@@ -499,6 +522,7 @@ public final class DeckOptionsPageModel {
     }
 
     func cancelAndDrain() async {
+        if phase == .saving { saveCancelled = true }
         let current = session
         await current?.cancel()
         await editTask?.value
@@ -539,16 +563,22 @@ final class CoreDeckOptionsPageSession: DeckOptionsPageSession {
     }
 
     func save() async throws -> UInt64 {
+        saving = true; cancelRequested = false
+        defer { saving = false; saveJob = nil }
         let job = try await editor.startSave()
         saveJob = job
-        defer { saveJob = nil }
+        // A cancel that arrived while the handle was on its way.
+        if cancelRequested { try? await job.job.cancel() }
         return try await job.value().summary.generation
     }
 
-    /// Cancels a running save; the draft stays usable.
+    /// Cancels a running save, also one whose job handle has not arrived
+    /// yet; the draft stays usable and a save that committed reports so.
     func cancel() async {
+        if saving { cancelRequested = true }
         try? await saveJob?.job.cancel()
     }
+    private var saving = false, cancelRequested = false
 
     static func field(_ row: DeckOptionsPageRow) -> OptionField {
         switch row {
