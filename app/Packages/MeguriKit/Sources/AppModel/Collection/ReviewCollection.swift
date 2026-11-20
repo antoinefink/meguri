@@ -771,32 +771,19 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// Explicit account action only. Preparing a NoCollection Host grants no
     /// collection choice, transfer or permission to create a collection.
     public func signInMeguri(endpoint: String, username: String, password: String) {
-        prepareMeguriLocalAction(resumingPause: false) { original in
+        prepareMeguriLocalAction { original in
             guard original.meguriSignInAvailable else { throw MeguriSignInLocalFailure.busy }
             original.signInMeguri(endpoint: endpoint, username: username, password: password)
         }
     }
-    public func resumeMeguri() {
-        guard meguriSignInPreparationTask == nil else { return }
-        if sync.meguriSignInAttached {
-            let settings = sync.settings
-            sync.setDeviceSettings(paused: false, automatic: settings.automatic, media: settings.media)
-            return
-        }
-        prepareMeguriLocalAction(resumingPause: true) { original in
-            let settings = original.settings
-            original.setDeviceSettings(paused: false, automatic: settings.automatic, media: settings.media)
-        }
-    }
-    /// Sign-in and cold Resume share one local preparation owner. The attached
+    /// Sign-in has one local preparation owner. The attached
     /// coordinator retains its ordinary authentication and settings-write lanes.
-    private func prepareMeguriLocalAction(resumingPause: Bool,
-                                         action: @escaping @MainActor (SyncCoordinator) throws -> Void) {
+    private func prepareMeguriLocalAction(action: @escaping @MainActor (SyncCoordinator) throws -> Void) {
         guard meguriSignInPreparationTask == nil else { return }
         let original = sync
         guard foreground, !closing, !closed,
               original.providerState?.selection == .meguri, !original.providerNeedsAttention,
-              original.settings.paused == resumingPause, !original.meguriBusy else { return }
+              !original.settings.paused, !original.meguriBusy else { return }
         guard !opening, !starting, !enabling, !resuming else {
             original.failMeguriSignInPreparation(.busy); return
         }

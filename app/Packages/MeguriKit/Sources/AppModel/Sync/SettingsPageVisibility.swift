@@ -9,3 +9,9 @@ extension SettingsPage {
         showsAnkiServer ? allCases : allCases.filter { $0 != .ankiServer }
     }
 }
+
+extension SettingsPage {
+    /// The section's row in a Settings list. N15.1 names the section Sync; the
+    /// case keeps its stored name, which the last selected section is saved under.
+    public var rowIdentifier: String { "settings.root.\(self == .accountSync ? "sync" : rawValue)" }
+}

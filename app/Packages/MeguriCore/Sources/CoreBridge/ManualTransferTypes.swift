@@ -99,12 +99,15 @@ public enum ManualTransferPhase: String, Sendable, Equatable {
 }
 public enum ManualTransferAcceptance: String, Sendable, Equatable {
     case notSent, possiblyAccepted, exactOk, refused
+    /// The server held something else when the upload was settled (MP6.9 neither).
+    case overtaken
     init(_ raw: MeguriCoreBindings.TransferAcceptance) {
         switch raw {
         case .notSent: self = .notSent
         case .possiblyAccepted: self = .possiblyAccepted
         case .exactOk: self = .exactOk
         case .refused: self = .refused
+        case .overtaken: self = .overtaken
         }
     }
 }

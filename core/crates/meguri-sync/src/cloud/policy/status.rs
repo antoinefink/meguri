@@ -75,9 +75,8 @@ impl State {
         if self.local_only() || (self.facts.binding.is_none() && !recovery_choice) {
             return Err(Unavailable::NotConnected);
         }
-        if self.settings.paused {
-            return Err(Unavailable::Paused);
-        }
+        // P25.2: P12.1 row 4 is removed. The update hold never makes Sync Now
+        // unavailable; the host clears it before it forwards the request.
         if self.account.status != AccountStatus::Available {
             return Err(Unavailable::ICloudUnavailable);
         }
@@ -194,6 +193,39 @@ impl State {
         let media_active = self.cycles.iter().any(|(op, c)| c.active && op.zone == Zone::Media)
             || s.media.uploads_running.is_some_and(|n| n > 0)
             || s.media.downloads_running.is_some_and(|n| n > 0);
+        // P14.2 rows 5 to 10: the state with no attention item (P25.4).
+        let below_attention = || {
+            // P25.2: a stored pause is only the update hold, shown as auto off.
+            if self.settings.paused || !self.automatic() {
+                StatusState::Paused(PausedReason::AutomaticOff)
+            } else if !self.reachable
+                || self
+                    .last_error
+                    .as_ref()
+                    .is_some_and(|e| e.class == OperationError::Offline)
+            {
+                StatusState::Offline
+            } else if self.exchange.is_some() || collection_active {
+                StatusState::SyncingCollection
+            } else if media_active {
+                StatusState::SyncingMedia
+            } else if s.pending_unheld > 0 || s.sendable > 0 || s.parked > 0 || s.in_flight > 0 || s.ready > 0 {
+                StatusState::ChangesPending
+            } else if !s.collection_known
+                || !s.crt_known
+                || !s.attention_known
+                || s.scan != Scan::None
+                || s.apply_in_progress
+                || s.unsettled_intents > 0
+            {
+                StatusState::AwaitingEvidence
+            } else if let Some(as_of_ms) = self.evidence.as_of_ms() {
+                StatusState::UpToDate { as_of_ms }
+            } else {
+                StatusState::AwaitingEvidence
+            }
+        };
+        let mut state_without_attention = None;
         let state = if self.local_only() {
             StatusState::LocalOnly
         } else if let Some(reason) = unavailable {
@@ -201,44 +233,21 @@ impl State {
         } else if self.facts.fence == Fence::DecisionRequired {
             StatusState::Paused(PausedReason::DecisionRequired)
         } else if !attention.is_empty() {
+            state_without_attention = Some(below_attention());
             StatusState::NeedsAttention
-        } else if self.settings.paused {
-            StatusState::Paused(PausedReason::UserPaused)
-        } else if !self.automatic() {
-            StatusState::Paused(PausedReason::AutomaticOff)
-        } else if !self.reachable
-            || self
-                .last_error
-                .as_ref()
-                .is_some_and(|e| e.class == OperationError::Offline)
-        {
-            StatusState::Offline
-        } else if self.exchange.is_some() || collection_active {
-            StatusState::SyncingCollection
-        } else if media_active {
-            StatusState::SyncingMedia
-        } else if s.pending_unheld > 0 || s.sendable > 0 || s.parked > 0 || s.in_flight > 0 || s.ready > 0 {
-            StatusState::ChangesPending
-        } else if !s.collection_known
-            || !s.crt_known
-            || !s.attention_known
-            || s.scan != Scan::None
-            || s.apply_in_progress
-            || s.unsettled_intents > 0
-        {
-            StatusState::AwaitingEvidence
-        } else if let Some(as_of_ms) = self.evidence.as_of_ms() {
-            StatusState::UpToDate { as_of_ms }
         } else {
-            StatusState::AwaitingEvidence
+            below_attention()
         };
-        let media_paused = !self.settings.media || self.settings.paused || s.media.no_space == Some(true);
+        // P25.1: no setting pauses media, so `media.paused` is always false. The
+        // estimate still stops while nothing downloads (the hold, no free space).
+        let media_paused = false;
         let mut media = s.media.clone();
-        if media_paused {
+        if self.settings.paused || s.media.no_space == Some(true) {
             media.remaining_download_ms = None;
         }
         Status {
             state,
+            state_without_attention,
             pending: s.sendable,
             held_back: s.held,
             in_flight: s.in_flight,
