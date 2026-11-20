@@ -1,6 +1,6 @@
 # docker/
 
-- Never push an image to a registry. Pin every base image by digest (`FROM name:tag@sha256:...`); `tools/mg selftest` checks it.
+- Never push an image to a registry. The one exception is the dev image that hosted CI shares (`.github/dev-image.sh`). It holds only what its `.dockerignore` lets in (`core/rust-toolchain.toml`), never source or data. Pin every base image by digest (`FROM name:tag@sha256:...`); `tools/mg selftest` checks it.
 - Every service sets `init: true`, so killing `tools/mg` stops the container; without it bash runs as PID 1 and SIGTERM is dropped. `tools/mg selftest-host` checks it.
 - Drive compose through `tools/mg` (`mg_compose`). It sets a per-checkout project name, so worktrees never share an image tag, network or `cargo-target` volume. It also sets `BUILDX_NO_DEFAULT_ATTESTATIONS=1`: with a provenance attestation, every rebuild gets a new image id even when all layers are cached, and compose 5.5 ignores `provenance: false`.
 - Every worktree shares the `meguri-cargo-home` volume, mounted as the whole `CARGO_HOME`. Cargo's package-cache lock files live in the `CARGO_HOME` root, so if only `registry/` were shared, parallel containers could unpack the same crate at the same time. Installed cargo tools stay in the image's `/usr/local/cargo/bin`, which is on `PATH`.

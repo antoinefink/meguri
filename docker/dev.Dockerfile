@@ -1,7 +1,8 @@
 # Meguri dev image: the Rust toolchain for build, test, lint, license gate and
 # benches (stage `dev`), plus a pinned nightly for cargo-fuzz (stage `fuzz`).
 # Build context is the repo root, filtered by dev.Dockerfile.dockerignore.
-# Never pushed to a registry.
+# tools/mg builds it locally. Hosted CI alone shares it through GitHub
+# Container Registry (.github/dev-image.sh); it is never published.
 
 FROM node:26.13.1-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS sync-web-node
 FROM rust:1.99-slim@sha256:2752b332db73fdbb7dc576f06c82ed1f312005784ef913d7e04a28f5f55dc581 AS dev
