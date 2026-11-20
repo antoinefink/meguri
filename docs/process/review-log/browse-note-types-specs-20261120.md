@@ -59,3 +59,20 @@ Also checked:
 
 - `package/backup-triggers` T6.1 and T6.2: a new line covers a refusal after the backup.
 - No local API or AnkiConnect action exposes the four ops. AnkiConnect's field, template and model-change actions are unsupported, and the MCP note tools are read-only for note types. D8 says so.
+
+## Re-review of the confirmed-losses fix (on 3f8cb1503)
+
+The same reviewer re-read the fix. All 17 findings are closed, and the reviewer found no remaining path to unconfirmed loss. Ten small items remained, and two CodeRabbit comments on #22 were added to them. The coordinator handles item 5 (the Status lines). The rest were fixed in one commit:
+
+- The order paragraphs say the first count refuses before the backup, and that the second count alone guarantees the commit. The staleness list now names all of each op's checks.
+- D7.1:
+  - It defines `kind_change_cards_removed` as the cloze-to-standard removals only.
+  - It refuses with `NotFound` and `NeedsStockKind`.
+  - It requires the caller to pass the same `kind` to the summary and to the op.
+- D7's card line points to D7.1's lines, and D7 begins with its Status line's prefix.
+- D8's restore test list includes the case with confirmed losses.
+- MP7 step 2 states the restore outcomes, and step 3 counts a changed digest as an unconfirmed loss.
+- D9 lists "No cards.".
+- E7 names the bullets it replaces.
+- T6.2's bullet states the coalescing rule for retries.
+- `conformance/browser-ops` B1 has the `fld:` exception.
