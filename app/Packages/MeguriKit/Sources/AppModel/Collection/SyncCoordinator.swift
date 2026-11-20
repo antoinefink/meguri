@@ -1462,10 +1462,10 @@ public final class SyncCoordinator {
         // A confirmation that ran meanwhile consumed the preview: nothing is left to cancel.
         guard meguriSetupPreview === preview else { return leavesOff && meguriStage == .required }
         let owner = meguriConnectionOwner
+        var discarded = false
         issueMeguri { _ in
             let expected = self.generation, revision = self.hostRevision
             self.meguriActiveFacade = facade
-            var discarded = false
             do {
                 let cancelled = try await MeguriSetupSequence.cancel(facade, preview: preview)
                 self.retainMeguri(cancelled.result)
@@ -1484,7 +1484,8 @@ public final class SyncCoordinator {
         }
         await waitForMeguriAction()
         if meguriSetupPreview === preview { meguriSetupPreview = nil; meguriSetupDecision = nil }
-        return leavesOff
+        // A download that is still retained is not abandoned by removing the sign-in.
+        return MeguriSetupSequence.cancelLeavesOff(keepsService: !leavesOff, discarded: discarded)
     }
     /// MP6.9 for a setup upload: one read of the server's facts. It starts no upload.
     public var meguriCanSettle: Bool {

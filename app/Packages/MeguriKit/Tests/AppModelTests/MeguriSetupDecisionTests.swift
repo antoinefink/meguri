@@ -116,12 +116,19 @@ import Testing
         #expect(!MeguriSetupSequence.keepsService(requested: false, stage: .required, failureKey: nil))
     }
 
+    @Test func cancelLeavesTheServiceOffOnlyWhenTheDownloadWasDiscarded() {
+        #expect(MeguriSetupSequence.cancelLeavesOff(keepsService: false, discarded: true))
+        // A refused or failed discard, or one that never ran: Meguri Sync stays selected.
+        #expect(!MeguriSetupSequence.cancelLeavesOff(keepsService: false, discarded: false))
+        #expect(!MeguriSetupSequence.cancelLeavesOff(keepsService: true, discarded: true))
+    }
+
     @Test func aClosedOrDamagedCollectionIsItsOwnNeedsYouRowWithAnAction() {
         #expect(MeguriSyncStatusPresentation.failureKey(.setupLocalUnusable) == MeguriSetupSequence.localUnusableKey)
         let row = SyncKinds.meguriRow(.init(connection: .setupRequired, stage: .failed,
                                             failureKey: MeguriSetupSequence.localUnusableKey))
         #expect(row.kind == .needsYou)
-        #expect(row.textKey == "sync.attention.collectionCorrupt")
+        #expect(row.textKey == "sync.needsYou.meguri.localUnusable")
         #expect(row.action == .copyDebugInfo)
         // It is not the "this device changed" sentence, and not the generic failure with Try Again.
         #expect(MeguriSyncStatusPresentation.failureKey(.setupLocalChanged) != MeguriSetupSequence.localUnusableKey)

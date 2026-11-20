@@ -31,9 +31,9 @@ enum MeguriSetupSequence {
     /// A routine round that needs a full sync (MP4): the same sentence and
     /// action as `overtakenKey`, but Cancel in its sheet keeps the service.
     static let fullSyncKey = "meguri.setup.fullSyncRequired"
-    /// N4: a collection file that is present but closed or damaged. The
-    /// closest existing sentence; its action is Copy Debug Info.
-    static let localUnusableKey = "sync.attention.collectionCorrupt"
+    /// MP6.3: a collection file that is present but closed or damaged. The
+    /// sentence names no cause (T19.5); its action is Copy Debug Info.
+    static let localUnusableKey = "sync.needsYou.meguri.localUnusable"
 
     /// One row's or one answer's transfer. Nil, with no call made, when the
     /// choice is not one the row offers.
@@ -110,6 +110,11 @@ enum MeguriSetupSequence {
         if case .refused = result.outcome { return (result, false) }
         return (result, true)
     }
+
+    /// MP6.3: Cancel leaves the service Off only when nothing prepared is
+    /// retained. A discard that the core refused, that failed or that never ran
+    /// is a failure: Meguri Sync stays selected and signed in, with Try Again.
+    static func cancelLeavesOff(keepsService: Bool, discarded: Bool) -> Bool { !keepsService && discarded }
 
     /// Cancel in a sheet that a status action opened changes nothing but the
     /// sheet (V27.4). After an overtaken upload it leaves the service Off, as

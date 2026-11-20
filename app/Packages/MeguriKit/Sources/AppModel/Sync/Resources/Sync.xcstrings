@@ -4104,7 +4104,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This device has media files but no collection. Meguri can only download the collection from your Meguri Sync server."
+            "value": "This device has no collection, but it may have media files. Meguri can only download the collection from your Meguri Sync server."
           }
         }
       }
@@ -4368,7 +4368,18 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The server accepted this device’s collection, but setup didn’t finish on this device."
+            "value": "The server accepted this device’s collection, but setup didn’t finish; finishing replaces any changes made here since the upload, and Meguri backs them up first."
+          }
+        }
+      }
+    },
+    "sync.needsYou.meguri.localUnusable": {
+      "comment": "Approved sync/status-strings T19; shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri can’t open the collection on this device, so setup stopped."
           }
         }
       }

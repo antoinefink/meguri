@@ -443,7 +443,8 @@ struct MeguriKeepCollectionSheet: View {
                             .accessibilityIdentifier("sync.keepCollection.keepDevice")
                     } footer: {
                         VStack(alignment: .leading) {
-                            Text(SyncText.value("sync.keep.device.effect.meguri"))
+                            // Upload only: the server holds no user content, so nothing there is replaced (T19.3).
+                            if facts.row != .askUploadOnly { Text(SyncText.value("sync.keep.device.effect.meguri")) }
                             Text(SyncText.value("sync.meguri.preview.otherClients"))
                         }
                     }
