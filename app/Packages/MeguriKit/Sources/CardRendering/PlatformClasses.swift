@@ -45,6 +45,10 @@ open class CardNativeWebView: WKWebView {
     open override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         guard let items = contextActions?(), !items.isEmpty else { return }
+        // Reloading the card's page is not a review action; the text items stay.
+        for item in menu.items where item.identifier?.rawValue == "WKMenuItemIdentifierReload" { menu.removeItem(item) }
+        while menu.items.first?.isSeparatorItem == true { menu.removeItem(at: 0) }
+        while menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
         if !menu.items.isEmpty { menu.insertItem(.separator(), at: 0) }
         for item in items.reversed() { menu.insertItem(item, at: 0) }
     }

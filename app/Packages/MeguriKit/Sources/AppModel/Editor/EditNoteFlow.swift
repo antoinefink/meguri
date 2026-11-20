@@ -89,9 +89,10 @@ public final class EditNoteFlow {
             subtitle = Subtitle(deck: Self.lastComponent(deck.fullName), notetype: notetype.name)
             let made = try makeRuntime(draft, current)
             host = made; runtime = made
+            // The form shows first: its page loads only once the view holds it (as Add's does).
+            isPresented = true
             try await made.start()
             guard current(), runtime === made else { throw Self.ownerChanged }
-            isPresented = true
             return true
         } catch {
             if epoch == expected {
