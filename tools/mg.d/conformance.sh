@@ -47,7 +47,15 @@ mg_conf__dev() {
     shift
   done
   [ "${1:-}" = "--" ] && shift
-  if [ -z "$MG_CONF_DEV_BUILT" ]; then
+  if [ -n "${MEGURI_CI_DEV_IMAGE:-}" ]; then
+    # CI only: the prebuilt image replaces the build (mg_ci_dev_image).
+    if [ -z "$MG_CONF_DEV_BUILT" ]; then
+      mg_ci_dev_image >&2 || return 125
+      MG_CONF_DEV_BUILT=1
+    fi
+    opts[${#opts[@]}]="--pull"
+    opts[${#opts[@]}]="never"
+  elif [ -z "$MG_CONF_DEV_BUILT" ]; then
     echo "$MG_JOB: building the dev image" >&2
     mg_compose --progress plain build dev >&2 || return 125
     MG_CONF_DEV_BUILT=1
