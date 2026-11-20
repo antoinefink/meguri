@@ -179,10 +179,10 @@ extension ReviewCollectionStartupTests {
                 if case .available(let step) = try await CoreUndoService().peekUndo(scope: .global) { return step.name }
                 return nil
             }
-            func waitUntil(_ condition: () -> Bool) async throws {
+            func waitUntil(line: Int = #line, _ condition: () -> Bool) async throws {
                 var tries = 0
                 while !condition(), tries < 500 { tries += 1; try await Task.sleep(for: .milliseconds(10)) }
-                try #require(condition())
+                try #require(condition(), "waited at line \(line)")
             }
 
             // E1: opening writes nothing and holds the review.
@@ -208,6 +208,21 @@ extension ReviewCollectionStartupTests {
             #expect(try await stored() == ["Question", "Answer"])
             let held = try #require(surface.presented.last)
             #expect(held == card)
+
+            // E7: a navigation that drops the review while the form holds a change
+            // presents the review again, so its question can show; Keep Editing stays.
+            let fourth = try await open()
+            try await fourth.type(1, "Kept")
+            owner.navigation.endReview(); owner.navigationChanged()
+            try await waitUntil { flow.discardConfirmation != nil }
+            #expect(owner.navigation.review != nil && owner.review === review)
+            flow.answerDiscard(try #require(flow.discardConfirmation), discard: false)
+            try await waitUntil { flow.discardConfirmation == nil && !flow.guardingClose }
+            #expect(owner.navigation.review != nil && owner.review === review && flow.isPresented)
+            let discarded = Task { await flow.requestCancel() }
+            try await waitUntil { flow.discardConfirmation != nil }
+            flow.answerDiscard(try #require(flow.discardConfirmation), discard: true)
+            #expect(await discarded.value && !flow.isPresented)
 
             // Done with no change writes nothing.
             let undoBefore = try await undoName()

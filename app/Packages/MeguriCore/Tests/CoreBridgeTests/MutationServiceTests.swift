@@ -151,7 +151,7 @@ extension EventTests {
             await #expect(throws: BridgeError.staleGeneration(planned: generation &+ 1, current: generation)) {
                 try await notes.patchNote(.init(id: note.id, notetype: loaded, fields: [1: "other"], generation: generation &+ 1))
             }
-            await #expect(throws: BridgeError.self) {
+            await #expect(throws: BridgeError.invalidArgument("field ordinal out of range")) {
                 try await notes.patchNote(.init(id: note.id, notetype: loaded, fields: [-1: "other"]))
             }
             #expect(try await notes.readNote(id: note.id).fields == ["persisted", "patched"])

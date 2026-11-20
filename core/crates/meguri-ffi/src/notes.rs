@@ -197,13 +197,15 @@ pub fn patch_note(request: NotePatchRequest, session_id: Option<u64>) -> Result<
     // Resolve the collection once and check it against the editor's
     // generation; the op then runs on that collection only.
     let collection = host.collection()?;
-    if let Some(expected) = request.expected_generation.map(meguri_engine::Generation) {
+    let expected = request.expected_generation.map(meguri_engine::Generation);
+    if let Some(expected) = expected {
         if collection.generation() != expected {
             return Err(meguri_engine::EngineError::StaleGeneration { planned: expected, current: collection.generation() }.into());
         }
     }
     let r = match session_id {
-        Some(session) => host.review().patch_note(input, meguri_engine::SessionId(session))?,
+        // The review resolves its own bound collection and checks the generation there.
+        Some(session) => host.review().patch_note(input, meguri_engine::SessionId(session), expected)?,
         None => notes::patch(&collection, input, OpSource::UserUndoable)?,
     };
     Ok(NoteMutation::with_cards(MutationSummary::of(&r), id, r.value.cards, r.value.written))
