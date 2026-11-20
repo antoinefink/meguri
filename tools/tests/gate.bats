@@ -773,11 +773,18 @@ path = "tests/main.rs"
 
 # A file of its own; its path is inferred from the name.
 [[test]]
-name = "own"'
+name = '"'"'own'"'"'
+
+[dependencies]
+extra = { version = "1", optional = true }'
   commit_in "$SB" "$crate/tests/main.rs" '//! The merged binary.
 #![allow(clippy::duplicate_mod)]
 
-#[cfg(feature = "hooks")]
+// #[cfg(feature = "removed")] is a comment.
+#[cfg(all(
+    feature = "hooks",
+    feature = "extra"
+))]
 #[path = "a.rs"]
 pub mod a;'
   commit_in "$SB" "$crate/tests/a.rs" $'mod common;\n#[test]\nfn t() {}'
@@ -816,17 +823,17 @@ pub mod a;'
   printf '#[path = "own.rs"]\npub mod own;\n#[path = "a.rs"]\npub mod again;\n' >>"$SB/$crate/tests/main.rs"
   mg static-checks --check test-targets
   [ "$status" -eq 1 ]
-  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/main.rs:10 test-targets:$crate/tests/main.rs:12" ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/main.rs:14 test-targets:$crate/tests/main.rs:16" ]
 
   # A module gated on a feature the crate lacks never builds; a commented-out
   # line lists nothing.
   git -C "$SB" checkout -q -- "$crate/tests/main.rs"
-  printf '#[cfg(feature = "hook")]\n#[path = "b.rs"]\npub mod b;\n' >>"$SB/$crate/tests/main.rs"
+  printf '#[cfg(\n    feature = "hook"\n)]\n#[path = "b.rs"]\npub mod b;\n' >>"$SB/$crate/tests/main.rs"
   mg static-checks --check test-targets
   [ "$status" -eq 1 ]
-  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/main.rs:7" ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/main.rs:11" ]
   git -C "$SB" checkout -q -- "$crate/tests/main.rs"
-  printf '/*\n#[path = "b.rs"]\npub mod b;\n*/\n' >>"$SB/$crate/tests/main.rs"
+  printf '/* /* nested */\n#[path = "b.rs"]\npub mod b;\n*/\n' >>"$SB/$crate/tests/main.rs"
   mg static-checks --check test-targets
   [ "$status" -eq 1 ]
   [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/b.rs:0" ]
@@ -841,10 +848,22 @@ pub mod a;'
   mg static-checks --check test-targets
   [ "$status" -eq 1 ]
   [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/b.rs:4" ]
-  [[ "$(field '.failures[0].message')" == *'needs a root-level `fn child_entry` test'* ]]
-  printf '#[test]\nfn child_entry() {}\n' >>"$SB/$crate/tests/main.rs"
+  [[ "$(field '.failures[0].message')" == *'needs a root-level `#[test] fn child_entry`'* ]]
+  # A plain function is no test, so the child would still run nothing.
+  printf 'fn child_entry() {}\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  git -C "$SB" checkout -q -- "$crate/tests/main.rs"
+  printf '#[path = "b.rs"]\npub mod b;\n#[test]\nfn child_entry() {}\n' >>"$SB/$crate/tests/main.rs"
   mg static-checks --check test-targets
   [ "$status" -eq 0 ]
+
+  # Two targets with one root compile it twice.
+  printf '\n[[test]]\nname = "again"\npath = "tests/main.rs"\n' >>"$SB/$crate/Cargo.toml"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/Cargo.toml:0" ]
+  git -C "$SB" checkout -q -- "$crate/Cargo.toml"
 
   # A crate that keeps Cargo's discovery is not checked.
   git -C "$SB" checkout -q -- "$crate/tests/main.rs"

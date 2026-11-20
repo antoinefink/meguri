@@ -36,7 +36,7 @@ PATH_ATTR = re.compile(r'^#\[path\s*=\s*"([^"]+)"\]\s*(.*)$')
 EXACT = re.compile(r'"--exact"\s*(?:,|\)\s*\.arg\()\s*(?:"([A-Za-z_][A-Za-z0-9_]*)"|([A-Z][A-Z0-9_]*)\b)')
 CFG = re.compile(r"#\[cfg\((.*?)\)\]", re.S)
 FEATURE = re.compile(r'feature\s*=\s*"([^"]+)"')
-BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+TOML_STRING = re.compile(r'^(?:"((?:[^"\\]|\\.)*)"|\'([^\']*)\')$')
 MOD = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?mod\s+(r#)?([A-Za-z_][A-Za-z0-9_]*)\s*;")
 NEEDS_OWN = [
     (re.compile(r"current_exe\(\)"), "re-runs the test binary by test name (current_exe())"),
@@ -63,7 +63,7 @@ class Tree:
 
     def grep(self, pattern):
         """Tracked (and, in the working tree, untracked) .rs files that match."""
-        args = ["grep", "-I", "-l", "-E", "-e", pattern]
+        args = ["grep", "-z", "-I", "-l", "-E", "-e", pattern]
         if self.rev:
             args += [self.rev]
         else:
@@ -74,7 +74,7 @@ class Tree:
             raise OSError(result.stderr.decode("utf-8", "replace").strip())
         prefix = self.rev + ":" if self.rev else ""
         return [p[len(prefix):] if p.startswith(prefix) else p
-                for p in result.stdout.decode("utf-8", "replace").splitlines()]
+                for p in result.stdout.decode("utf-8", "surrogateescape").split("\0") if p]
 
     def read(self, path):
         if self.rev:
@@ -85,13 +85,29 @@ class Tree:
         return data.decode("utf-8", "replace")
 
 
+def toml_string(value):
+    """A TOML basic ("...") or literal ('...') string's value."""
+    m = TOML_STRING.match(value)
+    if not m:
+        raise ValueError("not a TOML string: %s" % value)
+    if m.group(2) is not None:
+        return m.group(2)
+    return re.sub(r"\\(.)", lambda e: {"n": "\n", "t": "\t"}.get(e.group(1), e.group(1)), m.group(1))
+
+
 def manifest(text):
-    """(autotests, [[test]] entries as dicts, features) from a Cargo.toml's text."""
+    """(autotests, [[test]] entries as dicts, features) from a Cargo.toml's text.
+
+    Features are the [features] keys and the implicit feature of each
+    optional dependency that no `dep:` reference hides.
+    """
     autotests, tests, table, features = True, [], None, set()
+    optional, dep_refs, sub = set(), set(re.findall(r"[\"']dep:([A-Za-z0-9_\-]+)", text)), None
     for line in text.splitlines():
         m = TABLE.match(line)
         if m:
             table = ("array:" if m.group(1) == "[[" else "") + m.group(2)
+            sub = re.match(r"(?:target\..+\.)?(?:dev-|build-)?dependencies\.([A-Za-z0-9_\-]+)$", table)
             if table == "array:test":
                 tests.append({})
             continue
@@ -101,19 +117,57 @@ def manifest(text):
         key, value = m.group(1), m.group(2)
         if table == "features":
             features.add(key)
+        if sub and key == "optional" and value == "true":
+            optional.add(sub.group(1))
+        elif (table and re.match(r"(?:target\..+\.)?(?:dev-|build-)?dependencies$", table)
+              and re.search(r"\boptional\s*=\s*true\b", value)):
+            optional.add(key)
         if table == "package" and key == "autotests":
             autotests = value != "false"
         elif table == "array:test" and key in ("name", "path"):
             try:
-                tests[-1][key] = json.loads(value)
+                tests[-1][key] = toml_string(value)
             except ValueError:
                 raise ValueError("unreadable [[test]] %s: %s" % (key, value))
-    return autotests, tests, features
+    return autotests, tests, features | (optional - dep_refs)
 
 
 def uncomment(text):
-    """Block comments blanked out, line numbers kept."""
-    return BLOCK_COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+    """Rust comments (line, and nested block) blanked out; strings and line numbers kept."""
+    out, i, n, depth = [], 0, len(text), 0
+    while i < n:
+        c, two = text[i], text[i:i + 2]
+        if depth:
+            if two == "/*":
+                depth += 1
+                out.append("  ")
+                i += 2
+            elif two == "*/":
+                depth -= 1
+                out.append("  ")
+                i += 2
+            else:
+                out.append("\n" if c == "\n" else " ")
+                i += 1
+        elif two == "/*":
+            depth = 1
+            out.append("  ")
+            i += 2
+        elif two == "//":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i))
+            i = j
+        elif c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
 
 
 def listed(root, text, present):
@@ -135,7 +189,7 @@ def listed(root, text, present):
                 own = posixpath.join(base, name + ".rs")
                 out.append((own if own in present else posixpath.join(base, name, "mod.rs"), n))
             pending = None
-        elif line and not line.startswith(("#[", "//")):
+        elif line and not line.startswith("#["):
             pending = None
     return out
 
@@ -178,6 +232,10 @@ def check(tree):
                 if root not in present:
                     root = prefix + t["name"] + "/main.rs"
             else:
+                continue
+            if root in roots:
+                finding(cargo, 0, "[[test]] %s and %s both build %s, so it is compiled twice"
+                        % (roots[root], t.get("name", root), root))
                 continue
             roots[root] = t.get("name", root)
         seen = {}
@@ -222,12 +280,13 @@ def check(tree):
             for part in [path] + sorted(p for p in paths if p.startswith(stem + "/") and p.endswith(".rs")):
                 text = tree.read(part)
                 for name in sorted(exact):
-                    m = re.search(r"\bfn\s+%s\s*\(" % name, text)
-                    if not m or re.search(r"^(?:pub(?:\([^)]*\))?\s+)?fn\s+%s\s*\(" % name, uncomment(root_text), re.M):
+                    m = re.search(r"\bfn\s+%s\s*\(" % re.escape(name), text)
+                    if not m or re.search(r"^#\[test\]\s*(?:#\[[^\n]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?fn\s+%s\s*\("
+                                          % re.escape(name), uncomment(root_text), re.M):
                         continue
                     finding(part, text.count("\n", 0, m.start()) + 1,
                             "defines %s, which code re-runs with `--exact %s`; in %s its name gains the module "
-                            "prefix, so %s needs a root-level `fn %s` test too (or the file its own [[test]])"
+                            "prefix, so %s needs a root-level `#[test] fn %s` too (or the file its own [[test]])"
                             % (name, name, root, root, name))
     return findings
 
