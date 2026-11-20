@@ -127,7 +127,14 @@ public final class EditNoteFlow {
                 patchInFlight = true
                 let result: NoteMutation
                 // E2: the save is a step of the review session, so the review's Undo covers it.
-                do { result = try await CoreNoteService().patchNote(patch, sessionID: session?.sessionID) }
+                // When the core no longer has that session open (the review ended, the
+                // collection reopened), Done saves without it: the draft is never lost.
+                do {
+                    do { result = try await CoreNoteService().patchNote(patch, sessionID: session?.sessionID) }
+                    catch BridgeError.invalidArgument(let reason) where reason == "NoSession" {
+                        result = try await CoreNoteService().patchNote(patch, sessionID: nil)
+                    }
+                }
                 catch { patchInFlight = false; throw error }
                 ownPatches.insert(result.summary.seq); patchInFlight = false
                 await afterPatching?(result)

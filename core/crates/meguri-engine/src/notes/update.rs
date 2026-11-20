@@ -59,7 +59,8 @@ pub fn patch(collection: &Collection, input: NotePatch, source: OpSource) -> Res
 
 /// `review/edit-current` E2: the review's Edit Note names its session, so
 /// the step belongs to that session's undo scope (`engine/undo` M3). The
-/// review admits the call (`ReviewService::patch_note`); other hosts pass none.
+/// review admits the call (`ReviewService::patch_note`). Other hosts pass none;
+/// the writer still records the session that is open, as for any user op.
 pub fn patch_for(
     collection: &Collection,
     input: NotePatch,

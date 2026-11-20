@@ -286,7 +286,7 @@ extension EventTests {
             #expect(!resumed.externalChange)
             try await collectionService.close()
             try await collectionService.open(location, randomSeed: 37)
-            #expect(try await notes.readNote(id: note.id).fields == ["persisted", "back"])
+            #expect(try await notes.readNote(id: note.id).fields == ["persisted", "patched"])
             #expect(try await types.readNotetype(id: nt.id).css == ".card { color: green; }")
             #expect(try await media.addMedia(name: "Attachment.PNG", bytes: [1,2,3]) == safe)
             let deletion = try await notes.startDeleteNotes(ids: [note.id])

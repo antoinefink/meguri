@@ -233,7 +233,7 @@ public actor CoreNoteService: NoteService {
     /// `updateNote`, on the interactive queue.
     /// `sessionID`: the open review session when the review's Edit Note saves
     /// (`review/edit-current` E2), so the step is that session's.
-    public func patchNote(_ request: NoteFieldPatch, sessionID: UInt64? = nil) async throws(BridgeError) -> NoteMutation {
+    public func patchNote(_ request: NoteFieldPatch, sessionID: UInt64?) async throws(BridgeError) -> NoteMutation {
         try await InteractiveLane.shared.call(.patchNote) {
             NoteMutation(try MeguriCoreBindings.patchNote(request: request.raw, sessionId: sessionID))
         }

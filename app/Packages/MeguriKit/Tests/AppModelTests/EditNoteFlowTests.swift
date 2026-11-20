@@ -239,7 +239,9 @@ extension ReviewCollectionStartupTests {
                 #expect(ReviewStepNames.display(step.name) == "Edit Note")
             } else { Issue.record("The review's Undo offers the saved edit: \(review.undoStatus)") }
             review.restore(); await review.settled()
-            #expect(try await stored().first != "Mine", "Undo restores the note")
+            // The other writer's update made during the session merged into the
+            // same "Update Note" step (engine/undo A3), so Undo restores both.
+            #expect(try await stored() == ["Question", "Answer"], "Undo restores the note")
             #expect(review.item?.cardId == card && review.record.answers.isEmpty)
 
             await owner.finishReview()

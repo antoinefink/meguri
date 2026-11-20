@@ -2,7 +2,9 @@
 //! review session, so the session's Undo covers it, admitted only for the
 //! open session.
 mod session_support;
-use meguri_engine::{SessionId, StepKind, UndoScope, UndoStatus, notes};
+use meguri_engine::{EngineError, SessionId, StepKind, UndoScope, UndoStatus, notes};
+use meguri_model::{clock::Clock, time::EpochMillis};
+use meguri_sched::answer::Rating;
 use meguri_model::ids::NoteId;
 use meguri_storage::{ReadRows, ReaderRole};
 
@@ -63,7 +65,29 @@ fn an_edit_naming_no_open_session_is_refused_and_writes_nothing() {
     let (id, head) = h.start();
     let note = head.items[0].note_id;
     let before = back(&h, note);
-    assert!(h.review.patch_note(patch(&h, note, "edited"), SessionId(id.0 + 100)).is_err());
+    let refused = h.review.patch_note(patch(&h, note, "edited"), SessionId(id.0 + 100));
+    assert!(matches!(refused, Err(EngineError::InvalidArgument { .. })), "{refused:?}");
     assert_eq!(back(&h, note), before);
+    h.review.end(id).unwrap();
+    // An ended session admits no edit either.
+    let ended = h.review.patch_note(patch(&h, note, "edited"), id);
+    assert!(ended.is_err(), "{ended:?}");
+    assert_eq!(back(&h, note), before);
+}
+
+#[test]
+fn the_edit_is_a_new_step_so_an_undone_answer_can_no_longer_be_redone() {
+    let h = session_support::Harness::new(3);
+    let (id, head) = h.start();
+    let answered = &head.items[0];
+    h.review
+        .answer(id, answered.card_id, Rating::Good, answered.state_token, EpochMillis(h.clock.now_ms()), 0)
+        .unwrap();
+    h.review.undo(UndoScope::Session(id)).unwrap();
+    assert!(matches!(h.review.peek_redo(UndoScope::Session(id)).unwrap(), UndoStatus::Available(_)));
+    let note = h.review.head(id, 3).unwrap().items[0].note_id;
+    h.review.patch_note(patch(&h, note, "edited"), id).unwrap();
+    let redo = h.review.peek_redo(UndoScope::Session(id)).unwrap();
+    assert!(!matches!(redo, UndoStatus::Available(_)), "{redo:?}");
     h.review.end(id).unwrap();
 }
