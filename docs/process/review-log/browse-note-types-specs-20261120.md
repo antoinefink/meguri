@@ -21,3 +21,11 @@ Author: spec-writer session `s-20261120T154704Z-1e3b6b1f`. Reviewer: a separate 
   - The search-token exception is recorded in N21.2.
 
 Not changed: none.
+
+## Approval, 2026-11-20
+
+Antoine approved these specs in chat on 2026-11-20 ("I approve. And even more generally you have full permission to update specs yourself"), after PR #17 merged. Before that, the AI reviewer ran five rounds on the PR; every finding was fixed or answered. The later rounds added the confirmed-losses precondition for the note type draft save, Change Note Type, Delete Note Type and Restore to Default (`notetypes/draft-save` D8). The reviewer did not run on the last commit of round five.
+
+The Status lines of the round 8 and round 9 specs, MP7 in `sync/meguri-provider`, N11.10, N21 and N22 in the contract, and the inventory entries now say approved. The empty section list in `notetypes/restore-to-default`'s Status line now names D7.
+
+From this date Claude (coordinator) may change specs without asking first; each change still gets an independent review and is recorded with that attribution.

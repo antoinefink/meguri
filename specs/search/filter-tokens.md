@@ -4,7 +4,7 @@ Spec: search/filter-tokens
 Requirements: R1078, R1080, R1084, R1092, R1102, R1104, R1105, R1106, R1107, R1110, R1111, R1114, R1115, R1158, R1165; supersedes in part R1076, R1077, R1086 to R1091, R1093 to R1101, R1103, R1108, R1109, R1112, R1159, R1168 to R1170 (the Browse and Note Types plan §5 lists the notes)
 Anki: none (Meguri design, decided by Antoine 2026-11-20, round 8 option 2A; it reads and writes Anki search text by the 26.09.3 grammar)
 Scenarios: none; tests in `core/crates/meguri-search/tests/` (T16)
-Status: Under review (R1232; round 8, decided 2026-11-20, `docs/design/decisions.md` row `browser`). Do not implement until approved.
+Status: Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R1232; round 8, decided 2026-11-20, `docs/design/decisions.md` row `browser`).
 
 What Browse's search field holds and means (`docs/design/native-interface-contract.md` N21.2): plain words plus filter tokens, how they combine, how they become one Anki search that the existing search stack runs, how Anki search text typed, pasted or stored is read back into tokens, how the filter sidebar and the tokens stay in step, the suggestions, and the built-in saved searches. The grammar, the term meanings, the canonical writer and the builder stay `search/grammar`, `search/query-model`, `search/canonical-form` and `search/join-and-replace`; this file only says which built items a query makes. No syntax mode, no syntax reference and no canonical text are ever shown.
 

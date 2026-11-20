@@ -4,7 +4,7 @@ Spec: browser/sidebar
 Requirements: R1157, R1158, R1159, R1160, R1161, R1162, R1163, R1164, R1165, R1166, R1167, R1168, R1169, R1170, R1171, R1172, R1174, R1175, R1176, R1177, R1178, R1179, R1180, R1268 (sidebar part), AE43 (sidebar part); supports R274, R899, R1173, R66, R67
 Anki: 26.09.3 for S2 to S12 (the desktop browser's sidebar); none for the Meguri rules S15 lists
 Scenarios: conformance/scenarios/browser/sidebar/ (recorded, not active; S16)
-Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of S2, S7, S9 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R1232; round 8, decided 2026-11-20) for the lines of S2, S7, S9 that begin "Changed 2026-11-20 (round 8)". Every other section is in force and unchanged.
 
 What Browse's filter sidebar (U216, U217) holds and does: its sections and items, the search each item stands for, their order, which items keep their expansion and where, the filter box, how activating items changes the search, and which management action each item offers with the operation it calls. The operations themselves are other files' (named in each section); this file says which one runs, with which input. Layout, icons, colours, labels and gestures are Meguri's (`docs/design/screen-inventory.yaml` `browse.browser`, `browser/browse-strings` W6). Anki's sidebar is a desktop widget the oracle does not run (`conformance/AGENTS.md`), so apart from the searches the items build (S16) Meguri's tests check this file from its tables.
 

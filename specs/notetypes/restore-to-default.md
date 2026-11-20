@@ -4,7 +4,7 @@ Spec: notetypes/restore-to-default
 Requirements: R914, R949, R1475, R1477, R2008 (core side)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/notetypes/structure/ (`restore-*`)
-Status: Under review (R915; round 9, decided 2026-11-20) for the lines of  that begin "Changed 2026-11-20 (round 9)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R915; round 9, decided 2026-11-20) for the lines of D7 that begin "Changed 2026-11-20 (round 9)". Every other section is in force and unchanged.
 
 "Restore to Default" (R914, offered from the Note Types screen and the template editor, R919, R932) replaces a note type's fields, templates and styling with Meguri's stock version of its kind, keeping the note type itself and its notes. The stock kinds are `notetypes/stock-kinds` (K1 to K6); what happens to notes and cards reuses `notetypes/structure-changes` S5 to S7.
 

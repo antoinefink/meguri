@@ -4,7 +4,7 @@ Spec: browser/find-replace
 Requirements: R1200, R1201, R1202, R1203, R1204, R1205, R1206, R1207, AE47; supports R1179, R1181, R1182, R1183, R1184, R1185, R1245, R1832, R1860
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/find-replace/
-Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of F2, F8, F10 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R1232; round 8, decided 2026-11-20) for the lines of F2, F8, F10 that begin "Changed 2026-11-20 (round 8)". Every other section is in force and unchanged.
 
 Browse's Find and Replace rewrites text in the fields or in the tags of notes. This file gives what the sheet offers (F2, F3), how the find text becomes a pattern (F4) and the replacement text (F5), what the operation does to the notes it rewrites (F6, F7), which notes it reads (F8), what it reports (F9), the live preview Meguri adds (F10) and the operation's contract (F11). How a bulk operation runs (job, compute phase, commit phase, cancellation, progress, change set, undo entry) is the Meguri design doc `browser/bulk-framework` (U86); this file says only what the run computes and writes. The selection's ids come from `browser/result-sets` H12 (`resolve_selection`). The scenario ops are `specs/conformance/bulk-ops.md` X1 and X3.
 

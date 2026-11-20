@@ -4,7 +4,7 @@ Spec: browser/workspace
 Requirements: R1080, R1111, R1115 to R1117, R1132 to R1136, R1139 to R1145, R1152 to R1156, R1181 to R1187, R1190, R1193 to R1198, R1200 to R1207, R1212, R1221 to R1224, R1232, R1233, R1235 to R1240, R1241 to R1247, R1825 to R1832; supersedes in part R1131, R1134, R1135, R1157, R1184, R1193, R1212, R1222, R1226 to R1228, R1234 (the Browse and Note Types plan §5 lists the notes)
 Anki: none (Meguri design, decided by Antoine 2026-11-20, round 8: 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A); the operations it calls keep their own specs and Anki behaviour
 Scenarios: none; tests named in V18
-Status: Under review (R1232; round 8, decided 2026-11-20, `docs/design/decisions.md` rows `browser` and `home.deckList`). Do not implement until approved.
+Status: Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R1232; round 8, decided 2026-11-20, `docs/design/decisions.md` rows `browser` and `home.deckList`).
 
 The behaviour of Browse as round 8 decided it: columns and column sets, field columns, the deck and date cells, selection, the commands and when they ask, Find and Replace's preview and scope, Find Duplicates, the status line, the inspector's two tabs, the touch layouts' list, Select mode and swipes, the entry points, and the speed budgets. Layout and presentation are `docs/design/native-interface-contract.md` N21; the search field and the sidebar's meaning are `search/filter-tokens`. Where an older `browser/*` section differs, this file wins and that section carries a "Changed 2026-11-20" note.
 

@@ -4,7 +4,7 @@ Spec: notetypes/change-notetype
 Requirements: R944, R945, R946, R947, R948; supports R949, R951, R1189, R1475, R1476, R2008, R2053
 Anki: 26.09.3
 Scenarios: conformance/scenarios/notetypes/change/
-Status: Under review (R915; round 9, decided 2026-11-20) for the lines of M8 that begin "Changed 2026-11-20 (round 9)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R915; round 9, decided 2026-11-20) for the lines of M8 that begin "Changed 2026-11-20 (round 9)". Every other section is in force and unchanged.
 
 Moving selected notes to another note type, or remapping the fields and templates of their own note type: the info query that gives the default mappings, the loss preview and the schema stamp, and the change itself. The screens are U203 (and the Browse entry, U87 and U210); the scenario ops are `specs/conformance/change-notetype-ops.md`. The sheet's pickers (target order, opening state, template choices another row uses, the collapsed loss list) are `notetypes/editor-actions` A16.
 

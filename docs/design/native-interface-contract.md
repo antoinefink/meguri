@@ -283,7 +283,7 @@ Decided 2026-10-27 (screen contract `deckOptions.options`):
 
 ### N11.10 Note types (U200, U201, U203)
 
-Replaced 2026-11-20 by N22 (round 9), under review until Antoine approves it: the Note Types section, one draft and one Save sheet. The text below stays until then.
+Replaced 2026-11-20 by N22 (round 9), approved by Antoine that day: the Note Types section, one draft and one Save sheet. The text below describes the screens until the N22 units replace them.
 
 Decided 2026-10-27 (screen contracts `noteTypes.list`, `noteTypes.templates`, `noteTypes.fields`, `noteTypes.changeNoteType`):
 
@@ -837,7 +837,7 @@ The English text of the screens above. "New" marks text not used before this rou
 
 ## N21. Round 8: Browse (2026-11-20)
 
-Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `home.deckList`; round 8 answers 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A, with the forgetting curve in the first version, system symbols on the Today and Browse rows, every bulk action in the first version, a Note menu and ⇧⌘B). Where earlier text differs, this section wins. Behaviour is `browser/workspace` and `search/filter-tokens`; this section is the layout. Under review with those specs until Antoine approves them. Strings: `browser/workspace` V16 and `search/filter-tokens` T15.
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `home.deckList`; round 8 answers 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A, with the forgetting curve in the first version, system symbols on the Today and Browse rows, every bulk action in the first version, a Note menu and ⇧⌘B). Where earlier text differs, this section wins. Behaviour is `browser/workspace` and `search/filter-tokens`; this section is the layout. Approved with those specs by Antoine on 2026-11-20. Strings: `browser/workspace` V16 and `search/filter-tokens` T15.
 
 ### N21.1 Where Browse lives (11A)
 
@@ -933,7 +933,7 @@ R1076, R1086, R1090, R1093 (canonical text, syntax mode and reference: dropped; 
 
 ## N22. Round 9: Note Types (2026-11-20)
 
-Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` rows; round 9 answers 1B 2B 3C 4B 5A 6B 7B 8B, with a preview that has a Light and Dark switch and no device picker, and ⇧⌘T). Behaviour is `notetypes/workspace` and `notetypes/draft-save`; this section is the layout. Under review with those specs until Antoine approves them.
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` rows; round 9 answers 1B 2B 3C 4B 5A 6B 7B 8B, with a preview that has a Light and Dark switch and no device picker, and ⇧⌘T). Behaviour is `notetypes/workspace` and `notetypes/draft-save`; this section is the layout. Approved with those specs by Antoine on 2026-11-20.
 
 ### N22.1 Where Note Types lives (1B)
 

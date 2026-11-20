@@ -4,7 +4,7 @@ Spec: notetypes/schema-changes
 Requirements: R949, R950, R951, R1475, R1476, R1477, R1590 (core side), R2053 (core side), R918, R948 (schema side), R1889 (G9)
 Anki: 26.09.3 for G1's meaning of `scm` and `ls`, G2, G3, G5 and G9's Anki column; G1's CloudKit rules and the scope of `ls`, G4, G6, G7's CloudKit part, G8 and G9's Meguri column are Meguri design from the Product Contract
 Scenarios: conformance/scenarios/notetypes/gate/
-Status: Approved 2026-11-15 (R2066) for the new normal-transfer aggregate cross-reference paragraph in G7. Under review (R915; round 9, decided 2026-11-20) for the paragraph of G4 that begins "Changed 2026-11-20": do not implement it until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-15 (R2066) for the new normal-transfer aggregate cross-reference paragraph in G7. Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R915; round 9, decided 2026-11-20) for the paragraph of G4 that begins "Changed 2026-11-20". Every other section is in force and unchanged.
 
 Which operations mark the collection's schema as modified, what that means for the next manual Anki transfer (KTD26) and for CloudKit (R2053), and the guard that keeps a changed note type structure out of an incremental Anki transfer. Meguri asks no confirmation before a schema change (G4). Destructive-mapping previews belong to their units (U34, U35, U121, U200, U201, U203, U210, U232). The manual-transfer side is U106, U107 and U109 (frozen with the Anki server work); the CloudKit side is U113 and U114 (R2053; generation layout: `sync/cloudkit-records#K19`). Columns are `model/row-records` R2 and `storage/ids-usn-mtime` S6.
 
