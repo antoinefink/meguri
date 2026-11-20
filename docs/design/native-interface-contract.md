@@ -554,9 +554,10 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 
 ### N16.1 Session progress
 
-- One thin grey bar along the very bottom edge, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint. No text, no counts, no accent colour.
+- One thin grey bar along the very bottom edge, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint (on the Mac a drawn bar, the exception below). No text, no counts, no accent colour.
 - Touch: the bar spans the screen's width on its bottom edge, inside the bottom safe area, so the home indicator lies over its middle. iPhone Duo: the same edge folded, held wide and held tall; held wide it runs under both halves and across the fold. It is not a control, so it may cross (R9 covers controls).
-- Mac: the bar is the window's last row, under the answer buttons. The Mac had no bar before.
+- Mac: the bar is the window's last row, under the answer buttons, on the window's bottom edge and across its full width. The Mac had no bar before.
+- Mac exception (2026-11-20; need: the bottom-edge, full-width bar above): the bar is drawn, not the system's linear indicator, which draws its rounded track inset in its frame and so left a gap under the bar and at its leading end. The drawn bar is a 4 pt track in the quaternary fill with the value in the secondary fill, square at both ends; its accessibility below is unchanged. Verification: the Mac review renders in the test VM, light and dark, narrow and wide windows. Touch keeps the system indicator, which already lies on the screen's bottom edge.
 - The bar shows on the question and answer sides and between cards. Loading, waiting, paused and finished states have none.
 - Its value is the answers given over those answers plus the cards left (new, learning and to review). Accessibility: label "Session Progress", value "12 of 40", identifier `review.session.progress`. It takes no input and is read as text, so the hit-region audit does not ask a touch target of it.
 - Replaces: N11.1's bar across the top and its device setting (R341–R345), N13.3's counts line and top bar.
@@ -575,14 +576,15 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 
 - Show Answer is centred in the answer row on touch, as wide as two answer buttons. At the accessibility text sizes it keeps the full row.
 - With a fold through the row (iPhone Duo held wide) it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9).
-- The answer buttons' group is centred: on touch it is the reading column's width (N16.4), on Mac the four standard buttons are centred in it, as is Show Answer.
+- The answer buttons' group is centred: on touch it is the reading column's width (N16.4), on Mac the four standard buttons are centred in the window, as is Show Answer.
 - Replaces: N13.3's trailing-half Show Answer where no fold crosses the row.
 
 ### N16.4 Reading column
 
-- iPad and Mac: the card, any notice above it and the review's states sit in one centred column, `ContentWidth.readable` wide, the width the touch answer row already had. A narrower window uses its full width.
-- iPhone and iPhone Duo are unchanged: the card takes the full width in every position. The choice is by idiom, as N13.1's layout choice is.
-- The window beside the column shows the card page colour. A template's own background does not reach it yet (N13.4, R335).
+- Changed 2026-11-20 (Antoine asked "do we really want a max width at all?"; decided by the coordinator under his standing delegation; `decisions.md`): the card and any notice above it take the review's full width on every device, as on iPhone. Card styling is the user's and is written for a card that fills the window, so a narrower column would change how it looks. A card whose own content is wider than the window, such as a wide table or image, scrolls sideways inside the card page; any other card shows no horizontal scroll bar at any window width, also with scroll bars always shown.
+- iPad and Mac keep the review's states (N16.6) in one centred column, `ContentWidth.readable` wide, the width of the touch answer row (N16.3). A narrower window uses its full width. iPhone and iPhone Duo are unchanged: everything takes the full width in every position. The choice is by idiom, as N13.1's layout choice is.
+- Around the answer row and the states the window shows the card page colour. A template's own background does not reach it yet (N13.4, R335).
+- Replaced (2026-11-19 text): "iPad and Mac: the card, any notice above it and the review's states sit in one centred column, `ContentWidth.readable` wide".
 
 ### N16.5 End of a session
 
