@@ -20,6 +20,15 @@ public enum ReviewInputOwnership {
         return admits(cardFocused: cardFocused(in: pair.current.webView), editing: model.surface.editing,
             paused: model.paused, repeated: repeated)
     }
+    #else
+    /// The iPad menu bar's commands (N20.4) use the card host's admission:
+    /// the card has the focus, no DOM editing, not paused.
+    public static func admitsNativeCommand(_ model: ReviewCoordinator) -> Bool {
+        guard let pair = model.pair, let pages = model.surface as? ReviewPages,
+              pages.presenter.isAvailable else { return false }
+        return admits(cardFocused: cardFocused(in: pair.current.webView), editing: model.surface.editing,
+            paused: model.paused, repeated: false)
+    }
     #endif
     static func contains(_ view: CardPlatformView, in container: CardPlatformView) -> Bool {
         view === container || view.isDescendant(of: container)

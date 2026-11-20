@@ -5,72 +5,25 @@ import Testing
 
 @MainActor
 @Suite struct DeckActionsModelTests {
-    @Test func goToDeckCreateReservesBeforeYieldAndRechecksConflictsBeforeWriter() async throws {
-        let owner = await makeOwner(), model = owner.deckActions
-        var calls = 0
-        model.createDeck = { _ in calls += 1; throw BridgeError.cancelled }
-        owner.presentGoToDeck()
-        let token = try #require(owner.goToDeckPresentation)
-        let absence = DeckNameMatch(generation: 11, deck: nil)
-        let activation = owner.createGoToDeck(name: "raw", match: absence, presentation: token, knownDecks: [], layout: { .sidebar })
-        #expect(owner.goToDeckBusy && owner.navigation.sheet == .goToDeck)
-        #expect(!owner.canStudy && !owner.manualAllowed && !owner.exportAllowed && !model.canPresent(.create))
-        let duplicate = owner.createGoToDeck(name: "raw", match: absence, presentation: token, knownDecks: [], layout: { .sidebar })
-        owner.entry.pickerPresented = true
-        #expect(await duplicate.value == .unavailable)
-        #expect(await activation.value == .unavailable)
-        #expect(calls == 0)
-        owner.entry.pickerPresented = false
-        owner.navigation.sheetHost = .settings
-        #expect(await owner.createGoToDeck(name: "raw", match: absence, presentation: token, knownDecks: [], layout: { .sidebar }).value == .unavailable)
-        owner.navigation.sheetHost = .main
-        #expect(await owner.createGoToDeck(name: " \n ", match: absence, presentation: token, knownDecks: [], layout: { .sidebar }).value == .unavailable)
-        #expect(await owner.createGoToDeck(name: "raw", match: .init(generation: 12, deck: nil), presentation: token, knownDecks: [], layout: { .sidebar }).value == .unavailable)
-        #expect(calls == 0)
-    }
-
-    @Test(arguments: ["parent", "depth", "unknown"])
-    func goToDeckCreateRefusalsPreserveOriginWithoutContinuation(kind: String) async throws {
-        let owner = await makeOwner()
-        let raw = "  Editable :: Path:  "
-        let failure: BridgeError = kind == "parent" ? .deckRefused(.filteredParent) :
-            kind == "depth" ? .deckRefused(.tooDeep) : .internal("synthetic failure detail")
-        var writes: [String] = [], selections: [Int64] = []
-        owner.deckActions.createDeck = { name in writes.append(name); throw failure }
-        owner.saveSelectedDeck = { id in selections.append(id); return 11 }
-        owner.presentGoToDeck()
-        let token = try #require(owner.goToDeckPresentation)
-        let result = await owner.createGoToDeck(name: raw, match: .init(generation: 11, deck: nil),
-            presentation: token, knownDecks: [], layout: { .compact }).value
-        #expect(result == (kind == "parent" ? .filteredParent : kind == "depth" ? .tooDeep : .failed))
-        #expect(writes == [raw] && selections.isEmpty)
-        #expect(owner.navigation.sheet == .goToDeck && owner.goToDeckPresentation == token)
-        #expect(owner.review == nil && owner.navigation.review == nil && owner.navigation.homeDeckPage == nil)
-        // A refused write leaves no retained identity, so a corrected query reaches the writer.
-        _ = await owner.createGoToDeck(name: "Revised Path", match: .init(generation: 11, deck: nil),
-            presentation: token, knownDecks: [], layout: { .sidebar }).value
-        #expect(writes == [raw, "Revised Path"] && selections.isEmpty)
-    }
-
     @Test func mainHostFullPathsBlankAndFilteredAdmission() async {
         let owner = await makeOwner(), model = owner.deckActions
         model.present(.create, host: .settings)
         #expect(owner.navigation.sheet == nil)
         model.present(.rename(2))
-        #expect(model.name == "Parent::Child")
+        #expect(model.name == "Child" && model.parentID == 1 && model.composedName == "Parent::Child")
         #expect(owner.navigation.sheetHost == .main)
         #expect(!model.canPresent(.create))
         // A layout rereads the same owner, rather than making a fresh draft.
-        model.name = "Parent::Edited draft"
+        model.name = "Edited draft"
         owner.navigation.adoptLaunchLayout(.compact)
         #expect(owner.deckActions === model)
-        #expect(model.name == "Parent::Edited draft")
+        #expect(model.name == "Edited draft" && model.composedName == "Parent::Edited draft")
         owner.navigation.sheetHost = .settings
         #expect(!model.canSubmit)
         owner.navigation.sheetHost = .main
         model.cancel()
         model.present(.subdeck(2))
-        #expect(model.name == "Parent::Child::")
+        #expect(model.name.isEmpty && model.parentID == 2)
         model.name = " \n\t "
         #expect(!model.canSubmit)
         model.cancel()
@@ -93,7 +46,7 @@ import Testing
             await gate.hold()
             throw BridgeError.deckRefused(.filteredParent)
         }
-        model.present(.subdeck(2)); model.name += "Typed"
+        model.present(.subdeck(2)); model.name = "Typed"
         model.submit(); model.submit()
         #expect(model.busy)
         #expect(!owner.canStudy && !owner.exportAllowed && !owner.manualAllowed)
@@ -102,7 +55,7 @@ import Testing
         #expect(calls == 1)
         gate.release(); await model.waitForCompletion()
         #expect(!model.busy)
-        #expect(model.name == "Parent::Child::Typed")
+        #expect(model.name == "Typed" && model.composedName == "Parent::Child::Typed")
         #expect(model.message == DeckActionsModel.explanation(.deckRefused(.filteredParent)))
         #expect(model.canSubmit)
     }
@@ -128,7 +81,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckActions
         var calls = 0
         model.createDeck = { _ in calls += 1; throw BridgeError.cancelled }
-        model.present(.subdeck(2)); model.name += "New"
+        model.present(.subdeck(2)); model.name = "New"
         model.submit()
         owner.loadDeckTree = { CountedDeckTree(generation: 11, nextChangeAt: Int64.max, nodes: []) }
         // A conflicting route wins even if the queued task has not run yet.
@@ -205,432 +158,8 @@ private final class DeckNameGate {
     func release() { continuation?.resume(); continuation = nil }
 }
 
-@MainActor
-private final class DeckDrainClient: ReviewSessionClient {
-    private let core = CoreReviewSessionClient()
-    var refuseEnd = true
-    var endGate: DeckNameGate?
-    var endCalls = 0
-    func start(deckID: Int64) async throws -> ReviewStartResult { try await core.start(deckID: deckID) }
-    func head(sessionID: UInt64) async throws -> ReviewHead { try await core.head(sessionID: sessionID) }
-    func answer(sessionID: UInt64, item: ReviewHeadItem, rating: ReviewRating, at: Int64, elapsed: UInt64) async throws -> ReviewAnswerOutcome {
-        try await core.answer(sessionID: sessionID, item: item, rating: rating, at: at, elapsed: elapsed)
-    }
-    func undoStatus(sessionID: UInt64, redo: Bool) async throws -> ReviewUndoStatus { try await core.undoStatus(sessionID: sessionID, redo: redo) }
-    func restore(sessionID: UInt64, redo: Bool) async throws -> ReviewHead { try await core.restore(sessionID: sessionID, redo: redo) }
-    func studyState(deckID: Int64) async throws -> ReviewDeckStudyState { try await core.studyState(deckID: deckID) }
-    func end(sessionID: UInt64) async throws {
-        endCalls += 1
-        if refuseEnd { throw BridgeError.internal("synthetic end refusal") }
-        await endGate?.hold()
-        try await core.end(sessionID: sessionID)
-    }
-}
-
 // Real U28 API coverage shares the existing serialized owner of the global stream.
 extension ReviewCollectionStartupTests {
-    @Test(arguments: [false, true])
-    func goToDeckCommittedCreateCannotPublishAfterRouteReplacementOrBackground(background: Bool) async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService(), gate = DeckNameGate()
-            let raw = "Retained Query Result"
-            let absence = try await service.matchDeckName(name: raw)
-            var saved: DeckMutation?
-            var calls = 0
-            owner.deckActions.createDeck = { name in
-                calls += 1; await gate.hold()
-                let result = try await service.addDeck(name: name)
-                saved = result; return result
-            }
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            let activation = owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: [], layout: { .compact })
-            await gate.entered()
-            #expect(await owner.cancelGoToDeck(token).value == false)
-            if background { owner.setForeground(false) }
-            else { owner.navigation.present(.collectionExport) }
-            gate.release()
-            #expect(await activation.value == .unavailable)
-            if background {
-                await owner.waitForLifecycle()
-                owner.setForeground(true); await owner.waitForLifecycle()
-            } else { #expect(owner.navigation.sheet == .collectionExport) }
-            let mutation = try #require(saved)
-            #expect(calls == 1 && !owner.goToDeckBusy && owner.review == nil && owner.navigation.review == nil)
-            #expect(owner.navigation.homeDeckPage == nil)
-            #expect(try await service.matchDeckName(name: raw).deck?.id == mutation.id)
-        }
-    }
-
-    @Test(arguments: ["writer", "selection"])
-    func goToDeckIntentChangeRetainsOriginalCommittedIdentity(checkpoint: String) async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService(), gate = DeckNameGate()
-            let raw = "Intent Origin"
-            let absence = try await service.matchDeckName(name: raw)
-            var writes: [DeckMutation] = [], selections: [Int64] = []
-            owner.deckActions.createDeck = { name in
-                if checkpoint == "writer" { await gate.hold() }
-                let mutation = try await service.addDeck(name: name)
-                writes.append(mutation); return mutation
-            }
-            owner.saveSelectedDeck = { id in
-                selections.append(id)
-                if checkpoint == "selection" { await gate.hold() }
-                return try await service.selectDeck(id: id).generation
-            }
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            let operation = owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: [], layout: { .compact })
-            await gate.entered()
-            owner.navigation.show(.settings)
-            gate.release()
-            #expect(await operation.value == .saved)
-            let mutation = try #require(writes.first)
-            #expect(writes.count == 1 && owner.navigation.section == .settings)
-            #expect(owner.goToDeckIsCurrent(token, generation: absence.generation))
-            #expect(owner.navigation.sheet == .goToDeck && owner.navigation.homeDeckPage == nil)
-            #expect(owner.navigation.selectedDeck == nil && owner.review == nil && owner.navigation.review == nil)
-            #expect(try await service.matchDeckName(name: raw).deck?.id == mutation.id)
-            let other = "Different Intent Query"
-            #expect(await owner.createGoToDeck(name: other, match: absence, presentation: token,
-                knownDecks: [], layout: { .sidebar }).value == .unavailable)
-            let otherMatch = try await service.matchDeckName(name: other)
-            #expect(writes.count == 1 && otherMatch.deck == nil)
-            owner.loadDeckTree = { try await service.treeWithCounts() }
-            owner.saveSelectedDeck = { id in selections.append(id); return try await service.selectDeck(id: id).generation }
-            #expect(await owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: [], layout: { .compact }).value == .opened)
-            #expect(writes.count == 1 && selections.allSatisfy { $0 == mutation.id })
-            #expect(owner.navigation.homeDeckPage == DeckID(mutation.id) && owner.review == nil)
-        }
-    }
-
-    @Test(arguments: [false, true])
-    func goToDeckCreateDrainsRetainedSessionBeforeFirstWriter(invalidateDuringDrain: Bool) async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService(), control = CoreCollectionService(), gate = DeckNameGate()
-            let names = try await service.allDeckNames()
-            let entry = try #require(try await eligibleRegularDeck(in: names, service: service))
-            let client = DeckDrainClient()
-            owner.reviewSessionClient = client
-            let surface = ReviewCoordinatorTests.Surface()
-            surface.onLoad = { throw BridgeError.internal("synthetic page load failure") }
-            owner.makeReviewSurface = { _ in surface }
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            #expect(await owner.activateGoToDeck(entry, generation: names.generation, presentation: token,
-                layout: .compact).value == .failed)
-            let pending = try #require(try await control.resume().activeSession)
-            #expect(client.endCalls == 1 && owner.review == nil && owner.navigation.review == nil)
-            let raw = "After Retained Session"
-            let absence = try await service.matchDeckName(name: raw)
-            var writes: [DeckMutation] = []
-            owner.deckActions.createDeck = { name in
-                #expect(try await control.resume().activeSession == nil)
-                let mutation = try await service.addDeck(name: name)
-                writes.append(mutation); return mutation
-            }
-            // A second end failure must leave the real session retained and dispatch no writer.
-            #expect(await owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: [], layout: { .compact }).value == .failed)
-            #expect(writes.isEmpty && client.endCalls == 2)
-            #expect(try await control.resume().activeSession == pending)
-            client.refuseEnd = false; client.endGate = gate
-            let creation = owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: [], layout: { .compact })
-            await gate.entered()
-            #expect(writes.isEmpty && owner.goToDeckBusy && !owner.canStudy)
-            #expect(try await control.resume().activeSession == pending)
-            if invalidateDuringDrain { owner.navigation.show(.settings) }
-            gate.release()
-            #expect(await creation.value == (invalidateDuringDrain ? .unavailable : .opened))
-            #expect(try await control.resume().activeSession == nil)
-            #expect(client.endCalls == 3 && writes.count == (invalidateDuringDrain ? 0 : 1))
-            if invalidateDuringDrain {
-                #expect(owner.navigation.homeDeckPage == nil && owner.navigation.section == .settings)
-                client.endGate = nil
-                #expect(await owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                    knownDecks: [], layout: { .compact }).value == .opened)
-            }
-            let mutation = try #require(writes.first)
-            #expect(writes.count == 1 && owner.navigation.homeDeckPage == DeckID(mutation.id))
-            #expect(owner.review == nil && owner.navigation.sheet == nil)
-        }
-    }
-
-    @Test(arguments: [false, true])
-    func goToDeckCreatedReturnedIDOpensEmptyOverviewInEveryLayout(compact: Bool) async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService(), gate = DeckNameGate()
-            let raw = "  Query Parent :: Child:  "
-            let snapshot = try await service.allDeckNames()
-            let absence = try await service.matchDeckName(name: raw)
-            try #require(absence.deck == nil)
-            var mutations: [DeckMutation] = []
-            owner.deckActions.createDeck = { name in
-                #expect(name == raw && owner.goToDeckBusy && owner.navigation.sheet == .goToDeck)
-                await gate.hold()
-                let result = try await service.addDeck(name: name)
-                mutations.append(result)
-                return result
-            }
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            let activation = owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: snapshot.decks, layout: { gate.layout })
-            #expect(owner.goToDeckBusy && owner.navigation.sheet == .goToDeck)
-            #expect(await owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: snapshot.decks, layout: { gate.layout }).value == .unavailable)
-            await gate.entered()
-            gate.layout = compact ? .compact : .sidebar
-            gate.release()
-            try #require(await activation.value == .opened)
-            let mutation = try #require(mutations.first)
-            #expect(mutations.count == 1 && mutation.name == "Query Parent::Child")
-            #expect(mutation.summary.changes.decks.contains { $0.id == mutation.id && $0.change == .added })
-            #expect(mutation.summary.changes.decks.filter { $0.change == .added }.count == 2)
-            #expect(try await service.studyState(deckID: mutation.id).empty)
-            #expect(owner.navigation.homeDeckPage == DeckID(mutation.id))
-            #expect(owner.navigation.selectedDeck == DeckID(mutation.id) && owner.navigation.review == nil && owner.review == nil)
-            #expect(owner.navigation.sheet == nil && !owner.goToDeckBusy)
-        }
-    }
-
-    @Test(arguments: [false, true])
-    func goToDeckExistingRaceReadsReturnedIDAndUsesLiveLayout(compact: Bool) async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService(), gate = DeckNameGate()
-            let snapshot = try await service.allDeckNames()
-            let target = try #require(try await eligibleRegularDeck(in: snapshot, service: service))
-            let raw = "Race Result"
-            let absence = try await service.matchDeckName(name: raw)
-            try #require(absence.deck == nil)
-            var calls = 0
-            owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
-            owner.deckActions.createDeck = { name in
-                calls += 1; await gate.hold()
-                _ = try await service.renameDeck(id: target.id, name: name)
-                let result = try await service.addDeck(name: name)
-                #expect(result.id == target.id && result.summary.changes.decks.isEmpty)
-                return result
-            }
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            // Exercise a result whose metadata was unavailable in the earlier read.
-            let activation = owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: [], layout: { gate.layout })
-            await gate.entered()
-            gate.layout = compact ? .compact : .sidebar
-            gate.release()
-            try #require(await activation.value == .opened)
-            #expect(calls == 1)
-            #expect(owner.navigation.sheet == nil)
-            if compact {
-                #expect(owner.review?.record.deckID == target.id && owner.review?.sessionID != nil)
-                #expect(owner.navigation.review != nil)
-                await owner.finishReview()
-            } else {
-                #expect(owner.navigation.homeDeckPage == DeckID(target.id) && owner.navigation.selectedDeck == DeckID(target.id) && owner.review == nil)
-            }
-        }
-    }
-
-    @Test func goToDeckParentAdditionDoesNotMakeExistingReturnedIDNewAndFilteredIsRefused() async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService()
-            let snapshot = try await service.allDeckNames()
-            let target = try #require(try await eligibleRegularDeck(in: snapshot, service: service))
-            let absence = try await service.matchDeckName(name: "Parent Addition")
-            var calls = 0
-            owner.deckActions.createDeck = { _ in
-                calls += 1
-                let parentChanges = try await service.addDeck(name: "Added Parent::Child")
-                try #require(parentChanges.summary.changes.decks.allSatisfy { $0.id != target.id })
-                // A result seam with real persisted identities isolates parent-row accounting.
-                return DeckMutation(summary: parentChanges.summary, id: target.id, name: target.fullName)
-            }
-            owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            try #require(await owner.createGoToDeck(name: "Parent Addition", match: absence, presentation: token,
-                knownDecks: snapshot.decks, layout: { .compact }).value == .opened)
-            #expect(calls == 1 && owner.review?.record.deckID == target.id)
-            await owner.finishReview()
-            owner.presentGoToDeck()
-            let filteredToken = try #require(owner.goToDeckPresentation)
-            owner.deckActions.createDeck = { _ in calls += 1; return try await service.addDeck(name: target.fullName) }
-            let filtered = DeckNameEntry(id: target.id, fullName: target.fullName, filtered: true)
-            #expect(await owner.createGoToDeck(name: "Parent Addition", match: absence, presentation: filteredToken,
-                knownDecks: [filtered], layout: { .compact }).value == .filtered)
-            #expect(calls == 2 && owner.review == nil && owner.navigation.sheet == .goToDeck)
-            #expect(await owner.cancelGoToDeck(filteredToken).value)
-        }
-    }
-
-    @Test(arguments: [false, true])
-    func goToDeckCommittedResultRetriesRefreshOrNavigationWithoutWriter(refreshFails: Bool) async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService()
-            let snapshot = try await service.allDeckNames()
-            let raw = "Saved Query Deck"
-            let absence = try await service.matchDeckName(name: raw)
-            var mutations: [DeckMutation] = [], selections: [Int64] = []
-            owner.deckActions.createDeck = { name in
-                let result = try await service.addDeck(name: name)
-                mutations.append(result); return result
-            }
-            if refreshFails { owner.loadDeckTree = { throw BridgeError.internal("refresh diagnostic") } }
-            else {
-                owner.saveSelectedDeck = { id in selections.append(id); throw BridgeError.internal("selection diagnostic") }
-            }
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            #expect(await owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: snapshot.decks, layout: { .sidebar }).value == .saved)
-            let saved = try #require(mutations.first)
-            #expect(mutations.count == 1 && owner.navigation.sheet == .goToDeck && owner.review == nil)
-            owner.loadDeckTree = { try await service.treeWithCounts() }
-            owner.saveSelectedDeck = { id in selections.append(id); return try await service.selectDeck(id: id).generation }
-            let retry = owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: snapshot.decks, layout: { .compact })
-            #expect(await owner.createGoToDeck(name: raw, match: absence, presentation: token,
-                knownDecks: snapshot.decks, layout: { .compact }).value == .unavailable)
-            try #require(await retry.value == .opened)
-            #expect(mutations.count == 1 && selections.allSatisfy { $0 == saved.id })
-            #expect(selections.count == (refreshFails ? 1 : 2))
-            #expect(owner.navigation.homeDeckPage == DeckID(saved.id) && owner.review == nil && owner.navigation.sheet == nil)
-        }
-    }
-
-    @Test func goToDeckCompactPreparesOneRealSessionBeforeClosingItsSheet() async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService(), control = CoreCollectionService()
-            let previous = try await service.addDeck(name: "Before Switcher")
-            await owner.loadCounts()
-            try #require(await owner.openDeckPage(deckID: previous.id).value)
-            let snapshot = try await service.allDeckNames()
-            let entry = try #require(try await eligibleRegularDeck(in: snapshot, service: service), "Review fixture has no eligible regular deck")
-            let state = try await service.studyState(deckID: entry.id)
-            try #require(!state.empty && state.queueCounts.new + state.queueCounts.learning + state.queueCounts.review > 0)
-            let treeBefore = owner.decks, surface = ReviewCoordinatorTests.Surface()
-            var surfaces = 0
-            var preparingSession: UInt64?
-            owner.makeReviewSurface = { _ in surfaces += 1; return surface }
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            surface.onLoad = {
-                // Core has already started; publication must still await preparation.
-                let sessionID: UInt64 = try #require(try await control.resume().activeSession)
-                preparingSession = sessionID
-                #expect(owner.goToDeckBusy && owner.goToDeckPresentation == token)
-                #expect(owner.navigation.sheet == .goToDeck && owner.review == nil && owner.navigation.review == nil)
-                #expect(owner.navigation.selectedDeck == DeckID(previous.id))
-                #expect(await owner.activateGoToDeck(entry, generation: snapshot.generation,
-                    presentation: token, layout: .compact).value == .unavailable)
-            }
-            let activation = owner.activateGoToDeck(entry, generation: snapshot.generation,
-                presentation: token, layout: .compact)
-            #expect(owner.goToDeckBusy && owner.navigation.sheet == .goToDeck)
-            try #require(await activation.value == .opened)
-            let review = try #require(owner.review)
-            let session = try #require(review.sessionID)
-            #expect(surfaces == 1 && preparingSession == session)
-            #expect(try await control.resume().activeSession == session)
-            #expect(review.record.deckID == entry.id && review.phase == .question && review.item != nil)
-            #expect(owner.navigation.review != nil)
-            #expect(owner.navigation.sheet == nil && owner.goToDeckPresentation == nil && !owner.goToDeckBusy)
-            #expect(owner.decks == treeBefore)
-            await owner.finishReview()
-            #expect(review.phase == .ended && review.sessionID == nil)
-            #expect(owner.review == nil && owner.navigation.review == nil)
-            #expect(try await control.resume().activeSession == nil)
-            let selected = try await service.selectDeck(id: entry.id)
-            #expect(selected.changes.configKeys.isEmpty)
-        }
-    }
-
-    @Test func goToDeckSidebarResolvesActualHiddenDefaultWithoutOpeningOrExpandingItFirst() async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService()
-            let deletion = try await service.startDeleteDecks(ids: [1])
-            _ = try await deletion.value()
-            _ = try await service.addDeck(name: "Other Root")
-            await owner.loadCounts()
-            try #require(owner.deck(1) == nil)
-            try #require(owner.deckPage(1) == nil && owner.fullDeckName(1) == nil)
-            let snapshot = try await service.allDeckNames()
-            let entry = try #require(snapshot.decks.first { $0.id == 1 })
-            let state = try await service.studyState(deckID: entry.id)
-            try #require(state.empty && !entry.filtered)
-            let treeBefore = owner.decks
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            try #require(await owner.activateGoToDeck(entry, generation: snapshot.generation,
-                presentation: token, layout: .sidebar).value == .opened)
-            let detail = try #require(owner.deckPage(entry.id))
-            #expect(detail.id == state.deck && detail.name == entry.fullName && detail.counts == state.listCounts)
-            #expect(owner.fullDeckName(entry.id) == entry.fullName)
-            #expect(owner.navigation.homeDeckPage == DeckID(entry.id) && owner.navigation.selectedDeck == DeckID(entry.id))
-            #expect(owner.navigation.sheet == nil && owner.goToDeckPresentation == nil && !owner.goToDeckBusy)
-            #expect(owner.deck(1) == nil && owner.decks == treeBefore)
-            #expect(try await service.treeWithCounts().nodes == treeBefore)
-            #expect(owner.review == nil && owner.navigation.review == nil)
-            #expect(try await CoreCollectionService().resume().activeSession == nil)
-            let selected = try await service.selectDeck(id: entry.id)
-            #expect(selected.changes.configKeys.isEmpty)
-            // The fallback detail remains authoritative after the originating sheet closes.
-            #expect(owner.deckPage(entry.id) == detail)
-        }
-    }
-
-    @Test func goToDeckCompactRouteChangeDrainsRealPreparingSessionAndReleasesReservation() async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService(), control = CoreCollectionService()
-            let snapshot = try await service.allDeckNames()
-            let entry = try #require(try await eligibleRegularDeck(in: snapshot, service: service), "Review fixture has no eligible regular deck")
-            let state = try await service.studyState(deckID: entry.id)
-            try #require(!state.empty && state.queueCounts.new + state.queueCounts.learning + state.queueCounts.review > 0)
-            let surface = ReviewCoordinatorTests.Surface()
-            owner.makeReviewSurface = { _ in surface }
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            var abandonedSession: UInt64?
-            surface.onLoad = {
-                let sessionID: UInt64 = try #require(try await control.resume().activeSession)
-                abandonedSession = sessionID
-                #expect(owner.goToDeckBusy && owner.navigation.sheet == .goToDeck)
-                #expect(owner.review == nil && owner.navigation.review == nil)
-                // Invalidate at a deterministic checkpoint after actual core startup.
-                owner.navigation.present(.collectionExport)
-            }
-            #expect(await owner.activateGoToDeck(entry, generation: snapshot.generation,
-                presentation: token, layout: .compact).value == .failed)
-            try #require(abandonedSession != nil)
-            #expect(owner.review == nil && owner.navigation.review == nil && !owner.goToDeckBusy)
-            #expect(owner.navigation.sheet == .collectionExport && surface.calls.contains("close"))
-            #expect(try await control.resume().activeSession == nil)
-            // A fresh picker can start another actual session; no pending owner blocks it.
-            owner.navigation.dismissSheet()
-            try #require(owner.canPresentGoToDeck())
-            surface.onLoad = nil
-            owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
-            owner.presentGoToDeck()
-            let retryToken = try #require(owner.goToDeckPresentation)
-            #expect(retryToken != token)
-            try #require(await owner.activateGoToDeck(entry, generation: snapshot.generation,
-                presentation: retryToken, layout: .compact).value == .opened)
-            let retrySession = try #require(owner.review?.sessionID)
-            #expect(retrySession != abandonedSession)
-            #expect(try await control.resume().activeSession == retrySession)
-            await owner.finishReview()
-            #expect(owner.review == nil && owner.navigation.review == nil && !owner.goToDeckBusy)
-            #expect(try await control.resume().activeSession == nil)
-        }
-    }
-
     @Test(arguments: [false, true])
     func hiddenSelectedDefaultAdmitsRenameAndSubdeckWithFreshStoredPaths(subdeck: Bool) async throws {
         try await withHiddenDefaultOwner { owner in
@@ -640,14 +169,16 @@ extension ReviewCollectionStartupTests {
             #expect(model.canPresent(.rename(1)) && model.canPresent(.subdeck(1)))
             #expect(!model.canPresent(.rename(999)) && !model.canPresent(.subdeck(999)))
             model.present(subdeck ? .subdeck(1) : .rename(1))
-            #expect(model.name == (subdeck ? "Default::" : "Default"))
+            #expect(model.name == (subdeck ? "" : "Default") && model.parentID == (subdeck ? 1 : nil))
             #expect(owner.decks == treeBefore && owner.deck(1) == nil)
-            model.name = subdeck ? "Default::QZ81" : "QZ82::QZ83"
+            model.name = subdeck ? "QZ81" : "QZ82::QZ83"
+            let saved = model.composedName
+            #expect(saved == (subdeck ? "Default::QZ81" : "QZ82::QZ83"))
             model.submit(); await model.waitForCompletion()
             #expect(model.message == nil && !model.needsRefresh)
             let selectedID = try #require(owner.navigation.homeDeckPage?.rawValue)
             #expect(subdeck ? selectedID != 1 : selectedID == 1)
-            #expect(owner.fullDeckName(selectedID) == model.name)
+            #expect(owner.fullDeckName(selectedID) == saved)
             let node = try #require(owner.deck(selectedID))
             #expect(owner.deckPage(selectedID)?.name == node.name)
             #expect(owner.deckPage(selectedID)?.counts == node.counts)
@@ -660,8 +191,8 @@ extension ReviewCollectionStartupTests {
                 // Returning the same ID to its hidden name replaces the visible
                 // page detail; later drafts must use the new authoritative name.
                 model.present(.rename(1))
-                #expect(model.name == "QZ82::QZ83")
-                model.name = "Default"; model.submit(); await model.waitForCompletion()
+                #expect(model.name == "QZ83" && model.parent?.fullName == "QZ82")
+                model.parentID = nil; model.name = "Default"; model.submit(); await model.waitForCompletion()
                 #expect(model.message == nil && !model.needsRefresh)
                 #expect(owner.navigation.homeDeckPage == DeckID(1))
                 #expect(owner.deck(1) == nil && owner.deckPage(1)?.name == "Default")
@@ -669,7 +200,9 @@ extension ReviewCollectionStartupTests {
                 let refreshed = try await service.treeWithCounts()
                 #expect(owner.decks == refreshed.nodes)
                 model.cancel(); model.present(.subdeck(1))
-                #expect(model.name == "Default::" && model.canSubmit)
+                #expect(model.name.isEmpty && model.parentID == 1 && model.parent?.fullName == "Default")
+                model.name = "QZ84"
+                #expect(model.composedName == "Default::QZ84" && model.canSubmit)
                 model.cancel()
             }
         }
@@ -773,7 +306,7 @@ extension ReviewCollectionStartupTests {
                 return try await service.selectDeck(id: id).generation
             }
             model.present(subdeck ? .subdeck(parent.id) : .create)
-            model.name = subdeck ? "Selection Parent::Child" : "Selection Target"
+            model.name = subdeck ? "Child" : "Selection Target"
             model.submit(); await model.waitForCompletion()
             let committed = try #require(mutations.first)
             #expect(mutations.count == 1 && selections == [committed.id])
@@ -809,13 +342,16 @@ extension ReviewCollectionStartupTests {
             let parentID = try #require(owner.decks.first { $0.name == "Native Parent" }?.id)
             model.present(.rename(parentID)); model.name = "Native Renamed"
             model.submit(); await model.waitForCompletion()
-            #expect(owner.navigation.homeDeckPage?.rawValue == childID)
+            // N20.3: Rename shows the renamed deck's page.
+            #expect(owner.navigation.homeDeckPage?.rawValue == parentID)
             #expect(owner.fullDeckName(childID) == "Native Renamed::Child")
             model.cancel()
             model.present(.subdeck(parentID))
-            #expect(model.name == "Native Renamed::")
-            model.name += "Sibling"; model.submit(); await model.waitForCompletion(); model.cancel()
-            model.present(.rename(childID)); model.name = "Native Renamed::Sibling"
+            #expect(model.name.isEmpty && model.parentID == parentID)
+            model.name = "Sibling"; model.submit(); await model.waitForCompletion(); model.cancel()
+            model.present(.rename(childID))
+            #expect(model.name == "Child" && model.parentID == parentID && model.footer == .inside("Native Renamed"))
+            model.name = "Sibling"
             model.submit(); await model.waitForCompletion()
             #expect(model.finalName == "Native Renamed::Sibling+")
             #expect(owner.fullDeckName(childID) == model.finalName)
@@ -825,6 +361,69 @@ extension ReviewCollectionStartupTests {
             #expect(model.finalName == nil)
             #expect(model.message == DeckActionsModel.explanation(.deckRefused(.underDescendant)))
             #expect(model.name == "Native Renamed::Sibling+::Inside")
+        }
+    }
+
+    /// D19.7 with the core: a Parent Deck changed to None moves the subtree in
+    /// one Rename Deck step, and a trailing space writes nothing.
+    @Test func parentDeckNoneMovesTheSubtreeInOneStepAndATrailingSpaceWritesNothing() async throws {
+        try await withDeckNameOwner { owner in
+            let service = CoreDeckService(), model = owner.deckActions, undo = CoreUndoService()
+            let first = try await service.addDeck(name: "Languages::日本語::QZ61")
+            let second = try await service.addDeck(name: "Languages::日本語::QZ62")
+            await owner.loadCounts()
+            let languages = try #require(owner.decks.first { $0.name == "Languages" })
+            let japanese = try #require(languages.children.first { $0.name == "日本語" })
+            model.present(.rename(japanese.id))
+            #expect(model.name == "日本語" && model.parentID == languages.id && model.footer == .subdecksMove(2))
+            model.parentID = nil
+            #expect(model.composedName == "日本語" && model.canSubmit)
+            model.submit(); await model.waitForCompletion()
+            #expect(model.message == nil && owner.navigation.sheet == nil)
+            #expect(owner.fullDeckName(first.id) == "日本語::QZ61" && owner.fullDeckName(second.id) == "日本語::QZ62")
+            let step = try await undo.peekUndo(scope: .global)
+            #expect(CollectionUndoModel.stepName(step) == "Rename Deck")
+            _ = try await undo.startUndo(scope: .global).value()
+            await owner.loadCounts()
+            #expect(owner.fullDeckName(first.id) == "Languages::日本語::QZ61", "One step restores the whole subtree")
+            #expect(owner.fullDeckName(second.id) == "Languages::日本語::QZ62")
+
+            let plain = try await service.addDeck(name: "QZ63")
+            await owner.loadCounts()
+            model.present(.rename(plain.id))
+            model.name = "QZ63 "
+            #expect(model.canSubmit, "A difference the UI sees; D6 decides")
+            model.submit(); await model.waitForCompletion()
+            #expect(model.message == nil && owner.navigation.sheet == nil, "The form closes as after a rename")
+            #expect(owner.fullDeckName(plain.id) == "QZ63")
+            #expect(CollectionUndoModel.stepName(try await undo.peekUndo(scope: .global)) == "Add Deck",
+                "D6 step 3 wrote nothing and recorded no step")
+        }
+    }
+
+    /// N20.3: Rename shows the renamed deck's page, unless the person went
+    /// elsewhere while it ran; the committed rename stays either way.
+    @Test(arguments: [false, true])
+    func renameOpensTheRenamedDeckOnlyIfThePersonStayed(navigates: Bool) async throws {
+        try await withDeckNameOwner { owner in
+            let model = owner.deckActions, gate = DeckNameGate(), service = CoreDeckService()
+            let shown = try await service.addDeck(name: "QZ64").id
+            let renamed = try await service.addDeck(name: "QZ65").id
+            await owner.loadCounts()
+            try #require(await owner.openDeckPage(deckID: shown).value)
+            model.startRename = { id, name in
+                let job = try await CoreDeckService().startRenameDeck(id: id, name: name)
+                _ = try await job.value()
+                await gate.hold()
+                return job
+            }
+            model.present(.rename(renamed)); model.name = "QZ66"; model.submit()
+            await gate.entered()
+            if navigates { owner.navigation.openHome() }
+            gate.release(); await model.waitForCompletion()
+            #expect(owner.fullDeckName(renamed) == "QZ66")
+            #expect(owner.navigation.homeDeckPage == (navigates ? nil : DeckID(renamed)))
+            #expect(owner.navigation.sheet == nil && model.message == nil)
         }
     }
 
@@ -864,112 +463,6 @@ extension ReviewCollectionStartupTests {
             }
             #expect(owner.fullDeckName(id) == "Drain After")
         }
-    }
-
-    /// A scripted preparation over the real open collection, whose switch is
-    /// already on: the session start itself is the core's.
-    @MainActor private final class ScriptedPreparation {
-        var committed = false
-        var starts = 0
-        var failures = 0
-        var held: CheckedContinuation<Void, Never>?
-        var holds = false
-        func install(on owner: ReviewCollection) async {
-            owner.studyPreparation.environment = .init(
-                status: { [unowned self] in committed ? .ok : .needsEnable },
-                start: { [unowned self] in
-                    starts += 1
-                    return .init(cancel: { [unowned self] in held?.resume(); held = nil }, finish: { [unowned self] in
-                        if holds { await withCheckedContinuation { held = $0 } }
-                        if failures > 0 { failures -= 1; throw BridgeError.internal("synthetic") }
-                        committed = true
-                        return nil
-                    })
-                },
-                sessionOpen: { false }, syncFacts: { .none }, nowMilliseconds: { 0 })
-            await owner.studyPreparation.collectionOpened()
-        }
-        func release() { holds = false; held?.resume(); held = nil }
-    }
-
-    @Test func goToDeckAfterAFailedPreparationIsRefusedThenGoTriesAgainAndOpensStudy() async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService()
-            let snapshot = try await service.allDeckNames()
-            let entry = try #require(try await eligibleRegularDeck(in: snapshot, service: service))
-            owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
-            let script = ScriptedPreparation()
-            script.failures = 2
-            await script.install(on: owner)
-            await owner.studyPreparation.waitForJob()
-            try #require(owner.studyPreparation.phase == .failed && script.starts == 1)
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            // The first Go shows F5.3's sentence and starts nothing.
-            #expect(await owner.activateGoToDeck(entry, generation: snapshot.generation,
-                presentation: token, layout: .compact).value == .studyRefused)
-            #expect(script.starts == 1 && owner.review == nil && owner.navigation.sheet == .goToDeck)
-            // Go is the control that tries again: it runs the job. A second failure refuses again.
-            #expect(await owner.activateGoToDeck(entry, generation: snapshot.generation,
-                presentation: token, layout: .compact).value == .studyRefused)
-            #expect(script.starts == 2 && owner.review == nil && owner.navigation.sheet == .goToDeck)
-            #expect(await owner.activateGoToDeck(entry, generation: snapshot.generation,
-                presentation: token, layout: .compact).value == .opened)
-            #expect(script.starts == 3 && owner.studyPreparation.phase == .idle)
-            #expect(owner.review?.sessionID != nil && owner.navigation.sheet == nil)
-            await owner.finishReview()
-            // A refusal belongs to its own presentation: a new picker starts with a Study entry.
-            script.committed = false; script.failures = 1
-            await owner.studyPreparation.collectionOpened()
-            await owner.studyPreparation.waitForJob()
-            owner.presentGoToDeck()
-            let next = try #require(owner.goToDeckPresentation)
-            #expect(await owner.activateGoToDeck(entry, generation: snapshot.generation,
-                presentation: next, layout: .compact).value == .studyRefused)
-            #expect(script.starts == 4)
-            owner.navigation.dismissSheet()
-        }
-    }
-
-    @Test func goToDeckJoinsARunningPreparationAndOtherWorkStaysAllowed() async throws {
-        try await withDeckNameOwner { owner in
-            let service = CoreDeckService()
-            let snapshot = try await service.allDeckNames()
-            let entry = try #require(try await eligibleRegularDeck(in: snapshot, service: service))
-            owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
-            let before = [owner.canBeginAddAction, owner.exportAllowed, owner.entryAllowed, owner.manualAllowed,
-                owner.deckNamesAllowed(host: .main, route: nil)]
-            let script = ScriptedPreparation()
-            script.holds = true
-            await script.install(on: owner)
-            for _ in 0..<12 { await Task.yield() }
-            try #require(owner.enabling && script.starts == 1)
-            // Everything but study stays as usable as it was while the job runs (A1.2, F5.2).
-            #expect(before == [owner.canBeginAddAction, owner.exportAllowed, owner.entryAllowed, owner.manualAllowed,
-                owner.deckNamesAllowed(host: .main, route: nil)])
-            #expect(owner.exportAllowed && owner.deckNamesAllowed(host: .main, route: nil))
-            try #require(owner.canPresentGoToDeck())
-            owner.presentGoToDeck()
-            let token = try #require(owner.goToDeckPresentation)
-            let activation = owner.activateGoToDeck(entry, generation: snapshot.generation, presentation: token, layout: .compact)
-            for _ in 0..<12 { await Task.yield() }
-            // Go waits for the job: no second job, no refusal, no generic failure.
-            #expect(owner.goToDeckBusy && script.starts == 1 && owner.review == nil)
-            script.release()
-            #expect(await activation.value == .opened)
-            #expect(script.starts == 1 && owner.review?.sessionID != nil && owner.navigation.sheet == nil)
-            await owner.finishReview()
-        }
-    }
-
-    private func eligibleRegularDeck(in snapshot: DeckNameSnapshot, service: CoreDeckService) async throws -> DeckNameEntry? {
-        for entry in snapshot.decks where !entry.filtered {
-            let state = try await service.studyState(deckID: entry.id)
-            if !state.empty && state.queueCounts.new + state.queueCounts.learning + state.queueCounts.review > 0 {
-                return entry
-            }
-        }
-        return nil
     }
 
     private func withHiddenDefaultOwner(_ body: (ReviewCollection) async throws -> Void) async throws {

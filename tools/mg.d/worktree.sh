@@ -7,7 +7,7 @@
 # local-data/ are untracked, so no worktree has them. Each worktree gets the
 # commit-msg hook (hooks.sh) and a session record, committed as its branch's
 # first commit (session.sh). A worktree whose record or role marker cannot be
-# written is removed again.
+# written, or whose record the private-token scan refuses, is removed again.
 
 mg_job worktree host mg_worktree \
   "Role worktrees (KTD1): tools/mg worktree new --role <role> <name> [--base <ref>] [--branch <branch>] [--path <dir>]"
@@ -63,8 +63,8 @@ mg_worktree() {
     mg_status error
     return 0
   fi
-  if ! printf '%s' "$name" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; then
-    mg_failure bad-name "worktree name '$name' must match [A-Za-z0-9][A-Za-z0-9._-]*"
+  if ! mg_plain_name "$name" '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'; then
+    mg_failure bad-name "worktree name '$name' must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}"
     mg_status error
     return 0
   fi

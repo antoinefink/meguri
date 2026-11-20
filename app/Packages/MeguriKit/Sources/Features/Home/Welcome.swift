@@ -175,7 +175,7 @@ struct HomeWelcome: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private static let rowsSpace = "home.welcome.rows"
+    private nonisolated static let rowsSpace = "home.welcome.rows"
     private var hasNotices: Bool { error != nil || (previousAnswerCount ?? 0) > 0 }
 
     private var firstChoice: WelcomeChoice {

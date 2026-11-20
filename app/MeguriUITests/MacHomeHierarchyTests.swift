@@ -61,7 +61,7 @@ final class MacHomeHierarchyTests: XCTestCase {
                 : "Stage the generated owned-sync-review-1 fixture through tools/mg")
         XCTAssertEqual(homeScreens.count, 1)
         // N14.1: the sidebar is the Mac's only deck outline.
-        _ = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
+        _ = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review › Cards")
         XCTAssertEqual(app.sheets.count, 0, "Nothing asks before Home (N18.1)")
 
         func waitFor(_ predicate: @escaping () -> Bool, _ message: String) {
@@ -282,7 +282,7 @@ final class MacHomeHierarchyTests: XCTestCase {
             let offSequence = try XCTUnwrap(successSequence(), "Require the exact settled OFF success sequence before review")
             settings.typeKey("w", modifierFlags: .command)
             XCTAssertTrue(settings.waitForNonExistence(timeout: 10), "Close the actual Settings window")
-            let deck = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
+            let deck = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review › Cards")
             actionable(deck)
             try click(deck, app: app, bundle: bundle)
             let study = unique(main, "home.deck.study")
@@ -369,7 +369,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         // N14.1: the sidebar is the Mac's only deck outline; with no deck selected the
         // The detail column shows the Today page and no second deck list.
         let sidebarParent = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review")
-        let sidebarChild = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
+        let sidebarChild = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review › Cards")
         let parentID = String(sidebarParent.identifier.dropFirst("home.sidebar.deck.".count))
         let childID = String(sidebarChild.identifier.dropFirst("home.sidebar.deck.".count))
         assertTodayRoot(app, readyDeckID: childID)
@@ -396,9 +396,9 @@ final class MacHomeHierarchyTests: XCTestCase {
         try openChildMenu(sidebarChild, deckID: childID, app: app, bundle: bundle)
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-        XCTAssertTrue(menuItem(app, action: "overview", deckID: childID).waitForNonExistence(timeout: 10))
-        try openChildMenu(sidebarChild, deckID: childID, app: app, bundle: bundle)
-        try click(menuItem(app, action: "overview", deckID: childID), app: app, bundle: bundle)
+        XCTAssertTrue(menuItem(app, action: "study", deckID: childID).waitForNonExistence(timeout: 10))
+        // N20.2: the menu has no Overview; the row itself opens the child's page.
+        try click(sidebarChild, app: app, bundle: bundle)
         assertPage(app, deckID: childID)
         try showDecksRoot(app, bundle: bundle)
         assertTodayRoot(app, readyDeckID: childID)
@@ -428,7 +428,7 @@ final class MacHomeHierarchyTests: XCTestCase {
     func testSavedStudyCollapseSurvivesRestartWithoutReseeding() throws {
         let (app, bundle) = try launchFixture()
         let parent = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review")
-        let child = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
+        let child = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review › Cards")
         let parentID = String(parent.identifier.dropFirst("home.sidebar.deck.".count))
         let childID = String(child.identifier.dropFirst("home.sidebar.deck.".count))
         try assertExpandedHierarchy(app, parentID: parentID, childID: childID)
@@ -571,7 +571,8 @@ final class MacHomeHierarchyTests: XCTestCase {
     private func openChildMenu(_ row: XCUIElement, deckID: String, app: XCUIApplication, bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         row.rightClick()
-        let actions = [(action: "study", title: "Study"), (action: "addNote", title: "Add Note"), (action: "overview", title: "Overview"),
+        // N20.2: Study and Add Note, then Rename… and New Subdeck…; no Overview.
+        let actions = [(action: "study", title: "Study"), (action: "addNote", title: "Add Note"),
             (action: "rename", title: "Rename…"), (action: "subdeck", title: "New Subdeck…")]
         for (action, title) in actions {
             let matches = app.menuItems.matching(identifier: "home.deckMenu.\(action).\(deckID)")
@@ -595,7 +596,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         // AppKit's staticText parent labels and numeric sidebar badge values.
         let expectedRows = [
             (id: "home.sidebar.deck.1884308400001", type: "staticText", label: "Local Review", value: "4"),
-            (id: "home.sidebar.deck.1884308400002", type: "button", label: "Local Review::Cards", value: "4")
+            (id: "home.sidebar.deck.1884308400002", type: "button", label: "Local Review › Cards", value: "4")
         ]
         for expected in expectedRows {
             let rows = tree.elements(expected.id)

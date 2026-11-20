@@ -2,61 +2,59 @@ import Testing
 
 import Home
 
-/// Product Contract R26/R27; predicate use preserves the snapshot's values and order.
+/// `decks/deck-list` H6.2: the deck search's filter over full human names.
 @Suite struct GoToDeckFilterTests {
-    @Test func everyTermMayMatchADifferentComponent() {
-        #expect(GoToDeckFilter(query: "ja 1").matches(fullName: "Japanese::Lesson1"))
-        #expect(GoToDeckFilter(query: "JA les").matches(fullName: "Japanese::Lesson1"))
-        #expect(GoToDeckFilter(query: "1 ja").matches(fullName: "Japanese::Lesson1"))
-        #expect(GoToDeckFilter(query: "pan ese").matches(fullName: "Japanese::Lesson1"))
+    @Test(arguments: [
+        ("Japanese::Lesson1", "ja 1", true),
+        ("Japanese::Lesson1", "JA les", true),
+        ("Japanese::Lesson1", "ja 2", false),
+        ("Japanese::Lesson1", "se::le", true),
+        ("Japanese::Lesson1", "ja  1", true),
+        ("Straße", "strasse", false),
+        ("Café", "cafe", false),
+        ("日本語::N5", "n5 日本", true),
+    ])
+    func theSpecTable(name: String, query: String, listed: Bool) {
+        #expect(GoToDeckFilter(query: query).matches(fullName: name) == listed)
     }
 
-    @Test func anyUnmatchedTermRejectsTheDeck() {
-        #expect(!GoToDeckFilter(query: "ja 2").matches(fullName: "Japanese::Lesson1"))
-        #expect(!GoToDeckFilter(query: "missing").matches(fullName: "Japanese::Lesson1"))
-        #expect(!GoToDeckFilter(query: "ja").matches(fullName: ""))
+    @Test func termsSplitOnlyAtSpaces() {
+        #expect(GoToDeckFilter(query: "  ja   1  ").matches(fullName: "Japanese::Lesson1"))
+        // Any other whitespace is part of its term.
+        #expect(!GoToDeckFilter(query: "ja\tles").matches(fullName: "Japanese::Lesson1"))
+        #expect(!GoToDeckFilter(query: "ja\u{3000}1").matches(fullName: "Japanese::Lesson1"))
     }
 
-    @Test func termsSplitOnWhitespace() {
-        #expect(GoToDeckFilter(query: "  JA\t\nles\r\n 1  ").matches(fullName: "Japanese::Lesson1"))
-        #expect(GoToDeckFilter(query: "ja　1").matches(fullName: "Japanese::Lesson1"))
-    }
-
-    @Test(arguments: ["", "   ", "\t\n\r", "　"])
-    func emptyOrWhitespaceQueryMatchesAll(query: String) {
+    @Test(arguments: ["", " ", "   "])
+    func anEmptyQueryListsEveryEntry(query: String) {
         let filter = GoToDeckFilter(query: query)
         #expect(filter.matches(fullName: "Japanese::Lesson1"))
-        #expect(filter.matches(fullName: "日本語::初級"))
         #expect(filter.matches(fullName: ""))
     }
 
-    @Test func unicodeUsesCaseInsensitiveSubstringComparison() {
-        #expect(GoToDeckFilter(query: "ÛMÉ").matches(fullName: "Žûmér Žûmér::日本語"))
-        #expect(GoToDeckFilter(query: "初 猫").matches(fullName: "日本語::初級::猫"))
-        #expect(!GoToDeckFilter(query: "犬").matches(fullName: "日本語::初級::猫"))
-        #expect(!GoToDeckFilter(query: "cafe").matches(fullName: "Café"))
+    @Test func aTermMaySpanTheSeparator() {
+        #expect(GoToDeckFilter(query: "ese::Les").matches(fullName: "Japanese::Lesson1"))
+        #expect(GoToDeckFilter(query: "::").matches(fullName: "Japanese::Lesson1"))
+        #expect(!GoToDeckFilter(query: "eseLes").matches(fullName: "Japanese::Lesson1"))
+        #expect(!GoToDeckFilter(query: "::").matches(fullName: "Japanese"))
     }
 
-    @Test func aTermCannotCrossAComponentBoundary() {
-        #expect(!GoToDeckFilter(query: "eseLes").matches(fullName: "Japanese::Lesson1"))
-        #expect(!GoToDeckFilter(query: "ese::Les").matches(fullName: "Japanese::Lesson1"))
-        #expect(!GoToDeckFilter(query: "::").matches(fullName: "Japanese::Lesson1"))
-        #expect(GoToDeckFilter(query: "ese Les").matches(fullName: "Japanese::Lesson1"))
+    @Test func lowercasingIsTheFullMappingNotFolding() {
+        #expect(GoToDeckFilter(query: "ÛMÉ").matches(fullName: "Žûmér::日本語"))
+        #expect(!GoToDeckFilter(query: "ss").matches(fullName: "Straße"))
+        #expect(GoToDeckFilter(query: "ß").matches(fullName: "STRAßE"))
+        // U+0130 lowers to i U+0307.
+        #expect(GoToDeckFilter(query: "i\u{0307}stanbul").matches(fullName: "\u{0130}stanbul"))
+        // Final_Sigma: a capital sigma at the end of a word lowers to ς.
+        #expect(GoToDeckFilter(query: "οδος").matches(fullName: "ΟΔΟΣ"))
+    }
+
+    @Test func theQueryIsNFC() {
+        #expect(GoToDeckFilter(query: "Cafe\u{0301}").matches(fullName: "Caf\u{00E9}"))
     }
 
     @Test func punctuationIsLiteral() {
         #expect(GoToDeckFilter(query: "a.b").matches(fullName: "Study::a.b"))
         #expect(!GoToDeckFilter(query: "a.b").matches(fullName: "Study::axb"))
-    }
-
-    @Test func filteringASnapshotPreservesNamesDuplicatesAndOrder() {
-        let names = ["  日本語::Été  ", "Other", "日本語::été", "  日本語::Été  "]
-        let query = "語 ÉTÉ"
-        let filter = GoToDeckFilter(query: query)
-        let matches = names.filter { filter.matches(fullName: $0) }
-
-        #expect(matches == ["  日本語::Été  ", "日本語::été", "  日本語::Été  "])
-        #expect(names == ["  日本語::Été  ", "Other", "日本語::été", "  日本語::Été  "])
-        #expect(query == "語 ÉTÉ")
     }
 }

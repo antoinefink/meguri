@@ -2,77 +2,68 @@ import AppModel
 import CoreBridge
 import SwiftUI
 
-/// Only delivered destinations, in R47 order. Both row affordances use this builder.
+/// The deck's long-press and right-click menu (N20): Study and Add Note, then
+/// Rename… and New Subdeck…. A filtered deck takes neither notes nor
+/// subdecks and is not studied yet, so it offers Rename… only.
 struct DeckMenu: View {
     let collection: ReviewCollection
     let deck: CountedDeckNode
 
     var body: some View {
+        // N20.2: each item with its system symbol, on the Mac too.
+        items.labelStyle(.titleAndIcon)
+    }
+
+    @ViewBuilder private var items: some View {
         if !deck.filtered {
-            Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
-                Text("Study", bundle: .module)
+            Group {
+                Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
+                    Label { Text("Study", bundle: .module) } icon: { Image(systemName: "play") }
+                }
+                #if os(macOS)
+                // The Deck menu's key, shown beside the item (N4).
+                .keyboardShortcut("r", modifiers: .command)
+                #endif
+                // N14.3: as the deck page, no Study while nothing waits.
+                .disabled(!collection.canStudy || !collection.offersStudy(deckID: deck.id) || collection.navigation.sheet != nil || collection.addNotePresentation.opening)
+                .accessibilityIdentifier("home.deckMenu.study.\(deck.id)")
+                Button { collection.navigation.present(.add(deck: DeckID(deck.id))) } label: {
+                    Label { Text("Add Note", bundle: .module) } icon: { Image(systemName: "square.and.pencil") }
+                }
+                .disabled(!collection.addNotePresentation.canPresent(presetDeck: deck.id))
+                .accessibilityIdentifier("home.deckMenu.addNote.\(deck.id)")
             }
-            // N14.3: as the deck page, no Study while nothing waits.
-            .disabled(!collection.canStudy || !collection.offersStudy(deckID: deck.id) || collection.navigation.sheet != nil || collection.addNotePresentation.opening)
-            .accessibilityIdentifier("home.deckMenu.study.\(deck.id)")
-            Button { collection.navigation.present(.add(deck: DeckID(deck.id))) } label: {
-                Text("Add Note", bundle: .module)
-            }
-            .disabled(!collection.addNotePresentation.canPresent(presetDeck: deck.id))
-            .accessibilityIdentifier("home.deckMenu.addNote.\(deck.id)")
-            Button { collection.openDeckPage(deckID: deck.id) } label: { Text("Overview", bundle: .module) }
-                .disabled(collection.review != nil || collection.navigation.sheet != nil)
-                .accessibilityIdentifier("home.deckMenu.overview.\(deck.id)")
+            // A separator, not a Section: a section's header item took the
+            // items' identifiers away in the Mac's context menu.
+            Divider()
         }
-        Button { collection.deckActions.present(.rename(deck.id)) } label: { Text("Rename…", bundle: .module) }
+        Group {
+            Button { collection.deckActions.present(.rename(deck.id)) } label: {
+                Label { Text("Rename…", bundle: .module) } icon: { Image(systemName: "pencil") }
+            }
+            #if os(macOS)
             .keyboardShortcut("r", modifiers: [.command, .shift])
+            #endif
             .disabled(!collection.deckActions.canPresent(.rename(deck.id)))
             .accessibilityIdentifier("home.deckMenu.rename.\(deck.id)")
-        if !deck.filtered {
-            Button { collection.deckActions.present(.subdeck(deck.id)) } label: { Text("New Subdeck…", bundle: .module) }
+            if !deck.filtered {
+                Button { collection.deckActions.present(.subdeck(deck.id)) } label: {
+                    Label { Text("New Subdeck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
+                }
                 .disabled(!collection.deckActions.canPresent(.subdeck(deck.id)))
                 .accessibilityIdentifier("home.deckMenu.subdeck.\(deck.id)")
-        }
-    }
-}
-
-private struct DeckMenuAffordances: ViewModifier {
-    let collection: ReviewCollection?
-    let deck: CountedDeckNode
-    #if os(macOS)
-    @State private var hovering = false
-    @FocusState private var menuFocused: Bool
-    #endif
-
-    func body(content: Content) -> some View {
-        if let collection {
-            #if os(macOS)
-            HStack {
-                content
-                Menu { DeckMenu(collection: collection, deck: deck) } label: {
-                    Label { Text("Deck Actions", bundle: .module) } icon: { Image(systemName: "ellipsis") }
-                        .labelStyle(.iconOnly)
-                }
-                .focused($menuFocused)
-                .accessibilityIdentifier("home.deckMenu.open.\(deck.id)")
-                .menuStyle(.button)
-                .menuIndicator(.hidden)
-                .buttonStyle(.borderless)
-                .fixedSize()
-                .opacity(hovering || menuFocused ? 1 : 0)
-                .help(Text("Deck Actions", bundle: .module))
             }
-            .contextMenu { DeckMenu(collection: collection, deck: deck) }
-            .onHover { hovering = $0 }
-            #else
-            content.contextMenu { DeckMenu(collection: collection, deck: deck) }
-            #endif
-        } else { content }
+        }
     }
 }
 
 extension View {
-    func deckMenu(collection: ReviewCollection?, deck: CountedDeckNode) -> some View {
-        modifier(DeckMenuAffordances(collection: collection, deck: deck))
+    /// The row's deck menu: a long press on touch, a right-click on the Mac.
+    @ViewBuilder func deckMenu(collection: ReviewCollection?, deck: CountedDeckNode) -> some View {
+        if let collection {
+            contextMenu { DeckMenu(collection: collection, deck: deck) }
+        } else {
+            self
+        }
     }
 }
