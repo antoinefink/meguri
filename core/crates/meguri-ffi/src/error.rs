@@ -49,6 +49,11 @@ pub enum CoreError {
     DeckRefused {
         refusal: DeckRefusal,
     },
+    /// A note type structure op refused (`notetypes/structure-changes`
+    /// S1.2, S12, `restore-to-default` D7): nothing was written.
+    NotetypeStructureRefused {
+        refusal: crate::notetype_structure::NotetypeStructureRefusal,
+    },
     NoteNotFound {
         id: i64,
     },
@@ -122,6 +127,7 @@ impl fmt::Display for CoreError {
             CoreError::UndoUnavailable { .. } => write!(f, "{self:?}"),
             CoreError::NotetypeRefused { .. } => write!(f, "{self:?}"),
             CoreError::DeckRefused { .. } => write!(f, "{self:?}"),
+            CoreError::NotetypeStructureRefused { .. } => write!(f, "{self:?}"),
             CoreError::NoteNotFound { .. } => write!(f, "{self:?}"),
             CoreError::NotFound { .. } => write!(f, "{self:?}"),
             CoreError::InsufficientSpace { .. } => write!(f, "{self:?}"),
@@ -182,6 +188,9 @@ impl From<EngineError> for CoreError {
                 refusal: refusal.into(),
             },
             EngineError::DeckRefused(refusal) => CoreError::DeckRefused {
+                refusal: refusal.into(),
+            },
+            EngineError::NotetypeStructure(refusal) => CoreError::NotetypeStructureRefused {
                 refusal: refusal.into(),
             },
             EngineError::NoteNotFound { id } => CoreError::NoteNotFound { id: id.0 },
@@ -245,6 +254,7 @@ impl From<CoreError> for EngineError {
             CoreError::UndoUnavailable { reason } => EngineError::UndoUnavailable { reason: reason.into() },
             CoreError::NotetypeRefused { refusal } => EngineError::NotetypeRefused(refusal.into()),
             CoreError::DeckRefused { refusal } => EngineError::DeckRefused(refusal.into()),
+            CoreError::NotetypeStructureRefused { refusal } => EngineError::NotetypeStructure(refusal.into()),
             CoreError::NoteNotFound { id } => EngineError::NoteNotFound {
                 id: meguri_model::ids::NoteId(id),
             },

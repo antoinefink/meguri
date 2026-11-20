@@ -100,11 +100,20 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "undo",
             "unsuspend",
             "update_notetype",
+            "update_notetype.add_field",
+            "update_notetype.add_template",
             "update_notetype.css",
             "update_notetype.field_options",
+            "update_notetype.move_field",
+            "update_notetype.move_template",
+            "update_notetype.remove_field",
+            "update_notetype.remove_template",
             "update_notetype.rename",
+            "update_notetype.rename_field",
             "update_notetype.rename_template",
+            "update_notetype.sort_field",
             "update_notetype.template",
+            "update_notetype.template_text",
         ])
     );
     assert!(
@@ -165,6 +174,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "media_trash",
             "next_states",
             "notetype_structure",
+            "notetype_templates",
             "package_listing",
             "queue",
             "render",

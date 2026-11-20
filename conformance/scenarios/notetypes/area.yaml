@@ -9,11 +9,16 @@
 # The other note type scenarios need what
 # specs/notetypes/records.md N12 and schema-changes.md G8 list:
 # records/stamps setup.decks (U28); records/clone legacy_update (U36);
-# records/preserve-on-edit legacy_update, blob_decode and legacy_json (U36);
-# gate/* U34's update_notetype edits; gate/after-sync also the card
-# observation. The unit that adds the last of them makes each active here.
+# records/preserve-on-edit legacy_update, blob_decode and legacy_json (U36).
+# The unit that adds the last of them makes each active here. U34's
+# update_notetype edits and notetype_templates made gate/* and the
+# structure/* scenarios of its draft apply op active
+# (specs/notetypes/structure-changes.md S16); remove_notetype and
+# restore_notetype come with its removal and Restore to Default.
 area: notetypes
 active:
+  - "gate/after-sync"
+  - "gate/structure"
   - "records/io-on-demand"
   - "records/names"
   - "records/stock-handoff"
@@ -21,3 +26,23 @@ active:
   - "records/stock-render-handoff"
   - "records/stock-structure"
   - "records/validation"
+  - "structure/add-template"
+  - "structure/add-template-placement"
+  - "structure/cloze-fields"
+  - "structure/combined-draft"
+  - "structure/edit-front"
+  - "structure/field-ord-changes"
+  - "structure/field-sequence"
+  - "structure/first-field-duplicates"
+  - "structure/remove-crucial-fields"
+  - "structure/remove-field"
+  - "structure/remove-last"
+  - "structure/remove-template"
+  - "structure/rename-field"
+  - "structure/rename-then-remove"
+  - "structure/reorder-fields"
+  - "structure/reqs-after-rename"
+  - "structure/rewrite-format"
+  - "structure/template-draft-mix"
+  - "structure/template-swap-replace"
+  - "structure/undo-add-template"
