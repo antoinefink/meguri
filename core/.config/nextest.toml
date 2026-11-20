@@ -6,27 +6,27 @@ experimental = ["wrapper-scripts"]
 # Local-server rig tests share an account and read or change its metadata.
 # Run each alone across both packages when explicitly selected.
 [[profile.default.overrides]]
-filter = '(package(meguri-sync) or package(meguri-host)) and test(/^rig_/)'
+filter = '(package(meguri-sync) or package(meguri-host)) and (test(/^rig_/) or ((binary(=sync_it) or binary(=host_it)) and test(/^[a-z0-9_]+::rig_/)))'
 threads-required = "num-test-threads"
 
 [[profile.default.overrides]]
-filter = 'package(meguri-storage) and test(=media_unchanged_folder_at_30000_files_does_not_enumerate_or_hash)'
+filter = 'package(meguri-storage) and test(=media_scan::media_unchanged_folder_at_30000_files_does_not_enumerate_or_hash)'
 threads-required = "num-test-threads"
 
 # Tests with a wall-clock bound run alone: in a full run, other tests
 # compete for the same cores and can push a near-linear case past its bound.
 # Each bound stays as the test sets it.
 [[profile.default.overrides]]
-filter = 'package(meguri-engine) and test(=bulk_deck_edits_at_2000_decks_are_bounded)'
+filter = 'package(meguri-engine) and test(=decks::bulk_deck_edits_at_2000_decks_are_bounded)'
 threads-required = "num-test-threads"
 
 [[profile.default.overrides]]
-filter = 'package(meguri-template) and test(=five_megabyte_templates_parse_and_render_in_bounded_time)'
+filter = 'package(meguri-template) and test(=template_unit::five_megabyte_templates_parse_and_render_in_bounded_time)'
 threads-required = "num-test-threads"
 
 # The activity heatmap's million-row log bounds each cold query (stats/activity-heatmap AH5).
 [[profile.default.overrides]]
-filter = 'package(meguri-storage) and binary(activity) and test(=a_million_reviews_count_correctly_and_quickly)'
+filter = 'package(meguri-storage) and binary(storage_it) and test(=activity::a_million_reviews_count_correctly_and_quickly)'
 threads-required = "num-test-threads"
 
 # Tests named `*_at_150k` hold wall-clock budgets (p95 read latencies) on the
@@ -39,7 +39,7 @@ threads-required = "num-test-threads"
 # The timing protocol's interval test (U18) bounds a 5 ms timed part
 # against 400 ms of setup and check.
 [[profile.default.overrides]]
-filter = 'package(meguri-testkit) and test(=timing_measures_only_the_timed_part)'
+filter = 'package(meguri-testkit) and test(=timing::timing_measures_only_the_timed_part)'
 threads-required = "num-test-threads"
 
 # meguri-sync's transport tests that time stalls (`*times_out`, transport.md
@@ -47,7 +47,7 @@ threads-required = "num-test-threads"
 # trips it), cancellation (`a_cancelled_token_*`, T9: within 200 ms) and the
 # refusal of a decompression bomb (R1852: within 2 s) against the wall clock.
 [[profile.default.overrides]]
-filter = 'package(meguri-sync) and binary(transport) and (test(/times_out$/) or test(/^a_cancelled_token_/) or test(=bytes_past_the_declared_size_are_refused_and_never_handed_out))'
+filter = 'package(meguri-sync) and binary(sync_it) and (test(/^transport::.*times_out$/) or test(/^transport::a_cancelled_token_/) or test(=transport::bytes_past_the_declared_size_are_refused_and_never_handed_out))'
 threads-required = "num-test-threads"
 
 # U32: WAL full-sync coverage and bounded suspension must measure an idle
@@ -70,32 +70,32 @@ run-wrapper = 'settled-disk'
 # This integration test deliberately exhausts the container's 64 MiB /dev
 # tmpfs. Keep it isolated from every other test until its filler is dropped.
 [[profile.default.overrides]]
-filter = 'package(meguri-storage) and test(=real_disk_full_on_size_limited_tmpfs_leaves_original_intact)'
+filter = 'package(meguri-storage) and test(=atomic_file::real_disk_full_on_size_limited_tmpfs_leaves_original_intact)'
 threads-required = "num-test-threads"
 
 # U32 review regressions: lane contention and the DNS pool's idle accounting.
 [[profile.default.overrides]]
-filter = 'test(=control_lane_contention_counts_toward_suspend_deadline) or test(=suspend_during_a_slow_open_returns_within_its_budget) or test(=idle_dns_pool_threads_do_not_exhaust_the_suspend_budget) or test(=a_cancelled_lookup_stays_busy_until_its_blocking_closure_ends)'
+filter = 'test(=control_lane_contention_counts_toward_suspend_deadline) or test(=suspend_during_a_slow_open_returns_within_its_budget) or test(=transport::idle_dns_pool_threads_do_not_exhaust_the_suspend_budget) or test(=a_cancelled_lookup_stays_busy_until_its_blocking_closure_ends)'
 threads-required = "num-test-threads"
 
 # U43's UI undo and journal coverage bounds need an idle test runner.
 [[profile.default.overrides]]
-filter = 'package(meguri-engine) and (binary(session_durability) or binary(session_lifecycle) or test(=c15_committed_undo_returns_restored_head_during_real_200ms_sync_incoming) or test(=c12_every_acceptance_is_observed_fullsynced_while_a_later_writer_is_held))'
+filter = 'package(meguri-engine) and (binary(session_durability) or (binary(engine_it) and test(/^session_lifecycle::/)) or test(=c15_committed_undo_returns_restored_head_during_real_200ms_sync_incoming) or test(=c12_every_acceptance_is_observed_fullsynced_while_a_later_writer_is_held))'
 threads-required = "num-test-threads"
 
 # C8 runs four internal collection-owning threads across its complete session set.
 # Reserve the whole test runner because its real journal has a wall-clock durability bound.
 [[profile.default.overrides]]
-filter = 'package(meguri-engine) and test(=c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions)'
+filter = 'package(meguri-engine) and test(=session_predict::c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions)'
 threads-required = "num-test-threads"
 
 # U37 cancellation gates and pending-review response budgets need an idle runner.
 [[profile.default.overrides]]
-filter = 'package(meguri-engine) and (binary(controlled_services) or binary(session_controlled))'
+filter = 'package(meguri-engine) and binary(engine_it) and (test(/^controlled_services::/) or test(/^session_controlled::/))'
 threads-required = "num-test-threads"
 
 [[profile.default.overrides]]
-filter = '(package(meguri-host) and test(=close_refuses_restore_admission_and_retains_the_host_for_retry)) or (package(meguri-ffi) and binary(collection_ffi))'
+filter = '(package(meguri-host) and test(=lifecycle::close_refuses_restore_admission_and_retains_the_host_for_retry)) or (package(meguri-ffi) and binary(collection_ffi))'
 threads-required = "num-test-threads"
 
 [[profile.default.overrides]]
@@ -111,13 +111,13 @@ threads-required = "num-test-threads"
 
 # RF3's measured process footprint needs the runner to itself.
 [[profile.default.overrides]]
-filter = 'package(meguri-ffi) and binary(collection_export_memory)'
+filter = 'package(meguri-ffi) and binary(ffi_it) and test(/^collection_export_memory::/)'
 threads-required = "num-test-threads"
 
 # U107: real server pauses, one-second answer durability, cancellation and
 # snapshot races must not compete with other test processes.
 [[profile.default.overrides]]
-filter = 'package(meguri-sync) and binary(normal_sync)'
+filter = 'package(meguri-sync) and binary(sync_it) and test(/^normal_sync::/)'
 threads-required = "num-test-threads"
 
 # This small-fixture replay regression checks the same one-second journal handoff.
@@ -127,7 +127,7 @@ threads-required = "num-test-threads"
 
 # U127 Quit admission waits retain the existing end-to-end two-second budget.
 [[profile.default.overrides]]
-filter = 'test(=periodic::quit_expires_while_periodic_owner_is_still_blocked) or test(=quit_expires_before_the_forced_provider_owner_releases_its_copy)'
+filter = 'test(=maintenance_scheduler::periodic::quit_expires_while_periodic_owner_is_still_blocked) or test(=backup_service::quit_expires_before_the_forced_provider_owner_releases_its_copy)'
 threads-required = "num-test-threads"
 
 [[profile.default.overrides]]
@@ -190,12 +190,12 @@ filter = 'package(meguri-ffi) and binary(cloud_original_role) and test(/^bound_o
 threads-required = "num-test-threads"
 
 [[profile.default.overrides]]
-filter = 'package(meguri-ffi) and binary(cloud_original_observation)'
+filter = 'package(meguri-ffi) and binary(ffi_it) and test(/^cloud_original_observation::/)'
 threads-required = "num-test-threads"
 
 # Two real consumers rendezvous at terminal Runtime time with ten-second bounds.
 [[profile.default.overrides]]
-filter = 'package(meguri-host) and binary(cloud_media_rootless_ack) and (test(=identical_feed::two_real_empty_feed_consumers_coalesce_in_first_started_order) or test(=identical_feed::two_real_empty_feed_consumers_coalesce_in_second_started_order))'
+filter = 'package(meguri-host) and binary(host_it) and (test(=cloud_media_rootless_ack::identical_feed::two_real_empty_feed_consumers_coalesce_in_first_started_order) or test(=cloud_media_rootless_ack::identical_feed::two_real_empty_feed_consumers_coalesce_in_second_started_order))'
 threads-required = "num-test-threads"
 
 # Reference drains retain a one-second lane bound; provider interleaving uses
