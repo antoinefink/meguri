@@ -758,6 +758,70 @@ $TRAILERS"
   [ "$(field '.failures[0].id')" = "no-retries:tools/run-tests.sh:1" ]
 }
 
+@test "the test-targets check fails an integration test file that no test target compiles" {
+  local crate=core/crates/demo
+  commit_in "$SB" "$crate/Cargo.toml" '[package]
+name = "demo"
+autotests = false
+
+[[test]]
+name = "demo_it"
+path = "tests/main.rs"
+
+# A file of its own; its path is inferred from the name.
+[[test]]
+name = "own"'
+  commit_in "$SB" "$crate/tests/main.rs" '//! The merged binary.
+#![allow(clippy::duplicate_mod)]
+
+#[cfg(feature = "hooks")]
+#[path = "a.rs"]
+pub mod a;'
+  commit_in "$SB" "$crate/tests/a.rs" $'mod common;\n#[test]\nfn t() {}'
+  commit_in "$SB" "$crate/tests/common/mod.rs" 'pub fn helper() {}'
+  commit_in "$SB" "$crate/tests/own.rs" $'mod common;\nfn main() { std::env::current_exe().unwrap(); }'
+  mg static-checks --check test-targets
+  [ "$status" -eq 0 ]
+
+  # A new file nobody lists would never build, so its tests would never run.
+  commit_in "$SB" "$crate/tests/b.rs" $'#[test]\nfn t() {}'
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/b.rs:0" ]
+  [[ "$(field '.failures[0].message')" == *'add `#[path = "b.rs"] pub mod b;` to tests/main.rs'* ]]
+  # The committed tree is checked the same way (the merge's --rev run).
+  mg static-checks --check test-targets --rev HEAD
+  [ "$status" -eq 1 ]
+  validate "$result"
+  printf '#[path = "b.rs"]\npub mod b;\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 0 ]
+
+  # A listed file that re-runs its binary by test name needs its own target;
+  # so does one whose module directory holds an allocator.
+  printf 'fn child() { std::env::current_exe().unwrap(); }\n' >>"$SB/$crate/tests/b.rs"
+  mkdir -p "$SB/$crate/tests/a"
+  printf '\n#[global_allocator]\nstatic A: std::alloc::System = std::alloc::System;\n' >"$SB/$crate/tests/a/alloc.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | sort | join(" ")')" = "test-targets:$crate/tests/a/alloc.rs:2 test-targets:$crate/tests/b.rs:3" ]
+  [[ "$(field '.failures[] | select(.id | endswith("b.rs:3")) | .message')" == *"re-runs the test binary by test name"*"needs its own [[test]]"* ]]
+  git -C "$SB" checkout -q -- "$crate/tests/b.rs"
+  rm -r "$SB/$crate/tests/a"
+
+  # Listed twice, or listed and its own target: compiled twice.
+  printf '#[path = "own.rs"]\npub mod own;\n#[path = "a.rs"]\npub mod again;\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/main.rs:10 test-targets:$crate/tests/main.rs:12" ]
+
+  # A crate that keeps Cargo's discovery is not checked.
+  git -C "$SB" checkout -q -- "$crate/tests/main.rs"
+  printf '[package]\nname = "demo"\n' >"$SB/$crate/Cargo.toml"
+  mg static-checks --check test-targets
+  [ "$status" -eq 0 ]
+}
+
 # --- merge, escalations (R1951, R1957, R1991) ------------------------------
 
 @test "merge fast-forwards the integration branch only on a passing receipt for the branch tip" {
