@@ -30,9 +30,9 @@ worktree control. See `tools/cleanroom/README.md` for runtime isolation.
 
 Each agent session has one file, `docs/process/provenance/sessions/<id>.json`, holding one JSON object. Records are only ever added, never edited or removed, and every record is committed where it is created, in a commit that changes only that file (`Record session <id> (<role>, <name>)`, trailers `Role: infra` and `Session: <id>`). Two branches never touch the same file, so their merges, GitHub's included, never conflict on records, and no checkout is left with an uncommitted record.
 
-`docs/process/provenance/sessions.jsonl` is the archive of the records made before the switch (2026-11-20), one per line. Nothing appends to it now; readers take the archive and the directory (`mg_session_records`). Transition rule: a branch made before the switch may still add archive lines, each a record created before `ARCHIVE_CUTOFF` (2026-11-27T00:00:00Z, in `tools/gate/static-checks/sessions.py`), so it merges whenever it lands; `.gitattributes` keeps the union merge driver for local merges of the archive. A later record in the archive fails the check: merge the base branch and record the session again.
+`docs/process/provenance/sessions.jsonl` is the archive of the records made before the switch (2026-11-20), one per line. Nothing appends to it now; readers take the archive and the directory (`mg_session_records`). Transition rule: a branch still on the old tools (its record commit's parent has no `tools/gate/static-checks/sessions.py`) may add archive lines, each in a commit that changes only the archive, with those trailers and valid fields, so it passes whenever it merges. `.gitattributes` keeps the union driver for local merges of the archive; GitHub still shows two such branches as conflicting with each other. Any other new archive line fails the check: remove it in a new commit and record the session again. Follow-up: drop the allowance once no open branch predates the switch.
 
-`tools/mg static-checks` (`sessions`, also in the merge gate) checks every commit of a branch and the branch against its merge base: a record file is only added, alone, with those trailers, a known role, its role's `role_doc` and `role_doc_blob` at a `base_commit` the commit descends from; no archive line is removed or changed; each session id is recorded once; every `Session:` trailer names a record committed at the tip or the base.
+`tools/mg static-checks` (`sessions`, also in the merge gate) checks every commit of a branch and the branch against its merge bases: a record file is only added, as a regular file, alone, with those trailers, a known role, its role's `role_doc` and `role_doc_blob` at a full `base_commit` id the commit descends from; no archive line is removed or changed; a merge neither drops, changes nor adds a record; each session id is recorded once; every `Session:` trailer names a record committed at the tip or the base.
 
 - `tools/mg worktree new --role <role> <name> [--base <ref>] [--branch <branch>] [--path <dir>]` creates the worktree (default branch `unit/<name>`, default path `<main checkout>-wt/<name>`), installs the commit-msg hook, writes the record to `<worktree git dir>/meguri-session.json` and commits it in the worktree as the branch's first commit. The record reaches the integration branch when the unit merges. Jobs read the marker to know a worktree's role. For implementer and fixer roles, git sets `extensions.worktreeConfig` in the repository config, so the sparse settings stay in that worktree. If the marker or the record cannot be written or committed, the worktree (and a branch it created) is removed and the run is an error.
 - `tools/mg session record --role <role> [--name <name>] [--note <text>]` records a session in an existing checkout and commits the record on its current branch. Other staged changes stay staged. Parallel runs wait for each other on a lock in the repository's git directory, so each record gets its own commit.
@@ -50,16 +50,15 @@ The deny profile binds a Claude session started in the worktree. An orchestrator
 Antoine delegates the following routine updates across Meguri work until revoked
 (2026-11-16). Qualifying updates need no manual reconfirmation.
 
-For `docs/process/provenance/sessions.jsonl` (the archive; it changes only
-under the transition rule above):
+For session records (`docs/process/provenance/sessions/<id>.json`, and lines
+the transition rule above still adds to the archive `sessions.jsonl`):
 
-- An independent non-author reviews every appended record, including descriptions
+- An independent non-author reviews every new record, including descriptions
   and paths, and confirms that it contains only public operational metadata.
 - The orchestrator preserves the previously admitted bytes and original
-  ledger-only append commits, then verifies the exact candidate digest.
-
-A per-session record needs no admission: the pre-commit scan passes it, or
-`tools/mg` refuses it and the session is recorded again under another name.
+  record-only commits. For the archive, it verifies the exact candidate digest.
+  A record file needs no digest entry: the pre-commit scan passes it whole, or
+  `tools/mg` refuses it and the session is recorded under another name.
 
 For public-file snapshots, including first admissions and later hash refreshes:
 

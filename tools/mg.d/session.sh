@@ -73,7 +73,8 @@ mg_session_new_id() {
 # Records made in parallel (critic sessions, spec writers in the main
 # checkout) would race on git's index.lock, so the ledgers' lock
 # (mg__ledger_lock) covers write and commit; a commit that fails is tried
-# again, since another git command may hold index.lock for a moment. When the
+# again, since another git command may hold index.lock for a moment; after
+# the last try the file is unstaged and removed. When the
 # pre-commit private-token scan refuses the record, the file is removed and
 # the failure is session-private: the caller picks another name (or note, or
 # path); neither the hook nor this message names the word it matched. On
@@ -122,9 +123,18 @@ Session: $id" 2>"$err"; do
     tries=$((tries + 1))
     if [ "$tries" -ge 3 ]; then
       rm -f "$err"
+      # Committed after all (by a commit of its own that reported a failure):
+      # stored. Otherwise nothing stays behind, staged or not.
+      if [ "$(git -C "$dir" rev-parse -q --verify "HEAD:$rel" 2>/dev/null)" = "$(git -C "$dir" hash-object -- "$file")" ] &&
+        [ "$(git -C "$dir" diff-tree --no-commit-id --name-only -r HEAD)" = "$rel" ]; then
+        mg__session_unlock
+        return 0
+      fi
+      git -C "$dir" rm -q --cached --ignore-unmatch -- "$rel" >&2 2>&1
+      rm -f "$file"
       mg__session_unlock
       MG_SESSION_FAILURE=session-commit
-      MG_SESSION_MESSAGE="wrote the record $rel but could not commit it (see log.txt)"
+      MG_SESSION_MESSAGE="could not commit the record $rel, so nothing was recorded (see log.txt)"
       return 1
     fi
     sleep 1
@@ -147,7 +157,7 @@ mg_session_records() {
       if git --no-replace-objects -C "$1" cat-file -e "$2:$MG_SESSIONS_ARCHIVE" 2>/dev/null; then
         git --no-replace-objects -C "$1" cat-file blob "$2:$MG_SESSIONS_ARCHIVE" || exit 1
       fi
-      git --no-replace-objects -C "$1" ls-tree -r "$2^{commit}" -- "$MG_SESSIONS_DIR/" |
+      git --no-replace-objects -C "$1" ls-tree -r -z "$2^{commit}" -- "$MG_SESSIONS_DIR/" | tr '\0' '\n' |
         awk -F '\t' '$2 ~ /\.json$/ { split($1, m, " "); if (m[2] == "blob") print m[3] }' |
         git --no-replace-objects -C "$1" cat-file --batch='%(rest)'
     } | jq -c .
@@ -343,9 +353,6 @@ mg_session() {
     "$(jq -nc --arg note "$note" --arg checkout "$MG_ROOT" \
       '{checkout: $checkout} + (if $note == "" then {} else {note: $note} end)')")"
   if ! mg_session_store "$MG_ROOT" "$record"; then
-    case "$MG_SESSION_FAILURE" in
-      session-commit) MG_SESSION_MESSAGE="$MG_SESSION_MESSAGE; commit that file by hand" ;;
-    esac
     mg_failure "$MG_SESSION_FAILURE" "$MG_SESSION_MESSAGE"
     mg_status error
     return 0
