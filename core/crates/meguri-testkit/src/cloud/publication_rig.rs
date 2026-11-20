@@ -577,6 +577,22 @@ impl PublicationRig {
         self.refresh()?;
         Ok(id)
     }
+    /// V27.4's "Keep this device's collection" under a supplied history;
+    /// `confirm_publication` is this call with the history unknown.
+    pub fn keep_device_over_active(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+    ) -> Result<[u8; 16]> {
+        let id = self
+            .sdk
+            .get_mut()
+            .driver
+            .call(Input::SetupKeepDevice(preview.production.clone(), history))?;
+        self.work = None;
+        self.refresh()?;
+        Ok(id)
+    }
     pub fn adopt_cloud(&mut self, preview: &ConnectionPreview) -> Result<[u8; 16]> {
         let id = self
             .sdk

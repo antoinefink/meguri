@@ -785,11 +785,14 @@ fn after_the_other_service_both_buttons_of_the_sheet_work_over_a_binding_that_co
             (SetupRow::KeepCollection, SetupQuestion::Keep, Some(AskReason::TwoCollections), true, true)
         );
         // While the decision is Resume, with or without its confirmation,
-        // the sheet's download is not offered and changes nothing.
+        // neither button of the sheet is offered and nothing changes. The
+        // plain confirmation is the publication with the history unknown.
         let server = cursor(&service);
+        assert!(rig.confirm_publication(&preview).is_err());
         for history in [OtherServiceHistory::Unknown, OtherServiceHistory::NoneSinceStop] {
             assert_eq!(rig.setup_decision(&preview, history).unwrap().row, SetupRow::Resume);
             assert!(rig.keep_cloud_over_resumable(&preview, history).is_err(), "{history:?}");
+            assert!(rig.keep_device_over_active(&preview, history).is_err(), "{history:?}");
             let facts = rig.facts().unwrap();
             assert!(facts.recovery_ops.is_empty());
             assert_eq!(
@@ -835,7 +838,7 @@ fn after_the_other_service_both_buttons_of_the_sheet_work_over_a_binding_that_co
             assert_eq!(rig.driver().backup_collection_rows(&backup.name).unwrap(), on_device);
         } else {
             let before = server_records(&service, &scope);
-            rig.confirm_publication(&preview).unwrap();
+            rig.keep_device_over_active(&preview, OtherServiceHistory::ReadySinceStop).unwrap();
             assert!(rig.keep_cloud_over_resumable(&preview, OtherServiceHistory::ReadySinceStop).is_err());
             rig.drive_ready(&mut service, STEPS).unwrap();
             let facts = rig.facts().unwrap();
@@ -1128,6 +1131,141 @@ fn an_unreadable_active_record_is_asked_and_offers_no_icloud_collection() {
         assert!(rig.adopt_cloud(&preview).is_err());
         assert!(rig.facts().unwrap().recovery_ops.is_empty());
         assert!(server_records(&service, &scope) == theirs);
+        // This device's collection is offered, so its confirmation records
+        // the publication that may replace the unreadable record (V27.4).
+        let op = rig.confirm_publication(&preview).unwrap();
+        assert_eq!(rig.facts().unwrap().recovery_ops[0].id, op);
+        // The confirmation records the op; it sends nothing.
+        assert!(server_records(&service, &scope) == theirs);
+        rig.cancel_recovery_op(op).unwrap();
+        rig.close_clean().unwrap();
+    }
+}
+
+/// Nothing was recorded or sent, and the collection and its binding states
+/// are as they were.
+fn assert_unchanged(
+    rig: &mut PublicationRig,
+    service: &Service<SeededRandom>,
+    server: u64,
+    rows: &[codec::Payload],
+    states: &[(BindingId, BindingState)],
+) {
+    let facts = rig.facts().unwrap();
+    assert!(facts.recovery_ops.is_empty(), "no operation was recorded");
+    assert_eq!(facts.bindings.iter().map(|b| (b.id, b.facts.state)).collect::<Vec<_>>(), states);
+    assert_eq!(mutations_since(service, server), 0);
+    assert_eq!(rig.driver().collection_rows().unwrap(), rows);
+}
+
+/// V27.6 with V13.3: while the core's decision is Resume and its
+/// confirmation, no sheet offers "Keep this device's collection", so the
+/// publication confirmation over that `MGActive` is refused and records
+/// nothing. The preview stays for the question that was asked.
+#[test]
+fn the_publication_is_not_offered_while_the_decision_is_resume() {
+    let run = tempfile::tempdir().unwrap();
+    let mut service = service(run.path());
+    let scope = scope("noresumepublish");
+    let dir = generated(run.path(), "local", true);
+    let bound = stopped(&dir, &scope, &mut service);
+    let mut rig = open(&dir, &scope);
+    let rows = rig.driver().collection_rows().unwrap();
+    let identity = rig.facts().unwrap().decision.publication.identity;
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    assert!(preview.decision == ConnectDecision::ConfirmResume);
+    let decision = rig.setup_decision(&preview, UNKNOWN).unwrap();
+    assert_eq!((decision.row, decision.question), (SetupRow::Resume, SetupQuestion::ConfirmResume));
+    let server = cursor(&service);
+    let stopped_state = [(bound, BindingState::Isolated(IsolationReason::Stopped))];
+    assert!(rig.confirm_publication(&preview).is_err());
+    assert_unchanged(&mut rig, &service, server, &rows, &stopped_state);
+    for history in [OtherServiceHistory::Unknown, OtherServiceHistory::NoneSinceStop] {
+        assert!(rig.keep_device_over_active(&preview, history).is_err(), "{history:?}");
+        assert_unchanged(&mut rig, &service, server, &rows, &stopped_state);
+    }
+    assert_eq!(rig.facts().unwrap().decision.publication.identity, identity);
+    // The refusals consumed nothing: the same preview continues the binding.
+    assert_eq!(rig.start_setup(&preview, OtherServiceHistory::NoneSinceStop).unwrap(), None);
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    let resumed = rig.facts().unwrap().current.unwrap();
+    assert_eq!((resumed.id, resumed.facts.state), (bound, BindingState::Active));
+    rig.close_clean().unwrap();
+}
+
+/// Row 5 downloads with no question, so no sheet offers this device's
+/// collection either: publishing a collection proved to hold no user
+/// content over the iCloud collection is refused, whatever the history.
+#[test]
+fn the_publication_is_not_offered_where_row_5_downloads_with_no_question() {
+    let run = tempfile::tempdir().unwrap();
+    let mut service = service(run.path());
+    let scope = scope("norow5publish");
+    published(run.path(), &mut service, &scope, true);
+    let mut rig = open(&fresh(run.path(), "local"), &scope);
+    let rows = rig.driver().collection_rows().unwrap();
+    let theirs = server_records(&service, &scope);
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    assert!(preview.decision == ConnectDecision::ConfirmAdoption);
+    let server = cursor(&service);
+    assert!(rig.confirm_publication(&preview).is_err());
+    assert_unchanged(&mut rig, &service, server, &rows, &[]);
+    for history in EVERY_HISTORY {
+        assert_eq!(rig.setup_decision(&preview, history).unwrap(), silent(SetupRow::AdoptOverNoContent));
+        assert!(rig.keep_device_over_active(&preview, history).is_err(), "{history:?}");
+        assert_unchanged(&mut rig, &service, server, &rows, &[]);
+    }
+    assert!(server_records(&service, &scope) == theirs);
+    // The preview is still the row's: its no-question start runs.
+    let op = rig.start_setup(&preview, UNKNOWN).unwrap().unwrap();
+    assert_eq!(rig.facts().unwrap().recovery_ops[0].id, op);
+    rig.cancel_recovery_op(op).unwrap();
+    rig.close_clean().unwrap();
+}
+
+/// The confirmed flows the app uses still publish: the connect sheet with no
+/// `MGActive` (`ConfirmUpload`) and "Replace iCloud" on the publication
+/// choice (`ChooseCollection`), where the core's decision is the sheet with
+/// this device's collection offered.
+#[test]
+fn the_confirmed_publication_of_the_existing_sheets_still_publishes() {
+    for active in [false, true] {
+        let run = tempfile::tempdir().unwrap();
+        let mut service = service(run.path());
+        let scope = scope("confirmedpublish");
+        if active {
+            published(run.path(), &mut service, &scope, true);
+        }
+        let mut rig = open(&generated(run.path(), "local", true), &scope);
+        let rows = rig.driver().collection_rows().unwrap();
+        // A scope nothing was published to holds no zone yet.
+        let before = if active { server_records(&service, &scope) } else { Default::default() };
+        let preview = rig.preview(&mut service, STEPS).unwrap();
+        let decision = rig.setup_decision(&preview, UNKNOWN).unwrap();
+        if active {
+            assert!(preview.decision == ConnectDecision::ChooseCollection);
+            assert_eq!(
+                asks(&decision),
+                (SetupRow::KeepCollection, SetupQuestion::Keep, Some(AskReason::TwoCollections), true, true)
+            );
+        } else {
+            assert!(preview.decision == ConnectDecision::ConfirmUpload);
+            assert_eq!(decision, silent(SetupRow::Publish));
+        }
+        rig.confirm_publication(&preview).unwrap();
+        rig.drive_ready(&mut service, STEPS).unwrap();
+        let facts = rig.facts().unwrap();
+        assert!(facts.recovery_ops.is_empty());
+        let current = facts.current.unwrap();
+        assert_eq!(current.facts.state, BindingState::Active);
+        // A new epoch is active; a replaced one stays in iCloud (V22 invariant 6).
+        let after = server_records(&service, &scope);
+        let zone = meguri_sync::cloud::adapter::collection_zone(current.facts.epoch);
+        assert!(!before.contains_key(&zone) && after.contains_key(&zone));
+        for (name, records) in before.iter().filter(|(name, _)| name.starts_with("c-")) {
+            assert!(after.get(name) == Some(records), "the replaced zone {name} changed");
+        }
+        assert_eq!(rig.driver().collection_rows().unwrap(), rows);
         rig.close_clean().unwrap();
     }
 }

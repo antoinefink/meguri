@@ -65,7 +65,9 @@ impl OtherServiceEvidence {
     pub const fn history(self) -> OtherServiceHistory {
         self.0
     }
-    /// A history that a test states. Never compiled into a shipped core.
+    /// A history that a test states. Compiled only with `test-hooks`, so it
+    /// is in the Debug and Profile cores and never in a Release or App Store
+    /// core. Nothing in the app calls it.
     #[cfg(any(test, feature = "test-hooks"))]
     pub const fn for_testing(history: OtherServiceHistory) -> Self {
         Self(history)

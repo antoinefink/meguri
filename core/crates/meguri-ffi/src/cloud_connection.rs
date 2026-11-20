@@ -569,6 +569,19 @@ impl CloudConnectionPreview {
         }
         work.take().ok_or_else(|| failure(CloudConnectionFailure::Consumed))
     }
+    /// A confirmation the core refused with `NotOffered` recorded nothing and
+    /// left the core's preview as it was, so the handle gets the preview
+    /// back for the answer that was offered. Every other result keeps it
+    /// consumed.
+    fn unless_not_offered<T>(&self, ready: Box<p::Preview>, result: Result<T, r::RuntimeError>) -> Result<T, CoreError> {
+        if matches!(result, Err(r::RuntimeError::Publication(p::PublicationError::NotOffered))) {
+            let mut work = self.work.lock().unwrap_or_else(PoisonError::into_inner);
+            if work.is_none() {
+                *work = Some(p::PreviewWork::Ready(ready));
+            }
+        }
+        result.map_err(error)
+    }
 }
 #[derive(Clone, uniffi::Enum)]
 pub enum CloudConnectionPreviewWork {
@@ -919,17 +932,11 @@ impl CloudConnection {
         callback::enter("CloudConnection.confirm_publication");
         self.owns(&preview.owner)?;
         let collection = self.owner.generation(preview.generation)?;
-        let p::PreviewWork::Ready(p) = preview.take()? else {
+        let p::PreviewWork::Ready(ready) = preview.take()? else {
             return Err(failure(CloudConnectionFailure::NotOffered));
         };
-        Ok(self.recovery(
-            self.owner
-                .core
-                .confirm_connection_publication(&p, &collection)
-                .map_err(error)?,
-            false,
-            preview.generation,
-        ))
+        let result = self.owner.core.confirm_connection_publication(&ready, &collection);
+        Ok(self.recovery(preview.unless_not_offered(ready, result)?, false, preview.generation))
     }
     pub fn confirm_adoption(
         &self,
@@ -938,14 +945,11 @@ impl CloudConnection {
         callback::enter("CloudConnection.confirm_adoption");
         self.owns(&preview.owner)?;
         self.owner.check_generation(preview.generation)?;
-        let p::PreviewWork::Ready(p) = preview.take_adoption()? else {
+        let p::PreviewWork::Ready(ready) = preview.take_adoption()? else {
             return Err(failure(CloudConnectionFailure::NotOffered));
         };
-        Ok(self.recovery(
-            self.owner.host.confirm_cloud_adoption(&p).map_err(error)?,
-            true,
-            preview.generation,
-        ))
+        let result = self.owner.host.confirm_cloud_adoption(&ready);
+        Ok(self.recovery(preview.unless_not_offered(ready, result)?, true, preview.generation))
     }
     /// V27.2: the row the core picked for a ready preview, with both sides'
     /// counts. Reads only; the preview stays usable.

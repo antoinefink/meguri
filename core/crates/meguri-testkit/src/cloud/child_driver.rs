@@ -448,6 +448,8 @@ pub(crate) enum Input {
     /// V27.4: "Keep the iCloud collection" over a binding that could resume,
     /// under a supplied history.
     SetupKeepCloud(core::publication::Preview, core::setup::OtherServiceHistory),
+    /// V27.4: "Keep this device's collection" under a supplied history.
+    SetupKeepDevice(core::publication::Preview, core::setup::OtherServiceHistory),
     AdoptionReply(core::adoption::AdoptionWork, core::adoption::AdoptionReply),
     AdoptionLocal(core::adoption::AdoptionWork),
     Capacity(Option<u64>),
@@ -1385,6 +1387,7 @@ impl ChildDriver {
             Input::StopICloud => "StopICloud",
             Input::SetupStart(..) => "SetupStart",
             Input::SetupKeepCloud(..) => "SetupKeepCloud",
+            Input::SetupKeepDevice(..) => "SetupKeepDevice",
             Input::AdoptionReply(..) => "AdoptionReply",
             Input::AdoptionLocal(..) => "AdoptionLocal",
             Input::AdoptionCompletion(..) => "AdoptionCompletion",
@@ -3130,7 +3133,8 @@ impl Device {
             input @ (Input::PublicationConfirm(..)
             | Input::AdoptionConfirm(..)
             | Input::SetupStart(..)
-            | Input::SetupKeepCloud(..)) => {
+            | Input::SetupKeepCloud(..)
+            | Input::SetupKeepDevice(..)) => {
                 let result = publication_driver::handle(self, input)?;
                 // Only the original successful confirmation can admit setup.
                 self.runtime()?.provider_accept_icloud_connection()?;

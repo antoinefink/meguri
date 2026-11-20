@@ -866,6 +866,10 @@ fn setup_start_adopts_over_a_new_collection_and_records_the_condition_to_test_ag
     // Reading the decision twice starts nothing and keeps the preview.
     assert_eq!(connection.setup_decision(preview.clone()).unwrap().row_number, 5);
     assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+    // No sheet offers this device's collection for row 5, so no upload
+    // replaces the iCloud collection; the refusal keeps the handle.
+    failure_is(connection.confirm_publication(preview.clone()), CloudConnectionFailure::NotOffered);
+    assert!(fixture.workflow.core.publication_op().unwrap().is_none());
     let CloudSetupStarted::Operation { operation } = connection.start_setup(preview.clone()).unwrap() else {
         panic!("row 5 starts an adoption")
     };
@@ -952,11 +956,19 @@ fn setup_keeps_the_resume_confirmation_for_a_stopped_binding_and_starts_nothing(
     assert!(workflow.core.adoption_op().unwrap().is_none() && workflow.core.publication_op().unwrap().is_none());
     let again = connection.setup_decision(preview.clone()).unwrap();
     assert_eq!((again.row, again.question), (CloudSetupRow::Resume, CloudSetupQuestion::ConfirmResume));
-    // The sheet's download is not offered for it either (V27.6).
-    failure_is(connection.confirm_adoption(preview), CloudConnectionFailure::NotOffered);
+    // Neither button of the sheet is offered for it (V27.6): not the
+    // download, and not the upload that would replace this `MGActive`.
+    failure_is(connection.confirm_adoption(preview.clone()), CloudConnectionFailure::NotOffered);
+    failure_is(connection.confirm_publication(preview.clone()), CloudConnectionFailure::NotOffered);
     assert_eq!(state(), stopped);
-    assert!(workflow.core.adoption_op().unwrap().is_none());
+    assert!(workflow.core.adoption_op().unwrap().is_none() && workflow.core.publication_op().unwrap().is_none());
     assert_eq!(workflow.host.engine().slot_holder(), None);
+    // The refusals left the handle with its preview: the question that was
+    // asked is still answered with it.
+    assert_eq!(connection.setup_decision(preview.clone()).unwrap().question, CloudSetupQuestion::ConfirmResume);
+    connection.resume_binding(preview.clone()).unwrap();
+    assert_eq!(state(), c::BindingState::Active);
+    failure_is(connection.resume_binding(preview), CloudConnectionFailure::Consumed);
 }
 #[test]
 fn bridge_adoption_confirmation_takes_actual_host_slot_and_exact_cancel_releases_it() {

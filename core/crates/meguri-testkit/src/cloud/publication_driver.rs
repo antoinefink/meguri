@@ -312,6 +312,10 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
                 device.host.engine(),
             )?)
         }
+        Input::SetupKeepDevice(preview, history) => {
+            let history = meguri_sync::cloud::setup::OtherServiceEvidence::for_testing(history);
+            value(device.runtime()?.confirm_setup_publication(&preview, history, &collection)?)
+        }
         Input::AdoptionReply(work, reply) => {
             let mut diagnostic = meguri_sync::cloud::adoption::AdoptionDiagnosticRecorder::new(&work.task);
             let result = device.host.cloud_adoption_reply_with_diagnostic(

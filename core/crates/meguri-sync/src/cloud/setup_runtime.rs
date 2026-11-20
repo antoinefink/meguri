@@ -65,7 +65,15 @@ impl Runtime {
         preview: &Preview,
         other_service: OtherServiceEvidence,
     ) -> Result<SetupInputs, RuntimeError> {
-        let s = self.state();
+        Self::connection_setup_inputs_locked(&self.state(), preview, other_service)
+    }
+
+    /// The caller holds the state lock and not tracking access.
+    fn connection_setup_inputs_locked(
+        s: &State,
+        preview: &Preview,
+        other_service: OtherServiceEvidence,
+    ) -> Result<SetupInputs, RuntimeError> {
         if s.publication.preview.as_ref() != Some(&(preview.clone(), true)) {
             return Err(PublicationError::AuthorityChanged.into());
         }
@@ -134,7 +142,52 @@ impl Runtime {
         if preview.active.is_some() || preview.active_epoch.is_some() {
             return Err(PublicationError::NotOffered.into());
         }
-        self.confirm_connection_publication(preview, collection)
+        self.record_connection_publication(preview, other_service, collection)
+    }
+
+    /// V27.4's "Keep this device's collection" under the history the caller
+    /// holds. `confirm_connection_publication` is this call with
+    /// `OtherServiceEvidence::unknown()`, the only history a shipped core
+    /// has. Where `MGActive` exists the publication replaces the iCloud
+    /// collection, so `keep_device_admitted_locked` applies.
+    pub fn confirm_setup_publication(
+        &self,
+        preview: &Preview,
+        other_service: OtherServiceEvidence,
+        collection: &Collection,
+    ) -> Result<[u8; 16], RuntimeError> {
+        self.record_connection_publication(preview, other_service, collection)
+    }
+
+    /// The publication guard. With no `MGActive` nothing in iCloud is
+    /// replaced, and this admits the preview. With `MGActive`, the core's own
+    /// decision for this preview must be V27.4's sheet with "Keep this
+    /// device's collection" offered. Otherwise no such button was shown: a
+    /// Resume confirmation (row 3, also while its history is unknown) or a
+    /// row that starts with no question, such as row 5's download. Then
+    /// this refuses with `NotOffered`. The caller holds the state lock and
+    /// not tracking access, and has recorded nothing yet.
+    ///
+    /// The app's "Replace iCloud" (`ConnectDecision::ChooseCollection`) is
+    /// always admitted: that decision needs `Counts::empty` false or inexact
+    /// unsent counts, and `ProvedNone` implies `empty`, so row 5 is never its
+    /// row. A change to `count_local_rows` or `content_proof` must keep
+    /// `ProvedNone` stricter than `empty`. No test pins that boundary: the
+    /// confirmed-flow setup test uses a collection that has notes.
+    pub(super) fn keep_device_admitted_locked(
+        s: &State,
+        preview: &Preview,
+        other_service: OtherServiceEvidence,
+    ) -> Result<(), RuntimeError> {
+        if preview.active.is_none() && preview.active_epoch.is_none() {
+            return Ok(());
+        }
+        let decision = decide(&Self::connection_setup_inputs_locked(s, preview, other_service)?);
+        if decision.question == SetupQuestion::Keep && decision.keep_device_offered {
+            Ok(())
+        } else {
+            Err(PublicationError::NotOffered.into())
+        }
     }
 
     /// Rows 2 and 5, with no confirmation. Row 5's op records that it needs
