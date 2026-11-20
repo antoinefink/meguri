@@ -7,7 +7,8 @@ name: Verify Core at scale
 # When "stress" runs:
 # - a pull request or master push that changes an input of those cases: the
 #   Rust workspace (core/**), the dev image (docker/compose.yml,
-#   docker/dev.Dockerfile and its .dockerignore), the job that runs them
+#   docker/dev.Dockerfile and its .dockerignore, .github/dev-image.sh), the
+#   job that runs them
 #   (tools/mg, tools/mg.d/core.sh) or this file. These are the paths below.
 #   The cases read no specs, conformance data or app sources, so a change to
 #   those alone (or to docs/) does not run them, and then no "stress" check
@@ -20,6 +21,7 @@ on:
     paths:
       - '.github/workflows/meguri-core-stress.yml'
       - 'core/**'
+      - '.github/dev-image.sh'
       - 'docker/compose.yml'
       - 'docker/dev.Dockerfile*'
       - 'tools/mg'
@@ -29,6 +31,7 @@ on:
     paths:
       - '.github/workflows/meguri-core-stress.yml'
       - 'core/**'
+      - '.github/dev-image.sh'
       - 'docker/compose.yml'
       - 'docker/dev.Dockerfile*'
       - 'tools/mg'
@@ -48,16 +51,58 @@ jobs:
   stress:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - name: Hash the image inputs
+        id: hash
+        shell: bash
+        run: |
+          hash="$(.github/dev-image.sh hash)"
+          echo "hash=$hash" >>"$GITHUB_OUTPUT"
+
+      # Master's dev image of this hash, as "Verify Meguri" records it
+      # (.github/dev-image.sh); without a record, tools/mg builds the image.
+      - name: Restore the record of master's image
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/dev-image-digest
+          key: dev-image-v1-${{ steps.hash.outputs.hash }}-${{ github.run_id }}
+          restore-keys: dev-image-v1-${{ steps.hash.outputs.hash }}-
+
+      - name: Pull the shared dev image
+        id: pull
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+          DIGEST_FILE: ${{ runner.temp }}/dev-image-digest
+        run: .github/dev-image.sh pull
+
+      # Read only: the Core shards of "Verify Meguri" save this cache.
+      - name: Restore the Rust dependency cache
+        if: steps.pull.outputs.used == 'yes'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/cargo-home/registry/index
+            ${{ runner.temp }}/cargo-home/registry/cache
+            ${{ runner.temp }}/cargo-target
+          key: core-deps-v1-${{ steps.hash.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: core-deps-v1-${{ steps.hash.outputs.hash }}-
+
       - name: Run the three full-scale Core cases
         shell: bash
         run: |
+          mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/cargo-target"
           rc=0
-          receipt="$(sudo -n env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
+          receipt="$(sudo -n env MEGURI_CI_DEV_IMAGE="${MEGURI_CI_DEV_IMAGE:-}" \
+            MEGURI_DOCKER_CARGO_HOME="$RUNNER_TEMP/cargo-home" MEGURI_DOCKER_CARGO_TARGET="$RUNNER_TEMP/cargo-target" \
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
             GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" \
             core-test --stress)" || rc=$?
           if [[ -f "$receipt" ]]; then

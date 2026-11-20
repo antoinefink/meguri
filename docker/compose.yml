@@ -1,8 +1,10 @@
 # Meguri dev services. tools/mg is the only intended caller: it passes a
 # per-checkout project name (-p), so each worktree gets its own image tag and
 # target volume while CARGO_HOME (registry, git checkouts and cargo's lock
-# files) is shared.
-# Images are built locally from digest-pinned bases and never pushed.
+# files) is shared. MEGURI_DOCKER_CARGO_TARGET and MEGURI_DOCKER_CARGO_HOME
+# may name host directories instead (hosted CI caches them).
+# Images are built locally from digest-pinned bases. Hosted CI alone shares
+# the dev image through GitHub Container Registry (.github/dev-image.sh).
 
 services:
   dev:
@@ -16,7 +18,7 @@ services:
     working_dir: /work
     volumes:
       - ..:/work
-      - cargo-home:/cargo-home
+      - "${MEGURI_DOCKER_CARGO_HOME:-cargo-home}:/cargo-home"
       - "${MEGURI_DOCKER_CARGO_TARGET:-cargo-target}:/cargo-target"
       # Explicit locked browser install, shared with sync-web MG jobs; read-only.
       - sync-web-deps:/sync-web-deps:ro
@@ -64,7 +66,7 @@ services:
     working_dir: /work
     volumes:
       - ..:/work
-      - cargo-home:/cargo-home
+      - "${MEGURI_DOCKER_CARGO_HOME:-cargo-home}:/cargo-home"
       - "${MEGURI_DOCKER_CARGO_TARGET:-cargo-target}:/cargo-target"
     tmpfs:
       - /tmp:exec,mode=1777
