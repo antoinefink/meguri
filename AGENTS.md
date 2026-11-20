@@ -41,6 +41,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 - Antoine (2026-11-16): if the VM slows local work, iOS simulators may run on this Mac through MG. Keep the required VM and signed acceptance checks.
 
+- Antoine (2026-11-20): iCloud Sync work is paused; bug fixes only. Meguri Sync comes first. Parked items: `docs/process/verification-status.md`.
+
 - Antoine (2026-11-16): offer iCloud Sync and Meguri Sync using our own server under `specs/sync/meguri-provider.md`. Legacy Anki server UI stays hidden and its work frozen; retain its code/tests. No AnkiWeb contact is authorized. This grants no technical acceptance. See `docs/design/native-interface-contract.md` N12.4.
 
 - Build, test and verify only through `tools/mg <job>` (`tools/mg --list`; contract in `tools/AGENTS.md`). Rust, oracle and sync-server work runs in Docker; Apple builds run on the host; simulators and Mac UI suites run in the macOS test VM.
