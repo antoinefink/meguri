@@ -190,6 +190,7 @@ struct RootView: View {
         .modifier(ReviewLifecycle(collection: collection))
         .modifier(AddNoteRequestFeedback(collection: collection))
         .modifier(StudyRefusalFeedback(collection: collection))
+        .modifier(DeckDeletionFeedback(collection: collection))
         .modifier(LaunchEnvironment(configuration: configuration))
     }
 
