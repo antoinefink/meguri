@@ -117,6 +117,27 @@ import Testing
         #expect(model.value(.desiredRetention) == 0.81)
     }
 
+    @Test func saveCommitsATypedCorrectionOfAnError() async throws {
+        let (owner, _) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.fieldText[.desiredRetention] = "65%"; model.commit(.desiredRetention)
+        await model.waitForCompletion()
+        #expect(!model.canSave)
+        // The correction is still in the field: Save commits and validates it first.
+        model.fieldText[.desiredRetention] = "85%"
+        #expect(model.canSave)
+        model.save(); await model.waitForCompletion()
+        #expect(model.outcome == .saved)
+        // A correction that still fails keeps the page, with its error.
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.fieldText[.desiredRetention] = "65%"; model.commit(.desiredRetention)
+        await model.waitForCompletion()
+        model.fieldText[.desiredRetention] = "60%"
+        model.save(); await model.waitForCompletion()
+        #expect(model.phase == .editing && !model.canSave && model.value(.desiredRetention) == 0.6)
+    }
+
     @Test func aTypedErrorIsCheckedBeforeAnotherPresetIsChosen() async throws {
         let (owner, _) = await makeOwner()
         let model = owner.deckOptions

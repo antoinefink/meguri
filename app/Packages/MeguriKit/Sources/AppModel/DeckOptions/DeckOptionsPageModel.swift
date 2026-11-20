@@ -270,8 +270,18 @@ public final class DeckOptionsPageModel {
         issues.filter { $0.row == row && ($0.preset == nil || $0.preset == selectedPreset) }
     }
 
+    /// Rows of the selected preset whose field holds text not committed yet.
+    private var pendingRows: Set<DeckOptionsPageRow> {
+        Set(DeckOptionsPageRow.allCases.filter { row in fieldText[row].map { $0 != formatted(row) } ?? false })
+    }
+
+    /// An error blocks Save unless its row's field holds a correction that
+    /// Save commits and validates first (the save rechecks after validation).
     public var canSave: Bool {
-        guard phase == .editing, hasChanges, !hasErrors, let owner,
+        let pending = pendingRows
+        let blocking = issues.contains { $0.severity == .error
+            && !(pending.contains($0.row) && ($0.preset == nil || $0.preset == selectedPreset)) }
+        guard phase == .editing, hasChanges, !blocking, let owner,
               owner.generation == generation else { return false }
         return owner.deckOptionsAllowed
     }
@@ -389,8 +399,9 @@ public final class DeckOptionsPageModel {
     /// O17.3's save, after committing the field being edited (O15.3). On
     /// success the page closes with `.saved`.
     public func save() {
+        let allowed = canSave
         commitAll()
-        guard canSave, let session, let owner else { return }
+        guard allowed, let session, let owner else { return }
         phase = .saving; saveFailure = nil
         let current = revision, expected = generation
         task = Task {
