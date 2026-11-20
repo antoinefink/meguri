@@ -259,6 +259,29 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # TEMPORARY (test-binaries measurement; removed before merge): the
+      # quick suite's whole test inventory, as the --only-list settle step
+      # lists it, and the size of the Rust target.
+      - name: Collect the test inventory and target size
+        if: always()
+        shell: bash
+        run: |
+          list="$(sudo -n find "$GITHUB_WORKSPACE/build/mg/core-test" -name nextest-list.json | head -n 1)"
+          if [[ -n "$list" ]]; then
+            sudo -n cat -- "$list" >"$RUNNER_TEMP/nextest-list.json"
+            jq -r '"binaries: \(.["rust-suites"] | length); tests: \([.["rust-suites"][] | .testcases | length] | add)"' "$RUNNER_TEMP/nextest-list.json"
+          fi
+          sudo -n docker system df -v | sed -n '/VOLUME NAME/,/^$/p'
+          df -h /
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: meguri-core-nextest-list
+          path: ${{ runner.temp }}/nextest-list.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   # The Core result. always(): it must report even when a shard failed, was
   # cancelled or never started, and then it fails. A skipped job would count
   # as passing, so this job never skips itself.
