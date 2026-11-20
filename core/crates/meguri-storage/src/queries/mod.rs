@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod revlog_fsrs;
 
 pub mod due_range;

@@ -1,6 +1,7 @@
 # specs/stats/
 
 - Two day rules, never derived from each other: Anki's day (`day-buckets` B2, B3: fixed 86,400 s spans back from `next_day_at`) for the Stats screen, studied today and searches; the heatmap day (B4: local date of the instant moved back by the rollover hours, offset at the moved instant) for heatmaps, streaks and the widget.
+- The activity heatmap (`activity-heatmap`, contract N14.11) uses Anki's day (B3), not B4, by design, and deck pages' home-deck scope; it reads no `heatmap` key and keeps no resident aggregates.
 - Heatmap rules follow the Review Heatmap add-on 1.0.1 (oracle: the add-on image), not Anki. The only deviations are R1280 (future rows on today), R1284 (deck pages by home deck), B4.6 (the add-on's calendar draws a DST-start date's count on the day before; Meguri does not) and `heatmap-addon` A15 item 10 (filtered cards' forecast by `odue`). Home's `limdecks` reads the current deck.
 - Card Info dates are plain local calendar dates of the instant, with no rollover shift (`card-info` C2, C3.3, C5.1), not the heatmap day of B4.
 - Day-0 edges differ on purpose: studied today counts `id > S`, the Stats Today section `id >= S`, graph day indices truncate toward zero.

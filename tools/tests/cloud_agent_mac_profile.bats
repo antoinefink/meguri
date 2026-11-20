@@ -131,6 +131,8 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     jq() { :; }
     mg_failure() { usage=1; [ -z "$MG_UI_MAC_PROFILE_SELECTOR" ] || mismatch=1; }
     mg_mac_ui_begin() { return 0; }
+    mg_ui_suite_fixtures() { :; }
+    mg_ui_suite_fixtures_stage() { :; }
     mg_sim_begin() { return 0; }
     mg_sim_check_given() { return 0; }
     mg_host_lease() { return 0; }
@@ -208,6 +210,8 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     mg__xcframework() { return 0; }
     mg_app_remove_embedded_widget() { return 0; }
     mg_mac_ui_begin() { return 0; }
+    mg_ui_suite_fixtures() { :; }
+    mg_ui_suite_fixtures_stage() { :; }
     mg_mac_ui_take() {
       [ -f "$MG_RUN_DIR/rechecked" ] || return 1
       printf "%s\n" delivery >>"$MG_RUN_DIR/order"

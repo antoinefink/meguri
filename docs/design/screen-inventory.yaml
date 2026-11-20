@@ -134,10 +134,11 @@ screens:
     purpose: >-
       The deck tree as a native list (native-interface-contract N2, N11.5): each row the deck's last
       name component with the non-zero New, Learning and To Review counts as secondary text, the Mac
-      and iPad sidebar rows with a To Review badge; then the activity section (studied-today line, heatmap,
-      streak stats; U228) in the same list on every layout; and the toolbar's sync button and Add
-      menu (New Note, New Deck…; N20.1). The Mac and iPad sidebar has the deck search field at its
-      top (home.goToDeck).
+      and iPad sidebar rows with a To Review badge; then the collection's activity heatmap (N14.11,
+      stats/activity-heatmap) after the deck rows of the tab layout's list and after the decks on Today
+      (Mac, iPad, the Duo held wide), never in the sidebar; the studied-today line and streak stats
+      (U228) are not built; and the toolbar's sync button and Add menu (New Note, New Deck…; N20.1).
+      The Mac and iPad sidebar has the deck search field at its top (home.goToDeck).
   - id: home.deckPage
     title: Deck page
     units: [U155, U228a, U228]
@@ -148,8 +149,9 @@ screens:
     references: [list-counts, charts]
     purpose: >-
       One deck's labelled New, Learning and To Review counts with the buried "+N" badge (U228a), the
-      Study button, the finished state, and the deck-scoped heatmap, streak stats and Stats action
-      (U228).
+      Study button, the finished state, the Subdecks section, then the deck's activity heatmap with its
+      subdecks (N14.11, stats/activity-heatmap); streak stats and the Stats action (U228) are not
+      built.
   - id: home.deckMenu
     title: Deck menu
     units: [U152, U156]
