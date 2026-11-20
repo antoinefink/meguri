@@ -79,6 +79,23 @@ public nonisolated enum DeckNaming {
         return parent.map { .inside($0.spokenPath) }
     }
 
+    /// D1's conversion of a typed human name, in human form: each component
+    /// loses its control characters, is NFC, and loses leading and trailing
+    /// White_Space and `:`; an empty one is `blank`. The UI uses it only to
+    /// tell whether the saved name is worth reporting (H7); the core converts.
+    public static func converted(_ typed: String) -> String {
+        typed.components(separatedBy: "::").map { component in
+            let kept = String(String.UnicodeScalarView(component.unicodeScalars.filter {
+                !($0.value <= 0x1F || $0.value == 0x7F)
+            })).precomposedStringWithCanonicalMapping
+            let scalars = Array(kept.unicodeScalars)
+            let trimmed = { (scalar: Unicode.Scalar) in scalar.properties.isWhitespace || scalar == ":" }
+            guard let first = scalars.firstIndex(where: { !trimmed($0) }),
+                  let last = scalars.lastIndex(where: { !trimmed($0) }) else { return "blank" }
+            return String(String.UnicodeScalarView(scalars[first...last]))
+        }.joined(separator: "::")
+    }
+
     /// A tree node's components. Fixture trees can carry a full "::" name.
     static func path(of node: CountedDeckNode, parents: [String]) -> [String] {
         node.name.contains("::") ? node.name.components(separatedBy: "::") : parents + [node.name]

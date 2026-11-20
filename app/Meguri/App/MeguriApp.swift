@@ -143,7 +143,7 @@ struct MeguriApp: App {
         .commands {
             SidebarCommands()
             MainWindowCommands()
-            StudyCommands()
+            AppCommands()
             CloudSyncCommands(collection: collection)
         }
         SwiftUI.Settings {
@@ -167,6 +167,8 @@ struct MeguriApp: App {
         }
         .commands {
             SidebarCommands()
+            // N20.4: the iPad menu bar and the ⌘-held list have the Mac's menus.
+            AppCommands()
             CloudSyncCommands(collection: collection)
         }
         #endif

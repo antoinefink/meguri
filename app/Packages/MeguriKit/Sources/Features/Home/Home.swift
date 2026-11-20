@@ -25,9 +25,7 @@ public struct HomeView: View {
             if showsRootDeckList, showsToday {
                 TodayView(collection: collection)
             } else if showsRootDeckList, let query = activeSearch {
-                HomeDeckSearchResults(collection: collection, query: query) { id in
-                    collection.navigation.select(.deck(DeckID(id)))
-                }
+                HomeDeckSearchResults(collection: collection, search: DeckSearchFocus.search(collection.navigation), query: query)
             } else if showsRootDeckList {
                 HomeDeckTree(nodes: collection.decks, navigation: collection.navigation, collection: collection,
                     previousAnswerCount: showsPreviousSession ? collection.previousRecord?.answers.count : nil, error: collection.error,
@@ -69,7 +67,7 @@ public struct HomeView: View {
             #if !os(macOS)
             ToolbarItem(placement: .primaryAction) {
                 if showsDeckSearch {
-                    // N14.2: the list's Go to Deck; the system field appears when asked for.
+                    // N14.2: the list's deck search; the system field appears when asked for.
                     Button { search.presented = true } label: {
                         Label { Text("Search", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
                     }
@@ -78,49 +76,13 @@ public struct HomeView: View {
             }
             #endif
             ToolbarItem(placement: .primaryAction) {
+                // N20.1: one Add menu beside sync; the tab layout's deck page keeps Add Note (N14.3).
                 #if os(macOS)
-                addNoteButton
+                addMenu
                 #else
-                if deckID == nil, shellLayout == .compact { addMenu } else { addNoteButton }
+                if deckID != nil, shellLayout == .compact { addNoteButton } else { addMenu }
                 #endif
             }
-            #if os(macOS)
-            ToolbarItemGroup(placement: .primaryAction) {
-                if collection.review == nil, collection.navigation.review == nil {
-                    Button { collection.presentGoToDeck() } label: {
-                        Label { Text("Go to Deck…", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
-                    }
-                    .help(Text("Go to Deck…", bundle: .module))
-                    .disabled(!collection.canPresentGoToDeck())
-                    .accessibilityIdentifier("home.collection.goToDeck")
-                }
-                Button { collection.deckActions.present(.create) } label: {
-                    Label { Text("Create Deck", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
-                }
-                .help(Text("Create Deck", bundle: .module))
-                .disabled(!collection.deckActions.canPresent(.create))
-                .accessibilityIdentifier("home.collection.createDeck")
-            }
-            #else
-            ToolbarItem(placement: .primaryAction) {
-                if collection.review == nil, collection.navigation.review == nil, showsCollectionActions {
-                    Button { collection.presentGoToDeck() } label: {
-                        Label { Text("Go to Deck…", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
-                    }
-                    .disabled(!collection.canPresentGoToDeck())
-                    .accessibilityIdentifier("home.collection.goToDeck")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                if showsCollectionActions {
-                    Button { collection.deckActions.present(.create) } label: {
-                        Label { Text("Create Deck", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
-                    }
-                    .disabled(!collection.deckActions.canPresent(.create))
-                    .accessibilityIdentifier("home.collection.createDeck")
-                }
-            }
-            #endif
         }
         #if os(macOS)
         .focusable(homeKeyboardActive)
@@ -135,9 +97,12 @@ public struct HomeView: View {
             homeFocused = active
         }
         #endif
-        .onKeyPress(keys: [KeyEquivalent("/")], phases: .down) { press in
-            guard press.modifiers.isEmpty, collection.navigation.section == .home,
-                  collection.canPresentGoToDeck() else { return .ignored }
+        // N20.1: "/" and Find…'s second key, ⇧⌘O, put the focus in the deck search.
+        .onKeyPress(keys: [KeyEquivalent("/"), "o", "O"], phases: .down) { press in
+            let slash = press.key == KeyEquivalent("/") && press.modifiers.isEmpty
+            let find = press.key != KeyEquivalent("/") && press.modifiers == [.command, .shift]
+            guard slash || find, collection.navigation.section == .home,
+                  DeckSearchFocus.available(collection, layout: searchLayout) else { return .ignored }
             #if os(macOS)
             // Native editing, sheet and menu tracking own their input, even if
             // an unhandled event bubbles to Home's key path.
@@ -146,11 +111,13 @@ public struct HomeView: View {
                   RunLoop.current.currentMode != .eventTracking,
                   let event = NSApp.currentEvent, event.type == .keyDown, !event.isARepeat else { return .ignored }
             #endif
-            collection.presentGoToDeck()
+            DeckSearchFocus.request(collection, layout: searchLayout)
             return .handled
         }
         .accessibilityIdentifier("home.collection.screen")
     }
+    #if !os(macOS)
+    /// The tab layout's deck page: Add Note only (N14.3).
     @ViewBuilder private var addNoteButton: some View {
         if deckID.flatMap({ collection.deck($0) })?.filtered != true {
             Button { collection.navigation.present(.add(deck: deckID.map { DeckID($0) })) } label: {
@@ -161,15 +128,16 @@ public struct HomeView: View {
             .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
         }
     }
-    #if !os(macOS)
-    /// N14.2: the tab layout's deck list has one add button; Go to Deck is its search field.
+    #endif
+    /// N14.2, N20.1: one Add menu. On a deck page New Note presets that deck.
     private var addMenu: some View {
-        Menu {
-            Button { collection.navigation.present(.add(deck: nil)) } label: {
+        let preset = deckID.flatMap { collection.deck($0)?.filtered == true ? nil : $0 }
+        return Menu {
+            Button { collection.navigation.present(.add(deck: preset.map { DeckID($0) })) } label: {
                 Label { Text("New Note", bundle: .module) } icon: { Image(systemName: "square.and.pencil") }
             }
-            .disabled(!collection.addNotePresentation.canPresent(presetDeck: nil))
-            .accessibilityIdentifier("home.collection.addNote")
+            .disabled(!collection.addNotePresentation.canPresent(presetDeck: preset))
+            .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
             Button { collection.deckActions.present(.create) } label: {
                 Label { Text("New Deck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
             }
@@ -178,15 +146,20 @@ public struct HomeView: View {
         } label: {
             Label { Text("Add", bundle: .module) } icon: { Image(systemName: "plus") }
         }
+        .help(Text("Add", bundle: .module))
         .accessibilityIdentifier("home.collection.add")
     }
-    /// Go to Deck and Create Deck are toolbar buttons only in the sidebar layout (N14.2, N14.3).
-    private var showsCollectionActions: Bool { shellLayout == .sidebar }
+    private var searchLayout: ShellLayout {
+        #if os(macOS)
+        .sidebar
+        #else
+        shellLayout
+        #endif
+    }
+    #if !os(macOS)
     private var showsDeckSearch: Bool { deckID == nil && shellLayout == .compact && showsRootDeckList }
     /// Held by the navigation, not the view: a fold, an unfold or a layout switch keeps the query.
-    private var search: DeckListSearch {
-        collection.navigation.featureState(DeckListSearch.self) { DeckListSearch() }
-    }
+    private var search: DeckListSearch { DeckSearchFocus.search(collection.navigation) }
     private var activeSearch: String? { showsDeckSearch ? search.query : nil }
     /// N14.10: beside Today on an unfolded iPhone held wide, the list starts with the way back to it.
     private var todayRow: HomeTodayRow? {
@@ -514,49 +487,6 @@ private struct HomeDeckSearch: ViewModifier {
 }
 #endif
 
-/// Go to Deck's matches in place of the tree (N14.2): full names, then the offer to create the typed deck.
-private struct HomeDeckSearchResults: View {
-    let collection: ReviewCollection
-    let query: String
-    let select: (Int64) -> Void
-
-    var body: some View {
-        let search = DeckSearch(nodes: collection.decks, query: query)
-        List {
-            ForEach(search.matches) { match in
-                Button { select(match.id) } label: {
-                    VStack(alignment: .leading) {
-                        Text(verbatim: match.name)
-                        if !match.ancestors.isEmpty {
-                            // As Today: the parents as text under the name.
-                            Text(verbatim: match.ancestors.joined(separator: " › "))
-                                .font(.caption)
-                                .quietText()
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(verbatim: match.fullName))
-                .accessibilityIdentifier("home.deckSearch.deck.\(match.id)")
-            }
-            if search.offersCreate {
-                // The name sheet checks and saves the name, as Create Deck does.
-                Button {
-                    collection.deckActions.present(.create)
-                    collection.deckActions.name = query
-                } label: {
-                    Label { Text("Create deck named \(query)", bundle: .module) } icon: { Image(systemName: "plus") }
-                }
-                .disabled(!collection.deckActions.canPresent(.create))
-                .accessibilityIdentifier("home.deckSearch.create")
-            }
-        }
-        .accessibilityIdentifier("home.deckSearch.list")
-    }
-}
-
 /// Owns the root's native scroll container; never embed this list in a ScrollView.
 public struct HomeDeckTree: View {
     public let nodes: [CountedDeckNode]
@@ -718,6 +648,8 @@ private struct HomeDeckBranch: View {
     private var path: String {
         node.name.contains("::") ? node.name : (ancestors + [node.name]).joined(separator: "::")
     }
+    /// N20.3: shown and spoken paths join their components with " › ".
+    private var spokenPath: String { path.components(separatedBy: "::").joined(separator: " › ") }
 
     private var expanded: Binding<Bool> {
         Binding(get: { isExpanded?(node.id) ?? !node.studyCollapsed },
@@ -786,7 +718,7 @@ private struct HomeDeckBranch: View {
             .frame(width: ControlMetrics.minimumTarget, height: ControlMetrics.minimumTarget)
             .contentShape(Rectangle())
             // The name as a label: as text it would count as clipped in this control's frame.
-            .accessibilityLabel(Text(verbatim: path))
+            .accessibilityLabel(Text(verbatim: spokenPath))
             .accessibilityValue(disclosureValue)
             .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
     }
@@ -815,12 +747,12 @@ private struct HomeDeckBranch: View {
         }
         // Keep the row action distinct from its native disclosure control.
         .buttonStyle(.plain)
-        .accessibilityLabel(Text(verbatim: path))
+        .accessibilityLabel(Text(verbatim: spokenPath))
         .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
         .accessibilityIdentifier("home.deck.row.\(node.id)")
         .accessibilityAddTraits(selected ? .isSelected : [])
         #if os(macOS)
-        .help(Text(verbatim: path))
+        .help(Text(verbatim: spokenPath))
         #endif
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("home.deck.list")) } action: {
             frameChanged(node.id, $0)
@@ -1018,7 +950,8 @@ private struct HomeSidebarBranch: View {
     let node: CountedDeckNode
     let ancestors: [String]
     private var name: String { node.name.components(separatedBy: "::").last ?? node.name }
-    private var path: String { (ancestors + [name]).joined(separator: "::") }
+    /// N20.3: shown and spoken paths join their components with " › ".
+    private var path: String { (ancestors + [name]).joined(separator: " › ") }
     private var quiet: Bool {
         DeckWaiting(counts: node.counts, filtered: node.filtered)
             .quietInSidebar(selected: collection.navigation.sidebarSelection == .deck(DeckID(node.id)))

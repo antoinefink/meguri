@@ -102,6 +102,56 @@ import Testing
         #expect(!model.canPresent(.subdeck(6)))
     }
 
+    /// D1's table, read back in human form; H7 reports a saved name only when it differs.
+    @Test func conversionFollowsTheComponentRule() {
+        #expect(DeckNaming.converted("A::B::C") == "A::B::C")
+        #expect(DeckNaming.converted("  A ::  :B: \u{0007}x ::  ") == "A::B: x::blank")
+        #expect(DeckNaming.converted("a:::b") == "a::b")
+        #expect(DeckNaming.converted("::a") == "blank::a")
+        #expect(DeckNaming.converted("") == "blank")
+        #expect(DeckNaming.converted("e\u{0001}\u{0301}") == "\u{00E9}")
+        #expect(DeckNaming.converted("Languages:: 読解 ") == "Languages::読解")
+    }
+
+    @Test func confirmFollowsTheBlankRuleAndCodePointEquality() async {
+        let owner = await makeOwner(), model = owner.deckActions
+        model.present(.create)
+        for blank in ["", "   ", "\u{3000}", "\t\n"] {
+            model.name = blank
+            #expect(!model.canSubmit, "blank: \(blank.unicodeScalars.map(\.value))")
+        }
+        model.name = "::"
+        #expect(model.canSubmit, "\"::\" is not blank (R58)")
+        model.cancel()
+
+        model.present(.rename(2))
+        #expect(!model.canSubmit)
+        model.parentID = 7
+        #expect(model.canSubmit)
+        model.parentID = 1
+        #expect(!model.canSubmit, "Changed and changed back")
+        model.name = "日本語 "
+        #expect(model.canSubmit, "A trailing space is a difference; D6 decides")
+        // Canonically equal but different code points still count as a change.
+        model.cancel()
+        model.present(.rename(5))
+        model.name = "Espan\u{0303}ol"
+        #expect(model.canSubmit)
+        model.cancel()
+    }
+
+    @Test func theFormKeepsTheTreeItReadWhenItOpened() async {
+        let owner = await makeOwner(), model = owner.deckActions
+        model.present(.subdeck(7))
+        owner.loadDeckTree = { CountedDeckTree(generation: 11, nextChangeAt: Int64.max, nodes: [Self.node(7, "Science")]) }
+        await owner.loadCounts()
+        #expect(model.parentChoices.map(\.id) == [1, 2, 3, 4, 5, 7])
+        #expect(model.parent?.fullName == "Science")
+        model.name = "QZ71"
+        #expect(model.composedName == "Science::QZ71")
+        model.cancel()
+    }
+
     private func makeOwner() async -> ReviewCollection {
         let owner = ReviewCollection(configuration: LaunchConfiguration(), navigation: AppNavigation())
         owner.loadDeckTree = { CountedDeckTree(generation: 11, nextChangeAt: Int64.max, nodes: Self.tree) }

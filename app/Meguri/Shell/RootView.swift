@@ -22,6 +22,7 @@ struct RootView: View {
     @State private var launchSheet: Bool
     @State private var launchAlert: Bool
     @State private var linkRefusal: DeepLinkRefusal?
+    @State private var deckNameBesideList = false
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.layoutFollowsForcedSizeClass) private var layoutFollowsForcedSizeClass
@@ -88,8 +89,8 @@ struct RootView: View {
                 }
             }
         }
+        .focusedSceneValue(\.nativeCommandContext, collection.map { NativeCommandContext(collection: $0, host: .main, layout: layout) })
         #if os(macOS)
-        .focusedSceneValue(\.nativeCommandContext, collection.map { NativeCommandContext(collection: $0, host: .main) })
         // Hide only the presenting shell; sheets and alerts own their AX tree.
         .accessibilityHidden(launchSheet || launchAlert || linkRefusal != nil || hasModalSheet)
         .background(AddNoteWindowGuard(navigation: navigation))
@@ -98,9 +99,13 @@ struct RootView: View {
             if request != nil, collection?.sync.providerState?.selection == .meguri { openSettings() }
         }
         #endif
+        #if os(iOS)
+        .onPreferenceChange(DeckNameBesideListKey.self) { deckNameBesideList = $0 }
+        #endif
         .modifier(PresentationHost(
             navigation: navigation, features: features, configuration: configuration,
-            isActive: !(layout == .compact && navigation.review != nil)
+            isActive: !(layout == .compact && navigation.review != nil),
+            deckNameBesideList: layout == .compact && deckNameBesideList
         ))
         .environment(\.shellLayout, layout)
         .sheet(isPresented: $launchSheet) {

@@ -9,6 +9,7 @@ public struct DeckNameForm: View {
     @Bindable private var model: DeckActionsModel
     private let embedded: Bool
     @FocusState private var nameFocused: Bool
+    @State private var selection: TextSelection?
 
     public init(model: DeckActionsModel, embedded: Bool = false) {
         self.model = model; self.embedded = embedded
@@ -78,7 +79,12 @@ public struct DeckNameForm: View {
                 }
             }
         }
-        .task { nameFocused = true }
+        .task {
+            // D19.3: focus in Name, the cursor at the end.
+            nameFocused = true
+            await Task.yield()
+            selection = TextSelection(insertionPoint: model.name.endIndex)
+        }
     }
 
     @ViewBuilder private var nameRow: some View {
@@ -101,7 +107,7 @@ public struct DeckNameForm: View {
     }
 
     private var nameField: some View {
-        TextField(text: $model.name, prompt: namePrompt) { Text("Name", bundle: .module) }
+        TextField(text: $model.name, selection: $selection, prompt: namePrompt) { Text("Name", bundle: .module) }
             .focused($nameFocused)
             .disabled(model.busy || model.needsRefresh)
             .accessibilityIdentifier("home.deckName.name")
@@ -120,6 +126,7 @@ public struct DeckNameForm: View {
         if model.finalName == nil {
             Picker(selection: $model.parentID) {
                 Text("None", bundle: .module).tag(Int64?.none)
+                if !model.parentChoices.isEmpty { Divider() }
                 ForEach(model.parentChoices) { choice in
                     // Indented by depth; read as the whole path.
                     Text(verbatim: String(repeating: "\u{2003}", count: choice.depth) + choice.name)

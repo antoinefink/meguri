@@ -18,6 +18,12 @@ public final class DeckActionsModel {
     /// A parent the tree does not show (the hidden Default deck, D12), kept
     /// so that its subdecks can still be named.
     private var unlistedParent: DeckParentChoice?
+    /// D19.2: the tree as the form read it when it opened, and the renamed
+    /// deck's full name then; a later change does not update an open form.
+    private var formTree: [CountedDeckNode] = []
+    private var originalName: String?
+    /// The full name the last Create or Rename sent.
+    private var submittedName: String?
     public private(set) var busy = false
     public private(set) var cancelling = false
     public private(set) var message: String?
@@ -55,19 +61,20 @@ public final class DeckActionsModel {
         revision &+= 1
         self.action = action; generation = owner.generation
         message = nil; finalName = nil; pendingResult = nil; pendingPage = nil; cancelling = false
-        unlistedParent = nil
+        unlistedParent = nil; formTree = owner.decks; originalName = nil
         switch action {
         case .create:
             name = preset ?? ""; parentID = nil
         case .rename(let id):
             let full = owner.fullDeckName(id) ?? ""
-            parentID = DeckNaming.parent(of: id, in: owner.decks)?.id
+            originalName = full
+            parentID = DeckNaming.parent(of: id, in: formTree)?.id
             // A deck whose parent the tree does not show keeps its whole name,
             // so that saving it unchanged never moves it.
             name = parentID == nil && full.contains("::") ? full : full.components(separatedBy: "::").last ?? ""
         case .subdeck(let id):
             name = preset ?? ""; parentID = id
-            if !Self.choices(in: owner.decks, excluding: nil).contains(where: { $0.id == id }),
+            if !Self.choices(in: formTree, excluding: nil).contains(where: { $0.id == id }),
                let path = owner.fullDeckName(id)?.components(separatedBy: "::") {
                 unlistedParent = DeckParentChoice(id: id, name: path.last ?? "", path: path)
             }
@@ -79,10 +86,9 @@ public final class DeckActionsModel {
     /// The Parent Deck menu after None: the tree's normal decks; for Rename,
     /// without the deck itself and its subdecks.
     public var parentChoices: [DeckParentChoice] {
-        guard let owner else { return [] }
         var excluded: Int64?
         if case .rename(let id) = action { excluded = id }
-        let listed = Self.choices(in: owner.decks, excluding: excluded)
+        let listed = Self.choices(in: formTree, excluding: excluded)
         guard let unlistedParent, !listed.contains(where: { $0.id == unlistedParent.id }) else { return listed }
         return [unlistedParent] + listed
     }
@@ -96,20 +102,23 @@ public final class DeckActionsModel {
     /// The full name the form saves (D5, D6).
     public var composedName: String { DeckNaming.fullName(name: name, parent: parent) }
     public var footer: DeckNaming.Footer? {
-        guard let owner else { return nil }
         if case .rename(let id) = action {
-            return DeckNaming.footer(renaming: true, descendants: DeckNaming.descendantCount(of: id, in: owner.decks), parent: parent)
+            return DeckNaming.footer(renaming: true, descendants: DeckNaming.descendantCount(of: id, in: formTree), parent: parent)
         }
         return DeckNaming.footer(renaming: false, descendants: 0, parent: parent)
     }
 
+    /// H7's blank rule (R58): empty, or Unicode White_Space only; "::" is not blank.
+    static func blank(_ text: String) -> Bool { text.unicodeScalars.allSatisfy { $0.properties.isWhitespace } }
+
     public var canSubmit: Bool {
         guard !busy, cancellationTask == nil, finalName == nil, pendingResult == nil,
-              !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !Self.blank(name),
               parentID == nil || parent != nil,
               let action, let owner, generation == owner.generation else { return false }
-        // A rename that would save the name the deck already has changes nothing.
-        if case .rename(let id) = action, composedName == owner.fullDeckName(id) { return false }
+        // D19.4: a rename to the full name the deck already has, code point for code point.
+        if case .rename = action, let originalName,
+           composedName.unicodeScalars.elementsEqual(originalName.unicodeScalars) { return false }
         return owner.deckNamesAllowed(host: .main, route: .deckName(action)) && targetExists(action, owner: owner)
     }
 
@@ -118,6 +127,7 @@ public final class DeckActionsModel {
         // Reserve synchronously, before the task can yield to another submit.
         busy = true; cancelling = false; message = nil
         let expected = generation, current = revision, draft = composedName
+        submittedName = draft
         task = Task {
             defer { rename = nil; progress = nil; busy = false; task = nil }
             if cancelling, current == revision, expected == owner.generation {
@@ -175,6 +185,8 @@ public final class DeckActionsModel {
                 invalidate(); return
             }
             finalName = mutation.name
+            // H7: report the saved name only when it is not just D1's reading of what was typed.
+            let reported = submittedName.map { DeckNaming.converted($0) != mutation.name } ?? true
             do {
                 if pendingPage == nil {
                     guard try await owner.refreshDeckNames(generation: generation), current == revision,
@@ -204,8 +216,9 @@ public final class DeckActionsModel {
                     return
                 }
                 pendingResult = nil; pendingPage = nil; message = nil; cancelling = false
-                // Create and Rename return to the deck's page (N20).
-                if owner.navigation.sheet == .deckName(action), owner.navigation.sheetHost == .main {
+                // Create and Rename return to the deck's page (N20.3), unless the
+                // form has a final name to report (R57, R61), which Done closes.
+                if !reported, owner.navigation.sheet == .deckName(action), owner.navigation.sheetHost == .main {
                     owner.navigation.dismissSheet()
                 }
             } catch {
@@ -267,7 +280,7 @@ public final class DeckActionsModel {
         if let owner, let action, owner.navigation.sheet == .deckName(action), owner.navigation.sheetHost == .main {
             owner.navigation.dismissSheet()
         }
-        action = nil; name = ""; parentID = nil; unlistedParent = nil
+        action = nil; name = ""; parentID = nil; unlistedParent = nil; formTree = []; originalName = nil
         finalName = nil; message = nil; pendingResult = nil; pendingPage = nil
     }
 

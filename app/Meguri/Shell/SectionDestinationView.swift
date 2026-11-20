@@ -44,6 +44,12 @@ struct ShellFeatures {
     /// The rows of the sidebar's "Decks" group, each tagged
     /// `SidebarItem.deck(id)` so that selecting it opens the deck's page.
     var sidebarDecks: (AppNavigation) -> AnyView
+    /// The sidebar with its deck search around it (N20.1); fixtures keep the bare list.
+    var sidebarSearch: (AnyView) -> AnyView = { $0 }
+    /// N20.3: the naming form in the detail beside the deck list (iPhone at
+    /// regular width), and what choosing another row does to it: Cancel.
+    var deckNameBesideList: () -> AnyView = { AnyView(EmptyView()) }
+    var cancelDeckName: () -> Void = {}
     var review: (ReviewPresentation, AppNavigation) -> AnyView
     var sheet: (SheetRoute, AppNavigation) -> AnyView
     var deckExists: (DeckID) async -> Bool
@@ -71,6 +77,9 @@ struct ShellFeatures {
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
         features.sidebarDecks = { _ in AnyView(HomeSidebarDecks(collection: collection)) }
+        features.sidebarSearch = { list in AnyView(HomeSidebarDeckSearch(collection: collection) { list }) }
+        features.deckNameBesideList = { AnyView(DeckNameForm(model: collection.deckActions, embedded: true)) }
+        features.cancelDeckName = { if !collection.deckActions.busy { collection.deckActions.cancel() } }
         features.review = { presentation, _ in
             if let model = presentation.session as? ReviewCoordinator {
                 AnyView(ReviewDestination(model: model, collection: collection))
@@ -78,7 +87,6 @@ struct ShellFeatures {
         }
         features.sheet = { route, navigation in
             switch route {
-            case .goToDeck: AnyView(GoToDeckView(collection: collection))
             case .collectionEntry: AnyView(CollectionEntryView(coordinator: collection.entry))
             case .deckName: AnyView(DeckNameForm(model: collection.deckActions))
             case .collectionExport: AnyView(CollectionExportDestination(coordinator: collection.collectionExport))
