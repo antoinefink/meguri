@@ -1,6 +1,6 @@
 use super::AddFieldIdentity;
 use crate::undo::names::UPDATE_NOTE;
-use crate::{Collection, EngineError, OpResult};
+use crate::{Collection, EngineError, OpResult, SessionId};
 use meguri_model::changes::OpSource;
 use meguri_model::ids::{CardId, NoteId, NotetypeId};
 use meguri_model::note::Note;
@@ -54,9 +54,23 @@ pub fn update_in(scope: &mut WriteScope<'_>, input: &UpdateNote) -> Result<Updat
 /// The same op and step name as `update`, so consecutive patches of one
 /// note merge as `engine/undo` A3 says.
 pub fn patch(collection: &Collection, input: NotePatch, source: OpSource) -> Result<OpResult<Updated>, EngineError> {
-    collection.run(super::op_spec(UPDATE_NOTE, source, 1), move |context| {
-        patch_in(context.scope(), &input)
-    })
+    patch_for(collection, input, source, None)
+}
+
+/// `review/edit-current` E2: the review's Edit Note names its session, so
+/// the step belongs to that session's undo scope (`engine/undo` M3). The
+/// review admits the call (`ReviewService::patch_note`); other hosts pass none.
+pub fn patch_for(
+    collection: &Collection,
+    input: NotePatch,
+    source: OpSource,
+    session: Option<SessionId>,
+) -> Result<OpResult<Updated>, EngineError> {
+    let mut spec = super::op_spec(UPDATE_NOTE, source, 1);
+    if let Some(id) = session {
+        spec = spec.session(id);
+    }
+    collection.run(spec, move |context| patch_in(context.scope(), &input))
 }
 
 /// Reads the live rows in the writer's transaction and refuses, writing

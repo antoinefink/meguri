@@ -201,11 +201,17 @@ public protocol NoteService: Sendable {
     func addNote(_ request: AddNoteRequest) async throws(BridgeError) -> NoteMutation
     func addNoteForScreen(_ request: AddScreenNoteRequest) async throws(BridgeError) -> NoteMutation
     func updateNote(_ request: UpdateNoteRequest) async throws(BridgeError) -> NoteMutation
-    func patchNote(_ request: NoteFieldPatch) async throws(BridgeError) -> NoteMutation
+    func patchNote(_ request: NoteFieldPatch, sessionID: UInt64?) async throws(BridgeError) -> NoteMutation
     func cardDeck(cardId: Int64) async throws(BridgeError) -> Int64
     func readNote(id: Int64) async throws(BridgeError) -> NoteRecord
     func checkNoteFields(notetypeId: Int64, fields: [String], ownNote: Int64?) async throws(BridgeError) -> FieldCheck
     func startDeleteNotes(ids: [Int64]) async throws(BridgeError) -> CoreNoteDeletionJob
+}
+extension NoteService {
+    /// A patch that names no review session (Browse, the edit flows).
+    public func patchNote(_ request: NoteFieldPatch) async throws(BridgeError) -> NoteMutation {
+        try await patchNote(request, sessionID: nil)
+    }
 }
 public actor CoreNoteService: NoteService {
     public init() {}
@@ -225,8 +231,12 @@ public actor CoreNoteService: NoteService {
     }
     /// The editor's field patch: the same op and "Update Note" step as
     /// `updateNote`, on the interactive queue.
-    public func patchNote(_ request: NoteFieldPatch) async throws(BridgeError) -> NoteMutation {
-        try await InteractiveLane.shared.call(.patchNote) { NoteMutation(try MeguriCoreBindings.patchNote(request: request.raw)) }
+    /// `sessionID`: the open review session when the review's Edit Note saves
+    /// (`review/edit-current` E2), so the step is that session's.
+    public func patchNote(_ request: NoteFieldPatch, sessionID: UInt64? = nil) async throws(BridgeError) -> NoteMutation {
+        try await InteractiveLane.shared.call(.patchNote) {
+            NoteMutation(try MeguriCoreBindings.patchNote(request: request.raw, sessionId: sessionID))
+        }
     }
     /// The deck the card is in now.
     public func cardDeck(cardId: Int64) async throws(BridgeError) -> Int64 {
