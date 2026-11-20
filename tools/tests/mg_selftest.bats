@@ -493,6 +493,8 @@ docker_invoke_fixture() {
 jq -nc --args '$ARGS.positional' -- "$@" >>"$STUB_LOG"
 case "$1" in
   info|ps) exit 0 ;;
+  image) [ "$2" = inspect ] || exit 97; exit "${STUB_IMAGE_RC:-0}" ;;
+  tag) exit 0 ;;
   compose) shift ;;
   *) exit 97 ;;
 esac
@@ -556,6 +558,44 @@ EOF
   [ "$(field '.failures[0].id')" = image-build ]
   [[ "$(field '.failures[0].repro')" == 'docker compose -p '*" -f docker/compose.yml build dev" ]]
   jq -es 'map(select(.[0] == "compose")) | length == 1 and .[0][5:] == ["--progress", "plain", "build", "dev"]' "$STUB_LOG"
+  validate "$result"
+}
+
+@test "docker invocation takes the CI image named by MEGURI_CI_DEV_IMAGE as this checkout's dev image instead of building" {
+  docker_invoke_fixture
+  MEGURI_CI_DEV_IMAGE=ghcr.io/owner/meguri-dev:0123abcd mg fx-docker one
+  [ "$status" -eq 0 ]
+  [ "$(field -c .details.args)" = '["one"]' ]
+  jq -es '
+    map(select(.[0] == "compose")) as $compose
+    | ($compose | length) == 1
+      and $compose[0][5:8] == ["run", "--pull", "never"]
+      and map(select(.[0] == "image")) == [["image", "inspect", "ghcr.io/owner/meguri-dev:0123abcd"]]
+      and map(select(.[0] == "tag")) == [["tag", "ghcr.io/owner/meguri-dev:0123abcd", ($compose[0][2] + "-dev")]]
+  ' "$STUB_LOG"
+  validate "$result"
+}
+
+@test "docker invocation takes a CI image named by digest" {
+  docker_invoke_fixture
+  local ref="ghcr.io/owner/meguri-dev@sha256:$(printf '%064d' 0)"
+  MEGURI_CI_DEV_IMAGE="$ref" mg fx-docker one
+  [ "$status" -eq 0 ]
+  jq -es --arg ref "$ref" '
+    map(select(.[0] == "compose")) as $compose
+    | ($compose | length) == 1 and $compose[0][5:8] == ["run", "--pull", "never"]
+      and map(select(.[0] == "tag")) == [["tag", $ref, ($compose[0][2] + "-dev")]]
+  ' "$STUB_LOG"
+  validate "$result"
+}
+
+@test "docker invocation errs, and neither builds nor runs, when the CI image named by MEGURI_CI_DEV_IMAGE is absent" {
+  docker_invoke_fixture
+  STUB_IMAGE_RC=1 MEGURI_CI_DEV_IMAGE=ghcr.io/owner/meguri-dev:0123abcd mg fx-docker
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = image-build ]
+  jq -es 'map(select(.[0] == "compose" or .[0] == "tag")) | length == 0' "$STUB_LOG"
   validate "$result"
 }
 
