@@ -75,6 +75,8 @@ pub mod cloud_reset_adoption;
 pub mod cloud_review_roundtrip;
 #[path = "cloud_selected_control.rs"]
 pub mod cloud_selected_control;
+#[path = "cloud_setup.rs"]
+pub mod cloud_setup;
 #[cfg(feature = "test-hooks")]
 #[path = "endpoint_guard.rs"]
 pub mod endpoint_guard;
