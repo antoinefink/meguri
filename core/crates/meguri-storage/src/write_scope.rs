@@ -329,6 +329,12 @@ impl<'c> WriteScope<'c> {
         self.put_cells(Table::Cards, card.to_cells(), true)
     }
 
+    /// Stamp even an unchanged note: a note type structure change rewrites
+    /// every note of the type (`notetypes/structure-changes` S5, R927).
+    pub fn put_note_forced(&mut self, note: &Note) -> Result<Written, StorageError> {
+        self.put_cells(Table::Notes, note.to_cells(), true)
+    }
+
     /// Replace data while preserving every other stored scheduling column,
     /// including imported values that a typed whole-card write would normalize.
     /// The ordinary scope stamps and journals only a changed row.

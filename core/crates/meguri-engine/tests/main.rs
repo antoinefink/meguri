@@ -70,6 +70,8 @@ pub mod memory_recompute;
 pub mod notetype_field_rename;
 #[path = "notetype_records.rs"]
 pub mod notetype_records;
+#[path = "notetype_structure.rs"]
+pub mod notetype_structure;
 #[path = "observers.rs"]
 pub mod observers;
 #[path = "op_catalog.rs"]

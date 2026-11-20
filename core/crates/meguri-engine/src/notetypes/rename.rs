@@ -3,7 +3,7 @@
 //! spans and G9; the writer validates the captured aggregate and identities
 //! again before saving the type and committing G9 in the same journal.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,8 +11,8 @@ use meguri_model::changes::OpSource;
 use meguri_model::ids::NotetypeId;
 use meguri_model::notetype::{Notetype, NotetypeField};
 use meguri_storage::{ReadRows, ReaderRole, Table, WriteScope};
-use meguri_template::{NodeKind, ParsedTemplate};
 
+use super::rewrite::{Map, Side, Target, rewrite};
 use super::{AggregateDigest, InvalidNotetype, NotetypeKind, Saved, names, write};
 use crate::cardgen::regenerate::{self, RegenerationPlan};
 use crate::executor::catalog;
@@ -60,6 +60,13 @@ pub struct FieldRenamePlan {
     renamed: Notetype,
     changed: bool,
     regeneration: Option<RegenerationPlan>,
+}
+
+impl FieldRenamePlan {
+    /// Whether the commit generates cards (G9): its write is then declared.
+    pub(crate) fn regenerates(&self) -> bool {
+        self.regeneration.is_some()
+    }
 }
 
 fn invalid(message: &str) -> EngineError {
@@ -123,12 +130,12 @@ pub fn plan(
         return Err(InvalidNotetype::NoTemplate.into());
     }
     names::normalize_field_names(&mut renamed.fields)?;
-    let map: HashMap<&str, &str> = stored
+    let map: Map<'_> = stored
         .fields
         .iter()
         .zip(&renamed.fields)
         .filter(|(before, after)| before.name != after.name)
-        .map(|(before, after)| (before.name.as_str(), after.name.as_str()))
+        .map(|(before, after)| (before.name.as_str(), Target::Renamed(after.name.as_str())))
         .collect();
     let changed = !map.is_empty();
     if !changed {
@@ -146,10 +153,10 @@ pub fn plan(
     for template in &mut renamed.templates {
         cancel.check()?;
         let config = &mut template.config;
-        config.q_format = rewrite(&config.q_format, &map, first, cloze, true, false);
-        config.a_format = rewrite(&config.a_format, &map, first, cloze, false, false);
-        config.q_format_browser = rewrite(&config.q_format_browser, &map, first, cloze, true, true);
-        config.a_format_browser = rewrite(&config.a_format_browser, &map, first, cloze, false, true);
+        config.q_format = rewrite(&config.q_format, &map, first, cloze, Side::Front);
+        config.a_format = rewrite(&config.a_format, &map, first, cloze, Side::Back);
+        config.q_format_browser = rewrite(&config.q_format_browser, &map, first, cloze, Side::BrowserFront);
+        config.a_format_browser = rewrite(&config.a_format_browser, &map, first, cloze, Side::BrowserBack);
     }
     drop(map);
     // Preserve unknown members of retained requirement records as well as
@@ -190,77 +197,42 @@ pub fn plan(
     })
 }
 
-fn rewrite(source: &str, map: &HashMap<&str, &str>, first: &str, cloze: bool, front: bool, browser: bool) -> String {
-    if browser && source.is_empty() {
-        return source.to_owned();
-    }
-    let parsed = ParsedTemplate::parse(source);
-    if parsed.structure_error().is_some() {
-        return source.to_owned();
-    }
-    let mut output = String::with_capacity(source.len());
-    let mut through = 0;
-    let mut replacement = false;
-    let mut cloze_replacement = false;
-    for node in parsed.nodes() {
-        let key = match &node.kind {
-            NodeKind::Replacement { key, filters } => {
-                replacement = true;
-                cloze_replacement |= filters.iter().any(|filter| filter == "cloze");
-                key
-            }
-            NodeKind::Open { key, .. } | NodeKind::Close { key } => key,
-            _ => continue,
-        };
-        if let Some(final_name) = map.get(key.as_str()) {
-            // U60's parsed key is the suffix before the tag's trailing
-            // whitespace and closer. Replace that span only: preserve
-            // braces, spacing, filter order and delimiter prefix verbatim.
-            let inner_end = node.span.end - parsed.delimiters().close().len();
-            let key_end = source[..inner_end].trim_end().len();
-            let key_start = key_end - key.len();
-            output.push_str(&source[through..key_start]);
-            output.push_str(final_name);
-            through = key_end;
-        }
-    }
-    output.push_str(&source[through..]);
-    if (cloze && !cloze_replacement) || (!cloze && front && !replacement) {
-        output.push_str(parsed.delimiters().open());
-        if cloze {
-            output.push_str("cloze:");
-        }
-        output.push_str(first);
-        output.push_str(parsed.delimiters().close());
-    }
-    output
-}
-
 /// Apply inside the caller's executor transaction. Validate before any
 /// write, including normalized no-ops. G9 re-derives live note/card
 /// membership here; it never runs as a second operation or undo step.
 pub fn commit_in(scope: &mut WriteScope<'_>, planned: &FieldRenamePlan) -> Result<Saved, EngineError> {
+    commit_counted(scope, planned).map(|(saved, _)| saved)
+}
+
+/// [`commit_in`], with the number of cards G9 generated.
+pub(crate) fn commit_counted(
+    scope: &mut WriteScope<'_>,
+    planned: &FieldRenamePlan,
+) -> Result<(Saved, usize), EngineError> {
     let stored = validate(scope, &planned.request)?;
     if !planned.changed {
-        return Ok(Saved {
+        let saved = Saved {
             id: planned.renamed.id,
             name: planned.renamed.name.clone(),
             written: false,
-        });
+        };
+        return Ok((saved, 0));
     }
     let mut contribution = meguri_storage::journal::StructureReport::default();
     contribution.layouts.insert(stored.id.0, meguri_storage::journal::LayoutReport::identity(&stored)?);
     let report = scope.start_structure_report(contribution)?;
     let written = scope.put_notetype(&planned.renamed)?;
     scope.complete_structure_report(report)?;
-    if let Some(regeneration) = &planned.regeneration {
-        regenerate::commit_in(scope, regeneration)?;
-    }
-    Ok(Saved {
+    let cards = match &planned.regeneration {
+        Some(regeneration) => regenerate::commit_in(scope, regeneration)?.len(),
+        None => 0,
+    };
+    let saved = Saved {
         id: planned.renamed.id,
         name: planned.renamed.name.clone(),
         written: written.changed(),
-    })
+    };
+    Ok((saved, cards))
 }
 
 /// Blocking worker entry point, with G9's progress/cancellation and declared

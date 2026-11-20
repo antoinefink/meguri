@@ -176,6 +176,7 @@ impl RuntimeError {
                     EngineError::Cancelled => "Cancelled",
                     EngineError::SchemaNotMarked { .. } => "SchemaNotMarked",
                     EngineError::NotetypeRefused(_) => "NotetypeRefused",
+                    EngineError::NotetypeStructure(_) => "NotetypeStructure",
                     EngineError::Open(_) => "Open",
                     EngineError::Storage(_) => "Storage",
                     EngineError::SafetyBackupFailed(_) => "SafetyBackupFailed",
