@@ -78,3 +78,13 @@ The same reviewer re-read the fix. All 17 findings are closed, and the reviewer 
 - `conformance/browser-ops` B1 has the `fld:` exception.
 
 After the re-review the coordinator added a sentence to the Status lines of `browser/entry-points`, `notetypes/restore-to-default`, `notetypes/structure-changes`, `notetypes/draft-save`, `notetypes/change-notetype`, `sync/meguri-provider` and `package/backup-triggers` saying that the lines marked "(round 8 review)" or "(round 9 review)" are in force and on what basis. The conformance specs have no Status line.
+
+## CodeRabbit on the folded #22 (on 4d443b9c0)
+
+CodeRabbit left six comments on the folded result, and the coordinator accepted all six. One commit on `unit/browse-specs-approved` fixes them:
+
+- **Clear:** E10's row now matches E7's round 8 review line.
+- **`fld:` keys:** B1's `unsortable` sentence excludes them.
+- **Change Note Type:** the executor's read before it submits decides no refusal, so the op's own `not_found` is the one answer.
+- **Service at Save:** draft-save D3 reads the service at Save, in both directions.
+- **Deleted note type:** a restore of a note type deleted before the write is `Stale`, and so is an MP7 round that removes it, ahead of `LossesChanged`.

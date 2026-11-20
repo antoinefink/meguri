@@ -147,7 +147,7 @@ Anki's search field holds at most 2,000,000 UTF-16 code units: typing stops ther
 | Stats' joined text is recorded in canonical form; Anki does not record it | Decided 2026-10-27 (U210) | E3 rule 5, E6 |
 | A failed parse or run of the default search, or of a commit, shows inline, with the earlier result dimmed; Anki shows a modal warning | R1108 | E2 rule 6, E5 |
 | A handed search that does not parse shows inline in the field; Anki's callers never hand one, and one would raise its error dialog with the field unchanged | R1108, R1114 | E3 rule 4 |
-| Clear and the empty state's action run the default search; Esc never leaves Browse | R1092, R1110 | E7 |
+| Clear, the second Esc and the empty state's action empty the query and run the whole collection (E7's round 8 review line); Esc never leaves Browse (changed 2026-11-20, round 8 review) | R1092, R1110 | E7 |
 | The recent-search list is per device and survives a change of collection; Anki's history belongs to its profile | KTD12, R1102 | E6 |
 | A text Meguri writes into the field is never cut at the length limit; Anki cuts what it shows, and then runs either the whole text or the cut one | The field and the run never differ | E9 |
 
