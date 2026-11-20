@@ -837,8 +837,8 @@ Decided 2026-11-20 (`decisions.md`, `home.deckActions`, option 4B). The operatio
 
 | Where | Form | Buttons |
 |---|---|---|
-| iPhone; iPhone Duo folded or held tall; iPad at compact width | a confirmation dialog from the bottom | Delete Deck (destructive), Cancel |
-| Regular width on touch (iPad, the Duo held wide) | a popover beside the deck's row, in the list's half; from the menu bar with no row in view, the system's placement | Delete Deck (destructive); tapping elsewhere cancels, so there is no Cancel |
+| iPhone; iPhone Duo folded or held tall; iPad at compact width | the system's confirmation dialog, which iOS 27 shows as a popover from the deck's row (earlier systems: from the bottom) | Delete Deck (destructive); Cancel where the system shows one, otherwise tapping elsewhere cancels |
+| Regular width on touch (iPad, the Duo held wide) | a popover beside the deck's row, in the list's half; from the menu bar, the system's placement | Delete Deck (destructive); tapping elsewhere cancels, so there is no Cancel |
 | Mac | an alert on the window, with the app icon | Cancel and Delete; Delete has the destructive role and is never the default, so Return deletes nothing; Esc cancels |
 
 - Cancelling changes nothing.
