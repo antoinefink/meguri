@@ -46,7 +46,7 @@ The inspector beside the table holds, for the selected field:
 | Placeholder, with the help line "Grey text shown while the field is empty" | `description` | the hint shown in an empty field (`editor/field-html` F1) |
 
 - Sort Field is the table's Sort column (W3).
-- Not shown in this version: the editing font and size (`font_name`, `font_size`: editor settings, decided 2026-11-20), "Use HTML editor by default" (`plain_text`) and "Exclude from unqualified searches" (`exclude_from_search`) (default, open point for the owner in the plan). Their stored values are kept exactly: a draft carries every field option of the base unchanged (`notetypes/structure-changes` S1.1), and a new field takes N5.2's defaults.
+- Not shown in this version: the editing font and size (`font_name`, `font_size`: editor settings, decided 2026-11-20), "Use HTML editor by default" (`plain_text`) and "Exclude from unqualified searches" (`exclude_from_search`) (decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day ("Carry on here and in general with your best jugment")). The core keeps honouring a stored `exclude_from_search` in search (`search/text-matching` T7). Their stored values are kept exactly: a draft carries every field option of the base unchanged (`notetypes/structure-changes` S1.1), and a new field takes N5.2's defaults.
 - These per-field options are editor and search settings stored in the note type. None of them changes how a card is rendered in review; card appearance is the templates and the styling (W9, W10).
 
 ## W5. Card types (the Cards tab's list)
@@ -140,7 +140,7 @@ The last declaration of a property in the rule is the one read and edited (CSS's
 
 ## W14. Ways in and back
 
-- Mac and iPad: the Note Types sidebar row (below Browse; with `rectangle.stack` as its symbol, like Today and Browse) and View › Note Types ⇧⌘T. iPhone and the Duo: Settings › Collection › Note Types, and Browse's Filters menu (N22.1).
+- Mac and iPad: the Note Types sidebar row (below Browse; with `rectangle.stack` as its system symbol, like Today and Browse; decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day ("Carry on here and in general with your best jugment")) and View › Note Types ⇧⌘T. iPhone and the Duo: Settings › Collection › Note Types, and Browse's Filters menu (N22.1).
 - Edit Note Type… (Browse's Note menu, a note type's sidebar row in Browse, the inspector's Type menu, the status line's column set menu; the Add Note and Edit Note forms' Type menu): selects the Note Types section on that note type, its Cards tab, with the note it came from in the preview, and shows a Back button in the toolbar that returns to the screen it came from with its state.
 - From review: More › Edit Note, then its Type menu's Edit Note Type…; it leaves the review (saved; it resumes).
 

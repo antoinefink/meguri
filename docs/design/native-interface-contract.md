@@ -936,7 +936,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` ro
 
 ### N22.1 Where Note Types lives (1B)
 
-- Mac and iPad: a Note Types row in the sidebar under Browse, with its system symbol (`rectangle.stack`, matching Today and Browse). Its detail is list · detail: a column listing the note types (filter field, + button) and the selected note type's detail with Fields | Cards tabs in the toolbar, Revert and Save (Save… when it will ask) at the trailing edge, and the title "<name>" with "<n> notes · <c> cards" as its subtitle.
+- Mac and iPad: a Note Types row in the sidebar under Browse, with its system symbol (`rectangle.stack`, matching Today and Browse; decided by Claude under Antoine's delegation, 2026-11-20). Its detail is list · detail: a column listing the note types (filter field, + button) and the selected note type's detail with Fields | Cards tabs in the toolbar, Revert and Save (Save… when it will ask) at the trailing edge, and the title "<name>" with "<n> notes · <c> cards" as its subtitle.
 - View › Note Types ⇧⌘T; File › New Note Type… (no key). ⇧⌘N stays New Deck…. R282's and R915's ⇧⌘N for Note Types are superseded.
 - iPhone and the Duo folded: Settings › Collection › Note Types and the Filters menu of Browse push the list; no tab.
 - Under about 1,100 points the sidebar hides itself while the Cards tab shows, as Mail and Xcode do with their navigators.

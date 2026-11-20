@@ -126,7 +126,7 @@ Each carries a note in the parent plan ("Superseded 2026-11-20 …"), with the d
 ## 6. Decisions and defaults (each an assumption the specs make; the owner can change any)
 
 1. **Question 8 (iPhone, folded Duo)** for Note Types: 8B, now confirmed by Antoine (decisions.md).
-2. **Field options**: font and size not shown, values kept (decided). By default also not shown in this version: "Use HTML editor by default" and "Exclude from unqualified searches" (values kept). Shown: Name, Sort Field (table), Collapsed in Editor, Right-to-Left, Placeholder, each with a one-line purpose (`notetypes/workspace` W4). Verified in the specs: font, size, RTL, HTML-by-default, collapse and description are editing-form settings stored in the note type (`notetypes/records` N2, `editor/field-html` F1–F3); none changes the rendered card. Exclude-from-search is a search setting (`search/text-matching` T7). **Open: confirm hiding the last two.**
+2. **Field options**: font and size not shown, values kept (decided). Also not shown in this version: "Use HTML editor by default" and "Exclude from unqualified searches"; stored values are kept, and the core keeps honouring a stored exclude-from-search in search (decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day ("Carry on here and in general with your best jugment")). Shown: Name, Sort Field (table), Collapsed in Editor, Right-to-Left, Placeholder, each with a one-line purpose (`notetypes/workspace` W4). Verified in the specs: font, size, RTL, HTML-by-default, collapse and description are editing-form settings stored in the note type (`notetypes/records` N2, `editor/field-html` F1–F3); none changes the rendered card. Exclude-from-search is a search setting (`search/text-matching` T7).
 3. **Leech** is a Card State value (`tag:leech`), so "Suspended or Leech" is one token; the sidebar reaches it through the built-in Leeches saved search.
 4. **Day values** read "Today", "Last 7 Days", "Last 30 Days" (Anki's `added:7`, `added:30`), not "This Week" and "This Month", which would not be true; the built-in saved search is "Added in Last 7 Days". Due: Today, Overdue, Next 7 Days (tomorrow to seven days).
 5. **Built-in saved searches** (Due Today, Added in Last 7 Days, Leeches) are not stored in the collection and cannot be renamed or deleted in this version (writing them on open would change the collection without a user action, R1138).
@@ -136,25 +136,21 @@ Each carries a note in the parent plan ("Superseded 2026-11-20 …"), with the d
 9. **Card Info key** stays ⌥⌘I (R1226): the design's ⌘I is Italic while a field has focus.
 10. **⇧⌘B**: View › Browse, and Card › Show in Browse while review presents a card (the two are never enabled together).
 11. **No Flag** gets ⌘0; Flag sets (it does not toggle).
-12. **Delete** follows the design's full rule: it asks when more than one note goes or when the one note has other cards; one note with one card goes at once.
+12. **Delete** follows the design: it asks when more than one note is selected, or when the one note has other cards that would also be deleted; otherwise no question, and Undo restores (decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day ("Carry on here and in general with your best jugment")).
 13. **The Save sheet** says "cards and their progress are deleted", not the design's "and their review history": the review log stays (`notetypes/structure-changes` S6).
 14. **Undo after an upload**: a completed structure upload clears the undo history (an undo would leave the device behind the server).
 15. **Not in the first version**, as the design's "later" list says: Grade Now, Reposition, Mark, Export Selected Notes, Create Copy, batch Edit Field, Clear Unused Tags, filtered decks from a search, sidebar renaming and dragging, Browser Appearance, Update to Current Search.
-16. **Note Types sidebar row** gets a system symbol (`rectangle.stack`) to match Today and Browse; the decision named only those two. **Open: confirm.**
+16. **Note Types sidebar row** gets a system symbol (`rectangle.stack`), like Today and Browse (decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day ("Carry on here and in general with your best jugment")).
 17. **Card Info rows** stay `stats/card-info` C4's (the design's sketch listed a "State" row, which Anki's Card Info does not have).
-18. **Deck page Suspended Cards row**: shown only while the deck has suspended cards.
-19. **"All bulk actions"** is read as the actions round 8's question 7 drew; the page's "Later" list stays later (`browser/workspace` V8.1).
+18. **Deck page Suspended Cards row**: kept; shown only while the deck has suspended cards; it opens Browse filtered to that deck and Suspended (decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day ("Carry on here and in general with your best jugment")).
+19. **"All bulk actions"** means the actions drawn in round 8's question 7 plus Find and Replace and Find Duplicates; the page's "Later" list stays later (`browser/workspace` V8.1; decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day ("Carry on here and in general with your best jugment")).
 20. **Column sets** record no undo step and keep the undo steps (the current-deck selection's class), so a column change never removes "Undo Suspend Cards".
 21. **Status lines** name the requirement R1232 (Browse) or R915 (Note Types) with the round, as `specs/README-format.md` asks for a requirement id; the decision rows are the authority.
 22. **Uploading after an offline structural save** reads the server's facts and uploads with no question; if the server changed since this device's last round, it shows the normal collection choice instead (MP7 step 5).
 
 ## 7. Open points for the owner
 
-- Confirm decision 2 (hide "Use HTML editor by default" and "Exclude from unqualified searches" in the first version).
-- Confirm decision 16 (a symbol on the Note Types sidebar row).
-- Confirm the reading of "all bulk actions in the first version" (decision 19): the actions round 8's question 7 drew, without the round 8 page's "Later" list (Grade Now, Reposition, Mark, Export Selected Notes, Create Copy, Edit Field across notes, Clear Unused Tags, filtered decks from a search).
-- Confirm the deck page's Suspended Cards row (decision 18): the round 8 page drew it under "Ways into Browse", but no decision row names it.
-- Confirm the Delete rule (decision 12): the decision row says "asks when more than one note is selected"; the design's text also asks when the one note has other cards.
+- The five open points of the first version of this plan (decisions 2, 12, 16, 18 and 19) were decided by Claude (coordinator) under Antoine's delegation of 2026-11-20; the coordinator adds the decisions row.
 - Approve the spec lines under review (section 8), so the units of section 4 can start.
 
 ## 8. Spec lines awaiting approval
