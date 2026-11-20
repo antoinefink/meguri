@@ -155,7 +155,7 @@ public struct DeckOptionsPage: View {
                         label(.desiredRetention)
                     }
                     .labelsHidden()
-                    .accessibilityIdentifier("deckOptions.options.option.desiredRetention.stepper")
+                    .accessibilityIdentifier("deckOptions.options.retentionStepper")
                 }
             } label: {
                 label(.desiredRetention)
@@ -178,6 +178,8 @@ public struct DeckOptionsPage: View {
         }
         .labelsHidden()
         .multilineTextAlignment(.trailing)
+        // As wide as its value, so the row keeps its label and value on one line.
+        .fixedSize()
         .focused($focused, equals: row)
         .onSubmit { model.commit(row) }
         #if os(iOS)
