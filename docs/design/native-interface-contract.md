@@ -479,6 +479,7 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`: `set
 
 - Settings is one flat page: a grouped form whose sections are Sync, then Collection. The sections' rows are on the page itself; no row pushes a form that only repeats a section.
 - Mac, and the iPhone Duo's inner display held wide: the sections are a list beside the selected section, as in the system's Settings. Mac keeps N5's Settings scene and N11.4's search field; the list has Sync and Collection. The last selected section is restored (N5).
+- Changed 2026-11-20 (first-run fix; awaiting Antoine's approval). In the Mac Settings window the selected section's title bar names it, so its form shows no second Sync or Collection heading. The flat page and the Duo's wide layout keep each section's heading.
 - iPhone, the Duo folded or held tall, and iPad: the flat page, in the Settings tab or sidebar section (N11.4), with N14.8's title in the tab layout.
 - A Settings section that N11.4 lists and whose unit lands later joins as a further section after Collection, in N11.4's order. This section decides only Sync and Collection.
 - Collection keeps N5's and N12.4's file import and export. Import and export always carry cards and media; there is no media-scope choice (N5).
