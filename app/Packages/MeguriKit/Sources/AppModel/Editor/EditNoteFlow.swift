@@ -146,6 +146,16 @@ public final class EditNoteFlow {
                 return true
             } catch {
                 guard current() else { return false }
+                // The patch committed although the call reports an error: the
+                // note is saved, so the form closes as after a save and the
+                // same patch is never sent again.
+                switch error as? BridgeError {
+                case .commitCompleted?, .mediaCommitPending?:
+                    patchInFlight = false
+                    finish(saved: true)
+                    return true
+                default: break
+                }
                 if case .noteNotFound = error as? BridgeError {
                     // W5.4: the note was deleted; the form closes.
                     noteDeleted(droppingChanges: true)
@@ -170,9 +180,10 @@ public final class EditNoteFlow {
     /// whether the form closed.
     @discardableResult public func requestCancel() async -> Bool {
         if let closeTask { return await closeTask.value }
-        guard isPresented else { return true }
-        // Still opening: the page never held an edit, so nothing is asked.
+        // Still opening: the page never held an edit, so nothing is asked; the
+        // pending open is invalidated (a new epoch) so it cannot present later.
         if opening { finish(saved: false); return true }
+        guard isPresented else { return true }
         guardingClose = true
         let work = Task { () -> Bool in
             // A save may start a reload as it ends: wait until neither runs.
