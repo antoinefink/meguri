@@ -497,6 +497,7 @@ public final class SyncCoordinator {
     private static let round2Key = "meguri.sync.round2Migrated"
     /// Rendering fixtures only: no binding stands behind this value.
     private var renderConnected: Bool?
+    private var renderChoice = false
     /// P25.3: on with no stored value. Written only when the person changes
     /// the switch or P25.2's migration writes off.
     public var storedAutomatic: Bool { (defaults?.object(forKey: Self.automaticKey) as? Bool) ?? memoryAutomatic }
@@ -513,7 +514,9 @@ public final class SyncCoordinator {
             meguriPhase = .setupRequired; meguriEndpoint = "https://sync.example.test/"; meguriUsername = "study-account"
             meguriRoutine = state == .meguriConnected ? .idle : .fullSyncRequired
             meguriLastExchange = recent
-            renderConnected = true
+            // A collection choice is not a ready binding (P25.3); its one action shows (N15.2).
+            renderConnected = state == .meguriConnected
+            renderChoice = state == .meguriNeedsYou
         case .meguriSignIn:
             providerState = .renderFixture(selection: .meguri, phase: .setupRequired)
             meguriPhase = .signedOut; meguriEndpoint = "https://sync.example.test/"
@@ -554,6 +557,7 @@ public final class SyncCoordinator {
     /// connected, the stored value while it is disabled before that.
     public var automaticSwitchValue: Bool { serviceConnected ? settings.automatic && storedAutomatic : storedAutomatic }
     public var automaticSwitchAvailable: Bool {
+        if renderConnected == true { return true }
         guard serviceConnected, !closing, !replacing, !providerActionInProgress, !deviceSettingsSettling else { return false }
         return providerState?.selection != .meguri || meguriAutomaticSettingAvailable || settings.paused
     }
@@ -759,7 +763,8 @@ public final class SyncCoordinator {
         providerChangeAllowed() && !providerActionInProgress && !meguriBusy && !suspended && !replacing
     }
     public var meguriCanChoose: Bool {
-        meguriChoiceAllowed && (meguriStage == .required || meguriStage == .failed) && !meguriBusy && !settings.paused
+        if renderChoice { return true }
+        return meguriChoiceAllowed && (meguriStage == .required || meguriStage == .failed) && !meguriBusy && !settings.paused
     }
     public var meguriCanFinish: Bool {
         !meguriBusy && !settings.paused && meguriOperation.map { MeguriSyncStatusPresentation.canRecover($0.receipt) } == true

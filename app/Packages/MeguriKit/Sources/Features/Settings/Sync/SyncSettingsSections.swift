@@ -395,18 +395,23 @@ struct SyncMainStatusRows: View {
     }
     var body: some View {
         let status = status
-        VStack(alignment: .leading) {
-            Label(SyncText.value(status.titleKey), systemImage: status.symbol)
-            if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
-            if !meguri, let cloud = sync.status {
-                ForEach(Array(SyncStatusCopy.lines(cloud, now: clock.now()).enumerated()), id: \.offset) { _, line in
-                    Text(line).font(.footnote).foregroundStyle(.secondary)
+        // The detail lines sit under the title, beside the symbol, as a system row's subtitle does.
+        Label {
+            VStack(alignment: .leading) {
+                Text(SyncText.value(status.titleKey))
+                if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
+                if !meguri, let cloud = sync.status {
+                    ForEach(Array(SyncStatusCopy.lines(cloud, now: clock.now()).enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if meguri, sync.meguriStage == .media, let progress = sync.meguriMediaProgress {
+                    Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: progress.awaiting)))
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            if meguri, sync.meguriStage == .media, let progress = sync.meguriMediaProgress {
-                Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: progress.awaiting)))
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
+        } icon: {
+            Image(systemName: status.symbol)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("settings.sync.status")
