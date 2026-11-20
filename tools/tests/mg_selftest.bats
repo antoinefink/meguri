@@ -1349,9 +1349,12 @@ core_report_names() {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   core_modes_fixture
   local quick excluded only one two
+  # A library unit test: its binary id is the package, its JSON name is not.
+  write_file core/crates/meguri-ffi/src/lib.rs '#[cfg(test)] mod tests { #[test] fn unit_case() {} }'
   write_file list.txt "# Header comments and blank lines are ignored.
 
 meguri-ffi::hooks hooks_enabled  # needs the FFI hooks feature
+meguri-ffi tests::unit_case  # a library unit test
 meguri-engine::session_predict ${SESSION_CASE}_extra"
   mg core-test --quick
   [ "$status" -eq 0 ]
@@ -1360,9 +1363,10 @@ meguri-engine::session_predict ${SESSION_CASE}_extra"
   mg core-test --quick --exclude-list list.txt
   [ "$status" -eq 0 ]
   excluded="$(core_report_names)"
-  jq -e '.details.hosted_selection | .list_mode == "exclude" and .list_file == "list.txt" and (.listed | length) == 2' "$result"
+  jq -e '.details.hosted_selection | .list_mode == "exclude" and .list_file == "list.txt" and (.listed | length) == 3' "$result"
   jq -ne --argjson q "$quick" --argjson e "$excluded" --arg s "$SESSION_CASE" '
-    ($q - $e) == (["meguri-engine::session_predict$" + $s + "_extra", "meguri-ffi::hooks$hooks_enabled"] | sort)
+    ($q - $e) == (["meguri-engine::session_predict$" + $s + "_extra", "meguri-ffi::hooks$hooks_enabled",
+      "meguri-ffi::meguri_ffi$tests::unit_case"] | sort)
     and ($e - $q) == []'
   validate "$result"
 
@@ -1371,8 +1375,8 @@ meguri-engine::session_predict ${SESSION_CASE}_extra"
   only="$(core_report_names)"
   jq -ne --argjson o "$only" --arg s "$SESSION_CASE" '
     $o == (["meguri-engine::canary_pins$pin_held", "meguri-engine::session_predict$" + $s + "_extra",
-      "meguri-ffi::hooks$hooks_enabled"] | sort)'
-  jq -e '[.details.listed_results[].event] == ["ok", "ok"]' "$result"
+      "meguri-ffi::hooks$hooks_enabled", "meguri-ffi::meguri_ffi$tests::unit_case"] | sort)'
+  jq -e '[.details.listed_results[].event] == ["ok", "ok", "ok"]' "$result"
   validate "$result"
 
   # Every shard runs the canary; apart from it the shards are disjoint and
