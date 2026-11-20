@@ -161,6 +161,9 @@ public struct DeckOptionsPage: View {
         }
         .labelsHidden()
         .multilineTextAlignment(.trailing)
+        // As wide as its value: the row keeps label and value on one line at
+        // compact width, as the system's value rows do.
+        .fixedSize(horizontal: true, vertical: false)
         .focused($focused, equals: row)
         .onSubmit { model.commit(row) }
         #if os(iOS)

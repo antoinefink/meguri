@@ -137,11 +137,13 @@ public final class AppNavigation {
     }
 
     /// N20.9: back from Deck Options to its deck page, once.
+    /// Pops the Deck Options page from whichever stack holds it, so a draft
+    /// that ends while another section is current leaves no stale page.
     public func popDeckOptions(_ deck: DeckID) {
-        var current = path(section)
-        guard case .deckOptions(deck)? = current.last else { return }
-        current.removeLast()
-        setPath(current, for: section)
+        for (stack, path) in paths {
+            guard case .deckOptions(deck)? = path.last else { continue }
+            setPath(Array(path.dropLast()), for: stack)
+        }
     }
 
     /// The deck whose page the Home section shows, if it shows one.

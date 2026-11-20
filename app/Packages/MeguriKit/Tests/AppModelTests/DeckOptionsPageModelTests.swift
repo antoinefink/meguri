@@ -167,6 +167,16 @@ import Testing
         #expect(model.phase == .closed && model.outcome == .left && core.opens == 1)
     }
 
+    @Test func aDraftThatEndsWhileAnotherSectionShowsLeavesNoPageBehind() async throws {
+        let (owner, _) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        owner.navigation.setPath([.deckOptions(DeckID(1))], for: .home)
+        owner.navigation.show(.settings)
+        model.discardChanges()
+        #expect(model.phase == .closed && owner.navigation.path(.home).isEmpty)
+    }
+
     @Test func refusedSavesKeepThePageWithItsIssues() async throws {
         let (owner, core) = await makeOwner()
         let model = owner.deckOptions

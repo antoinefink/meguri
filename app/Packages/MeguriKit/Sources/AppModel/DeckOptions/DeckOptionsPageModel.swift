@@ -425,10 +425,6 @@ public final class DeckOptionsPageModel {
 
     public func keepEditing() { confirmingDiscard = false }
 
-    /// N11.9's Keep Editing: the draft stays; a later save is refused while
-    /// the snapshot is stale, which shows the row again.
-    public func dismissChangedElsewhere() { changedElsewhere = false }
-
     /// The shell acknowledges an outcome once it has returned to the deck page.
     public func acknowledgeOutcome() { outcome = nil }
 
@@ -440,8 +436,9 @@ public final class DeckOptionsPageModel {
         deckID = nil; phase = .closed; self.outcome = outcome
         if let previous { Task { await previous.cancel() } }
         // The model, not the view, returns to the deck page (a page that is
-        // not on screen, after a layout switch, still closes).
-        if outcome != .ended, let closing { owner?.navigation.popDeckOptions(DeckID(closing)) }
+        // not on screen, after a layout switch, still closes), for every
+        // outcome, so a generation that ends never leaves a closed page behind.
+        if let closing { owner?.navigation.popDeckOptions(DeckID(closing)) }
     }
 
     /// The page left its stack (`AppNavigation.onDeckOptionsLeft`): the draft
