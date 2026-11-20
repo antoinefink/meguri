@@ -458,7 +458,8 @@ jobs:
           # The settle step's listing skips the binaries its filter leaves
           # out, so list every test again with the already built binaries.
           set +o pipefail
-          image="$(sudo -n docker images --format '{{.Repository}}:{{.Tag}}' | grep -E -- '-dev:' | head -n 1)"
+          # The shared image (MEGURI_CI_DEV_IMAGE), else the one built here.
+          image="${MEGURI_CI_DEV_IMAGE:-$(sudo -n docker images --format '{{.Repository}}:{{.Tag}}' | grep -E -- '-dev:[^<]' | head -n 1)}"
           target="$RUNNER_TEMP/cargo-target" home="$RUNNER_TEMP/cargo-home"
           du -sh "$target" "$home" || true
           echo "image $image, target $target, home $home"
