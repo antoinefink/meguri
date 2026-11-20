@@ -448,38 +448,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # TEMPORARY (test-binaries measurement; removed before merge): the
-      # quick suite's whole test inventory, as the --only-list settle step
-      # lists it, and the size of the Rust target.
-      - name: Collect the test inventory and target size
-        if: always()
-        shell: bash
-        run: |
-          # The settle step's listing skips the binaries its filter leaves
-          # out, so list every test again with the already built binaries.
-          set +o pipefail
-          # The shared image (MEGURI_CI_DEV_IMAGE), else the one built here.
-          image="${MEGURI_CI_DEV_IMAGE:-$(sudo -n docker images --format '{{.Repository}}:{{.Tag}}' | grep -E -- '-dev:[^<]' | head -n 1)}"
-          target="$RUNNER_TEMP/cargo-target" home="$RUNNER_TEMP/cargo-home"
-          du -sh "$target" "$home" || true
-          echo "image $image, target $target, home $home"
-          sudo -n docker run --rm -v "$GITHUB_WORKSPACE:/work" -v "$target:/cargo-target" -v "$home:/cargo-home" \
-            -e CARGO_HOME=/cargo-home -e CARGO_TARGET_DIR=/cargo-target -e GIT_CONFIG_COUNT=1 \
-            -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/work -w /work/core "$image" \
-            cargo nextest list --workspace --features meguri-ffi/test-hooks --message-format json \
-            >"$RUNNER_TEMP/nextest-list.json" || true
-          jq -r '"binaries: \(.["rust-suites"] | length); tests: \([.["rust-suites"][] | .testcases | length] | add)"' "$RUNNER_TEMP/nextest-list.json" || true
-          sudo -n docker system df -v | sed -n '/VOLUME NAME/,/^$/p'
-          df -h /
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: meguri-core-nextest-list
-          path: ${{ runner.temp }}/nextest-list.json
-          if-no-files-found: ignore
-          retention-days: 7
-
   # The Core result. always(): it must report even when a shard failed, was
   # cancelled or never started, and then it fails. A skipped job would count
   # as passing, so this job never skips itself.
