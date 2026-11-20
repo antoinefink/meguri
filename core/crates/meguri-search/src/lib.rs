@@ -16,6 +16,7 @@ pub mod browser;
 pub mod canonical;
 pub mod config;
 pub mod context;
+pub mod custom_data;
 pub mod error;
 mod lexer;
 mod parser;

@@ -231,3 +231,75 @@ fn boolean_card_and_note_queries_share_per_card_truth_and_exact_context_reads() 
     assert!(!cards.sql().contains("notes"));
     assert_eq!(ids(&db, "", SearchMode::Notes, &ctx), [1, 2, 3]);
 }
+
+/// id, type, queue, flags for S5 and S6.
+fn typed_card(db: &OpenedCollection, id: i64, card_type: i64, queue: i64, flags: i64) {
+    db.writer()
+        .execute_raw(
+            "INSERT INTO cards (id,nid,type,queue,due,odue,odid,did,ord,mod,usn,ivl,factor,reps,lapses,left,flags,data)
+         VALUES (?1,?1,?2,?3,0,0,0,1,0,0,0,0,0,0,0,0,?4,'')",
+            &[id, card_type, queue, flags].map(SqlValue::Integer),
+        )
+        .unwrap();
+}
+
+#[test]
+fn state_words_test_the_stored_type_or_queue() {
+    let (_dir, db) = collection();
+    // S5: every word over type/queue pairs, unusual ones included.
+    for (id, card_type, queue) in [
+        (1, 0, 0),
+        (2, 1, 1),
+        (3, 2, 2),
+        (4, 3, 1),
+        (5, 1, 3),
+        (6, 3, 3),
+        (7, 0, -1),
+        (8, 2, -1),
+        (9, 2, -2),
+        (10, 2, -3),
+        (11, 0, -2),
+        (12, 0, -3),
+        (13, 1, -1),
+        (14, 2, 4),
+        (15, 3, -3),
+        (16, 5, 7),
+    ] {
+        typed_card(&db, id, card_type, queue, 0);
+    }
+    let ctx = context();
+    for (query, expected) in [
+        ("is:new", vec![1, 7, 11, 12]),
+        ("is:learn", vec![2, 4, 5, 6, 13, 15]),
+        ("is:review", vec![3, 4, 6, 8, 9, 10, 14, 15]),
+        ("is:suspended", vec![7, 8, 13]),
+        ("is:buried", vec![9, 10, 11, 12, 15]),
+        ("is:buried-sibling", vec![9, 11]),
+        ("is:buried-manually", vec![10, 12, 15]),
+        ("IS:new", vec![1, 7, 11, 12]),
+    ] {
+        assert_eq!(ids(&db, query, SearchMode::Cards, &ctx), expected, "{query}");
+        let plan = plan(query, SearchMode::Cards, &ctx);
+        assert!(!plan.is_slow() && plan.reads().is_empty(), "{query}");
+    }
+}
+
+#[test]
+fn flags_read_the_lowest_three_bits() {
+    let (_dir, db) = collection();
+    for (id, flags) in [(1, 0), (2, 1), (3, 3), (4, 11), (5, 7), (6, 8)] {
+        typed_card(&db, id, 0, 0, flags);
+    }
+    let ctx = context();
+    for (query, expected) in [
+        ("flag:0", vec![1, 6]),
+        ("flag:1", vec![2]),
+        ("flag:3", vec![3, 4]),
+        ("flag:+3", vec![3, 4]),
+        ("flag:03", vec![3, 4]),
+        ("flag:7", vec![5]),
+        ("-flag:0", vec![2, 3, 4, 5]),
+    ] {
+        assert_eq!(ids(&db, query, SearchMode::Cards, &ctx), expected, "{query}");
+    }
+}

@@ -51,6 +51,16 @@ pub fn register(conn: &Connection) -> rusqlite::Result<()> {
     conn.create_scalar_function("meguri_relative_retrievability", 5, flags, |ctx| {
         Ok(sql_real(relative(ctx)))
     })?;
+    // P15: never an error; data or a key that is not TEXT reads as no keys.
+    conn.create_scalar_function("meguri_custom_data", 2, flags, |ctx| {
+        let (ValueRef::Text(data), ValueRef::Text(key)) = (ctx.get_raw(0), ctx.get_raw(1)) else {
+            return Ok(None);
+        };
+        let (Ok(data), Ok(key)) = (std::str::from_utf8(data), std::str::from_utf8(key)) else {
+            return Ok(None);
+        };
+        Ok(crate::custom_data::custom_data(data, key))
+    })?;
     register_text(conn, flags)
 }
 

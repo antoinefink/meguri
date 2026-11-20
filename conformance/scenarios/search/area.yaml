@@ -7,10 +7,11 @@
 area: search
 active:
   - "canonical/*"
-  # U82 names and ids (specs/search/names-and-ids.md). tags/hierarchy and
-  # tags/regex-and-nc stay inactive: their setup note `Animal` is stored as
-  # `animal` beside `animal::mammal` (tags T3, deviation
-  # tags-implicit-parent-spelling), which changes their dumps and one search.
+  # U82: decks, dupe, errors/ae42, history, ids, notetypes/names, props,
+  # regex/glob-size and state. tags/hierarchy and tags/regex-and-nc stay
+  # inactive: their setup note `Animal` is stored as `animal` beside
+  # `animal::mammal` (tags T3, deviation tags-implicit-parent-spelling),
+  # which changes their dumps and one search.
   - "decks/*"
   - "dupe/*"
   - "extractors/*"
@@ -20,9 +21,12 @@ active:
   - "errors/kinds"
   - "errors/order"
   - "errors/run"
+  - "history/*"
   - "ids/lists"
   - "notetypes/names"
+  - "props/*"
   - "regex/glob-size"
+  - "state/*"
   - "lexing/*"
   - "structure/groups"
   - "structure/negation"
