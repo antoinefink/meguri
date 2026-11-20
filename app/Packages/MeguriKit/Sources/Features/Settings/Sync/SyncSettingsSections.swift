@@ -8,6 +8,8 @@ struct SyncSettingsSections: View {
     var host: AppNavigation.SheetHost = .main
     /// The sign-in fields' text, owned above any layout that rebuilds this section.
     var draft: MeguriSignInDraft
+    /// The Mac Settings pane already names the section in its title bar.
+    var showsHeading = true
     private var sync: SyncCoordinator { collection.sync }
     private var selection: SyncProviderSelection? {
         switch sync.providerState?.selection {
@@ -34,8 +36,10 @@ struct SyncSettingsSections: View {
                     showsUnavailableReason: sync.serviceConnected)
             }
         } header: {
-            Text(SyncText.value("sync.settings.sync.section"))
-                .accessibilityIdentifier("settings.sync.heading")
+            if showsHeading {
+                Text(SyncText.value("sync.settings.sync.section"))
+                    .accessibilityIdentifier("settings.sync.heading")
+            }
         } footer: {
             Text(SyncText.value(selection == nil ? "sync.service.none.footer" : "sync.settings.automatic.footer"))
                 .accessibilityIdentifier("settings.sync.footer")
