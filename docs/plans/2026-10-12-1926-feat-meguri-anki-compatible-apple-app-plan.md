@@ -454,7 +454,7 @@ flowchart TB
 - R279. Meguri menu: About Meguri, Settings… (⌘,), Services, Hide/Hide Others/Show All, Quit (⌘Q).
 - R280. File menu: New Note (⌘N), New Deck… (⌥⌘N), Import… (⇧⌘I), Export… (⌘E), Export Deck… (for the selected deck), Sync Now (⇧⌘Y; `sync.now.command`, `docs/design/native-interface-contract.md` N11.8, corrected 2026-10-27), Back Up Now, Restore from Backup…, Close (⌘W).
 - R281. Edit menu: Undo <op>, Redo <op>, Cut, Copy, Paste, Paste and Match Style, Delete, Select All, Find (⌘F), Find and Replace… (Browse), plus the system Emoji & Symbols and Dictation items.
-- R282. View menu: Show/Hide Sidebar, Home (D), Browse (B), Stats (T), Note Types (⇧⌘N), Zoom In / Zoom Out / Actual Size (card zoom), Enter Full Screen.
+- R282. View menu: Show/Hide Sidebar, Home (D), Browse (B), Stats (T), Note Types (⇧⌘N), Zoom In / Zoom Out / Actual Size (card zoom), Enter Full Screen. (Superseded 2026-11-20, under review with its specs: Note Types is ⇧⌘T; Browse ⇧⌘B; `docs/design/native-interface-contract.md` N21.8, N22.1; decisions.md 2026-11-20 rows `noteTypes`, round 9.)
 - R283. Deck menu: Study (S/Return), Go to Deck… (⇧⌘O), Deck Options… (⌥⌘O), Rename… (⇧⌘R), Description…, New Subdeck…, Unbury, Export Deck…, Delete Deck… (⌘⌫), Collapse All / Expand All.
 - R284. Card menu (enabled in review, preview and Browse): Show Answer, Again, Hard, Good, Easy, Edit Note, Flag ▸ (seven named flags using the collection's flag names), Mark Note, Bury Card, Bury Note, Suspend Card, Suspend Note, Set Due Date…, Reset…, Card Info, Previous Card Info, Create Copy, Delete Note, Replay Audio, Pause Audio, Audio −5 s, Audio +5 s, Close Review.
 - R285. Tools menu: Check Database, Check Media, Empty Cards…, Note Types, Migaku Recently Received (Mac, when the integration is on), Copy Debug Info.
@@ -1335,30 +1335,30 @@ flowchart TB
 
 **Note types: management screen**
 
-- R915. A Note Types screen lists every note type with its note count (loaded in the background), and is reachable from Settings and Browse on all platforms and with ⇧⌘N on Mac.
-- R916. Add offers "Add: <stock kind>" for each stock kind and "Clone: <name>" for every existing note type (named "<name> copy"), then asks for a name, and selects the new type.
+- R915. A Note Types screen lists every note type with its note count (loaded in the background), and is reachable from Settings and Browse on all platforms and with ⇧⌘N on Mac. (Superseded 2026-11-20, under review with its specs: Note Types is a sidebar section (Mac, iPad) with View › Note Types ⇧⌘T; ⇧⌘N stays New Deck…; `specs/notetypes/workspace.md` W14, `docs/design/native-interface-contract.md` N22.1; decisions.md 2026-11-20 rows `noteTypes`, round 9. The background counts stand.)
+- R916. Add offers "Add: <stock kind>" for each stock kind and "Clone: <name>" for every existing note type (named "<name> copy"), then asks for a name, and selects the new type. (Superseded 2026-11-20, under review with its specs: New Note Type… lists the six stock kinds with one line each; Duplicate makes "<name> Copy" at once; `specs/notetypes/workspace.md` W11; decisions.md 2026-11-20 rows `noteTypes`, round 9.)
 - R917. Rename changes only the name (no schema change) and selects the renamed type.
 - R918. Delete is refused for the last note type, asks "Delete this note type and all its cards?" (or "Delete this unused note type?"), takes its safety backup after that question is accepted and before its first write, and deletes all its notes and cards. It asks no schema-change confirmation (`specs/notetypes/schema-changes.md` G4; safety backup per `specs/package/backup-triggers.md` T6.1; corrected 2026-10-27).
-- R919. Each row offers Fields, Cards and the Restore to Default action.
+- R919. Each row offers Fields, Cards and the Restore to Default action. (Superseded 2026-11-20, under review with its specs: a note type opens on its detail with Fields and Cards tabs; `specs/notetypes/workspace.md` W2, `docs/design/native-interface-contract.md` N22.1; decisions.md 2026-11-20 rows `noteTypes`, round 9.)
 
 **Note types: fields**
 
-- R920. The field editor lists fields as "1: Name" and supports Add, Delete, Rename, Reposition (to a position 1–N) and drag reordering.
+- R920. The field editor lists fields as "1: Name" and supports Add, Delete, Rename, Reposition (to a position 1–N) and drag reordering. (Superseded 2026-11-20, under review with its specs: the fields are a table with drag reordering, Sort, Used On and Notes columns; no "1: Name" rows or Reposition; `specs/notetypes/workspace.md` W3; decisions.md 2026-11-20 rows `noteTypes`, round 9.)
 - R921. Field names have `"` removed and are trimmed, cannot start with `#`, `^` or `/`, cannot contain `:`, `{`, `}` or `"`, and must be unique ignoring case, with invalid input explained inline.
-- R922. Deleting is refused for the last field ("Notes require at least one field.") and for protected fields, and otherwise asks "Delete field from N notes?".
+- R922. Deleting is refused for the last field ("Notes require at least one field.") and for protected fields, and otherwise asks "Delete field from N notes?". (Superseded 2026-11-20, under review with its specs: deleting a field asks nothing at once; the Save sheet gives its content count; `specs/notetypes/draft-save.md` D4, D8; decisions.md 2026-11-20 rows `noteTypes`, round 9. The refusals stand.)
 - R923. Renaming a field rewrites every reference in all front, back and browser templates, including filtered references and conditional open, negated and close tags.
 - R924. Deleting a field removes its references from all templates, and if a front template is left with no field reference and no conditional, the first remaining field is inserted into it.
-- R925. Per-field options are editable: editor font and size, "Reverse text direction (RTL)", "Use HTML editor by default", "Collapse by default", "Exclude from unqualified searches (slower)" and Description.
+- R925. Per-field options are editable: editor font and size, "Reverse text direction (RTL)", "Use HTML editor by default", "Collapse by default", "Exclude from unqualified searches (slower)" and Description. (Superseded 2026-11-20, under review with its specs: shown: Collapsed in Editor, Right-to-Left, Placeholder; font, size, HTML by default and exclude from search are kept, not shown; `specs/notetypes/workspace.md` W4; decisions.md 2026-11-20 rows `noteTypes`, round 9.)
 - R926. "Sort by this field in the browser" selects exactly one sort field and rewrites every note's sort value.
 - R927. Adding, deleting or reordering fields and changing the sort field rewrite every note of the type off the main thread, while renaming and option changes do not touch notes.
 - R928. Leaving the field editor with unsaved changes asks "Discard changes?".
 
 **Note types: card template editor**
 
-- R929. The template editor shows Front Template, Back Template and Styling (⌘1, ⌘2, ⌘3), with a monospaced plain-text editor using plain quotes, no autocorrect, Tab inserting 4 spaces, and ⌘F find.
+- R929. The template editor shows Front Template, Back Template and Styling (⌘1, ⌘2, ⌘3), with a monospaced plain-text editor using plain quotes, no autocorrect, Tab inserting 4 spaces, and ⌘F find. (Superseded 2026-11-20, under review with its specs: Styling also has the Card Text row over the CSS; `specs/notetypes/workspace.md` W6, W10; decisions.md 2026-11-20 rows `noteTypes`, round 9. The rest stands.)
 - R930. The template editor highlights `{{…}}` tags and shows parse and validation errors live under the editor (deviation: Anki shows them only on save).
-- R931. A card-type picker shows "N: Name" for each template with "Changes below will affect the N notes that use this card type.", and for Cloze types shows a card picker built from the note's cloze numbers instead.
-- R932. The Options menu offers Add Card Type (copying the current template, named "Card N", confirming "This will create N cards. Proceed?" when notes exist), Remove Card Type, Rename Card Type, Reposition Card Type, Deck Override, Browser Appearance, Restore to Default and "Copy Info" (front, back and styling as Markdown code blocks).
+- R931. A card-type picker shows "N: Name" for each template with "Changes below will affect the N notes that use this card type.", and for Cloze types shows a card picker built from the note's cloze numbers instead. (Superseded 2026-11-20, under review with its specs: card types are a list beside the code with their card counts; `specs/notetypes/workspace.md` W5; decisions.md 2026-11-20 rows `noteTypes`, round 9.)
+- R932. The Options menu offers Add Card Type (copying the current template, named "Card N", confirming "This will create N cards. Proceed?" when notes exist), Remove Card Type, Rename Card Type, Reposition Card Type, Deck Override, Browser Appearance, Restore to Default and "Copy Info" (front, back and styling as Markdown code blocks). (Superseded 2026-11-20, under review with its specs: commands are the list's +, − and context menu; adding asks nothing at once, the Save sheet gives the cards created; Browser Appearance and Copy Info wait; `specs/notetypes/workspace.md` W5, `specs/notetypes/draft-save.md` D8; decisions.md 2026-11-20 rows `noteTypes`, round 9.)
 - R933. Removing a template is refused for the last one and otherwise asks "Delete the 'X' card type, and its N cards?", also stating how many notes would be left with no cards (deviation: Anki does not warn about cardless notes).
 - R934. Deck Override sets or clears a template's target deck using deck autocomplete, creating the deck if it does not exist, and is not offered for Cloze types.
 - R935. Browser Appearance sets the template's browser front and back formats and an optional browser font and size, used for Browse's question and answer columns when non-empty.
@@ -1369,7 +1369,7 @@ flowchart TB
 
 - R938. The template editor previews the real note it was opened for (including unsaved editor content), or the type's first note, rendered by the same engine and web view contract as review, side by side with the code on Mac and iPad and as a switchable pane on iPhone.
 - R939. The preview shows front or back, updates within the R1835 budget after typing pauses, and offers "Fill empty fields" (empty fields show "(FieldName)", empty cloze fields a sample cloze sentence).
-- R940. The preview can be switched between light and dark card appearance and between iPhone, iPad and Mac platform classes independently of the device in hand.
+- R940. The preview can be switched between light and dark card appearance and between iPhone, iPad and Mac platform classes independently of the device in hand. (Superseded 2026-11-20, under review with its specs: Light and Dark only; no platform or device picker; `specs/notetypes/workspace.md` W9; decisions.md 2026-11-20 rows `noteTypes`, round 9.)
 - R941. In preview, type-in answers are simulated with "example" typed on the front and its comparison with "sample" on the back.
 
 **Note types: validation on save**
@@ -1389,7 +1389,7 @@ flowchart TB
 
 - R949. Adding, deleting or reordering fields, changing the sort field, adding, deleting or reordering templates, deleting a note type, Change Note Type, and Restore to Default when it changes structure mark the collection schema as modified.
 - R950. Renaming fields, templates or note types, field options, template text, styling, deck override, browser appearance and adding or cloning note types are not schema changes.
-- R951. Schema changes update Anki compatibility bookkeeping while publishing coherent CloudKit generations (R1475, R2053). Ordinary edits show no Anki full-upload warning; the warning and direction choice belong to a later explicit manual transfer preview (R1476).
+- R951. Schema changes update Anki compatibility bookkeeping while publishing coherent CloudKit generations (R1475, R2053). Ordinary edits show no Anki full-upload warning; the warning and direction choice belong to a later explicit manual transfer preview (R1476). (Superseded 2026-11-20, under review with its specs: with Meguri Sync a structural save asks once, in the Save sheet, and uploads; with iCloud or Off it asks only when content is lost; `specs/notetypes/draft-save.md` D3, `specs/sync/meguri-provider.md` MP7; decisions.md 2026-11-20 rows `noteTypes`, round 9. iCloud stands.)
 
 **Empty Cards (card-generation side)**
 
@@ -1564,7 +1564,7 @@ flowchart TB
 
 **Search errors and canonical form**
 - R1075. Parse errors cover exactly Anki's categories (misplaced AND/OR, empty group, unopened/unclosed group, empty/unclosed quote, missing key, unknown escape, invalid state/flag/property/operator/number/whole number/positive or negative whole number/answer button/id list) with plain-English messages that name the offending text.
-- R1076. Committing a search replaces the typed text with Anki's canonical form (AND as a space, OR as ` OR `, quoting and escaping added only where needed, empty search → `deck:*`), byte-identical to what Anki produces for the same input.
+- R1076. Committing a search replaces the typed text with Anki's canonical form (AND as a space, OR as ` OR `, quoting and escaping added only where needed, empty search → `deck:*`), byte-identical to what Anki produces for the same input. (Superseded 2026-11-20, under review with its specs: Browse shows no canonical text: a commit reads the text into filter tokens; pasted Anki syntax is still read; `specs/search/filter-tokens.md` T7, T8; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1077. Canonicalising an already canonical search returns it unchanged, and a canonical search means the same as the text it came from.
 - R1078. Every search Meguri generates from UI (sidebar items, chips, autocomplete, Select Notes, duplicate links, other screens) escapes wildcards and quotes in names so a deck or tag named `a_b*` matches only itself.
 - R1079. Combining a clicked item with the current search follows Anki's join rules: AND/OR join without adding brackets around the existing side when not needed, and "replace same kind" swaps every existing node of the clicked node's kind (e.g. all `deck:` terms) for the new one.
@@ -1578,24 +1578,24 @@ flowchart TB
 - R1085. Result sets for any query, in both modes, equal real Anki's for the same collection and clock, verified by differential and grammar-fuzz tests against the oracle (including error/no-error outcome and canonical text), except for the extra non-ASCII case matches R1036 adds.
 
 **Search field: tokens and editing**
-- R1086. The search field is a single editable line whose underlying value is always the search text, and recognised `key:value` terms render as tokens (chips) with a kind icon (deck, tag, notetype, card, flag colour dot, state, property, date range, saved search) while plain text stays as text.
-- R1087. Negated terms render as a visibly negated token, OR joins render as an explicit "or" connector, and parenthesised groups render as a bracketed token group, so the precedence the user sees is the precedence executed.
-- R1088. Clicking or tapping a token offers Negate/Un-negate, Change value (picker for decks, tags, notetypes, flags, states), Edit as text, Switch join to AND/OR, and Remove.
-- R1089. Backspace at a token's trailing edge first selects then deletes the token, arrow keys move across tokens as single units, and ⌘C/⌘X copy the canonical text of the selection.
-- R1090. A "Syntax mode" toggle shows the raw text without tokens, and the choice persists per device.
-- R1091. A term becomes a token only when the cursor leaves it or the search is committed, so typing is never interrupted by rendering.
+- R1086. The search field is a single editable line whose underlying value is always the search text, and recognised `key:value` terms render as tokens (chips) with a kind icon (deck, tag, notetype, card, flag colour dot, state, property, date range, saved search) while plain text stays as text. (Superseded 2026-11-20, under review with its specs: the field holds plain words and filter tokens, not chips over Anki text; `specs/search/filter-tokens.md` T1 to T6; decisions.md 2026-11-20 row `browser`, round 8.)
+- R1087. Negated terms render as a visibly negated token, OR joins render as an explicit "or" connector, and parenthesised groups render as a bracketed token group, so the precedence the user sees is the precedence executed. (Superseded 2026-11-20, under review with its specs: in part: tokens are filter tokens; an is-not token reads "is not"; values of one token read "or"; groups from pasted text are advanced tokens; `specs/search/filter-tokens.md` T2, T6; decisions.md 2026-11-20 row `browser`, round 8.)
+- R1088. Clicking or tapping a token offers Negate/Un-negate, Change value (picker for decks, tags, notetypes, flags, states), Edit as text, Switch join to AND/OR, and Remove. (Superseded 2026-11-20, under review with its specs: in part: the token menu is Is, Is Not, the values, Add Another and Remove Filter; `specs/search/filter-tokens.md` T10; decisions.md 2026-11-20 row `browser`, round 8.)
+- R1089. Backspace at a token's trailing edge first selects then deletes the token, arrow keys move across tokens as single units, and ⌘C/⌘X copy the canonical text of the selection. (Superseded 2026-11-20, under review with its specs: in part: ⌘C copies the run text of the selected tokens; `specs/search/filter-tokens.md` T10; decisions.md 2026-11-20 row `browser`, round 8. The keys stand.)
+- R1090. A "Syntax mode" toggle shows the raw text without tokens, and the choice persists per device. (Superseded 2026-11-20, under review with its specs: withdrawn: there is no syntax mode; `specs/search/filter-tokens.md` T5, `docs/design/native-interface-contract.md` N21.2; decisions.md 2026-11-20 row `browser`, round 8.)
+- R1091. A term becomes a token only when the cursor leaves it or the search is committed, so typing is never interrupted by rendering. (Superseded 2026-11-20, under review with its specs: in part: text becomes tokens at a commit (Return, paste, an accepted suggestion, focus loss); `specs/search/filter-tokens.md` T8; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1092. A clear button empties the field and runs the default search, and Esc in the search field first dismisses suggestions, then clears the field (deviation: Esc does not close the browser, since Browse is a section of the single window).
-- R1093. A syntax reference with examples for every key family is reachable from the search field.
+- R1093. A syntax reference with examples for every key family is reachable from the search field. (Superseded 2026-11-20, under review with its specs: withdrawn: no syntax reference is shown; `docs/design/native-interface-contract.md` N21.2; decisions.md 2026-11-20 row `browser`, round 8.)
 
 **Search field: autocomplete**
-- R1094. Typing a bare word that prefixes a keyword (`de` → `deck:`, `pr` → `prop:`, `preset:`) suggests those keywords, while the first suggestion is always to search the typed text as written.
+- R1094. Typing a bare word that prefixes a keyword (`de` → `deck:`, `pr` → `prop:`, `preset:`) suggests those keywords, while the first suggestion is always to search the typed text as written. (Superseded 2026-11-20, under review with its specs: keywords are suggested only while Anki syntax is typed; the first row is "Contains “…”"; `specs/search/filter-tokens.md` T12; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1095. After `deck:` suggestions list full deck paths matching any path component as a case-insensitive substring, plus `current`, `filtered`, `*` and "Parent::*", with filtered decks marked.
 - R1096. After `tag:` suggestions list tags from the tag registry matching any `::` component, plus `none`, and accepting a parent offers its children next.
 - R1097. After `note:` suggestions list notetype names, and after `card:` template names and numbers, scoped to notetypes named by `note:` terms in the same AND group when present.
 - R1098. Field names are suggested as `Name:` keys (scoped to notetypes named in the same AND group), and after a field key the suggestions offer `_*` (non-empty), empty, `re:` and `nc:` forms.
 - R1099. After `flag:` suggestions show 0–7 with colour swatches and the user's flag labels, and typing a flag's label matches it (e.g. `flag:import` → `flag:3` when green is labelled "Important").
 - R1100. After `is:`, `prop:` (property, then operator, then a value hint with unit), `rated:`/`added:`/`edited:`/`introduced:`/`resched:` (1, 7, 30, 365 days, with plain-language descriptions) and `preset:` (preset names), suggestions list every valid value.
-- R1101. Saved search names are suggested anywhere, and accepting one inserts its query as a parenthesised group (or replaces the whole search when the field was empty).
+- R1101. Saved search names are suggested anywhere, and accepting one inserts its query as a parenthesised group (or replaces the whole search when the field was empty). (Superseded 2026-11-20, under review with its specs: choosing a saved search replaces the query; `specs/search/filter-tokens.md` T9, T13; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1102. With the field focused and empty, suggestions show recent searches (last 30, per device, not synced) and saved searches.
 - R1103. Accepting a suggestion inserts it with any needed quoting and escaping (spaces, parentheses, `*`, `_`, `"`, `:`) and places the cursor after it.
 - R1104. Suggestions rank prefix matches before substring matches and recently used before others, show at most 50 rows, and appear within one frame of the keystroke on a 150k-card collection with thousands of tags.
@@ -1604,13 +1604,13 @@ flowchart TB
 **Search field: live results and errors**
 - R1106. Results update as the user types (deviation: Anki searches only on Enter), with each edit re-running the search after at most a 60 ms debounce and cancelling superseded runs.
 - R1107. While the cursor is at the end of an incomplete term (key with empty value, unclosed quote or bracket, dangling `-`, `and`/`or`), results keep showing the last valid search and no error is shown.
-- R1108. A syntax error is shown inline under the field with the offending range underlined, and the previous results stay visible, dimmed, labelled "Results unchanged until the search is valid" (deviation: Anki shows a modal warning).
-- R1109. Return, accepting a suggestion, or a sidebar/chip action commits the search: it is canonicalised, added to recent searches, and the field shows the canonical text.
+- R1108. A syntax error is shown inline under the field with the offending range underlined, and the previous results stay visible, dimmed, labelled "Results unchanged until the search is valid" (deviation: Anki shows a modal warning). (Superseded 2026-11-20, under review with its specs: no syntax error is shown: text that does not parse searches its words literally; `specs/search/filter-tokens.md` T5; decisions.md 2026-11-20 row `browser`, round 8.)
+- R1109. Return, accepting a suggestion, or a sidebar/chip action commits the search: it is canonicalised, added to recent searches, and the field shows the canonical text. (Superseded 2026-11-20, under review with its specs: a commit reads the text into tokens; no canonical text is shown; `specs/search/filter-tokens.md` T8; decisions.md 2026-11-20 row `browser`, round 8. Recent searches stand.)
 - R1110. A valid search with no results shows "No cards match" (or notes) with a "Clear search" action.
-- R1111. The browser always shows the result count and the selection count ("3 of 1,204 cards selected" / notes variant).
+- R1111. The browser always shows the result count and the selection count ("3 of 1,204 cards selected" / notes variant). (Superseded 2026-11-20, under review with its specs: the status line reads "<r> of <t> cards · <s> selected"; `specs/browser/workspace.md` V11; decisions.md 2026-11-20 row `browser`, round 8.)
 
 **Default search and entry points**
-- R1112. Opening Browse runs the synced `defaultSearchText` when set, else `deck:current`, shown as an empty field with a placeholder (as Anki does).
+- R1112. Opening Browse runs the synced `defaultSearchText` when set, else `deck:current`, shown as an empty field with a placeholder (as Anki does). (Superseded 2026-11-20, under review with its specs: Browse opens on its kept state; the first open reads `defaultSearchText` into tokens, otherwise the whole collection; `specs/search/filter-tokens.md` T14; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1113. Opening Browse from the reviewer selects and scrolls to the card under review, falling back to `cid:<id>` when the default search does not contain it.
 - R1114. Other screens (deck ⋯ menu "Browse", editor "Show duplicates", add history, stats, AnkiConnect GUI actions) can open Browse with a given search, which is canonicalised and run as if committed.
 
@@ -1633,13 +1633,13 @@ flowchart TB
 - R1128. Note Type (`note`, sorted by name) and Tags (`noteTags`, space-separated).
 - R1129. Position (`originalPosition`): the original new-card position kept in card data, else the current new position for new cards, else blank.
 - R1130. Stability (`stability`, time span), Difficulty (`difficulty`, 0–100 %) and Retrievability (`retrievability`, live %), blank without a memory state; sortable in cards mode only.
-- R1131. Text columns (Question, Answer, Card Type, Deck, Sort Field, Note Type, Tags) are start-aligned and the rest centred, with deck names elided in the middle.
+- R1131. Text columns (Question, Answer, Card Type, Deck, Sort Field, Note Type, Tags) are start-aligned and the rest centred, with deck names elided in the middle. (Superseded 2026-11-20, under review with its specs: a deck shows its name with the parent path in secondary text, the path cut first from its end; no middle truncation; `specs/browser/workspace.md` V5.1; decisions.md 2026-11-20 row `browser`, round 8. The rest stands.)
 - R1132. Each column header has a tooltip explaining it, and cells show their full value on hover (Mac) or long-press preview (touch) when truncated.
 
 **Column choice, order and persistence**
 - R1133. The header context menu (Mac/iPad) and the Display menu (iPhone) toggle any of the 19 columns, sorted by label, and at least one column always remains.
-- R1134. Active columns persist in the synced keys `activeCols` (cards) and `activeNoteCols` (notes), with defaults `noteFld, template, cardDue, deck` and `noteFld, note, template, noteTags` when absent.
-- R1135. Columns can be reordered by dragging, and the order is stored as the order of the `activeCols`/`activeNoteCols` arrays (deviation: Anki keeps order in local window state, so Meguri's order also syncs).
+- R1134. Active columns persist in the synced keys `activeCols` (cards) and `activeNoteCols` (notes), with defaults `noteFld, template, cardDue, deck` and `noteFld, note, template, noteTags` when absent. (Superseded 2026-11-20, under review with its specs: Browse shows Meguri's column sets (`meguriBrowserColumnSets`) with a tighter default and never reads or writes these keys; `specs/browser/workspace.md` V2.3, V2.4; decisions.md 2026-11-20 row `browser`, round 8.)
+- R1135. Columns can be reordered by dragging, and the order is stored as the order of the `activeCols`/`activeNoteCols` arrays (deviation: Anki keeps order in local window state, so Meguri's order also syncs). (Superseded 2026-11-20, under review with its specs: the order is stored in `meguriBrowserColumnSets`; `specs/browser/workspace.md` V2.4; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1136. Column widths are stored per device and per mode, not synced, and the last column stretches to fill.
 - R1137. Unknown column keys found in the synced arrays (add-on columns) are preserved on write but not displayed (deviation: Anki shows them as empty "Add-on" columns).
 - R1138. Opening, scrolling or searching in the browser never rewrites synced config keys; keys are written only when the user changes the corresponding setting.
@@ -1647,7 +1647,7 @@ flowchart TB
 **Sorting**
 - R1139. Clicking a sortable header sorts by it, using the column's default direction first (descending for Card Type, Due, Ease, Interval, Reviews, Lapses, Created, Modified, Position, Stability, Difficulty, Retrievability; ascending otherwise), and clicking again reverses.
 - R1140. Question, Answer, and Stability/Difficulty/Retrievability in notes mode are not sortable, and their headers show no sort affordance (deviation: Anki shows an info message).
-- R1141. The sort persists in the synced keys `sortType`/`sortBackwards` (cards) and `noteSortType`/`browserNoteSortBackwards` (notes), falling back to `noteCrt` when the stored column is invalid or unsortable.
+- R1141. The sort persists in the synced keys `sortType`/`sortBackwards` (cards) and `noteSortType`/`browserNoteSortBackwards` (notes), falling back to `noteCrt` when the stored column is invalid or unsortable. (Superseded 2026-11-20, under review with its specs: Browse's sort is stored with its column set; `specs/browser/workspace.md` V4.3; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1142. Reversing the current column reverses the result order in memory without re-querying, keeping the selection.
 - R1143. Sort orders match Anki: Sort Field case-insensitive (ASCII) with numeric sort fields ordered numerically then by template ordinal, Due on one scale mixing new positions, intraday learning timestamps and review days, Ease with new cards last, Created by note id then template, Deck/Note Type/Card Type by name.
 - R1144. Notes-mode sorts on card-level columns use per-note aggregates (Cards = count, Card Modified = max, Deck = distinct-deck count then name, Due = earliest due of non-new unsuspended unburied non-filtered cards, Ease = average of non-new, Interval = average of review/relearn, Reviews/Lapses = sum, Position = original else new position), with notes lacking a value sorting first ascending.
@@ -1655,7 +1655,7 @@ flowchart TB
 - R1146. On iPhone, a Sort menu offers every sortable column plus Ascending/Descending, using the same keys.
 
 **Row appearance**
-- R1147. In cards mode a row's background follows the first that applies: flag colour (1–7), marked note, suspended, buried; in notes mode only marked colours a row.
+- R1147. In cards mode a row's background follows the first that applies: flag colour (1–7), marked note, suspended, buried; in notes mode only marked colours a row. (Superseded 2026-11-20, under review with its specs: no row tints: a state column shows a symbol; `specs/browser/workspace.md` V2.5; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1148. Row tints are lightened in light mode and darkened in dark mode so text keeps at least WCAG AA contrast, and selection highlight always wins over tint.
 - R1149. Rows also show small glyphs for flag, marked, suspended, buried and leech states so state is never conveyed by colour alone.
 - R1150. Question, Answer and Sort Field cells use the template's browser font family when installed, sized relative to the system text size (Dynamic Type on iOS/iPadOS).
@@ -1669,9 +1669,9 @@ flowchart TB
 - R1156. Deleted notes' rows disappear immediately and the cursor moves to the nearest remaining row (deviation: Anki shows deleted rows disabled until the next search).
 
 **Sidebar: sections**
-- R1157. The browser's filter sidebar shows, in order: Saved Searches, Today, Flags, Card State, Decks, Note Types, Tags, each section collapsible with its state stored in the synced keys `collapseSavedSearches`, `collapseToday`, `collapseFlags`, `collapseCardState`, `collapseDecks`, `collapseNotetypes`, `collapseTags`.
+- R1157. The browser's filter sidebar shows, in order: Saved Searches, Today, Flags, Card State, Decks, Note Types, Tags, each section collapsible with its state stored in the synced keys `collapseSavedSearches`, `collapseToday`, `collapseFlags`, `collapseCardState`, `collapseDecks`, `collapseNotetypes`, `collapseTags`. (Superseded 2026-11-20, under review with its specs: Browse's sidebar is Saved Searches, Card State, Flags, Decks, Note Types, Tags, folded on the device only; `specs/browser/workspace.md` V6; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1158. Saved Searches lists the synced `savedFilters` map (name → search) sorted case-insensitively by name, each item running its search.
-- R1159. Today contains Due today `prop:due=0`, Added today `added:1`, Edited today `edited:1`, Studied today `rated:1`, First review `introduced:1`, Rescheduled `resched:1`, Again today `rated:1:1`, Overdue `is:due -prop:due=0`.
+- R1159. Today contains Due today `prop:due=0`, Added today `added:1`, Edited today `edited:1`, Studied today `rated:1`, First review `introduced:1`, Rescheduled `resched:1`, Again today `rated:1:1`, Overdue `is:due -prop:due=0`. (Superseded 2026-11-20, under review with its specs: no Today section: built-in saved searches Due Today, Added in Last 7 Days and Leeches; `specs/search/filter-tokens.md` T13; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1160. Flags has a root `-flag:0`, "No flag" `flag:0` and the seven flags with their colours and labels, each `flag:N`.
 - R1161. Card State has New `is:new`, Learning `is:learn`, Review `is:review`, Suspended `is:suspended`, Buried `is:buried`, each with its state colour.
 - R1162. Decks has a root `deck:_*`, "Current deck" `deck:current`, and the full deck tree (filtered decks with a distinct icon) running `deck:"Full::Name"`, with per-deck expansion stored in the deck's browser-collapsed flag, separate from the deck list's.
@@ -1682,9 +1682,9 @@ flowchart TB
 - R1167. The sidebar refreshes in the background after any change to decks, tags, notetypes, flags or saved searches, keeping scroll position and expansion.
 
 **Sidebar: combining searches**
-- R1168. On Mac and with an iPad keyboard, clicking (or Return on) an item replaces the search, ⌘-click ANDs it, ⇧-click ORs it, ⌥ negates the clicked term (combinable with ⌘ or ⇧), and ⌘⇧-click replaces existing terms of the same kind.
-- R1169. On touch, tap replaces the search, a leading swipe ANDs the item, a trailing swipe adds it negated, and long-press offers Search, Add (AND), Add as alternative (OR), Exclude (NOT), and Replace same kind.
-- R1170. Multi-selecting sidebar items (⌘/⇧-click on Mac, Select mode on touch) offers Search all selected (AND) and Search any selected (OR).
+- R1168. On Mac and with an iPad keyboard, clicking (or Return on) an item replaces the search, ⌘-click ANDs it, ⇧-click ORs it, ⌥ negates the clicked term (combinable with ⌘ or ⇧), and ⌘⇧-click replaces existing terms of the same kind. (Superseded 2026-11-20, under review with its specs: a sidebar click replaces only its own kind's token, ⌘-click adds or removes a value, ⌥-click excludes; no AND/OR/replace modifiers; `specs/search/filter-tokens.md` T9; decisions.md 2026-11-20 row `browser`, round 8.)
+- R1169. On touch, tap replaces the search, a leading swipe ANDs the item, a trailing swipe adds it negated, and long-press offers Search, Add (AND), Add as alternative (OR), Exclude (NOT), and Replace same kind. (Superseded 2026-11-20, under review with its specs: touch has no swipe-to-combine on sidebar rows; the Filters sheet sets tokens; `specs/browser/workspace.md` V14.3; decisions.md 2026-11-20 row `browser`, round 8.)
+- R1170. Multi-selecting sidebar items (⌘/⇧-click on Mac, Select mode on touch) offers Search all selected (AND) and Search any selected (OR). (Superseded 2026-11-20, under review with its specs: no multi-selection searches in the sidebar; `specs/search/filter-tokens.md` T9; decisions.md 2026-11-20 row `browser`, round 8.)
 
 **Sidebar: management**
 - R1171. Saved Searches offers Save Current Search (name prompt, overwrite confirmation when the name exists), and each saved search offers Update to Current Search, Rename (inline), Delete (multi-select) and Search.
@@ -1702,7 +1702,7 @@ flowchart TB
 - R1181. Every bulk action acts on the selected rows (all cards of selected notes in notes mode) and is disabled with no selection.
 - R1182. Every bulk action is one undo step named after the action ("Undo Change Deck") on the shared app undo stack, with ⌘Z / ⇧⌘Z and toolbar undo on touch.
 - R1183. Bulk actions on large selections run in the background with a progress indicator and cancel-before-commit, the UI stays interactive, and the result is applied in one transaction.
-- R1184. Each action ends with a brief, non-blocking result message ("12 cards suspended", "3 of 10 notes updated") that includes an Undo button on touch.
+- R1184. Each action ends with a brief, non-blocking result message ("12 cards suspended", "3 of 10 notes updated") that includes an Undo button on touch. (Superseded 2026-11-20, under review with its specs: no result message or toast; VoiceOver announces the result and Undo names the step; `specs/browser/workspace.md` V8.3; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1185. After an action only affected rows refresh, and the editor pane reloads when the shown note changed.
 - R1186. All actions are reachable from the menu bar (Mac/iPad keyboard), the row context menu, and on iPhone the Select-mode toolbar plus its More menu.
 
@@ -1712,16 +1712,16 @@ flowchart TB
 - R1189. Change Note Type requires one shared notetype, maps fields/templates by name then position with nothing allowed, and previews destructive mappings before applying. It publishes a coherent CloudKit generation; any Anki full-transfer warning is deferred to a manual transfer.
 - R1190. Add Tags and Remove Tags open a tag entry with autocomplete from the tag registry, split on whitespace, adopt the casing of existing tags, and ignore duplicates.
 - R1191. Clear Unused Tags removes from the tag registry every tag no note uses and reports the count.
-- R1192. Toggle Mark adds the `marked` tag to all selected notes when the current note is unmarked, else removes it from all.
+- R1192. Toggle Mark adds the `marked` tag to all selected notes when the current note is unmarked, else removes it from all. (Superseded 2026-11-20, under review with its specs: deferred: marking is not offered in the first version (flags cover it); `specs/browser/workspace.md` V8.1; decisions.md 2026-11-20 row `browser`, round 8.)
 
 **Bulk actions: scheduling and flags**
-- R1193. Toggle Suspend unsuspends all selected cards when the current card is suspended, else suspends all, and the menu item shows the current card's state as a checkmark.
+- R1193. Toggle Suspend unsuspends all selected cards when the current card is suspended, else suspends all, and the menu item shows the current card's state as a checkmark. (Superseded 2026-11-20, under review with its specs: Suspend and Unsuspend are two commands, shown by what the selection holds; `specs/browser/workspace.md` V8.1; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1194. Toggle Bury unburies all selected cards when the current card is buried (manually or as a sibling), else buries them manually.
 - R1195. Flag 1–7 sets that flag on all selected cards, or clears it from all when the current card already has that flag, and a "No flag" item clears flags.
 - R1196. Set Due Date accepts `N` (0 = today), `N-M` (random day per card) and a `!` suffix (also set the interval), remembers the last input in the synced key `setDueBrowser` (default "0"), converts new cards to review cards, returns filtered cards home, and logs a manual revlog entry.
 - R1197. Under FSRS, Set Due Date sets the interval to the days elapsed since the last review plus the new delay (0 for never-reviewed cards) and uses the home preset's initial ease when the card has none.
 - R1198. Reset (Forget) returns cards to the new queue with options "Restore original position where possible" (default on, synced `restorePositionBrowser`) and "Reset repetition and lapse counts" (default off, synced `resetCountsBrowser`), clears the memory state, keeps review history, and logs a reset entry.
-- R1199. Grade Now shows Again/Hard/Good/Easy (keys 1–4 work), answers each selected card immediately with its computed next state as a review with time 0, writes revlog entries, and leaves queues of other cards untouched.
+- R1199. Grade Now shows Again/Hard/Good/Easy (keys 1–4 work), answers each selected card immediately with its computed next state as a review with time 0, writes revlog entries, and leaves queues of other cards untouched. (Superseded 2026-11-20, under review with its specs: deferred to a later version; `specs/browser/workspace.md` V8.1; decisions.md 2026-11-20 row `browser`, round 8.)
 
 **Find and Replace**
 - R1200. Find and Replace offers Find, Replace With, In ("All fields", "Tags", or any field name used by the selected notes), "Selected notes only" (off and disabled when nothing is selected), "Ignore case" and "Treat input as regular expression".
@@ -1734,15 +1734,15 @@ flowchart TB
 - R1207. Changed notes are saved through the normal note-save path (sort field, checksum, card generation for newly satisfied templates; never deleting cards), and the result reads "N of M notes updated" or "N notes updated".
 
 **Batch edit (bulk field editing)**
-- R1208. Edit Field… sets one field across all selected notes with the operation Replace (set whole content), Append, Prepend or Clear (deviation: Anki provides this only through the Batch Editing add-on).
+- R1208. Edit Field… sets one field across all selected notes with the operation Replace (set whole content), Append, Prepend or Clear (deviation: Anki provides this only through the Batch Editing add-on). (Superseded 2026-11-20, under review with its specs: deferred to a later version (R1208 to R1211); `specs/browser/workspace.md` V8.1; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1209. The field list is the union of field names of the selected notes' notetypes, and notes whose notetype lacks the chosen field are skipped and counted.
 - R1210. Content is entered in a rich-text field (with an HTML source toggle), and Append/Prepend take a separator choice (none, space, line break `<br>`, or custom text) that is omitted when the field is empty.
 - R1211. Batch edit is one undo step, saves through the normal note-save path, modifies only notes whose content changes, and reports "N of M notes updated".
 
 **Delete, export, add, copy**
-- R1212. Delete Notes deletes the selected notes and all their cards with no confirmation dialog, shows "N notes deleted" with Undo, and is fully undoable.
-- R1213. Export Notes opens the `.apkg` export sheet limited to the selected notes, with the same options as collection/deck export (scheduling, media, deck presets, legacy compatibility).
-- R1214. Add Notes opens the Add screen, and Create Copy opens it prefilled with the current note's fields and tags and the current card's deck.
+- R1212. Delete Notes deletes the selected notes and all their cards with no confirmation dialog, shows "N notes deleted" with Undo, and is fully undoable. (Superseded 2026-11-20, under review with its specs: Delete asks when more than one note goes or the note has more than one card; there is no result message; `specs/browser/workspace.md` V8.2, V8.3; decisions.md 2026-11-20 row `browser`, round 8. Undo stands.)
+- R1213. Export Notes opens the `.apkg` export sheet limited to the selected notes, with the same options as collection/deck export (scheduling, media, deck presets, legacy compatibility). (Superseded 2026-11-20, under review with its specs: deferred to a later version; `specs/browser/workspace.md` V8.1; decisions.md 2026-11-20 row `browser`, round 8.)
+- R1214. Add Notes opens the Add screen, and Create Copy opens it prefilled with the current note's fields and tags and the current card's deck. (Superseded 2026-11-20, under review with its specs: deferred to a later version; `specs/browser/workspace.md` V8.1; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1215. ⌘C on the table copies the selected rows' visible column values as tab-separated text (deviation: Anki has no table copy).
 
 **Preview**
@@ -1754,15 +1754,15 @@ flowchart TB
 
 **Editor pane**
 - R1221. Exactly one selected row shows that note in the editor pane (the same editor as Edit/Add, see the editor area), and multiple selection shows a summary ("12 cards selected") with the bulk actions.
-- R1222. On Mac/iPad the inspector (Editor, Preview, Card Info tabs) sits on the right by default or below the table by a per-device setting, and is collapsible.
+- R1222. On Mac/iPad the inspector (Editor, Preview, Card Info tabs) sits on the right by default or below the table by a per-device setting, and is collapsible. (Superseded 2026-11-20, under review with its specs: the inspector has two tabs, Note and Info, on the trailing side; `specs/browser/workspace.md` V12, V13; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1223. Editor changes save with debounce, update the row immediately, and form undo steps; moving to another row first flushes the pending save.
 - R1224. Moving to the previous/next row keeps the focused field focused in the new note.
 
 **Keyboard shortcuts (Mac, and iPad with keyboard)**
 - R1225. Edit: Undo ⌘Z, Redo ⇧⌘Z, Select All ⌥⌘A (and ⌘A in the table), Invert Selection ⌥⌘S, Copy ⌘C.
-- R1226. View: Toggle Cards/Notes ⌥⌘T, Toggle Sidebar ⌃⌘S, Card Info ⌥⌘I, Preview ⇧⌘P.
+- R1226. View: Toggle Cards/Notes ⌥⌘T, Toggle Sidebar ⌃⌘S, Card Info ⌥⌘I, Preview ⇧⌘P. (Superseded 2026-11-20, under review with its specs: View has Browse ⇧⌘B and Note Types ⇧⌘T; Card Info stays ⌥⌘I; there is no Preview command; `docs/design/native-interface-contract.md` N21.8; decisions.md 2026-11-20 row `browser`, round 8. The rest stands.)
 - R1227. Notes: Create Copy ⌥⌘E, Export Notes ⇧⌘E, Add Tags ⇧⌘A, Remove Tags ⌥⇧⌘A, Toggle Mark ⌘K, Change Note Type ⇧⌘M, Find and Replace ⌥⌘F, Delete ⌘⌫ (only when the table has focus).
-- R1228. Cards: Change Deck ⌘D, Set Due Date ⇧⌘D, Grade Now ⇧⌘G, Reset ⌥⌘N, Toggle Suspend ⌘J, Toggle Bury ⇧⌘J, Flags ⌘1–⌘7 (these take precedence over any app-level ⌘-number shortcut while Browse has focus).
+- R1228. Cards: Change Deck ⌘D, Set Due Date ⇧⌘D, Grade Now ⇧⌘G, Reset ⌥⌘N, Toggle Suspend ⌘J, Toggle Bury ⇧⌘J, Flags ⌘1–⌘7 (these take precedence over any app-level ⌘-number shortcut while Browse has focus). (Superseded 2026-11-20, under review with its specs: Suspend and Unsuspend, Bury and Unbury are separate commands with round 7's keys (Bury ⌘J, Suspend ⇧⌘J); No Flag ⌘0; `specs/browser/workspace.md` V8.1, `docs/design/native-interface-contract.md` N21.8; decisions.md 2026-11-20 row `browser`, round 8. The other keys stand.)
 - R1229. Go: Find ⌘F (focus and select the search text), Sidebar Filter ⇧⌘F, Card List ⇧⌘L, First Home, Last End, Previous ⌃⌘↑ / ↑, Next ⌃⌘↓ / ↓ (Sidebar and Note editor focus stay unbound), with Shift+Home/End extending the selection.
 - R1230. ⇧⌘S (Reposition) and ⌘G / ⌥⌘G (Create Filtered Deck) stay reserved and unbound for the deferred features.
 - R1231. All shortcuts appear in the menu bar on Mac and in the iPadOS menu/keyboard overlay, using Anki's mapping (Ctrl→⌘, Alt→⌥).
@@ -1770,10 +1770,10 @@ flowchart TB
 **Layouts per platform**
 - R1232. Mac: Browse occupies the main content area as filter sidebar column | table | inspector, with the search field and Cards/Notes toggle in the toolbar, and nothing opens a separate window (deviation: Anki uses separate windows for browser, preview, card info and find/replace).
 - R1233. iPad (regular width) and unfolded foldable: the same three columns using a real multi-column table, with the filter sidebar and inspector collapsible; compact widths (Split View, Slide Over, folded) switch live to the iPhone layout, preserving search, selection and scroll position.
-- R1234. iPhone: a list with the search field pinned at the top, a horizontal quick-filter chip row (Due today, Flagged, Leeches `tag:leech`, Suspended, Added today, Studied today, New, then saved searches), and one row per result.
+- R1234. iPhone: a list with the search field pinned at the top, a horizontal quick-filter chip row (Due today, Flagged, Leeches `tag:leech`, Suspended, Added today, Studied today, New, then saved searches), and one row per result. (Superseded 2026-11-20, under review with its specs: no chip row: the same search field with suggestions and tokens, and a Filters sheet; `specs/browser/workspace.md` V14.3; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1235. iPhone rows show the sort field (or Question when chosen) as the primary line, up to two user-chosen secondary columns from the 19 as a second line, and status chips (flag, marked, suspended, buried, leech, "Now" when due now, "+N more tags").
-- R1236. iPhone: a Filters button opens the full sidebar as a sheet with the touch combining gestures, and a toolbar holds Cards/Notes, Sort, Display (secondary columns) and Select.
-- R1237. iPhone Select mode shows checkboxes, Select All / Deselect All / Invert / Select Notes, and a bottom toolbar (Flag, Suspend, Tags, Change Deck, More) with every other action under More.
+- R1236. iPhone: a Filters button opens the full sidebar as a sheet with the touch combining gestures, and a toolbar holds Cards/Notes, Sort, Display (secondary columns) and Select. (Superseded 2026-11-20, under review with its specs: the toolbar holds Filters and Add; Cards/Notes and Sort By are in the Filters sheet; no Display menu; `specs/browser/workspace.md` V14.3; decisions.md 2026-11-20 row `browser`, round 8.)
+- R1237. iPhone Select mode shows checkboxes, Select All / Deselect All / Invert / Select Notes, and a bottom toolbar (Flag, Suspend, Tags, Change Deck, More) with every other action under More. (Superseded 2026-11-20, under review with its specs: the Select bar holds Move, Tags, Suspend, Flag and More; `specs/browser/workspace.md` V14.2; decisions.md 2026-11-20 row `browser`, round 8.)
 - R1238. iPhone: tapping a row pushes the note editor with Preview and Card Info reachable from its toolbar and ⋯ menu, plus previous/next buttons that move through the results.
 - R1239. iPhone rows support a leading swipe (flag menu) and trailing swipes (Suspend/Unsuspend, Delete with undo), and long-press shows a context menu with all single-row actions and a preview peek.
 - R1240. Every row, token, sidebar item and action has a VoiceOver label (rows read their visible column values and states), and all browser features are operable by keyboard alone on Mac and iPad.
