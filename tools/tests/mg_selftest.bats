@@ -1267,6 +1267,12 @@ core_report_names() {
       "meguri-sync::sync_it$normal_sync::large::" + $suspend,
       "meguri-sync::sync_it$normal_sync::large::" + $merge] | sort)' <<<"$stress"
   validate "$result"
+  # One case alone, as the hosted matrix runs them.
+  mg core-test --stress --case merge
+  [ "$status" -eq 0 ]
+  [ "$(field -c .summary)" = '{"total":1,"passed":1,"failed":0,"skipped":0}' ]
+  jq -e --arg merge "$MERGE_CASE" '.details.stress_tests == ["meguri-sync::sync_it$normal_sync::large::" + $merge]' "$result"
+  validate "$result"
 
   write_file core/crates/meguri-engine/tests/canary_pins.rs '#[test] fn pin_held() {}'
   mg core-test -- --features meguri-ffi/test-hooks
@@ -1335,6 +1341,13 @@ core_report_names() {
   mg core-test -- -E 'all()' --stress
   [ "$status" -eq 2 ]
   [ "$(failure_ids)" = usage ]
+  local args
+  for args in "--stress --case" "--stress --case all" "--stress --case c8" "--stress --case merge --case merge" "--stress --case merge -- -E all()"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg core-test $args
+    [ "$status" -eq 2 ]
+    [ "$(failure_ids)" = usage ]
+  done
   [ ! -s "$STUB_LOG" ]
 }
 

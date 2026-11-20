@@ -1,7 +1,7 @@
 # Rust core jobs. Sourced by tools/mg; they run inside the `dev` container.
 
 mg_job core-test docker:dev mg_core_test \
-  "Rust tests: cargo nextest on core/ (no retries), canary_* first; --canaries only, --quick excludes three stress cases (hosted shards: [--partition hash:M/N] [--exclude-list <file> | --only-list <file>]), --stress requires those three; args after -- go to nextest"
+  "Rust tests: cargo nextest on core/ (no retries), canary_* first; --canaries only, --quick excludes three stress cases (hosted shards: [--partition hash:M/N] [--exclude-list <file> | --only-list <file>]), --stress requires those three (--stress --case session|suspend|merge: one of them), building only their test binaries; args after -- go to nextest"
 mg_job core-lint docker:dev mg_core_lint \
   "Rust lint: clippy -D warnings on all targets and features, layering-check (edges.toml), and no AnkiWeb name in meguri-sync built without its features; source formatting is optional"
 mg_job core-deny docker:dev mg_core_deny \
@@ -30,11 +30,32 @@ mg_u38_wiring() {
 # phase runs only when a canary exists.
 MG_CORE_CANARIES='binary(/^canary_/)'
 
-# Exact identities shared by quick's exclusion and stress's selection. Keep
-# nextest's existing scheduling overrides; neither mode changes the profile.
-MG_CORE_STRESS='(package(=meguri-engine) & binary(=engine_it) & test(=session_predict::c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions))
-  | (package(=meguri-sync) & binary(=sync_it) & test(=normal_sync::large::suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k))
-  | (package(=meguri-sync) & binary(=sync_it) & test(=normal_sync::large::merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k))'
+# Exact identities shared by quick's exclusion and stress's selection, one
+# line per case: <case> <package> <test binary> <test>. Keep nextest's
+# existing scheduling overrides; neither mode changes the profile.
+MG_CORE_STRESS_CASES='session meguri-engine engine_it session_predict::c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions
+suspend meguri-sync sync_it normal_sync::large::suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k
+merge meguri-sync sync_it normal_sync::large::merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k'
+
+# mg__core_stress <case|all> <filter|names|targets>: the selected cases'
+# nextest filter, their `<package>::<binary>$<test>` names (JSON array), or
+# their test binaries (`--test <binary>` arguments, each once).
+mg__core_stress() {
+  awk -v want="$1" -v what="$2" '
+    want == "all" || $1 == want {
+      n++
+      filter = filter (n > 1 ? " | " : "") "(package(=" $2 ") & binary(=" $3 ") & test(=" $4 "))"
+      names = names (n > 1 ? "," : "") "\"" $2 "::" $3 "$" $4 "\""
+      if (!($3 in seen)) { seen[$3] = 1; targets = targets (targets == "" ? "" : " ") "--test " $3 }
+    }
+    END {
+      if (n == 0) exit 1
+      if (what == "filter") print filter
+      else if (what == "names") print "[" names "]"
+      else print targets
+    }' <<<"$MG_CORE_STRESS_CASES"
+}
+MG_CORE_STRESS="$(mg__core_stress all filter)"
 
 # mg__core_canary_packages: workspace packages with a canary_* test target, one per line.
 mg__core_canary_packages() {
@@ -105,24 +126,30 @@ mg__core_settle() {
   sync
 }
 
-# tools/mg core-test [--canaries | --quick [hosted options] | --stress | -- nextest args]
+# tools/mg core-test [--canaries | --quick [hosted options] | --stress [--case <case>] | -- nextest args]
 # --canaries runs the canary phase alone (the gate's canary stage, U19) and
 # fails when the workspace has no canary. Quick keeps that ordering; stress
-# runs only its exact three cases. Both opt into the FFI test hooks locally.
+# runs only its exact three cases (or the one --case names), and builds only
+# their test binaries. Both opt into the FFI test hooks locally.
 # Hosted options split quick's ordinary tests across runners; each shard
 # still runs the canaries first. `--partition hash:M/N` keeps the tests of
 # nextest partition M of N. `--exclude-list <file>` leaves out the listed
 # tests; `--only-list <file>` runs exactly them, one at a time after the
 # build has been flushed to disk, and fails when a listed test did not run.
 mg_core_test() {
-  local only_canaries=false mode=default arg
+  local only_canaries=false mode=default arg stress_case=all
   local partition="" list_mode="" list_file="" listed="" list_expr=""
   case "${1:-}" in
     --canaries|--stress)
       mode="${1#--}"
       shift
+      if [ "$mode" = stress ] && [ "${1:-}" = --case ] && [ "$#" -eq 2 ] && [ "$2" != all ] &&
+         mg__core_stress "$2" names >/dev/null; then
+        stress_case="$2"
+        shift 2
+      fi
       if [ "$#" -gt 0 ]; then
-        mg_failure usage "--$mode takes no other arguments" "tools/mg core-test --$mode"
+        mg_failure usage "--$mode takes no other arguments$( [ "$mode" != stress ] || printf ' but one --case session|suspend|merge')" "tools/mg core-test --$mode"
         mg_status error
         return 0
       fi
@@ -242,7 +269,8 @@ mg_core_test() {
     ordinary_filter="$ordinary_filter & $quick_filter"
     set -- --no-tests=pass -E "$quick_filter"
   elif [ "$mode" = stress ]; then
-    set -- -E "$MG_CORE_STRESS"
+    # shellcheck disable=SC2046 # the --test words of the selected cases
+    set -- $(mg__core_stress "$stress_case" targets) -E "$(mg__core_stress "$stress_case" filter)"
   fi
   if [ "$mode" != stress ] && { [ "$#" -eq 0 ] || [ "$mode" = quick ]; }; then
     while IFS= read -r pkg; do
@@ -309,20 +337,16 @@ mg_core_test() {
   fi
   if [ "$mode" = stress ]; then
     local stress_tests
-    if stress_tests="$(jq -ces '
+    if stress_tests="$(jq -ces --argjson want "$(mg__core_stress "$stress_case" names)" '
       [.[] | select(.type == "test" and .event != "started")] as $tests
       | ([$tests[].name] | sort) as $names
-      | select(($tests | length) == 3 and all($tests[]; .event == "ok")
-        and $names == ([
-          "meguri-engine::engine_it$session_predict::c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions",
-          "meguri-sync::sync_it$normal_sync::large::suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k",
-          "meguri-sync::sync_it$normal_sync::large::merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k"
-        ] | sort))
+      | select(($tests | length) == ($want | length) and all($tests[]; .event == "ok")
+        and $names == ($want | sort))
       | $names' "$main")"; then
       mg_detail stress_tests "$stress_tests"
     else
       stress_complete=false
-      mg_failure stress-selection "stress requires exactly the three expected cases to pass, with none missing or skipped" "tools/mg core-test --stress"
+      mg_failure stress-selection "stress requires exactly the expected cases ($stress_case) to pass, with none missing or skipped" "tools/mg core-test --stress$( [ "$stress_case" = all ] || printf ' --case %s' "$stress_case")"
     fi
   fi
   # --only-list: every listed test must have run exactly once. A renamed or

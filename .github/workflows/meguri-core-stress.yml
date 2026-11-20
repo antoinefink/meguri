@@ -4,26 +4,24 @@ name: Verify Core at scale
 # `tools/mg core-test --stress`: exactly the three full-scale Core cases that
 # the quick suite leaves out (docs/process/tiers.md, "Hosted checks").
 #
-# When "stress" runs:
-# - a pull request or master push that changes an input of those cases: the
-#   Rust workspace (core/**), the dev image (docker/compose.yml,
-#   docker/dev.Dockerfile and its .dockerignore), the job that runs them
-#   (tools/mg, tools/mg.d/core.sh) or this file. These are the paths below.
-#   The cases read no specs, conformance data or app sources, so a change to
-#   those alone (or to docs/) does not run them, and then no "stress" check
-#   appears on the pull request at all;
+# When "stress" runs (decided 2026-11-20 under Antoine's delegation; it no
+# longer runs on pull requests: these are scale cases that cost about an
+# hour on every push, and a master run finds a regression on the same day):
+# - a master push that changes an input of those cases: the Rust workspace
+#   (core/**), the dev image (docker/compose.yml, docker/dev.Dockerfile and
+#   its .dockerignore), the job that runs them (tools/mg, tools/mg.d/core.sh)
+#   or this file. These are the paths below. The cases read no specs,
+#   conformance data or app sources;
 # - every night at 02:37 UTC on master, and on manual runs.
+# A red stress run on master is a required repair before the next Core merge
+# (docs/process/verification-status.md).
+#
+# Each case runs on its own runner ("stress · <case>"), building only its
+# test binary: the cases hold wall-clock budgets and run alone
+# (core/.config/nextest.toml), so one runner would run them one after
+# another. "stress" passes only when all three passed on this commit.
 
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - '.github/workflows/meguri-core-stress.yml'
-      - 'core/**'
-      - 'docker/compose.yml'
-      - 'docker/dev.Dockerfile*'
-      - 'tools/mg'
-      - 'tools/mg.d/core.sh'
   push:
     branches: [master]
     paths:
@@ -45,36 +43,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  stress:
+  stress-case:
+    name: stress · ${{ matrix.case }}
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 120
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [session, suspend, merge]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Run the three full-scale Core cases
+      - name: Run the full-scale Core case ${{ matrix.case }}
         shell: bash
+        env:
+          CASE: ${{ matrix.case }}
         run: |
           rc=0
           receipt="$(sudo -n env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
             GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" \
-            core-test --stress)" || rc=$?
+            core-test --stress --case "$CASE")" || rc=$?
           if [[ -f "$receipt" ]]; then
             cp "$receipt" "$RUNNER_TEMP/meguri-result.json"
           fi
           ((rc == 0))
-          jq -e --arg sha "$GITHUB_SHA" \
+          jq -e --arg sha "$GITHUB_SHA" --arg case "$CASE" \
             '.status == "pass" and .commit.sha == $sha and .commit.dirty == false
-            and .job == "core-test" and .args == ["--stress"]
+            and .job == "core-test" and .args == ["--stress", "--case", $case]
             and .placement == "docker" and .service == "dev"
-            and .summary == {total: 3, passed: 3, failed: 0, skipped: 0}
-            and (.details.stress_tests | type == "array" and length == 3)' "$receipt"
+            and .summary == {total: 1, passed: 1, failed: 0, skipped: 0}
+            and (.details.stress_tests | type == "array" and length == 1)' "$receipt"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: meguri-core-stress-result
+          name: meguri-core-stress-${{ matrix.case }}-result
           path: ${{ runner.temp }}/meguri-result.json
           if-no-files-found: ignore
           retention-days: 7
+
+  # always(): a failed, cancelled or skipped case must fail "stress", never
+  # leave it skipped (a skipped check counts as passing).
+  stress:
+    needs: stress-case
+    if: always()
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - name: Require all three cases to pass on this commit
+        shell: bash
+        env:
+          CASES: ${{ needs.stress-case.result }}
+        run: |
+          if [[ "$CASES" != success ]]; then
+            echo "::error::The stress cases ended $CASES (failed, cancelled or not started)."
+            printf '### stress: failed\n\nThe cases ended %s.\n' "$CASES" >>"$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          printf '### stress: passed\n\nsession, suspend and merge each passed.\n' >>"$GITHUB_STEP_SUMMARY"
