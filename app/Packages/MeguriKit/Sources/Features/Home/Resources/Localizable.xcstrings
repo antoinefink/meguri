@@ -258,7 +258,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Create deck named %@"
+            "value": "Create deck named “%@”"
           }
         }
       }
@@ -399,6 +399,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "New Subdeck…"
+          }
+        }
+      }
+    },
+    "Its %lld subdecks move with it.": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Its subdeck moves with it."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Its %lld subdecks move with it."
+                }
+              }
+            }
           }
         }
       }

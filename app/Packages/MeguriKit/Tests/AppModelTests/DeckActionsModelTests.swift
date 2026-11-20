@@ -57,20 +57,20 @@ import Testing
         model.present(.create, host: .settings)
         #expect(owner.navigation.sheet == nil)
         model.present(.rename(2))
-        #expect(model.name == "Parent::Child")
+        #expect(model.name == "Child" && model.parentID == 1 && model.composedName == "Parent::Child")
         #expect(owner.navigation.sheetHost == .main)
         #expect(!model.canPresent(.create))
         // A layout rereads the same owner, rather than making a fresh draft.
-        model.name = "Parent::Edited draft"
+        model.name = "Edited draft"
         owner.navigation.adoptLaunchLayout(.compact)
         #expect(owner.deckActions === model)
-        #expect(model.name == "Parent::Edited draft")
+        #expect(model.name == "Edited draft" && model.composedName == "Parent::Edited draft")
         owner.navigation.sheetHost = .settings
         #expect(!model.canSubmit)
         owner.navigation.sheetHost = .main
         model.cancel()
         model.present(.subdeck(2))
-        #expect(model.name == "Parent::Child::")
+        #expect(model.name.isEmpty && model.parentID == 2)
         model.name = " \n\t "
         #expect(!model.canSubmit)
         model.cancel()
@@ -93,7 +93,7 @@ import Testing
             await gate.hold()
             throw BridgeError.deckRefused(.filteredParent)
         }
-        model.present(.subdeck(2)); model.name += "Typed"
+        model.present(.subdeck(2)); model.name = "Typed"
         model.submit(); model.submit()
         #expect(model.busy)
         #expect(!owner.canStudy && !owner.exportAllowed && !owner.manualAllowed)
@@ -102,7 +102,7 @@ import Testing
         #expect(calls == 1)
         gate.release(); await model.waitForCompletion()
         #expect(!model.busy)
-        #expect(model.name == "Parent::Child::Typed")
+        #expect(model.name == "Typed" && model.composedName == "Parent::Child::Typed")
         #expect(model.message == DeckActionsModel.explanation(.deckRefused(.filteredParent)))
         #expect(model.canSubmit)
     }
@@ -128,7 +128,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckActions
         var calls = 0
         model.createDeck = { _ in calls += 1; throw BridgeError.cancelled }
-        model.present(.subdeck(2)); model.name += "New"
+        model.present(.subdeck(2)); model.name = "New"
         model.submit()
         owner.loadDeckTree = { CountedDeckTree(generation: 11, nextChangeAt: Int64.max, nodes: []) }
         // A conflicting route wins even if the queued task has not run yet.
@@ -640,14 +640,16 @@ extension ReviewCollectionStartupTests {
             #expect(model.canPresent(.rename(1)) && model.canPresent(.subdeck(1)))
             #expect(!model.canPresent(.rename(999)) && !model.canPresent(.subdeck(999)))
             model.present(subdeck ? .subdeck(1) : .rename(1))
-            #expect(model.name == (subdeck ? "Default::" : "Default"))
+            #expect(model.name == (subdeck ? "" : "Default") && model.parentID == (subdeck ? 1 : nil))
             #expect(owner.decks == treeBefore && owner.deck(1) == nil)
-            model.name = subdeck ? "Default::QZ81" : "QZ82::QZ83"
+            model.name = subdeck ? "QZ81" : "QZ82::QZ83"
+            let saved = model.composedName
+            #expect(saved == (subdeck ? "Default::QZ81" : "QZ82::QZ83"))
             model.submit(); await model.waitForCompletion()
             #expect(model.message == nil && !model.needsRefresh)
             let selectedID = try #require(owner.navigation.homeDeckPage?.rawValue)
             #expect(subdeck ? selectedID != 1 : selectedID == 1)
-            #expect(owner.fullDeckName(selectedID) == model.name)
+            #expect(owner.fullDeckName(selectedID) == saved)
             let node = try #require(owner.deck(selectedID))
             #expect(owner.deckPage(selectedID)?.name == node.name)
             #expect(owner.deckPage(selectedID)?.counts == node.counts)
@@ -660,8 +662,8 @@ extension ReviewCollectionStartupTests {
                 // Returning the same ID to its hidden name replaces the visible
                 // page detail; later drafts must use the new authoritative name.
                 model.present(.rename(1))
-                #expect(model.name == "QZ82::QZ83")
-                model.name = "Default"; model.submit(); await model.waitForCompletion()
+                #expect(model.name == "QZ83" && model.parent?.fullName == "QZ82")
+                model.parentID = nil; model.name = "Default"; model.submit(); await model.waitForCompletion()
                 #expect(model.message == nil && !model.needsRefresh)
                 #expect(owner.navigation.homeDeckPage == DeckID(1))
                 #expect(owner.deck(1) == nil && owner.deckPage(1)?.name == "Default")
@@ -669,7 +671,9 @@ extension ReviewCollectionStartupTests {
                 let refreshed = try await service.treeWithCounts()
                 #expect(owner.decks == refreshed.nodes)
                 model.cancel(); model.present(.subdeck(1))
-                #expect(model.name == "Default::" && model.canSubmit)
+                #expect(model.name.isEmpty && model.parentID == 1 && model.parent?.fullName == "Default")
+                model.name = "QZ84"
+                #expect(model.composedName == "Default::QZ84" && model.canSubmit)
                 model.cancel()
             }
         }
@@ -773,7 +777,7 @@ extension ReviewCollectionStartupTests {
                 return try await service.selectDeck(id: id).generation
             }
             model.present(subdeck ? .subdeck(parent.id) : .create)
-            model.name = subdeck ? "Selection Parent::Child" : "Selection Target"
+            model.name = subdeck ? "Child" : "Selection Target"
             model.submit(); await model.waitForCompletion()
             let committed = try #require(mutations.first)
             #expect(mutations.count == 1 && selections == [committed.id])
@@ -813,9 +817,11 @@ extension ReviewCollectionStartupTests {
             #expect(owner.fullDeckName(childID) == "Native Renamed::Child")
             model.cancel()
             model.present(.subdeck(parentID))
-            #expect(model.name == "Native Renamed::")
-            model.name += "Sibling"; model.submit(); await model.waitForCompletion(); model.cancel()
-            model.present(.rename(childID)); model.name = "Native Renamed::Sibling"
+            #expect(model.name.isEmpty && model.parentID == parentID)
+            model.name = "Sibling"; model.submit(); await model.waitForCompletion(); model.cancel()
+            model.present(.rename(childID))
+            #expect(model.name == "Child" && model.parentID == parentID && model.footer == .inside("Native Renamed"))
+            model.name = "Sibling"
             model.submit(); await model.waitForCompletion()
             #expect(model.finalName == "Native Renamed::Sibling+")
             #expect(owner.fullDeckName(childID) == model.finalName)
