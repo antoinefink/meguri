@@ -1298,7 +1298,9 @@ public final class SyncCoordinator {
         defer { if self.meguriEditorDecision?.owner == id { self.meguriEditorDecision = nil } }
         let admission = await prepareEditorReplacement("Meguri Sync", decision, current)
         defer { if let admission { finishEditorReplacement(admission.id) } }
-        guard let admission, admission.accepted else {
+        // MP6.5: a blocked phase starts no activation. It ends this unconfirmed
+        // preparation as a refused admission does, so setup can be tried again.
+        guard let admission, admission.accepted, !self.providerNeedsAttention else {
             do {
                 let result = try await discard()
                 guard self.meguriAction?.id == id, self.meguriCurrent(owner, expected, revision), held() else { return nil }
@@ -1318,8 +1320,7 @@ public final class SyncCoordinator {
             return nil
         }
         let reservation = admission.id
-        // MP6.5: a blocked phase starts no transfer; the retained preview stays.
-        guard current(), !self.providerNeedsAttention else { return nil }
+        guard current() else { return nil }
         do { try beginMeguriActivation(reservation) }
         catch { self.meguriLastError = error; return nil }
         let before = self.generation
@@ -1728,15 +1729,18 @@ public final class SyncCoordinator {
     private func continueMeguriMedia(_ operation: MeguriBootstrapOperation, id: UUID) async throws {
         guard let facade = meguriBootstrap, let owner = meguriConnectionOwner, !settings.paused else { return }
         let expected = generation, revision = hostRevision
-        // MP6.5: a blocked phase starts no media step; the operation keeps its pending media.
-        guard meguriCurrent(owner, expected, revision), !providerNeedsAttention,
+        guard meguriCurrent(owner, expected, revision),
               operation.receipt.phase == .collectionComplete || operation.receipt.phase == .mediaIncomplete else { return }
+        // MP6.5: a blocked phase starts no media step. The operation keeps its
+        // pending media, and Retry stays offered for after the phase recovers.
+        guard !providerNeedsAttention else { meguriOperation = operation; meguriStage = .mediaBlocked; return }
         meguriActiveFacade = facade; meguriStage = .media
         let prepared = try await facade.prepareMedia(operation, progress: progressForMeguri(id))
         retainMeguri(prepared)
         guard meguriCurrent(owner, expected, revision) else { return }
         applyMeguriOutcome(prepared.outcome)
-        guard case .mediaConsent(let consent) = prepared.outcome, !providerNeedsAttention else { return }
+        guard case .mediaConsent(let consent) = prepared.outcome else { return }
+        guard !providerNeedsAttention else { meguriOperation = operation; meguriStage = .mediaBlocked; return }
         let result = try await facade.transferMedia(consent, progress: progressForMeguri(id), mediaProgress: { [weak self] value in
             Task { @MainActor in if self?.meguriAction?.id == id { self?.meguriMediaProgress = value } }
         })
