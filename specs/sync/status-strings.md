@@ -5,7 +5,7 @@ Requirements: R89, R102, R103, R104, R105, R106, R107, R117, R122, R123, R124, R
 Anki: none (Meguri design)
 Scenarios: none (Meguri's Swift tests: T16)
 
-The user-visible text of routine iCloud sync: the sync button, the status popover, the Sync Now command and its results, the attention items, the error classes, the recovery choices and their confirmations, Account & Sync's iCloud rows and the Mac quit sheet. U151's `SyncStatusModel` and U161 take every such string only from this file (KTD1); U166's connect entry and U153's damaged-collection remedy reuse the T12 and T13 keys for the same flows. It fixes the draft wording that `sync/policy#P24` left open: P12.1's explanation texts are replaced by T6 under the same keys.
+The user-visible text of routine iCloud sync: the sync button, the status popover, the Sync Now command and its results, the attention items, the error classes, the recovery choices and their confirmations, Account & Sync's iCloud rows and the Mac quit sheet. U151's `SyncStatusModel` and U161 take every such string only from this file (KTD1); U166's connect entry and U153's damaged-collection remedy reuse the T12 and T13 keys for the same flows (changed 2026-11-20: Welcome has no connect entry, `docs/design/native-interface-contract.md` N18.2; its Set Up Sync opens the Sync section). It fixes the draft wording that `sync/policy#P24` left open: P12.1's explanation texts are replaced by T6 under the same keys.
 
 The states, items, results and choices are those of `sync/policy` (P12, P14, P15) and `sync/cloudkit-recovery` (V9 to V21); this file adds no state and changes no condition. Manual Anki transfers (Settings Anki Transfers, `sync/anki-transfers`) are frozen and have their own text; none of it is here (R1560).
 
@@ -367,7 +367,7 @@ Entries with one plural form use it for both.
 
 | Key | English | Shown |
 |---|---|---|
-| `sync.connect.action` | Connect to iCloud… | T9.2; Account & Sync's enable control (T14); U166's Welcome choice |
+| `sync.connect.action` | Connect to iCloud… | T9.2; Account & Sync's enable control (T14). Changed 2026-11-20: no longer Welcome's choice (N18.2), and unused once T19 ships (T19.8) |
 | `sync.connect.reading` | Getting details of the iCloud collection… | while V13.2 reads and prefetches; with `sync.now.cancel` |
 | `sync.connect.downloading` | Downloading your collection from iCloud… | V13.3 row 2, then V14's progress (T13.1) |
 | `sync.connect.downloadingMedia` | Downloading media… | after the collection, with T5's lines (R1592) |
@@ -942,6 +942,20 @@ Under each button, after its effect line, the work that the choice loses or that
 | `sync.keep.unavailable.unreadable` | The iCloud collection can’t be read, so it can’t be kept. |
 
 - **One direction** (V27.4, V27.6: lost iCloud data, another account with one side empty). The sheet is T12's: `sync.connect.upload.title`, the row's sentence, `sync.connect.upload.message`, this device's counts and `sync.connect.upload.confirm`; or `sync.connect.useICloud.title`, the row's sentence, `sync.connect.useICloud.message`, both sides' counts and `sync.connect.useICloud.confirm`. These keys are shown nowhere else.
+- **One direction, Meguri Sync** (added 2026-11-20; `sync/meguri-provider#MP6.3`'s lines "Changed 2026-11-20"). The sheet keeps `sync.keepCollection`'s order with one destructive button and Cancel. The keys below take the place of `sync.keep.title`, `sync.keep.message` and the button's key:
+
+| Key | English | Shown |
+|---|---|---|
+| `sync.keep.uploadOnly.title` | Upload This Device’s Collection? | sheet title, upload only: a changed endpoint or account, the server proved to hold no user content |
+| `sync.keep.uploadOnly.message.meguri` | This device synced with another server or account before. The account you signed in to has no collection yet, so Meguri can only upload this device’s collection to it. | in place of `sync.keep.message` |
+| `sync.keep.uploadOnly.confirm` | Upload This Device’s Collection | the destructive button, in place of `sync.keep.device` |
+| `sync.keep.downloadOnly.title.meguri` | Download the Meguri Sync Collection? | sheet title, download only: no collection on this device, and media files or a media folder that cannot be read |
+| `sync.keep.downloadOnly.message.meguri` | This device has no collection, but it may have media files. Meguri can only download the collection from your Meguri Sync server. | in place of `sync.keep.message` (changed 2026-11-20 from the built "This device has media files but no collection. …", which is not true when the folder cannot be read) |
+| `sync.keep.downloadOnly.confirm` | Download the Collection | the destructive button, in place of `sync.keep.service.meguri` |
+
+- Upload only: this device's counts; the service's side has `sync.meguri.preview.server` with the endpoint, `sync.settings.account` with the account signed in to, and the counts of the retained server copy. Under the button only `sync.meguri.preview.otherClients`. `sync.keep.device.effect.meguri` is not shown: the server holds no collection with user content, so nothing there "is replaced", and no text says it is.
+- Download only: this device's side has only `sync.counts.mediaFiles`, and only when the folder can be read. Under the button no effect line: nothing on this device is replaced or backed up, so `sync.keep.service.effect` is not shown.
+- After the button, in both forms: `sync.meguri.preview.media`, always, since the media reconciliation can change this device's files; `sync.meguri.preview.automatic` while Sync Automatically reads on.
 - When the facts change while the sheet is open, `sync.recovery.error.epochChanged` (iCloud) or `sync.meguri.setup.error.remoteChanged` or `.localChanged` (Meguri Sync) shows, the counts reload, and a new choice is needed.
 
 ### T19.4 The three kinds: iCloud (`sync/policy#P14`, `#P25.4`; V11, V27)
@@ -1002,6 +1016,8 @@ Attention items (`sync/policy#P14.4`; the T9.1 rows), needs you first, in the or
 | 21 | `publishQuota` (in place of `quotaFull`, T9.1) | needs you | `sync.attention.publishQuota` | `sync.action.cancelOp` |
 | 22 | `recoveryOpWaiting`, `publishAccount` | needs you | `sync.attention.publishAccount` | `sync.action.resumeOp` while V15.3 offers it; otherwise `sync.action.cancelOp` |
 | 23 | `recoveryOpWaiting`, `publishWaiting`, while V15.3 offers Resume | needs you | `sync.attention.publishWaiting` | `sync.action.resumeOp` |
+| 23a | `recoveryOpWaiting`, an `adopt` op in V14.3's staging transport wait, while V14.3 offers Resume (added 2026-11-20) | needs you | `sync.attention.adoptWaiting` (T13.7) | `sync.action.resumeOp`: `resume_recovery_op` (V26.2), the only call that repeats the pending staging work |
+| 23b | `recoveryOpWaiting`, the same op, otherwise (before its recorded retry-after) (added 2026-11-20) | waiting | `sync.attention.adoptWaiting` | |
 | 24 | `quotaFull` | needs you | `sync.needsYou.quotaFull`: Your iCloud storage is full, so changes stay on this device. | `sync.action.tryAgain` |
 | 25 | `generationIncomplete`, while V18 offers Abandon | needs you | `sync.attention.generationIncomplete` | `sync.action.abandon` |
 | 26 | `recoveryOpWaiting`, `publishWaiting`, otherwise | waiting | `sync.attention.publishWaiting` | |
@@ -1033,8 +1049,9 @@ Actions added:
 
 - The error classes of T8 are unchanged. `offline`, `throttled` and `cloudError` as `sync.details.error` are waiting texts: the engine retries them. Media downloads paused for free space keep `sync.media.noSpace` (T5) as a media line, as before.
 - `sync.action.resume`, `sync.action.resumeOp` and `sync.action.tryAgain` run at once. `sync.action.cancelOp` and `sync.action.abandon` keep their confirmations (T13.5, T13.3). `sync.action.tryAgain` is enabled as Sync Now is (T9.2).
-- A Cancel Replacement that is not a row's action (rows 22, 23, 26, 27, while V14.3 or V15.3 allows it) is in Troubleshooting (T19.6).
+- A Cancel Replacement that is not a row's action (rows 22, 23, 23a, 23b, 26, 27, while V14.3 or V15.3 allows it) is in Troubleshooting (T19.6).
 - An issues row of the list shows its T9.1 text and, under it, its T11.3 items, which Show Details used to open. `applyFailed` and `rekeyFailed` rows add `sync.item.error`. The list's only button is row 37's. Copy Debug Info is in Troubleshooting.
+- Rows 23a and 23b (2026-11-20) number in between so that no row is renumbered; they are in the order that decides which shows.
 - Rows 4 and the two `iCloudUnavailable` rows have no action, because none exists on the platform; they stay needs you, since only the user can end them.
 
 ### T19.5 The three kinds: Meguri Sync (T18.4 to T18.6; MP6)
@@ -1054,11 +1071,12 @@ The same four rules make the main status. The first condition that applies decid
 | setup transferring the collection, transferring media | none | T18.5 | |
 | setup acceptance unknown | waiting | `sync.meguri.setup.acceptanceUnknown` | `sync.recovery.tryAgain`: runs MP6.9's settling step (decided 2026-11-19 (review F4)) |
 | setup or round media blocked | issues | `sync.meguri.media.notTransferred` as the row that opens Affected Files (T18.6), in place of `sync.issues.row`; `sync.meguri.media.blocked` as the status detail | `sync.meguri.media.retry`, in the list |
-| the server accepted the upload, local activation unfinished | needs you while the core permits Finish Setup, otherwise waiting | `sync.needsYou.meguri.finishSetup`: The server accepted this device’s collection, but setup didn’t finish on this device. | `sync.meguri.setup.finish` |
+| the server accepted the upload, local activation unfinished | needs you while the core permits Finish Setup, otherwise waiting | `sync.needsYou.meguri.finishSetup`: The server accepted this device’s collection, but setup didn’t finish; finishing replaces changes made here since the upload, which stay in a backup. (Changed 2026-11-20; it said "…but setup didn’t finish on this device.", which left out that finishing replaces this device's later changes.) | `sync.meguri.setup.finish` |
 | setup failed, `activationInterrupted` | needs you while the core permits Finish Setup, otherwise waiting | `sync.needsYou.meguri.activation`: Replacing this device’s collection didn’t finish, and your backup is kept. | `sync.meguri.setup.finish` |
 | setup failed, `authentication`; round failed, authentication | needs you | `sync.needsYou.meguri.signIn`: The server didn’t accept your sign-in, so Meguri Sync stopped. | `sync.meguri.signIn` |
 | setup failed, `identityChanged` | needs you | `sync.needsYou.meguri.identityChanged`: The server address or account changed, so you need to sign in again. | `sync.meguri.signIn` |
 | setup failed, `storage` | needs you | `sync.needsYou.meguri.storage`: Meguri couldn’t save to this device, so setup stopped. | `sync.recovery.tryAgain` |
+| setup failed, `localUnusable`: a collection file is on this device but is not open, damaged or closed (`sync/meguri-provider#MP6.3`, added 2026-11-20) | needs you | `sync.needsYou.meguri.localUnusable`: Meguri can’t open the collection on this device, so setup stopped. | `sync.action.copyDebugInfo` |
 | setup failed, `remoteUnavailable`, `remoteChanged`, `localChanged`, `backupFailed`, `server`, `invalidDownload` | needs you | `sync.needsYou.meguri.setupFailed`: Setting up Meguri Sync didn’t finish, and nothing was replaced. | `sync.recovery.tryAgain`: runs MP6.3 again from preparation |
 | setup failed, `cancelled` | none: the service is Off (MP6.3) | | |
 | connection setup required, no setup stage and no round | waiting | `sync.meguri.status.setupUnavailable` | |
@@ -1074,6 +1092,8 @@ The same four rules make the main status. The first condition that applies decid
 | round failed, cancelled | none | as round with pending work | |
 
 - The failure's own T18.5 line is the first line of that attempt's entry in the sync log, so the reason is not lost when the status shows one sentence.
+- MP6.9's outcomes show in these rows as MP6.9 says: "neither" (the upload was overtaken) is "round failed, full sync required"'s sentence and action during setup too, and Cancel in the sheet it opens leaves the service Off, because that setup never finished; "indistinct" stays the acceptance-unknown row (added 2026-11-20).
+- `sync.needsYou.meguri.localUnusable` makes no claim about the cause: the file may be damaged or only closed. The local-only screens of V19 still apply to a damaged collection (added 2026-11-20).
 - `sync.needsYou.meguri.setupFailed` says nothing was replaced, which MP4 makes true for each failure it covers: every one comes before activation or dispatch. `activationInterrupted` has its own row and makes no such claim.
 - With Sync Automatically off, the status of an idle round is T3's `sync.status.automaticOff.title` and `.detail`, as for iCloud.
 
@@ -1093,6 +1113,7 @@ The same four rules make the main status. The first condition that applies decid
 | `sync.action.cancelOp` (T9.2) | | while an op can be cancelled and Cancel is not its status action (T19.4) |
 | `sync.trouble.log` | Sync Log | opens the log of real recorded attempts (N7's rules) |
 | `sync.action.copyDebugInfo` (T9.2) | Copy Debug Info | always |
+| `sync.status.openSettings` | Sync Settings | the status popover's button that opens the Sync section (added 2026-11-20; T19.7: rows that opened Account & Sync open the Sync section) |
 | `sync.trouble.conflictCopies` | `%lld conflict copy is saved on this device.` / `%lld conflict copies are saved on this device.` | iCloud, one plain line with no action, while P14.4's `conflicts` is above 0 (V27.7) |
 
 - `sync.settings.privacy` (T14) stays the Sync section's footer while iCloud is the service.
