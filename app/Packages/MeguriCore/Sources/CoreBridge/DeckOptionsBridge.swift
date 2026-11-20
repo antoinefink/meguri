@@ -220,6 +220,9 @@ public struct OptionIssue: Sendable, Hashable {
     public let code: OptionIssueCode
     public let severity: OptionSeverity
     public let params: [String: String]
+    public init(field: OptionField, preset: Int64?, code: OptionIssueCode, severity: OptionSeverity, params: [String: String]) {
+        self.field = field; self.preset = preset; self.code = code; self.severity = severity; self.params = params
+    }
     init(_ raw: MeguriCoreBindings.OptionIssue) {field = OptionField(raw.field); preset = raw.preset; code = OptionIssueCode(raw.code); severity = OptionSeverity(raw.severity); params = raw.params}
 }
 public struct OptionMetadata: Sendable, Hashable {
@@ -282,12 +285,15 @@ public struct DeckOptionsSnapshot: Sendable, Hashable {
     public let effectiveNewLimit: UInt32
     public let effectiveReviewLimit: UInt32
     public let effectiveRetention: Float
+    /// `sched/deck-options` O17.3: the deck values the save leaves as stored.
+    public let keptDeckValues: Set<OptionField>
     init(_ raw: MeguriCoreBindings.DeckOptionsSnapshot) {
         newLimitScope = OptionLimitScope(raw.newLimitScope); reviewLimitScope = OptionLimitScope(raw.reviewLimitScope); retentionThisDeck = raw.retentionThisDeck
         deck = raw.deck; name = raw.name; assignedPreset = raw.assignedPreset; selectedPreset = raw.selectedPreset; presetMissing = raw.presetMissing; today = raw.today; todayDate = raw.todayDate
         presets = raw.presets.map(OptionPreset.init); deckValues = optionFields(raw.deckValues); globals = optionFields(raw.globals); metadata = raw.metadata.map(OptionMetadata.init)
         newToday = raw.newToday.map(OptionTodayLimit.init); reviewToday = raw.reviewToday.map(OptionTodayLimit.init); ignoreCount = raw.ignoreCount.map(OptionIgnoreCount.init)
         unsavedChanges = raw.unsavedChanges; subtree = raw.subtree; effectiveNewLimit = raw.effectiveNewLimit; effectiveReviewLimit = raw.effectiveReviewLimit; effectiveRetention = raw.effectiveRetention
+        keptDeckValues = Set(raw.keptDeckValues.map(OptionField.init))
     }
 }
 public enum DeckOptionsEdit: Sendable, Hashable {
@@ -297,6 +303,11 @@ public enum DeckOptionsEdit: Sendable, Hashable {
     case select(preset: Int64), add(name: String), clone(name: String), rename(name: String), remove(preset: Int64)
     case restoreDefault(preset: Int64?, field: OptionField)
     case configure(subtree: Bool)
+    /// O17.3: the save writes none of these deck values (`newLimit`, `reviewLimit`,
+    /// `newLimitToday`, `reviewLimitToday`, `deckDesiredRetention`).
+    case keep(fields: [OptionField])
+    /// The five deck values a save can write (`sched/presets` D1).
+    public static let deckValues: [OptionField] = [.newLimit, .reviewLimit, .newLimitToday, .reviewLimitToday, .deckDesiredRetention]
     var raw: MeguriCoreBindings.DeckOptionsEdit {
         switch self {
         case .setLimit(let review, let scope, let value): return .setLimit(review: review, scope: scope.raw, value: value)
@@ -309,6 +320,7 @@ public enum DeckOptionsEdit: Sendable, Hashable {
         case .remove(let preset): return .remove(preset: preset)
         case .restoreDefault(let preset, let field): return .restoreDefault(preset: preset, field: field.raw)
         case .configure(let subtree): return .configure(subtree: subtree)
+        case .keep(let fields): return .keep(fields: fields.map(\.raw))
         }
     }
 }

@@ -1,0 +1,420 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "deckOptions.cancel": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "deckOptions.changedElsewhere": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These options were changed elsewhere."
+          }
+        }
+      }
+    },
+    "deckOptions.changedElsewhere.keepEditing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep Editing"
+          }
+        }
+      }
+    },
+    "deckOptions.changedElsewhere.reload": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload"
+          }
+        }
+      }
+    },
+    "deckOptions.discard.discard": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard"
+          }
+        }
+      }
+    },
+    "deckOptions.discard.keepEditing": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep Editing"
+          }
+        }
+      }
+    },
+    "deckOptions.discard.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard changes?"
+          }
+        }
+      }
+    },
+    "deckOptions.issue.notWhole": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a whole number."
+          }
+        }
+      }
+    },
+    "deckOptions.issue.outOfRange.number": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a number from %1$@ to %2$@."
+          }
+        }
+      }
+    },
+    "deckOptions.issue.outOfRange.percent": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a percentage from %1$@ to %2$@."
+          }
+        }
+      }
+    },
+    "deckOptions.issue.retentionHigh": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A higher desired retention means many more reviews."
+          }
+        }
+      }
+    },
+    "deckOptions.issue.retentionHigh.strong": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A desired retention this high means a very large number of reviews."
+          }
+        }
+      }
+    },
+    "deckOptions.issue.retentionLow": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "With a lower desired retention, you’ll forget more cards."
+          }
+        }
+      }
+    },
+    "deckOptions.issue.retentionLow.strong": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "With a desired retention this low, you’ll forget many of your cards."
+          }
+        }
+      }
+    },
+    "deckOptions.issue.reviewsBelowTenTimesNew": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use %@ or more reviews per day to keep up with your new cards."
+          }
+        }
+      }
+    },
+    "deckOptions.preset.usedBy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ (used by %#@decks@)"
+          },
+          "substitutions": {
+            "decks": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%3$@ deck"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%3$@ decks"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "deckOptions.saveFailed.busy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The collection is busy. Finish the current operation, then try again."
+          }
+        }
+      }
+    },
+    "deckOptions.saveFailed.failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing was changed. Try again."
+          }
+        }
+      }
+    },
+    "deckOptions.saveFailed.ok": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "deckOptions.saveFailed.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t Save Deck Options"
+          }
+        }
+      }
+    },
+    "deckOptions.unavailable.failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri couldn’t read this deck’s options."
+          }
+        }
+      }
+    },
+    "deckOptions.unavailable.filtered": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A filtered deck has no deck options."
+          }
+        }
+      }
+    },
+    "deckOptions.unavailable.notFound": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This deck is no longer available."
+          }
+        }
+      }
+    },
+    "deckOptions.unavailable.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck Options Unavailable"
+          }
+        }
+      }
+    },
+    "deckOptions.unavailable.tryAgain": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again"
+          }
+        }
+      }
+    },
+    "deckOptions.v1.desiredRetention": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desired Retention"
+          }
+        }
+      }
+    },
+    "deckOptions.v1.desiredRetentionFooter": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How likely you are to remember a card when it comes back."
+          }
+        }
+      }
+    },
+    "deckOptions.v1.newPerDay": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Cards per Day"
+          }
+        }
+      }
+    },
+    "deckOptions.v1.ownLimits": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This deck has its own limits, which stay in force."
+          }
+        }
+      }
+    },
+    "deckOptions.v1.ownRetention": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This deck has its own desired retention, which stays in force."
+          }
+        }
+      }
+    },
+    "deckOptions.v1.preset": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preset"
+          }
+        }
+      }
+    },
+    "deckOptions.v1.presetFooter": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@footer@"
+          },
+          "substitutions": {
+            "footer": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Used by this deck only."
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Used by %2$@ decks. Changes apply to all of them."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "deckOptions.v1.reviewsPerDay": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maximum Reviews per Day"
+          }
+        }
+      }
+    },
+    "deckOptions.v1.save": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        }
+      }
+    },
+    "deckOptions.v1.section.dailyLimits": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily Limits"
+          }
+        }
+      }
+    },
+    "deckOptions.v1.section.memory": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memory"
+          }
+        }
+      }
+    },
+    "deckOptions.v1.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck Options"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
