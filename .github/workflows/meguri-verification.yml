@@ -458,9 +458,9 @@ jobs:
           # The settle step's listing skips the binaries its filter leaves
           # out, so list every test again with the already built binaries.
           set +o pipefail
-          image="$(sudo -n docker images --format '{{.Repository}}' | grep -E -- '-dev$' | head -n 1)"
-          target="$(sudo -n docker volume ls --format '{{.Name}}' | grep -E '_cargo-target$' | head -n 1)"
-          home="$(sudo -n docker volume ls --format '{{.Name}}' | grep -E '_cargo-home$' | head -n 1)"
+          image="$(sudo -n docker images --format '{{.Repository}}:{{.Tag}}' | grep -E -- '-dev:' | head -n 1)"
+          target="$RUNNER_TEMP/cargo-target" home="$RUNNER_TEMP/cargo-home"
+          du -sh "$target" "$home" || true
           echo "image $image, target $target, home $home"
           sudo -n docker run --rm -v "$GITHUB_WORKSPACE:/work" -v "$target:/cargo-target" -v "$home:/cargo-home" \
             -e CARGO_HOME=/cargo-home -e CARGO_TARGET_DIR=/cargo-target -e GIT_CONFIG_COUNT=1 \
