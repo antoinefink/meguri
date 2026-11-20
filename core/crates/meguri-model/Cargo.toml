@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] targets below build (tests/main.rs is model_it).
+autotests = false
 
 [features]
 # Test-only hooks (KTD18): fault points that fire and the steppable clock.
@@ -25,10 +27,14 @@ unicode-normalization.workspace = true
 [dev-dependencies]
 meguri-testkit.workspace = true
 
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
+[[test]]
+name = "model_it"
+path = "tests/main.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
 [[test]]
 name = "faultpoint"
-required-features = ["test-hooks"]
-
-[[test]]
-name = "step_clock"
+path = "tests/faultpoint.rs"
 required-features = ["test-hooks"]
