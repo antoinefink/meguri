@@ -320,6 +320,31 @@ final class LocalReviewJourneyTests: XCTestCase {
     func testCardMenuKeysEditTheNoteAndBuryTheCard() throws {
         let (app, bundleIdentifier) = try startFreshReview()
         XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
+        let menu = editMenu(app)
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        let undo = editItem(menu, "Undo")
+        /// Opens Edit until its Undo reads `title` (the step lands asynchronously).
+        func undoReads(_ title: String) throws -> Bool {
+            for _ in 0..<5 {
+                try click(menu, in: app, bundleIdentifier: bundleIdentifier)
+                XCTAssertTrue(undo.waitForExistence(timeout: 10))
+                if undo.title == title { return true }
+                try app.bringToFront(bundleIdentifier: bundleIdentifier)
+                app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+                Thread.sleep(forTimeInterval: 1)
+            }
+            return false
+        }
+        // ⌘J buries the card; Edit › Undo names the bury and brings it back.
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey("j", modifierFlags: .command)
+        XCTAssertTrue(try undoReads("Undo Bury Card"), "Edit › Undo names the bury: \(undo.title)")
+        try click(undo, in: app, bundleIdentifier: bundleIdentifier)
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
+        XCTAssertTrue(try undoReads("Undo"), "Nothing left to undo after the bury is undone")
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        // ⌘E opens Edit Note over the card; Esc is its Cancel, not Back to Decks.
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         app.typeKey("e", modifierFlags: .command)
         let form = element(app, "review.editCurrent")
@@ -328,15 +353,10 @@ final class LocalReviewJourneyTests: XCTestCase {
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         XCTAssertTrue(form.waitForNonExistence(timeout: 10), "Esc is the form's Cancel")
         XCTAssertTrue(element(app, "review.session.screen").exists, "Esc did not leave the review")
-        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
+        // The keys are the card's again: ⌘J buries it.
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         app.typeKey("j", modifierFlags: .command)
-        let menu = editMenu(app)
-        XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        try click(menu, in: app, bundleIdentifier: bundleIdentifier)
-        let undo = editItem(menu, "Undo")
-        XCTAssertTrue(undo.waitForExistence(timeout: 10))
-        XCTAssertEqual(undo.title, "Undo Bury Card")
+        XCTAssertTrue(try undoReads("Undo Bury Card"), "After the form closes, ⌘J reaches the card")
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
