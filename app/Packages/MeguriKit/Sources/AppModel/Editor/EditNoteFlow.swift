@@ -277,7 +277,6 @@ public final class EditNoteFlow {
                     if case .noteNotFound = error as? BridgeError { noteDeleted(droppingChanges: draft.hasChanges); break }
                     self.error = String(describing: error)
                 }
-                if held, epoch == expected, runtime === host { try? await host.release() }
             }
             reloadTask = nil
         }
