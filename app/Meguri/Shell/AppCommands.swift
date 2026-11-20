@@ -95,7 +95,15 @@ struct NativeCommandContext {
 
     /// The main window's own Undo and Redo, while no sheet or panel holds the
     /// keys: there the system's items keep the text inputs' undo.
-    var replacesUndo: Bool { host == .main && collection.navigation.sheet == nil }
+    var replacesUndo: Bool {
+        guard host == .main, collection.navigation.sheet == nil else { return false }
+        #if os(iOS)
+        // iPad: a text input that is editing keeps the system's Undo (R174);
+        // during review the card's own key handling is unchanged.
+        if review == nil, TextInputFocus.shared.editing { return false }
+        #endif
+        return true
+    }
 
     func undoRoute(redo: Bool) -> EditUndoRouting.Route {
         var inputs = EditUndoRouting.Inputs()

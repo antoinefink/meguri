@@ -202,14 +202,24 @@ public final class DeckListSearch {
                              defaultHasCards: @MainActor () async throws -> Bool) async {
         guard loadedKey != key else { return }
         loadedKey = key; snapshotFailed = false
+        let outcome: Result<(DeckNameSnapshot, Bool), any Error>
         do {
             let result = try await read()
             let listed = result.decks.contains { $0.id == 1 } ? try await defaultHasCards() : false
-            guard loadedKey == key, !Task.isCancelled else { return }
+            outcome = .success((result, listed))
+        } catch {
+            outcome = .failure(error)
+        }
+        guard loadedKey == key else { return }
+        // A read cancelled with its view leaves the key free, so the next view reads again.
+        guard !Task.isCancelled else { loadedKey = nil; return }
+        switch outcome {
+        case .success(let (result, listed)):
             guard result.generation == key.generation else { snapshot = nil; snapshotFailed = true; return }
             snapshot = result; listsDefault = listed
-        } catch {
-            guard loadedKey == key, !Task.isCancelled else { return }
+        case .failure:
+            // The results shown may be older than this read: the error shows with them,
+            // and a successful Retry replaces them.
             snapshotFailed = true
         }
     }

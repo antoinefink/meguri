@@ -138,6 +138,55 @@ import Testing
     }
 }
 
+
+extension DeckSearchHighlightTests {
+    @Test func aCancelledReadLetsTheNextViewReadTheSameKey() async {
+        let search = DeckListSearch(), gate = Gate()
+        let key = search.snapshotKey(generation: 11, tree: 1)
+        var reads = 0
+        let first = Task {
+            await search.loadSnapshot(key, read: { reads += 1; await gate.wait(); return DeckNameSnapshot(generation: 11, decks: []) },
+                defaultHasCards: { false })
+        }
+        await gate.entered()
+        first.cancel(); gate.open(); await first.value
+        #expect(search.entries(generation: 11) == nil, "A cancelled read publishes nothing")
+        await search.loadSnapshot(key, read: { reads += 1; return DeckNameSnapshot(generation: 11, decks: []) },
+            defaultHasCards: { false })
+        #expect(reads == 2 && search.entries(generation: 11) != nil)
+    }
+
+    @Test func aFailedRefreshShowsTheErrorAndARetryReplacesTheResults() async {
+        let search = DeckListSearch()
+        let old = [DeckNameEntry(id: 11, fullName: "QZ67", filtered: false)]
+        let new = [DeckNameEntry(id: 11, fullName: "QZ68", filtered: false)]
+        await search.loadSnapshot(search.snapshotKey(generation: 11, tree: 1),
+            read: { DeckNameSnapshot(generation: 11, decks: old) }, defaultHasCards: { false })
+        await search.loadSnapshot(search.snapshotKey(generation: 11, tree: 2),
+            read: { throw BridgeError.cancelled }, defaultHasCards: { false })
+        #expect(search.snapshotFailed && search.entries(generation: 11) == old, "The error shows with the older results")
+        search.retrySnapshot()
+        await search.loadSnapshot(search.snapshotKey(generation: 11, tree: 2),
+            read: { DeckNameSnapshot(generation: 11, decks: new) }, defaultHasCards: { false })
+        #expect(!search.snapshotFailed && search.entries(generation: 11) == new)
+    }
+
+    #if os(macOS)
+    @Test func theFieldsKeysLeaveAnInputMethodsCompositionAlone() {
+        #expect(DeckSearchFieldKey(keyCode: 125, modifiers: [], repeated: false, composing: false) == .down)
+        #expect(DeckSearchFieldKey(keyCode: 126, modifiers: [], repeated: true, composing: false) == .up)
+        #expect(DeckSearchFieldKey(keyCode: 36, modifiers: [], repeated: false, composing: false) == .open)
+        #expect(DeckSearchFieldKey(keyCode: 76, modifiers: [], repeated: false, composing: false) == .open)
+        #expect(DeckSearchFieldKey(keyCode: 36, modifiers: [], repeated: true, composing: false) == nil, "A held Return opens once")
+        #expect(DeckSearchFieldKey(keyCode: 36, modifiers: .shift, repeated: false, composing: false) == nil)
+        for code: UInt16 in [36, 76, 125, 126] {
+            #expect(DeckSearchFieldKey(keyCode: code, modifiers: [], repeated: false, composing: true) == nil,
+                "Return and the arrows belong to the input method while it composes")
+        }
+    }
+    #endif
+}
+
 @MainActor
 private final class Gate {
     private var waiting: CheckedContinuation<Void, Never>?

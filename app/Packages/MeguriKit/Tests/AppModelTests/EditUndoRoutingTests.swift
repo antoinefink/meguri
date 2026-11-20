@@ -60,6 +60,41 @@ import Testing
         #expect(history.canUndo)
     }
 
+    @Test(arguments: [false, true])
+    func anUndoReopensTheShownPageOnlyIfThePersonStayed(navigates: Bool) async {
+        let owner = await makeOwner(), history = owner.collectionUndo
+        history.service = FakeUndo()
+        await history.waitForRefresh(); await history.refreshNow()
+        owner.navigation.openDeckPage(DeckID(2))
+        owner.saveSelectedDeck = { _ in 11 }
+        let tree = owner.decks
+        var held: CheckedContinuation<Void, Never>?
+        owner.loadDeckTree = {
+            await withCheckedContinuation { held = $0 }
+            return CountedDeckTree(generation: 11, nextChangeAt: Int64.max, nodes: tree)
+        }
+        history.undo()
+        while held == nil { await Task.yield() }
+        // The person opens another deck while the undo's tree read waits.
+        if navigates { owner.navigation.openDeckPage(DeckID(3)) }
+        let intent = owner.navigation.intentRevision
+        held?.resume()
+        await history.waitForCompletion()
+        // Reopening the page is a new deck selection, which moves the intent on.
+        #expect((owner.navigation.intentRevision != intent) == !navigates,
+            "The shown page reads again only where the person still is")
+    }
+
+    @Test func aNewGenerationPeeksItsOwnHistory() async {
+        let owner = await makeOwner(), history = owner.collectionUndo, fake = FakeUndo()
+        history.service = fake
+        await history.waitForRefresh(); await history.refreshNow()
+        let before = await fake.peeks
+        owner.receiveLifecycle(.ready(generation: 12))
+        await history.waitForRefresh()
+        #expect(await fake.peeks > before, "Same tree, new collection: its undo history is read")
+    }
+
     @Test func findIsDisabledDuringReviewAndOutsideTheDeckWorkspace() async {
         let owner = await makeOwner()
         #expect(owner.deckSearchAvailable(layout: .sidebar))
@@ -81,7 +116,9 @@ import Testing
         let counts = ReviewCounts(new: 0, learning: 0, review: 0)
         let deck = CountedDeckNode(id: 2, name: "QZ60", filtered: false, studyCollapsed: true, browserCollapsed: true,
             counts: counts, children: [])
-        owner.loadDeckTree = { CountedDeckTree(generation: 11, nextChangeAt: Int64.max, nodes: [deck]) }
+        let other = CountedDeckNode(id: 3, name: "QZ69", filtered: false, studyCollapsed: true, browserCollapsed: true,
+            counts: counts, children: [])
+        owner.loadDeckTree = { CountedDeckTree(generation: 11, nextChangeAt: Int64.max, nodes: [deck, other]) }
         owner.receiveLifecycle(.ready(generation: 11)); await owner.loadCounts()
         return owner
     }
@@ -92,6 +129,7 @@ private actor FakeUndo: UndoService {
     var undoNameValue: String? = "Rename Deck"
     var redoNameValue: String?
     var undos = 0
+    var peeks = 0
     private func status(_ name: String?) -> ReviewUndoStatus {
         name.map { .available(step: ReviewStepInfo(id: 1, name: $0, kind: .other, session: nil, longWrite: nil)) }
             ?? .unavailable(reason: .none)
@@ -99,7 +137,7 @@ private actor FakeUndo: UndoService {
     private var head: ReviewHead {
         ReviewHead(items: [], counts: .init(new: 0, learning: 0, review: 0), validUntil: Int64.max, terminalState: .finished)
     }
-    func peekUndo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus { status(undoNameValue) }
+    func peekUndo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus { peeks += 1; return status(undoNameValue) }
     func peekRedo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus { status(redoNameValue) }
     func startUndo(scope: ReviewUndoScope) throws(BridgeError) -> CoreUndoStart {
         undos += 1; redoNameValue = undoNameValue; undoNameValue = nil

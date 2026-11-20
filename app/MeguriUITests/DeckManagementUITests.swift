@@ -158,7 +158,13 @@ final class DeckManagementUITests: XCTestCase {
         app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
         XCTAssertTrue(waitForValue(search, "QZ90"))
         XCTAssertTrue(secondRow.waitForExistence(timeout: 10))
+        // "QZ90" lists QZ90 (the parent the first create made), QZ90 › QZ91, then QZ90 › QZ92:
+        // the first is highlighted, so two ↓ reach QZ92.
+        let parentRow = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@ AND label == %@", "home.deckSearch.deck.", "QZ90")).firstMatch
+        XCTAssertTrue(parentRow.waitForExistence(timeout: 10))
         try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [])
         app.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [])
         XCTAssertTrue(element(app, pageIDs[0]).exists, "The highlight does not change the detail")
         app.typeKey("\r", modifierFlags: [])
