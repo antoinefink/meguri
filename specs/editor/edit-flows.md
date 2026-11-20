@@ -27,7 +27,7 @@ How an editor bound to an existing note behaves in its hosts (U196): Browse's ed
 
 - Every change is saved as `editor/field-html` S1 and S2 say: per field after 600 ms, on blur, before any other action, when the host closes and when the app moves to the background (R820), as "Update Note" steps merged per note within 60 s (R821).
 - **No unsaved-changes prompt** (R824): closing never asks, because closing flushes first.
-- **Closing the review edit panel**: ⌘↩, Esc and the panel's close control flush with `hold`, wait, and then close (R863, R259). When the flush fails (except `NotFound`), the panel stays open with its text and the failure (S2). Esc while the tag editor shows suggestions first hides them (`editor/tag-editor` G4).
+- **The review's Edit Note form** keeps its changes as a draft until Done and asks before Cancel drops one (`review/edit-current#E2`, E7; decided 2026-11-20). This section's saves while typing and its no-prompt rule apply to Browse's pane only, and so do the flushes of W5.2 (before a reload) and W6 (Sync Now): the review's form flushes only for Done, which submits the draft (`review/edit-current#E2`), and for its own reload and Cancel, whose flush writes nothing (it only collects pending input into the draft). A Sync Now press while it is open syncs without the draft, which is not in the collection; a foreign change while it is open is E2's (the draft keeps its text and Done patches only the fields the user changed).
 - **Exclusive phase** (KTD17): the host flushes, then closes; an editor never stays bound across a collection replacement (W5.5).
 - **Cards…** opens the card template editor (U200) with the editor's current session values for its preview (R847, R938), after a flush.
 
