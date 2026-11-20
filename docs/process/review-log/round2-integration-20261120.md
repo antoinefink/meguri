@@ -37,3 +37,15 @@ Left as notes: the Mac ordering of the request and the Settings window is the te
 ## Checks
 
 Recorded in the pull request.
+
+## AI review of the pull request
+
+Three passes by the AI reviewer on pull request 7. Each finding was checked against the code and the specs. Fixes: `dd12d0457`, `864523aef`, `443e7fbc7`, `980eb2886`. The answers, with the reason for each finding left unchanged, are in the pull request.
+
+`980eb2886` also builds the three texts that the specs marked "not built" (`sync.keep.downloadOnly.message.meguri`, `sync.needsYou.meguri.finishSetup`, `sync.needsYou.meguri.localUnusable`) and removes the "is replaced" line from the upload-only sheet.
+
+Valid findings deferred to follow-up work. None can replace or upload a collection without its confirmation.
+
+- iCloud, whose work is paused: `SyncCoordinator.swift` (the update hold clears when the cancel dialog opens, not at the confirmed cancel; a stored Sync Automatically off against the core's committed value, two places; the recovery-read failure flag), `SyncKinds.swift` (note type name placeholder), `CloudConnectionView.swift` (Resume and Set Up Again inside the resume sheet).
+- Meguri Sync: `meguri-ffi/src/provider_bootstrap.rs` (admission refresh in the settlement worker; recoverable through the existing refresh), `ProviderBootstrapService.swift` (interval names; the active slot during a decision read), `Settings.swift` (sign-in draft above the layout switch), `one_way.rs:375`.
+- Tests and previews: `SyncSettingsPreview.swift`, `SyncStringCatalogTests.swift`, `MeguriSetupSequenceTests.swift`.
