@@ -1186,6 +1186,20 @@ mod tests {
   validate "$result"
 }
 
+# merged_tests <crate> <binary> <module> [<own target>...]: the real layout,
+# one integration-test binary per crate (tests/main.rs lists <module>.rs)
+# plus targets of their own.
+merged_tests() {
+  local crate="$1" binary="$2" module="$3" own
+  shift 3
+  printf 'autotests = false\n\n[[test]]\nname = "%s"\npath = "tests/main.rs"\n' "$binary" >>"$SB/core/crates/$crate/Cargo.toml"
+  for own in ${1+"$@"}; do
+    printf '\n[[test]]\nname = "%s"\n' "$own" >>"$SB/core/crates/$crate/Cargo.toml"
+  done
+  write_file "core/crates/$crate/tests/main.rs" "#[path = \"$module.rs\"]
+pub mod $module;"
+}
+
 # These are tiny fixture bodies, not copies of the expensive real tests. The
 # near matches prove package, binary and full-name equality independently.
 core_modes_fixture() {
@@ -1200,21 +1214,24 @@ core_modes_fixture() {
   SESSION_CASE=c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions
   SUSPEND_CASE=suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k
   MERGE_CASE=merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k
+  merged_tests meguri-engine engine_it session_predict canary_pins session_predict_extra
+  merged_tests meguri-engine-extra engine_it session_predict
+  merged_tests meguri-sync sync_it normal_sync normal_sync_extra
   write_file core/crates/meguri-engine/tests/canary_pins.rs '#[test] fn pin_held() {}'
   write_file core/crates/meguri-engine/tests/session_predict.rs "#[test] fn $SESSION_CASE() {}
 #[test] fn ${SESSION_CASE}_extra() {}
 mod nested { #[test] fn $SESSION_CASE() {} }"
-  write_file core/crates/meguri-engine/tests/session_predict_extra.rs "#[test] fn $SESSION_CASE() {}"
+  write_file core/crates/meguri-engine/tests/session_predict_extra.rs "mod session_predict { #[test] fn $SESSION_CASE() {} }"
   write_file core/crates/meguri-engine-extra/tests/session_predict.rs "#[test] fn $SESSION_CASE() {}"
   write_file core/crates/meguri-sync/tests/normal_sync.rs "mod large {
 #[test] fn $SUSPEND_CASE() {}
 #[test] fn $MERGE_CASE() {}
 #[test] fn ${MERGE_CASE}_extra() {}
 }"
-  write_file core/crates/meguri-sync/tests/normal_sync_extra.rs "mod large {
+  write_file core/crates/meguri-sync/tests/normal_sync_extra.rs "mod normal_sync { mod large {
 #[test] fn $SUSPEND_CASE() {}
 #[test] fn $MERGE_CASE() {}
-}"
+} }"
 }
 
 core_report_names() {
@@ -1246,9 +1263,9 @@ core_report_names() {
   stress="$(core_report_names)"
   jq -e --argjson cases "$stress" '.details.stress_tests == $cases' "$result"
   jq -e --arg session "$SESSION_CASE" --arg suspend "$SUSPEND_CASE" --arg merge "$MERGE_CASE" '
-    . == (["meguri-engine::session_predict$" + $session,
-      "meguri-sync::normal_sync$large::" + $suspend,
-      "meguri-sync::normal_sync$large::" + $merge] | sort)' <<<"$stress"
+    . == (["meguri-engine::engine_it$session_predict::" + $session,
+      "meguri-sync::sync_it$normal_sync::large::" + $suspend,
+      "meguri-sync::sync_it$normal_sync::large::" + $merge] | sort)' <<<"$stress"
   validate "$result"
 
   write_file core/crates/meguri-engine/tests/canary_pins.rs '#[test] fn pin_held() {}'
@@ -1279,15 +1296,17 @@ core_report_names() {
   validate "$result"
 
   rm "$SB/core/crates/meguri-engine/tests/canary_pins.rs"
+  write_crate meguri-engine ''
+  merged_tests meguri-engine engine_it session_predict session_predict_extra
   mg core-test --quick
   [ "$status" -eq 0 ]
   local names
   names="$(core_report_names)"
   jq -e --arg session "$SESSION_CASE" --arg suspend "$SUSPEND_CASE" --arg merge "$MERGE_CASE" '
     index("meguri-ffi::hooks$hooks_enabled") != null
-    and index("meguri-engine::session_predict$" + $session) == null
-    and index("meguri-sync::normal_sync$large::" + $suspend) == null
-    and index("meguri-sync::normal_sync$large::" + $merge) == null' <<<"$names"
+    and index("meguri-engine::engine_it$session_predict::" + $session) == null
+    and index("meguri-sync::sync_it$normal_sync::large::" + $suspend) == null
+    and index("meguri-sync::sync_it$normal_sync::large::" + $merge) == null' <<<"$names"
 }
 
 @test "core-test stress rejects missing and skipped expected cases and retains test failures" {
@@ -1301,7 +1320,7 @@ core_report_names() {
     jq -e '.failures | any(.id == "stress-selection")' "$result"
     validate "$result"
   done
-  jq -e --arg id "meguri-engine::session_predict\$$SESSION_CASE" '
+  jq -e --arg id "meguri-engine::engine_it\$session_predict::$SESSION_CASE" '
     .failures | any(.id == $id and (.message | contains("stress failed")))' "$result"
 }
 
@@ -1358,7 +1377,7 @@ core_report_names() {
 meguri-ffi::hooks hooks_enabled  # needs the FFI hooks feature
 meguri-ffi tests::unit_case  # a library unit test
 meguri-ffi::meguri_ffi same_named  # an integration test named like the library
-meguri-engine::session_predict ${SESSION_CASE}_extra"
+meguri-engine::engine_it session_predict::${SESSION_CASE}_extra"
   mg core-test --quick
   [ "$status" -eq 0 ]
   quick="$(core_report_names)"
@@ -1368,7 +1387,7 @@ meguri-engine::session_predict ${SESSION_CASE}_extra"
   excluded="$(core_report_names)"
   jq -e '.details.hosted_selection | .list_mode == "exclude" and .list_file == "list.txt" and (.listed | length) == 4' "$result"
   jq -ne --argjson q "$quick" --argjson e "$excluded" --arg s "$SESSION_CASE" '
-    ($q - $e) == (["meguri-engine::session_predict$" + $s + "_extra", "meguri-ffi::hooks$hooks_enabled",
+    ($q - $e) == (["meguri-engine::engine_it$session_predict::" + $s + "_extra", "meguri-ffi::hooks$hooks_enabled",
       "meguri-ffi::meguri_ffi$tests::unit_case", "meguri-ffi::meguri_ffi$same_named"] | sort)
     and ($e - $q) == []'
   validate "$result"
@@ -1377,7 +1396,7 @@ meguri-engine::session_predict ${SESSION_CASE}_extra"
   [ "$status" -eq 0 ]
   only="$(core_report_names)"
   jq -ne --argjson o "$only" --arg s "$SESSION_CASE" '
-    $o == (["meguri-engine::canary_pins$pin_held", "meguri-engine::session_predict$" + $s + "_extra",
+    $o == (["meguri-engine::canary_pins$pin_held", "meguri-engine::engine_it$session_predict::" + $s + "_extra",
       "meguri-ffi::hooks$hooks_enabled", "meguri-ffi::meguri_ffi$tests::unit_case", "meguri-ffi::meguri_ffi$same_named"] | sort)'
   jq -e '[.details.listed_results[].event] == ["ok", "ok", "ok", "ok"]' "$result"
   validate "$result"

@@ -49,8 +49,8 @@ mg__swift_initial_adoption_fixture() {
     return 1
   fi
   if ! result="$(MEGURI_INITIAL_ADOPTION_FIXTURE="/work/${fixture#"$MG_ROOT"/}" \
-    "$MG_ROOT/tools/mg" core-test -- --test cloud_initial_app_fixture \
-      -E 'package(meguri-ffi) & test(=export_initial_app_adoption_replies_from_real_publication)')"; then
+    "$MG_ROOT/tools/mg" core-test -- --test ffi_it \
+      -E 'package(meguri-ffi) & test(=cloud_initial_app_fixture::export_initial_app_adoption_replies_from_real_publication)')"; then
     mg_failure initial-adoption-fixture "Rust fixture generation failed; Swift tests did not start"
     mg_status fail
     return 1

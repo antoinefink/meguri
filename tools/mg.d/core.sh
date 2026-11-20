@@ -19,7 +19,7 @@ mg_u38_wiring() {
   mg_milestone_gate__load "$manifest" || return 0
   mg_artifact manifest "$manifest" "validated milestone manifest for pending provider ownership"
   export MEGURI_WIRING_TARGET="$target" MEGURI_WIRING_MANIFEST="$manifest"
-  mg_core_test -- --test ports --run-ignored only -E 'package(meguri-host) & test(=milestone_provider_owners)'
+  mg_core_test -- --test host_it --run-ignored only -E 'package(meguri-host) & test(=ports::milestone_provider_owners)'
 }
 
 # Canary test binaries (tests/canary_*.rs) run first and alone in a bare
@@ -32,9 +32,9 @@ MG_CORE_CANARIES='binary(/^canary_/)'
 
 # Exact identities shared by quick's exclusion and stress's selection. Keep
 # nextest's existing scheduling overrides; neither mode changes the profile.
-MG_CORE_STRESS='(package(=meguri-engine) & binary(=session_predict) & test(=c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions))
-  | (package(=meguri-sync) & binary(=normal_sync) & test(=large::suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k))
-  | (package(=meguri-sync) & binary(=normal_sync) & test(=large::merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k))'
+MG_CORE_STRESS='(package(=meguri-engine) & binary(=engine_it) & test(=session_predict::c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions))
+  | (package(=meguri-sync) & binary(=sync_it) & test(=normal_sync::large::suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k))
+  | (package(=meguri-sync) & binary(=sync_it) & test(=normal_sync::large::merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k))'
 
 # mg__core_canary_packages: workspace packages with a canary_* test target, one per line.
 mg__core_canary_packages() {
@@ -314,9 +314,9 @@ mg_core_test() {
       | ([$tests[].name] | sort) as $names
       | select(($tests | length) == 3 and all($tests[]; .event == "ok")
         and $names == ([
-          "meguri-engine::session_predict$c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions",
-          "meguri-sync::normal_sync$large::suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k",
-          "meguri-sync::normal_sync$large::merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k"
+          "meguri-engine::engine_it$session_predict::c8_all_four_actual_choices_in_ten_thousand_random_multi_answer_sessions",
+          "meguri-sync::sync_it$normal_sync::large::suspend_two_seconds_with_five_queued_answers_rolls_back_merge_at_150k",
+          "meguri-sync::sync_it$normal_sync::large::merge_150k_updates_preserves_real_overlay_answers_and_write_budget_at_150k"
         ] | sort))
       | $names' "$main")"; then
       mg_detail stress_tests "$stress_tests"

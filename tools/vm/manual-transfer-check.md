@@ -12,8 +12,9 @@ validation and manifest generation. Controller doubles live in
 `tools/tests/manual_transfer_fakes.sh`; their contract cases are
 `tools/tests/manual_transfer_check.bats`.
 
-The Docker data job calls the `manual_transfer_data` Rust test target's
-ignored `rig_manual_transfer_data` method. It passes its owned controller
+The Docker data job calls the ignored
+`manual_transfer_data::rig_manual_transfer_data` test of meguri-host's
+`host_it` test binary. It passes its owned controller
 directory as `MEGURI_MANUAL_TRANSFER_DATA_RUN` and `seed` or `verify` as
 `MEGURI_MANUAL_TRANSFER_DATA_MODE`. These values select generated run data;
 they carry no login information. The capability attestation uses
@@ -196,7 +197,7 @@ Run these focused checks through `tools/mg`:
 
 ```sh
 tools/mg selftest --filter 'manual transfer:' --jobs 1
-tools/mg core-test -- --test manual_transfer_data -E 'package(meguri-host)'
+tools/mg core-test -- --test host_it -E 'package(meguri-host) & test(/^manual_transfer_data::/)'
 tools/mg core-lint
 tools/mg doctor
 ```
