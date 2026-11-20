@@ -108,9 +108,14 @@ public final class DeckDeletionModel {
     /// The destructive button. The summary is read again first; when it no
     /// longer matches the question, the new one is asked instead (N20.7).
     public func confirm() {
-        guard let pending = confirmation, !busy, let owner, pending.generation == owner.generation,
-              owner.deckWriteAllowed(host: .main) else { return }
+        guard let pending = confirmation, let owner else { return }
         confirmation = nil
+        guard !busy, pending.generation == owner.generation, owner.deckWriteAllowed(host: .main) else {
+            // A confirmed delete that cannot start (a sync hold, another deck
+            // write) says so instead of vanishing: nothing was deleted.
+            failure = Failure(deckID: pending.deckID, name: pending.name, reason: .other)
+            return
+        }
         start(deckID: pending.deckID, name: pending.name, anchor: pending.anchor, shown: pending.summary, owner: owner)
     }
 

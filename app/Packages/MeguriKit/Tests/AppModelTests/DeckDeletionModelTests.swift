@@ -252,6 +252,23 @@ import Testing
         #expect(history.redoName == "Delete Deck" && history.undoName == nil)
     }
 
+    @Test func aConfirmedDeleteThatCannotStartSaysNothingWasDeleted() async {
+        let owner = await makeOwner(), model = owner.deckDeletion, gate = DeletionGate()
+        var deletes = 0
+        model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 3) }
+        model.deleteDecks = { ids in deletes += 1; return deletion(removed: ids) }
+        model.delete(deckID: 2); await model.waitForCompletion()
+        #expect(model.confirmation != nil)
+        // Another deck write starts while the question is up.
+        owner.deckActions.startRename = { _, _ in await gate.hold(); throw BridgeError.cancelled }
+        owner.deckActions.present(.rename(3)); owner.deckActions.name = "Renamed"
+        owner.deckActions.submit(); await gate.entered()
+        model.confirm(); await model.waitForCompletion()
+        #expect(deletes == 0 && model.confirmation == nil)
+        #expect(model.failure?.reason == .other && model.failure?.deckID == 2)
+        gate.release(); await owner.deckActions.waitForCompletion()
+    }
+
     @Test func aRunningRenameBlocksDeletion() async {
         let owner = await makeOwner(), gate = DeletionGate()
         owner.deckActions.startRename = { _, _ in await gate.hold(); throw BridgeError.cancelled }

@@ -902,28 +902,6 @@
           }
         }
       }
-    },
-    "Undo Delete Deck": {
-      "comment": "N20.7 Delete Deck. Edit menu (R173).",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Undo Delete Deck"
-          }
-        }
-      }
-    },
-    "Redo Delete Deck": {
-      "comment": "N20.7 Delete Deck. Edit menu (R173).",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Redo Delete Deck"
-          }
-        }
-      }
     }
   },
   "version": "1.0"

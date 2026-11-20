@@ -268,13 +268,18 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
         XCTAssertTrue(parent.exists, "Return cancels")
         alert = try ask()
+        // Esc cancels too.
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(parent.exists, "Esc cancels")
+        alert = try ask()
         try click(alert.buttons["Cancel"], app: app, bundle: bundle)
         XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
         XCTAssertTrue(parent.exists, "Cancel changes nothing")
         alert = try ask()
         try click(alert.buttons["Delete"], app: app, bundle: bundle)
         XCTAssertTrue(parent.waitForNonExistence(timeout: 10))
-        XCTAssertFalse(sidebarRow(app, label: "Cards").exists, "Its subdeck goes with it")
+        XCTAssertFalse(sidebarRow(app, label: "Local Review › Cards").exists, "Its subdeck goes with it")
 
         // One undo step: Edit › Undo Delete Deck brings the deck and its subdeck back.
         let edit = app.menuBars.menuBarItems["Edit"]
@@ -285,6 +290,7 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertTrue(undo.isEnabled)
         try click(undo, app: app, bundle: bundle)
         XCTAssertTrue(sidebarRow(app, label: "Local Review").waitForExistence(timeout: 10))
+        XCTAssertTrue(sidebarRow(app, label: "Local Review › Cards").waitForExistence(timeout: 10), "Its subdeck comes back")
         try click(edit, app: app, bundle: bundle)
         let redo = edit.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", "Redo")).firstMatch
         XCTAssertTrue(redo.waitForExistence(timeout: 10))
@@ -317,6 +323,7 @@ final class DeckManagementUITests: XCTestCase {
         try click(sidebarRow(app, label: "QZ71"), app: app, bundle: bundle)
         XCTAssertTrue(element(app, page).waitForExistence(timeout: 10))
         app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: .command)
+        XCTAssertFalse(app.sheets.firstMatch.waitForExistence(timeout: 2), "⌘⌫ acts on the shown, empty deck: no question")
         XCTAssertTrue(sidebarRow(app, label: "QZ71").waitForNonExistence(timeout: 10))
         XCTAssertTrue(element(app, page).waitForNonExistence(timeout: 10))
     }
