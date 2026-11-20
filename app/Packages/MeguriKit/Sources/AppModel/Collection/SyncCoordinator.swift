@@ -662,8 +662,71 @@ public final class SyncCoordinator {
     }
     private var providerDirectory: URL?
     private var provider: CoreProviderService?
-    public private(set) var providerState: SyncProviderState?
+    public private(set) var providerState: SyncProviderState? {
+        didSet {
+            updateProviderBlockedCause()
+            if MeguriSyncStatusPresentation.stopsWorkOnBlock(was: oldValue?.phase, now: providerState?.phase,
+                stage: meguriStage, roundRunning: meguriWake != nil) { stopMeguriWorkForBlockedProvider() }
+        }
+    }
     public var providerNeedsAttention: Bool { SyncStatusPresentation.providerNeedsAttention(providerState) }
+    /// Copy Debug Info's names for why the phase is blocked; nil while it is not.
+    public private(set) var providerBlockedCause: (source: ProviderBlockedSource, reason: ProviderFailureReason?)?
+    @ObservationIgnored private var reportedBlockedCause: (source: ProviderBlockedSource, reason: ProviderFailureReason?)?
+    /// A failed provider call that this coordinator reports as blocked.
+    private func markProviderBlocked(_ source: ProviderBlockedSource, _ error: any Error) {
+        reportedBlockedCause = (source, ProviderFailureReason(error))
+        providerState = .blocked
+        reportedBlockedCause = nil
+    }
+    private func updateProviderBlockedCause() {
+        guard let state = providerState, state.phase == .blocked else { providerBlockedCause = nil; return }
+        // Core's own snapshot: no selection means its metadata could not be read.
+        providerBlockedCause = reportedBlockedCause ?? (state.selection == nil ? .metadataUnreadable : .admissionClosed, nil)
+    }
+    /// Content-free facts for Copy Debug Info.
+    public var debugFacts: SyncDebugFacts {
+        let service = switch providerState?.selection {
+        case .meguri: "meguri"
+        case .iCloud: "iCloud"
+        case .localOnly: "off"
+        case nil: "unread"
+        }
+        let status = mainStatus
+        let connection: MeguriProviderConnectionPhase = meguriAuthenticating ? .authenticating : meguriPhase
+        return SyncDebugFacts(service: service, providerPhase: providerState.map { "\($0.phase)" } ?? "unread",
+            blockedSource: providerBlockedCause?.source, blockedReason: providerBlockedCause?.reason,
+            meguriConnection: providerState?.selection == .meguri ? "\(connection)" : nil,
+            meguriSetupStage: meguriStage.map { "\($0)" }, meguriRoutine: meguriRoutine.map { "\($0)" },
+            statusTitleKey: status.titleKey, statusDetailKey: status.detailKey)
+    }
+    /// MP6.5: blocked metadata stops network work, including the work already
+    /// running. Nothing is discarded: a stopped media step or round keeps its
+    /// pending work, as a failed or cancelled round does (MP5), and a new start
+    /// is refused while blocked.
+    private func stopMeguriWorkForBlockedProvider() {
+        let stage = meguriStage, facade = meguriActiveFacade, wake = meguriWake, action = meguriAction?.id
+        meguriWakePending = false; meguriWakeManual = false; meguriReadyWakePending = false
+        wake?.task.cancel()
+        // Stop only the media step that was running, never a later action on the same facade.
+        if stage == .media, let facade, let action {
+            Task { guard self.meguriAction?.id == action else { return }; await facade.stop(.system) }
+        }
+    }
+    /// The Account section's one progress value while Meguri work runs (MP6.3).
+    public var meguriProgressValue: MeguriProgressValue? {
+        let media = meguriMediaProgress
+        return MeguriSyncStatusPresentation.progress(busy: meguriBusy, stopped: providerNeedsAttention, stage: meguriStage,
+            completed: meguriProgress?.completed, total: meguriProgress?.total,
+            mediaDone: media.map { $0.uploadedFiles.addingReportingOverflow($0.downloadedFiles) }
+                .flatMap { $0.overflow ? nil : $0.partialValue },
+            mediaAwaiting: media?.awaiting)
+    }
+    /// The setup's media files left, while its media step runs and nothing stopped it.
+    public var meguriMediaFilesLeft: UInt64? {
+        guard meguriStage == .media, !providerNeedsAttention else { return nil }
+        return meguriMediaProgress?.awaiting
+    }
     /// Sync waits on the person, so review shows its status button (N16.2).
     public var needsUser: Bool {
         if providerNeedsAttention { return true }
@@ -2018,7 +2081,7 @@ public final class SyncCoordinator {
                     providerState = try await CoreProviderService.migrate(directory: providerDirectory,
                         legacyJSON: CoreProviderService.legacyMigrationJSON(defaults?.object(forKey: Self.settingsKey)))
                     if let migrated = providerState?.settings { settings = migrated }
-                } catch { providerState = .blocked; operationFailed = true }
+                } catch { markProviderBlocked(.migration, error); operationFailed = true }
             }
             do { try await bootstrap(); platformPrepared = true; setupState = .prepared }
             catch SyncOwnerFailure.configurationUnavailable { setupState = .configurationUnavailable }
@@ -2256,7 +2319,7 @@ public final class SyncCoordinator {
                     // A queued later request cannot replace the original
                     // failed write retained by Core (in particular Pause).
                     if providerState?.phase != .blocked { desiredProviderSettings = next }
-                    providerState = .blocked; operationFailed = true
+                    markProviderBlocked(.settingsWrite, error); operationFailed = true
                 }
             }
             return
@@ -2605,7 +2668,7 @@ public final class SyncCoordinator {
             return true
         } catch {
             guard current() else { return false }
-            providerState = .blocked; operationFailed = true
+            markProviderBlocked(.publicationRetry, error); operationFailed = true
             recordConnectionFailure(error)
             return false
         }
@@ -2635,7 +2698,7 @@ public final class SyncCoordinator {
                 else if providerAllowsAccountRead { enqueue(.account(false)) }
             } catch {
                 guard self.provider === provider, expected == generation, revision == hostRevision, !closing, !replacing else { return }
-                providerState = .blocked; operationFailed = true
+                markProviderBlocked(.authorityRefresh, error); operationFailed = true
             }
         }
     }
@@ -3100,7 +3163,7 @@ public final class SyncCoordinator {
         initialOwnResumeRead = nil
         awaitingInitialOwnProof = false
         do { try await saveEnabled(earlier) }
-        catch { providerState = .blocked; operationFailed = true }
+        catch { markProviderBlocked(.adoptionRestore, error); operationFailed = true }
     }
     private func reconcileInitialAdoption(_ original: any SyncCoordinatorBackend) async {
         guard initialAdoptionEnabledBefore != nil else { return }
