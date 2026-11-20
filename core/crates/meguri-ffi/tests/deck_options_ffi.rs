@@ -42,9 +42,7 @@ fn finish(rx: &mpsc::Receiver<CoreEvent>, id: u64) -> JobOutcome {
         }
     }
 }
-#[test]
-fn runtime_jobs_expose_snapshot_validation_staging_save_stale_and_preferences() {
-    let dir = tempfile::tempdir().unwrap();
+fn open(dir: &tempfile::TempDir) -> mpsc::Receiver<CoreEvent> {
     let collection = dir.path().join("collection");
     let backups = dir.path().join("backups");
     std::fs::create_dir_all(&collection).unwrap();
@@ -70,6 +68,82 @@ fn runtime_jobs_expose_snapshot_validation_staging_save_stale_and_preferences() 
     )
     .unwrap();
     assert_eq!(finish(&rx, handle.id), JobOutcome::Succeeded);
+    rx
+}
+fn read(rx: &mpsc::Receiver<CoreEvent>) -> Arc<DeckOptionsEditor> {
+    let read = start_deck_options(1).unwrap();
+    assert_eq!(finish(rx, read.handle.id), JobOutcome::Succeeded);
+    read.result.result().unwrap().unwrap()
+}
+fn save(rx: &mpsc::Receiver<CoreEvent>, editor: &Arc<DeckOptionsEditor>) -> JobOutcome {
+    let save = start_save_deck_options(editor.clone()).unwrap();
+    finish(rx, save.handle.id)
+}
+fn value(snapshot: &DeckOptionsSnapshot, field: OptionField) -> OptionValue {
+    snapshot
+        .deck_values
+        .iter()
+        .chain(&snapshot.presets[0].values)
+        .find(|v| v.field == field)
+        .unwrap()
+        .value
+        .clone()
+}
+#[test]
+fn keep_leaves_the_deck_values_as_stored_while_the_page_saves_a_preset_value() {
+    let dir = tempfile::tempdir().unwrap();
+    let rx = open(&dir);
+    let editor = read(&rx);
+    editor
+        .edit(DeckOptionsEdit::Set {
+            preset: None,
+            field: OptionField::NewLimit,
+            value: OptionValue::Number { value: 50. },
+        })
+        .unwrap();
+    assert_eq!(save(&rx, &editor), JobOutcome::Succeeded);
+    let deck_values = [
+        OptionField::NewLimit,
+        OptionField::ReviewLimit,
+        OptionField::NewLimitToday,
+        OptionField::ReviewLimitToday,
+        OptionField::DeckDesiredRetention,
+    ];
+    let editor = read(&rx);
+    assert!(editor.snapshot().unwrap().kept_deck_values.is_empty());
+    assert!(matches!(
+        editor.edit(DeckOptionsEdit::Keep {
+            fields: vec![OptionField::NewPerDay],
+        }),
+        Err(CoreError::InvalidArgument { .. })
+    ));
+    let snapshot = editor
+        .edit(DeckOptionsEdit::Keep {
+            fields: deck_values.to_vec(),
+        })
+        .unwrap();
+    assert_eq!(snapshot.kept_deck_values, deck_values);
+    assert!(!snapshot.unsaved_changes);
+    let snapshot = editor
+        .edit(DeckOptionsEdit::Set {
+            preset: Some(1),
+            field: OptionField::NewPerDay,
+            value: OptionValue::Number { value: 15. },
+        })
+        .unwrap();
+    assert!(snapshot.unsaved_changes);
+    // The kept This-deck limit of 50 plays no part in the warnings (O17.1).
+    assert!(editor.validate().unwrap().is_empty());
+    assert_eq!(save(&rx, &editor), JobOutcome::Succeeded);
+    let snapshot = read(&rx).snapshot().unwrap();
+    assert_eq!(value(&snapshot, OptionField::NewLimit), OptionValue::Number { value: 50. });
+    assert_eq!(value(&snapshot, OptionField::NewPerDay), OptionValue::Number { value: 15. });
+    meguri_ffi::lifecycle::close_collection().unwrap();
+}
+#[test]
+fn runtime_jobs_expose_snapshot_validation_staging_save_stale_and_preferences() {
+    let dir = tempfile::tempdir().unwrap();
+    let rx = open(&dir);
     let read = start_deck_options(1).unwrap();
     assert_eq!(finish(&rx, read.handle.id), JobOutcome::Succeeded);
     let editor = read.result.result().unwrap().unwrap();
