@@ -749,13 +749,13 @@ The menu bar, in order: Meguri, File, Edit, View, Deck, Card, Window, Help. The 
 
 | Menu | Item | Key | Enabled when |
 |---|---|---|---|
-| File | New Note | ⌘N | a collection is open and no sheet or panel owns the keys. Opens `editor.add`, with the deck preset on a deck page; during review as N11.1's panel |
+| File | New Note | ⌘N | a collection is open, outside review, and no sheet or panel owns the keys. Opens `editor.add`, with the deck preset on a deck page. Disabled during review until N11.1's review-time Add Note panel exists (deferred) |
 | File | New Deck… | ⇧⌘N | a collection is open, outside review; opens N20.3's New Deck form |
 | File | Import Collection… | ⇧⌘I | as N17.2 |
 | File | Export Collection… | ⇧⌘E | as N17.3 |
 | File | Sync Now | ⇧⌘Y | `syncNowAvailability()` (N11.8) |
 | File | Close | ⌘W | the system's |
-| Edit | Undo <operation>, Redo <operation> | ⌘Z, ⇧⌘Z | R173's titles ("Undo Answer" …); plain "Undo" and "Redo", disabled, when nothing can be undone or redone |
+| Edit | Undo <step name>, Redo <step name> | ⌘Z, ⇧⌘Z | titled with the core's undo step name ("Undo Rename Deck", "Undo Answer Card"), the review's existing pattern, until `review/reviewer-strings` S5's catalog keys exist (R173); plain "Undo" and "Redo", disabled, when nothing can be undone or redone. A text input that has focus keeps its own undo; otherwise they act on the collection's undo history, in review and outside it |
 | Edit | Cut, Copy, Paste | ⌘X, ⌘C, ⌘V | the system's |
 | Edit | Find… | ⌘F; also ⇧⌘O | the deck workspace shows and no sheet or panel owns the keys; focuses N20.1's field (tab layout: presents the Search) |
 | Deck | Study | ⌘R | the shown deck's Study is available (N14.3); never for a filtered deck (H3) |
@@ -804,13 +804,13 @@ The English text of the screens above. "New" marks text not used before this rou
 | Delete Deck | the deck menu, the Deck menu, the touch confirmation's button | new (N20.7) |
 | Deck, Card | top-level menu titles | Card new |
 | Import Collection…, Export Collection…, Sync Now, Close | File menu | |
-| Undo, Redo, Undo <operation>, Redo <operation> | Edit menu (R173) | |
+| Undo, Redo, Undo <step name>, Redo <step name> | Edit menu; <step name> is the core's undo step name until S5's keys exist (R173) | |
 | Find… | Edit menu | new |
 | Deck Options… | the Deck menu, the deck menu | N20.9 |
 | Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
 | Edit Note | the Card menu, the card's context menu (Mac), the touch review toolbar button, the form's title | N20.8 |
 
-- No longer used: "Go to Deck…", "Create Deck", "Overview", "Deck Actions", "Deck name", "Rename Deck…", "Close Review", the Study menu's title and its "Undo Answer" and "Redo Answer" items (Edit's Undo still reads "Undo Answer" after an answer, R173), "Import…", "Export…".
+- No longer used: "Go to Deck…", "Create Deck", "Overview", "Deck Actions", "Deck name", "Rename Deck…", "Close Review", the Study menu's title and its "Undo Answer" and "Redo Answer" items (Edit's Undo still reads "Undo Answer Card" after an answer, from the core's step name), "Import…", "Export…".
 
 ### N20.7 Deleting a deck
 
