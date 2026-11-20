@@ -150,7 +150,9 @@ jobs:
 
   # Builds the dev image once per change of its inputs and shares it through
   # GitHub Container Registry, tagged with a hash of those inputs
-  # (.github/dev-image.sh names them). Jobs pull it and tools/mg uses it
+  # (.github/dev-image.sh names them). Master pushes, the schedule and manual
+  # runs on master push to meguri-dev; pull requests reuse that image or push
+  # to meguri-dev-pr, which master never reads. Jobs pull it and tools/mg uses it
   # instead of building (MEGURI_CI_DEV_IMAGE). An empty ref (cold runs, fork
   # pull requests that cannot push, a registry failure) makes each job build
   # the image itself, as before.
@@ -177,6 +179,7 @@ jobs:
         env:
           COLD: ${{ github.event_name == 'schedule' || inputs.cold == true }}
           CAN_PUSH: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          TRUSTED: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/master' }}
           TOKEN: ${{ github.token }}
         run: .github/dev-image.sh ensure
 
@@ -190,7 +193,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     concurrency:
-      group: meguri-verification-${{ github.ref }}-core-${{ matrix.shard }}-${{ needs.suites.outputs.core == 'yes' && 'run' || github.run_id }}
+      group: meguri-verification-${{ github.ref }}-core-${{ matrix.shard }}-${{ needs.suites.outputs.core == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
       cancel-in-progress: true
     strategy:
       fail-fast: false
@@ -221,7 +224,6 @@ jobs:
           path: |
             ${{ runner.temp }}/cargo-home/registry/index
             ${{ runner.temp }}/cargo-home/registry/cache
-            ${{ runner.temp }}/cargo-home/git/db
             ${{ runner.temp }}/cargo-target
           key: core-deps-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
           restore-keys: core-deps-v1-${{ needs.image.outputs.hash }}-
@@ -262,8 +264,11 @@ jobs:
             .status == "pass" and .commit.sha == $sha and .commit.dirty == false
             and .job == "core-test" and .args == $want' "$artifact"
 
-      # Only shard 1 of a master push or manual run saves, and only a new key:
-      # pull requests read master's cache but never add to the 10 GB budget.
+      # Only shard 1 of a master push or manual run saves, and only a new key,
+      # once its tests passed: pull requests read master's cache but never add
+      # to the 10 GB budget. A manual run on a branch saves where only that
+      # branch reads it; unused entries age out (7 days, or least recently
+      # used first when the budget is full).
       - name: Keep only third-party crates in the Rust cache
         id: prune
         if: >-
@@ -272,6 +277,7 @@ jobs:
         shell: bash
         run: |
           target="$RUNNER_TEMP/cargo-target"
+          echo "Cargo target before pruning: $(sudo du -sm "$target" | cut -f1) MB"
           # Local packages (workspace and patched path crates) are rebuilt from
           # source; their artifacts never enter the cache.
           mapfile -t pkgs < <(find core -name Cargo.toml -not -path '*/target/*' -print0 |
@@ -290,8 +296,14 @@ jobs:
           done
           sudo rm -rf -- "$target/nextest" "$target/tmp"
           sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/cargo-home" "$target"
-          size="$(du -sm "$RUNNER_TEMP/cargo-home/registry/index" "$RUNNER_TEMP/cargo-home/registry/cache" \
-            "$RUNNER_TEMP/cargo-home/git/db" "$target" 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')"
+          # Only the paths that exist: du fails on a missing one (no git
+          # dependencies, say), and that would fail the step.
+          paths=()
+          for p in "$RUNNER_TEMP/cargo-home/registry/index" "$RUNNER_TEMP/cargo-home/registry/cache" "$target"; do
+            [[ ! -e "$p" ]] || paths+=("$p")
+          done
+          size=0
+          ((${#paths[@]} == 0)) || size="$(du -smc -- "${paths[@]}" | tail -n 1 | cut -f1)"
           echo "Rust dependency cache: $size MB"
           if ((size > 4096)); then
             echo "::warning::Rust dependency cache is $size MB, over 4 GB; not saving it."
@@ -307,7 +319,6 @@ jobs:
           path: |
             ${{ runner.temp }}/cargo-home/registry/index
             ${{ runner.temp }}/cargo-home/registry/cache
-            ${{ runner.temp }}/cargo-home/git/db
             ${{ runner.temp }}/cargo-target
           key: core-deps-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
 
@@ -332,7 +343,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     concurrency:
-      group: meguri-verification-${{ github.ref }}-core-timing-${{ needs.suites.outputs.core == 'yes' && 'run' || github.run_id }}
+      group: meguri-verification-${{ github.ref }}-core-timing-${{ needs.suites.outputs.core == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -359,7 +370,6 @@ jobs:
           path: |
             ${{ runner.temp }}/cargo-home/registry/index
             ${{ runner.temp }}/cargo-home/registry/cache
-            ${{ runner.temp }}/cargo-home/git/db
             ${{ runner.temp }}/cargo-target
           key: core-deps-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
           restore-keys: core-deps-v1-${{ needs.image.outputs.hash }}-
@@ -503,7 +513,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     concurrency:
-      group: meguri-verification-${{ github.ref }}-${{ matrix.suite }}-${{ needs.suites.outputs.linux == 'yes' && 'run' || github.run_id }}
+      group: meguri-verification-${{ github.ref }}-${{ matrix.suite }}-${{ needs.suites.outputs.linux == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
       cancel-in-progress: true
     strategy:
       fail-fast: false

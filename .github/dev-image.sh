@@ -4,24 +4,33 @@
 # checks"). Run from the checkout root, in GitHub Actions only.
 #
 #   dev-image.sh hash     the content hash of the image inputs (the tag)
-#   dev-image.sh ensure   "Prepare dev image": reuse ghcr.io/<owner>/meguri-dev:<hash>,
-#                         or build and push it. Writes hash= and ref= to
+#   dev-image.sh ensure   "Prepare dev image": reuse the shared image of this hash,
+#                         or build it once and push it. Writes hash= and ref= to
 #                         $GITHUB_OUTPUT; an empty ref means no shared image.
-#                         Env: TOKEN, CAN_PUSH and COLD (true or false).
-#   dev-image.sh pull     pull the image of this checkout's hash and name it in
-#                         $GITHUB_ENV (MEGURI_CI_DEV_IMAGE), so tools/mg uses it
-#                         instead of building. Env: TOKEN, and REF when given
-#                         (it must be this checkout's ref). Writes used=yes to
-#                         $GITHUB_OUTPUT on success. On any failure, tools/mg
-#                         builds the image itself, as without CI.
+#                         Env: TOKEN, CAN_PUSH, COLD and TRUSTED (true or false).
+#   dev-image.sh pull     pull REF, which must be one of this checkout's two refs,
+#                         and name it in $GITHUB_ENV (MEGURI_CI_DEV_IMAGE), so
+#                         tools/mg uses it instead of building. Without REF,
+#                         pull the master image of this hash. Env: TOKEN, REF.
+#                         Writes used=yes to $GITHUB_OUTPUT on success. On any
+#                         failure, tools/mg builds the image itself.
+#
+# Two repositories: ghcr.io/<owner>/meguri-dev holds images built by master
+# pushes, the schedule and manual runs on master (TRUSTED); meguri-dev-pr
+# holds images built for pull requests. Master never reads meguri-dev-pr, so
+# an unreviewed change cannot put its image into master's checks. A pull
+# request reuses master's image first.
 #
 # The image build reads only these files: docker/dev.Dockerfile (its bases
 # are pinned by digest), its .dockerignore (it lets in only
-# core/rust-toolchain.toml), that toolchain file, docker/compose.yml (build
-# context and target) and this script (the build command). The source under
-# test is mounted at run time and is not an input. The tag is content
-# addressed: a commit that changes none of these files reuses the image on
-# every branch, and a job never takes an image whose label names another hash.
+# core/rust-toolchain.toml), that toolchain file, docker/compose.yml (the
+# build section; the image is built through it, as tools/mg does) and this
+# script (the build command). The source under test is mounted at run time
+# and is not an input. The tag is content addressed: a commit that changes
+# none of these files reuses the image on every branch, and a job never takes
+# an image whose label names another hash. The Dockerfile's apt packages are
+# not pinned, so a shared image keeps the packages of its first build until
+# an input changes; a cold run builds them afresh.
 
 set -euo pipefail
 
@@ -38,7 +47,18 @@ hash() {
   } | sha256sum | cut -c1-32
 }
 
-ref_of() { printf 'ghcr.io/%s/meguri-dev:%s\n' "${GITHUB_REPOSITORY_OWNER,,}" "$1"; }
+# ref_of <hash> [pr]: the master or the pull request image of a hash.
+ref_of() { printf 'ghcr.io/%s/meguri-dev%s:%s\n' "${GITHUB_REPOSITORY_OWNER,,}" "${2:+-pr}" "$1"; }
+
+# build <hash> <ref>: build the dev service through compose, as tools/mg
+# does, then add the labels in a layerless image on top.
+build() {
+  local project=meguri-ci-image
+  BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -p "$project" -f docker/compose.yml --progress plain build dev &&
+    printf 'FROM %s\nLABEL %s=%s org.opencontainers.image.source=https://github.com/%s\n' \
+      "$project-dev" "$label" "$1" "$GITHUB_REPOSITORY" |
+    docker build -q -t "$2" - >/dev/null
+}
 
 login() { printf '%s' "$TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null; }
 
@@ -57,20 +77,22 @@ ensure() {
     report "" "Cold run: every job builds the image itself."
     return 0
   fi
-  ref="$(ref_of "$h")"
+  local master pr
+  master="$(ref_of "$h")"
+  pr="$(ref_of "$h" pr)"
   if ! login; then
     echo "::warning::Cannot log in to ghcr.io; every job builds the dev image itself."
     report "" "No shared image (registry login failed): every job builds it."
     return 0
   fi
   trap logout EXIT
-  if docker manifest inspect "$ref" >/dev/null 2>&1; then
-    report "$ref" "Reused \`$ref\`."
-  elif [[ "$CAN_PUSH" == true ]] &&
-       BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker build --progress plain -f docker/dev.Dockerfile --target dev \
-         --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "$label=$h" \
-         -t "$ref" . &&
-       docker push "$ref"; then
+  ref="$pr"
+  [[ "$TRUSTED" != true ]] || ref="$master"
+  if docker manifest inspect "$master" >/dev/null 2>&1; then
+    report "$master" "Reused \`$master\`."
+  elif [[ "$ref" == "$pr" ]] && docker manifest inspect "$pr" >/dev/null 2>&1; then
+    report "$pr" "Reused \`$pr\`."
+  elif [[ "$CAN_PUSH" == true ]] && build "$h" "$ref" && docker push -q "$ref"; then
     report "$ref" "Built and pushed \`$ref\`."
   else
     echo "::warning::No shared dev image for $h; every job builds it itself."
@@ -81,9 +103,9 @@ ensure() {
 pull() {
   local h ref got
   h="$(hash)"
-  ref="$(ref_of "$h")"
-  if [[ -n "${REF:-}" && "$REF" != "$ref" ]]; then
-    echo "::warning::The shared image $REF is not this checkout's $ref; tools/mg builds the dev image."
+  ref="${REF:-$(ref_of "$h")}"
+  if [[ "$ref" != "$(ref_of "$h")" && "$ref" != "$(ref_of "$h" pr)" ]]; then
+    echo "::warning::The shared image $ref is not one of this checkout's; tools/mg builds the dev image."
     return 0
   fi
   if login && docker pull -q "$ref" &&

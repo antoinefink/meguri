@@ -67,7 +67,8 @@ jobs:
         env:
           TOKEN: ${{ github.token }}
         run: |
-          echo "hash=$(.github/dev-image.sh hash)" >>"$GITHUB_OUTPUT"
+          hash="$(.github/dev-image.sh hash)"
+          echo "hash=$hash" >>"$GITHUB_OUTPUT"
           .github/dev-image.sh pull
 
       # Read only: the Core shards of "Verify Meguri" save this cache.
@@ -78,7 +79,6 @@ jobs:
           path: |
             ${{ runner.temp }}/cargo-home/registry/index
             ${{ runner.temp }}/cargo-home/registry/cache
-            ${{ runner.temp }}/cargo-home/git/db
             ${{ runner.temp }}/cargo-target
           key: core-deps-v1-${{ steps.pull.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
           restore-keys: core-deps-v1-${{ steps.pull.outputs.hash }}-
