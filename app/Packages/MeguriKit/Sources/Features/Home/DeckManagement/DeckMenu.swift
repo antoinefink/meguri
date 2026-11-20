@@ -10,6 +10,11 @@ struct DeckMenu: View {
     let deck: CountedDeckNode
 
     var body: some View {
+        // N20.2: each item with its system symbol, on the Mac too.
+        items.labelStyle(.titleAndIcon)
+    }
+
+    @ViewBuilder private var items: some View {
         if !deck.filtered {
             Group {
                 Button { Task { await collection.startStudy(deckID: deck.id) } } label: {

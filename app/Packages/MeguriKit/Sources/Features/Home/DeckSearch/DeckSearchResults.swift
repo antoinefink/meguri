@@ -113,6 +113,11 @@ struct DeckSearchTrailingRows: View {
             Button { DeckSearchActivation.create(collection, search: search) } label: {
                 Label { Text("Create deck named \(search.text)", bundle: .module) } icon: { Image(systemName: "plus") }
             }
+            #if os(macOS)
+            // A sidebar row like the results, in the tint as an action row, not a push button.
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
+            #endif
             .disabled(!collection.deckActions.canPresent(.create))
             .tag(DeckSearchTarget.create)
             .accessibilityIdentifier("home.deckSearch.create")

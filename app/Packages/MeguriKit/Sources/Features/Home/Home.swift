@@ -128,16 +128,20 @@ public struct HomeView: View {
     private var addMenu: some View {
         let preset = deckID.flatMap { collection.deck($0)?.filtered == true ? nil : $0 }
         return Menu {
-            Button { collection.navigation.present(.add(deck: preset.map { DeckID($0) })) } label: {
-                Label { Text("New Note", bundle: .module) } icon: { Image(systemName: "square.and.pencil") }
+            Group {
+                Button { collection.navigation.present(.add(deck: preset.map { DeckID($0) })) } label: {
+                    Label { Text("New Note", bundle: .module) } icon: { Image(systemName: "square.and.pencil") }
+                }
+                .disabled(!collection.addNotePresentation.canPresent(presetDeck: preset))
+                .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
+                Button { collection.deckActions.present(.create) } label: {
+                    Label { Text("New Deck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
+                }
+                .disabled(!collection.deckActions.canPresent(.create))
+                .accessibilityIdentifier("home.collection.createDeck")
             }
-            .disabled(!collection.addNotePresentation.canPresent(presetDeck: preset))
-            .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
-            Button { collection.deckActions.present(.create) } label: {
-                Label { Text("New Deck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
-            }
-            .disabled(!collection.deckActions.canPresent(.create))
-            .accessibilityIdentifier("home.collection.createDeck")
+            // N20.1: each item with its system symbol, on the Mac too.
+            .labelStyle(.titleAndIcon)
         } label: {
             Label { Text("Add", bundle: .module) } icon: { Image(systemName: "plus") }
         }
