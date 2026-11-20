@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] targets below build (tests/main.rs is text_it).
+autotests = false
 
 [dependencies]
 html5ever.workspace = true
@@ -17,3 +19,9 @@ unicode-normalization.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
+[[test]]
+name = "text_it"
+path = "tests/main.rs"
