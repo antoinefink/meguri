@@ -104,7 +104,8 @@ import Testing
                 let expected: Facts
                 switch routine {
                 case .exchanging: expected = Self.exchanging
-                case nil, .unreported, .network, .waiting: expected = Self.waiting
+                // A cancelled round (the app left the foreground mid-round) is still waiting.
+                case nil, .unreported, .network, .waiting, .cancelled: expected = Self.waiting
                 default: expected = Self.settled(last)
                 }
                 #expect(Facts.mapping(input) == expected, "\(input)")
