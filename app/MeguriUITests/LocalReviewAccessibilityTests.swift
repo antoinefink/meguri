@@ -33,16 +33,8 @@ final class LocalReviewAccessibilityTests: XCTestCase {
             // N14: the tab layout's deck list row, or the sidebar's row where the detail shows Today.
             let deckRows = HomeControls.deckRows(app, deckID: "1884308400002")
             var deck: XCUIElement { HomeControls.hittable(deckRows) ?? deckRows.firstMatch }
-            let enable = element(app, "home.policy.enable")
-            let policy = element(app, "home.policy.sheet")
-            try wait("collection ready or FSRS admission, \(variant)") {
-                enable.isHittable || (deck.isHittable && !policy.exists)
-            }
-            if enable.isHittable {
-                try app.bringToFront(bundleIdentifier: bundleIdentifier)
-                enable.clickOrTap()
-            }
-            try wait("native Home, \(variant)") { deck.isHittable && !policy.exists }
+            // Nothing asks before Home (N18.1).
+            try wait("native Home, \(variant)") { deck.isHittable }
             try require(element(app, "home.collection.screen"), "native Home, \(variant)")
             // Check the native Home background, never the user card's CSS.
             let shown = try AccessibilityAudit.Appearance.shown(by: app)

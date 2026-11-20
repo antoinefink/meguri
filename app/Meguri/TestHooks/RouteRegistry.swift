@@ -56,6 +56,7 @@ extension TestHooks {
             ReplayAccessibilityRoute.register(in: &registry)
             #endif
             CollectionEntryRoutes.register(in: &registry)
+            SyncRoutes.register(in: &registry)
             ReviewRoutes.register(in: &registry)
             return registry
         }

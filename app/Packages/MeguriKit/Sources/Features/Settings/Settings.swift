@@ -11,8 +11,12 @@ public struct SettingsView: View {
     #if !os(macOS)
     @Environment(\.shellLayout) private var shellLayout
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @AppStorage("settings.selectedSection") private var selectedSection = "accountSync"
+    /// Wider than tall, measured without the keyboard: a focused field must not change the layout.
+    @State private var wide = false
     #endif
+    @State private var draft = MeguriSignInDraft()
     public init(collection: ReviewCollection) { self.collection = collection }
     public var body: some View {
         content
@@ -23,27 +27,39 @@ public struct SettingsView: View {
             #endif
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("settings.root.content")
+            .onDisappear { draft.password = "" }
+            #if !os(macOS)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.onChange(of: proxy.size, initial: true) { _, size in wide = size.width > size.height }
+                }
+                .ignoresSafeArea(.keyboard)
+            }
+            .onAppear(perform: consumeSyncRequest)
+            .onChange(of: collection.syncPresentation.settingsRequest) { _, _ in consumeSyncRequest() }
+            #endif
     }
     @ViewBuilder private var content: some View {
         #if os(macOS)
         flat
         #else
-        // The tab layout at regular width and wider than tall: an unfolded iPhone held wide.
+        // The tab layout at regular width and height, wider than tall: an unfolded
+        // iPhone held wide. A phone in landscape has a compact height and stays flat.
         GeometryReader { proxy in
-            if shellLayout == .compact, sizeClass == .regular, proxy.size.width > proxy.size.height {
+            if shellLayout == .compact, sizeClass == .regular, verticalSizeClass == .regular, wide {
                 HStack(spacing: 0) {
                     List(selection: Binding<String?>(get: { section }, set: { if let value = $0 { selectedSection = value } })) {
                         ForEach([SettingsPage.accountSync, .collection], id: \.self) { page in
                             SettingsPageLabel(page: page)
                                 .tag(page.rawValue)
-                                .accessibilityIdentifier("settings.root.\(page.rawValue)")
+                                .accessibilityIdentifier(page.rowIdentifier)
                         }
                     }
                     .frame(width: proxy.size.width / 3)
                     NavigationStack {
                         Form {
                             if section == "collection" { SettingsCollectionFilesSection(collection: collection) }
-                            else { SyncSettingsSections(collection: collection) }
+                            else { SyncSettingsSections(collection: collection, draft: draft) }
                         }
                         .formStyle(.grouped)
                     }
@@ -54,10 +70,16 @@ public struct SettingsView: View {
     }
     #if !os(macOS)
     private var section: String { selectedSection == "collection" ? "collection" : "accountSync" }
+    /// A request to show the Sync section selects it where sections are a list.
+    private func consumeSyncRequest() {
+        guard collection.syncPresentation.settingsRequest != nil else { return }
+        selectedSection = "accountSync"
+        collection.syncPresentation.settingsRequest = nil
+    }
     #endif
     private var flat: some View {
         Form {
-            SyncSettingsSections(collection: collection)
+            SyncSettingsSections(collection: collection, draft: draft)
             SettingsCollectionFilesSection(collection: collection)
             if SettingsPage.showsAnkiServer {
                 // The hidden legacy interface keeps its pages for its own suites.
@@ -127,52 +149,48 @@ struct SettingsCollectionFilesSection: View {
         return collection.navigation.sheet == nil && !collection.manualTransfers.busy
             && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
     }
+    private var canImport: Bool { fileActionsAvailable && collection?.entry.canPresent == true }
+    private var canExport: Bool { fileActionsAvailable && collection?.collectionExport.canPresent == true }
+    private func importCollection() {
+        if let present { present(.collectionEntry) } else { collection?.entry.present() }
+    }
+    private func exportCollection() {
+        if let present { present(.collectionExport) } else { collection?.collectionExport.start() }
+    }
     var body: some View {
         Section {
+            #if os(macOS)
             CollectionActionRow {
-                Button { if let present { present(.collectionEntry) } else { collection?.entry.present() } } label: {
-                    Text("Import Collection", bundle: .module)
-                        #if !os(macOS)
-                        // Borderless draws no bezel: the label carries the touch target.
-                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                        .contentShape(Rectangle())
-                        #endif
-                }
-                #if os(macOS)
-                .buttonStyle(.bordered)
-                #else
-                .buttonStyle(.borderless)
-                #endif
-                .controlSize(.regular)
-                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                .contentShape(Rectangle())
-                .disabled(!fileActionsAvailable || collection?.entry.canPresent != true)
-                .accessibilityIdentifier("settings.root.importCollection")
+                Button(action: importCollection) { Text("Import Collection", bundle: .module) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                    .contentShape(Rectangle())
+                    .disabled(!canImport)
+                    .accessibilityIdentifier("settings.root.importCollection")
             } label: {
                 Label { Text("From a file", bundle: .module) } icon: { Image(systemName: "square.and.arrow.down") }
             }
             CollectionActionRow {
-                Button { if let present { present(.collectionExport) } else { collection?.collectionExport.start() } } label: {
-                    Text("Export Collection", bundle: .module)
-                        #if !os(macOS)
-                        // Borderless draws no bezel: the label carries the touch target.
-                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                        .contentShape(Rectangle())
-                        #endif
-                }
-                #if os(macOS)
-                .buttonStyle(.bordered)
-                #else
-                .buttonStyle(.borderless)
-                #endif
-                .controlSize(.regular)
-                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                .contentShape(Rectangle())
-                .disabled(!fileActionsAvailable || collection?.collectionExport.canPresent != true)
-                .accessibilityIdentifier("settings.root.exportCollection")
+                Button(action: exportCollection) { Text("Export Collection", bundle: .module) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                    .contentShape(Rectangle())
+                    .disabled(!canExport)
+                    .accessibilityIdentifier("settings.root.exportCollection")
             } label: {
                 Label { Text("To a file", bundle: .module) } icon: { Image(systemName: "square.and.arrow.up") }
             }
+            #else
+            // N15.1: plain rows, as the system's Settings has for an action that opens a sheet.
+            Button(action: importCollection) { Text("Import Collection…", bundle: .module) }
+                .disabled(!canImport)
+                .accessibilityIdentifier("settings.root.importCollection")
+            Button(action: exportCollection) { Text("Export Collection…", bundle: .module) }
+                .disabled(!canExport)
+                .accessibilityIdentifier("settings.root.exportCollection")
+            #endif
         } header: {
             Text("Collection", bundle: .module)
                 .accessibilityIdentifier("settings.root.collectionHeading")
@@ -186,7 +204,8 @@ struct SettingsCollectionFilesSection: View {
 
 }
 
-/// Compact native Mac rows; other platforms retain their labeled Form layout.
+#if os(macOS)
+/// Compact native Mac rows: the label leading, its button trailing.
 private struct CollectionActionRow<Content: View, RowLabel: View>: View {
     private let content: Content
     private let label: RowLabel
@@ -194,19 +213,14 @@ private struct CollectionActionRow<Content: View, RowLabel: View>: View {
         self.content = content(); self.label = label()
     }
     var body: some View {
-        #if os(macOS)
         HStack(alignment: .center) {
             label
             Spacer()
             content
         }
-        #else
-        LabeledContent { content } label: { label }
-        #endif
     }
 }
 
-#if os(macOS)
 /// Native Settings shares the collection. Only this device-local section is restored.
 public struct MacSettingsView: View {
     private let collection: ReviewCollection
@@ -221,7 +235,7 @@ public struct MacSettingsView: View {
                 ForEach(SettingsPage.visible.filter(matchesSearch), id: \.self) { page in
                     SettingsPageLabel(page: page)
                         .tag(page.rawValue)
-                        .accessibilityIdentifier("settings.root.\(page.rawValue)")
+                        .accessibilityIdentifier(page.rowIdentifier)
                 }
             }
             .searchable(text: Binding(get: { collection.syncPresentation.settingsSearch },

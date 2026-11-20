@@ -26,7 +26,7 @@ extension ReviewCollectionStartupTests {
             let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
             owner.entry.present(); owner.entry.inspect(source); await owner.entry.waitForCompletion()
             try #require(owner.entry.preview != nil)
-            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             try #require(owner.state == .ready)
             if owner.policy != .ok { await owner.enableFsrs() }
             func flatten(_ nodes: [CountedDeckNode]) -> [CountedDeckNode] { nodes.flatMap { [$0] + flatten($0.children) } }

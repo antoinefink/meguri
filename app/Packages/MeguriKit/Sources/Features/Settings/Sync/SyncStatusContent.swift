@@ -44,7 +44,7 @@ enum SyncStatusCopy {
     static func unavailable(_ collection: ReviewCollection) -> String? {
         if collection.sync.providerState?.selection == .meguri {
             if case .disabled(let key) = collection.sync.meguriStatus.route {
-                return key.map { SyncText.value(SyncKinds.meguriSyncNowKey($0)) }
+                return key.map { SyncText.value($0) }
             }
             return nil
         }
@@ -56,7 +56,7 @@ enum SyncStatusCopy {
             key = SyncStatusPresentation.reviewAvailabilityKey(collection.sync.status?.controls)
         case .notConnected: key = SyncKinds.syncNowOffKey
         // Never reported: P12.1 row 4 is removed (P25.2).
-        case .paused: key = "sync.now.unavailable.recoveryRequired"
+        case .paused: return nil
         case .iCloudUnavailable:
             if collection.sync.status == nil, collection.sync.setupState == .configurationUnavailable {
                 key = "sync.status.unavailable.setupNeeded"
@@ -157,10 +157,7 @@ struct CloudRecoveryContent: View {
                 .accessibilityIdentifier("sync.recovery.switchConflict")
         }
         if SyncStatusPresentation.showsRecoveryResume(recovery) {
-            Button(SyncText.value("sync.action.resumeOp")) {
-                if recovery.adoptionTransportWait { collection.sync.resumeWaitingAdoption() }
-                else { collection.sync.resumeConnection() }
-            }
+            Button(SyncText.value("sync.action.resumeOp")) { Task { await collection.sync.resumeRecoveryOperation() } }
                 .disabled(recovery.switchConflict || recovery.step == .cancelling)
                 .accessibilityIdentifier("sync.recovery.resume")
         }

@@ -15,7 +15,7 @@ import Testing
         #else
         let replayAccessibilityRoute = ""
         #endif
-        return "card/behaviors, card/behaviors/fallback, card/behaviors/graphic, card/behaviors/replay-identifier, card/behaviors/separator, \(replayAccessibilityRoute)collection/import/empty, collection/import/error, collection/import/loading, collection/import/overflow, collection/import/typical, designsystem/gallery, home/deck-list/empty, home/deck-list/typical, perf/probe, review/congratulations/finished, review/congratulations/finished-with-new-work, review/congratulations/ready-to-continue, review/congratulations/waiting-unavailable, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets, settings/account-sync/setup-needed, settings/anki-transfer/empty, settings/anki-transfer/error, settings/anki-transfer/loading, settings/anki-transfer/media-complete, settings/anki-transfer/media-consent, settings/anki-transfer/media-partial, settings/anki-transfer/media-progress, settings/anki-transfer/media-unknown, settings/anki-transfer/overflow, settings/anki-transfer/typical, settings/import-export/error, settings/import-export/loading, settings/import-export/typical, shell/root/browse-pushed, shell/root/deck-page, shell/root/error, shell/root/loading, shell/root/review-answer, shell/root/typical, spike/card-swap, spike/card-swap/capture, spike/card-swap/typein, spike/media-seek, spike/media-seek/audio, spike/storage/read, spike/storage/write"
+        return "card/behaviors, card/behaviors/fallback, card/behaviors/graphic, card/behaviors/replay-identifier, card/behaviors/separator, \(replayAccessibilityRoute)collection/import/empty, collection/import/error, collection/import/loading, collection/import/overflow, collection/import/typical, designsystem/gallery, home/deck-list/beside-deck, home/deck-list/beside-today, home/deck-list/empty, home/deck-list/typical, perf/probe, review/congratulations/finished, review/congratulations/finished-with-new-work, review/congratulations/ready-to-continue, review/congratulations/waiting-unavailable, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets, settings/account-sync/setup-needed, settings/anki-transfer/empty, settings/anki-transfer/error, settings/anki-transfer/loading, settings/anki-transfer/media-complete, settings/anki-transfer/media-consent, settings/anki-transfer/media-partial, settings/anki-transfer/media-progress, settings/anki-transfer/media-unknown, settings/anki-transfer/overflow, settings/anki-transfer/typical, settings/import-export/error, settings/import-export/loading, settings/import-export/typical, settings/sync/icloud-connected, settings/sync/icloud-issues, settings/sync/icloud-needs-you, settings/sync/icloud-selected, settings/sync/issues-list, settings/sync/keep-collection, settings/sync/meguri-connected, settings/sync/meguri-needs-you, settings/sync/meguri-sign-in, settings/sync/off, settings/sync/status-needs-you, settings/sync/troubleshooting-icloud, settings/sync/troubleshooting-meguri, settings/sync/wide-icloud-needs-you, settings/sync/wide-meguri-connected, shell/root/browse-pushed, shell/root/deck-page, shell/root/error, shell/root/loading, shell/root/review-answer, shell/root/typical, spike/card-swap, spike/card-swap/capture, spike/card-swap/typein, spike/media-seek, spike/media-seek/audio, spike/storage/read, spike/storage/write"
     }()
 
     @Test func theStandardRegistryHasTheSampleGalleryPerfShellAndSpikeRoutes() {
@@ -36,6 +36,8 @@ import Testing
         ("collection/import/overflow", .sheet),
         ("collection/import/error", .sheet),
         ("collection/import/loading", .sheet),
+        ("home/deck-list/beside-deck", .screen),
+        ("home/deck-list/beside-today", .screen),
         ("home/deck-list/empty", .screen),
         ("home/deck-list/typical", .screen),
         ("settings/account-sync/setup-needed", .screen),
@@ -52,6 +54,21 @@ import Testing
         ("settings/import-export/error", .sheet),
         ("settings/import-export/loading", .sheet),
         ("settings/import-export/typical", .sheet),
+        ("settings/sync/icloud-connected", .screen),
+        ("settings/sync/icloud-issues", .screen),
+        ("settings/sync/icloud-needs-you", .screen),
+        ("settings/sync/icloud-selected", .screen),
+        ("settings/sync/issues-list", .screen),
+        ("settings/sync/keep-collection", .screen),
+        ("settings/sync/meguri-connected", .screen),
+        ("settings/sync/meguri-needs-you", .screen),
+        ("settings/sync/meguri-sign-in", .screen),
+        ("settings/sync/off", .screen),
+        ("settings/sync/status-needs-you", .screen),
+        ("settings/sync/troubleshooting-icloud", .screen),
+        ("settings/sync/troubleshooting-meguri", .screen),
+        ("settings/sync/wide-icloud-needs-you", .screen),
+        ("settings/sync/wide-meguri-connected", .screen),
         ("review/congratulations/finished", .screen),
         ("review/congratulations/finished-with-new-work", .screen),
         ("review/congratulations/ready-to-continue", .screen),

@@ -20,7 +20,7 @@ extension ReviewCollectionStartupTests {
             await owner.start()
             let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
             owner.entry.inspect(source); await owner.entry.waitForCompletion()
-            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             try #require(owner.state == .ready)
 
             let aID = try await decks.addDeck(name: "U152 A").id

@@ -1,5 +1,6 @@
 import AppModel
 import CoreBridge
+import DesignSystem
 import SwiftUI
 
 /// The same quiet control is injected into the platform toolbar and review.
@@ -53,6 +54,10 @@ public struct CloudSyncStatusButton: View {
             .disabled(collection.syncPresentation.statusHandoffPending)
             .popover(isPresented: presented(compact: false)) {
                 status
+                    // A navigation stack has no size of its own: without one the popover
+                    // shrinks to the two buttons under the form and hides the status.
+                    .frame(idealWidth: ContentWidth.primaryAction,
+                        idealHeight: ContentWidth.primaryAction + ControlMetrics.minimumTarget + ControlMetrics.minimumTarget)
                     .presentationCompactAdaptation(.sheet)
                     .presentationDetents([.medium, .large])
             }
@@ -84,7 +89,8 @@ public struct CloudSyncStatusButton: View {
             VStack {
                 Form {
                     Section {
-                        SyncMainStatusRows(collection: collection, openEntry: openStatusEntry)
+                        SyncMainStatusRows(collection: collection, openEntry: openStatusEntry,
+                            showInSettings: { showSettings(keepCollection: $0) })
                         if meguri, MeguriMediaFactRows.isVisible(collection.sync) {
                             MeguriMediaFactRows(collection: collection)
                         }
@@ -92,9 +98,9 @@ public struct CloudSyncStatusButton: View {
                 }
                 .formStyle(.grouped)
                 Divider()
-                VStack {
+                VStack(spacing: Spacing.medium) {
                     SyncNowButton(collection: collection)
-                    Button(SyncText.value("sync.settings.sync.section"), action: showSettings)
+                    Button(SyncText.value("sync.status.openSettings")) { showSettings() }
                         .accessibilityIdentifier("sync.status.settings")
                 }
                 .padding()
@@ -114,17 +120,20 @@ public struct CloudSyncStatusButton: View {
         if compact { collection.queueCloudSyncAfterStatusDismissal(entry, host: host) }
         else { collection.presentCloudSync(entry, host: host) }
     }
-    private func showSettings() {
+    /// `keepCollection`: Choose… or Try Again for Meguri Sync. The Sync section
+    /// presents N15.3's sheet, so the action opens it there.
+    private func showSettings(keepCollection: Bool = false) {
         if compact {
-            collection.queueAccountSyncAfterStatusDismissal()
+            collection.queueAccountSyncAfterStatusDismissal(keepCollection: keepCollection)
             return
         }
         collection.syncPresentation.statusPresented = false
         #if os(macOS)
+        if keepCollection { collection.syncPresentation.keepCollectionRequested = true }
         collection.syncPresentation.settingsRequest = UUID()
         openSettings()
         #else
-        collection.navigation.openAccountSync()
+        collection.openAccountSyncFromStatus(keepCollection: keepCollection)
         #endif
     }
 }

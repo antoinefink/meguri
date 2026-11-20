@@ -413,7 +413,7 @@ assert_host_untouched() {
   called "^vm-products $SB/build/app/DerivedData/Build/Products/Profile-iphonesimulator built from $SB\$"
   called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri-Profile_Performance_iphonesimulator27.0-arm64.xctestrun -destination platform=iOS Simulator,id=$u -resultBundlePath $dir/perf.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/PerfTestCaseTests -only-testing:MeguriUITests/SmokePerfTests\$"
   called '^xcrun simctl list runtimes --json$'
-  [ "$(field .details.runtime.actual.build)" = 24A434 ]
+  [ "$(field .details.runtime.actual.build)" = 24B8117 ]
   # The result bundle came back (the VM keeps none) and was read here.
   [ -f "$dir/perf.xcresult/summary.json" ]
   [ ! -e "$(vm_fs "$dir/perf.xcresult")" ]
@@ -422,8 +422,8 @@ assert_host_untouched() {
   [ "$(field '.artifacts[] | select(.kind == "perf-result") | .path')" = "$out" ]
   python3 "$SB/tools/scripts/perf-compare/perf_compare.py" validate "$out"
   # The baseline key names the test VM, as for the Mac in it.
-  [ "$(jq -r .runner.id "$out")" = "vm/meguri-mac/iPhone 17 Pro/24A434" ]
-  [ "$(jq -r '"\(.runner.kind) \(.runner.model) \(.runner.os_build)"' "$out")" = "simulator iPhone 17 Pro 24A434" ]
+  [ "$(jq -r .runner.id "$out")" = "vm/meguri-mac/iPhone 18 Pro/24B8117" ]
+  [ "$(jq -r '"\(.runner.kind) \(.runner.model) \(.runner.os_build)"' "$out")" = "simulator iPhone 18 Pro 24B8117" ]
   # The device went back to the pool, and the VM's lease is free.
   [ ! -e "$(vm_lease "$u")" ]
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
@@ -469,7 +469,7 @@ assert_host_untouched() {
   [ "$(field .status)" = pass ]
   [ "$(field .details.sim_runner)" = vm ]
   [ "$(field .details.runtime.device)" = "$u" ]
-  [ "$(field .details.runtime.actual.build)" = 24A434 ]
+  [ "$(field .details.runtime.actual.build)" = 24B8117 ]
   called "^vm-xcodebuild .* -destination platform=iOS Simulator,id=$u .* -only-testing:MeguriUITests/SmokePerfTests\$"
   [ "$(jq -r .holder "$(vm_lease "$u")")" = test ]
   # A device the pool does not have is refused before anything is built.

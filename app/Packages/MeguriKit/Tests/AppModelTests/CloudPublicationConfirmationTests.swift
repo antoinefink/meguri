@@ -244,7 +244,9 @@ extension ReviewCollectionStartupTests {
             // The real resolver is admitted first; hold a later actual status.
             hold.armed = true
             let settings = harness.sync.settings
-            harness.sync.setDeviceSettings(paused: settings.paused, automatic: settings.automatic, media: !settings.media)
+            // P25.2: the update hold, as a stored pause beside the retained op. It
+            // changes the status, and nothing of the op may start while it is set.
+            harness.sync.setDeviceSettings(paused: true, automatic: settings.automatic)
             try #require(try await publicationSignal(entered.stream, stage: "startup-issued-status-entry"))
             #expect(harness.sync.recovery?.step == .bound)
             #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
@@ -255,6 +257,16 @@ extension ReviewCollectionStartupTests {
             #expect(heldStatus && !commandReturned)
             #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
             releaseCommand?.resume(); releaseCommand = nil
+            stage = "startup-update-hold"
+            await harness.sync.prepareConnectionAuthority()
+            #expect(harness.sync.updateHold && harness.sync.recovery?.step == .bound)
+            #expect(harness.sync.serviceChangeRefusedForOperation, "V27.5: Off is refused while the op exists")
+            #expect(!(await harness.sync.turnOffICloud()) && harness.sync.providerState?.selection == .iCloud)
+            #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
+            #expect(!harness.sync.connectionOperationActive)
+            // The person's Resume is a clearing act: it writes `paused: false` first.
+            await harness.sync.resumeRecoveryOperation()
+            #expect(!harness.sync.updateHold)
             stage = "startup-account-proof-completion"
             await harness.sync.prepareConnectionAuthority()
             harness.expectSuccessfulAccountCompletion(stage: "startup-account-proof-completion")
@@ -326,7 +338,7 @@ extension ReviewCollectionStartupTests {
             var successorProof: PublicationAccountProof?
             switch block {
             case .paused:
-                harness.sync.setDeviceSettings(paused: true, automatic: false, media: true)
+                harness.sync.setDeviceSettings(paused: true, automatic: false)
             case .stale:
                 successorProof = harness.accounts.holdNextRead()
                 await harness.sync.accountChanged()
@@ -356,7 +368,7 @@ extension ReviewCollectionStartupTests {
                 // The successful proof while paused left this same durable
                 // operation pending. Unpause must resolve a new native proof.
                 let freshProof = harness.accounts.holdNextRead()
-                harness.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+                harness.sync.setDeviceSettings(paused: false, automatic: false)
                 try await freshProof.waitForAdmission(stage: "unpause-account-proof-admission")
                 #expect(harness.transport.zones.enqueues == 0 && harness.transport.save.enqueues == 0)
                 #expect(!harness.sync.connectionOperationActive)
@@ -461,8 +473,11 @@ extension ReviewCollectionStartupTests {
     private func makeOwner() -> ReviewCollection {
         var configuration = LaunchConfiguration()
         configuration.collectionLocation = AppModel.CollectionLocation(directory: root)
-        return ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
+        let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: providerDirectory)
+        // This fixture scripts every collection write and exchange.
+        owner.studyPreparation.runsUnprompted = false
+        return owner
     }
     init(realAccountProof _: Bool = false) throws {
         defaults = try #require(UserDefaults(suiteName: suite))

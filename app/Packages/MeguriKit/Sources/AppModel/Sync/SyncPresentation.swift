@@ -44,7 +44,7 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     public private(set) var statusPresentationID = UUID()
     fileprivate enum StatusDestination {
         case cloudSync(CloudSyncEntry, AppNavigation.SheetHost)
-        case accountSync
+        case accountSync(keepCollection: Bool)
     }
     fileprivate struct StatusEntry {
         let presentationID: UUID
@@ -64,8 +64,6 @@ public enum CloudConnectionConfirmation: Sendable, Equatable { case publication,
     public var keepCollectionRequested = false
     public var serviceChanging = false
     public var serviceChangeFailed = false
-    public var meguriSigningOut = false
-    public var meguriSignOutFailed = false
     public var showStatusForCommands = true
     public var connectionPath: [CloudSyncEntry] = []
     public init() {}
@@ -128,17 +126,15 @@ public struct SyncStatusPresentation {
         let values: (String, String, String?)
         switch state {
         case .localOnly:
-            values = ("icloud.slash", "sync.status.localOnly.title", "sync.status.localOnly.detail")
+            values = ("icloud.slash", "sync.status.off.title", "sync.status.localOnly.detail")
         case .iCloudUnavailable(let reason):
             values = ("person.icloud", "sync.status.unavailable.title", Self.unavailableKey(reason))
-        case .paused(let reason):
-            let title = reason == .automaticOff ? "sync.status.automaticOff.title" : "sync.status.paused.title"
-            let detail: String = switch reason {
-            case .decisionRequired: "sync.decision.title.none" // reason is not exposed by this projection
-            case .userPaused: "sync.status.paused.user"
-            case .automaticOff: "sync.status.automaticOff.detail"
-            }
-            values = ("pause.circle", title, detail)
+        case .paused(.decisionRequired):
+            // The fence's reason is not exposed by this projection.
+            values = ("pause.circle", "sync.status.paused.title", "sync.needsYou.fence.none")
+        case .paused(.automaticOff), .paused(.userPaused):
+            // P25.2: `userPaused` is never reported; the update hold reads as auto off.
+            values = ("pause.circle", "sync.status.automaticOff.title", "sync.status.automaticOff.detail")
         case .needsAttention:
             values = ("exclamationmark.icloud", "sync.status.needsAttention.title", nil)
         case .offline:
@@ -179,10 +175,9 @@ public struct SyncStatusPresentation {
         }
     }
     /// UI readiness only; confirmation still consumes the coordinator's retained authority.
-    public static func publicationReady(_ decision: CloudConnectionDecision?, accountAvailable: Bool,
-                                        paused: Bool, busy: Bool) -> Bool {
+    public static func publicationReady(_ decision: CloudConnectionDecision?, accountAvailable: Bool, busy: Bool) -> Bool {
         guard let decision else { return false }
-        return permitsPublication(decision) && accountAvailable && !paused && !busy
+        return permitsPublication(decision) && accountAvailable && !busy
     }
     public static func permitsResume(_ decision: CloudConnectionDecision) -> Bool {
         decision == .confirmResume
@@ -306,8 +301,16 @@ extension ReviewCollection {
     public func queueCloudSyncAfterStatusDismissal(_ entry: CloudSyncEntry, host: AppNavigation.SheetHost = .main) {
         queueSyncStatusDestination(.cloudSync(entry, host))
     }
-    public func queueAccountSyncAfterStatusDismissal() {
-        queueSyncStatusDestination(.accountSync)
+    public func queueAccountSyncAfterStatusDismissal(keepCollection: Bool = false) {
+        queueSyncStatusDestination(.accountSync(keepCollection: keepCollection))
+    }
+    /// N15.3: only the Sync section presents the keep-collection sheet, so a status
+    /// action outside Settings opens that section first. The request is recorded
+    /// only once the section is opening, so a refused route leaves nothing behind.
+    @discardableResult public func openAccountSyncFromStatus(keepCollection: Bool) -> Bool {
+        guard navigation.openAccountSync() else { return false }
+        if keepCollection { syncPresentation.keepCollectionRequested = true }
+        return true
     }
     private func queueSyncStatusDestination(_ destination: SyncPresentation.StatusDestination) {
         let presentation = syncPresentation
@@ -327,7 +330,7 @@ extension ReviewCollection {
               request.reviewID == navigation.review?.id, navigation.sheet == nil else { return }
         switch request.destination {
         case .cloudSync(let entry, let host): presentCloudSync(entry, host: host)
-        case .accountSync: navigation.openAccountSync()
+        case .accountSync(let keepCollection): openAccountSyncFromStatus(keepCollection: keepCollection)
         }
     }
 }
@@ -338,7 +341,9 @@ extension AppNavigation {
         guard sheet == nil else { return false }
         if review != nil { present(.accountSync) }
         else {
-            // N15.1: the Sync section is on the flat Settings page itself.
+            // N15.1: the Sync section is on the flat Settings page itself; beside
+            // a section list, Sync becomes the selected section.
+            featureState { SyncPresentation() }.settingsRequest = UUID()
             show(.settings)
             setPath([], for: .settings)
         }
@@ -358,45 +363,16 @@ public enum MeguriRoutineState: Sendable, Equatable {
 public enum MeguriSyncNowRoute: Equatable, Sendable {
     case disabled(String?), account(String), round
 }
+/// What Sync Now does for Meguri Sync, and whether the service is busy or
+/// waits on the person. The status text itself is `SyncKinds.meguri` (T19.5).
 public struct MeguriSyncStatusPresentation {
-    public let titleKey: String
-    public let detailKey: String?
     public let route: MeguriSyncNowRoute
-    private let lastExchange: Int64?
-    public func detailLines(now: Date) -> [String] {
-        var lines = detailKey.map { [SyncText.value($0)] } ?? []
-        if let lastExchange {
-            lines.append(SyncText.format("sync.meguri.lastExchange", SyncText.instant(lastExchange, now: now)))
-        }
-        return lines
-    }
-    public var isBusy: Bool {
-        switch titleKey {
-        case "sync.meguri.status.signingIn.title", "sync.meguri.status.preparing.title",
-             "sync.meguri.status.transferringCollection.title", "sync.meguri.status.transferringMedia.title",
-             "sync.meguri.status.syncingCollection.title", "sync.meguri.status.syncingMedia.title": true
-        default: false
-        }
-    }
+    public let isBusy: Bool
     /// Whether Meguri Sync waits on the person (N16.2): a sign-in, a
     /// collection choice, a setup step, or a round or setup that stopped and
-    /// will not retry. Transfers, pending changes, a pause the person chose,
-    /// failures that retry and the state before the first report do not
-    /// count. From the inputs, never from the title.
+    /// will not retry. Transfers, pending changes, failures that retry and
+    /// the state before the first report do not count.
     public let needsUser: Bool
-    public var symbol: String {
-        if isBusy { return "arrow.triangle.2.circlepath" }
-        return switch titleKey {
-        case "sync.meguri.status.notSetUp.title", "sync.meguri.status.signedOut.title",
-             "sync.meguri.status.signedIn.title", "sync.meguri.status.setup.title",
-             "sync.meguri.status.chooseCollection.title", "sync.meguri.status.signInRequired.title":
-            "person.crop.circle.badge.exclamationmark"
-        case "sync.meguri.status.paused.title": "pause.circle"
-        case "sync.meguri.status.pending.title": "arrow.up.circle"
-        case "sync.meguri.status.on.title": "checkmark.circle"
-        default: "exclamationmark.arrow.triangle.2.circlepath"
-        }
-    }
     /// Read-only values for the replacement sheet; no preview or command authority.
     public static func replacementCountRows(cards: UInt64, notes: UInt64, reviews: UInt64) -> [(label: String, value: String)] {
         [(SyncText.value("sync.counts.cards"), cards.formatted(.number)),
@@ -404,59 +380,25 @@ public struct MeguriSyncStatusPresentation {
          (SyncText.value("sync.counts.reviews"), reviews.formatted(.number))]
     }
     public init(stopped: Bool, connection: MeguriProviderConnectionPhase, stage: MeguriSetupStage?,
-                localCollection: Bool, paused: Bool, routine: MeguriRoutineState?, failureKey: String? = nil,
-                lastExchange: Int64? = nil, settling: Bool = false) {
+                routine: MeguriRoutineState?, settling: Bool = false) {
+        // T19.7's reasons.
         if stopped || connection == .blocked {
-            route = .disabled("sync.meguri.now.unavailable.stopped")
-        } else if paused {
-            route = .disabled("sync.meguri.now.unavailable.paused")
+            route = .disabled("sync.meguri.now.unavailable.stopped.sync")
         } else if let routine {
             route = switch routine {
             case .acceptanceUnknown: .disabled("sync.meguri.now.unavailable.acceptanceUnknown")
-            case .fullSyncRequired: .account("sync.meguri.now.chooseCollection")
+            case .fullSyncRequired: .account("sync.decision.action")
             case .mediaBlocked: .account("sync.meguri.media.showAffected")
-            case .authentication: .disabled("sync.meguri.now.unavailable.signIn")
+            case .authentication: .disabled("sync.meguri.now.unavailable.signIn.sync")
             case .exchanging, .failed: .disabled(nil)
             case .unreported, .idle, .pending, .waiting, .network, .server, .cancelled: settling ? .disabled(nil) : .round
             }
         } else { route = .account("sync.meguri.setup.continue") }
-        let pair: (String, String?)
-        if stopped { pair = ("stopped", nil) }
-        else if connection == .blocked { pair = ("connectionBlocked", "sync.meguri.status.connectionBlocked.detail") }
-        else if connection == .unconfigured { pair = ("notSetUp", "sync.meguri.status.notSetUp.detail") }
-        else if connection == .signedOut { pair = ("signedOut", "sync.meguri.status.signedOut.detail") }
-        else if connection == .cancelled { pair = ("signedOut", "sync.meguri.status.cancelled.detail") }
-        else if connection == .authenticating { pair = ("signingIn", nil) }
-        else if let stage {
-            pair = switch stage {
-            case .required: ("setup", localCollection ? "sync.meguri.setup.choose" : "sync.meguri.setup.download.detail")
-            case .preparing: ("preparing", "sync.meguri.setup.preparing")
-            case .preview: ("setup", "sync.meguri.setup.review")
-            case .collection: ("transferringCollection", nil)
-            case .media: ("transferringMedia", "sync.meguri.setup.collectionDone")
-            case .mediaBlocked: ("mediaBlocked", "sync.meguri.media.blocked")
-            case .acceptanceUnknown: ("acceptanceUnknown", "sync.meguri.setup.acceptanceUnknown")
-            case .acceptedLocalIncomplete: ("acceptedLocalIncomplete", "sync.meguri.setup.acceptedLocalIncomplete")
-            case .failed: ("setupFailed", failureKey)
-            }
-        } else if paused { pair = ("paused", "sync.meguri.status.paused.detail") }
-        else if let routine {
-            pair = switch routine {
-            case .unreported, .failed: ("stopped", nil)
-            case .exchanging: ("syncingCollection", nil)
-            case .idle: ("on", nil)
-            case .pending: ("pending", "sync.meguri.status.pending.detail")
-            case .waiting: ("pending", nil)
-            case .mediaBlocked: ("mediaBlocked", "sync.meguri.media.blocked")
-            case .authentication: ("signInRequired", "sync.meguri.status.signInRequired.detail")
-            case .acceptanceUnknown: ("acceptanceUnknown", "sync.meguri.round.acceptanceUnknown")
-            case .fullSyncRequired: ("chooseCollection", "sync.meguri.round.fullSyncRequired")
-            case .network: ("failed", "sync.meguri.round.network")
-            case .server: ("failed", "sync.meguri.round.server")
-            case .cancelled: ("failed", "sync.meguri.round.cancelled")
-            }
-        } else { pair = ("signedIn", "sync.meguri.status.setupUnavailable") }
-        titleKey = "sync.meguri.status.\(pair.0).title"; detailKey = pair.1
+        if stopped || connection == .blocked { isBusy = false }
+        else if connection == .authenticating { isBusy = true }
+        else if connection != .setupRequired { isBusy = false }
+        else if let stage { isBusy = stage == .preparing || stage == .collection || stage == .media }
+        else { isBusy = routine == .exchanging }
         if stopped || connection == .blocked { needsUser = true }
         else if connection == .unconfigured || connection == .authenticating { needsUser = false }
         else if connection == .signedOut || connection == .cancelled { needsUser = true }
@@ -465,32 +407,34 @@ public struct MeguriSyncStatusPresentation {
             case .required, .preview, .mediaBlocked, .acceptanceUnknown, .acceptedLocalIncomplete, .failed: true
             case .preparing, .collection, .media: false
             }
-        } else if paused { needsUser = false }
-        else if let routine {
+        } else if let routine {
             needsUser = switch routine {
             case .failed, .mediaBlocked, .authentication, .acceptanceUnknown, .fullSyncRequired: true
             case .unreported, .exchanging, .idle, .pending, .waiting, .network, .server, .cancelled: false
             }
         } else { needsUser = true } // Signed in, setup not continued.
-        // Waiting has the same title as pending, but proves no completed work.
-        self.lastExchange = pair.0 == "on" || (pair.0 == "pending" && routine == .pending) ? lastExchange : nil
     }
     public static func canDiscard(_ receipt: MeguriBootstrapReceipt) -> Bool {
         receipt.acceptance == .notSent && receipt.phase != .needsDecision
             && receipt.boundary != .activationInterrupted
     }
     public static func canRecover(_ receipt: MeguriBootstrapReceipt) -> Bool {
+        // An accepted upload in the preview phase is its recovery preview:
+        // a first preview has sent nothing.
         receipt.direction == .export && receipt.acceptance == .exactOk
-            && (receipt.phase == .remoteAccepted || receipt.phase == .activating
+            && (receipt.phase == .remoteAccepted || receipt.phase == .activating || receipt.phase == .preview
                 || receipt.boundary == .activationInterrupted)
     }
+    /// A classification only: T19.8 withdraws its text, and no view shows it.
+    public static let cancelledFailureKey = "meguri.setup.cancelled"
     public static func failureKey(_ failure: MeguriBootstrapFailure) -> String? {
         switch failure {
         case .accountChanged, .connectionChanged, .username: "sync.meguri.setup.error.identityChanged"
-        case .publicationChanged: "sync.meguri.setup.error.remoteChanged"
-        case .documentChanged: "sync.meguri.setup.error.localChanged"
+        case .publicationChanged, .setupRemoteChanged: "sync.meguri.setup.error.remoteChanged"
+        case .documentChanged, .setupLocalChanged: "sync.meguri.setup.error.localChanged"
+        case .setupLocalUnusable: MeguriSetupSequence.localUnusableKey
         case .storage, .diskFull: "sync.meguri.setup.error.storage"
-        case .cancelled: "sync.meguri.setup.error.cancelled"
+        case .cancelled: cancelledFailureKey
         case .transfer(let value): transferFailureKey(value)
         default: nil
         }
@@ -501,7 +445,7 @@ public struct MeguriSyncStatusPresentation {
         case .safetyBackup: return "sync.meguri.setup.error.backupFailed"
         case .invalidDownload: return "sync.meguri.setup.error.invalidDownload"
         case .storage, .diskFull: return "sync.meguri.setup.error.storage"
-        case .cancelled, .interrupted: return "sync.meguri.setup.error.cancelled"
+        case .cancelled, .interrupted: return cancelledFailureKey
         case .server:
             switch value.serverKind {
             case "auth_failed": return "sync.meguri.setup.error.authentication"

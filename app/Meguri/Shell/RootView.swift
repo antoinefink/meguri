@@ -1,6 +1,7 @@
 import AppModel
 import CoreBridge
 import Editor
+import Home
 import SwiftUI
 
 /// The root of the window (KTD10): the tab layout at compact width, the
@@ -21,6 +22,7 @@ struct RootView: View {
     @State private var launchSheet: Bool
     @State private var launchAlert: Bool
     @State private var linkRefusal: DeepLinkRefusal?
+    @State private var deckNameBesideList = false
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.layoutFollowsForcedSizeClass) private var layoutFollowsForcedSizeClass
@@ -55,6 +57,19 @@ struct RootView: View {
         #endif
     }
 
+    #if os(iOS)
+    /// The tab layout's list beside the deck: not for the welcome (N18.3), and not
+    /// decided while the collection is still opening.
+    private var besideDetail: Bool? {
+        guard let collection else { return true }
+        switch collection.state {
+        case .unopened, .loading: return nil
+        case .noFile: return false
+        case .ready, .unavailable, .creationRecovery, .failed: return true
+        }
+    }
+    #endif
+
     var body: some View {
         Group {
             if let launchScreen {
@@ -66,15 +81,19 @@ struct RootView: View {
                 case .compact:
                     #if os(iOS)
                     CompactRootView(navigation: navigation, features: features, configuration: configuration,
-                        hasDecks: collection?.decks.isEmpty == false)
+                        hasDecks: collection?.decks.isEmpty == false,
+                        besideDetail: besideDetail)
                     #endif
                 case .sidebar:
                     SidebarRootView(navigation: navigation, features: features, configuration: configuration)
                 }
             }
         }
+        .focusedSceneValue(\.nativeCommandContext, collection.map { NativeCommandContext(collection: $0, host: .main, layout: layout) })
+        .background {
+            if let collection { FindSecondKey(context: NativeCommandContext(collection: collection, host: .main, layout: layout)) }
+        }
         #if os(macOS)
-        .focusedSceneValue(\.nativeCommandContext, collection.map { NativeCommandContext(collection: $0, host: .main) })
         // Hide only the presenting shell; sheets and alerts own their AX tree.
         .accessibilityHidden(launchSheet || launchAlert || linkRefusal != nil || hasModalSheet)
         .background(AddNoteWindowGuard(navigation: navigation))
@@ -83,9 +102,13 @@ struct RootView: View {
             if request != nil, collection?.sync.providerState?.selection == .meguri { openSettings() }
         }
         #endif
+        #if os(iOS)
+        .onPreferenceChange(DeckNameBesideListKey.self) { deckNameBesideList = $0 }
+        #endif
         .modifier(PresentationHost(
             navigation: navigation, features: features, configuration: configuration,
-            isActive: !(layout == .compact && navigation.review != nil)
+            isActive: !(layout == .compact && navigation.review != nil),
+            deckNameBesideList: layout == .compact && deckNameBesideList
         ))
         .environment(\.shellLayout, layout)
         .sheet(isPresented: $launchSheet) {
@@ -143,9 +166,6 @@ struct RootView: View {
             }
         }
         .onChange(of: navigation.sheet) { _, sheet in
-            #if os(macOS)
-            if sheet == .fsrsAdmission { openWindow(id: WindowMetrics.mainWindowID) }
-            #endif
             updateReviewObscuration()
             collection?.entry.presentationChanged()
         }
@@ -169,6 +189,7 @@ struct RootView: View {
         }
         .modifier(ReviewLifecycle(collection: collection))
         .modifier(AddNoteRequestFeedback(collection: collection))
+        .modifier(StudyRefusalFeedback(collection: collection))
         .modifier(LaunchEnvironment(configuration: configuration))
     }
 

@@ -1,7 +1,7 @@
 # Decks
 
 Spec: decks/decks
-Requirements: R1465, R322, R1474, R26, R27, R36, R37, R38, R39, R40, R41, R42, R53, R54, R55, R56, R57, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R1473, R1483, R2008
+Requirements: R1465, R322, R1474, R26, R27, R36, R37, R38, R39, R40, R41, R42, R53, R54, R55, R56, R57, R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R1473, R1483, R2008
 Anki: 26.09.3
 Scenarios: conformance/scenarios/decks/
 
@@ -90,7 +90,7 @@ Input: a typed name. The UI disables its confirm button for an empty or blank na
 
 ## D6. Rename a deck (R59, R60, R61, R62)
 
-Input: a deck and a typed full name (the UI pre-fills the current full name, R60; "New Subdeck" pre-fills `<full name>::`, R59, and is a create, D5).
+Input: a deck and a typed full name. Meguri's UI pre-fills no full path: it composes the full name from the form's Name and Parent Deck (D19.1). "New Subdeck" is a create (D5).
 
 1. Convert the new name (D1).
 2. Apply the unique-name rule (D2) against the other decks.
@@ -281,12 +281,14 @@ Focused tests for this Meguri projection:
 - A concurrent rename yields one coherent before-or-after snapshot. Replacement cannot relabel old entries with a new generation: a stale reader request fails, and an already completed old-generation result is rejected at publication.
 - Closed/unavailable and storage-error cases fail without a partial value. A successful read changes no persisted state, undo history or events, and uses no writer, day-maintenance, count or card path.
 
-## D18. Create from Go to Deck (Meguri UI, R27)
+## D18. Create from the deck search (Meguri UI, R27)
 
-- The create row is available when the typed name passes the normal create rules and a completed read for this query, collection generation and sheet finds no matching deck (D1/D2). Compare with the core's existing name functions across all D17 records. This read makes no changes; Swift case conversion is not the name-matching rule. Wait or show the read error rather than treating an unfinished, failed or out-of-date read as no match. Use only recorded deck ids and names, including for Default.
-- Activating the row submits the raw query through the existing collection-owned create path. Check readiness, generation, originating main-host presentation and conflicts, and reserve the operation before yielding. Keep that reservation through the result, without an unreserved dismiss-and-present interval or an empty second name form. Recheck authority before writer dispatch and result publication; repeated activation admits one operation.
+The deck search is the sidebar's search field (Mac, iPad) and the tab layout's Search (iPhone, iPhone Duo, iPad at compact width), and any other list of deck search results (`docs/design/native-interface-contract.md` N20.1). The Go to Deck sheet is retired.
+
+- The create row is available when the typed name passes the normal create rules and a completed read for this query, collection generation and search presentation finds no matching deck (D1/D2). Compare with the core's existing name functions across all D17 records. This read makes no changes; Swift case conversion is not the name-matching rule. Wait or show the read error rather than treating an unfinished, failed or out-of-date read as no match. Use only recorded deck ids and names, including for Default.
+- Activating the row opens D19's New Deck form with the raw query as its Name and Parent Deck None (D19.3). It never opens an empty form, and nothing is created until the form's Create. Create submits D19.1's full name (the raw query itself while Parent Deck is None) through the existing collection-owned create path. Check readiness, generation, originating main-host presentation and conflicts, and reserve the operation at Create before yielding. Keep that reservation through the result. Recheck authority before writer dispatch and result publication; repeated Create admits one operation.
 - Use D5's writer result for the deck id, name and generation. The call created the returned deck if and only if `mutation.summary.changes.decks` has an item whose `id == mutation.id` and `change == .added`. Changes to parent decks do not answer this question. Without that item, the returned deck already existed. When this deck is not in the earlier snapshot, query its kind by the returned id before opening it. Use this result without another created flag, writer operation or read just to determine whether the deck was created.
-- A newly created deck opens its overview in every layout, as New Deck does. An existing result follows R27's existing-deck activation using the layout current at activation, with the existing filtered-deck restriction. Success dismisses only the originating presentation; generation or route replacement prevents stale publication or dismissal of its successor.
+- A newly created deck opens its deck page in every layout, as New Deck does. An existing deck, whether a search result the person activates or the deck D5 returned, opens its deck page in every layout, compact and sidebar alike, using the layout current at activation; it never starts review (N20.5). A filtered deck shows R53's explanation instead (`decks/deck-list` H3). Success dismisses only the originating form; generation or route replacement prevents stale publication or dismissal of its successor.
 - After creation commits, a refresh or navigation failure retains the saved identity and reports that the deck was saved. Retry only refresh/navigation, never creation. Dismissal does not imply that the committed write was rolled back.
 
 Focused tests:
@@ -295,6 +297,79 @@ Focused tests:
 |---|---|
 | D1 normalization and D2 equality, including `Straße`/`STRASSE`; hidden or renamed Default | Exact match suppresses Create using actual core semantics; the check writes nothing and fabricates no identity or name. |
 | Query/generation/presentation changes while the read waits; lookup error | Obsolete or failed results cannot establish absence, dispatch creation or publish into another presentation. |
-| Repeated Return or conflicting work during admission | One admitted existing create writer, raw query preserved, no unreserved route handoff. |
-| A deck is created, or another caller creates a matching name after the read, in each layout; the other caller creates a filtered deck; the result contains added parent decks | Test `.added` for the returned id. A deck created by this call opens its overview; an existing deck follows R27 with the layout then in use and the filtered-deck refusal. Read the existing deck's kind if it was missing from the snapshot. Added parents do not count as creation of the returned deck. |
-| Creation commits, then refresh/navigation fails or layout changes before retry | Retry targets the saved identity without another create; the new deck opens its overview in either layout. Stale ownership cannot navigate or dismiss another presentation. |
+| Activating the create row | The New Deck form opens with the raw query as its Name and Parent Deck None; no create runs before Create. |
+| Repeated Create or conflicting work during admission | One admitted existing create writer, the composed name preserved, no unreserved route handoff. |
+| A deck is created, or another caller creates a matching name after the read, in each layout; the other caller creates a filtered deck; the result contains added parent decks | Test `.added` for the returned id. A deck created by this call opens its deck page; an existing deck opens its deck page in either layout, never review, and a filtered one shows R53's explanation. Read the existing deck's kind if it was missing from the snapshot. Added parents do not count as creation of the returned deck. |
+| A deck result is activated in the compact and in the sidebar layout | Its deck page opens in both; no review starts. |
+| Creation commits, then refresh/navigation fails or layout changes before retry | Retry targets the saved identity without another create; the new deck opens its deck page in either layout. Stale ownership cannot navigate or dismiss another presentation. |
+
+## D19. Name and Parent Deck form (Meguri UI, R55, R57, R58, R59, R60)
+
+The form of New Deck…, New Subdeck… and Rename… (`docs/design/native-interface-contract.md` N20.3): a Name text field and a Parent Deck menu. This section gives the full name it sends and the facts it shows; the writes are D5 and D6. It replaces `decks/deck-list` H7's Rename and New Subdeck pre-fills and its untouched-pre-fill rule. H7's blank rule, existing-name rule and final-name report stay.
+
+### D19.1 The full name
+
+- Parent Deck None: the full name is the Name text.
+- Parent Deck a deck P: P's full human name (D1: the human form of its stored name, the spelling D17 gives), then `::`, then the Name text.
+- The UI changes nothing in the Name text: no trimming, normalization or escaping. The full name is a typed human name like any other, so D5 or D6 converts it with D1: a `::` in the Name still nests, and an empty component becomes `blank`.
+
+| Parent Deck | Name | Full name sent | Stored (D1) |
+|---|---|---|---|
+| None | `Español` | `Español` | `Español` |
+| `Languages::日本語` | `読解` | `Languages::日本語::読解` | `Languages␟日本語␟読解` |
+| `Languages` | `日本語::文法` | `Languages::日本語::文法` | `Languages␟日本語␟文法` (`Languages::日本語` created when missing, D3) |
+| `Languages` | ` 読解 ` | `Languages:: 読解 ` | `Languages␟読解` |
+| None | `::x` | `::x` | `blank␟x` |
+
+### D19.2 Parent Deck candidates
+
+- First None, the top level. Then the nodes of D12's tree in preorder (a deck before its children, siblings in D12's order), each with its depth (0 for a top-level deck). Collapse flags play no part: a collapsed deck's descendants are listed.
+- Left out: filtered decks, since nothing can be created or renamed under one (D3, D9); every deck D12 leaves out (a deck whose parent is missing, and the hidden empty default deck); for Rename, the deck itself and its descendants (D3), which would put it inside its own subtree.
+- Exception: New Subdeck… of the default deck while D12 hides it (top-level, empty, no children) lists that deck as one extra entry after None, at depth 0, so D19.3's default holds. It is never listed otherwise while hidden.
+- The form reads the tree once, when it opens. Its candidates, the chosen deck's full name and D19.6's count come from that read; a later change in the collection does not update an open form.
+
+### D19.3 Defaults
+
+| Entry | Name | Parent Deck |
+|---|---|---|
+| New Deck… (Add menu, File menu) | empty | None |
+| New Subdeck… of deck D | empty | D |
+| Rename… of deck D | the human form of D's stored last component | D's parent; None for a top-level deck |
+| The deck search's create row (D18) | the raw query | None |
+
+The Name field opens with focus and the cursor at the end.
+
+### D19.4 When the confirm button is enabled
+
+- Disabled while the Name text is blank by H7's rule (empty, or only Unicode White_Space; `::` is not blank, R58).
+- Rename: also disabled while the full name (D19.1) equals the deck's current full human name, code point for code point. This is a check of the form's values in the UI, with no core call. It covers the untouched form and a Parent Deck changed and changed back. Any other difference enables Rename and D6 decides: when D1's conversion and the unique-name rule give back the stored name byte for byte (a space added at the end of the Name, for example), D6 step 3 writes nothing and records no step, and the form closes as after a rename.
+- Disabled while the form's operation runs (D18's reservation).
+
+### D19.5 What the confirm button does
+
+- New Deck…, New Subdeck… and the create row run D5 with the full name. A deck that already exists is opened as H7 says; nothing is written.
+- When D5 or D6 returns, after a write or with a deck that already existed (H7), the form shows H7's final-name report ("Saved As", N20.3) when the stored name D5 or D6 returns differs from the human form of D1's conversion of the full name sent; otherwise it closes. Either way the returned deck's page then opens in every layout.
+- Rename… runs D6 with the deck and the full name. A different Parent Deck is a rename like any other: the deck and its whole subtree take the new name (D6 step 6) in one "Rename Deck" step. It is not D7's move: D1's conversion, case adoption and the creation of missing ancestors apply.
+- A refusal (`filtered_parent`, `too_deep`, `under_descendant`, `NotFound`) shows in the form, which stays with the draft. With D19.2's candidates the first three can come only from a `::` typed in the Name; `NotFound` comes from a change made elsewhere.
+
+### D19.6 Footer
+
+- Rename of a deck with descendants: the number of decks that move with it, which is all its descendants at every depth, not only its children. It is counted as the nodes under the deck in D12's tree; a descendant that D12 leaves out for a missing parent moves too but is not counted. Text (N20.3): 1 gives "Its subdeck moves with it."; any other number N gives "Its N subdecks move with it.".
+- Otherwise, with a Parent Deck: "Inside <path>.", where <path> is that deck's full human name with its components joined by " › ".
+- With None, and no subdeck footer: no footer.
+- The footer follows the form's values as they change.
+
+### D19.7 Focused tests
+
+Swift unit tests of the form's model; no core write is needed except where a row says so.
+
+| Case | Required result |
+|---|---|
+| D19.1's table; Parent Deck None | The full names in the table; the Name text is sent unchanged, with no trimming or normalization in the UI. |
+| Candidates of a tree with collapsed parents, a filtered deck, a hidden empty Default, a Default with one card, a deck with a missing parent | Preorder with depths; collapsed descendants listed; the filtered deck, the hidden Default and the missing-parent deck left out; the Default with a card listed. |
+| New Subdeck… of the hidden empty default deck | None, then that deck, which is preselected; it is absent from New Deck…'s candidates. |
+| Rename of `a::b` with `a::b::c`, `a::b::c::d` and `a::bc` | `a::b`, `a::b::c` and `a::b::c::d` left out; `a` and `a::bc` listed. |
+| Each entry point of D19.3; Rename of a top-level deck | The table's Name and Parent Deck; None for the top-level deck. |
+| Enablement: Name of spaces, of U+3000, `::`; Rename untouched; Parent Deck changed and changed back; a space added at the end of the Name | Disabled, disabled, enabled; disabled; disabled; enabled, and with the core, D6 writes nothing and records no step. |
+| Rename of `日本語` (2 subdecks) from `Languages` to None | Sends `日本語`; with the core, the subtree moves in one "Rename Deck" step. |
+| Footer: a deck with one child that has one child; a deck with one child; a parent `Languages::日本語`; None | "Its 2 subdecks move with it."; "Its subdeck moves with it."; "Inside Languages › 日本語."; no footer. |

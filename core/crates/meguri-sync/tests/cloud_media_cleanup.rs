@@ -172,6 +172,100 @@ fn media_policy_lookup_cost_real_inbox_overrides_local_image_before_download() {
     pair.close();
 }
 
+/// P25.1: a device that had media off holds names whose files it never
+/// fetched, and may have lost files it once held. Its first scan and sync with
+/// media on record no removal, send none, and fetch the files.
+#[test]
+fn media_on_after_off_scans_absent_files_as_downloads_never_as_deletions() {
+    let mut pair = Pair::adopted();
+    pair.sender.driver().put_media("held.jpg", LOCAL).unwrap();
+    sync(&mut pair);
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    assert_eq!(pair.receiver.driver().media_files().unwrap()["held.jpg"], LOCAL);
+
+    // While media was off the name's record still arrived; its blob was never read.
+    pair.sender.driver().put_media("never.jpg", REMOTE).unwrap();
+    sync(&mut pair);
+    let sent = media_names(&pair.sender);
+    assert_eq!(sent.len(), 2);
+    let state = pair.service.inspect(&scope()).unwrap().unwrap();
+    let zone = pair.sender.collection_zone().unwrap();
+    let record = state.zones[&zone].records[&sent["never.jpg"].name].clone();
+    let blobs: Vec<String> = state.zones[MEDIA]
+        .records
+        .iter()
+        .filter(|(_, r)| r.record_type == "MGBlob")
+        .map(|(name, _)| name.clone())
+        .collect();
+    assert_eq!(blobs.len(), 2);
+    pair.receiver.driver().deliver_collection_records(&[record]).unwrap();
+    // A file the ledger knows left the folder outside Meguri.
+    std::fs::remove_file(pair.receiver_dir.join("collection.media").join("held.jpg")).unwrap();
+    assert!(pair.receiver.driver().media_files().unwrap().is_empty());
+    let before = cursor(&pair);
+
+    // The updated build's first launch and first scan.
+    pair.receiver.close_clean().unwrap();
+    pair.receiver = online(&pair.receiver_dir, false);
+    pair.receiver.driver().reconcile_binding().unwrap();
+    let scanned = media_names(&pair.receiver);
+    assert!(scanned.values().all(|e| e.tombstone_at.is_none()), "{scanned:?}");
+    assert!(scanned["held.jpg"].mark.is_none(), "a lost file is no local change");
+
+    pair.receiver.sync_now_and_drain(&mut pair.service, STEPS).unwrap();
+    let files = pair.receiver.driver().media_files().unwrap();
+    assert_eq!(files["held.jpg"], LOCAL);
+    assert_eq!(files["never.jpg"], REMOTE);
+    let received = media_names(&pair.receiver);
+    assert_eq!(received.len(), 2);
+    assert!(
+        received
+            .values()
+            .all(|e| e.tombstone_at.is_none() && !ack_tombstone(e) && e.local_rev == e.acked_rev)
+    );
+    assert_eq!(
+        pair.receiver.driver().policy_media_facts().unwrap(),
+        policy_media_expected((0, 0), (0, 0), 0, 0)
+    );
+
+    // Nothing reached the server: no record was deleted and no name was saved again.
+    let state = pair.service.inspect(&scope()).unwrap().unwrap();
+    assert!(blobs.iter().all(|blob| state.zones[MEDIA].records.contains_key(blob)));
+    for request in pair.service.request_log().unwrap() {
+        let touched = request
+            .records
+            .iter()
+            .any(|r| blobs.contains(&r.name) || sent.values().any(|e| e.name == r.name));
+        assert!(
+            request.request_id <= before || request.kind != RequestKind::Modify || !touched,
+            "request {} changed a media record",
+            request.request_id
+        );
+    }
+    sync(&mut pair);
+    let files = pair.sender.driver().media_files().unwrap();
+    assert_eq!(files["held.jpg"], LOCAL);
+    assert_eq!(files["never.jpg"], REMOTE);
+    assert!(
+        media_names(&pair.sender)
+            .values()
+            .all(|e| e.tombstone_at.is_none() && !ack_tombstone(e))
+    );
+    pair.close();
+}
+
+fn media_names(rig: &PublicationRig) -> std::collections::BTreeMap<String, EntityFacts> {
+    rig.facts()
+        .unwrap()
+        .entities
+        .into_values()
+        .filter_map(|e| match &e.payload {
+            Payload::MediaName(p) => Some((String::from_utf8(p.name.clone()).unwrap(), e)),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn media_policy_lookup_cost_projection_rejects_damaged_local_base_ack_and_flight_bodies() {
     let mut pair = Pair::published();

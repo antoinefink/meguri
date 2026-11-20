@@ -30,6 +30,9 @@ extension TestHooks {
             registry.register("collection/import/overflow") { _ in .sheet { CollectionEntryPreview.preview(.overflow) } }
             registry.register("collection/import/error") { _ in .sheet { CollectionEntryPreview.preview(.error) } }
             registry.register("collection/import/loading") { _ in .sheet { CollectionEntryPreview.preview(.loading) } }
+            // N14.10: the list an unfolded iPhone shows beside the detail, which no simulator here can be opened to.
+            registry.register("home/deck-list/beside-deck") { _ in .screen { HomeDeckListPreview.besideDetail(deck: 2) } }
+            registry.register("home/deck-list/beside-today") { _ in .screen { HomeDeckListPreview.besideDetail(deck: nil) } }
             registry.register("home/deck-list/empty") { _ in .screen { HomeDeckListPreview.preview(.empty) } }
             registry.register("home/deck-list/typical") { _ in .screen { HomeDeckListPreview.preview(.typical) } }
         }

@@ -25,9 +25,7 @@ public struct HomeView: View {
             if showsRootDeckList, showsToday {
                 TodayView(collection: collection)
             } else if showsRootDeckList, let query = activeSearch {
-                HomeDeckSearchResults(collection: collection, query: query) { id in
-                    collection.navigation.select(.deck(DeckID(id)))
-                }
+                HomeDeckSearchResults(collection: collection, search: DeckSearchFocus.search(collection.navigation), query: query)
             } else if showsRootDeckList {
                 HomeDeckTree(nodes: collection.decks, navigation: collection.navigation, collection: collection,
                     previousAnswerCount: showsPreviousSession ? collection.previousRecord?.answers.count : nil, error: collection.error,
@@ -35,9 +33,14 @@ public struct HomeView: View {
                     isExpansionPending: { collection.isStudyExpansionPending(deckID: $0) },
                     setExpanded: { id, expanded, descendants in
                         collection.setStudyExpanded(deckID: id, expanded: expanded, includingDescendants: descendants)
-                    }) { id in
+                    }, today: todayRow,
+                    // N14.11: beside Today the list leaves the collection's activity to Today.
+                    activity: todayRow == nil ? collection.activity : nil,
+                    activityActive: collection.heatmapRefreshes) { id in
                     collection.navigation.select(.deck(DeckID(id)))
                 }
+            } else if collection.state == .noFile {
+                welcome
             } else {
                 if let deck = deckPageDetail {
                     // Keeps the screen's and the page's identifiers on separate elements.
@@ -58,7 +61,7 @@ public struct HomeView: View {
         // N14.4: the Mac names the page in the toolbar, with what is waiting under it.
         .navigationSubtitle(pageSubtitle)
         #else
-        .modifier(HomeDeckSearch(enabled: showsDeckSearch, search: search))
+        .modifier(HomeDeckSearch(enabled: showsDeckSearch, collection: collection, search: search))
         // The deck page carries its own title in the content: no empty large-title band above it.
         // The tab layout's deck list shares its bar's row with the title (N14.8).
         .toolbarTitleDisplayMode(deckID != nil ? .inline : shellLayout == .compact ? .inlineLarge : .automatic)
@@ -67,7 +70,7 @@ public struct HomeView: View {
             #if !os(macOS)
             ToolbarItem(placement: .primaryAction) {
                 if showsDeckSearch {
-                    // N14.2: the list's Go to Deck; the system field appears when asked for.
+                    // N14.2: the list's deck search; the system field appears when asked for.
                     Button { search.presented = true } label: {
                         Label { Text("Search", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
                     }
@@ -76,49 +79,13 @@ public struct HomeView: View {
             }
             #endif
             ToolbarItem(placement: .primaryAction) {
+                // N20.1: one Add menu beside sync; the tab layout's deck page keeps Add Note (N14.3).
                 #if os(macOS)
-                addNoteButton
+                addMenu
                 #else
-                if deckID == nil, shellLayout == .compact { addMenu } else { addNoteButton }
+                if deckID != nil, shellLayout == .compact { addNoteButton } else { addMenu }
                 #endif
             }
-            #if os(macOS)
-            ToolbarItemGroup(placement: .primaryAction) {
-                if collection.review == nil, collection.navigation.review == nil {
-                    Button { collection.presentGoToDeck() } label: {
-                        Label { Text("Go to Deck…", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
-                    }
-                    .help(Text("Go to Deck…", bundle: .module))
-                    .disabled(!collection.canPresentGoToDeck())
-                    .accessibilityIdentifier("home.collection.goToDeck")
-                }
-                Button { collection.deckActions.present(.create) } label: {
-                    Label { Text("Create Deck", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
-                }
-                .help(Text("Create Deck", bundle: .module))
-                .disabled(!collection.deckActions.canPresent(.create))
-                .accessibilityIdentifier("home.collection.createDeck")
-            }
-            #else
-            ToolbarItem(placement: .primaryAction) {
-                if collection.review == nil, collection.navigation.review == nil, showsCollectionActions {
-                    Button { collection.presentGoToDeck() } label: {
-                        Label { Text("Go to Deck…", bundle: .module) } icon: { Image(systemName: "magnifyingglass") }
-                    }
-                    .disabled(!collection.canPresentGoToDeck())
-                    .accessibilityIdentifier("home.collection.goToDeck")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                if showsCollectionActions {
-                    Button { collection.deckActions.present(.create) } label: {
-                        Label { Text("Create Deck", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
-                    }
-                    .disabled(!collection.deckActions.canPresent(.create))
-                    .accessibilityIdentifier("home.collection.createDeck")
-                }
-            }
-            #endif
         }
         #if os(macOS)
         .focusable(homeKeyboardActive)
@@ -133,22 +100,22 @@ public struct HomeView: View {
             homeFocused = active
         }
         #endif
+        // N20.1, H9.2: "/" from the deck page puts the focus in the deck search
+        // (⇧⌘O is Find…'s key equivalent, the shell's).
         .onKeyPress(keys: [KeyEquivalent("/")], phases: .down) { press in
-            guard press.modifiers.isEmpty, collection.navigation.section == .home,
-                  collection.canPresentGoToDeck() else { return .ignored }
+            guard press.modifiers.isEmpty, DeckSearchFocus.available(collection, layout: searchLayout) else { return .ignored }
             #if os(macOS)
             // Native editing, sheet and menu tracking own their input, even if
             // an unhandled event bubbles to Home's key path.
-            guard homeKeyboardActive, NSApp.isActive, let window = NSApp.keyWindow, window.attachedSheet == nil,
-                  !(window.firstResponder is NSTextInputClient),
-                  RunLoop.current.currentMode != .eventTracking,
-                  let event = NSApp.currentEvent, event.type == .keyDown, !event.isARepeat else { return .ignored }
+            guard homeKeyboardActive, DeckSearchFocus.slashAdmitted() else { return .ignored }
             #endif
-            collection.presentGoToDeck()
+            DeckSearchFocus.request(collection, layout: searchLayout)
             return .handled
         }
         .accessibilityIdentifier("home.collection.screen")
     }
+    #if !os(macOS)
+    /// The tab layout's deck page: Add Note only (N14.3).
     @ViewBuilder private var addNoteButton: some View {
         if deckID.flatMap({ collection.deck($0) })?.filtered != true {
             Button { collection.navigation.present(.add(deck: deckID.map { DeckID($0) })) } label: {
@@ -159,33 +126,50 @@ public struct HomeView: View {
             .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
         }
     }
-    #if !os(macOS)
-    /// N14.2: the tab layout's deck list has one add button; Go to Deck is its search field.
+    #endif
+    /// N14.2, N20.1: one Add menu. On a deck page New Note presets that deck.
     private var addMenu: some View {
-        Menu {
-            Button { collection.navigation.present(.add(deck: nil)) } label: {
-                Label { Text("New Note", bundle: .module) } icon: { Image(systemName: "square.and.pencil") }
+        let preset = deckID.flatMap { collection.deck($0)?.filtered == true ? nil : $0 }
+        return Menu {
+            Group {
+                Button { collection.navigation.present(.add(deck: preset.map { DeckID($0) })) } label: {
+                    Label { Text("New Note", bundle: .module) } icon: { Image(systemName: "square.and.pencil") }
+                }
+                .disabled(!collection.addNotePresentation.canPresent(presetDeck: preset))
+                .accessibilityIdentifier(deckID == nil ? "home.collection.addNote" : "home.deck.addNote")
+                Button { collection.deckActions.present(.create) } label: {
+                    Label { Text("New Deck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
+                }
+                .disabled(!collection.deckActions.canPresent(.create))
+                .accessibilityIdentifier("home.collection.createDeck")
             }
-            .disabled(!collection.addNotePresentation.canPresent(presetDeck: nil))
-            .accessibilityIdentifier("home.collection.addNote")
-            Button { collection.deckActions.present(.create) } label: {
-                Label { Text("New Deck…", bundle: .module) } icon: { Image(systemName: "folder.badge.plus") }
-            }
-            .disabled(!collection.deckActions.canPresent(.create))
-            .accessibilityIdentifier("home.collection.createDeck")
+            // N20.1: each item with its system symbol, on the Mac too.
+            .labelStyle(.titleAndIcon)
         } label: {
             Label { Text("Add", bundle: .module) } icon: { Image(systemName: "plus") }
         }
+        .help(Text("Add", bundle: .module))
         .accessibilityIdentifier("home.collection.add")
     }
-    /// Go to Deck and Create Deck are toolbar buttons only in the sidebar layout (N14.2, N14.3).
-    private var showsCollectionActions: Bool { shellLayout == .sidebar }
+    private var searchLayout: ShellLayout {
+        #if os(macOS)
+        .sidebar
+        #else
+        shellLayout
+        #endif
+    }
+    #if !os(macOS)
     private var showsDeckSearch: Bool { deckID == nil && shellLayout == .compact && showsRootDeckList }
     /// Held by the navigation, not the view: a fold, an unfold or a layout switch keeps the query.
-    private var search: DeckListSearch {
-        collection.navigation.featureState(DeckListSearch.self) { DeckListSearch() }
-    }
+    private var search: DeckListSearch { DeckSearchFocus.search(collection.navigation) }
     private var activeSearch: String? { showsDeckSearch ? search.query : nil }
+    /// N14.10: beside Today on an unfolded iPhone held wide, the list starts with the way back to it.
+    private var todayRow: HomeTodayRow? {
+        guard todayBesideDeckList else { return nil }
+        let navigation = collection.navigation
+        return HomeTodayRow(waiting: TodayDecks(nodes: collection.decks).totals.waiting,
+            selection: DeckListSelection(homeDeckPage: navigation.homeDeckPage)) { navigation.openHome() }
+    }
     /// Today beside the list (N14.1) already shows the previous session.
     private var showsPreviousSession: Bool {
         !(todayBesideDeckList && collection.navigation.homeDeckPage == nil)
@@ -194,12 +178,19 @@ public struct HomeView: View {
     private var showsToday: Bool { shellLayout == .sidebar }
     #else
     private var activeSearch: String? { nil }
+    private var todayRow: HomeTodayRow? { nil }
     private var showsToday: Bool { true }
     private var showsPreviousSession: Bool { true }
     #endif
     private var pageTitle: String {
         // The sidebar's first row says Today in every collection state, so its page does too.
-        guard let deckID else { return HomeHeading.rootTitle(showsToday: showsToday) }
+        guard let deckID else {
+            #if !os(macOS)
+            // N18.3: the welcome names itself in the content; the tab layout's bar repeats nothing over it.
+            if collection.state == .noFile, shellLayout == .compact { return "" }
+            #endif
+            return HomeHeading.rootTitle(showsToday: showsToday)
+        }
         #if os(macOS)
         return HomeHeading.deckTitle(deckPageDetail?.name ?? collection.deck(deckID)?.name ?? "")
         #else
@@ -274,25 +265,7 @@ public struct HomeView: View {
     @ViewBuilder private var content: some View {
         switch collection.state {
         case .unopened, .loading: LoadingStateView(Text("Opening collection…", bundle: .module))
-        case .noFile:
-            HomeCollectionEmptyContent(canPresent: collection.entry.canPresent,
-                importAction: { collection.entry.present() },
-                connectTitleKey: collection.sync.status?.controls.resumeBindingOffered == true
-                    ? "sync.action.resume" : "sync.connect.action",
-                connectUnavailableReason: collection.cloudPreviewEntryUnavailableReason(.connect),
-                canPresentConnect: collection.navigation.sheet == nil || collection.navigation.sheet == .accountSync,
-                connectAction: { collection.presentCloudSync(.connect) },
-                canPresentAccountSync: collection.navigation.sheet == nil,
-                accountSyncAction: {
-                    guard collection.navigation.sheet == nil else { return }
-                    #if os(macOS)
-                    collection.syncPresentation.settingsRequest = UUID()
-                    openSettings()
-                    #else
-                    collection.navigation.present(.accountSync)
-                    #endif
-                }, canStartEmpty: collection.canStartEmpty,
-                startEmptyAction: { Task { await collection.startEmpty() } })
+        case .noFile: EmptyView() // The welcome owns the page (N18.3).
         case .unavailable:
             LoadingStateView(Text("Collection is busy…", bundle: .module))
         case .creationRecovery:
@@ -310,6 +283,24 @@ public struct HomeView: View {
                     description: Text("This collection has no decks to study.", bundle: .module))
             }
         }
+    }
+
+    /// N18.3: one row for sync, the Account & Sync entry; then the import and the empty collection.
+    private var welcome: some View {
+        HomeWelcome(
+            sync: .init(enabled: collection.navigation.sheet == nil) {
+                guard collection.navigation.sheet == nil else { return }
+                #if os(macOS)
+                collection.syncPresentation.settingsRequest = UUID()
+                openSettings()
+                #else
+                collection.navigation.present(.accountSync)
+                #endif
+            },
+            importFile: .init(enabled: collection.entry.canPresent) { collection.entry.present() },
+            startEmpty: .init(enabled: collection.canStartEmpty) { Task { await collection.startEmpty() } },
+            error: collection.error,
+            previousAnswerCount: collection.previousRecord?.answers.count)
     }
 
     private var deckPageDetail: ReviewCollection.DeckPageDetail? {
@@ -347,6 +338,9 @@ public struct HomeView: View {
                         .accessibilityIdentifier("home.deck.subdecksHeader")
                 }
             }
+            // N14.11: this deck's and its subdecks' activity, after the subdecks.
+            ActivityHeatmapSection(store: collection.activity, scope: .deck(deck.id),
+                                   widths: collection.navigation.activityRowWidths, page: .deck)
             if let error = collection.error {
                 Text(verbatim: error).foregroundStyle(.token(.statusError))
                     .accessibilityIdentifier("home.collection.error")
@@ -365,6 +359,8 @@ public struct HomeView: View {
         // N14.3: system grouped sections on the grouped background.
         .listStyle(.insetGrouped)
         #endif
+        .activityLoading(collection.activity, scope: .deck(deck.id), active: collection.heatmapRefreshes,
+                         widths: collection.navigation.activityRowWidths, page: .deck)
     }
     @ViewBuilder private func deckAction(_ deck: ReviewCollection.DeckPageDetail, empty: Bool) -> some View {
         if empty {
@@ -485,118 +481,26 @@ public struct HomeView: View {
 /// The deck list's search field (N14.2), only where the list is the root.
 private struct HomeDeckSearch: ViewModifier {
     let enabled: Bool
+    let collection: ReviewCollection
     @Bindable var search: DeckListSearch
     func body(content: Content) -> some View {
         if enabled {
             // Out of the way until the toolbar's search button presents it, so the large title stays.
             content.searchable(text: $search.text, isPresented: $search.presented, placement: .navigationBarDrawer(displayMode: .automatic),
                                prompt: Text("Search or Create a Deck", bundle: .module))
+                // N20.5: Return opens the first row, deck or create row, as in the sidebar layouts.
+                .onSubmit(of: .search) {
+                    guard let query = search.query,
+                          let target = DeckSearchRows.results(collection, search, query: query)?
+                              .targets(offeringCreate: search.offersCreate(generation: collection.generation)).first else { return }
+                    DeckSearchActivation.activate(target, collection: collection, search: search, layout: .compact)
+                }
         } else {
             content
         }
     }
 }
 #endif
-
-/// Go to Deck's matches in place of the tree (N14.2): full names, then the offer to create the typed deck.
-private struct HomeDeckSearchResults: View {
-    let collection: ReviewCollection
-    let query: String
-    let select: (Int64) -> Void
-
-    var body: some View {
-        let search = DeckSearch(nodes: collection.decks, query: query)
-        List {
-            ForEach(search.matches) { match in
-                Button { select(match.id) } label: {
-                    VStack(alignment: .leading) {
-                        Text(verbatim: match.name)
-                        if !match.ancestors.isEmpty {
-                            // As Today: the parents as text under the name.
-                            Text(verbatim: match.ancestors.joined(separator: " › "))
-                                .font(.caption)
-                                .quietText()
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(verbatim: match.fullName))
-                .accessibilityIdentifier("home.deckSearch.deck.\(match.id)")
-            }
-            if search.offersCreate {
-                // The name sheet checks and saves the name, as Create Deck does.
-                Button {
-                    collection.deckActions.present(.create)
-                    collection.deckActions.name = query
-                } label: {
-                    Label { Text("Create deck named \(query)", bundle: .module) } icon: { Image(systemName: "plus") }
-                }
-                .disabled(!collection.deckActions.canPresent(.create))
-                .accessibilityIdentifier("home.deckSearch.create")
-            }
-        }
-        .accessibilityIdentifier("home.deckSearch.list")
-    }
-}
-
-struct HomeCollectionEmptyContent: View {
-    var canPresent: Bool = true
-    var importAction: (() -> Void)? = nil
-    var connectTitleKey: String = "sync.connect.action"
-    var connectUnavailableReason: String? = nil
-    var canPresentConnect: Bool = true
-    var connectAction: () -> Void = {}
-    var canPresentAccountSync: Bool = true
-    var accountSyncAction: (() -> Void)? = nil
-    var canStartEmpty: Bool = false
-    var startEmptyAction: (() -> Void)? = nil
-
-    var body: some View {
-        EmptyStateView(Text("No Collection", bundle: .module), systemImage: "rectangle.stack",
-            description: Text("Import, sync or start an empty collection.", bundle: .module)) {
-            Button(SyncText.value(connectTitleKey), action: connectAction)
-                .disabled(connectUnavailableReason != nil || !canPresentConnect)
-                .help(SyncText.value(connectUnavailableReason ?? connectTitleKey))
-                .accessibilityIdentifier("home.collection.connect")
-            if let connectUnavailableReason {
-                Text(SyncText.value(connectUnavailableReason)).foregroundStyle(.secondary)
-            }
-            if let importAction {
-                HomeCollectionImportButton(canPresent: canPresent, action: importAction)
-            }
-            if let accountSyncAction {
-                Button(SyncText.value("sync.settings.section"), action: accountSyncAction)
-                    .disabled(!canPresentAccountSync)
-                    .accessibilityIdentifier("home.collection.accountSync")
-            }
-            if let startEmptyAction {
-                Button(action: startEmptyAction) { Text("Start Empty", bundle: .module) }
-                    .disabled(!canStartEmpty)
-                    .accessibilityIdentifier("home.collection.startEmpty")
-            }
-        }
-    }
-}
-
-/// Styled by EmptyStateView's state actions, like the Connect button beside it.
-struct HomeCollectionImportButton: View {
-    let canPresent: Bool
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            Text("Import Collection")
-        }
-        #if os(macOS)
-        // As ErrorStateView's retry: the Mac target audit reads this frame.
-        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-        .contentShape(Rectangle())
-        #endif
-        .disabled(!canPresent)
-        .accessibilityIdentifier("home.collection.import")
-    }
-}
 
 /// Owns the root's native scroll container; never embed this list in a ScrollView.
 public struct HomeDeckTree: View {
@@ -609,6 +513,10 @@ public struct HomeDeckTree: View {
     private let isExpanded: ((Int64) -> Bool)?
     private let isExpansionPending: ((Int64) -> Bool)?
     private let setExpanded: ((Int64, Bool, Bool) -> Void)?
+    private let today: HomeTodayRow?
+    /// N14.11: the collection's activity after the deck rows; nil beside Today, which shows it.
+    private let activity: ActivityHeatmapStore?
+    private let activityActive: Bool
     @State private var rowFrames: [Int64: CGRect] = [:]
     @State private var restoring: Int64?
     @State private var tracking = false
@@ -618,21 +526,31 @@ public struct HomeDeckTree: View {
                 isExpanded: ((Int64) -> Bool)? = nil,
                 isExpansionPending: ((Int64) -> Bool)? = nil,
                 setExpanded: ((Int64, Bool, Bool) -> Void)? = nil,
+                today: HomeTodayRow? = nil,
+                activity: ActivityHeatmapStore? = nil, activityActive: Bool = true,
                 select: @escaping (Int64) -> Void) {
         self.nodes = nodes; self.navigation = navigation; self.collection = collection
         self.previousAnswerCount = previousAnswerCount; self.error = error; self.select = select
         self.isExpanded = isExpanded; self.setExpanded = setExpanded
         self.isExpansionPending = isExpansionPending
+        self.today = today
+        self.activity = activity; self.activityActive = activityActive
     }
 
     public var body: some View {
         GeometryReader { viewport in
             ScrollViewReader { proxy in
                 List {
-                    ForEach(nodes, id: \.id) { node in
-                        HomeDeckBranch(node: node, collection: collection, ancestors: [], depth: 0, select: select,
-                            isExpanded: isExpanded, isExpansionPending: isExpansionPending,
-                            setExpanded: setExpanded, frameChanged: recordFrame)
+                    if let today {
+                        // N14.10: Today in its own group, then the decks in theirs.
+                        Section { HomeTodayRowView(row: today).id(InfoAnchor.today) }
+                        Section { branches }
+                    } else {
+                        branches
+                    }
+                    if let activity, let navigation {
+                        ActivityHeatmapSection(store: activity, scope: .collection, widths: navigation.activityRowWidths,
+                                               page: .deckList)
                     }
                     if let error {
                         Section {
@@ -655,6 +573,8 @@ public struct HomeDeckTree: View {
                     }
                 }
                 .coordinateSpace(name: "home.deck.list")
+                .activityLoading(activity, scope: .collection, active: activityActive,
+                                 widths: navigation?.activityRowWidths, page: .deckList)
                 // List does not use the ScrollView target-layout modifier.
                 // Track actual row geometry, not lazy row creation, so cached
                 // off-screen rows cannot overwrite the saved navigation anchor.
@@ -673,7 +593,12 @@ public struct HomeDeckTree: View {
                     tracking = false
                     await Task.yield()
                     let saved = navigation?.scrollPosition(for: .section(.home))
-                    if let id = saved?.viewID as? Int64, contains(id, in: nodes) {
+                    if today != nil, let id = saved?.viewID as? Int64, id == nodes.first?.id {
+                        // Saved at the first deck, the list was at its top: the Today row is part of it.
+                        restoring = nil
+                        scrollToTop(proxy)
+                        tracking = true
+                    } else if let id = saved?.viewID as? Int64, contains(id, in: nodes) {
                         restoring = id
                         proxy.scrollTo(id, anchor: .top)
                         if let frame = rowFrames[id], frame.maxY > 0, frame.minY < viewport.size.height {
@@ -698,7 +623,15 @@ public struct HomeDeckTree: View {
         }
     }
 
-    private enum InfoAnchor: Hashable { case previousSession, error }
+    private var branches: some View {
+        ForEach(nodes, id: \.id) { node in
+            HomeDeckBranch(node: node, collection: collection, ancestors: [], depth: 0, select: select,
+                isExpanded: isExpanded, isExpansionPending: isExpansionPending,
+                setExpanded: setExpanded, selection: today?.selection, frameChanged: recordFrame)
+        }
+    }
+
+    private enum InfoAnchor: Hashable { case today, previousSession, error }
     private func recordFrame(_ id: Int64, _ frame: CGRect?) { rowFrames[id] = frame }
     private func contains(_ id: Int64, in nodes: [CountedDeckNode]) -> Bool {
         nodes.contains { node in
@@ -706,7 +639,10 @@ public struct HomeDeckTree: View {
         }
     }
     private func scrollToTop(_ proxy: ScrollViewProxy) {
-        if let first = nodes.first {
+        if today != nil {
+            // The Today row is the list's first: the top is above the first deck.
+            proxy.scrollTo(InfoAnchor.today, anchor: .top)
+        } else if let first = nodes.first {
             proxy.scrollTo(first.id, anchor: .top)
         } else if error != nil {
             proxy.scrollTo(InfoAnchor.error, anchor: .top)
@@ -725,7 +661,10 @@ private struct HomeDeckBranch: View {
     let isExpanded: ((Int64) -> Bool)?
     let isExpansionPending: ((Int64) -> Bool)?
     let setExpanded: ((Int64, Bool, Bool) -> Void)?
+    /// What shows beside this list (N14.10); nil where the list marks no row.
+    var selection: DeckListSelection? = nil
     let frameChanged: (Int64, CGRect?) -> Void
+    private var selected: Bool { selection?.marks(node, expanded: expanded.wrappedValue) == true }
     #if os(macOS)
     @Environment(\.locale) private var locale
     #else
@@ -735,6 +674,8 @@ private struct HomeDeckBranch: View {
     private var path: String {
         node.name.contains("::") ? node.name : (ancestors + [node.name]).joined(separator: "::")
     }
+    /// N20.3: shown and spoken paths join their components with " › ".
+    private var spokenPath: String { path.components(separatedBy: "::").joined(separator: " › ") }
 
     private var expanded: Binding<Bool> {
         Binding(get: { isExpanded?(node.id) ?? !node.studyCollapsed },
@@ -766,6 +707,7 @@ private struct HomeDeckBranch: View {
                 row
             }
             .padding(.leading, CGFloat(depth) * Spacing.medium)
+            .homeRowSelection(selected)
             if expanded.wrappedValue {
                 ForEach(node.children, id: \.id) { child in
                     childBranch(child)
@@ -779,7 +721,7 @@ private struct HomeDeckBranch: View {
     private func childBranch(_ child: CountedDeckNode) -> some View {
         AnyView(HomeDeckBranch(node: child, collection: collection, ancestors: path.components(separatedBy: "::"), depth: depth + 1,
             select: select, isExpanded: isExpanded, isExpansionPending: isExpansionPending,
-            setExpanded: setExpanded, frameChanged: frameChanged))
+            setExpanded: setExpanded, selection: selection, frameChanged: frameChanged))
     }
 
     #if !os(macOS)
@@ -802,7 +744,7 @@ private struct HomeDeckBranch: View {
             .frame(width: ControlMetrics.minimumTarget, height: ControlMetrics.minimumTarget)
             .contentShape(Rectangle())
             // The name as a label: as text it would count as clipped in this control's frame.
-            .accessibilityLabel(Text(verbatim: path))
+            .accessibilityLabel(Text(verbatim: spokenPath))
             .accessibilityValue(disclosureValue)
             .accessibilityIdentifier("home.deck.disclosure.\(node.id)")
     }
@@ -831,11 +773,12 @@ private struct HomeDeckBranch: View {
         }
         // Keep the row action distinct from its native disclosure control.
         .buttonStyle(.plain)
-        .accessibilityLabel(Text(verbatim: path))
+        .accessibilityLabel(Text(verbatim: spokenPath))
         .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
         .accessibilityIdentifier("home.deck.row.\(node.id)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
         #if os(macOS)
-        .help(Text(verbatim: path))
+        .help(Text(verbatim: spokenPath))
         #endif
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("home.deck.list")) } action: {
             frameChanged(node.id, $0)
@@ -889,7 +832,8 @@ private struct HomeDeckBranch: View {
             if !stacks { Spacer() }
             if node.counts.waiting > 0 {
                 Text(node.counts.waiting, format: .number)
-                    .foregroundStyle(.token(.textSecondary))
+                    // Primary on the selection's grey, where the secondary token falls short of 4.5:1.
+                    .foregroundStyle(.token(selected ? .textPrimary : .textSecondary))
                     .monospacedDigit()
                     // A number never splits across lines.
                     .lineLimit(1)
@@ -899,6 +843,105 @@ private struct HomeDeckBranch: View {
         }
     }
     #endif
+}
+
+/// Which row the deck list beside the detail marks (N14.10): Today while no deck page
+/// shows, otherwise that deck's row, or the collapsed parent that hides it.
+public nonisolated struct DeckListSelection: Equatable, Sendable {
+    /// The deck whose page the detail shows; nil while it shows Today.
+    public let deck: Int64?
+    public init(deck: Int64?) { self.deck = deck }
+    public init(homeDeckPage: DeckID?) { deck = homeDeckPage?.rawValue }
+    public var today: Bool { deck == nil }
+
+    /// A collapsed deck stands for the subdeck it hides.
+    public func marks(_ node: CountedDeckNode, expanded: Bool) -> Bool {
+        guard let deck else { return false }
+        return node.id == deck || (!expanded && Self.holds(deck, under: node))
+    }
+    private static func holds(_ deck: Int64, under node: CountedDeckNode) -> Bool {
+        node.children.contains { $0.id == deck || holds(deck, under: $0) }
+    }
+}
+
+/// The deck list's first row beside Today (N14.10): what it counts, what the list
+/// marks, and the way back to Today.
+public struct HomeTodayRow {
+    public let waiting: Int
+    public let selection: DeckListSelection
+    public let open: () -> Void
+    public var selected: Bool { selection.today }
+    public init(waiting: Int, selection: DeckListSelection = DeckListSelection(deck: nil), open: @escaping () -> Void) {
+        self.waiting = waiting; self.selection = selection; self.open = open
+    }
+}
+
+private struct HomeTodayRowView: View {
+    let row: HomeTodayRow
+    #if !os(macOS)
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    #endif
+
+    var body: some View {
+        Button(action: row.open) {
+            content
+                .frame(maxWidth: .infinity, minHeight: ControlMetrics.minimumTarget, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Today", bundle: .module))
+        .accessibilityValue(Text("\(row.waiting) cards waiting", bundle: .module))
+        .accessibilityAddTraits(row.selected ? .isSelected : [])
+        .accessibilityIdentifier("home.today.row")
+        .homeRowSelection(row.selected)
+    }
+
+    private var stacks: Bool {
+        #if os(macOS)
+        false
+        #else
+        dynamicTypeSize.isAccessibilitySize
+        #endif
+    }
+
+    private var content: some View {
+        // As a deck row: at the accessibility sizes the count goes under the title.
+        (stacks ? AnyLayout(VStackLayout(alignment: .leading)) : AnyLayout(HStackLayout())) {
+            // Not a Label: the Dynamic Type audit read its title as text that may be cut.
+            HStack(spacing: Spacing.small) {
+                // The sidebar layouts' symbol for Today (N14.1).
+                Image(systemName: "sun.max")
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+                Text("Today", bundle: .module)
+                    .foregroundStyle(.token(.textPrimary))
+                    // Rows grow with the text size rather than cut it.
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !stacks { Spacer() }
+            if row.waiting > 0 {
+                Text(row.waiting, format: .number)
+                    .foregroundStyle(.token(row.selected ? .textPrimary : .textSecondary))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        }
+    }
+}
+
+private extension View {
+    /// The selected row's grey in the list beside Today (N14.10): the system's fill for a
+    /// selected cell, since these rows are buttons and the list has no selection of its own.
+    /// One view whether or not it is selected: a branch here would give the row a new
+    /// identity on selection, which drops its recorded frame and cuts the tap's highlight.
+    func homeRowSelection(_ selected: Bool) -> some View {
+        #if os(macOS)
+        self
+        #else
+        listRowBackground(selected ? Color(uiColor: .systemGray5) : nil)
+        #endif
+    }
 }
 
 public struct HomeSidebarDecks: View {
@@ -933,7 +976,8 @@ private struct HomeSidebarBranch: View {
     let node: CountedDeckNode
     let ancestors: [String]
     private var name: String { node.name.components(separatedBy: "::").last ?? node.name }
-    private var path: String { (ancestors + [name]).joined(separator: "::") }
+    /// N20.3: shown and spoken paths join their components with " › ".
+    private var path: String { (ancestors + [name]).joined(separator: " › ") }
     private var quiet: Bool {
         DeckWaiting(counts: node.counts, filtered: node.filtered)
             .quietInSidebar(selected: collection.navigation.sidebarSelection == .deck(DeckID(node.id)))
@@ -1027,37 +1071,20 @@ private func studyDisclosureIncludesDescendants() -> Bool {
     #endif
 }
 
-public struct FsrsAdmissionView: View {
-    public let collection: ReviewCollection
-    public init(collection: ReviewCollection) { self.collection = collection }
-    public var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.large) {
-            Label { Text("Study with FSRS", bundle: .module) } icon: { Image(systemName: "brain") }
-                .font(.title2.bold())
-            Text(collection.policy == .needsReEnable
-                 ? String(localized: "Another device turned FSRS off. Meguri will turn it on again for this collection.", bundle: .module)
-                 : String(localized: "Meguri schedules with FSRS. Enabling it computes memory states from your review history without changing due dates or intervals. The change reaches your other devices when you sync.", bundle: .module))
-            if let error = collection.error {
-                Text(verbatim: error).foregroundStyle(.token(.statusError))
-                    .accessibilityIdentifier("home.policy.error")
-            }
-            if collection.enabling {
-                if let progress = collection.progress, let total = progress.total {
-                    ProgressView(value: Double(progress.completed), total: Double(max(1, total)))
-                    Text("\(progress.completed) of \(total) cards", bundle: .module)
-                } else { ProgressView() }
-            }
-            Button { Task { await collection.enableFsrs() } } label: {
-                Text("Enable FSRS", bundle: .module).frame(maxWidth: .infinity, minHeight: 44)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(collection.enabling)
-            .accessibilityIdentifier("home.policy.enable")
+/// Study is refused while the collection could not be prepared for it
+/// (`sched/app-coordination` F5.3). Shown at the entry point that was used;
+/// everything else in the collection stays usable.
+public struct StudyRefusalFeedback: ViewModifier {
+    let collection: ReviewCollection?
+    public init(collection: ReviewCollection?) { self.collection = collection }
+    public func body(content: Content) -> some View {
+        content.alert(Text("study.prepare.failed", bundle: .module), isPresented: Binding(
+            get: { collection?.studyRefusal != nil && collection?.navigation.sheet == nil },
+            set: { if !$0 { collection?.dismissStudyRefusal() } }
+        )) {
+            Button { Task { await collection?.retryRefusedStudy() } } label: { Text("study.prepare.tryAgain", bundle: .module) }
+                .keyboardShortcut(.defaultAction)
+            Button(role: .cancel) { collection?.dismissStudyRefusal() } label: { Text("Cancel", bundle: .module) }
         }
-        .padding(Spacing.large)
-        .frame(maxWidth: ContentWidth.readable)
-        .interactiveDismissDisabled()
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("home.policy.sheet")
     }
 }

@@ -31,7 +31,10 @@ screens:
     states: [typical, loading, error]
     variants: pairwise
     references: [sidebar, tab-bar, toolbar]
-    purpose: Root layout with the sidebar on iPad and Mac and the tab bar on iPhone, plus the status overlay.
+    purpose: >-
+      Root layout with the sidebar on iPad and Mac and the tab bar on iPhone, plus the status
+      overlay. Its menu bar (Mac, and iPad with a keyboard) is organised by object: File, Edit, Deck,
+      Card, with one Undo in Edit and no Study menu (native-interface-contract N20.4).
   - id: shell.keyboardShortcuts
     title: Keyboard shortcuts help
     units: [U158]
@@ -80,53 +83,35 @@ screens:
     variants: pairwise
     references: [onboarding]
     purpose: >-
-      First launch with no collection (U151's CollectionStore in NoCollection; R157, R161, R163,
-      R2046; native-interface-contract N11.8). It replaces the whole root content: no sidebar, tab bar
-      or toolbar sync button. Mac: Meguri › Settings… (⌘,) and Quit stay available. Decided
-      2026-10-27: on iPhone and iPad Settings is a tab or sidebar section of the main window (N11.4),
-      which Welcome replaces, so Settings is not reachable from Welcome there; each choice leads to
-      Home or a sheet, and no extra control is added. Layout (onboarding): the
-      app icon, the title "Welcome to Meguri", one line saying Meguri studies flashcards on this
-      device and syncs through the user's private iCloud, then three buttons in R157's order:
-      `sync.connect.action` ("Connect to iCloud…", prominent), "Import a File…" (bordered) and
-      "Start Empty" (bordered);
-      full width on iPhone, content-sized and centred on Mac and iPad. No feature rows, walkthrough,
-      sample deck or Anki login (R157, R163). Line texts are Meguri's own (String Catalog); the iCloud
-      text is sync/status-strings' (T12 names this choice, T14 and T8 the reasons). Connect to iCloud
-      opens sync.connect
-      (cloudkit-recovery V13). Import a File… opens onboarding.collectionImport now and U162's full
-      file intake once it lands; the imported collection stays local, and its iCloud choice is the
-      first connection (V12.2). Start Empty creates the collection with only the Default deck and the
-      stock note types (R161), local only, and opens Home; it never asks for an Apple account.
-      Connect to iCloud needs the account status `available` with an identity read in this process
-      (V13.1). Decided 2026-10-27: Welcome's state is `localOnly` (sync/policy P14.2 row 1), which
-      has no unavailableReason (P14.4 sets it in state 2 only), so the reason comes from P14.4's
-      `account` field (its status, and whether the identity was read in this process; sync/policy
-      P14.4 should name this second part) and from reachability: `noAccount`
-      `sync.settings.account.none`, `restricted` `sync.settings.account.restricted`,
-      `temporarilyUnavailable` or `couldNotDetermine` `sync.settings.account.temporary`,
-      `configuration` `sync.settings.account.setupNeeded`; `available` with no identity read yet
-      `sync.error.offline` when not reachable, else `sync.settings.account.temporary` (V9.1). While
-      one applies the button stays visible and disabled, the reason shows in one line under it as
-      text only (T3's details speak of "this collection", which Welcome does not have yet), with no
-      link that changes system accounts and no Apple password field (R102, R117, R2065), and Start
-      Empty takes the prominent style; the button enables as soon as a later account read succeeds
-      (V9.1's read points). Decided 2026-10-27: only Welcome disables Connect to iCloud, since its
-      other two choices sit beside it; Account & Sync's, the empty Home's and sync.status's Connect
-      to iCloud… stay enabled and open sync.connect, which shows
-      `sync.recovery.error.accountUnavailable` (T13.6) with Try Again. Error: a failed Start Empty (disk full) shows
-      its cause in one line and the screen stays. Decided
-      2026-10-27: an iCloud download interrupted by a relaunch has no error state here: V14.3 deletes
-      its staging and op row at restart and no core fact records it, so Welcome shows as usual and
-      Connect to iCloud starts V13 case b again. Keyboard: Tab moves through
-      the buttons; Return activates the prominent one. VoiceOver: the title is a header; the reason
-      line is its own text element, read in order after Connect to iCloud, and is also that button's
-      hint, so it is heard with hints off. Identifiers onboarding.welcome.connect,
-      onboarding.welcome.import, onboarding.welcome.startEmpty. Core: the account status from U151's
-      SyncStatusModel (P14.4's `account` field and reachability), the empty-collection create of R161;
-      no zone or record read and no CloudKit write starts before Connect to iCloud (R2046). V9.1's
-      account-status and identity reads, which read no Meguri data, run at their read points here
-      as everywhere.
+      No collection on this device (U151's CollectionStore in NoCollection; R157, R161, R163, R2046;
+      native-interface-contract N18.3, decided 2026-11-19, which replaces the earlier layout of an
+      app icon and three bordered buttons). Welcome is Home's content in that state, inside the
+      shell: the sidebar or the tabs, Settings and the toolbar's sync button stay. Layout: the large
+      title "Welcome to Meguri", the line "Choose how to start. You can change this later in
+      Settings.", and one grouped list of three rows, each a symbol, a title, one line of
+      explanation and a chevron: Set Up Sync ("Get your collection from Meguri Sync or iCloud."),
+      Import a Collection File ("Open a .colpkg file exported from Meguri or Anki.") and Start Empty
+      ("Begin with no decks and add your own notes."). Compact width: the title and line head the
+      list at the top. iPad and Mac: the same list in a centred column of the readable width.
+      iPhone at regular width held wide (the Duo unfolded): the title and line centred on the
+      leading half, the rows on the trailing half, either side of the fold; a short window or an
+      accessibility text size keeps the one column. No feature rows, walkthrough, sample deck or
+      Anki login (R157, R163). Texts are Meguri's own (String Catalog). Set Up Sync opens Account &
+      Sync (the sheet on touch, the Settings window on Mac), where the service is chosen and its
+      own control starts the first connection (sync.connect, cloudkit-recovery V13); Welcome has no
+      Connect to iCloud… button and shows no account reason, which Account & Sync shows. Import a
+      Collection File opens the file picker and then onboarding.collectionImport (N17.2); the
+      imported collection stays local, and its iCloud choice is the first connection (V12.2).
+      Start Empty creates the collection with only the Default deck and the stock note types
+      (R161), local only, and shows the deck list; it never asks for an Apple account. A row is
+      disabled, and stays visible, only while another sheet or flow owns the window or Start Empty
+      cannot start. Error: a failed Start Empty shows its cause in a group under the rows and the
+      screen stays. An iCloud download interrupted by a relaunch has no error state here (V14.3
+      deletes its staging and op row at restart). Keyboard: Tab moves through the rows. VoiceOver:
+      the title is a header; each row reads its title as the label and its explanation as the
+      hint. Identifiers home.welcome.title, home.welcome.message, home.collection.accountSync,
+      home.collection.import, home.collection.startEmpty. Core: the empty-collection create of
+      R161; no zone or record read and no CloudKit write starts from this screen (R2046).
 
   - id: onboarding.collectionImport
     title: Import Collection
@@ -149,8 +134,11 @@ screens:
     purpose: >-
       The deck tree as a native list (native-interface-contract N2, N11.5): each row the deck's last
       name component with the non-zero New, Learning and To Review counts as secondary text, the Mac
-      and iPad sidebar rows with a To Review badge; then the activity section (studied-today line, heatmap,
-      streak stats; U228) in the same list on every layout; and the sync button.
+      and iPad sidebar rows with a To Review badge; then the collection's activity heatmap (N14.11,
+      stats/activity-heatmap) after the deck rows of the tab layout's list and after the decks on Today
+      (Mac, iPad, the Duo held wide), never in the sidebar; the studied-today line and streak stats
+      (U228) are not built; and the toolbar's sync button and Add menu (New Note, New Deck…; N20.1).
+      The Mac and iPad sidebar has the deck search field at its top (home.goToDeck).
   - id: home.deckPage
     title: Deck page
     units: [U155, U228a, U228]
@@ -161,8 +149,9 @@ screens:
     references: [list-counts, charts]
     purpose: >-
       One deck's labelled New, Learning and To Review counts with the buried "+N" badge (U228a), the
-      Study button, the finished state, and the deck-scoped heatmap, streak stats and Stats action
-      (U228).
+      Study button, the finished state, the Subdecks section, then the deck's activity heatmap with its
+      subdecks (N14.11, stats/activity-heatmap); streak stats and the Stats action (U228) are not
+      built.
   - id: home.deckMenu
     title: Deck menu
     units: [U152, U156]
@@ -172,14 +161,18 @@ screens:
     variants: pairwise
     references: [list-counts, confirmation-dialog]
     purpose: >-
-      One menu for a deck, shown as the row's context menu (right-click, long press) and the Mac row's
-      hover ⋯ button, in R47's order with Delete separated and destructive and Unbury only with buried
-      cards; a filtered deck's menu offers only Rename and Delete (R53). On iPhone a row swipe shows
-      Options and More, never Delete (R49). The menu bar's Deck menu is U159's and follows R283. Until
-      U156 lands the menu holds Study and Overview (U152). Delete of a subtree with cards asks first with
-      the deck and card counts (confirmation-dialog); deletes and moves end with an Undo toast.
+      One menu for a deck, shown as the row's context menu (right-click on Mac, long press on touch;
+      native-interface-contract N20.2, decided 2026-11-20). Groups, each item with its SF Symbol:
+      Study (play) and Add Note (square.and.pencil); Rename… (pencil) and New Subdeck…
+      (folder.badge.plus); then Delete Deck (trash, destructive), which arrives with the Delete Deck
+      unit. A filtered deck's menu holds only Rename… (and Delete Deck once it exists; R53). No
+      Overview and no hover ⋯ button: a tap or click on the row opens the deck page. On Mac the menu
+      shows the Deck menu's keys (Study ⌘R, Rename… ⇧⌘R). iPhone Duo held wide: the menu opens beside
+      the row in the list's half. On iPhone a row swipe shows Options and More, never Delete (R49).
+      The menu bar's Deck menu is N20.4's. Delete Deck, its confirmation and its undo are the Delete
+      Deck unit's; moves end with an Undo toast.
   - id: home.deckName
-    title: Deck name sheet
+    title: Deck name form
     units: [U156]
     signature: false
     platforms: [iphone, ipad, mac]
@@ -187,19 +180,40 @@ screens:
     variants: pairwise
     references: [sheet-form]
     purpose: >-
-      The sheet for Create Deck, New Subdeck (prefilled "<parent>::", cursor at the end) and Rename
-      (prefilled full path): one name field, Cancel and a confirm button disabled for an empty or
-      blank name. Error: the refused move or name in one line under the field; a final name that
-      differs from the typed one is reported after saving.
+      The form for New Deck…, New Subdeck… and Rename… (native-interface-contract N20.3,
+      decks/decks D19; decided 2026-11-20): a system Form with two rows, Name (a text field) and
+      Parent Deck (a menu: None, then the normal decks of the tree indented by depth, each item's
+      accessibility label its path joined with " › "). Titles and confirm buttons: "New Deck" and
+      Create, "New Subdeck" and Create, "Rename Deck" and Rename; Cancel. The confirm button is
+      disabled for a blank name and, for Rename, while the composed full name equals the current one
+      (D19.4). Defaults: New Deck… None; New Subdeck… the deck it came from; Rename… the deck's last
+      name component and its parent; the deck search's create row the query and None. Footer: "Its
+      subdeck moves with it." or "Its N subdecks move with it." for a Rename of a deck with
+      subdecks, otherwise "Inside <parent path>." with a parent, none with None. No "::" is shown.
+      iPhone and the Duo folded or held tall: a sheet; the Duo held wide: the form in the detail
+      half in place of what it showed; iPad: a sheet; Mac: a window sheet with leading labels.
+      Error: a refused name in one line under the form, which stays; a final name that differs from
+      the typed one is reported after saving.
   - id: home.goToDeck
-    title: Go to Deck
+    title: Deck search
     units: [U156]
     signature: false
     platforms: [iphone, ipad, mac]
     states: [empty, typical, overflow]
     variants: pairwise
-    references: [search-tokens, sheet-form]
-    purpose: Filter decks by name and jump to one.
+    references: [search-tokens, sidebar]
+    purpose: >-
+      Find, open or create a deck by name (native-interface-contract N20.1, N14.2; decks/decks D18;
+      decided 2026-11-20). Mac and iPad: a search field at the top of the sidebar, prompt "Search or
+      Create a Deck", which replaces the Go to Deck sheet; typing replaces the sidebar's list with
+      the results. iPhone and the Duo: N14.2's Search button and field over the deck list. Each
+      result is the deck's name over its parent path joined with " › " (decks/deck-list H6.2
+      matching), then a "Create deck named “<query>”" row (plus symbol) while no deck has that name,
+      which opens the New Deck form (home.deckName) with the query. Return, a tap or a click opens a
+      result's deck page in every layout, never review; a filtered deck shows R53's explanation. The
+      query and results stay while a result is open; Esc clears the field. Mac: the first result is
+      highlighted and the arrow keys move the highlight. ⌘F, ⇧⌘O and "/" focus the field. Empty:
+      H6.3's one-line message. Overflow: the results scroll.
   - id: home.sessionSummary
     title: Session summary
     units: [U157]
@@ -225,15 +239,9 @@ screens:
       "No missed cards". Overflow: many missed cards scroll inside the sheet; the toolbar stays. The
       deck page's "Last Session" opens the same sheet read-only: title "Last Session", no Undo,
       Continue or Unbury. No chart.
-  - id: home.fsrsSheet
-    title: FSRS optimization sheet
-    units: [U51]
-    signature: false
-    platforms: [iphone, ipad, mac]
-    states: [typical, error, loading]
-    variants: pairwise
-    references: [sheet-form]
-    purpose: The FSRS-only notice and parameter optimization status for a collection.
+  # home.fsrsSheet was removed on 2026-11-19 (decisions.md, native-interface-contract N18.1):
+  # FSRS is always on and nothing is shown for it. A study entry point that is refused shows
+  # the system alert of sched/app-coordination F5.3, which is no screen of its own.
 
   - id: review.question
     title: Review, question side
@@ -1002,7 +1010,7 @@ screens:
       (M5 gives no count for it). Never shown (R752, O3's hidden options):
       the FSRS switch, parameters, Optimize and Evaluate, the simulator, Easy Days, Custom scheduling
       and the SM-2 options; parameter optimization runs by itself (sched/optimizer) and reports in
-      home.fsrsSheet and settings.diagnostics. Decided 2026-10-27: no notice for an unsupported preset
+      settings.diagnostics. Decided 2026-10-27: no notice for an unsupported preset
       (sched/fsrs-policy U1) here, since the snapshot has no such fact; its parameter lists are hidden
       options that a save keeps (sched/presets V8), and the study refusal (U51) names it. Every option
       row: the label; "Global" in secondary text after it for the three global options (R735); the
@@ -1067,195 +1075,97 @@ screens:
 
   - id: settings.root
     title: Settings
-    units: [U160]
+    units: [U160, U161]
     signature: false
     platforms: [iphone, ipad, mac]
     states: [typical]
     variants: pairwise
     references: [grouped-form, sidebar]
     purpose: >-
-      The settings sections and their preferences (native-interface-contract N5, N11.4). Mac: the
-      separate Settings window (⌘,) with a sidebar of sections and a search field; iPad and iPhone:
-      the Settings sidebar section or tab of the main window, sections as rows. Each section is a
-      grouped form.
+      Settings as one flat page (native-interface-contract N15.1; N5, N11.4 for the Mac scene). A
+      grouped Form whose sections are Sync (settings.accountSync), then Collection
+      (settings.importExport's file import and export); the sections' rows are on the page itself
+      and no row pushes a form that repeats a section. iPhone, iPad and a folded or tall iPhone
+      Duo: the flat page in the Settings tab or sidebar section. Mac, and the Duo's inner display
+      held wide (regular width and height, wider than tall, measured without the keyboard so that
+      a focused field never changes the layout): a list of the sections beside the selected
+      section; Mac keeps the Settings window, its search field and the restored last section. A
+      request to show Sync selects it in that list. Identifiers settings.root.content,
+      settings.root.sync, settings.root.collection, settings.root.search (Mac).
   - id: settings.accountSync
-    title: Account & Sync
+    title: Sync
     units: [U161]
     signature: false
     platforms: [iphone, ipad, mac]
-    states: [empty, typical, overflow, error, loading]
+    states: [empty, typical, error, loading]
     variants: pairwise
     references: [grouped-form, list-counts, confirmation-dialog]
     purpose: >-
-      The Account & Sync section, first in Settings (native-interface-contract N11.4, N11.8; R117,
-      R122, R123, R125, R1560, R2046, R2054, R2059). Mac: a section of the Settings window's sidebar;
-      iPad and iPhone: the first row of Settings, pushing this form. Text: sync/status-strings T14,
-      with T3 to T9 for the status (titled `sync.settings.section`), and T18 for the Sync Service and
-      Meguri Sync (sync/meguri-provider MP2–MP5; N12.4). It shows no Anki endpoint, account,
-      transfer result or one-way option (Settings › Anki Server and Collection, N11.4; R1547, R1560).
-      One grouped form: (0) Sync Service, always first (MP2): a standard Picker labelled
-      `sync.service.label` with exactly `sync.service.iCloud` and `sync.service.meguri`. It shows the
-      committed selection only: choosing a value writes no selection, and the shown service changes
-      only when its change commits. While no service is selected (local-only) it shows no value, with
-      `sync.service.none.footer` as its footer; choosing iCloud Sync then opens the flow of section
-      (1)'s enable control (sync.connect, or Resume Syncing's continue page for a stopped binding
-      that V9.2 offers), and choosing Meguri Sync selects it with nothing to stop and shows (M).
-      While a service is selected, choosing the other opens sync.serviceSwitch. While a change runs
-      the picker is disabled with `sync.service.changing` under it; after a failed change,
-      `sync.service.changeFailed`. In handoff recovery (MP3.5), whatever the selection, the picker
-      is disabled and `sync.service.recovery` sits under it with `sync.service.recovery.action`,
-      which asks the alert `sync.service.recovery.title` with `.message`, destructive `.confirm` and
-      `sync.service.cancel`, then calls recoverProviderHandoffToLocalOnly; that action is offered nowhere else.
-      While the provider phase is blocked the picker is disabled with `sync.service.blocked` and no
-      action. Opening the section or choosing a value starts no Meguri request (MP2). Sections (1)
-      to (6) are iCloud Sync's, shown unchanged whenever Meguri Sync is not the selected service;
-      while it is, (M) replaces them. (1) iCloud (`sync.settings.iCloud`): the status row with
-      sync.status's symbol and the T3 title and detail, then T4's lines, T5's media lines and, while a
-      Sync Now runs or after one, T7's step or result; the account row, `sync.settings.account.*`
-      by the account status and whether it matches the binding (`.other`); the account guidance of T3
-      when iCloud is unavailable, as text with no sign-in field and no Apple password (R117); then
-      the enable control (T14), the first that applies, none with a confirmation (V16):
-      `sync.settings.resumePause` while the user's pause is on, whatever the binding, so a pause can
-      always be cleared (decided 2026-10-27); none while the state is `paused{decisionRequired}`,
-      whose `sync.decision.action` (accessibility label `sync.decision.action.label`) sits under the
-      status row's detail whatever the pause and opens sync.publicationChoice, so Connect to iCloud…
-      is not shown (its Replace would publish with reason 2, not V12.2's); `sync.action.resume`
-      (sync.connect's continue page) for a `stopped` binding while V9.2 offers it (T9.2: a stopped
-      binding is the `localOnly` state, not an attention row); `sync.connect.action` while no
-      binding is usable (sync.connect); otherwise `sync.settings.pause`; then `sync.now.command`,
-      disabled with T6's reason as its footer. Section
-      footer `sync.settings.privacy` (R2058, R2059). (2) The device-local toggles
-      `sync.settings.automatic` (R123; default on after a connection) and `sync.settings.media`
-      (R122; default on), each with its footer; written only on change (R114), and disabled while
-      no binding is usable. (3) Needs Attention, present only with items: one row per P14.4 item in
-      P14.4's order with its T9.1 text and count and its T9.2 actions as buttons, as in sync.status;
-      Show Details… pushes the item's list (T11.3: one row per item, `sync.item.*` with the key, and
-      `sync.item.error` for applyFailed and rekeyFailed; media names alone), with Copy Debug Info in its
-      toolbar; Abandon Change… asks T13.3's alert; Cancel Replacement… asks T13.5's; Keep on This
-      Device Only… asks T14's local-only alert. (4) `sync.settings.conflicts`, always present, with the
-      unresolved count as its value (V17.2); it pushes sync.reviewConflicts, also at zero. (5)
-      `sync.settings.advanced`, only while the account is available; showing it starts the preview
-      read of `MGActive` and its `MGEpoch` records (V26.1 "Preview reads", not while paused; an
-      iCloud read N11.8 allows, not an Anki server request):
-      `sync.adopt.action`
-      (sync.replaceLocal with the active source, shown while a fresh read of `MGActive` names a
-      complete epoch, V14.1), `sync.adopt.previous` (the previous source, only while V14.1 offers it),
-      `sync.publish.action` (sync.replaceCloud, V15.1), as T14 lists the group. Decided 2026-10-27:
-      while the user's pause is on (V16; automatic sync off is not a pause) no preview read runs,
-      so the group shows `sync.adopt.action` and `sync.publish.action` disabled, with
-      `sync.status.paused.user` as its footer, and no `sync.adopt.previous` (N11.8). (6) While a binding
-      is active, whatever the account status (stop_using_icloud needs no account or network), its
-      own row outside Advanced: `sync.settings.stop`, opening the alert `sync.settings.stop.title` with `.message`, destructive
-      `.confirm` and Cancel (stop_using_icloud, V16); a stopped binding's Resume Syncing is the
-      enable control (1). Decided 2026-10-27: while an `adopt` or `publish` row of this build exists
-      (V2.3; a `prefetch` row does not count), Stop stays enabled and, when chosen, shows
-      `sync.recovery.error.busy` with that op's name in its row and opens no alert, because the op's
-      Cancel or failure returns the binding before to its recorded state (V14.3, V15.3) and would
-      undo the Stop; the user cancels the op first (sync/cloudkit-recovery V26.2 should give
-      stop_using_icloud the same `Busy{running_op}`). Gates: an action V20 refuses during a review
-      session stays enabled and shows `sync.recovery.error.sessionActive` in its row when chosen
-      (T9.2); Sync Now follows T6; Replace iCloud Collection… and Review Conflicts work during a
-      session (V20). In the exclusive phase a recovery action shows `sync.recovery.error.busy`
-      (R171). In Failed{Corrupt} the toggles, Pause, Review Conflicts (read only) and
-      `sync.adopt.action` (V19's conditions) stay usable; Sync Now shows `collectionUnavailable`.
-      (M) Meguri Sync, while it is the selected service (T18.3 to T18.7): (M1) the status row,
-      one element with the T18.4 title and detail of the first
-      condition that applies, then T18.5's or T18.6's lines and controls for a setup stage or a
-      blocked media phase. Use This Device’s Collection… and Use Server Collection… are shown
-      together, neither the default button; they and Download from Meguri Sync… only start the
-      preparation (Preparing… with Cancel), whose preview opens sync.meguriSetup. Show Affected
-      Files pushes a page inside Account & Sync on every platform: a native List of the affected
-      files sorted by name, each its name and T18.6 state, `sync.meguri.media.lossyName` under a
-      name that is not valid text, titled `sync.meguri.media.list.title`, footer
-      `sync.meguri.media.list.footer`, and `sync.meguri.media.list.excluded` while a file that can't
-      transfer is listed; the names appear nowhere else, logs included. Retry calls the media retry,
-      which recomputes the list, keeps every guard and never clears the block by leaving a file out
-      (MP5); nothing deletes or converts a file automatically, and no text points to a media folder.
-      After an exactly accepted upload whose local activation did not finish, and after
-      `activationInterrupted`, the row offers only `sync.meguri.setup.finish` (identifier
-      settings.accountSync.meguri.finishSetup), shown and enabled only while the core exposes a
-      permitted recovery command for the retained operation; this contract defines no such command
-      and does not claim one exists. No new collection choice shows until it is settled (MP4).
-      (M2) The account. While unconfigured, signed out, cancelled or Sign In Required: one heading
-      `sync.meguri.signIn.title`, without a repeated service label, Not Set Up / Not Signed In
-      title or introductory detail. Keep cancelled, blocked, paused, setup and ongoing sync
-      states visible; the shared status popover keeps its provider label and behavior. The fields
-      `sync.meguri.address` (URL keyboard), `sync.meguri.username` (username content type) and the
-      secure `sync.meguri.password` (password content type), with no autocapitalization or
-      autocorrection, then `sync.meguri.signIn`, disabled until all three hold text and also chosen
-      by Return in Password, with footer `sync.meguri.signIn.footer`. Keep native grouped Form,
-      native text and secure fields in this keyboard order, native rounded-border Mac fields
-      for visible input boundaries, and one prominent system Sign In button. An explicit click
-      prepares the existing NoCollection Host only if needed and joins offline attachment/load
-      before ordinary owner sign-in. Show `sync.meguri.signIn.preparing` progress during local
-      preparation. Disable draft fields and service changes while processing, coalesce rapid
-      submits and fence stale address, attachment and lifecycle ownership after suspension.
-      Rendering never prepares a Host; sign-in never creates a collection or starts a transfer.
-      Local busy, attachment and credential-store failures use their T18.3 recovery lines.
-      Sign In normalizes the address
-      locally first (`sync.meguri.error.address`, with no request, when refused), applies an address
-      change, which invalidates the stored sign-in (MP2), then only authenticates; a failure shows
-      its T18.3 line under the fields in an inline native error Label with an SF Symbol, identifier
-      settings.accountSync.meguri.signInError and text that does not rely on color. The password
-      field is emptied after every attempt and on any
-      address edit. Otherwise the address is a read-only row, with `sync.meguri.signOut` (its alert:
-      `.title`, `.message`, destructive `.confirm` and `sync.service.cancel`; `sync.meguri.signingOut`
-      while work drains; `.failed` when removal fails, then the selection and connection phase the
-      core actually reports, never a claim that they are unchanged). Sign Out calls
-      removeMeguriConnection, which is changeProvider(to: .localOnly, removing the credentials):
-      only after the actual drain and credential deletion does local-only become the selection,
-      never iCloud Sync, keeping the collection, media, server data and every unresolved
-      operation's evidence (MP2); the address changes only after Sign Out. While the
-      connection is blocked: `sync.meguri.connection.retry`, then Sign Out. No Test Connection is
-      offered. (M3) While a round is reported: `sync.now.command` in T18.7's disabled and enabled rows
-      only, enabled exactly in its last row, with T18.7's reason as its footer otherwise, and `sync.meguri.pause` or
-      `sync.meguri.resume`. There is no media toggle: media is always included (MP1, MP5). (M4)
-      `sync.meguri.stop`, opening sync.serviceSwitch to local-only, except in handoff recovery and
-      while blocked. A control shows only while the core reports its stage, so none calls a command
-      that does not exist yet. Meguri Sync states: empty: Not Set Up with empty fields; typical: On
-      with its last exchange; loading: Signing In…, Preparing…, a transfer or a round running;
-      error: Setup Didn’t Finish, Setup Not Finished on This Device, Media Incomplete, Server
-      Acceptance Unknown, Last Exchange Didn’t
-      Finish, a blocked connection; overflow: a long address and long affected names wrap, and the
-      affected list scrolls.
-      Empty: never connected: the iCloud group with T3's localOnly lines and Connect to iCloud…, the
-      toggles disabled, Review Conflicts… at 0. Typical: connected and up to date. Loading: an
-      exchange, media transfer or recovery op running, its progress in the iCloud group, with Cancel
-      where V14.3 or V15.3 allow it. Error: needs attention, iCloud unavailable, quota full (T9.1 with
-      the storage guidance and Try Again; study, edits, backups and file export go on, R2059), local
-      storage full, unsupported schema. Overflow: many attention rows and long details lists scroll;
-      at the largest text sizes row values wrap under their labels. Changes apply at once with no
-      Save (R115). Keyboard: Tab through the rows; ⇧⌘Y runs Sync Now from anywhere, and the
-      unmodified Y only when no text field, secure field, open menu or other view that owns keys has
-      focus, through the same ownership check as the review keys (N4, N11.3; the Settings search
-      field keeps its letters; sync.status). VoiceOver: the status row is one element with its title and detail; each
-      attention row reads its text and count and offers its actions as custom actions as well as
-      buttons; the toggles read their state. Identifiers settings.accountSync.status,
-      settings.accountSync.connect, settings.accountSync.resume, settings.accountSync.decide,
-      settings.accountSync.pause, settings.accountSync.syncNow,
-      settings.accountSync.automatic, settings.accountSync.media,
-      settings.accountSync.attention.<item>, settings.accountSync.reviewConflicts,
-      settings.accountSync.replaceLocal, settings.accountSync.restorePrevious,
-      settings.accountSync.replaceCloud, settings.accountSync.stop, settings.accountSync.service,
-      settings.accountSync.serviceRecovery, settings.accountSync.meguri.status,
-      settings.accountSync.meguri.address, settings.accountSync.meguri.username,
-      settings.accountSync.meguri.password, settings.accountSync.meguri.signIn,
-      settings.accountSync.meguri.signInError, settings.accountSync.meguri.signInProgress,
-      settings.accountSync.meguri.retryConnection, settings.accountSync.meguri.signOut,
-      settings.accountSync.meguri.useDevice, settings.accountSync.meguri.useServer,
-      settings.accountSync.meguri.download, settings.accountSync.meguri.cancelSetup,
-      settings.accountSync.meguri.finishSetup,
-      settings.accountSync.meguri.showAffected, settings.accountSync.meguri.affectedList,
-      settings.accountSync.meguri.retryMedia, settings.accountSync.meguri.syncNow,
-      settings.accountSync.meguri.pause, settings.accountSync.meguri.stop. Core: the P14 status and
-      syncNowAvailability() through U151's SyncStatusModel and SyncCoordinator; DeviceSettings for
-      Pause, automatic and media (V2.1, R324); recovery_state(), resume_recovery_op,
-      cancel_recovery_op, keep_local_only, stop_using_icloud and abandon_generation (V26.2);
-      list_conflicts for the count (V17.3). Meguri Sync: the provider selection and phase, the
-      connection phase and endpoint (MeguriProviderConnectionOwner's configure, signIn and load;
-      configure and load send no request, MP2), changeProvider, removeMeguriConnection and
-      recoverProviderHandoffToLocalOnly through SyncCoordinator; the setup stage, media accounting
-      and round state from the Meguri setup and round services (MP4, MP5).
+      The Sync section of Settings, version 2 of this contract (native-interface-contract N15.2,
+      N15.4, N15.6; sync/policy P25, sync/cloudkit-recovery V27, sync/meguri-provider MP6; text
+      sync/status-strings T19). It replaces the Account & Sync page: the id stays, since the status
+      ledger records it, and the identifiers' prefix is now settings.sync. The section is on the
+      Settings page itself (settings.root).
+      Its rows, in this order, each only under its condition: (1) Service, a standard Picker (`sync.service.control`) with Off, Meguri
+      Sync and iCloud, iCloud carrying its Beta label; it shows the service the core reports. From
+      Off a choice asks nothing; from a service it opens sync.serviceSwitch once, for Off too. Under
+      it: `sync.service.changing`, `sync.service.changeFailed`, `sync.service.opFirst` while an
+      `adopt` or `publish` op could restore the binding before or could not be read (V27.5),
+      `sync.switch.busy`, `sync.service.blocked`. (2) Meguri Sync only: the sign-in fields (Server
+      Address, Username, Password, one prominent Sign In, the T19.3 footer) until signed in, then
+      the Account row with the username, pushing Server Address and Username. (3) Status: symbol,
+      title and detail of T19.4 or T19.5; a needs you status has its one action as a button; an
+      issues row pushes the issues list (`sync.issues.title`), or Affected Files for Meguri Sync's
+      blocked media. (4) Sync Automatically with its footer, while a service is selected; disabled,
+      showing the stored value, until the service is connected (P25.3). (5) Sync Now, through
+      syncNowAvailability(), with its reason when unavailable. (6) Troubleshooting, pushing
+      settings.troubleshooting. With iCloud selected the privacy footer follows. While the value is
+      Off the section has the Service row and its footer only. No media toggle, Pause, Sign Out,
+      Stop Using, Advanced or Review Conflicts row. Over a review on iPhone and iPad the Sync section
+      alone is presented in a sheet (settings.sync.content, Done). Empty: Off. Typical: a connected
+      service, up to date. Loading: a service change or setup running. Error: a needs you status
+      with its button, or an issues row. Identifiers settings.sync.heading, settings.sync.footer, settings.sync.service,
+      settings.sync.service.off, settings.sync.service.meguri, settings.sync.service.iCloud,
+      settings.sync.serviceChanging, settings.sync.serviceChangeFailed, settings.sync.serviceRefused,
+      settings.sync.serviceBusy, settings.sync.serviceBlocked, settings.sync.meguri.address,
+      settings.sync.meguri.username, settings.sync.meguri.password, settings.sync.meguri.signIn,
+      settings.sync.meguri.signInFooter, settings.sync.meguri.signInError,
+      settings.sync.meguri.signInProgress, settings.sync.meguri.account,
+      settings.sync.meguri.account.content, settings.sync.meguri.affectedList, settings.sync.status,
+      settings.sync.statusAction, settings.sync.connectionError, settings.sync.issues,
+      settings.sync.automatic, settings.sync.syncNow, settings.sync.troubleshooting,
+      settings.sync.privacyFooter, settings.sync.content, settings.sync.done, sync.issues.list,
+      sync.issues.row.<n>. Test routes settings/sync/off, meguri-sign-in, meguri-connected,
+      meguri-needs-you, icloud-selected, icloud-connected, icloud-needs-you, icloud-issues and
+      issues-list draw the production views over an inert coordinator. Core: the provider
+      selection and phase, the P14 status with `stateWithoutAttention`, syncNowAvailability(),
+      DeviceSettings for Sync Automatically (the update hold is cleared by every act P25.2 lists),
+      changeProvider, stop_using_icloud and keep_local_only for Off, and the Meguri connection,
+      setup and round state, all through SyncCoordinator.
+  - id: settings.troubleshooting
+    title: Troubleshooting
+    units: [U161]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error]
+    variants: pairwise
+    references: [grouped-form, confirmation-dialog]
+    purpose: >-
+      The Troubleshooting page inside the Sync section, for both services
+      (native-interface-contract N15.5; sync/status-strings T19.6). Rows, each only under its
+      condition: Replace This Device’s Collection… and Replace the iCloud Collection… or Replace
+      the Meguri Sync Collection…, each opening its preview (sync.replaceLocal, sync.replaceCloud,
+      sync.meguriSetup) and changing nothing, disabled with its reason while it cannot run; Cancel
+      Replacement… while an op can be cancelled and that is not the status action; Retry for
+      Meguri Sync's blocked media; Sync Log, a page of real recorded attempts (N7); Copy Debug
+      Info; for iCloud, one plain line with the number of saved conflict copies while there are
+      any (V27.7). Not built yet, for want of a core call: Restore Previous iCloud Collection from
+      <date>… and Show Replaced Media. Opening the page starts no Meguri Sync request. Typical: a
+      connected service. Error: iCloud with conflict copies and a disabled entry. Identifiers
+      sync.trouble.content, sync.trouble.replaceDevice, sync.trouble.replaceService,
+      sync.trouble.cancelOp, sync.trouble.retryMedia, sync.trouble.log, sync.trouble.copyDebugInfo,
+      sync.trouble.conflictCopies. Test routes settings/sync/troubleshooting-icloud and
+      troubleshooting-meguri.
   - id: settings.sync
     title: Anki Server and Transfers
     units: [U161]
@@ -1267,7 +1177,7 @@ screens:
     purpose: >-
       The manual Anki server screens of native-interface-contract N11.4 (R118, R1496–R1504;
       sync/anki-transfers, frozen; native-interface-contract N5 to N8). Nothing here is iCloud sync, which is
-      settings.accountSync and sync.status. Decided 2026-10-27: the id stays settings.sync, since the
+      settings.root's Sync section and sync.status. Decided 2026-10-27: the id stays settings.sync, since the
       status ledger and its recorded snapshots use it. Two places: Settings › Anki Server (the
       preview's Connection section renamed: the server address with Test beside it, the account and
       its actions, and Connection details with Sync Logs; N6, N7) and the Anki Transfers actions of
@@ -1490,9 +1400,9 @@ screens:
     purpose: >-
       The first connection and its two-collections decision (cloudkit-recovery V13, V9.2; R158,
       R159, R160, R1592, R2055; N11.8). Text: sync/status-strings T11, T12 and T13.6, except page a's,
-      which is U166's own (T12: that file adds none). Entry points: Welcome's Connect to iCloud
-      (onboarding.welcome), Account & Sync's `sync.connect.action`, the empty Home's Connect to iCloud
-      (R161), and sync.status's Connect to iCloud… and Resume Syncing. It needs account status
+      which is U166's own (T12: that file adds none). Entry points: Account & Sync's
+      `sync.connect.action`, which Welcome's Set Up Sync row leads to (onboarding.welcome, N18.3),
+      and sync.status's Connect to iCloud… and Resume Syncing. It needs account status
       `available` with an identity read in this process (V13.1); during a review session it does not
       start and shows `sync.recovery.error.sessionActive` (V20, T9.2); while the user's pause is on
       its entry points are disabled with `sync.status.paused.user`, since V26.1 runs no preview read
@@ -1555,7 +1465,7 @@ screens:
       `sync.recovery.error.replaceIncomplete` with `sync.recovery.tryAgain` and no
       `sync.cancelOp.adopt.message`; in case b `sync.error.cloudError` with Try Again. After a relaunch during a download chosen in the
       decision, recovery_state() shows the decision again with Try Again (V14.3); in case b no op row
-      survives the restart, so Welcome shows as usual and its Connect to iCloud starts V13 again. Overflow: the
+      survives the restart, so Welcome shows as usual and Account & Sync's connect control starts V13 again. Overflow: the
       largest text sizes stack the groups and wrap every value; long kind lists scroll above the
       choices. Keyboard: Tab through the controls; Esc is Cancel while it is allowed; Return
       activates the prominent button of pages a, c and f; page d, the decision page and the previews
@@ -1770,6 +1680,31 @@ screens:
       sync.reviewConflicts.restore, sync.reviewConflicts.resolve. Core: list_conflicts, get_conflict,
       preview_recovery, recover, resolve and unresolve (V17.3), off the main thread and with no
       network; a restored edit is a local change that syncs like any other.
+  - id: sync.keepCollection
+    title: Which collection to keep
+    units: [U161]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error, loading]
+    variants: pairwise
+    references: [grouped-form, confirmation-dialog]
+    purpose: >-
+      The one sheet that asks which collection to keep, for both services
+      (native-interface-contract N15.3; sync/cloudkit-recovery V27.4; sync/meguri-provider MP6.3;
+      sync/status-strings T19.3). Title `sync.keep.title`; `sync.keep.message`; both sides' counts
+      and last change; then Keep This Device’s Collection and Keep the iCloud Collection or Keep
+      the Meguri Sync Collection, each with what it replaces and what protects the replaced side
+      under it; Cancel. Both buttons have the destructive role and neither is the default: Return
+      confirms nothing and Esc cancels. Built so far for Meguri Sync only, opened after sign-in when
+      this device holds a collection and by the status action Choose…: it shows the message, the
+      server address, the two buttons with their effect lines and Cancel, and a button still leads
+      to sync.meguriSetup's preview, which keeps the bound confirmation. Not built yet: the counts
+      side by side, the buttons as the confirmation itself, the one-direction form, and the sheet
+      for iCloud, whose choice is still sync.connect's and sync.publicationChoice's. Typical: both
+      sides hold a collection. Loading: the chosen direction's progress. Error: the facts changed
+      and a new choice is needed. Identifiers sync.keepCollection.sheet,
+      sync.keepCollection.message, sync.keepCollection.keepDevice, sync.keepCollection.keepService,
+      sync.keepCollection.cancel. Test route settings/sync/keep-collection.
   - id: sync.serviceSwitch
     title: Change sync service
     units: [U161]
@@ -1779,8 +1714,14 @@ screens:
     variants: pairwise
     references: [sheet-form]
     purpose: >-
+      Round 2 (native-interface-contract N15.2; sync/status-strings T19.2; sync/cloudkit-recovery
+      V27.5): the sheet also confirms Off, with the title and destructive button
+      `sync.switch.title.off` and `sync.switch.confirm.off` and the line `sync.switch.next.localOnly`;
+      for a service it shows `sync.switch.next.iCloud.setup` or `sync.switch.next.meguri.setup`, and
+      the new service's setup follows with no Connect step. It never opens from Off, and it does not
+      open while V27.5 refuses the change. Where the text below differs, this paragraph wins.
       The sheet that confirms a change of sync service (sync/meguri-provider MP2, MP3;
-      native-interface-contract N11.8, N12.4). Opened from settings.accountSync's Sync Service
+      native-interface-contract N11.8, N12.4). Opened from settings.root's Service
       picker when the other service is chosen while one is selected, and by Meguri Sync's
       `sync.meguri.stop`. Text: sync/status-strings T18.2. Title `sync.switch.title.*` by
       destination; then the old service's pending and held lines in T18.2's order, from its local
@@ -1810,7 +1751,7 @@ screens:
     purpose: >-
       The preview sheet that confirms Meguri Sync's first transfer of the collection and its media
       (sync/meguri-provider MP4, MP5; native-interface-contract N8, N11.8). Opened when
-      settings.accountSync's setup stage reaches its preview, after Use This Device’s Collection…,
+      the Sync section's setup stage reaches its preview, after Use This Device’s Collection…,
       Use Server Collection… or Download from Meguri Sync…, which only start the preparation and
       change nothing. Text: sync/status-strings T18.5. Title `sync.meguri.preview.title.*` by
       direction; `sync.meguri.preview.server` with the endpoint; this device's T11.1 cards, notes and
@@ -1825,11 +1766,11 @@ screens:
       placement or a default shortcut, so Return confirms no replacement, and Esc cancels (N11.8); a
       download replaces nothing, and `sync.meguri.preview.confirm.download` is a plain confirm
       button. The confirmation is bound to the shown preview's operation; a new preview replaces the
-      facts and needs a new choice. After confirming, the sheet closes and settings.accountSync's
+      facts and needs a new choice. After confirming, the sheet closes and the Sync section's
       status row shows the collection and then the media phase, never one success line; Server
       Acceptance Unknown and Media Incomplete stay until settled (T18.5, T18.6). Typical: Use This
       Device’s Collection… with counts and the warning. Overflow: a long endpoint and the largest text
-      sizes scroll under a fixed toolbar. Failures show in settings.accountSync, not here.
+      sizes scroll under a fixed toolbar. Failures show in the Sync section's status, not here.
       Identifiers sync.meguriSetup.cancel, sync.meguriSetup.confirm.
   - id: sync.quitFlush
     title: Mac quit sheet

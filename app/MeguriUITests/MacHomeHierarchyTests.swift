@@ -61,10 +61,8 @@ final class MacHomeHierarchyTests: XCTestCase {
                 : "Stage the generated owned-sync-review-1 fixture through tools/mg")
         XCTAssertEqual(homeScreens.count, 1)
         // N14.1: the sidebar is the Mac's only deck outline.
-        _ = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
-        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "home.policy.enable"))
-            .element(boundBy: 0).exists, "The generated recipe must already enable FSRS")
-        XCTAssertEqual(app.sheets.count, 0, "Unexpected admission sheets are fixture prerequisite failures")
+        _ = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review › Cards")
+        XCTAssertEqual(app.sheets.count, 0, "Nothing asks before Home (N18.1)")
 
         func waitFor(_ predicate: @escaping () -> Bool, _ message: String) {
             let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in predicate() }, object: nil)
@@ -96,10 +94,14 @@ final class MacHomeHierarchyTests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         XCTAssertEqual(settingsWindows.count, 1)
         finiteWindow(settings)
-        _ = unique(settings, "settings.root.accountSync")
-        let picker = unique(settings, "settings.accountSync.service")
+        // N15.1: the list has Sync and Collection; the Sync pane holds the Service control.
+        _ = unique(settings, "settings.root.sync")
+        _ = unique(settings, "settings.root.collection")
+        let picker = unique(settings, "settings.sync.service")
         XCTAssertEqual(picker.elementType, .popUpButton)
         actionable(picker)
+        // T19.2: Off, Meguri Sync, iCloud, in that order; iCloud carries its Beta label.
+        let captions = ["Off", "Meguri Sync", "iCloud (Beta)"]
 
         func choose(_ caption: String) throws {
             actionable(picker)
@@ -107,10 +109,10 @@ final class MacHomeHierarchyTests: XCTestCase {
             let items = picker.menuItems
             XCTAssertTrue(items.matching(NSPredicate(format: "title == %@", "Meguri Sync"))
                 .element(boundBy: 0).waitForExistence(timeout: 10))
-            XCTAssertEqual(items.count, 2, "LocalOnly is a separate Stop action, never a third provider")
-            XCTAssertEqual(Set(items.allElementsBoundByIndex.map(\.title)), Set(["iCloud Sync", "Meguri Sync"]),
-                "Require the full native menu's actual captions")
-            for title in ["iCloud Sync", "Meguri Sync"] {
+            XCTAssertEqual(items.count, 3, "Off is the first value of the one Service control")
+            XCTAssertEqual(items.allElementsBoundByIndex.map(\.title), captions,
+                "Require the full native menu's actual captions, in order")
+            for title in captions {
                 let options = items.matching(NSPredicate(format: "title == %@", title))
                 XCTAssertEqual(options.count, 1, "Require the exact native service caption: \(title)")
                 XCTAssertEqual(options.element(boundBy: 0).elementType, .menuItem)
@@ -124,26 +126,36 @@ final class MacHomeHierarchyTests: XCTestCase {
             actionable(option)
             try click(option, app: app, bundle: bundle)
         }
+        func count(_ id: String) -> Int {
+            settings.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", id)).count
+        }
         func meguriForm() {
             waitFor({ picker.value as? String == "Meguri Sync" }, "The real Picker must retain Meguri selection")
             actionable(picker)
             for name in ["address", "username", "password"] {
-                let field = unique(settings, "settings.accountSync.meguri.\(name)")
+                let field = unique(settings, "settings.sync.meguri.\(name)")
                 XCTAssertEqual(field.elementType, name == "password" ? .secureTextField : .textField)
                 actionable(field)
             }
-            let secure = settings.secureTextFields.matching(NSPredicate(format: "identifier == %@", "settings.accountSync.meguri.password"))
+            let secure = settings.secureTextFields.matching(NSPredicate(format: "identifier == %@", "settings.sync.meguri.password"))
             XCTAssertEqual(secure.count, 1, "Password must be an actual native secure field")
-            let signIn = unique(settings, "settings.accountSync.meguri.signIn")
+            let signIn = unique(settings, "settings.sync.meguri.signIn")
             XCTAssertEqual(signIn.elementType, .button)
             XCTAssertFalse(signIn.isEnabled, "The empty setup form cannot sign in")
-            for id in ["iCloudHeading", "connect", "automatic", "media"] {
-                XCTAssertEqual(settings.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "settings.accountSync.\(id)")).count, 0)
+            // P25.3: selected but not connected, the switch shows its stored value and is disabled.
+            let automatic = unique(settings, "settings.sync.automatic")
+            XCTAssertFalse(automatic.isEnabled, "Sync Automatically has no effect before the service is connected")
+            // T19.6: no media toggle, Pause, Sign Out, Stop Using or Connect.
+            for id in ["settings.sync.media", "settings.sync.pause", "settings.sync.stop", "settings.sync.connect",
+                       "settings.sync.meguri.signOut", "settings.sync.privacyFooter"] {
+                XCTAssertEqual(count(id), 0, id)
             }
         }
+        // A choice made while the value is Off opens no confirmation (T19.2).
         try choose("Meguri Sync")
+        XCTAssertEqual(settings.sheets.count, 0)
         meguriForm()
-        try choose("iCloud Sync")
+        try choose("iCloud (Beta)")
         let sheets = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.serviceSwitch.cancel"))
         let sheet = sheets.element(boundBy: 0)
         XCTAssertTrue(sheet.waitForExistence(timeout: 10))
@@ -160,7 +172,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         XCTAssertEqual(sheets.count, 1)
         XCTAssertEqual(picker.value as? String, "Meguri Sync")
         for id in ["address", "username", "password", "signIn"] {
-            _ = unique(settings, "settings.accountSync.meguri.\(id)")
+            _ = unique(settings, "settings.sync.meguri.\(id)")
         }
         actionable(cancel)
         try click(cancel, app: app, bundle: bundle)
@@ -183,59 +195,60 @@ final class MacHomeHierarchyTests: XCTestCase {
                 let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in predicate() }, object: nil)
                 XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 60), .completed, message)
             }
+            // Connected and settled: Sync Now can run, no status action waits on the person.
             func availableSync() -> Bool {
-                let button = settings.buttons.matching(identifier: "settings.accountSync.meguri.syncNow").element(boundBy: 0)
+                let button = settings.buttons.matching(identifier: "settings.sync.syncNow").element(boundBy: 0)
                 return button.exists && button.isEnabled && button.isHittable && settings.sheets.count == 0
-                    && ["useDevice", "useServer", "finishSetup", "cancelSetup", "retryConnection", "retryMedia"].allSatisfy {
-                        settings.descendants(matching: .any).matching(identifier: "settings.accountSync.meguri.\($0)").count == 0
+                    && ["settings.sync.statusAction", "settings.sync.issues", "settings.sync.meguri.signIn"].allSatisfy {
+                        settings.descendants(matching: .any).matching(identifier: $0).count == 0
                     }
             }
-            try enter(journey.address, id: "settings.accountSync.meguri.address")
-            try enter(journey.username, id: "settings.accountSync.meguri.username")
-            try enter(journey.password, id: "settings.accountSync.meguri.password")
-            let signIn = unique(settings, "settings.accountSync.meguri.signIn")
+            try enter(journey.address, id: "settings.sync.meguri.address")
+            try enter(journey.username, id: "settings.sync.meguri.username")
+            try enter(journey.password, id: "settings.sync.meguri.password")
+            let signIn = unique(settings, "settings.sync.meguri.signIn")
             actionable(signIn)
             journeyCleanup.pending = true
             try click(signIn, app: app, bundle: bundle)
-            waitForJourney({
-                settings.buttons.matching(identifier: "settings.accountSync.meguri.useDevice").count == 1
-                    && settings.buttons.matching(identifier: "settings.accountSync.meguri.signOut").count == 1
-                    && settings.buttons.matching(identifier: "settings.accountSync.meguri.signIn").count == 0
-            }, "Require actual signed-in setup controls")
-            for id in ["useDevice", "useServer", "signOut"] {
-                let control = unique(settings, "settings.accountSync.meguri.\(id)")
-                XCTAssertEqual(control.elementType, .button)
-                actionable(control)
-            }
-            let useDevice = unique(settings, "settings.accountSync.meguri.useDevice")
-            try click(useDevice, app: app, bundle: bundle)
-            let previews = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.meguriSetup.confirm"))
-            let preview = previews.element(boundBy: 0)
-            XCTAssertTrue(preview.waitForExistence(timeout: 60), "Require the actual setup preview")
-            XCTAssertEqual(previews.count, 1)
+            // MP6.3: signing in is the consent to set the service up. Both sides hold a
+            // collection, so Meguri asks which one to keep (N15.3).
+            let keeps = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.keepCollection.keepDevice"))
+            let keep = keeps.element(boundBy: 0)
+            XCTAssertTrue(keep.waitForExistence(timeout: 60), "Require the keep-collection sheet after sign-in")
+            XCTAssertEqual(keeps.count, 1)
             XCTAssertEqual(settings.sheets.count, 1)
-            let previewCancel = unique(preview, "sync.meguriSetup.cancel")
-            let previewConfirm = unique(preview, "sync.meguriSetup.confirm")
-            for control in [previewCancel, previewConfirm] {
+            XCTAssertEqual(count("settings.sync.meguri.signIn"), 0, "The sign-in fields give way to the Account row")
+            for id in ["keepDevice", "keepService", "cancel"] {
+                let control = unique(keep, "sync.keepCollection.\(id)")
                 XCTAssertEqual(control.elementType, .button)
                 actionable(control)
             }
+            try app.bringToFront(bundleIdentifier: bundle)
+            keep.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
+            XCTAssertTrue(keep.exists, "Return must confirm neither destructive choice")
+            // N15.3: a button of the sheet is the confirmation, bound by the core to the
+            // facts shown; no preview sheet and no alert follow it.
             for caption in [
-                "The server’s collection will be replaced with this device’s collection. Meguri first backs up this device’s collection and keeps a copy of the server’s collection.",
+                "The collection on your Meguri Sync server is replaced. Meguri first saves a copy of it on this device.",
                 "Stop syncing on your other devices until this finishes. Changes they send to the server meanwhile can be replaced.",
-                "Media then syncs both ways. On either side, files can be added, replaced or deleted. Files that no card uses are kept.",
-                "After setup, Meguri Sync syncs this collection and its media automatically."
+                "Media then syncs both ways. On either side, files can be added, replaced or deleted. Files that no card uses are kept."
             ] {
-                let content = preview.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", caption, caption))
-                XCTAssertTrue(content.element(boundBy: 0).waitForExistence(timeout: 10), "Require ordinary setup consequence content")
+                let content = keep.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", caption, caption))
+                XCTAssertTrue(content.element(boundBy: 0).waitForExistence(timeout: 10), "Require the choice's consequence in the sheet")
                 XCTAssertEqual(content.count, 1)
             }
-            try click(previewConfirm, app: app, bundle: bundle)
+            let keepDevice = unique(keep, "sync.keepCollection.keepDevice")
+            try click(keepDevice, app: app, bundle: bundle)
+            XCTAssertEqual(settings.descendants(matching: .any).matching(identifier: "sync.meguriSetup.confirm").count, 0,
+                "No second confirmation follows the sheet's button")
             waitForJourney({ availableSync() }, "Setup must finish with available native Sync Now and no unresolved setup sheet")
-            XCTAssertEqual(unique(settings, "settings.accountSync.meguri.syncNow").elementType, .button)
+            XCTAssertEqual(unique(settings, "settings.sync.syncNow").elementType, .button)
+            // N15.2 row 2: once signed in, one Account row takes the fields' place.
+            _ = unique(settings, "settings.sync.meguri.account")
+            _ = unique(settings, "settings.sync.troubleshooting")
 
             waitForJourney({ availableSync() }, "Native Sync Now must be available before the daily action")
-            let syncNow = unique(settings, "settings.accountSync.meguri.syncNow")
+            let syncNow = unique(settings, "settings.sync.syncNow")
             actionable(syncNow)
             func successSequence() -> UInt64? {
                 let prefix = "meguri-round-success-sequence:"
@@ -252,8 +265,9 @@ final class MacHomeHierarchyTests: XCTestCase {
                 guard let sequence = successSequence(), sequence > baseline else { return false }
                 return availableSync()
             }, "Require a fresh successful collection/media round and available controls before review")
-            let automatic = unique(settings, "settings.accountSync.meguri.automatic")
+            let automatic = unique(settings, "settings.sync.automatic")
             XCTAssertTrue(automatic.isEnabled, "Require the ready binding's native Sync Automatically control")
+            // P25.3: with no stored value Sync Automatically reads on from the first completed setup.
             XCTAssertTrue(automatic.value as? String == "1" || automatic.value as? NSNumber == NSNumber(value: 1),
                 "Sync Automatically must report the exact native ON value after bootstrap")
 
@@ -268,7 +282,7 @@ final class MacHomeHierarchyTests: XCTestCase {
             let offSequence = try XCTUnwrap(successSequence(), "Require the exact settled OFF success sequence before review")
             settings.typeKey("w", modifierFlags: .command)
             XCTAssertTrue(settings.waitForNonExistence(timeout: 10), "Close the actual Settings window")
-            let deck = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
+            let deck = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review › Cards")
             actionable(deck)
             try click(deck, app: app, bundle: bundle)
             let study = unique(main, "home.deck.study")
@@ -317,26 +331,30 @@ final class MacHomeHierarchyTests: XCTestCase {
                 guard let sequence = successSequence(), sequence > offSequence else { return false }
                 return availableSync() && automatic.exists && automatic.isEnabled && automatic.isHittable
                     && (automatic.value as? String == "1" || automatic.value as? NSNumber == NSNumber(value: 1))
-            }, "Require a fresh successful collection/media round and available controls before Sign Out")
-            let signOut = unique(settings, "settings.accountSync.meguri.signOut")
-            actionable(signOut)
-            try click(signOut, app: app, bundle: bundle)
-            let confirmations = settings.sheets.containing(NSPredicate(format: "label == %@", "Sign Out"))
-            let confirmation = confirmations.element(boundBy: 0)
-            XCTAssertTrue(confirmation.waitForExistence(timeout: 10))
-            XCTAssertEqual(confirmations.count, 1)
+            }, "Require a fresh successful collection/media round and available controls before turning sync off")
+            // V27.5, T19.2: Off is the one way out. It asks once, names the removed
+            // sign-in, and its destructive button is not the default.
+            try choose("Off")
+            let offSheets = settings.sheets.containing(NSPredicate(format: "identifier == %@", "sync.serviceSwitch.confirm"))
+            let offSheet = offSheets.element(boundBy: 0)
+            XCTAssertTrue(offSheet.waitForExistence(timeout: 10))
+            XCTAssertEqual(offSheets.count, 1)
             XCTAssertEqual(settings.sheets.count, 1)
-            let destructive = confirmation.buttons.matching(NSPredicate(format: "label == %@", "Sign Out"))
-            XCTAssertEqual(destructive.count, 1)
-            let signOutConfirm = destructive.element(boundBy: 0)
-            XCTAssertEqual(signOutConfirm.elementType, .button)
-            actionable(signOutConfirm)
-            try click(signOutConfirm, app: app, bundle: bundle)
+            let offConfirm = unique(offSheet, "sync.serviceSwitch.confirm")
+            XCTAssertEqual(offConfirm.elementType, .button)
+            XCTAssertTrue(offConfirm.label == "Turn Off Sync" || offConfirm.title == "Turn Off Sync")
+            try app.bringToFront(bundleIdentifier: bundle)
+            offSheet.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
+            XCTAssertTrue(offSheet.exists, "Return must not turn sync off")
+            XCTAssertEqual(picker.value as? String, "Meguri Sync")
+            actionable(offConfirm)
+            try click(offConfirm, app: app, bundle: bundle)
             waitForJourney({
-                settings.sheets.count == 0 && picker.exists && picker.isEnabled
+                settings.sheets.count == 0 && picker.exists && picker.isEnabled && picker.value as? String == "Off"
                     && settings.staticTexts["Choose a service to sync this collection."].exists
-                    && ["signOut", "signIn", "syncNow", "status"].allSatisfy {
-                        settings.descendants(matching: .any).matching(identifier: "settings.accountSync.meguri.\($0)").count == 0
+                    && ["settings.sync.meguri.signIn", "settings.sync.meguri.account", "settings.sync.syncNow",
+                        "settings.sync.status", "settings.sync.automatic", "settings.sync.troubleshooting"].allSatisfy {
+                        settings.descendants(matching: .any).matching(identifier: $0).count == 0
                     }
             }, "Owned provider journey cleanup-pending")
             journeyCleanup.pending = false
@@ -351,7 +369,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         // N14.1: the sidebar is the Mac's only deck outline; with no deck selected the
         // The detail column shows the Today page and no second deck list.
         let sidebarParent = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review")
-        let sidebarChild = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
+        let sidebarChild = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review › Cards")
         let parentID = String(sidebarParent.identifier.dropFirst("home.sidebar.deck.".count))
         let childID = String(sidebarChild.identifier.dropFirst("home.sidebar.deck.".count))
         assertTodayRoot(app, readyDeckID: childID)
@@ -378,9 +396,9 @@ final class MacHomeHierarchyTests: XCTestCase {
         try openChildMenu(sidebarChild, deckID: childID, app: app, bundle: bundle)
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-        XCTAssertTrue(menuItem(app, action: "overview", deckID: childID).waitForNonExistence(timeout: 10))
-        try openChildMenu(sidebarChild, deckID: childID, app: app, bundle: bundle)
-        try click(menuItem(app, action: "overview", deckID: childID), app: app, bundle: bundle)
+        XCTAssertTrue(menuItem(app, action: "study", deckID: childID).waitForNonExistence(timeout: 10))
+        // N20.2: the menu has no Overview; the row itself opens the child's page.
+        try click(sidebarChild, app: app, bundle: bundle)
         assertPage(app, deckID: childID)
         try showDecksRoot(app, bundle: bundle)
         assertTodayRoot(app, readyDeckID: childID)
@@ -410,7 +428,7 @@ final class MacHomeHierarchyTests: XCTestCase {
     func testSavedStudyCollapseSurvivesRestartWithoutReseeding() throws {
         let (app, bundle) = try launchFixture()
         let parent = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review")
-        let child = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review::Cards")
+        let child = namedRow(app, prefix: "home.sidebar.deck.", path: "Local Review › Cards")
         let parentID = String(parent.identifier.dropFirst("home.sidebar.deck.".count))
         let childID = String(child.identifier.dropFirst("home.sidebar.deck.".count))
         try assertExpandedHierarchy(app, parentID: parentID, childID: childID)
@@ -448,8 +466,6 @@ final class MacHomeHierarchyTests: XCTestCase {
         app.launchArguments = launchArguments(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"))
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
-        let enable = element(app, "home.policy.enable")
-        if enable.waitForExistence(timeout: 5) { try click(enable, app: app, bundle: bundle) }
         try showDecksRoot(app, bundle: bundle)
         return (app, bundle)
     }
@@ -555,7 +571,8 @@ final class MacHomeHierarchyTests: XCTestCase {
     private func openChildMenu(_ row: XCUIElement, deckID: String, app: XCUIApplication, bundle: String) throws {
         try app.bringToFront(bundleIdentifier: bundle)
         row.rightClick()
-        let actions = [(action: "study", title: "Study"), (action: "addNote", title: "Add Note"), (action: "overview", title: "Overview"),
+        // N20.2: Study and Add Note, then Rename… and New Subdeck…; no Overview.
+        let actions = [(action: "study", title: "Study"), (action: "addNote", title: "Add Note"),
             (action: "rename", title: "Rename…"), (action: "subdeck", title: "New Subdeck…")]
         for (action, title) in actions {
             let matches = app.menuItems.matching(identifier: "home.deckMenu.\(action).\(deckID)")
@@ -579,7 +596,7 @@ final class MacHomeHierarchyTests: XCTestCase {
         // AppKit's staticText parent labels and numeric sidebar badge values.
         let expectedRows = [
             (id: "home.sidebar.deck.1884308400001", type: "staticText", label: "Local Review", value: "4"),
-            (id: "home.sidebar.deck.1884308400002", type: "button", label: "Local Review::Cards", value: "4")
+            (id: "home.sidebar.deck.1884308400002", type: "button", label: "Local Review › Cards", value: "4")
         ]
         for expected in expectedRows {
             let rows = tree.elements(expected.id)

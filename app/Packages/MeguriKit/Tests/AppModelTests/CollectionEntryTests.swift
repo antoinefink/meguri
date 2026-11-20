@@ -88,7 +88,7 @@ extension ReviewCollectionStartupTests {
             await activation.waitUntilHeld()
             #expect(owner.generation == generation && factories == 1)
             sync.receive(.foreground)
-            sync.setDeviceSettings(paused: true, automatic: false, media: false)
+            sync.setDeviceSettings(paused: true, automatic: false)
             await sync.preparePlatform(); await sync.waitForInputs()
             #expect(factories == 1 && bootstraps == 1 && successor.events.isEmpty)
             if outcome == .cancelled { await activationOperation?.cancel() }
@@ -254,7 +254,7 @@ extension ReviewCollectionStartupTests {
             owner.entry.inspect(source); await owner.entry.waitForCompletion()
             try #require(owner.entry.preview != nil)
             _ = try await CoreDeckService().addDeck(name: "Committed after preview")
-            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             #expect(owner.entry.failure?.issue == .staleConfirmation)
             #expect(owner.entry.preview == nil && owner.entry.needsReinspection)
             #expect(owner.state == .ready && owner.generation == generation)
@@ -269,7 +269,7 @@ extension ReviewCollectionStartupTests {
             }
             owner.entry.inspect(source); await owner.entry.waitForCompletion()
             try #require(owner.entry.preview != nil)
-            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             #expect(owner.entry.failure?.issue == .core(.sessionActive))
             #expect(owner.generation == generation)
             try await Core.endSession(sessionID: session)

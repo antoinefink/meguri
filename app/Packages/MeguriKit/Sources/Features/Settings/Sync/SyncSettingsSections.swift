@@ -6,6 +6,8 @@ import SwiftUI
 struct SyncSettingsSections: View {
     let collection: ReviewCollection
     var host: AppNavigation.SheetHost = .main
+    /// The sign-in fields' text, owned above any layout that rebuilds this section.
+    var draft: MeguriSignInDraft
     private var sync: SyncCoordinator { collection.sync }
     private var selection: SyncProviderSelection? {
         switch sync.providerState?.selection {
@@ -17,7 +19,7 @@ struct SyncSettingsSections: View {
     var body: some View {
         Section {
             SyncServiceRows(collection: collection, host: host)
-            if selection == .meguri { MeguriAccountRows(collection: collection) }
+            if selection == .meguri { MeguriAccountRows(collection: collection, draft: draft) }
             if selection != nil || sync.providerNeedsAttention {
                 SyncMainStatusRows(collection: collection, host: host)
             }
@@ -26,7 +28,10 @@ struct SyncSettingsSections: View {
                     get: { sync.automaticSwitchValue }, set: { sync.setAutomatic($0) }))
                     .disabled(!sync.automaticSwitchAvailable)
                     .accessibilityIdentifier("settings.sync.automatic")
-                SyncNowButton(collection: collection, identifier: "settings.sync.syncNow")
+                // Until the service is connected the status row says what is missing; the
+                // not-connected reason ("Sync is off…") would contradict the Service row.
+                SyncNowButton(collection: collection, identifier: "settings.sync.syncNow",
+                    showsUnavailableReason: sync.serviceConnected)
             }
         } header: {
             Text(SyncText.value("sync.settings.sync.section"))
@@ -49,6 +54,19 @@ struct SyncSettingsSections: View {
             }
         }
     }
+}
+
+/// What the person typed into the Meguri Sync sign-in fields. The Settings page
+/// owns it, so a layout change that rebuilds the section keeps the text. The
+/// password leaves it at submission and when the page goes away.
+@Observable public final class MeguriSignInDraft {
+    public var address = ""
+    public var username = ""
+    public var password = ""
+    /// A Sign In made in the fields continues into setup (MP6.3). Kept here, not
+    /// in the view, so a layout change between Sign In and setup does not lose it.
+    public var setupAfterSignIn = false
+    public init() {}
 }
 
 /// The service's name; iCloud carries its Beta label as separate text (T19.1).
@@ -92,11 +110,8 @@ struct SyncServiceRows: View {
         case .localOnly, nil: "localOnly"
         }
     }
-    /// V27.5: Off is refused while an `adopt` or `publish` op could restore the binding before.
-    private var opBlocksChange: Bool {
-        guard sync.providerState?.selection == .iCloud, let recovery = sync.recovery else { return false }
-        return !recovery.switchConflict
-    }
+    /// V27.5: refused while an op could restore the binding before, or could not be read.
+    private var opBlocksChange: Bool { sync.serviceChangeRefusedForOperation }
     var body: some View {
         Picker(SyncText.value("sync.service.control"), selection: Binding(get: { selected }, set: choose)) {
             Text(SyncText.value("sync.service.off")).tag("localOnly")
@@ -115,7 +130,7 @@ struct SyncServiceRows: View {
         .sheet(isPresented: Binding(get: { destination != nil }, set: { if !$0 && !changing { destination = nil } })) {
             if let destination, let switchSource {
                 SyncServiceSwitchSheet(collection: collection, source: switchSource, destination: destination, changing: changing,
-                    failed: failed, cancel: { self.destination = nil }, confirm: { change(destination) })
+                    failed: failed, cancel: { self.destination = nil }, confirm: { change(destination, shown: switchSource) })
             }
         }
         if changing {
@@ -145,19 +160,29 @@ struct SyncServiceRows: View {
         if selected != "localOnly" { switchSource = sync.providerState?.selection; destination = value }
         else { change(value) }
     }
-    private func change(_ value: String) {
+    /// `shown`: the service the confirmation sheet named. When the selection is
+    /// no longer that one, the sheet closes and nothing changes.
+    private func change(_ value: String, shown: SyncProviderSelection? = nil) {
         let source = sync.providerState?.selection
+        if let shown, shown != source { destination = nil; return }
         changing = true; failed = false
         Task {
             do {
                 try await collection.prepareSyncServiceSelection()
                 let current = collection.sync
+                // A choice in the Service control clears the update hold, by writing
+                // `paused: false` before the change itself is asked for (P25.2).
+                guard await current.clearUpdateHold() else { failed = true; changing = false; return }
+                // The selection is not reserved across those waits: a change of it
+                // ends this switch, and the person confirms again.
+                // No state yet shows as Off, the same as `.localOnly`.
+                guard (current.providerState?.selection ?? .localOnly) == (source ?? .localOnly) else {
+                    destination = nil; changing = false; return
+                }
                 let succeeded: Bool
                 if value == "localOnly", source == .iCloud {
                     // V27.5's rows, through the retained operations.
-                    if current.status?.controls.bindingActive == true { await current.stopUsingICloud() }
-                    else { await current.keepLocalOnly() }
-                    succeeded = collection.sync.providerState?.selection != .iCloud
+                    succeeded = await current.turnOffICloud()
                 } else {
                     let target: SyncProviderSelection = value == "meguri" ? .meguri : value == "iCloud" ? .iCloud : .localOnly
                     succeeded = await current.changeProvider(to: target, removeMeguriCredentials: source == .meguri)
@@ -165,8 +190,6 @@ struct SyncServiceRows: View {
                 failed = !succeeded
                 if succeeded {
                     destination = nil
-                    // A choice in the Service control clears the update hold (P25.2).
-                    await collection.sync.clearUpdateHold()
                     if value == "iCloud" { collection.presentCloudSync(.connect, host: host) }
                 }
             } catch { failed = true }
@@ -178,10 +201,15 @@ struct SyncServiceRows: View {
 /// N15.2 row 2 and MP6.1: the sign-in fields until signed in, then one Account row.
 struct MeguriAccountRows: View {
     let collection: ReviewCollection
-    @State private var address = ""
-    @State private var username = ""
-    @State private var password = ""
-    @State private var choosing = false
+    let draft: MeguriSignInDraft
+    /// A Sign In made here continues into setup (MP6.3). Setup that was left
+    /// unfinished earlier continues only from a user action.
+    private var setupAfterSignIn: Bool {
+        get { draft.setupAfterSignIn } nonmutating set { draft.setupAfterSignIn = newValue }
+    }
+    private var address: String { get { draft.address } nonmutating set { draft.address = newValue } }
+    private var username: String { get { draft.username } nonmutating set { draft.username = newValue } }
+    private var password: String { get { draft.password } nonmutating set { draft.password = newValue } }
     private var sync: SyncCoordinator { collection.sync }
     private var changing: Bool { collection.syncPresentation.serviceChanging }
     private var signedIn: Bool { sync.meguriPhase == .setupRequired && sync.meguriRoutine != .authentication }
@@ -191,31 +219,37 @@ struct MeguriAccountRows: View {
         Group {
             if showsFields {
                 Group {
-                    TextField(SyncText.value("sync.meguri.address"), text: Binding(get: { address }, set: {
-                        guard !processing else { return }
-                        address = $0; password = ""; sync.meguriAddressEdited()
-                    }))
-                        #if os(iOS)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("settings.sync.meguri.address")
-                    TextField(SyncText.value("sync.meguri.username"), text: Binding(get: { username }, set: {
-                        if !processing { username = $0 }
-                    }))
-                        .textContentType(.username)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("settings.sync.meguri.username")
-                    SecureField(SyncText.value("sync.meguri.password"), text: Binding(get: { password }, set: {
-                        if !processing { password = $0 }
-                    }))
-                        .textContentType(.password)
-                        .onSubmit(signIn)
-                        .accessibilityIdentifier("settings.sync.meguri.password")
+                    field("sync.meguri.address") {
+                        TextField(SyncText.value("sync.meguri.address"), text: Binding(get: { address }, set: {
+                            guard !processing else { return }
+                            address = $0; password = ""; sync.meguriAddressEdited()
+                        }), prompt: fieldPrompt)
+                            #if os(iOS)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("settings.sync.meguri.address")
+                    }
+                    field("sync.meguri.username") {
+                        TextField(SyncText.value("sync.meguri.username"), text: Binding(get: { username }, set: {
+                            if !processing { username = $0 }
+                        }), prompt: fieldPrompt)
+                            .textContentType(.username)
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("settings.sync.meguri.username")
+                    }
+                    field("sync.meguri.password") {
+                        SecureField(SyncText.value("sync.meguri.password"), text: Binding(get: { password }, set: {
+                            if !processing { password = $0 }
+                        }), prompt: fieldPrompt)
+                            .textContentType(.password)
+                            .onSubmit(signIn)
+                            .accessibilityIdentifier("settings.sync.meguri.password")
+                    }
                 }
                 .disabled(processing || changing)
                 Button(SyncText.value("sync.meguri.signIn"), action: signIn)
@@ -230,8 +264,26 @@ struct MeguriAccountRows: View {
                         .accessibilityIdentifier("settings.sync.meguri.signInError")
                 }
             } else {
-                LabeledContent(SyncText.value("sync.settings.account"), value: sync.meguriEndpoint)
-                    .accessibilityIdentifier("settings.sync.meguri.account")
+                // N15.2 row 2: the username is the row's value; the page has both facts.
+                NavigationLink {
+                    Form {
+                        LabeledContent(SyncText.value("sync.meguri.address"), value: sync.meguriEndpoint)
+                            .accessibilityIdentifier("settings.sync.meguri.account.address")
+                        LabeledContent(SyncText.value("sync.meguri.username"), value: sync.meguriUsername ?? "")
+                            .accessibilityIdentifier("settings.sync.meguri.account.username")
+                    }
+                    .formStyle(.grouped)
+                    .navigationTitle(SyncText.value("sync.settings.account"))
+                    .accessibilityIdentifier("settings.sync.meguri.account.content")
+                } label: {
+                    LabeledContent(SyncText.value("sync.settings.account"), value: sync.meguriUsername ?? "")
+                }
+                .accessibilityIdentifier("settings.sync.meguri.account")
+                // Setup left unfinished in an earlier session continues only from here.
+                if sync.meguriStage == .required, sync.meguriCanChoose, !setupAfterSignIn, sync.meguriSetupDecision == nil {
+                    Button(SyncText.value("sync.recovery.tryAgain")) { sync.startMeguriSetup() }
+                        .accessibilityIdentifier("settings.sync.meguri.continueSetup")
+                }
             }
             if collection.meguriSignInPreparing {
                 ProgressView(SyncText.value("sync.meguri.signIn.preparing"))
@@ -242,71 +294,178 @@ struct MeguriAccountRows: View {
                 } else { ProgressView() }
             }
         }
-        .onAppear { address = sync.meguriEndpoint; startSetupIfAsked() }
+        .onAppear { if address.isEmpty { address = sync.meguriEndpoint }; startSetupIfAsked() }
         .onChange(of: sync.meguriEndpoint) { _, endpoint in address = endpoint; password = "" }
         .onChange(of: sync.meguriCanChoose) { _, _ in startSetupIfAsked() }
-        .onDisappear { password = "" }
-        .sheet(isPresented: Binding(
-            get: { choosing || collection.syncPresentation.keepCollectionRequested },
-            set: { choosing = $0; if !$0 { collection.syncPresentation.keepCollectionRequested = false } })) {
-            MeguriKeepCollectionSheet(collection: collection) {
-                choosing = false; collection.syncPresentation.keepCollectionRequested = false
+        .onChange(of: sync.meguriCanSettle) { _, _ in startSetupIfAsked() }
+        .onChange(of: collection.syncPresentation.keepCollectionRequested) { _, _ in startSetupIfAsked() }
+        // The one presentation of the keep-collection sheet (N15.3). The core's
+        // decision opens it; no view state can.
+        .sheet(isPresented: Binding(get: { sync.meguriSetupDecision != nil }, set: { _ in })) {
+            if let decision = sync.meguriSetupDecision {
+                MeguriKeepCollectionSheet(collection: collection, facts: decision.facts, account: decision.account)
             }
         }
-        .sheet(isPresented: Binding(get: { sync.meguriPreview != nil && !choosing }, set: { _ in })) {
+        .sheet(isPresented: Binding(get: { sync.meguriPreview != nil }, set: { _ in })) {
             if let preview = sync.meguriPreview { MeguriSetupPreviewSheet(collection: collection, preview: preview) }
         }
     }
+    /// MP2's labelled fields: the label leading and the value trailing, as the
+    /// system's Settings forms have. A Mac form already draws a field's title that way.
+    /// The leading label names the field, so the field repeats no placeholder.
+    private var fieldPrompt: Text? {
+        #if os(macOS)
+        nil
+        #else
+        Text(verbatim: "")
+        #endif
+    }
+    @ViewBuilder private func field(_ key: String, @ViewBuilder content: () -> some View) -> some View {
+        #if os(macOS)
+        content()
+        #else
+        // The field carries the same name for VoiceOver, so the visible label is not read twice.
+        HStack {
+            Text(SyncText.value(key)).accessibilityHidden(true)
+            content().multilineTextAlignment(.trailing)
+        }
+        #endif
+    }
     private func signIn() {
-        let secret = password; password = ""
-        guard !processing, !changing, !address.isEmpty, !username.isEmpty, !secret.isEmpty else { return }
+        // All three values are those of the tap: an edit made while the hold
+        // clears never sends this password to another address or account.
+        let endpoint = address, account = username, secret = password
+        password = ""
+        guard !processing, !changing, !endpoint.isEmpty, !account.isEmpty, !secret.isEmpty else { return }
+        setupAfterSignIn = true
+        // A request left by an earlier status action is not this sign-in's:
+        // Cancel during this setup leaves the service Off (MP6.3).
+        collection.syncPresentation.keepCollectionRequested = false
         Task {
             // Signing in to set the service up is a service choice: it clears the hold.
-            guard await sync.clearUpdateHold() else { return }
-            collection.signInMeguri(endpoint: address, username: username, password: secret)
+            guard await sync.clearUpdateHold(), address == endpoint, username == account else { return }
+            collection.signInMeguri(endpoint: endpoint, username: account, password: secret)
         }
     }
-    /// MP6.3: signing in is the consent to set the service up. With no
-    /// collection on this device only a download can run; otherwise Meguri asks.
+    /// MP6.3: signing in is the consent to set the service up. The core reads
+    /// both sides and asks only when both hold a collection. MP6.9: an unknown
+    /// acceptance is settled before anything else of a setup attempt.
     private func startSetupIfAsked() {
-        guard sync.meguriCanChoose, sync.meguriStage == .required, sync.meguriPreview == nil else { return }
-        if collection.lifecycle == .noCollection { sync.prepareMeguri(.useServerCollection) }
-        else { choosing = true }
+        let requested = collection.syncPresentation.keepCollectionRequested
+        guard setupAfterSignIn || requested else { return }
+        if sync.meguriCanSettle {
+            setupAfterSignIn = false
+            // The request is used up here too: what follows the settling needs its own tap.
+            collection.syncPresentation.keepCollectionRequested = false
+            sync.settleMeguriSetup()
+        } else if sync.meguriCanChoose, sync.meguriSetupDecision == nil, sync.meguriPreview == nil,
+                  sync.meguriStage == .required || requested {
+            setupAfterSignIn = false
+            collection.syncPresentation.keepCollectionRequested = false
+            // A sheet opened by the status action keeps the service on Cancel (V27.4).
+            sync.startMeguriSetup(keepingService: requested)
+        }
     }
 }
 
-/// N15.3 for Meguri Sync. The core's preview of the chosen direction follows
-/// and keeps the bound confirmation (MP4), so nothing is replaced by this sheet alone.
+/// N15.3 for Meguri Sync: both sides' counts, then one button per collection.
+/// A button is the confirmation, bound by the core to the facts shown here
+/// (MP6.3); changed facts reload the sheet and need a new choice.
 struct MeguriKeepCollectionSheet: View {
     let collection: ReviewCollection
-    let close: () -> Void
+    let facts: MeguriSetupFacts
+    /// The account the core decided for; the one-direction forms name it (MP6.3).
+    var account = ""
+    @Environment(\.appClock) private var clock
     @State private var cancelling = false
+    #if os(macOS)
+    /// Keyboard focus starts on Cancel: neither replacement reads as the default (N15.3).
+    @FocusState private var cancelFocused: Bool
+    #endif
     private var sync: SyncCoordinator { collection.sync }
+    private var choices: [MeguriSetupChoice] { SyncCoordinator.meguriSetupChoices(facts.row) }
+    private var working: Bool { cancelling || sync.meguriBusy }
+    /// The one-direction forms (MP6.3): a changed endpoint or account whose
+    /// server is empty, or media files on a device with no collection.
+    private var oneDirection: Bool { facts.row == .askUploadOnly || facts.row == .askDownloadOnly }
+    private var titleKey: String {
+        switch facts.row {
+        case .askUploadOnly: "sync.keep.uploadOnly.title"
+        case .askDownloadOnly: "sync.keep.downloadOnly.title.meguri"
+        default: "sync.keep.title"
+        }
+    }
+    private var messageKey: String {
+        switch facts.row {
+        case .askUploadOnly: "sync.keep.uploadOnly.message.meguri"
+        case .askDownloadOnly: "sync.keep.downloadOnly.message.meguri"
+        default: "sync.keep.message"
+        }
+    }
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Text(SyncText.value("sync.keep.message"))
+                    #if !os(macOS)
+                    // The title is a question longer than a navigation bar holds: it wraps here.
+                    Text(SyncText.value(titleKey)).font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("sync.keepCollection.title")
+                    #endif
+                    if let key = sync.meguriSetupNoticeKey {
+                        Text(SyncText.value(key)).accessibilityIdentifier("sync.keepCollection.changed")
+                    }
+                    Text(SyncText.value(messageKey))
                         .accessibilityIdentifier("sync.keepCollection.message")
-                    LabeledContent(SyncText.value("sync.meguri.preview.server"), value: sync.meguriEndpoint)
                 }
-                Section {
-                    Button(SyncText.value("sync.keep.device"), role: .destructive) {
-                        close(); sync.prepareMeguri(.useDeviceCollection)
-                    }
-                    .accessibilityIdentifier("sync.keepCollection.keepDevice")
-                } footer: {
-                    VStack(alignment: .leading) {
-                        Text(SyncText.value("sync.keep.device.effect.meguri"))
-                        Text(SyncText.value("sync.meguri.preview.otherClients"))
+                if let device = facts.device {
+                    Section(SyncText.value("sync.counts.thisDevice")) {
+                        if facts.row == .askDownloadOnly {
+                            // No collection on this device: only its media files are counted.
+                            if let media = device.mediaFiles {
+                                LabeledContent(SyncText.value("sync.counts.mediaFiles"), value: media.formatted(.number))
+                            }
+                        } else { rows(device) }
                     }
                 }
-                Section {
-                    Button(SyncText.value("sync.keep.service.meguri"), role: .destructive) {
-                        close(); sync.prepareMeguri(.useServerCollection)
+                if facts.server != nil || oneDirection {
+                    Section(SyncText.value("sync.service.meguri")) {
+                        LabeledContent(SyncText.value("sync.meguri.preview.server"), value: sync.meguriEndpoint)
+                        if oneDirection, !account.isEmpty {
+                            LabeledContent(SyncText.value("sync.settings.account"), value: account)
+                                .accessibilityIdentifier("sync.keepCollection.account")
+                        }
+                        if let server = facts.server { rows(server) }
                     }
-                    .accessibilityIdentifier("sync.keepCollection.keepService")
-                } footer: { Text(SyncText.value("sync.keep.service.effect")) }
+                }
+                if choices.contains(.keepDevice) {
+                    Section {
+                        Button(SyncText.value(facts.row == .askUploadOnly ? "sync.keep.uploadOnly.confirm" : "sync.keep.device"),
+                               role: .destructive) { sync.answerMeguriSetup(.keepDevice) }
+                            .disabled(working)
+                            .accessibilityIdentifier("sync.keepCollection.keepDevice")
+                    } footer: {
+                        VStack(alignment: .leading) {
+                            // Upload only: the server holds no user content, so nothing there is replaced (T19.3).
+                            if facts.row != .askUploadOnly { Text(SyncText.value("sync.keep.device.effect.meguri")) }
+                            Text(SyncText.value("sync.meguri.preview.otherClients"))
+                        }
+                    }
+                }
+                if choices.contains(.keepServer) {
+                    Section {
+                        Button(SyncText.value(facts.row == .askDownloadOnly ? "sync.keep.downloadOnly.confirm" : "sync.keep.service.meguri"),
+                               role: .destructive) { sync.answerMeguriSetup(.keepServer) }
+                            .disabled(working)
+                            .accessibilityIdentifier("sync.keepCollection.keepService")
+                    } footer: {
+                        VStack(alignment: .leading) {
+                            // With no collection on this device nothing is replaced or backed up.
+                            if facts.row != .askDownloadOnly { Text(SyncText.value("sync.keep.service.effect")) }
+                            if facts.unsent { Text(SyncText.value("sync.meguri.preview.unsent")) }
+                        }
+                    }
+                }
                 Section {} footer: {
                     VStack(alignment: .leading) {
                         Text(SyncText.value("sync.meguri.preview.media"))
@@ -315,30 +474,55 @@ struct MeguriKeepCollectionSheet: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle(SyncText.value("sync.keep.title"))
-            #if !os(macOS)
+            #if os(macOS)
+            .navigationTitle(SyncText.value(titleKey))
+            #else
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(SyncText.value("sync.service.cancel"), role: .cancel) {
-                        // MP6.3: Cancel while no binding is ready leaves the service Off.
-                        guard !sync.serviceConnected else { close(); return }
-                        cancelling = true
-                        Task {
-                            let removed = await sync.removeMeguriConnection()
-                            collection.syncPresentation.serviceChangeFailed = !removed
-                            cancelling = false; close()
-                        }
-                    }
-                    .disabled(cancelling)
-                    .accessibilityIdentifier("sync.keepCollection.cancel")
+                    // Cancel is always available: only its own run disables it.
+                    Button(SyncText.value("sync.service.cancel"), role: .cancel, action: cancel)
+                        .disabled(cancelling)
+                        #if os(macOS)
+                        .focused($cancelFocused)
+                        #endif
+                        .accessibilityIdentifier("sync.keepCollection.cancel")
                 }
             }
-            .disabled(cancelling || !sync.meguriCanChoose)
             .interactiveDismissDisabled()
         }
+        #if os(macOS)
+        // On the stack, so that the toolbar's Cancel is inside the focus scope.
+        // The toolbar joins the key view loop after the form, so focus is also asked for once shown.
+        .defaultFocus($cancelFocused, true)
+        .task { cancelFocused = true }
+        #endif
         .accessibilityIdentifier("sync.keepCollection.sheet")
+    }
+    @ViewBuilder private func rows(_ side: MeguriSetupSide) -> some View {
+        LabeledContent(SyncText.value("sync.counts.notes"), value: side.notes.formatted(.number))
+        LabeledContent(SyncText.value("sync.counts.cards"), value: side.cards.formatted(.number))
+        LabeledContent(SyncText.value("sync.counts.reviews"), value: side.reviews.formatted(.number))
+        if let media = side.mediaFiles {
+            LabeledContent(SyncText.value("sync.counts.mediaFiles"), value: media.formatted(.number))
+        }
+        if let change = side.lastChangeMs {
+            LabeledContent(SyncText.value("sync.counts.lastChange"), value: SyncText.instant(change, now: clock.now()))
+        }
+    }
+    /// MP6.3, V27.4: during setup Cancel leaves the service Off, which removes
+    /// the sign-in; from a status action it changes nothing but the sheet.
+    private func cancel() {
+        cancelling = true
+        Task {
+            if sync.meguriBusy { sync.cancelMeguriPreparation() }
+            if await sync.cancelMeguriSetup() {
+                let removed = await sync.removeMeguriConnection()
+                collection.syncPresentation.serviceChangeFailed = !removed
+            }
+            cancelling = false
+        }
     }
 }
 
@@ -348,6 +532,9 @@ struct SyncMainStatusRows: View {
     var host: AppNavigation.SheetHost = .main
     /// The compact status sheet hands its destination over after it dismisses.
     var openEntry: ((CloudSyncEntry, AppNavigation.SheetHost) -> Void)? = nil
+    /// Set outside Settings (the status popover): Meguri's setup sheets belong to
+    /// the Sync section, so its actions open that section, asking for N15.3's sheet or not.
+    var showInSettings: ((_ keepCollection: Bool) -> Void)? = nil
     @Environment(\.appClock) private var clock
     @State private var recovering = false
     private var sync: SyncCoordinator { collection.sync }
@@ -363,6 +550,8 @@ struct SyncMainStatusRows: View {
         if status.titleKey == "sync.status.upToDate.title" {
             let instant: Int64? = meguri ? sync.meguriLastExchange : {
                 if case .upToDate(let at) = sync.status?.state { return at }
+                // T19.4: with only issues present the row shows the state underneath, detail included.
+                if case .upToDate(let at) = sync.status?.stateWithoutAttention { return at }
                 return nil
             }()
             if let instant { return SyncText.format("sync.status.upToDate.detail", SyncText.instant(instant, now: clock.now())) }
@@ -371,18 +560,35 @@ struct SyncMainStatusRows: View {
     }
     var body: some View {
         let status = status
-        VStack(alignment: .leading) {
-            Label(SyncText.value(status.titleKey), systemImage: status.symbol)
-            if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
-            if !meguri, let cloud = sync.status {
-                ForEach(Array(SyncStatusCopy.lines(cloud, now: clock.now()).enumerated()), id: \.offset) { _, line in
-                    Text(line).font(.footnote).foregroundStyle(.secondary)
+        // The detail lines sit under the title, beside the symbol, as a system row's subtitle does.
+        Label {
+            VStack(alignment: .leading) {
+                Text(SyncText.value(status.titleKey))
+                if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
+                if !meguri, let cloud = sync.status {
+                    ForEach(Array(SyncStatusCopy.lines(cloud, now: clock.now()).enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if meguri, let done = sync.meguriSetupDone {
+                    // T19.3: what setup did when it asked nothing.
+                    Group {
+                        switch done {
+                        case .uploaded: Text(SyncText.value("sync.setup.done.uploaded.meguri"))
+                        case .downloaded(let backup):
+                            Text(SyncText.value("sync.setup.done.downloaded.meguri"))
+                            if backup { Text(SyncText.value("sync.setup.done.backup")) }
+                        }
+                    }
+                    .font(.footnote).foregroundStyle(.secondary)
+                }
+                if meguri, sync.meguriStage == .media, let progress = sync.meguriMediaProgress {
+                    Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: progress.awaiting)))
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            if meguri, sync.meguriStage == .media, let progress = sync.meguriMediaProgress {
-                Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: progress.awaiting)))
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
+        } icon: {
+            Image(systemName: status.symbol)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("settings.sync.status")
@@ -423,8 +629,8 @@ struct SyncMainStatusRows: View {
         switch action {
         case .chooseCollection:
             if meguri {
-                if sync.meguriCanChoose {
-                    Button(title) { collection.syncPresentation.keepCollectionRequested = true }
+                if sync.meguriCanChoose, !sync.meguriBusy {
+                    Button(title) { askKeepCollection() }
                         .accessibilityIdentifier(id)
                 }
             } else {
@@ -449,13 +655,14 @@ struct SyncMainStatusRows: View {
             }
         case .resumeOp:
             if let recovery = sync.recovery {
-                Button(title) {
-                    if recovery.adoptionTransportWait { sync.resumeWaitingAdoption() } else { sync.resumeConnection() }
-                }
-                .disabled(recovery.switchConflict || recovery.step == .cancelling)
-                .accessibilityIdentifier(id)
+                // `resume_recovery_op` clears the update hold first (P25.2).
+                Button(title) { Task { await sync.resumeRecoveryOperation() } }
+                    .disabled(recovery.switchConflict || recovery.step == .cancelling)
+                    .accessibilityIdentifier(id)
             }
-        case .copyDebugInfo:
+        case .copyDebugInfo, .repair:
+            // The damaged-collection screen (V19) is not built: Copy Debug Info
+            // is the one action that can run for that row.
             if let callbacks = collection.configuration.fieldDiagnostics {
                 SyncCopyDebugInfoButton(callbacks: callbacks, identifier: id)
             }
@@ -481,23 +688,30 @@ struct SyncMainStatusRows: View {
                 Button(title, role: .cancel) { sync.cancelMeguriPreparation() }.accessibilityIdentifier(id)
             }
         case .meguriTryAgain:
-            // Setup runs again from preparation; an unknown acceptance has no
-            // settling step in the core yet, so no button is shown for it.
-            if sync.meguriCanChoose {
-                Button(title) {
-                    if collection.lifecycle == .noCollection { sync.prepareMeguri(.useServerCollection) }
-                    else { collection.syncPresentation.keepCollectionRequested = true }
-                }
-                .accessibilityIdentifier(id)
+            // An unknown acceptance runs MP6.9's settling step; any other
+            // failure runs setup again from preparation (T19.5). The sheet that
+            // setup may open belongs to the Sync section, so outside Settings
+            // that section opens too.
+            if sync.meguriCanSettle {
+                Button(title) { sync.settleMeguriSetup() }.accessibilityIdentifier(id)
+            } else if sync.meguriRoutine == .acceptanceUnknown {
+                Button(title) { sync.settleMeguriRound() }
+                    .disabled(sync.meguriBusy).accessibilityIdentifier(id)
+            } else if sync.meguriCanChoose {
+                Button(title) { sync.startMeguriSetup(); showInSettings?(false) }.accessibilityIdentifier(id)
             }
         case .meguriFinishSetup:
             if sync.meguriCanFinish {
                 Button(title) { sync.finishMeguriSetup() }.accessibilityIdentifier(id)
             }
-        case .meguriSignIn, .meguriRetryMedia, .repair, .abandon, .checkDatabase:
+        case .meguriSignIn, .meguriRetryMedia, .abandon, .checkDatabase:
             // The sign-in fields are in the section; the others have no entry here.
             EmptyView()
         }
+    }
+    private func askKeepCollection() {
+        if let showInSettings { showInSettings(true) }
+        else { collection.syncPresentation.keepCollectionRequested = true }
     }
     private func open(_ entry: CloudSyncEntry) {
         if let openEntry { openEntry(entry, host) } else { collection.presentCloudSync(entry, host: host) }
@@ -561,7 +775,10 @@ struct SyncTroubleshootingPage: View {
                             .disabled(!sync.meguriCanChoose || collection.lifecycle == .noCollection)
                             .accessibilityIdentifier("sync.trouble.replaceService")
                     } footer: {
-                        if !sync.meguriCanChoose { Text(SyncText.value("sync.switch.busy")) }
+                        // A connected device has a proved baseline, and the core starts no
+                        // full replacement over one (MP4): the entries wait for a setup.
+                        if sync.serviceConnected { Text(SyncText.value("sync.trouble.replace.connected.meguri")) }
+                        else if !sync.meguriCanChoose { Text(SyncText.value("sync.switch.busy")) }
                     }
                 }
                 if sync.meguriCanRetryMedia || sync.meguriRoutine == .mediaBlocked {
@@ -608,9 +825,6 @@ struct SyncTroubleshootingPage: View {
         }
         .formStyle(.grouped)
         .navigationTitle(SyncText.value("sync.settings.troubleshooting"))
-        .sheet(isPresented: Binding(get: { meguri && sync.meguriPreview != nil }, set: { _ in })) {
-            if let preview = sync.meguriPreview { MeguriSetupPreviewSheet(collection: collection, preview: preview) }
-        }
         .accessibilityIdentifier("sync.trouble.content")
     }
 }

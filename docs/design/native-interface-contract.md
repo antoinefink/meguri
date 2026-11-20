@@ -416,9 +416,9 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 - Touch layouts keep the large title in the content (deck pages) or use N14.8's (tab roots).
 - Replaces on Mac: N12.1's leading large title and in-content counts line.
 
-### N14.5 Activity (not built)
+### N14.5 Activity (built: N14.11)
 
-- The heatmap is the minimal form of `decisions.md` (2026-11-19). On a deck page it follows the subdecks, not the counts and Study. Replaces N11.5's "On the deck page it follows the counts and Study" when the heatmap is built.
+- The heatmap is the minimal form of `decisions.md` (2026-11-19). On a deck page it follows the subdecks, not the counts and Study. Replaces N11.5's "On the deck page it follows the counts and Study". Built as N14.11.
 
 ### N14.6 Sidebar deck list
 
@@ -442,6 +442,34 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`). Whe
 ### N14.9 iPad sidebar title
 
 - The iPad sidebar's navigation bar draws no title: the app's name is already in the status area. The column keeps "Meguri" as its navigation title for accessibility, removed from the bar with the toolbar's own API (`toolbar(removing: .title)`). The sidebar toggle stays where the system puts it, except during review, which has none (N16.2). The Mac sidebar never drew one.
+
+### N14.10 Today row beside Today
+
+- iPhone at regular width with the list beside the detail (the Duo unfolded and held wide): the deck list starts with a "Today" row in a group of its own, above the decks. It has the sidebar layouts' `sun.max` symbol, the title "Today" and, trailing, the cards waiting across the collection (new + learning + to review of the top-level decks), hidden at zero like a deck row's number.
+- It is selected on arrival, while the detail shows Today. A tap returns the detail to Today after a deck was picked, as the sidebar's Today row does.
+- The selected row, Today or the deck whose page shows, has the system's grey selected-cell fill; its number takes the primary label colour there. A deck row is marked this way only in this list. When a collapsed deck hides the selected subdeck, the collapsed deck's row is marked.
+- The Today row is the top of the list: scrolling to the top, and returning to a list that was at its first deck, show it. Its target is at least the minimum height.
+- Compact width (an ordinary iPhone, the Duo folded or held tall) has no such row and marks no row. iPad and Mac keep the sidebar's own Today row (N14.1).
+- Search results replace the whole list, the Today row included (N14.2).
+- Accessibility: `home.today.row`, labelled "Today", with "N cards waiting" as its value and the selected trait; the selected deck row has that trait too.
+
+### N14.11 Activity heatmap
+
+The H-A minimal form of `decisions.md` (2026-11-19). Antoine's build direction (chat): it should look good and be simple to ship, and performance matters: it must not slow down the page. Data and rules are `stats/activity-heatmap`. Changes from the H-A page: a day cannot be tapped and has no callout; with no reviews the heatmap is hidden, with no empty grid or message; there are no month labels and no legend; the Mac adds a hover tooltip on each day.
+
+- Grid: small rounded squares, one per day. Weeks are columns, the most recent week trailing; days are rows from the locale's first weekday. Days after today in the current week are not drawn. Standard SwiftUI shapes in a grid: no custom drawing, no gestures.
+- Colour: a day with no reviews uses the system secondary fill. Days with reviews use four steps of the app's accent (tint) colour, from the system's hierarchical styles: level 4 primary, 3 secondary, 2 tertiary, 1 quaternary (levels: `stats/activity-heatmap` AH7). Today's square has a 1 pt outline in the primary label colour. System colours only, so dark mode and Increase Contrast need no extra code.
+- Width: as many whole weeks as fit the row's content width, up to 53. The squares stretch so the strip spans the row from edge to edge; the gap is a fixed fraction of the square. Minimum column pitch: 20 pt on touch, 13 pt on Mac (about 16 weeks on an iPhone, 20 on the folded Duo, up to 53 on iPad, Mac and the Duo opened wide). No horizontal scrolling, date picker, month labels or legend.
+- Text: one line under the grid in footnote secondary text, "312 reviews in the last 16 weeks", pluralised (AH8). It wraps and never truncates.
+- No interaction: a tap does nothing. Accessibility: the grid and its line are one element, `home.activity.grid` (header `home.activity.header`), labelled "Review activity", with the summary line as its value. On Mac only, each square has a hover help tooltip with its date and count.
+- Placement: a group of its own with the section header "Activity" and the side margins of the rows above it (never wider than the rows, never touching the edges). Deck page: after the Subdecks section, before the error line and the previous session. Today: after the decks with cards waiting. The tab layout's deck list (compact: iPhone, the Duo folded or held tall): after the deck rows. The deck list beside Today (Duo held wide) has none; Today has it. Mac: in the detail column, at the same places.
+- Scope: the whole collection on Today and the deck list; the deck and its subdecks on a deck page (AH4).
+- Hidden completely while the days shown have no reviews (AH8). It collapses only after the first result says so.
+- Performance rules:
+  - The page never waits for the heatmap. It loads asynchronously, off the main actor, on the query lane. Its height follows from the row width and is reserved from the first frame, so nothing moves when it appears. Returning to a page shows the cached grid at once while a due refresh runs in the background, without flicker.
+  - One query per scope fetches all 53 weeks. A width change (rotation, window resize, fold) changes only how many weeks are drawn and never queries again.
+- Not in this build: streaks, statistics, tapping a day, month labels, legend, scrolling back, colour choices, settings, the Home Screen widget.
+- Replaces N11.5's Activity bullet for the heatmap only; its studied-today line and streak stats are unchanged by this section.
 
 ## N15. Round 2 Settings and sync decisions (2026-11-19)
 
@@ -629,6 +657,8 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsShee
 - No FSRS sheet, prompt, notice, setting, menu command or option exists on any platform. The screen `home.fsrsSheet` is removed, with its view, strings and snapshots.
 - A collection that opens with FSRS off opens as usual, and Meguri turns FSRS on in the background: at once with sync Off, Sync Automatically off or a service that needs the person; otherwise after a collection exchange, or when study is started (`sched/app-coordination` F5.1; decided 2026-11-19 (review F2)). Nothing about it is shown and nothing is asked. Study entry points show their normal loading state until it is done; a study entry point never waits for the network.
 - When that step fails, the collection stays open: study is refused with "Meguri couldn’t prepare this collection for study." (`study.prepare.failed`) and Try Again at the study entry points, while browsing, adding notes, import, export and sync stay available. A failure at open and a later one behave the same. No route studies with FSRS off.
+- Accepted deviation from `sched/app-coordination` F5.3's "one Try Again button" (review of the FSRS unit, 2026-11-20): at a Study control the sentence is a system alert with Try Again and Cancel, because an alert needs a way to dismiss it; Cancel changes nothing and study stays refused. In Go to Deck the sentence shows in the sheet and Go is the control that tries again. While the step runs, Go to Deck waits for it and then opens study.
+- A step that the core refuses or stops for other work on the collection (an export, an import, a replacement, the app moving to the background) is not a failure: nothing is shown, and the next sync or study entry point runs it.
 - When another client turns FSRS off, Meguri turns it on again each time and says nothing; each time is written to the diagnostic log.
 - The change syncs like any other change. Its risks for the owner are in `sched/fsrs-policy` A1.6.
 - Replaces: R702's and R703's sheet, U51's `FsrsEnabledSheet`, AE29's "after the one-time sheet".
@@ -653,3 +683,152 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsShee
 - Mac: Meguri › Settings… and Quit stay available. On iPhone and iPad Settings is not reachable from the welcome screen except through Set Up Sync's sheet.
 - Until N15 is built, Set Up Sync opens the sync settings that exist.
 - Replaces: R157's and R1591's "Connect to iCloud" as the first choice and its disabled state with a reason line; the `onboarding.welcome` screen contract's three buttons, its prominent style rules and its line about private iCloud; the empty state's separate sync buttons. `sync/status-strings` T12's `sync.connect.action` is no longer shown here (T19.8).
+
+### N18.3 Welcome screen
+
+- Home with no collection shows a welcome in place of the "No Collection" state and its four equal buttons: the large title "Welcome to Meguri", the secondary line "Choose how to start. You can change this later in Settings.", and one system grouped list of three rows.
+- Each row has a leading symbol, a title, one line of explanation and a trailing disclosure chevron, in this order:
+  1. Set Up Sync (`cloud`): "Get your collection from Meguri Sync or iCloud." It opens Account & Sync (`home.collection.accountSync`): the sheet on touch, the Settings window on Mac. The separate Connect to iCloud… button and its reason line are gone; Account & Sync says why a service is unavailable.
+  2. Import a Collection File (`folder`): "Open a .colpkg file exported from Meguri or Anki." It opens the file picker (N17.2; `home.collection.import`).
+  3. Start Empty (`plus`): "Begin with no decks and add your own notes." (`home.collection.startEmpty`).
+- A row is disabled only where its button was: Set Up Sync and Import while another sheet or flow owns the window, Start Empty while it cannot start. A disabled row stays visible.
+- The rows are buttons in a grouped form, at least the minimum target high. The chevron is drawn, because a row that acts in place gets none from the system. Title and explanation wrap at every text size. At the accessibility sizes the symbol and the chevron are left out and the text takes the row, as the state views leave out their symbols: a label there wraps each text around its symbol. VoiceOver reads the title as the row's label and the explanation as its hint; the title of the screen is a header.
+- Compact width: the title and line lead the list as its header, at the top of the page. In the tab layout the navigation bar has no title here: the welcome's own title is the page's header.
+- iPad and Mac: the same list in a centred column of the readable width in the detail area, from the top. The page is still titled "Today" where the sidebar's first row says so (N14.1).
+- iPhone at regular width, wider than tall and at least 480 points high, below the accessibility text sizes (the Duo unfolded and held wide): no list beside a detail. A large iPhone in landscape is too short for it and keeps the column, as the accessibility sizes do. The title and line are vertically centred on the leading half and the three rows on the trailing half, either side of the fold, which the layout reads as the answer row does (N13.1); without a fold in the view, two equal halves. A form has no vertical alignment of its own, so the rows' measured height sets its top margin. Rows that leave less than 48 points above and below, or that an error or the previous session follows, keep the system's margin and scroll from the top: the margin never follows scrolling.
+- While the collection is still opening, the tab layout keeps the arrangement it last showed and starts a launch on the single column, so no list beside a detail shows for a moment before the welcome.
+- On touch the navigation bar over the welcome is opaque, in the page's grouped background colour: nothing shows at rest, and rows that scroll under it are covered. Under the system's translucent bar the contrast audit failed a row title seen through the bar, at the largest text size in dark.
+- An error from the last attempt and the previous session's line follow the rows, each in its own group.
+- Start Empty, the import and sync themselves did not change.
+- Replaces: N2's centred "No Collection" state for this page, `workflow.md`'s empty-collection Import button as a button, and `screen-inventory.yaml`'s `onboarding.welcome` layout (app icon, three bordered buttons, the reason line under Connect to iCloud… and its identifiers `onboarding.welcome.*`).
+
+## N20. Round 6 decisions (2026-11-20)
+
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, `home.deckActions`, `home.deckName`, `shell.commands`; round 6 options 1C, 2C, 3B, 5B). Where earlier text differs, this section wins. It covers the screens that exist. Delete Deck (4B), Deck Options (6B) and Edit Note (7A) arrive with their units, which add their own subsections; their places below are kept for them. The name rules of N20.3 are `decks/decks` D19, the create row's D18. Meguri authors these strings; implementers take them from N20.6.
+
+### N20.1 Deck search in the sidebar
+
+- Sidebar layouts (Mac, iPad at regular width): a search field at the top of the sidebar, in the system's sidebar placement for `.searchable`, with the prompt "Search or Create a Deck". It replaces the Go to Deck sheet.
+- Typing replaces the sidebar's list, the Today row included, with the results, as System Settings does. Each result is two lines: the deck's last name component over its parents in secondary text, joined with " › " (a top-level deck has no second line). Matching and order are the touch Search's (N14.2): `decks/deck-list` H6.1 and H6.2. Filtered decks are listed.
+- After the results, while `decks/decks` D18 finds no deck with the typed name: a row with the `plus` symbol, "Create deck named “<query>”". It opens N20.3's New Deck form with the query as the Name and Parent Deck None.
+- With no result and no create row, H6.3's one-line message shows.
+- Return or a click opens a result: its deck page, with the sidebar selection on that deck; a filtered deck shows R53's explanation (`decks/deck-list` H3). The query and results stay while it is open, and the opened deck shows selected among them. Esc clears the field and the tree returns, the opened deck still selected.
+- Mac: after each edit the first result is highlighted, or the create row when nothing is listed; ↑ and ↓ move the highlight over all rows and wrap (H6.3). The highlight does not change the detail; Return opens the highlighted row. iPad: a tap opens a result; Return in the field opens the first.
+- ⌘F (Edit › Find…, N20.4), ⇧⌘O (a second key of Find…, with no menu item of its own) and "/" in the `decks.list` and `decks.page` contexts (H9.2; never while a text field or other view owns the key, N4) put the focus in the field, showing the sidebar first when it is hidden. In the tab layout the same keys present the deck list's Search (N14.2). During review Find… is disabled.
+- Sidebar layouts' toolbar, on Today and the deck page: the sync status button and one Add menu (`plus`) with New Note (`square.and.pencil`) and New Deck… (`folder.badge.plus`). No separate Add Note, Go to Deck or Create Deck button. On a deck page New Note presets that deck, as Add Note does now (`notes/add-defaults`).
+- "New Deck…" is the one name of that action in every menu; its form is titled "New Deck". "Create Deck" is no longer used.
+- The tab layout keeps N14.2's Search button and Add menu, unchanged.
+- The Go to Deck sheet is retired on every platform: no button, menu item or key opens it. Every list of deck search results shows the two-line rows, never a `::` path, and opens the deck page in every layout (N20.5).
+- Replaces: N14.2's "The Go to Deck sheet stays for the sidebar layouts' toolbar, the "/" key and the Mac's Deck menu" and its "opens the Create Deck sheet" (now the New Deck form); N14.3's "Sidebar layouts keep Go to Deck and Create Deck in the window toolbar"; R26's sheet (its filter stays, H6.2); `decks/deck-list` H6.3's sheet, its highlight on opening and its Return that starts review, and H9.2's `/` and ⇧⌘O rows (now Find…); N18.1's Go to Deck sentence, which no longer has a screen.
+
+### N20.2 The deck menu
+
+- One menu per deck row: right-click on Mac, long press on touch. Its groups, in order:
+
+| Group | Item | Symbol | Mac key | Filtered deck |
+|---|---|---|---|---|
+| 1 | Study | `play` | ⌘R | absent |
+| 1 | Add Note | `square.and.pencil` | | absent |
+| 2 | Rename… | `pencil` | ⇧⌘R | shown |
+| 2 | New Subdeck… | `folder.badge.plus` | | absent |
+| 3 | Delete Deck (destructive role; arrives with the Delete Deck unit) | `trash` | ⌘⌫ | shown |
+
+- Until Delete Deck arrives the menu has groups 1 and 2, and a filtered deck's menu holds Rename… alone (R53).
+- Study is disabled under N14.3's condition, through the same availability function. Add Note opens `editor.add` with that deck (`notes/add-defaults`). Rename… and New Subdeck… open N20.3's form.
+- Overview and the Mac row's hover ⋯ button ("Deck Actions") are removed; a tap or click on the row opens the deck page.
+- Mac: the menu shows the Deck menu's keys beside its items (N20.4). Touch menus show no keys.
+- iPhone Duo held wide: the menu opens beside the row in the list's half, as the system places it; nothing sits on the fold.
+- Replaces: R47's items and order for this menu (an R47 item not listed here comes back only with the unit that brings it, which says where); N14.3's "The long-press deck menu is otherwise unchanged"; `decks/deck-list` H3's "the row menu's Overview opens the deck page"; `home.deckMenu`'s hover ⋯ and its menu of Study and Overview.
+
+### N20.3 Naming a deck
+
+- New Deck…, New Subdeck… and Rename… use one system `Form` with two rows:
+  1. **Name**: a text field labelled "Name", with focus and the cursor at the end when the form opens.
+  2. **Parent Deck**: a menu-style `Picker` labelled "Parent Deck". Its items: "None" (top level), a separator, then D19.2's decks in tree order, each its last name component, indented one level per depth. Each item's accessibility label is its full path joined with " › ". The row shows the chosen deck's last name component; its accessibility value is the full path.
+- Title and confirm button: New Deck… gives "New Deck" and Create; New Subdeck… gives "New Subdeck" and Create; Rename… gives "Rename Deck" and Rename. Cancel is the cancellation action, the confirm button the confirmation action. Defaults and when the confirm button is enabled: D19.3 and D19.4.
+- Footer (D19.6): Rename of a deck with subdecks: "Its subdeck moves with it." or "Its N subdecks move with it.". Otherwise, with a parent: "Inside <parent path>.", the path joined with " › ". With None: no footer.
+- Confirming composes the full name and runs the create or rename of D19.5. A refusal shows in one line under the form, which stays with the draft. The existing-name rule is `decks/deck-list` H7's. A created deck, and a renamed one, opens its deck page in every layout.
+- **Saved As** (H7's final-name report, D19.5): when the stored name differs from what D1 makes of the typed full name (a `+` was added, R61, or an existing deck's spelling adopted, R57), the form stays open after the write: its rows give way to one row, "Saved As", with the stored name as its value (its path joined with " › "), and a Done button replaces Cancel and the confirm button. Done closes the form and opens the deck page.
+- Meguri's interface never shows the `::` notation: a deck path in a label, help tag, accessibility label or value joins the components with " › ". A `::` typed in the Name still creates nested decks.
+- Presentation:
+
+| Platform | The form |
+|---|---|
+| iPhone; iPhone Duo folded or held tall | a sheet |
+| iPhone Duo held wide (iPhone at regular width with the list beside the detail, N14.10) | in the detail half, in place of what it showed, with Cancel and the confirm button in that half's navigation bar; no field crosses the fold. Cancel returns the detail to what it showed; the confirm button shows the deck's page. Choosing another row in the list closes the form as Cancel does |
+| iPad | a sheet |
+| Mac | a window sheet; the form keeps the macOS default style, with leading labels |
+
+- Replaces: R59's and R60's pre-filled paths and R60's "typing a different path moves the deck" (a changed Parent Deck moves it; R58 stays); `decks/deck-list` H7's Rename and New Subdeck pre-fills and its untouched-pre-fill rule (D19); `home.deckName`'s single name field and "Deck name" prompt; the `::` form of the full path in N2's and N11.5's hover help and accessibility text (now joined with " › ").
+
+### N20.4 The menu bar by object
+
+The menu bar, in order: Meguri, File, Edit, View, Deck, Card, Window, Help. The Study menu is removed: there is one Undo and one Redo, in Edit. The Go to Deck… item is removed.
+
+| Menu | Item | Key | Enabled when |
+|---|---|---|---|
+| File | New Note | ⌘N | a collection is open, outside review, and no sheet or panel owns the keys. Opens `editor.add`, with the deck preset on a deck page. Disabled during review until N11.1's review-time Add Note panel exists (deferred) |
+| File | New Deck… | ⇧⌘N | a collection is open, outside review; opens N20.3's New Deck form |
+| File | Import Collection… | ⇧⌘I | as N17.2 |
+| File | Export Collection… | ⇧⌘E | as N17.3 |
+| File | Sync Now | ⇧⌘Y | `syncNowAvailability()` (N11.8) |
+| File | Close | ⌘W | the system's |
+| Edit | Undo <step name>, Redo <step name> | ⌘Z, ⇧⌘Z | titled with the core's undo step name ("Undo Rename Deck", "Undo Answer Card"), the review's existing pattern, until `review/reviewer-strings` S5's catalog keys exist (R173); plain "Undo" and "Redo", disabled, when nothing can be undone or redone. During review they use the review session's own restore (session-aware); outside review, the collection's undo history. On Mac a focused text input keeps its own undo. On iPad text focus is not detected outside sheets, so a sheet keeps the system's text undo |
+| Edit | Cut, Copy, Paste | ⌘X, ⌘C, ⌘V | the system's |
+| Edit | Find… | ⌘F; also ⇧⌘O | the deck workspace shows in the main window, no sheet or panel owns the keys, and no review runs; focuses N20.1's field (tab layout: presents the Search). While it is disabled, a text view's own Find keeps ⌘F |
+| Deck | Study | ⌘R | the shown deck's Study is available (N14.3); never for a filtered deck (H3) |
+| Deck | Rename… | ⇧⌘R | a deck is shown, filtered included |
+| Deck | New Subdeck… | | a normal deck is shown |
+| Deck | Delete Deck | ⌘⌫ | arrives with the Delete Deck unit |
+| Deck | Deck Options… | ⌥⌘O | arrives with the Deck Options unit; a normal deck |
+| Card | Show Answer | Space | review shows a question side |
+| Card | Again, Hard, Good, Easy | 1, 2, 3, 4 | review shows an answer side |
+| Card | Back to Decks | Esc | during review |
+| Card | Edit Note | ⌘E | arrives with the Edit Note unit; during review |
+
+- Edit keeps the system's text items intact: its Find submenu and every other item the system adds for text. Meguri's Find… is a separate item placed just before that group; while enabled it takes ⌘F, while disabled the system's Find ▸ Find… of a focused text view keeps it. ⇧⌘O is a hidden second key equivalent of Meguri's Find…, with no menu item; on iPad it is a key command with no discoverability title.
+- Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo, Paste and Meguri's Find…; Deck after Study, New Subdeck… and Delete Deck; Card after Show Answer, Easy and Back to Decks. A separator with nothing after it yet is left out.
+- The Deck menu acts on the deck the workspace shows: the sidebar's selection (Mac, iPad), or the deck page shown (tab layout). With none (Today, the welcome, review) its items are disabled.
+- Each command follows N4: disabled outside its context, routed through the action and guard of its visible control, and subject to input ownership. The Card menu's unmodified keys follow N11.3: the card page keeps the first claim. ⌘⌫ and the other menu key equivalents never take a key from a text input (H9.2). The one exception is Find…: while enabled it takes ⌘F even when a text input has focus, as its row above says.
+- iPad with a keyboard: the same menus, items and keys in the iPad menu bar and in the list the system shows while ⌘ is held (SwiftUI `commands`), except the Card menu: its items carry no key equivalents on iPad, because the card host keeps the single key registration (N11.3's first claim), so the ⌘-held list does not list the review keys. iPhone and the iPhone Duo have no menu bar: with a keyboard the same keys act, and where the system shows its ⌘-held list it follows these menus.
+- Replaces: N11.3's first bullet's Study menu, and the Undo Answer and Redo Answer items it named; R280's New Deck… ⌥⌘N, Export… ⌘E (⌘E becomes Edit Note's) and the labels "Import…" and "Export…"; R282's ⇧⌘N for Note Types (the key is New Deck…'s; Note Types' key is open); R283's Go to Deck… (⇧⌘O is Find…'s second key), its S and Return as Study's menu keys (S and Return stay deck-list keys, H9.2) and "Delete Deck…" (now "Delete Deck"); the current Deck menu's "Rename Deck…" (now "Rename…").
+
+### N20.5 Consistency fixes
+
+1. Every list of deck search results, on touch and in the sidebar, shows each deck as its name over its parent path joined with " › " (N14.2, N20.1), never a raw `A::B::C` path.
+2. The touch review's close button (N11.1, N13.3): its title, accessibility label, Voice Control name and help are "Back to Decks". "Close Review" is no longer used. The Mac's round Back button is unchanged (N12.3).
+3. Activating a deck search result (Return, a tap or a click) opens its deck page in the compact and sidebar layouts alike, and never starts review.
+
+- Replaces: R27's "starts its review (iPhone layout)" and `decks/deck-list` H6.3's same rule; R284's "Close Review" (N11.3 already named it).
+
+### N20.6 Strings
+
+The English text of the screens above. "New" marks text not used before this round; the others stay as they are. Units that land later own the text marked "with its unit".
+
+| Text | Where | |
+|---|---|---|
+| Search or Create a Deck | the sidebar search prompt (also N14.2's) | |
+| Create deck named “%@” | the search's last row; %@ is the typed text, between U+201C and U+201D | changed: the earlier text had no quotation marks |
+| ` › ` (space, U+203A, space) | between the components of every shown deck path | |
+| New Note | Add menu, File menu | |
+| New Deck… | Add menu, File menu | |
+| New Deck, New Subdeck, Rename Deck | the form's titles | New Deck new |
+| Name, Parent Deck | the form's row labels | new |
+| None | Parent Deck's first item | new |
+| Create, Rename, Cancel | the form's buttons | |
+| Saved As | the form's final-name row (N20.3) | new |
+| Done | the form's button after Saved As | |
+| Its subdeck moves with it. | footer, one subdeck | new |
+| Its %lld subdecks move with it. | footer, other counts; a String Catalog plural with the one form above | new |
+| Inside %@. | footer; %@ is the parent path joined with " › " | new |
+| Study, Add Note, Rename…, New Subdeck… | the deck menu; Rename…, New Subdeck… and Study in the Deck menu | Rename… new in the Deck menu |
+| Delete Deck | the deck menu, the Deck menu | with its unit |
+| Deck, Card | top-level menu titles | Card new |
+| Import Collection…, Export Collection…, Sync Now, Close | File menu | |
+| Undo, Redo, Undo <step name>, Redo <step name> | Edit menu; <step name> is the core's undo step name until S5's keys exist (R173) | |
+| Find… | Edit menu | new |
+| Deck Options… | the Deck menu | with its unit |
+| Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
+| Edit Note | the Card menu | with its unit |
+
+- No longer used: "Go to Deck…", "Create Deck", "Overview", "Deck Actions", "Deck name", "Rename Deck…", "Close Review", the Study menu's title and its "Undo Answer" and "Redo Answer" items (Edit's Undo still reads "Undo Answer Card" after an answer, from the core's step name), "Import…", "Export…".

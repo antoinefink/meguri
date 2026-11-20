@@ -6,12 +6,14 @@ import SwiftUI
 public struct AccountSyncView: View {
     let collection: ReviewCollection
     var host: AppNavigation.SheetHost
+    @State private var draft = MeguriSignInDraft()
     public init(collection: ReviewCollection, host: AppNavigation.SheetHost = .main) {
         self.collection = collection; self.host = host
     }
     public var body: some View {
-        Form { SyncSettingsSections(collection: collection, host: host) }
+        Form { SyncSettingsSections(collection: collection, host: host, draft: draft) }
             .formStyle(.grouped)
+            .onDisappear { draft.password = "" }
             .navigationTitle(SyncText.value("sync.settings.sync.section"))
             .accessibilityIdentifier("settings.sync.content")
     }

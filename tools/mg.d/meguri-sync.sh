@@ -30,7 +30,7 @@ mg_sync_server__clean() {
 # Read committed records only, never an uncommitted append or the last row.
 mg_sync_server__author_session() {
   local ledger
-  if [ -z "$1" ] || ! ledger="$(git -C "$MG_ROOT" show HEAD:docs/process/provenance/sessions.jsonl)"; then
+  if [ -z "$1" ] || ! ledger="$(mg_session_records "$MG_ROOT" HEAD)"; then
     mg_failure candidate-author-session "An explicit committed producer session is required"; return 1
   fi
   if ! printf '%s\n' "$ledger" | jq -se --arg session "$1" '[.[] | select(.session==$session)] | length==1' >/dev/null; then

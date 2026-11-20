@@ -31,7 +31,7 @@ mg_cleanroom_source_commit() {
   [ -z "$status" ] || return 1
   (
     set -o pipefail
-    git --no-replace-objects -C "$MG_ROOT" cat-file blob "$commit:$MG_SESSIONS_FILE" |
+    mg_session_records "$MG_ROOT" "$commit" |
       jq -es --arg s "$1" '[.[] | select(.session == $s)] |
         length == 1 and (.[0].role == "implementer" or .[0].role == "fixer")' >/dev/null
   ) || return 1

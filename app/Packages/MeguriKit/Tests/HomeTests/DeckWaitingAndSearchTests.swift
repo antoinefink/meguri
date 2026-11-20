@@ -103,38 +103,43 @@ import Testing
         #expect(strings["Nothing to study right now"] != nil)
     }
 
-    // MARK: Deck list search (N14.2)
+    // MARK: Deck search (N14.2, N20.1, H6.1)
 
-    @Test func searchMatchesComponentsAndNamesParents() {
-        let search = DeckSearch(nodes: tree, query: "chem")
+    /// The D17 snapshot of the tree above, in stored-name order, with a default deck.
+    private var entries: [DeckNameEntry] {
+        [DeckNameEntry(id: 1, fullName: "Default", filtered: false),
+         DeckNameEntry(id: 10, fullName: "Languages", filtered: false),
+         DeckNameEntry(id: 2, fullName: "Languages::Español", filtered: false),
+         DeckNameEntry(id: 3, fullName: "Languages::日本語", filtered: false),
+         DeckNameEntry(id: 4, fullName: "Languages::日本語::文法", filtered: false),
+         DeckNameEntry(id: 8, fullName: "Quick Review", filtered: true),
+         DeckNameEntry(id: 5, fullName: "Reading", filtered: false),
+         DeckNameEntry(id: 6, fullName: "Science", filtered: false),
+         DeckNameEntry(id: 7, fullName: "Science::Chemistry", filtered: false)]
+    }
+
+    @Test func searchMatchesFullNamesAndNamesParents() {
+        let search = DeckSearch(entries: entries, listsDefault: true, query: "chem")
         #expect(search.matches.map(\.id) == [7])
         #expect(search.matches.first?.name == "Chemistry")
         #expect(search.matches.first?.ancestors == ["Science"])
         #expect(search.matches.first?.fullName == "Science::Chemistry")
-        // Every term must match some component, in any order and case.
-        #expect(DeckSearch(nodes: tree, query: "文法 LANG").matches.map(\.id) == [4])
-        #expect(DeckSearch(nodes: tree, query: "文法 science").matches.isEmpty)
-        // A parent's match lists the parent and, through its path, its subdecks.
-        #expect(DeckSearch(nodes: tree, query: "日本語").matches.map(\.id) == [3, 4])
+        #expect(DeckSearch(entries: entries, listsDefault: true, query: "文法 LANG").matches.map(\.id) == [4])
+        #expect(DeckSearch(entries: entries, listsDefault: true, query: "文法 science").matches.isEmpty)
+        // A parent's match lists the parent and, through its path, its subdecks, in snapshot order.
+        #expect(DeckSearch(entries: entries, listsDefault: true, query: "日本語").matches.map(\.id) == [3, 4])
+        // Filtered decks are listed (H6.1).
+        #expect(DeckSearch(entries: entries, listsDefault: true, query: "quick").matches.map(\.id) == [8])
     }
 
-    @Test func createIsOfferedOnlyForANameNoDeckHas() {
-        #expect(DeckSearch(nodes: tree, query: "Korean").offersCreate)
-        #expect(DeckSearch(nodes: tree, query: "Korean").matches.isEmpty)
-        // A partial match still offers the typed name as a new deck.
-        #expect(DeckSearch(nodes: tree, query: "Chem").offersCreate)
-        // An existing full name, in any case and with outer spaces, is not offered again.
-        #expect(!DeckSearch(nodes: tree, query: "science::chemistry").offersCreate)
-        #expect(!DeckSearch(nodes: tree, query: "  Reading ").offersCreate)
-        // A last component alone is not a full name: "Chemistry" would be a new top-level deck.
-        #expect(DeckSearch(nodes: tree, query: "Chemistry").offersCreate)
+    @Test func theDefaultDeckIsListedOnlyWhileACardHasItsId() {
+        #expect(DeckSearch(entries: entries, listsDefault: true, query: "default").matches.map(\.id) == [1])
+        #expect(DeckSearch(entries: entries, listsDefault: false, query: "default").matches.isEmpty)
     }
 
-    @Test func aBlankQueryShowsNoResultsAndNoOffer() {
+    @Test func aBlankQueryShowsNoResults() {
         for query in ["", "   ", "\n"] {
-            let search = DeckSearch(nodes: tree, query: query)
-            #expect(search.matches.isEmpty)
-            #expect(!search.offersCreate)
+            #expect(DeckSearch(entries: entries, listsDefault: true, query: query).matches.isEmpty)
         }
     }
 }
