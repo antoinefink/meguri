@@ -13,7 +13,7 @@ pub struct Binding {
     pub roles: &'static [PortKind],
 }
 
-pub const PROVIDED: [Binding; 5] = [
+pub const PROVIDED: [Binding; 6] = [
     Binding {
         port: ServicePort::Backup,
         name: "forced-safety-backup",
@@ -31,6 +31,12 @@ pub const PROVIDED: [Binding; 5] = [
         name: "deck-counts",
         unit: "U41",
         roles: &[PortKind::ChangeObserver, PortKind::GenerationListener],
+    },
+    Binding {
+        port: ServicePort::NameIndex,
+        name: "name-index",
+        unit: "U88a",
+        roles: &[PortKind::OpenStep, PortKind::ChangeObserver, PortKind::GenerationListener],
     },
     Binding {
         port: ServicePort::DerivedStore,
