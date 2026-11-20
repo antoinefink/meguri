@@ -692,6 +692,14 @@ Session: s-20261101T000000Z-0000000b"
   sessions_py "$new" HEAD
   [ "$status" -eq 1 ]
   [[ "$output" == *"removes or rewrites 1 line(s) of the archive"* ]]
+  # Admitted lines keep their order.
+  git -C "$SB" reset -q --hard "$ok"
+  { tail -n 1 "$SESSIONS"; sed '$d' "$SESSIONS"; } >"$BATS_TEST_TMPDIR/reordered"
+  cp "$BATS_TEST_TMPDIR/reordered" "$SESSIONS"
+  git -C "$SB" commit -qam "Reorder the archive"
+  sessions_py "$new" HEAD
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"reorders or edits the archive"* ]]
   # An old-way line with other changes, without its trailers or with wrong
   # fields is refused.
   git -C "$SB" checkout -q -b old-mixed "$old"
@@ -817,6 +825,20 @@ Session: ${t%.json}"
   # A revision that is not a commit cannot be checked: an error, not a finding.
   BASE=not-a-commit sessions_check
   [ "$status" -eq 2 ]
+}
+
+@test "session record writes only inside the checkout, never through a symlinked directory" {
+  local outside="$BATS_TEST_TMPDIR/outside" head0
+  mkdir -p "$outside"
+  head0="$(git -C "$SB" rev-parse HEAD)"
+  rm -rf "$RECORDS"
+  ln -s "$outside" "$RECORDS"
+  mg session record --role critic --name linked
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = session-ledger ]
+  [[ "$(field '.failures[0].message')" == *"is a symlink"* ]]
+  [ -z "$(ls -A "$outside")" ]
+  [ "$(git -C "$SB" rev-parse HEAD)" = "$head0" ]
 }
 
 @test "the sessions check refuses non-JSON numbers, impossible dates, tag ids, missing role docs and gitlinks" {

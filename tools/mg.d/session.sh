@@ -107,7 +107,18 @@ mg_session_store() {
   trap 'mg__session_drop; mg__session_unlock; exit 143' TERM
   trap 'mg__session_drop; mg__session_unlock; exit 129' HUP
   trap 'mg__session_drop; mg__session_unlock' EXIT
-  if ! { mkdir -p "$(dirname "$file")" && printf '%s\n' "$line" >"$file"; }; then
+  # Inside the checkout only: no symlinked directory on the way, and the
+  # file is created, never written through an existing one (noclobber).
+  local part=""
+  for part in docs docs/process docs/process/provenance "$MG_SESSIONS_DIR"; do
+    if [ -L "$dir/$part" ]; then
+      mg__session_drop
+      mg__session_unlock
+      MG_SESSION_MESSAGE="$part is a symlink in $dir; session records are written only inside the checkout"
+      return 1
+    fi
+  done
+  if ! { mkdir -p "$(dirname "$file")" && (set -C && printf '%s\n' "$line" >"$file"); }; then
     mg__session_drop
     mg__session_unlock
     return 1

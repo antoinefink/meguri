@@ -260,8 +260,9 @@ class Check:
             return "adds an archive line without a session id: %s" % shown
         if parent is None or self.repo.entry(parent, MARKER) is not None:
             return ("adds session %s to the archive %s, which takes no new records since the switch to %s<id>.json. "
-                    "Move it: remove the line in one commit, then commit the same record alone as %s%s.json "
-                    "(Role: infra, Session: %s), so commits that cite the session still resolve"
+                    "Move it: remove the line in one commit, then commit the same record (same session id, any "
+                    "invalid field corrected) alone as %s%s.json (Role: infra, Session: %s), so commits that cite "
+                    "the session still resolve"
                     % (session, ARCHIVE, RECORDS, RECORDS, session, session))
         if len(changes) != 1:
             return "adds session %s to the archive together with other changes; a session record is committed alone" % session
@@ -315,8 +316,13 @@ class Check:
                 if status == "D":
                     self.find(sha, subject, "deletes the archive %s; session records are never removed" % ARCHIVE)
                     continue
-                old = collections.Counter(lines(self.repo.blob(parent, ARCHIVE) if parent else None))
-                new = collections.Counter(lines(self.repo.blob(sha, ARCHIVE)))
+                old_bytes = (self.repo.blob(parent, ARCHIVE) if parent else None) or b""
+                new_bytes = self.repo.blob(sha, ARCHIVE) or b""
+                old = collections.Counter(lines(old_bytes))
+                new = collections.Counter(lines(new_bytes))
+                # Appends keep the admitted bytes as they are, in order.
+                if not (old - new) and not new_bytes.startswith(old_bytes):
+                    self.find(sha, subject, "reorders or edits the archive %s; it only takes lines appended at its end" % ARCHIVE)
                 # Taking out a refused line this range added is allowed; any
                 # other is not.
                 removed = old - new
