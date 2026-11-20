@@ -17,6 +17,7 @@ import Testing
         private var holding = false
         var generation: UInt64 = 1
         var value: UInt32 = 1
+        var fails = false
 
         var calls: [Int64?] { lock.withLock { _calls } }
         func hold() { lock.withLock { holding = true } }
@@ -31,10 +32,11 @@ import Testing
         var held: Int { lock.withLock { holds.count } }
 
         func heatmap(deckID: Int64?) async throws(BridgeError) -> ActivityDays {
-            let (wait, generation, value) = lock.withLock { () -> (Bool, UInt64, UInt32) in
+            let (wait, generation, value, fails) = lock.withLock { () -> (Bool, UInt64, UInt32, Bool) in
                 _calls.append(deckID)
-                return (holding, self.generation, self.value)
+                return (holding, self.generation, self.value, self.fails)
             }
+            if fails { throw .unavailable(reason: "exclusive phase") }
             if wait {
                 await withCheckedContinuation { continuation in
                     lock.withLock { holds.append(continuation) }
@@ -178,6 +180,24 @@ import Testing
         await loaded(store, .collection)
         #expect(store.days(.collection) != nil)
         #expect(service.calls == [nil, nil])
+    }
+
+    @Test func aFailedReadIsAskedAgainWhenTheCollectionIsReady() async {
+        let service = FakeService()
+        let store = ActivityHeatmapStore(service: service)
+        service.fails = true
+        let failed = store.request(.collection)
+        await store.load(failed)
+        #expect(store.days(.collection) == nil)
+        service.fails = false
+        store.collectionReady()
+        #expect(store.request(.collection) != failed, "the page's task runs again")
+        await loaded(store, .collection)
+        #expect(store.days(.collection) != nil)
+        // Ready again with nothing failed: nothing to ask.
+        let current = store.request(.collection)
+        store.collectionReady()
+        #expect(store.request(.collection) == current)
     }
 
     @Test func onlyAFewScopesAreKept() async {

@@ -1240,6 +1240,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         switch value {
         case .ready(let next):
             activity.generationChanged(to: next)
+            activity.collectionReady()
             if generation != next {
                 addFlowOwner?.generationEnded()
                 endGoToDeckGeneration()

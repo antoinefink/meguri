@@ -367,7 +367,8 @@ public struct HomeView: View {
                 }
             }
             // N14.11: this deck's and its subdecks' activity, after the subdecks.
-            ActivityHeatmapSection(store: collection.activity, scope: .deck(deck.id))
+            ActivityHeatmapSection(store: collection.activity, scope: .deck(deck.id),
+                                   widths: collection.navigation.activityRowWidths)
             if let error = collection.error {
                 Text(verbatim: error).foregroundStyle(.token(.statusError))
                     .accessibilityIdentifier("home.collection.error")
@@ -386,7 +387,8 @@ public struct HomeView: View {
         // N14.3: system grouped sections on the grouped background.
         .listStyle(.insetGrouped)
         #endif
-        .activityLoading(collection.activity, scope: .deck(deck.id), active: collection.heatmapRefreshes)
+        .activityLoading(collection.activity, scope: .deck(deck.id), active: collection.heatmapRefreshes,
+                         widths: collection.navigation.activityRowWidths)
     }
     @ViewBuilder private func deckAction(_ deck: ReviewCollection.DeckPageDetail, empty: Bool) -> some View {
         if empty {
@@ -609,8 +611,8 @@ public struct HomeDeckTree: View {
                     } else {
                         branches
                     }
-                    if let activity {
-                        ActivityHeatmapSection(store: activity, scope: .collection)
+                    if let activity, let navigation {
+                        ActivityHeatmapSection(store: activity, scope: .collection, widths: navigation.activityRowWidths)
                     }
                     if let error {
                         Section {
@@ -633,7 +635,8 @@ public struct HomeDeckTree: View {
                     }
                 }
                 .coordinateSpace(name: "home.deck.list")
-                .activityLoading(activity, scope: .collection, active: activityActive)
+                .activityLoading(activity, scope: .collection, active: activityActive,
+                                 widths: navigation?.activityRowWidths)
                 // List does not use the ScrollView target-layout modifier.
                 // Track actual row geometry, not lazy row creation, so cached
                 // off-screen rows cannot overwrite the saved navigation anchor.

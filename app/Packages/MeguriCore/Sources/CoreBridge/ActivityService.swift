@@ -43,9 +43,10 @@ public protocol ActivityService: Sendable {
     func heatmap(deckID: Int64?) async throws(BridgeError) -> ActivityDays
 }
 
-/// Reads on the query lane, so the heatmap never waits behind the writer or the
-/// interactive lane. A request cancelled while it waits for the lane never reaches
-/// the core.
+/// Reads on the query lane and the core's query reader, never the interactive lane or the
+/// writer's ops (only the day clock's own rollover check, when the day has changed, may
+/// wait for the writer, as the deck counts do). A request cancelled while it waits for
+/// the lane never reaches the core.
 public struct CoreActivityService: ActivityService {
     public init() {}
     public func heatmap(deckID: Int64?) async throws(BridgeError) -> ActivityDays {

@@ -20,6 +20,7 @@ public final class ActivityHeatmapStore {
         let day: UInt64
         let reviews: UInt64
         let membership: UInt64
+        let attempt: UInt64
     }
     /// What a page keys its load task by: a new key means a refresh is due.
     public struct Request: Hashable, Sendable {
@@ -46,6 +47,10 @@ public final class ActivityHeatmapStore {
     /// Moved by card and deck changes: deck scopes are stale, the collection's is not.
     private var membership: UInt64 = 0
     @ObservationIgnored private var generation: UInt64?
+    /// Moved when the collection is ready again after a read failed (an exclusive phase,
+    /// an unavailable collection), so the pages that failed ask again.
+    private var attempt: UInt64 = 0
+    @ObservationIgnored private var failed = false
 
     public init(service: any ActivityService = CoreActivityService()) {
         self.service = service
@@ -72,7 +77,11 @@ public final class ActivityHeatmapStore {
         }
         let expected = generation
         let deckID: Int64? = if case .deck(let id) = scope { id } else { nil }
-        guard let days = try? await service.heatmap(deckID: deckID) else { return }
+        let days: ActivityDays
+        do { days = try await service.heatmap(deckID: deckID) } catch {
+            if !Task.isCancelled { failed = true }
+            return
+        }
         guard !Task.isCancelled, request.stamp == stamp(for: scope),
               expected == generation, generation.map({ $0 == days.generation }) ?? true else { return }
         entries[scope] = Entry(days: days, stamp: request.stamp)
@@ -97,6 +106,13 @@ public final class ActivityHeatmapStore {
 
     /// Rollover, a time zone change, or a new `next_day_at`.
     public func dayChanged() { day &+= 1 }
+
+    /// The collection is ready (again): a read that failed meanwhile is asked again.
+    public func collectionReady() {
+        guard failed else { return }
+        failed = false
+        attempt &+= 1
+    }
 
     /// Another collection, or the same file reopened: nothing kept applies.
     public func generationChanged(to next: UInt64?) {
@@ -124,7 +140,7 @@ public final class ActivityHeatmapStore {
 
     private func stamp(for scope: ActivityScope) -> Stamp {
         // The collection's counts ignore which deck a card is in.
-        Stamp(day: day, reviews: reviews, membership: scope == .collection ? 0 : membership)
+        Stamp(day: day, reviews: reviews, membership: scope == .collection ? 0 : membership, attempt: attempt)
     }
 
     private func touch(_ scope: ActivityScope) {
