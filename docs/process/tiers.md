@@ -98,6 +98,8 @@ GitHub Actions runs on every pull request and master push. "Select suites" picks
 | Linux · server, conformance, package-smoke | `sync-server-test`, `conformance --lane docker`, `sync-server-package-test` | 12–15 min |
 | stress (Verify Core at scale) | `core-test --stress`, for changes to `core/`, the dev image, `tools/mg`, `tools/mg.d/core.sh` or its workflow; nightly and manual. Its workflow header lists why. Pull requests that change none of these show no stress check. | about 70 min |
 
+For branch protection, require Linux · core and the three other Linux checks, never a shard or the timing-sensitive job: those skip themselves when Core is not selected, and GitHub counts a skipped required check as passing. A change that adds a line to the list gets a warning in "Select suites".
+
 Linux · core covers the quick tests except the listed ones. The listed tests fail on hosted runners for timing reasons only, so they stay advisory until they are fixed. Each one is tracked in `verification-status.md`. When a test is fixed, delete its line in `.github/core-timing-sensitive.txt`: the shards then run it again, and it blocks again. Local `core-test` and the gate still run every test.
 
 Antoine authorized a narrow unsigned Apple pilot on 2026-11-19 for the public Core XCFramework build on GitHub's Xcode runner. This is the exception to the Docker-only cloud placement rule (R1939). It supplies build feedback. The signed app journey, test VM, private data and device requirements retain their designated environments.
