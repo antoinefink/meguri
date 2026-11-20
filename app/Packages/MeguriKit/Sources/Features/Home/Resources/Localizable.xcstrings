@@ -834,6 +834,164 @@
           }
         }
       }
+    },
+    "Delete “%@”?": {
+      "comment": "N20.7 Delete Deck. Confirmation title; %@ is the deck's last name component.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete “%@”?"
+          }
+        }
+      }
+    },
+    "Its %lld subdecks and %lld cards will also be deleted.": {
+      "comment": "N20.7 Delete Deck. Confirmation message; the first number is the deck's subdecks (0 or more), the second the cards deleted (1 or more).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%#@subdecks@"
+          },
+          "substitutions": {
+            "subdecks": {
+              "argNum": 1,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "zero": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Its %#@cards@ will also be deleted."
+                    }
+                  },
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Its subdeck and %#@cards@ will also be deleted."
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Its %arg subdecks and %#@cards@ will also be deleted."
+                    }
+                  }
+                }
+              }
+            },
+            "cards": {
+              "argNum": 2,
+              "formatSpecifier": "lld",
+              "variations": {
+                "plural": {
+                  "one": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg card"
+                    }
+                  },
+                  "other": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "%arg cards"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Delete Deck": {
+      "comment": "N20.7 Delete Deck. The deck menu, the Deck menu and the touch confirmation's destructive button.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Deck"
+          }
+        }
+      }
+    },
+    "Delete": {
+      "comment": "N20.7 Delete Deck. The Mac alert's destructive button.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete"
+          }
+        }
+      }
+    },
+    "Couldn’t Delete “%@”": {
+      "comment": "N20.7 Delete Deck. Failure alert title; %@ is the deck's last name component.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t Delete “%@”"
+          }
+        }
+      }
+    },
+    "Meguri couldn’t make a backup first, so nothing was deleted.": {
+      "comment": "N20.7 Delete Deck. Failure alert message when the backup failed.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri couldn’t make a backup first, so nothing was deleted."
+          }
+        }
+      }
+    },
+    "Nothing was deleted.": {
+      "comment": "N20.7 Delete Deck. Failure alert message for any other failure.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing was deleted."
+          }
+        }
+      }
+    },
+    "OK": {
+      "comment": "N20.7 Delete Deck. Failure alert button.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "Undo Delete Deck": {
+      "comment": "N20.7 Delete Deck. Edit menu (R173).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undo Delete Deck"
+          }
+        }
+      }
+    },
+    "Redo Delete Deck": {
+      "comment": "N20.7 Delete Deck. Edit menu (R173).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redo Delete Deck"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
