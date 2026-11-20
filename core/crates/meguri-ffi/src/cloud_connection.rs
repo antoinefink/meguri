@@ -320,6 +320,138 @@ impl From<&p::Preview> for CloudConnectionSummary {
         }
     }
 }
+/// `sync/cloudkit-recovery#V27.2`: the row the core picked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CloudSetupRow {
+    /// Row 1: create an empty collection, then set up again (row 4 follows).
+    CreateAndPublish,
+    AdoptInitial,
+    Resume,
+    Publish,
+    AdoptOverNoContent,
+    PublishOverNoContent,
+    KeepCollection,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CloudSetupQuestion {
+    /// Call `start_setup` at once (row 1: create the collection first).
+    None,
+    /// Row 3 while no durable record excludes the other service: keep the
+    /// "Continue syncing this collection" confirmation, then `resume_binding`.
+    ConfirmResume,
+    /// Show the keep-collection sheet (V27.4).
+    Keep,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum CloudSetupAskReason {
+    TwoCollections,
+    Fence,
+    UnprovedLayout,
+    OtherAccount,
+    RetainedBinding,
+    WorkAtRisk,
+    CloudUnreadable,
+    OtherServiceUnknown,
+}
+/// One side of the keep-collection sheet (V13.4).
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudSetupSide {
+    pub present: bool,
+    pub counts: Vec<CloudKindCount>,
+    /// False: `counts` are `MGEpoch.counts`; label them with `counts_as_of_ms`.
+    pub counts_exact: bool,
+    pub counts_as_of_ms: Option<i64>,
+    /// None is unknown, never "no change".
+    pub last_change_ms: Option<i64>,
+    pub last_review_ms: Option<i64>,
+    /// False only when V27.1 proved that this side holds no user content.
+    pub holds_user_content: bool,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct CloudSetupDecision {
+    pub row: CloudSetupRow,
+    /// The row's number in V27.2's table, 1 to 7.
+    pub row_number: u8,
+    pub question: CloudSetupQuestion,
+    pub reason: Option<CloudSetupAskReason>,
+    pub keep_device_offered: bool,
+    pub keep_cloud_offered: bool,
+    pub device: CloudSetupSide,
+    pub cloud: CloudSetupSide,
+    /// The epoch and `MGActive` change tag the preview read. The confirm
+    /// calls bind to them through the preview handle (V27.4).
+    pub epoch_id: Option<Vec<u8>>,
+    pub active_change_tag: Option<Vec<u8>>,
+    /// Unsent, held, isolated and fetched work, and conflict copies (R2056).
+    pub summary: CloudConnectionSummary,
+}
+pub(crate) fn setup_record(
+    decision: &c::setup::SetupDecision,
+    preview: &p::Preview,
+    last_change_ms: Option<i64>,
+    last_review_ms: Option<i64>,
+) -> CloudSetupDecision {
+    use c::setup::{AskReason as A, ContentProof, SetupQuestion as Q, SetupRow as R};
+    let device_present = preview.native_file.is_some();
+    CloudSetupDecision {
+        row: match decision.row {
+            R::CreateAndPublish => CloudSetupRow::CreateAndPublish,
+            R::AdoptInitial => CloudSetupRow::AdoptInitial,
+            R::Resume => CloudSetupRow::Resume,
+            R::Publish => CloudSetupRow::Publish,
+            R::AdoptOverNoContent => CloudSetupRow::AdoptOverNoContent,
+            R::PublishOverNoContent => CloudSetupRow::PublishOverNoContent,
+            R::KeepCollection => CloudSetupRow::KeepCollection,
+        },
+        row_number: decision.row.number(),
+        question: match decision.question {
+            Q::None => CloudSetupQuestion::None,
+            Q::ConfirmResume => CloudSetupQuestion::ConfirmResume,
+            Q::Keep => CloudSetupQuestion::Keep,
+        },
+        reason: decision.reason.map(|reason| match reason {
+            A::TwoCollections => CloudSetupAskReason::TwoCollections,
+            A::Fence => CloudSetupAskReason::Fence,
+            A::UnprovedLayout => CloudSetupAskReason::UnprovedLayout,
+            A::OtherAccount => CloudSetupAskReason::OtherAccount,
+            A::RetainedBinding => CloudSetupAskReason::RetainedBinding,
+            A::WorkAtRisk => CloudSetupAskReason::WorkAtRisk,
+            A::CloudUnreadable => CloudSetupAskReason::CloudUnreadable,
+            A::OtherServiceUnknown => CloudSetupAskReason::OtherServiceUnknown,
+        }),
+        keep_device_offered: decision.keep_device_offered,
+        keep_cloud_offered: decision.keep_cloud_offered,
+        device: CloudSetupSide {
+            present: device_present,
+            counts: counts(&preview.local.counts),
+            counts_exact: device_present,
+            counts_as_of_ms: None,
+            last_change_ms: if device_present { last_change_ms } else { None },
+            last_review_ms: if device_present { last_review_ms } else { None },
+            holds_user_content: device_present && preview.local_content != Some(ContentProof::ProvedNone),
+        },
+        cloud: CloudSetupSide {
+            present: preview.active.is_some(),
+            counts: preview.cloud.as_ref().map(|v| counts(&v.counts)).unwrap_or_default(),
+            // Manifest counts only: this build stages no prefetch.
+            counts_exact: false,
+            counts_as_of_ms: preview.published_at_ms,
+            last_change_ms: None,
+            last_review_ms: None,
+            // Never proved from `MGEpoch.counts` (V27.1).
+            holds_user_content: preview.active.is_some(),
+        },
+        epoch_id: preview.active_epoch.map(|e| e.0.to_vec()),
+        active_change_tag: preview.active.as_ref().map(|r| r.system_fields.0.clone()),
+        summary: preview.into(),
+    }
+}
+/// What `start_setup` started.
+#[derive(Clone, uniffi::Enum)]
+pub enum CloudSetupStarted {
+    Resumed,
+    Operation { operation: Arc<CloudRecoveryOperation> },
+}
 struct Owner {
     host: Arc<meguri_host::CoreHost>,
     core: Arc<r::Runtime>,
@@ -417,6 +549,14 @@ impl CloudConnectionPreview {
             .unwrap_or_else(PoisonError::into_inner)
             .take()
             .ok_or_else(|| failure(CloudConnectionFailure::Consumed))
+    }
+    /// The ready preview, left in the handle for the call that uses it.
+    fn ready(&self) -> Result<Box<p::Preview>, CoreError> {
+        match self.work.lock().unwrap_or_else(PoisonError::into_inner).as_ref() {
+            Some(p::PreviewWork::Ready(preview)) => Ok(preview.clone()),
+            Some(_) => Err(failure(CloudConnectionFailure::NotOffered)),
+            None => Err(failure(CloudConnectionFailure::Consumed)),
+        }
     }
     fn take_adoption(&self) -> Result<p::PreviewWork, CoreError> {
         let mut work = self.work.lock().unwrap_or_else(PoisonError::into_inner);
@@ -806,6 +946,62 @@ impl CloudConnection {
             true,
             preview.generation,
         ))
+    }
+    /// V27.2: the row the core picked for a ready preview, with both sides'
+    /// counts. Reads only; the preview stays usable.
+    pub fn setup_decision(&self, preview: Arc<CloudConnectionPreview>) -> Result<CloudSetupDecision, CoreError> {
+        callback::enter("CloudConnection.setup_decision");
+        self.owns(&preview.owner)?;
+        self.owner.check_generation(preview.generation)?;
+        let ready = preview.ready()?;
+        let decision = self.owner.host.cloud_setup_decision(&ready).map_err(error)?;
+        // Dates are presentation only; a failed read shows them as unknown.
+        let dates = ready
+            .native_file
+            .and_then(|_| local_information_for_host(&self.owner.host, preview.generation).ok());
+        Ok(setup_record(
+            &decision,
+            &ready,
+            dates.as_ref().and_then(|d| d.last_change_ms),
+            dates.as_ref().and_then(|d| d.last_review_ms),
+        ))
+    }
+    /// The decided row's recovery call, for a decision whose question is
+    /// `None`. The core decides the row again; any other question, and row 1,
+    /// is `NotOffered` and leaves the preview usable. Call
+    /// `ProviderOwner.accept_icloud_connection` after it, as after a confirm.
+    pub fn start_setup(&self, preview: Arc<CloudConnectionPreview>) -> Result<CloudSetupStarted, CoreError> {
+        use c::setup::{SetupQuestion, SetupRow};
+        callback::enter("CloudConnection.start_setup");
+        self.owns(&preview.owner)?;
+        self.owner.check_generation(preview.generation)?;
+        let ready = preview.ready()?;
+        let decision = self.owner.host.cloud_setup_decision(&ready).map_err(error)?;
+        if decision.question != SetupQuestion::None {
+            return Err(failure(CloudConnectionFailure::NotOffered));
+        }
+        let generation = meguri_engine::Generation(preview.generation);
+        let host = &self.owner.host;
+        let started = match decision.row {
+            SetupRow::Resume => host
+                .start_cloud_setup_resume(&ready, generation)
+                .map(|()| CloudSetupStarted::Resumed),
+            SetupRow::Publish => host.start_cloud_setup_publication(&ready, generation).map(|id| {
+                CloudSetupStarted::Operation { operation: self.recovery(id, false, preview.generation) }
+            }),
+            SetupRow::AdoptInitial | SetupRow::AdoptOverNoContent => {
+                host.start_cloud_setup_adoption(&ready).map(|id| CloudSetupStarted::Operation {
+                    operation: self.recovery(id, true, preview.generation),
+                })
+            }
+            SetupRow::CreateAndPublish | SetupRow::PublishOverNoContent | SetupRow::KeepCollection => {
+                return Err(failure(CloudConnectionFailure::NotOffered));
+            }
+        }
+        .map_err(error)?;
+        // The call consumed the core's preview; retire the handle with it.
+        let _ = preview.take();
+        Ok(started)
     }
     pub fn next_publication_work(&self) -> Result<CloudPublicationWork, CoreError> {
         callback::enter("CloudConnection.next_publication_work");
