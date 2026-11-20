@@ -600,6 +600,17 @@ fn retained_artifacts(config: &meguri_host::HostConfig, op: &meguri_sync::policy
 fn assert_artifacts(artifacts: &[(std::path::PathBuf, Vec<u8>)]) {
     for (path, before) in artifacts { assert_eq!(&fs::read(path).unwrap(), before); }
 }
+/// A discarded preparation that sent nothing and replaced nothing takes its
+/// retained candidate and its server copy with it. Its published safety
+/// backup is an ordinary backup and stays, byte for byte.
+fn assert_swept(config: &meguri_host::HostConfig, op: &meguri_sync::policy::Operation, artifacts: &[(std::path::PathBuf, Vec<u8>)]) {
+    let safety = op.safety_backups.iter().map(|a| config.backups_directory.join(&a.name)).collect::<Vec<_>>();
+    assert!(!safety.is_empty());
+    for (path, before) in artifacts {
+        if safety.contains(path) { assert_eq!(&fs::read(path).unwrap(), before); } else { assert!(!path.exists()); }
+    }
+    assert!(!config.manual_transfer_directory.join(op.id.as_str()).exists());
+}
 fn discard_preparation_roundtrip(cold: bool) {
     let root = tempfile::tempdir().unwrap();
     let (host, config) = seeded(&root.path().join("local"));
@@ -627,7 +638,7 @@ fn discard_preparation_roundtrip(cold: bool) {
     assert!(host.pending_meguri_bootstrap_preparation(&connection, USER).unwrap().is_none());
     assert!(!host.provider_authority().network_blocked());
     assert_eq!(bytes(&config), provider_before);
-    assert_artifacts(&artifacts);
+    assert_swept(&config, &cancelled, &artifacts);
     let offline = Script::new(vec![]);
     assert!(matches!(host.confirm_meguri_bootstrap(access(&connection, &offline), preview), Err(E::Busy)));
     offline.assert_done();
@@ -643,7 +654,7 @@ fn discard_preparation_roundtrip(cold: bool) {
     host.close().unwrap();
 }
 #[test]
-fn meguri_discard_live_preparation_preserves_artifacts_and_reopens_explicit_admission() {
+fn meguri_discard_live_preparation_takes_its_own_artifacts_and_reopens_explicit_admission() {
     let _lane = LANE.lock().unwrap();
     discard_preparation_roundtrip(false);
 }
@@ -845,8 +856,9 @@ fn discarded_failed_confirmation_allows_next_preview(cold: bool) {
     assert_eq!(host.manual_transfer_history().get(&next.operation.id).unwrap(), cancelled_next);
     assert_eq!(host.manual_transfer_history().history().unwrap().len(), 2);
     assert_eq!(bytes(&config), provider_before);
-    assert_artifacts(&first_artifacts);
-    assert_artifacts(&next_artifacts);
+    // Neither sent anything or replaced anything, and both were discarded.
+    assert_swept(&config, &cancelled_first, &first_artifacts);
+    assert_swept(&config, &cancelled_next, &next_artifacts);
     for method in [Method::Upload, Method::MediaBegin, Method::UploadChanges, Method::MediaChanges, Method::DownloadFiles, Method::MediaSanity] {
         assert_eq!(script.count(method), 0);
         assert_eq!(next_script.count(method), 0);
@@ -982,8 +994,9 @@ fn nonactive_failed_confirmation_allows_fresh_preview_discard_and_confirm(cold: 
     assert_eq!((metadata.dev(), metadata.ino(), metadata.len()), file_before);
     assert_eq!(state.settled_publication().unwrap(), publication_before);
     assert_eq!(state.replacement_evidence().unwrap(), replacement_before);
+    // The failed confirmation was never discarded: its artifacts stay. The discarded preview's go.
     assert_artifacts(&first_artifacts);
-    assert_artifacts(&next_artifacts);
+    assert_swept(&config, &cancelled_next, &next_artifacts);
     for method in [Method::Upload, Method::MediaBegin, Method::UploadChanges, Method::MediaChanges, Method::DownloadFiles, Method::MediaSanity] {
         assert_eq!(script.count(method), 0);
         assert_eq!(next_script.count(method), 0);

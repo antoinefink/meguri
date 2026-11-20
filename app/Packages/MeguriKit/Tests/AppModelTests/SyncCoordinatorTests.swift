@@ -645,17 +645,285 @@ struct SyncCoordinatorTests {
         let defaults = try #require(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: defaults)
-        sync.setDeviceSettings(paused: true, automatic: false, media: false)
+        sync.setDeviceSettings(paused: true, automatic: false)
         await sync.waitForInputs()
         await sync.cancelConnectionPreview()
         #expect(!sync.settings.enabled)
         let restored = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: defaults)
-        #expect(restored.settings == .init(enabled: false, paused: true, automatic: false, media: false))
+        // P25.1: a stored media off from an earlier build reads as on.
+        #expect(restored.settings == .init(enabled: false, paused: true, automatic: false, media: true))
+    }
+
+    // sync/policy P25.5, U151's rows.
+
+    private func round2Defaults(_ stored: [String: Bool]?) throws -> (UserDefaults, String) {
+        let name = "SyncCoordinatorTests.round2.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        if let stored { defaults.set(stored, forKey: "meguri.cloud.deviceSettings") }
+        return (defaults, name)
+    }
+
+    @Test func missingAutomaticReadsOnAndTheFirstInputCarriesIt() async throws {
+        let (defaults, name) = try round2Defaults(nil)
+        defer { defaults.removePersistentDomain(forName: name) }
+        let backend = SyncOwnerFake()
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: defaults)
+        #expect(sync.settings.automatic && sync.settings.media && !sync.settings.paused)
+        #expect(sync.storedAutomatic && sync.automaticSwitchValue)
+        var inputs: [CloudPolicyDeviceSettings] = []
+        backend.routeInput = { event in
+            if case .settings(let value) = event { inputs.append(value) }
+            return .commands([])
+        }
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2)
+        await sync.waitForInputs()
+        #expect(inputs.first?.automatic == true && inputs.first?.media == true)
+        #expect(await sync.cancelAndDrain())
+    }
+
+    @Test func storedPauseBecomesAutomaticOffInOneWriteBeforeTheFirstInput() async throws {
+        let (defaults, name) = try round2Defaults(["enabled": true, "paused": true, "automatic": true, "media": false])
+        defer { defaults.removePersistentDomain(forName: name) }
+        let backend = SyncOwnerFake()
+        var inputs: [CloudPolicyDeviceSettings] = []
+        backend.routeInput = { event in
+            if case .settings(let value) = event { inputs.append(value) }
+            return .commands([])
+        }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: defaults)
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2)
+        await sync.waitForInputs()
+        // No publish or adopt op: no hold. The first input is already migrated.
+        #expect(inputs.first == .init(enabled: true, paused: false, automatic: false, media: true))
+        #expect(sync.settings == .init(enabled: true, paused: false, automatic: false, media: true))
+        #expect(!sync.storedAutomatic && !sync.updateHold)
+        let stored = try #require(defaults.dictionary(forKey: "meguri.cloud.deviceSettings") as? [String: Bool])
+        #expect(stored == ["enabled": true, "paused": false, "automatic": false, "media": true])
+        #expect(await sync.cancelAndDrain())
+        // It runs once: a later launch changes nothing, and a stored off survives.
+        let later = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: defaults)
+        #expect(later.settings == .init(enabled: true, paused: false, automatic: false, media: true))
+        #expect(!later.storedAutomatic)
+    }
+
+    @Test func storedSettingsThatWereNotPausedKeepTheirValues() async throws {
+        let (defaults, name) = try round2Defaults(["enabled": true, "paused": false, "automatic": true, "media": false])
+        defer { defaults.removePersistentDomain(forName: name) }
+        let backend = SyncOwnerFake()
+        var inputs: [CloudPolicyDeviceSettings] = []
+        backend.routeInput = { event in
+            if case .settings(let value) = event { inputs.append(value) }
+            return .commands([])
+        }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: defaults)
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2)
+        await sync.waitForInputs()
+        // Only the removed media value changes; automatic and paused are untouched.
+        #expect(inputs.first == .init(enabled: true, paused: false, automatic: true, media: true))
+        #expect(sync.storedAutomatic)
+        #expect(await sync.cancelAndDrain())
+    }
+
+    private func attach(_ stored: [String: Bool], operation: Result<Bool, any Error>?, defaults: UserDefaults)
+        async -> (SyncCoordinator, [CloudPolicyDeviceSettings]) {
+        defaults.set(stored, forKey: "meguri.cloud.deviceSettings")
+        let backend = SyncOwnerFake()
+        var inputs: [CloudPolicyDeviceSettings] = []
+        backend.routeInput = { event in
+            if case .settings(let value) = event { inputs.append(value) }
+            return .commands([])
+        }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: defaults)
+        if let operation { sync.retainedOperationForMigration = { operation } }
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2)
+        await sync.waitForInputs()
+        return (sync, inputs)
+    }
+
+    @Test func storedPauseStaysAsTheUpdateHoldOnlyWithAnOperation() async throws {
+        // P25.2: a `publish` op at any step, or an `adopt` op. The op's kind and
+        // step do not enter the decision: its presence alone keeps the pause.
+        let (defaults, name) = try round2Defaults(nil)
+        defer { defaults.removePersistentDomain(forName: name) }
+        let (sync, inputs) = await attach(["enabled": true, "paused": true, "automatic": true, "media": true],
+            operation: .success(true), defaults: defaults)
+        #expect(inputs.first == .init(enabled: true, paused: true, automatic: false, media: true))
+        #expect(sync.updateHold && !sync.storedAutomatic && !sync.automaticSwitchValue)
+        #expect(defaults.bool(forKey: "meguri.sync.round2Migrated"))
+        let stored = try #require(defaults.dictionary(forKey: "meguri.cloud.deviceSettings") as? [String: Bool])
+        #expect(stored == ["enabled": true, "paused": true, "automatic": false, "media": true])
+        #expect(await sync.cancelAndDrain())
+        // It ran once. A later launch, with the op gone, does not reopen the question:
+        // the hold stays until a clearing act, and Sync Automatically stays off.
+        let later = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: defaults)
+        later.retainedOperationForMigration = { .success(false) }
+        await later.preparePlatform(); await later.completeOpenedHost(generation: 2); await later.waitForInputs()
+        #expect(later.settings == .init(enabled: true, paused: true, automatic: false, media: true))
+        #expect(await later.clearUpdateHold())
+        #expect(later.settings == .init(enabled: true, paused: false, automatic: false, media: true) && !later.storedAutomatic)
+        #expect(await later.cancelAndDrain())
+    }
+
+    @Test func anOperationThatCannotBeReadKeepsTheHold() async throws {
+        struct Unreadable: Error {}
+        let (defaults, name) = try round2Defaults(nil)
+        defer { defaults.removePersistentDomain(forName: name) }
+        let (sync, inputs) = await attach(["enabled": true, "paused": true, "automatic": true, "media": false],
+            operation: .failure(Unreadable()), defaults: defaults)
+        // Not proved absent: nothing opens, and Sync Automatically still reads off.
+        #expect(inputs.first == .init(enabled: true, paused: true, automatic: false, media: true))
+        #expect(sync.updateHold && !sync.storedAutomatic)
+        #expect(await sync.cancelAndDrain())
+        // The decision itself, for each service.
+        #expect(SyncCoordinator.keepsUpdateHold(operation: .failure(Unreadable()), selection: .iCloud))
+        #expect(SyncCoordinator.keepsUpdateHold(operation: .failure(Unreadable()), selection: nil))
+        #expect(!SyncCoordinator.keepsUpdateHold(operation: .failure(Unreadable()), selection: .meguri))
+        #expect(SyncCoordinator.keepsUpdateHold(operation: .success(true), selection: .iCloud))
+        #expect(!SyncCoordinator.keepsUpdateHold(operation: .success(false), selection: .iCloud))
+    }
+
+    @Test func anEarlierOffWithoutPauseIsCarriedToTheDeviceAndSurvivesAServiceChange() async throws {
+        // P25.3: the earlier build kept Sync Automatically with the service's settings.
+        let (defaults, name) = try round2Defaults(nil)
+        defer { defaults.removePersistentDomain(forName: name) }
+        let (sync, inputs) = await attach(["enabled": true, "paused": false, "automatic": false, "media": true],
+            operation: nil, defaults: defaults)
+        #expect(inputs.first == .init(enabled: true, paused: false, automatic: false, media: true))
+        #expect(!sync.storedAutomatic && defaults.object(forKey: "meguri.sync.automatic") as? Bool == false)
+        #expect(await sync.cancelAndDrain())
+        // Another service's settings arrive with their own default of on.
+        // The device's value still reads off, and a setup commits it as off.
+        let (other, _) = await attach(["enabled": false, "paused": false, "automatic": true, "media": true],
+            operation: nil, defaults: defaults)
+        #expect(!other.storedAutomatic && !other.automaticSwitchValue)
+        #expect(await other.cancelAndDrain())
+        // A device that never turned it off, and was not connected, stores nothing.
+        let (fresh, freshName) = try round2Defaults(nil)
+        defer { fresh.removePersistentDomain(forName: freshName) }
+        let (untouched, _) = await attach(["enabled": false, "paused": false, "automatic": false, "media": true],
+            operation: nil, defaults: fresh)
+        #expect(untouched.storedAutomatic && fresh.object(forKey: "meguri.sync.automatic") == nil)
+        #expect(await untouched.cancelAndDrain())
+    }
+
+    @Test func aClearingActBeforeTheMigrationCannotTurnSyncAutomaticallyOn() async throws {
+        // The earlier build's pause with auto on, on a device whose migration has
+        // not run (or whose write failed). Sync Now clears the hold first.
+        let (defaults, name) = try round2Defaults(["enabled": true, "paused": true, "automatic": true, "media": true])
+        defer { defaults.removePersistentDomain(forName: name) }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: defaults)
+        #expect(sync.updateHold && sync.settings.automatic)
+        #expect(await sync.clearUpdateHold())
+        // The device's off is stored before the write, so it can never read on afterwards.
+        #expect(sync.settings == .init(enabled: true, paused: false, automatic: false, media: true))
+        #expect(!sync.storedAutomatic && defaults.object(forKey: "meguri.sync.automatic") as? Bool == false)
+        // The migration then finds nothing to change, and a later launch keeps off.
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2); await sync.waitForInputs()
+        #expect(defaults.bool(forKey: "meguri.sync.round2Migrated"))
+        #expect(sync.settings == .init(enabled: true, paused: false, automatic: false, media: true))
+        #expect(await sync.cancelAndDrain())
+        let later = SyncCoordinator(bootstrap: {}, makeBackend: { _ in SyncOwnerFake() }, defaults: defaults)
+        #expect(!later.settings.automatic && !later.storedAutomatic && !later.updateHold)
+    }
+
+    @Test func resumeAndCancelOfAnOperationClearTheHoldFirst() async throws {
+        // P25.2 lists `resume_recovery_op` and `cancel_recovery_op` among the clearing acts.
+        for cancel in [false, true] {
+            let backend = SyncOwnerFake()
+            var timeline: [Bool] = []
+            backend.routeInput = { event in
+                if case .settings(let value) = event { timeline.append(value.paused) }
+                return .commands([])
+            }
+            let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+            await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2)
+            sync.setDeviceSettings(paused: true, automatic: false)
+            await sync.waitForInputs()
+            #expect(sync.updateHold)
+            if cancel { _ = await sync.prepareConnectionCancellation() } else { await sync.resumeRecoveryOperation() }
+            await sync.waitForInputs()
+            #expect(!sync.updateHold && timeline.last == false && !sync.settings.automatic)
+            #expect(await sync.cancelAndDrain())
+        }
+    }
+
+    @Test func offIsRefusedWhileAnOperationCouldRestoreTheBindingOrCannotBeRead() {
+        // V27.5's rows.
+        typealias S = SyncCoordinator
+        #expect(!S.serviceChangeRefused(selection: .iCloud, operationSwitchConflict: nil, readFailed: false))
+        #expect(S.serviceChangeRefused(selection: .iCloud, operationSwitchConflict: false, readFailed: false))
+        // A `publish` op whose switch conflict is set permits Off: it keeps local only.
+        #expect(!S.serviceChangeRefused(selection: .iCloud, operationSwitchConflict: true, readFailed: false))
+        // An op that could not be read is not proved absent.
+        #expect(S.serviceChangeRefused(selection: .iCloud, operationSwitchConflict: nil, readFailed: true))
+        #expect(S.serviceChangeRefused(selection: .iCloud, operationSwitchConflict: true, readFailed: true))
+        // Only iCloud has these ops.
+        for selection: SyncProviderSelection? in [.meguri, .localOnly, nil] {
+            #expect(!S.serviceChangeRefused(selection: selection, operationSwitchConflict: false, readFailed: true))
+        }
+        // Row 1: an active binding with no op stops. Row 2: every other permitted state keeps local only.
+        #expect(S.offStopsBinding(bindingActive: true, operationPresent: false))
+        #expect(!S.offStopsBinding(bindingActive: true, operationPresent: true))
+        #expect(!S.offStopsBinding(bindingActive: false, operationPresent: false))
+        #expect(!S.offStopsBinding(bindingActive: nil, operationPresent: false))
+    }
+
+    @Test func offWithNoServiceSelectedOrNoICloudWritesNothing() async {
+        for state in [SyncCoordinator.RenderState.off, .meguriConnected] {
+            let sync = SyncCoordinator.renderFixture(state)
+            let selection = sync.providerState?.selection
+            #expect(!sync.serviceChangeRefusedForOperation)
+            #expect(!(await sync.turnOffICloud()))
+            #expect(sync.providerState?.selection == selection && sync.recovery == nil)
+        }
+    }
+
+    @Test func clearingActsWritePausedOffBeforeTheirRequest() async throws {
+        let backend = SyncOwnerFake()
+        var timeline: [String] = []
+        backend.routeInput = { event in
+            switch event {
+            case .settings(let value): timeline.append(value.paused ? "paused" : "clear")
+            case .syncNowRequested: timeline.append("syncNow")
+            default: break
+            }
+            return .commands([])
+        }
+        let sync = SyncCoordinator(bootstrap: {}, makeBackend: { _ in backend }, defaults: nil)
+        await sync.preparePlatform(); await sync.completeOpenedHost(generation: 2)
+        // The hold, as a stored pause that no control sets any more.
+        sync.setDeviceSettings(paused: true, automatic: false)
+        await sync.waitForInputs()
+        #expect(sync.updateHold)
+        timeline.removeAll()
+        // A launch-like refresh, a foreground return and an account read do not clear it.
+        await sync.foregroundAfterLocalResume()
+        await sync.prepareConnectionAuthority()
+        // An account event does not clear it either (P25.2).
+        await sync.accountChanged()
+        await sync.waitForInputs()
+        #expect(sync.updateHold && !timeline.contains("clear"))
+        // Sync Now clears it first, then forwards the request.
+        sync.syncNow(source: .command)
+        while sync.updateHold { await Task.yield() }
+        await sync.waitForInputs()
+        for _ in 0..<50 where !timeline.contains("syncNow") { await Task.yield(); await sync.waitForInputs() }
+        let clear = try #require(timeline.firstIndex(of: "clear"))
+        let request = try #require(timeline.firstIndex(of: "syncNow"))
+        #expect(clear < request && !sync.settings.paused)
+        // Auto stays as stored: off.
+        #expect(!sync.settings.automatic)
+        // A recovery call the person starts clears it through the same write.
+        sync.setDeviceSettings(paused: true, automatic: false)
+        await sync.waitForInputs()
+        #expect(await sync.clearUpdateHold())
+        #expect(!sync.updateHold)
+        #expect(await sync.cancelAndDrain())
     }
 }
 
 extension ReviewCollectionStartupTests {
-    @Test func visibleMediaOffToOnReplaysLatestNamesThroughRealPolicy() async throws {
+    @Test func visibleMediaNamesReachTheRealPolicyWithMediaAlwaysOn() async throws {
         let files = FileManager.default
         let root = files.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? files.removeItem(at: root) }
@@ -692,14 +960,13 @@ extension ReviewCollectionStartupTests {
         configuration.timeZone = TimeZone(secondsFromGMT: 0)
         let owner = ReviewCollection(configuration: configuration, navigation: AppNavigation(), sync: sync,
             providerDirectory: root.appending(path: "synthetic-installation"))
-        sync.setDeviceSettings(paused: false, automatic: true, media: false)
+        sync.setDeviceSettings(paused: false, automatic: true)
         do {
             await owner.start()
             try #require(owner.state == .ready && sync.setupState == .attached)
             await sync.waitForInputs()
-            // Disabled media accepts this input without scheduling priority work.
-            _ = try await backend.input(.visibleMedia(names: ["ignored.png"]))
-            #expect(issuedMediaSets.isEmpty)
+            // P25.1: media is always on, so the names on screen are prioritised
+            // as they change; no setting holds them back or needs to replay them.
             policyTimeline.removeAll()
             let generation = owner.generation
             try #require(generation > 0)
@@ -707,18 +974,15 @@ extension ReviewCollectionStartupTests {
             sync.visibleMedia(["head.png", "answer.mp3"], generation: generation)
             sync.visibleMedia(["old-collection.png"], generation: generation - 1)
             await sync.waitForInputs()
-            #expect(policyTimeline.isEmpty && issuedMediaSets.isEmpty)
-            // The setting alone must deliver the latest retained references.
-            sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            #expect(policyTimeline.last == "visible:answer.mp3,head.png")
+            #expect(issuedMediaSets.last == ["answer.mp3", "head.png"])
+            #expect(!policyTimeline.contains { $0.contains("old-collection.png") })
+            // No settings write can turn media off, whatever it changes.
+            sync.setDeviceSettings(paused: false, automatic: false)
+            sync.setDeviceSettings(paused: false, automatic: true)
             await sync.waitForInputs()
-            #expect(policyTimeline == ["media:on", "visible:answer.mp3,head.png"])
-            #expect(issuedMediaSets == [["answer.mp3", "head.png"]])
-            // Repeat the toggle without supplying any additional screen data.
-            sync.setDeviceSettings(paused: false, automatic: true, media: false)
-            sync.setDeviceSettings(paused: false, automatic: true, media: true)
-            await sync.waitForInputs()
-            #expect(Array(policyTimeline.suffix(3)) == ["media:off", "media:on", "visible:answer.mp3,head.png"])
-            #expect(issuedMediaSets == [["answer.mp3", "head.png"], ["answer.mp3", "head.png"]])
+            #expect(!policyTimeline.contains("media:off") && sync.settings.media)
+            #expect(issuedMediaSets.allSatisfy { $0 == ["answer.mp3", "head.png"] || $0 == ["stale.png"] })
             #expect(!sync.operationFailed)
             #expect(await owner.close())
         } catch {

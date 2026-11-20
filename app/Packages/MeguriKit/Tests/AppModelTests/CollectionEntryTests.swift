@@ -88,7 +88,7 @@ extension ReviewCollectionStartupTests {
             await activation.waitUntilHeld()
             #expect(owner.generation == generation && factories == 1)
             sync.receive(.foreground)
-            sync.setDeviceSettings(paused: true, automatic: false, media: false)
+            sync.setDeviceSettings(paused: true, automatic: false)
             await sync.preparePlatform(); await sync.waitForInputs()
             #expect(factories == 1 && bootstraps == 1 && successor.events.isEmpty)
             if outcome == .cancelled { await activationOperation?.cancel() }

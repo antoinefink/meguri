@@ -23,7 +23,10 @@ extension ReviewCollectionStartupTests {
     private func checkMediaConstruction(afterOriginalLookup: Bool, handoff: Bool) async throws {
         try await withAutomaticServiceApp { app, _, wire in
             let backend = try app.backend
-            app.sync.setDeviceSettings(paused: false, automatic: true, media: false)
+            // The policy starts unreachable. Regained reachability, with automatic
+            // scheduling on, issues the real ResumeMedia at the moment a case chooses.
+            app.sync.receive(.network(reachable: false))
+            app.sync.setDeviceSettings(paused: false, automatic: true)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let sdk = try #require(await app.factory.engines.last)
             await sdk.waitForAutomaticSend(); await app.sync.drainOperations()
@@ -97,7 +100,7 @@ extension ReviewCollectionStartupTests {
                 app.sync.observeCausalBoundary = nil
             }
             do {
-                app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+                app.sync.receive(.network(reachable: true))
                 try #require(try await serviceAppSignal(held.entered, stage: afterOriginalLookup
                     ? "media lookup reached"
                     : "media preparation held"))
@@ -112,7 +115,7 @@ extension ReviewCollectionStartupTests {
                     #expect(lookup.withLock { $0 } == nil && calls.withLock { $0.isEmpty })
                 }
                 #expect(results == 0 && acknowledgements == 0)
-                app.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+                app.sync.setDeviceSettings(paused: false, automatic: false)
                 try #require(try await serviceAppSignal(handoff ? registration.entered : creation.entered,
                     stage: "replacement construction held"))
                 let retirementCommand = try #require(configure)
@@ -194,7 +197,10 @@ extension ReviewCollectionStartupTests {
     @Test func serviceAppMediaKeepsFailureDuringConstructionCleanup() async throws {
         try await withAutomaticServiceApp { app, _, wire in
             let backend = try app.backend
-            app.sync.setDeviceSettings(paused: false, automatic: true, media: false)
+            // The policy starts unreachable. Regained reachability, with automatic
+            // scheduling on, issues the real ResumeMedia at the moment a case chooses.
+            app.sync.receive(.network(reachable: false))
+            app.sync.setDeviceSettings(paused: false, automatic: true)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let sdk = try #require(await app.factory.engines.last)
             await sdk.waitForAutomaticSend(); await app.sync.drainOperations()
@@ -268,9 +274,9 @@ extension ReviewCollectionStartupTests {
                 backend.observeCoreCall = nil; app.sync.observeCausalBoundary = nil
             }
             do {
-                app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+                app.sync.receive(.network(reachable: true))
                 try #require(try await serviceAppSignal(issuedGate.entered, stage: "media issued"))
-                app.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+                app.sync.setDeviceSettings(paused: false, automatic: false)
                 try #require(try await serviceAppSignal(factoryGate.entered, stage: "factory pending"))
                 await issuedGate.release()
                 try #require(try await serviceAppSignal(preparedGate.entered, stage: "replacement media prepared"))
@@ -386,7 +392,7 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: [false, true])
     func serviceAppPauseAndResumeWithMediaRetiresOriginalSDKWithoutOperationFailure(automatic: Bool) async throws {
         try await withAutomaticServiceApp { app, _, _ in
-            app.sync.setDeviceSettings(paused: false, automatic: automatic, media: true)
+            app.sync.setDeviceSettings(paused: false, automatic: automatic)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let sdk = try #require(await app.factory.engines.last)
             await sdk.waitForAutomaticSend()
@@ -401,7 +407,7 @@ extension ReviewCollectionStartupTests {
             let cancelled = Mutex(false)
             await sdk.inspectNextCancellation { cancelled.withLock { $0 = true } }
 
-            app.sync.setDeviceSettings(paused: true, automatic: automatic, media: true)
+            app.sync.setDeviceSettings(paused: true, automatic: automatic)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             #expect(app.sync.settings.paused && app.sync.settings.media)
             #expect(!app.sync.operationFailed)
@@ -417,7 +423,7 @@ extension ReviewCollectionStartupTests {
                 Issue.record("Pause retained original SDK authority")
             } catch { }
 
-            app.sync.setDeviceSettings(paused: false, automatic: automatic, media: true)
+            app.sync.setDeviceSettings(paused: false, automatic: automatic)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let successor = try #require(await app.factory.engines.last)
             #expect(successor !== sdk && successor.instanceID != sdk.instanceID)
@@ -451,9 +457,10 @@ extension ReviewCollectionStartupTests {
     func serviceAppPauseQualifiesOnlyOriginalSupersededCommand(resumeMedia: Bool) async throws {
         try await withAutomaticServiceApp { app, fixture, wire in
             let backend = try app.backend
-            // Media off -> on with automatic scheduling issues the real ResumeMedia.
+            // Regained reachability with automatic scheduling issues the real ResumeMedia.
             // A normal local edit supplies UpdatePending in the other row.
-            app.sync.setDeviceSettings(paused: false, automatic: resumeMedia, media: false)
+            app.sync.receive(.network(reachable: false))
+            app.sync.setDeviceSettings(paused: false, automatic: resumeMedia)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let sdk = try #require(await app.factory.engines.last)
             await sdk.waitForAutomaticSend(); await app.sync.drainOperations()
@@ -504,7 +511,7 @@ extension ReviewCollectionStartupTests {
                 stopped.continuation.finish(); cancelled.continuation.finish()
             }
             do {
-                if resumeMedia { app.sync.setDeviceSettings(paused: false, automatic: true, media: true) }
+                if resumeMedia { app.sync.receive(.network(reachable: true)) }
                 else {
                     let seed = try #require(fixture.notes.first)
                     try await automaticServiceEdit(app, id: seed.id, suffix: " held original UpdatePending")
@@ -512,7 +519,7 @@ extension ReviewCollectionStartupTests {
                 try #require(try await serviceAppSignal(held.entered, stage: "actual original command held before execution"))
                 try #require(original != nil)
                 let collection = try await CoreCollectionService().localPublicationInformation(generation: generation)
-                app.sync.setDeviceSettings(paused: true, automatic: resumeMedia, media: resumeMedia)
+                app.sync.setDeviceSettings(paused: true, automatic: resumeMedia)
                 await app.sync.waitForInputs()
                 // Join actual Pause observations, never drain with the original held.
                 try #require(try await serviceAppSignal(cancelled.stream, stage: "Pause cancels original SDK"))
@@ -557,7 +564,7 @@ extension ReviewCollectionStartupTests {
                 #expect(!app.sync.operationFailed && app.sync.failureRevision == failureRevision)
                 #expect(backend.firstFailureDiagnostic == nil)
                 #expect(backend.diagnostics.contains { $0.contains("qualifiedOriginalRefusal") })
-                app.sync.setDeviceSettings(paused: false, automatic: resumeMedia, media: resumeMedia)
+                app.sync.setDeviceSettings(paused: false, automatic: resumeMedia)
                 await app.sync.waitForInputs(); await app.sync.drainOperations()
                 let successor = try #require(await app.factory.engines.last)
                 #expect(successor !== sdk && successor.instanceID != sdk.instanceID)
@@ -757,7 +764,7 @@ extension ReviewCollectionStartupTests {
         try await withAutomaticServiceApp { app, _, _ in
             app.startCausalTrace()
             let causalTrace = app.causalTrace
-            app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            app.sync.setDeviceSettings(paused: false, automatic: true)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let sdk = try #require(causalTrace.presence(await app.factory.engines.last))
             await sdk.waitForAutomaticSend()
@@ -877,7 +884,7 @@ extension ReviewCollectionStartupTests {
             app.startCausalTrace()
             let causalTrace = app.causalTrace
             if trigger == 0 {
-                app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+                app.sync.setDeviceSettings(paused: false, automatic: true)
                 await app.sync.waitForInputs(); await app.sync.drainOperations()
             }
             let sdk = try #require(causalTrace.presence(await app.factory.engines.last))
@@ -1274,7 +1281,7 @@ extension ReviewCollectionStartupTests {
     func serviceAppPredecessorCorePhaseRetainsRealResultACKBeforeAccountProof() async throws {
         try await withAutomaticServiceApp { app, _, _ in
             // AutomaticOff masks B's completion status transition; enabling automatic mode rotates the SDK.
-            app.sync.setDeviceSettings(paused: false, automatic: true, media: app.sync.settings.media)
+            app.sync.setDeviceSettings(paused: false, automatic: true)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let sdk = try #require(await app.factory.engines.last)
             try await sdk.signInSameServiceIdentity()
@@ -1585,7 +1592,7 @@ extension ReviewCollectionStartupTests {
             var joined: Task<Void, Never>?
             do {
                 if automatic {
-                    app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+                    app.sync.setDeviceSettings(paused: false, automatic: true)
                     await app.sync.waitForInputs(); await app.sync.drainOperations()
                 }
                 let sdk = try #require(await app.factory.engines.last)
@@ -1746,7 +1753,7 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: [false, true])
     func serviceSDKTerminalEmptyPassRetainsOnlyNewRealPendingAddition(addition: Bool) async throws {
         try await withAutomaticServiceApp { app, fixture, wire in
-            app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            app.sync.setDeviceSettings(paused: false, automatic: true)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let sdk = try #require(await app.factory.engines.last)
             await sdk.waitForAutomaticSend()
@@ -1840,7 +1847,7 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: [false, true])
     func serviceSDKCancellationAndReleaseJoinOriginalAutomaticCallbackAndFenceAdmission(release: Bool) async throws {
         try await withAutomaticServiceApp { app, fixture, _ in
-            app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            app.sync.setDeviceSettings(paused: false, automatic: true)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let sdk = try #require(await app.factory.engines.last)
             try #require(await sdk.automaticSchedulingEnabled)

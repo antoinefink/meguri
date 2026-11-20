@@ -786,6 +786,8 @@ impl From<p::Controls> for CloudPolicyControls {
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct CloudPolicyStatus {
     pub state: CloudPolicyStatusState,
+    /// P25.4: present only in `NeedsAttention`.
+    pub state_without_attention: Option<CloudPolicyStatusState>,
     pub pending: u64,
     pub held_back: u64,
     pub in_flight: u64,
@@ -806,6 +808,7 @@ impl From<p::Status> for CloudPolicyStatus {
     fn from(v: p::Status) -> Self {
         Self {
             state: v.state.into(),
+            state_without_attention: v.state_without_attention.map(Into::into),
             controls: v.controls.into(),
             pending: v.pending,
             held_back: v.held_back,

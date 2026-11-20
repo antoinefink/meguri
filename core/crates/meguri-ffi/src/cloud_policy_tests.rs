@@ -2811,11 +2811,10 @@ fn policy_empty_media_ledger_and_unqualified_completion_never_claim_success() {
             .iter()
             .any(|c| matches!(c.action, CloudPolicyAction::RunExchange { .. }))
     );
+    // P25.2: the hold starts nothing, and Sync Now is never unavailable for it.
     assert!(matches!(
         policy.status().unwrap().sync_now,
-        CloudPolicySyncNowAvailability::Unavailable {
-            reason: CloudPolicyUnavailable::Paused
-        }
+        CloudPolicySyncNowAvailability::Available
     ));
     fixture.workflow.host.close().unwrap();
 }
