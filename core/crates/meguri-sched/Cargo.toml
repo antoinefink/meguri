@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] targets below build (tests/main.rs is sched_it).
+autotests = false
 
 [dependencies]
 fsrs.workspace = true
@@ -19,3 +21,9 @@ fuzz_rand.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true
+
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
+[[test]]
+name = "sched_it"
+path = "tests/main.rs"

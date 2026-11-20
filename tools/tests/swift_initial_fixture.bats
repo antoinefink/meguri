@@ -9,7 +9,7 @@ setup() {
   cat >"$MG_ROOT/tools/mg" <<'EOF'
 #!/bin/bash
 set -eu
-[ "$*" = 'core-test -- --test cloud_initial_app_fixture -E package(meguri-ffi) & test(=export_initial_app_adoption_replies_from_real_publication)' ]
+[ "$*" = 'core-test -- --test ffi_it -E package(meguri-ffi) & test(=cloud_initial_app_fixture::export_initial_app_adoption_replies_from_real_publication)' ]
 [ "${FX_PRODUCER_FAIL:-0}" = 0 ] || exit 1
 output="$MG_ROOT/${MEGURI_INITIAL_ADOPTION_FIXTURE#/work/}"
 [ "$output" = "$MG_RUN_DIR/initial-adoption-fixture.json" ]

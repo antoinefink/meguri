@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] targets below build (tests/main.rs is package_it).
+autotests = false
 
 [dependencies]
 tracing.workspace = true
@@ -31,3 +33,9 @@ meguri-model = { workspace = true, features = ["test-hooks"] }
 [[bench]]
 name = "backup"
 harness = false
+
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
+[[test]]
+name = "package_it"
+path = "tests/main.rs"

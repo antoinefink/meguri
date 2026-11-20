@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] targets below build (tests/main.rs is sync_it).
+autotests = false
 
 [features]
 # AnkiWeb build switch (KTD21); off in the App Store build. Without it no
@@ -54,26 +56,48 @@ zstd.workspace = true
 # crate's `test-hooks` and `ankiweb` features.
 meguri-testkit.workspace = true
 
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
 [[test]]
-name = "endpoint_guard"
-required-features = ["test-hooks"]
+name = "sync_it"
+path = "tests/main.rs"
 
+# Its #[global_allocator] would serve every test in a shared binary.
 [[test]]
-name = "transport"
-required-features = ["test-hooks", "ankiweb"]
+name = "cloud_generation_codec"
+path = "tests/cloud_generation_codec.rs"
 
+# Its #[global_allocator] would serve every test in a shared binary.
 [[test]]
-name = "wire"
-required-features = ["test-hooks"]
+name = "cloud_payload_memory"
+path = "tests/cloud_payload_memory.rs"
 
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
 [[test]]
-name = "status"
-required-features = ["test-hooks"]
+name = "cloud_records"
+path = "tests/cloud_records.rs"
 
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
 [[test]]
-name = "errors"
-required-features = ["test-hooks", "ankiweb"]
+name = "cloud_recovery"
+path = "tests/cloud_recovery.rs"
 
+# Its #[global_allocator] would serve every test in a shared binary.
 [[test]]
-name = "normal_sync"
-required-features = ["test-hooks"]
+name = "cloud_rekey"
+path = "tests/cloud_rekey.rs"
+
+# Its #[global_allocator] would serve every test in a shared binary.
+[[test]]
+name = "download_memory"
+path = "tests/download_memory.rs"
+
+# Its #[global_allocator] would serve every test in a shared binary.
+[[test]]
+name = "download_meta_memory"
+path = "tests/download_meta_memory.rs"
+
+# Its #[global_allocator] would serve every test in a shared binary.
+[[test]]
+name = "media_zip_memory"
+path = "tests/media_zip_memory.rs"
