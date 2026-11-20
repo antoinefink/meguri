@@ -33,7 +33,7 @@ import WebKit
             deck: .init(id: 9, fullName: "Daily", filtered: false), values: [original, "", "e\u{301}\u{1f}"])
         let host = try FieldEditorHost(draft: draft, isCurrent: { true })
         host.webView.frame = CGRect(x: 0, y: 0, width: 500, height: 700)
-        defer { host.dispose() }
+        defer { host.shutDown() }
         try await host.start()
         #expect(try await Self.replaceSource(host, ord: 1, value: typed))
         try await host.setMode(.rich, ord: 1)
@@ -70,12 +70,12 @@ import WebKit
         }
         let draft = try NoteEditorDraft(generation: 1, notetype: Self.type(), deck: deck, values: ["kept", "", ""])
         let host = try FieldEditorHost(draft: draft, isCurrent: { false })
-        defer { host.dispose() }
+        defer { host.shutDown() }
         await #expect(throws: (any Error).self) { try await host.start() }
         #expect(draft.values == ["kept", "", ""] && host.webView.url == nil)
     }
 
-    @Test(arguments: ["owner", "dispose", "failed", "process"])
+    @Test(arguments: ["owner", "shutDown", "failed", "process"])
     func heldActualConversionCannotOutliveItsOwnerOrLoad(_ invalidation: String) async throws {
         let original = "<span  class='original'>kept</span><br/>"
         let draft = try NoteEditorDraft(generation: 1, notetype: Self.type(),
@@ -84,7 +84,7 @@ import WebKit
         let host = try FieldEditorHost(draft: draft, isCurrent: { owner.isCurrent })
         let hold = HeldResult()
         var replacement: FieldEditorHost?
-        defer { hold.release(); replacement?.dispose(); host.dispose() }
+        defer { hold.release(); replacement?.shutDown(); host.shutDown() }
         try await host.start()
         try #require(try await Self.replaceSource(host, ord: 0, value: "<b>accepted</b>"))
         try await host.flush(hold: false)
@@ -99,7 +99,7 @@ import WebKit
         #expect(draft.fields == accepted && draft.pendingFields == [1])
         switch invalidation {
         case "owner": owner.isCurrent = false
-        case "dispose": host.dispose()
+        case "shutDown": host.shutDown()
         case "failed": try await Self.failPayload(host)
         default: host.webViewWebContentProcessDidTerminate(host.webView)
         }
@@ -111,7 +111,7 @@ import WebKit
             try #require(try await Self.replaceSource(host, ord: 1, value: "new load"))
             try await host.flush(hold: true)
         } else if invalidation == "owner" {
-            // The old owner has not been disposed. Its late guard must not
+            // The old owner has not been wasShutDown. Its late guard must not
             // touch a new owner's already accepted state in the same draft.
             let next = try FieldEditorHost(draft: draft, isCurrent: { true })
             replacement = next
@@ -138,7 +138,7 @@ import WebKit
         let draft = try NoteEditorDraft(generation: 1, notetype: Self.type(),
             deck: .init(id: 9, fullName: "Daily", filtered: false), values: ["kept", "", ""])
         let host = try FieldEditorHost(draft: draft, isCurrent: { true })
-        defer { host.dispose() }
+        defer { host.shutDown() }
         try await host.start()
         try await Self.failPayload(host)
         let accepted = try await host.webView.callAsyncJavaScript("""
@@ -234,7 +234,7 @@ import WebKit
     func flush(hold: Bool) throws { flushes += 1; throw Self.failure }
     func release() {}
     func setFocus(_ ord: Int) { draft.setFocus(ord) }
-    func dispose() { disposals += 1 }
+    func shutDown() { disposals += 1 }
 }
 
 extension ReviewCollectionStartupTests {
@@ -449,7 +449,7 @@ extension ReviewCollectionStartupTests {
             flow.generationEnded(); preparation.replace(with: nil); editor = nil
             // Hold a real committed reply at exactly the ownership boundary.
             // Each case writes once; revocation cannot turn that write into nil,
-            // revive a disposed host or erase newer/different retained input.
+            // revive a wasShutDown host or erase newer/different retained input.
             for change in ["revoked", "newer", "replacement", "currentNewer"] {
                 let submitted = try NoteEditorDraft(generation: owner.generation, notetype: savingDraft.notetype,
                     deck: savingDraft.deck, values: savingDraft.fields.indices.map { $0 == 0 ? "Late ack \(change)" : "" })
@@ -619,7 +619,7 @@ extension ReviewCollectionStartupTests {
             }
             try await core.close()
         } catch {
-            editor?.dispose(); owner.addNoteFlow.runtime?.dispose()
+            editor?.shutDown(); owner.addNoteFlow.runtime?.shutDown()
             _ = await owner.close(); try? await core.close(); throw error
         }
     }

@@ -137,6 +137,16 @@ extension EventTests {
             #expect(try await notes.checkNoteFields(notetypeId: nt.id, fields: ["front", "back"], ownNote: nil).duplicates == [note.id])
             let saved = try await notes.updateNote(.init(id: note.id, fields: ["persisted", "back"], tags: ["Parent::Child"]))
             #expect(saved.written)
+            // editor/field-html S2: the patch writes only its fields and refuses a deleted note.
+            let loaded = try await types.readNotetype(id: nt.id)
+            let patched = try await notes.patchNote(.init(id: note.id, notetype: loaded, fields: [1: "patched"]))
+            #expect(patched.written && patched.summary.undoName == "Update Note")
+            #expect(try await notes.readNote(id: note.id).fields == ["persisted", "patched"])
+            #expect(try await notes.patchNote(.init(id: note.id, notetype: loaded, fields: [1: "patched"])).written == false)
+            await #expect(throws: BridgeError.noteNotFound(id: -5)) {
+                try await notes.patchNote(.init(id: -5, notetype: loaded, fields: [0: "x"]))
+            }
+            #expect(try await notes.cardDeck(cardId: note.cards[0]) == deck.id)
             #expect(try await tags.markNotes(notes: [note.id]).count == 1)
             #expect(try await notes.readNote(id: note.id).tags.contains("marked"))
             #expect(try await tags.toggleNoteMark(current: note.id, notes: [note.id]).count == 1)

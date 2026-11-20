@@ -597,14 +597,14 @@ private struct ReplacementObservationTimeout: Error {}
     let draft: NoteEditorDraft
     private var flushes = 0
     private var observedFlushes = 0
-    private(set) var disposed = false
+    private(set) var wasShutDown = false
     private(set) var releases = 0
     init(_ draft: NoteEditorDraft) { self.draft = draft }
     func start() {}
     func flush(hold: Bool) { flushes += 1 }
     func release() { releases += 1 }
     func setFocus(_ ord: Int) { draft.setFocus(ord) }
-    func dispose() { disposed = true }
+    func shutDown() { wasShutDown = true }
     func waitForFlush() async throws {
         try await observeReplacement { self.flushes > self.observedFlushes }
         observedFlushes = flushes
@@ -661,7 +661,7 @@ extension ReviewCollectionStartupTests {
                 #expect(!cancellationJoined)
             }
             #expect(flow.isPresented && flow.draft === runtime.draft && runtime.draft.values == values)
-            #expect(!runtime.disposed && runtime.releases == 1)
+            #expect(!runtime.wasShutDown && runtime.releases == 1)
             #expect(!owner.canBeginAddAction && owner.manualAllowed)
             #expect(await service.calls.filter { $0 == "confirm" }.isEmpty)
             await terminal.release()

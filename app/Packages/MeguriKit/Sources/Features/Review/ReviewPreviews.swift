@@ -58,7 +58,8 @@ private struct ReviewFixture: View {
             notice: state == .error ? "Couldn’t save the answer. Please answer this card again." : nil,
             undoDescription: "Undo Answer Card", canUndo: true, canRedo: false,
             phase: state == .loading ? .loading : (answer ? .answer : .question), states: states,
-            enabled: true, close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in }) {
+            enabled: true, close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in },
+            canEditNote: state != .loading) {
                 if state == .loading {
                     ReviewStatusLayout { LoadingStateView(Text(verbatim: "Preparing review…")) }
                 }

@@ -20,6 +20,8 @@ public final class ReviewCoordinator {
     public private(set) var studyState: ReviewDeckStudyState?
     public private(set) var waitingUntil: Date?
     public private(set) var paused = false
+    /// The Edit Note form is open over the presented card (`review/edit-current` E2).
+    public private(set) var editingNote = false
     public let surface: any ReviewCardSurface
     public var onPolicyRefusal: (() -> Void)?
     // Named attachments for U154/U177; no fake summary/sync/backup providers.
@@ -114,10 +116,16 @@ public final class ReviewCoordinator {
             (phase == .waiting || phase == .finished)
     }
     public var canRefresh: Bool { !busy && !paused && !closingAdmission && sessionID != nil && phase != .ended }
-    public var canReveal: Bool { phase == .question && !busy && !paused }
-    public var canRate: Bool { phase == .answer && !busy && !paused }
-    public var canUndo: Bool { if case .available = undoStatus { return !busy && !paused && phase != .ended }; return false }
-    public var canRedo: Bool { if case .available = redoStatus { return !busy && !paused && phase != .ended }; return false }
+    public var canReveal: Bool { phase == .question && !busy && !paused && !editingNote }
+    public var canRate: Bool { phase == .answer && !busy && !paused && !editingNote }
+    public var canUndo: Bool { if case .available = undoStatus { return !busy && !paused && !editingNote && phase != .ended }; return false }
+    public var canRedo: Bool { if case .available = redoStatus { return !busy && !paused && !editingNote && phase != .ended }; return false }
+    /// N20.8: Edit Note acts on a presented card, on either side, and never
+    /// while a transition, a pause or another open form owns the screen.
+    public var canEditNote: Bool {
+        (phase == .question || phase == .answer) && item != nil && sessionID != nil &&
+            !busy && !paused && !editingNote && !closingAdmission && terminalPresentation == nil
+    }
     public var progress: Double { sessionProgress.fraction }
     /// Answers given and cards left in this session, for the bottom-edge bar (N16.1).
     public var sessionProgress: ReviewSessionProgress {
@@ -237,7 +245,7 @@ public final class ReviewCoordinator {
     }
 
     public func reveal() {
-        guard phase == .question, !busy, !paused else { return }
+        guard phase == .question, !busy, !paused, !editingNote else { return }
         busy = true; phase = .transition
         let inputTime = uptime()
         operation = Task {
@@ -277,7 +285,7 @@ public final class ReviewCoordinator {
     }
 
     public func rate(_ rating: ReviewRating) {
-        guard phase == .answer, !busy, !paused, let item, let sessionID else { return }
+        guard phase == .answer, !busy, !paused, !editingNote, let item, let sessionID else { return }
         // All input paths enter this synchronous gate, before any suspension.
         busy = true; phase = .transition
         let inputTime = uptime()
@@ -436,6 +444,9 @@ public final class ReviewCoordinator {
     public func requestRefresh(question: Bool = false) {
         guard !closingAdmission, sessionID != nil, phase != .ended else { return }
         refreshPending = true; forceQuestion = forceQuestion || question
+        // E2: the side on screen is not rendered again while the form is
+        // open; the read runs once when it closes.
+        if editingNote { return }
         if !paused && terminalPresentation == nil { phase = .transition }
         if !busy && !paused { refresh() }
     }
@@ -463,7 +474,7 @@ public final class ReviewCoordinator {
         if case .restoration(let id) = intent, restorationID == id { restorationID = nil }
     }
     private func refresh(intent: PresentationIntent = .automatic) {
-        guard !closingAdmission, let sessionID, !busy, !paused else { return }
+        guard !closingAdmission, let sessionID, !busy, !paused, !editingNote else { return }
         let restoration = restorationIntent
         let presentationIntent = restoration == .automatic ? intent : restoration
         busy = true
@@ -477,7 +488,7 @@ public final class ReviewCoordinator {
     }
     private func completeOperation() {
         busy = false
-        if refreshPending && !paused { refresh() }
+        if refreshPending && !paused && !editingNote { refresh() }
         else { retryArrivedMedia() }
     }
 
@@ -491,7 +502,7 @@ public final class ReviewCoordinator {
         retryArrivedMedia()
     }
     private func retryArrivedMedia() {
-        guard !busy, !paused, sessionID != nil, phase == .question || phase == .answer,
+        guard !busy, !paused, !editingNote, sessionID != nil, phase == .question || phase == .answer,
               !mediaArrivals.isEmpty else { return }
         let names = mediaArrivals.take(), revision = pauseRevision, expected = sessionID
         let presentation = mediaPresentationRevision
@@ -728,22 +739,28 @@ public final class ReviewCoordinator {
             try Task.checkCancellation()
             guard ready, !closingAdmission, revision == pauseRevision else { busy = false; return }
             startupNeedsPreparation = false
-            // Consume only requests known before this read. Later events own
-            // another fresh read, including those received during presentation.
-            let intent = restorationIntent
-            let question = forceQuestion
-            forceQuestion = false; refreshPending = false
-            // Read the retained Core session afresh, outside cancellable visuals.
-            let head = try await client.head(sessionID: sessionID)
-            guard !closingAdmission, self.sessionID == sessionID, phase != .ended,
-                  revision == pauseRevision else { busy = false; return }
-            try await apply(head, question: question, whilePaused: true, intent: intent)
+            if editingNote {
+                // E2: the read and any render wait for the form to close.
+                refreshPending = true
+            } else {
+                // Consume only requests known before this read. Later events own
+                // another fresh read, including those received during presentation.
+                let intent = restorationIntent
+                let question = forceQuestion
+                forceQuestion = false; refreshPending = false
+                // Read the retained Core session afresh, outside cancellable visuals.
+                let head = try await client.head(sessionID: sessionID)
+                guard !closingAdmission, self.sessionID == sessionID, phase != .ended,
+                      revision == pauseRevision else { busy = false; return }
+                try await apply(head, question: question, whilePaused: true, intent: intent)
+            }
             try Task.checkCancellation()
             guard !closingAdmission, revision == pauseRevision else { busy = false; return }
             paused = false
-            (surface as? ReviewPages)?.inputActive = true
+            (surface as? ReviewPages)?.inputActive = !editingNote
             if item != nil, phase == .question || phase == .answer {
-                timer.resume(at: uptime()); activeTime.resume(at: uptime())
+                if !editingNote { timer.resume(at: uptime()) }
+                activeTime.resume(at: uptime())
             }
             completeOperation()
         } catch {
@@ -751,6 +768,44 @@ public final class ReviewCoordinator {
             fail(error); throw error
         }
     }
+    /// E2: the Edit Note form opens over the presented card. Review keys and
+    /// tap zones go inactive, card audio stops and the answer timer pauses.
+    /// Nothing is written and nothing is rendered again.
+    @discardableResult public func beginEditingNote() -> Bool {
+        guard canEditNote else { return false }
+        editingNote = true
+        timer.pause(at: uptime())
+        surface.pair?.pauseAudio()
+        (surface as? ReviewPages)?.inputActive = false
+        surface.pair?.ownsKeyboardFocus = false
+        return true
+    }
+
+    /// E3: after a save the side that was showing is rendered again as a new
+    /// presentation, which restarts the answer timer; with nothing saved the
+    /// paused timer goes on from its value and nothing is rendered. Reports
+    /// held while the form was open are read now, once.
+    public func endEditingNote(saved: Bool) {
+        guard editingNote else { return }
+        editingNote = false
+        guard sessionID != nil, phase != .ended, !closingAdmission else { return }
+        if !paused {
+            (surface as? ReviewPages)?.inputActive = true
+            if phase == .question || phase == .answer { timer.resume(at: uptime()) }
+        }
+        if saved {
+            // The same card and side, presented again from the saved note.
+            presentedKey = nil
+            requestRefresh()
+        } else if refreshPending {
+            if !paused && terminalPresentation == nil { phase = .transition }
+            if !busy && !paused { refresh() }
+        } else { retryArrivedMedia() }
+    }
+
+    /// A notice above the card, for a change the screen reports itself.
+    func showNotice(_ text: String) { notice = text }
+
     public func mediaUnavailable() {
         mediaArrivals = ReviewMediaArrivals()
         beginPause()
