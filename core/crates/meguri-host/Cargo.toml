@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] targets below build (tests/main.rs is host_it).
+autotests = false
 
 [features]
 test-hooks = ["meguri-engine/test-hooks", "meguri-sync/test-hooks"]
@@ -30,18 +32,47 @@ meguri-engine = { workspace = true, features = ["test-hooks"] }
 meguri-model = { workspace = true, features = ["test-hooks"] }
 tempfile.workspace = true
 
-[[test]]
-name = "provider_bootstrap"
-required-features = ["test-hooks"]
-
-[[test]]
-name = "provider_setup"
-required-features = ["test-hooks"]
-
-[[test]]
-name = "provider_normal"
-required-features = ["test-hooks"]
-
 [[example]]
 name = "real_server_provider"
 required-features = ["test-hooks"]
+
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
+[[test]]
+name = "host_it"
+path = "tests/main.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "cloud_adoption_guards"
+path = "tests/cloud_adoption_guards.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "cloud_native_absence"
+path = "tests/cloud_native_absence.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "cloud_policy_driver"
+path = "tests/cloud_policy_driver.rs"
+
+# Re-runs this binary by test name, and sets a #[global_allocator].
+[[test]]
+name = "cloud_publication_phase"
+path = "tests/cloud_publication_phase.rs"
+
+# `tools/mg native-durability` builds and runs this whole binary on the Mac.
+[[test]]
+name = "cloud_runtime"
+path = "tests/cloud_runtime.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "collection_entry"
+path = "tests/collection_entry.rs"
+
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
+[[test]]
+name = "manual_transfers"
+path = "tests/manual_transfers.rs"

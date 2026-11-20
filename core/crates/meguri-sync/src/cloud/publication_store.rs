@@ -433,6 +433,23 @@ impl TrackingStore {
         }
         Ok(None)
     }
+    /// Every binding of this build scope other than a salvage binding, newest
+    /// first (V27.6). A binding of another account is included.
+    pub(super) fn setup_bindings(&self) -> Result<Vec<Binding>, Error> {
+        let mut s = self.connection.prepare(
+            "SELECT id FROM bindings WHERE container=?1 AND environment=?2 AND salvage=0
+             ORDER BY created_at_ms DESC,id DESC",
+        )?;
+        let ids = s
+            .query_map(
+                params![self.scope.container.as_str(), self.scope.environment.code()],
+                |r| r.get::<_, Vec<u8>>(0),
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids.into_iter()
+            .map(|id| self.binding(super::store::binding_id(id)?)?.ok_or(Error::BindingNotFound))
+            .collect()
+    }
     pub(super) fn confirm_publication(&mut self, op: &PublishOp) -> Result<(), Error> {
         if self.publication_op()?.is_some() {
             return Err(Error::Constraint);

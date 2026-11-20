@@ -25,8 +25,8 @@ class GuestUnavailable(Exception):
     pass
 
 
-PRODUCER_ARGS = ['--', '--test', 'cloud_initial_app_fixture', '-E',
-                 'package(meguri-ffi) & test(=export_initial_app_adoption_replies_from_real_publication)']
+PRODUCER_ARGS = ['--', '--test', 'ffi_it', '-E',
+                 'package(meguri-ffi) & test(=cloud_initial_app_fixture::export_initial_app_adoption_replies_from_real_publication)']
 
 
 def admitted(value):

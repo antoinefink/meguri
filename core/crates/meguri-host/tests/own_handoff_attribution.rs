@@ -345,6 +345,7 @@ fn n13_every_retained_adoption_step_at_refusal_stays_strict() {
             epoch: publication.epoch, epoch_record: None, media_root: None,
             staging_name: "synthetic-own-handoff-adoption".into(),
             started_at_ms: 1_894_701_600_000, transport_wait: false, retry_after_ms: None,
+            requires_no_user_content: false,
         };
         let scope = config.cloud.as_ref().unwrap().scope.clone();
         let _handoff = host.begin_provider_handoff(Selection::LocalOnly).unwrap();

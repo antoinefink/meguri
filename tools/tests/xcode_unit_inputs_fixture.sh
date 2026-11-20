@@ -49,7 +49,7 @@ PY
 CARGO
   cat >"$producer" <<'MG'
 #!/bin/bash
-[ "$*" = 'core-test -- --test cloud_initial_app_fixture -E package(meguri-ffi) & test(=export_initial_app_adoption_replies_from_real_publication)' ] || exit 97
+[ "$*" = 'core-test -- --test ffi_it -E package(meguri-ffi) & test(=cloud_initial_app_fixture::export_initial_app_adoption_replies_from_real_publication)' ] || exit 97
 echo rust-producer >>"$UNIT_CALLS"
 [ "${UNIT_PRODUCER_FAIL:-0}" = 0 ] || exit 1
 out="$MG_ROOT/${MEGURI_INITIAL_ADOPTION_FIXTURE#/work/}"
@@ -64,8 +64,8 @@ r = {'job': 'core-test', 'status': 'pass', 'dry_run': False, 'root': os.environ[
      'commit': {'sha': subprocess.check_output(['git', '-C', os.environ['MG_ROOT'], 'rev-parse', 'HEAD'], text=True).strip(),
                 'dirty': bool(os.environ.get('UNIT_DIRTY_RECEIPT'))},
      'summary': {'total': 1, 'passed': 1, 'failed': 0, 'skipped': 0}}
-r['args'] = ['--', '--test', 'cloud_initial_app_fixture', '-E',
-             'package(meguri-ffi) & test(=export_initial_app_adoption_replies_from_real_publication)']
+r['args'] = ['--', '--test', 'ffi_it', '-E',
+             'package(meguri-ffi) & test(=cloud_initial_app_fixture::export_initial_app_adoption_replies_from_real_publication)']
 if os.environ.get('UNIT_WRONG_REVISION'): r['commit']['sha'] = '0' * 40
 if os.environ.get('UNIT_SKIPPED'): r['summary']['skipped'] = 1
 with open(sys.argv[1], 'w') as f: json.dump(r, f)

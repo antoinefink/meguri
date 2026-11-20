@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] targets below build (tests/main.rs is ffi_it).
+autotests = false
 
 [lib]
 # One static library holds the whole core in the app (KTD9, KTD16); `lib` keeps
@@ -43,10 +45,18 @@ meguri-storage = { workspace = true, features = ["test-hooks"] }
 meguri-testkit.workspace = true
 tempfile.workspace = true
 
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
 [[test]]
-name = "maintenance_ffi"
-required-features = ["test-hooks"]
+name = "ffi_it"
+path = "tests/main.rs"
 
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
 [[test]]
-name = "physical_review_rows"
-required-features = ["test-hooks"]
+name = "cloud_original_role"
+path = "tests/cloud_original_role.rs"
+
+# `tools/mg native-durability` builds and runs this whole binary on the Mac.
+[[test]]
+name = "collection_ffi"
+path = "tests/collection_ffi.rs"
