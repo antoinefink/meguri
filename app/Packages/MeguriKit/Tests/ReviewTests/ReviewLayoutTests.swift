@@ -13,11 +13,11 @@ import Testing
 @MainActor @Suite struct ReviewLayoutTests {
     @Observable final class Width { var value: CGFloat = -1 }
 
-    private func host<V: View>(_ view: V, size: CGSize) -> (NSWindow, NSHostingView<V>) {
+    private func host<V: View>(_ view: V, size: CGSize, dark: Bool = false) -> (NSWindow, NSHostingView<V>) {
         let window = NSWindow(contentRect: CGRect(origin: CGPoint(x: -30_000, y: -30_000), size: size),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named: .aqua)
+        window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let hosting = NSHostingView(rootView: view)
         hosting.frame = CGRect(origin: .zero, size: size)
         window.contentView = hosting
@@ -68,11 +68,13 @@ import Testing
     /// N16.1: the bar's track reaches the window's bottom edge and both sides;
     /// just above it is the card page. The system indicator left a gap below
     /// its inset track and at its rounded ends.
-    @Test(arguments: [800.0, 1000.0]) func progressBarIsTheBottomEdge(width: Double) async throws {
+    @Test(arguments: [800.0, 1000.0], [false, true]) func progressBarIsTheBottomEdge(width: Double, dark: Bool) async throws {
         let size = CGSize(width: width, height: 600)
-        let (window, hosting) = host(layout(phase: .question) { Color.clear }, size: size)
+        let (window, hosting) = host(layout(phase: .question) { Color.clear }, size: size, dark: dark)
         defer { window.close() }
-        try await settle(hosting) { false }
+        hosting.layoutSubtreeIfNeeded()
+        await Task.yield()
+        hosting.layoutSubtreeIfNeeded()
         let bitmap = try #require(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
         hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
         let scale = CGFloat(bitmap.pixelsWide) / size.width
