@@ -758,6 +758,120 @@ $TRAILERS"
   [ "$(field '.failures[0].id')" = "no-retries:tools/run-tests.sh:1" ]
 }
 
+@test "the test-targets check fails an integration test file that no test target compiles" {
+  local crate=core/crates/demo
+  commit_in "$SB" "$crate/Cargo.toml" '[package]
+name = "demo"
+autotests = false
+
+[features]
+hooks = []
+
+[[test]]
+name = "demo_it"
+path = "tests/main.rs"
+
+# A file of its own; its path is inferred from the name.
+[[test]]
+name = '"'"'own'"'"'
+
+[dependencies]
+extra = { version = "1", optional = true }'
+  commit_in "$SB" "$crate/tests/main.rs" '//! The merged binary.
+#![allow(clippy::duplicate_mod)]
+
+// #[cfg(feature = "removed")] is a comment.
+#[cfg(all(
+    feature = "hooks",
+    feature = "extra"
+))]
+#[path = "a.rs"]
+pub mod a;'
+  commit_in "$SB" "$crate/tests/a.rs" $'mod common;\n#[test]\nfn t() {}'
+  commit_in "$SB" "$crate/tests/common/mod.rs" 'pub fn helper() {}'
+  commit_in "$SB" "$crate/tests/own.rs" $'mod common;\nfn main() { std::env::current_exe().unwrap(); }'
+  mg static-checks --check test-targets
+  [ "$status" -eq 0 ]
+
+  # A new file nobody lists would never build, so its tests would never run.
+  commit_in "$SB" "$crate/tests/b.rs" $'#[test]\nfn t() {}'
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/b.rs:0" ]
+  [[ "$(field '.failures[0].message')" == *'add `#[path = "b.rs"] pub mod b;` to tests/main.rs'* ]]
+  # The committed tree is checked the same way (the merge's --rev run).
+  mg static-checks --check test-targets --rev HEAD
+  [ "$status" -eq 1 ]
+  validate "$result"
+  printf '#[path = "b.rs"]\npub mod b;\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 0 ]
+
+  # A listed file that re-runs its binary by test name needs its own target;
+  # so does one whose module directory holds an allocator.
+  printf 'fn child() { std::env::current_exe().unwrap(); }\n' >>"$SB/$crate/tests/b.rs"
+  mkdir -p "$SB/$crate/tests/a"
+  printf '\n#[global_allocator]\nstatic A: std::alloc::System = std::alloc::System;\n' >"$SB/$crate/tests/a/alloc.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | sort | join(" ")')" = "test-targets:$crate/tests/a/alloc.rs:2 test-targets:$crate/tests/b.rs:3" ]
+  [[ "$(field '.failures[] | select(.id | endswith("b.rs:3")) | .message')" == *"re-runs the test binary by test name"*"needs its own [[test]]"* ]]
+  git -C "$SB" checkout -q -- "$crate/tests/b.rs"
+  rm -r "$SB/$crate/tests/a"
+
+  # Listed twice, or listed and its own target: compiled twice.
+  printf '#[path = "own.rs"]\npub mod own;\n#[path = "a.rs"]\npub mod again;\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/main.rs:14 test-targets:$crate/tests/main.rs:16" ]
+
+  # A module gated on a feature the crate lacks never builds; a commented-out
+  # line lists nothing.
+  git -C "$SB" checkout -q -- "$crate/tests/main.rs"
+  printf '#[cfg(\n    feature = "hook"\n)]\n#[path = "b.rs"]\npub mod b;\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/main.rs:11" ]
+  git -C "$SB" checkout -q -- "$crate/tests/main.rs"
+  printf '/* /* nested */\n#[path = "b.rs"]\npub mod b;\n*/\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/b.rs:0" ]
+
+  # A test that other code re-runs by its bare name (`--exact <name>`) needs
+  # an entry of that name at the binary's root.
+  git -C "$SB" checkout -q -- "$crate/tests/main.rs"
+  printf '#[path = "b.rs"]\npub mod b;\n' >>"$SB/$crate/tests/main.rs"
+  mkdir -p "$SB/$crate/src"
+  printf 'pub fn spawn() -> [&'"'"'static str; 2] { ["--exact", "child_entry"] }\n' >"$SB/$crate/src/lib.rs"
+  printf '#[test]\nfn child_entry() {}\n' >>"$SB/$crate/tests/b.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/b.rs:4" ]
+  [[ "$(field '.failures[0].message')" == *'needs a root-level `#[test] fn child_entry`'* ]]
+  # A plain function is no test, so the child would still run nothing.
+  printf 'fn child_entry() {}\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  git -C "$SB" checkout -q -- "$crate/tests/main.rs"
+  printf '#[path = "b.rs"]\npub mod b;\n#[test]\nfn child_entry() {}\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 0 ]
+
+  # Two targets with one root compile it twice.
+  printf '\n[[test]]\nname = "again"\npath = "tests/main.rs"\n' >>"$SB/$crate/Cargo.toml"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/Cargo.toml:0" ]
+  git -C "$SB" checkout -q -- "$crate/Cargo.toml"
+
+  # A crate that keeps Cargo's discovery is not checked.
+  git -C "$SB" checkout -q -- "$crate/tests/main.rs"
+  printf '[package]\nname = "demo"\n' >"$SB/$crate/Cargo.toml"
+  mg static-checks --check test-targets
+  [ "$status" -eq 0 ]
+}
+
 # --- merge, escalations (R1951, R1957, R1991) ------------------------------
 
 @test "merge fast-forwards the integration branch only on a passing receipt for the branch tip" {

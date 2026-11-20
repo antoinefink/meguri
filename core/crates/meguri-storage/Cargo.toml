@@ -5,6 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Only the [[test]] targets below build (tests/main.rs is storage_it).
+autotests = false
 
 [features]
 # Test-only hooks (KTD18): fault points fire (meguri-model's feature decides)
@@ -33,62 +35,40 @@ tempfile.workspace = true
 # Turns on test-hooks for the tests (testkit depends on this crate with it).
 meguri-testkit.workspace = true
 
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
 [[test]]
-name = "open_refuse"
-required-features = ["test-hooks"]
+name = "storage_it"
+path = "tests/main.rs"
 
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
 [[test]]
-name = "upgrade"
-required-features = ["test-hooks"]
+name = "crash_consistency"
+path = "tests/crash_consistency.rs"
 
-[[test]]
-name = "schema_objects"
-required-features = ["test-hooks"]
-
-[[test]]
-name = "connections"
-required-features = ["test-hooks"]
-
-[[test]]
-name = "collation_order"
-required-features = ["test-hooks"]
-
-[[test]]
-name = "open_budget"
-required-features = ["test-hooks"]
-
-[[test]]
-name = "ids"
-required-features = ["test-hooks"]
-
-[[test]]
-name = "noop_writes"
-required-features = ["test-hooks"]
-
-[[test]]
-name = "graves"
-required-features = ["test-hooks"]
-
-[[test]]
-name = "config_bytes"
-required-features = ["test-hooks"]
-
+# Its #[global_allocator] would serve every test in a shared binary.
 [[test]]
 name = "journal"
+path = "tests/journal.rs"
 required-features = ["test-hooks"]
 
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
 [[test]]
-name = "savepoints"
-required-features = ["test-hooks"]
+name = "lockfile"
+path = "tests/lockfile.rs"
 
+# Re-runs this binary by test name, and sets a #[global_allocator].
 [[test]]
-name = "snapshots"
-required-features = ["test-hooks"]
+name = "media_download_file"
+path = "tests/media_download_file.rs"
 
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
 [[test]]
-name = "derived_store"
-required-features = ["test-hooks"]
+name = "media_feed"
+path = "tests/media_feed.rs"
 
+# Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
 [[test]]
-name = "day_writes"
+name = "upgrade"
+path = "tests/upgrade.rs"
 required-features = ["test-hooks"]

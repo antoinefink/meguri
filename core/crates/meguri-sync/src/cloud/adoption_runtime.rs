@@ -1,5 +1,6 @@
 //! Production V14 collection adoption. The platform supplies record replies;
 //! Runtime owns the slot, unpublished stage, validation and durable transitions.
+use super::setup_impl::AdoptionAdmission;
 use super::*;
 use crate::cloud::{
     adoption::*,
@@ -799,6 +800,19 @@ impl Runtime {
         collection: Option<&Collection>,
         engine: &Engine,
     ) -> Result<[u8; 16], RuntimeError> {
+        self.record_cloud_adoption(preview, collection, engine, AdoptionAdmission::Confirmed)
+    }
+    /// `ProvedNoUserContent` is V27.2 row 5's condition, recorded in the op
+    /// so the exclusive phase tests it again; only `start_setup_adoption`
+    /// gives it. `KeepOverResumable` admits a preview whose binding could
+    /// resume, and nothing else: every other check here is the same.
+    pub(super) fn record_cloud_adoption(
+        &self,
+        preview: &Preview,
+        collection: Option<&Collection>,
+        engine: &Engine,
+        admission: AdoptionAdmission,
+    ) -> Result<[u8; 16], RuntimeError> {
         self.wait_incoming_idle();
         if preview.active.is_none() || preview.active_epoch.is_none() {
             return Err(PublicationError::NotOffered.into());
@@ -822,10 +836,21 @@ impl Runtime {
                 })
             })?;
         }
-        if !matches!(
-            preview.decision,
-            ConnectDecision::ConfirmAdoption | ConnectDecision::ChooseCollection | ConnectDecision::NoCollection
-        ) {
+        let offered = match admission {
+            // The sheet's confirmation over a `stopped` binding that could
+            // resume. That binding becomes the op's binding before, as any
+            // retained binding of this account does (V14.2 step 3).
+            AdoptionAdmission::KeepOverResumable => {
+                collection.is_some()
+                    && preview.decision == ConnectDecision::ConfirmResume
+                    && preview.resume_binding.is_some()
+            }
+            AdoptionAdmission::Confirmed | AdoptionAdmission::ProvedNoUserContent => matches!(
+                preview.decision,
+                ConnectDecision::ConfirmAdoption | ConnectDecision::ChooseCollection | ConnectDecision::NoCollection
+            ),
+        };
+        if !offered {
             return Err(PublicationError::NotOffered.into());
         }
         {
@@ -900,6 +925,7 @@ impl Runtime {
             started_at_ms: self.adapter_now()?,
             transport_wait: false,
             retry_after_ms: None,
+            requires_no_user_content: admission == AdoptionAdmission::ProvedNoUserContent,
         };
         self.check_adoption_preview(preview, collection)?;
         let cleanup_evidence = collection
@@ -945,6 +971,9 @@ impl Runtime {
             })?;
             *held = Some(owner);
             s.publication.preview = None;
+            // The retained resume proof was of that preview. The op now holds
+            // its binding as the binding before, so V9.2 offers no resume.
+            s.publication.resume = None;
             Self::adapter_close_exchange_locked(s);
             Ok(())
         })?;
@@ -2343,6 +2372,15 @@ impl Runtime {
         owner.slot.check_verified_review(ReplaceReason::CloudAdopt)?;
         self.check_adoption_before(op, Some(exclusive.collection()))?;
         require_registered_media(media)?;
+        // V27.2 row 5, "proof is checked again where it is used": no writer
+        // runs in this phase, so what this reads is what would be replaced.
+        // Refusing before the stage is taken leaves the caller's abort
+        // (V14.3's first `ready` row) with nothing replaced.
+        if op.requires_no_user_content
+            && Self::exclusive_content_proof(&working, media) != crate::cloud::setup::ContentProof::ProvedNone
+        {
+            return Err(PublicationError::AuthorityChanged.into());
+        }
         let stage = owner
             .stage
             .lock()
@@ -2823,6 +2861,7 @@ mod tests {
             started_at_ms: 1,
             transport_wait: false,
             retry_after_ms: None,
+            requires_no_user_content: false,
         };
         let payload = codec::Payload::MediaName(codec::MediaName {
             name: b"photo.jpg".to_vec(),
@@ -2869,5 +2908,50 @@ mod tests {
         let mut damaged = payload;
         damaged[0] ^= 1;
         assert!(received_bytes(&op, &record, Some(&damaged)).is_err());
+    }
+
+    /// A row written before `requires_no_user_content` existed is a confirmed
+    /// op: it decodes, and it never asks for the row 5 re-test.
+    #[test]
+    fn an_adopt_op_row_written_before_the_row_5_field_still_decodes_as_confirmed() {
+        let op = AdoptOp {
+            id: [13; 16],
+            step: AdoptStep::Ready,
+            binding_before: None,
+            binding_after: BindingId([14; 16]),
+            account: OpaqueBytes(vec![15]),
+            before: None,
+            file_before: None,
+            candidate: Publication {
+                identity: PublicationId::from_bytes([16; 16]),
+                binding: AccountBinding::LocalOnly,
+                decision: PublicationDecision::Clear,
+            },
+            active: ControlRecord {
+                encrypted: None,
+                system_fields: OpaqueBytes(vec![17]),
+            },
+            epoch: EpochId([11; 16]),
+            epoch_record: None,
+            media_root: None,
+            staging_name: ".meguri-stage-earlier".into(),
+            started_at_ms: 1,
+            transport_wait: true,
+            retry_after_ms: Some(7),
+            requires_no_user_content: true,
+        };
+        let mut row = serde_json::to_value(&op).unwrap();
+        // The row 5 condition survives a round trip of today's row.
+        assert!(serde_json::from_value::<AdoptOp>(row.clone()).unwrap() == op);
+        assert!(row.as_object_mut().unwrap().remove("requires_no_user_content").is_some());
+        let earlier: AdoptOp = crate::cloud::store::decode(&row.to_string()).unwrap();
+        assert!(!earlier.requires_no_user_content);
+        assert!(
+            earlier
+                == AdoptOp {
+                    requires_no_user_content: false,
+                    ..op
+                }
+        );
     }
 }

@@ -37,6 +37,11 @@ pub struct AdoptOp {
     pub transport_wait: bool,
     #[serde(default)]
     pub retry_after_ms: Option<i64>,
+    /// V27.2 row 5: started with no confirmation because the local collection
+    /// was proved to hold no user content. The exclusive phase tests it again
+    /// and cancels the op when that no longer holds. False for a confirmed op.
+    #[serde(default)]
+    pub requires_no_user_content: bool,
 }
 impl std::fmt::Debug for AdoptOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

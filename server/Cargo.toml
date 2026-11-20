@@ -9,6 +9,8 @@ edition = "2024"
 rust-version = "1.99"
 license = "MIT"
 publish = false
+# Only the [[test]] targets below build (tests/main.rs is server_it).
+autotests = false
 
 [features]
 default = []
@@ -49,3 +51,9 @@ libc = "=0.2.190"
 tempfile = "=3.27.0"
 # Real loopback HTTP client only; no external endpoints or TLS graph needed.
 reqwest = { version = "=0.13.5", default-features = false, features = ["json"] }
+
+# Integration tests: one binary. A file gets its own target only when it
+# cannot share that binary, with the reason.
+[[test]]
+name = "server_it"
+path = "tests/main.rs"
