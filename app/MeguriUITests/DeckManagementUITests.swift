@@ -268,6 +268,7 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertFalse(parent.waitForNonExistence(timeout: 2), "Return deletes nothing")
         XCTAssertTrue(alert.exists, "No button answers Return: the question stays")
         // Esc cancels.
+        try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
         XCTAssertTrue(parent.exists, "Esc cancels")
@@ -294,6 +295,7 @@ final class DeckManagementUITests: XCTestCase {
         let redo = edit.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", "Redo")).firstMatch
         XCTAssertTrue(redo.waitForExistence(timeout: 10))
         XCTAssertEqual(redo.title, "Redo Delete Deck")
+        try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
@@ -309,7 +311,9 @@ final class DeckManagementUITests: XCTestCase {
         try click(deckMenu, app: app, bundle: bundle)
         XCTAssertTrue(item.waitForExistence(timeout: 10))
         XCTAssertTrue(item.isEnabled)
+        try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: .command)
         XCTAssertFalse(app.sheets.firstMatch.waitForExistence(timeout: 2), "An empty deck: no question")
         XCTAssertTrue(sidebarRow(app, label: "QZ72").waitForNonExistence(timeout: 10))
@@ -322,9 +326,11 @@ final class DeckManagementUITests: XCTestCase {
         app.typeKey("f", modifierFlags: .command)
         app.typeText("QZ7")
         XCTAssertTrue(waitForValue(search, "QZ7"))
+        try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: .command)
         XCTAssertTrue(waitForValue(search, ""), "⌘⌫ stays the field's")
         XCTAssertTrue(sidebarRow(app, label: "QZ71").exists, "The deck is kept")
+        try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 

@@ -4,8 +4,9 @@ import Foundation
 /// N20.6 and N20.7's text for Delete Deck. Numbers use the locale's grouping.
 enum DeckDeletionText {
     static func title(_ question: DeckDeletionModel.Confirmation) -> String { title(name: question.name) }
-    static func message(_ question: DeckDeletionModel.Confirmation) -> String {
-        message(subdecks: question.subdecks, cards: question.cards)
+    /// The window's locale groups the counts (the launch locale can differ from the process's).
+    static func message(_ question: DeckDeletionModel.Confirmation, locale: Locale = .current) -> String {
+        message(subdecks: question.subdecks, cards: question.cards, locale: locale)
     }
     static func failureTitle(_ failure: DeckDeletionModel.Failure) -> String { failureTitle(name: failure.name) }
     static func failureMessage(_ failure: DeckDeletionModel.Failure) -> String { failureMessage(failure.reason) }
