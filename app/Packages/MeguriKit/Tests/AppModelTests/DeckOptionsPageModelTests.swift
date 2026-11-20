@@ -175,6 +175,11 @@ import Testing
         owner.navigation.show(.settings)
         model.discardChanges()
         #expect(model.phase == .closed && owner.navigation.path(.home).isEmpty)
+        // A generation that ends while Settings shows ends the draft the same way.
+        model.open(deckID: 1); await model.waitForCompletion()
+        owner.navigation.setPath([.deckOptions(DeckID(1))], for: .home)
+        owner.receiveLifecycle(.ready(generation: 12))
+        #expect(model.phase == .closed && owner.navigation.path(.home).isEmpty)
     }
 
     @Test func refusedSavesKeepThePageWithItsIssues() async throws {
