@@ -117,7 +117,7 @@ fn the_spec_examples_classify_as_d5_2_says() {
 fn each_form_needs_its_cursor() {
     use Incomplete::*;
     // empty_value: at the term's end, or just before its closing quote.
-    assert_eq!(tail("deck:| x"), incomplete("deck:| x").into_tail());
+    assert_eq!(incomplete("deck:| x"), (EmptyValue, 0..5));
     assert_eq!(tail("|deck:"), Tail::Valid);
     assert_eq!(tail("deck: |x"), Tail::Valid);
     assert_eq!(incomplete("\"deck:|\"").0, EmptyValue);
@@ -127,9 +127,9 @@ fn each_form_needs_its_cursor() {
     assert_eq!(incomplete("-deck:"), (EmptyValue, 0..6));
     assert_eq!(incomplete("x -tag:re:"), (EmptyValue, 2..10));
     assert_eq!(tail("deck:a"), Tail::Valid);
-    assert_eq!(tail("w:"), incomplete("w:").into_tail());
+    assert_eq!(incomplete("w:"), (EmptyValue, 0..2));
     // dangling_minus: only a bare `-` ending at the cursor.
-    assert_eq!(tail("a -| b"), incomplete("a -| b").into_tail());
+    assert_eq!(incomplete("a -| b"), (DanglingMinus, 2..3));
     assert_eq!(tail("a| -"), Tail::Valid);
     assert_eq!(tail("a \\-"), Tail::Valid);
     assert_eq!(tail("a \"-\""), Tail::Valid);
@@ -200,17 +200,4 @@ fn offsets_are_characters_of_the_given_text() {
             range: 2..7
         })
     );
-}
-
-trait IntoTail {
-    fn into_tail(self) -> Tail;
-}
-
-impl IntoTail for (Incomplete, std::ops::Range<usize>) {
-    fn into_tail(self) -> Tail {
-        Tail::Incomplete {
-            form: self.0,
-            range: self.1,
-        }
-    }
 }

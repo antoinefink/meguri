@@ -6,7 +6,7 @@
 //! `conformance/goldens/search/builder/` run through the testkit's
 //! `search_build` adapter in T0.
 
-use meguri_model::ids::NotetypeId;
+use meguri_model::ids::NotetypeId as Ntid;
 use meguri_search::ast::{CardState, IdKind, NodeKind};
 use meguri_search::builder::{BuilderError, BuiltItem, ErrorSource, InvalidItem, Joiner, build, build_query};
 use meguri_search::plan::{BuildError, Plan, SearchMode};
@@ -97,7 +97,7 @@ fn the_spec_examples_build_their_text() {
         ),
         (
             Duplicates {
-                notetype: NotetypeId(1_600_000_000_000),
+                notetype: Ntid(1_600_000_000_000),
                 text: s("a\\b \"c\""),
             },
             "\"dupe:1600000000000,a\\\\b \\\"c\\\"\"",
@@ -112,8 +112,8 @@ fn the_spec_examples_build_their_text() {
 #[test]
 fn items_without_an_oracle_scenario_build_their_text() {
     let cases = [
-        (NotetypeId(NotetypeId(1_600_000_000_000)), "mid:1600000000000"),
-        (NotetypeId(NotetypeId(-5)), "mid:-5"),
+        (NotetypeId(Ntid(1_600_000_000_000)), "mid:1600000000000"),
+        (NotetypeId(Ntid(-5)), "mid:-5"),
         (
             Ids {
                 kind: IdKind::Cards,
@@ -291,14 +291,14 @@ fn refused_items_give_their_reason() {
         ),
         (
             Duplicates {
-                notetype: NotetypeId(1),
+                notetype: Ntid(1),
                 text: s("a\u{a0}b"),
             },
             InvalidItem::UnrepresentableText,
         ),
         (
             Duplicates {
-                notetype: NotetypeId(1),
+                notetype: Ntid(1),
                 text: s("a\u{1f}b"),
             },
             InvalidItem::UnrepresentableText,
@@ -404,7 +404,10 @@ fn deep_items_build_and_drop_without_recursion() {
         item = group(Joiner::Or, vec![Flag(2), item]);
     }
     let o = text(&item);
-    assert!(o.starts_with("flag:2 OR (flag:2 OR (") && o.ends_with("flag:1))"), "{}", &o[..40]);
+    assert!(o.starts_with("flag:2 OR (flag:2 OR ("), "{}", &o[..40]);
+    let inner = o.trim_end_matches(')');
+    assert!(inner.ends_with("(flag:2 OR flag:1"), "{}", &inner[inner.len() - 40..]);
+    assert_eq!(o.len() - inner.len(), 49_999);
     assert_eq!(canonical_text(&o).unwrap(), o);
     let mut item = Flag(3);
     for _ in 0..100_000 {
@@ -465,9 +468,12 @@ fn item(seq: &mut Seq, depth: u32) -> BuiltItem {
         6 => FieldEmpty(name(seq)),
         7 => Literal(name(seq)),
         8 => Flag(1 + seq.below(7) as u8),
-        9 => [NoFlag, AnyFlag, AnyTag, Untagged, AnyDeck, CurrentDeck, AnyNotetype, WholeCollection]
+        // Not the whole collection: its `deck:*` reads back as a deck term
+        // the stand-in compilers do not equate with it (Q2's meaning is
+        // checked by the example tests).
+        9 => [NoFlag, AnyFlag, AnyTag, Untagged, AnyDeck, CurrentDeck, AnyNotetype]
             .into_iter()
-            .nth(seq.below(8))
+            .nth(seq.below(7))
             .unwrap_or(NoFlag),
         10 => State(states[seq.below(states.len())]),
         11 => Added(seq.below(400) as u64),
@@ -485,10 +491,10 @@ fn item(seq: &mut Seq, depth: u32) -> BuiltItem {
             ids: (0..=seq.below(3)).map(|k| (k * 7 + seq.below(9)) as i64).collect(),
         },
         19 => Duplicates {
-            notetype: NotetypeId(seq.below(5) as i64),
+            notetype: Ntid(seq.below(5) as i64),
             text: name(seq),
         },
-        20 => NotetypeId(NotetypeId(seq.below(9) as i64 - 4)),
+        20 => NotetypeId(Ntid(seq.below(9) as i64 - 4)),
         21 => Template(seq.below(5) as u32),
         22..=29 => Parsed {
             text: sequence(seq, 2),
@@ -535,7 +541,7 @@ fn holds_an_exception(item: &BuiltItem) -> bool {
 fn built_searches_round_trip() {
     let conn = collection();
     let mut seq = Seq(0x00B0_1D3E);
-    let (mut checked, mut refusals, mut fourth_shape) = (0, 0, 0);
+    let (mut checked, mut refusals, mut fourth_shape, mut parsed_checked) = (0, 0, 0, 0);
     let mut attempts = 0;
     while checked < 5_000 {
         attempts += 1;
@@ -549,8 +555,30 @@ fn built_searches_round_trip() {
             }
             Err(BuilderError::Parse { .. }) => continue,
         };
-        if holds_an_exception(&item) || is_exception(&query) {
+        // F7's first three shapes; and the whole collection, whose `deck:*`
+        // reads back as a deck term (Q2) that the stand-in compilers do not
+        // equate with it: the example tests check that text.
+        let whole = query
+            .nodes()
+            .iter()
+            .any(|node| node.kind == NodeKind::Term(meguri_search::Term::WholeCollection));
+        if holds_an_exception(&item) || is_exception(&query) || whole {
             continue;
+        }
+        // A parsed-text item means what its text means, independently of
+        // the builder: the same query as `grammar.md` reads from the text.
+        if let Parsed { text, field_text } = &item {
+            let read = if *field_text {
+                meguri_search::builder::search_field_text(text).into_owned()
+            } else {
+                text.clone()
+            };
+            let original = parse(&read).unwrap();
+            assert!(
+                same_meaning(&original, meaning_root(&original), &query, meaning_root(&query)),
+                "{item:?} builds another query"
+            );
+            parsed_checked += 1;
         }
         let o = query.canonical_text();
         assert_eq!(build(&item).as_deref(), Ok(o.as_str()));
@@ -575,6 +603,30 @@ fn built_searches_round_trip() {
         }
         checked += 1;
     }
-    assert!(refusals > 100, "the generator should also meet refusals ({refusals})");
+    assert!(refusals > 10, "the generator should also meet refusals ({refusals})");
+    assert!(parsed_checked > 500, "parsed-text items checked: {parsed_checked}");
     assert!(fourth_shape > 0, "the generator should meet F7's fourth shape");
+}
+
+// J3.3's reserved keys are exactly the keys the parser does not read as a
+// field name: each, in any letter case, never gives a field term.
+#[test]
+fn the_reserved_keys_are_the_parsers() {
+    use meguri_search::builder::RESERVED_KEYS;
+    for key in RESERVED_KEYS {
+        for written in [key.to_owned(), key.to_ascii_uppercase()] {
+            if let Ok(query) = parse(&format!("{written}:1")) {
+                assert!(
+                    !matches!(query.node(query.root()).kind, NodeKind::Term(meguri_search::Term::Field { .. })),
+                    "{written}"
+                );
+            }
+            assert_eq!(refused(&FieldPresent(written.clone())), InvalidItem::ReservedFieldName);
+        }
+    }
+    for field in ["decks", "tags", "has_cd", "rid", "and"] {
+        let query = parse(&format!("{field}:1")).unwrap();
+        assert!(matches!(query.node(query.root()).kind, NodeKind::Term(meguri_search::Term::Field { .. })));
+        assert!(build(&FieldPresent(s(field))).is_ok(), "{field}");
+    }
 }

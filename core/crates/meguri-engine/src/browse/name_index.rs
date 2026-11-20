@@ -9,8 +9,12 @@
 //! deck and preset lists are reread whole (they are short), tags change one
 //! row at a time, a note type is reread by id, and the two config keys are
 //! read again. A whole-collection change rereads everything. The observer
-//! reads only the committed writer's rows it is handed.
+//! reads only the committed writer's rows it is handed. A build or update
+//! that cannot read its rows never fails the open or the commit: the index
+//! is left empty (a failed build) or as it was (a failed update), and the
+//! next commit rereads everything.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use meguri_model::changes::{ChangeKind, ChangeSet};
@@ -37,7 +41,13 @@ pub struct NameIndexProvider {
     current: Mutex<Arc<NameIndex>>,
     /// Serializes builds and updates, so none is lost to another.
     building: Mutex<()>,
+    /// A build or an update failed: the next commit rereads everything.
+    stale: AtomicBool,
 }
+
+/// More tag changes than this in one change set reread the tag list
+/// instead of inserting each name (an import can register thousands).
+const TAG_CHANGES_ONE_BY_ONE: usize = 64;
 
 impl NameIndexProvider {
     pub fn new() -> NameIndexProvider {
@@ -58,32 +68,60 @@ impl NameIndexProvider {
     /// change the snapshot already holds again changes nothing).
     pub fn rebuild(&self, collection: &Collection) -> Result<(), EngineError> {
         let _building = self.building.lock().unwrap_or_else(PoisonError::into_inner);
-        let reader = collection.reader(ReaderRole::Query)?;
-        let snapshot = reader.snapshot()?;
-        let mut index = NameIndex::default();
-        fill(&mut index, &SnapshotRows(&*snapshot), Sections::ALL, None)?;
-        drop(snapshot);
-        self.install(index);
-        Ok(())
+        let built = (|| -> Result<NameIndex, EngineError> {
+            let reader = collection.reader(ReaderRole::Query)?;
+            let snapshot = reader.snapshot()?;
+            let mut index = NameIndex::default();
+            fill(&mut index, &SnapshotRows(&*snapshot), Sections::ALL, None)?;
+            Ok(index)
+        })();
+        match built {
+            Ok(index) => {
+                self.stale.store(false, Ordering::Release);
+                self.install(index);
+                Ok(())
+            }
+            Err(error) => {
+                // Never another collection's names: an empty index until a
+                // commit rereads the rows.
+                self.stale.store(true, Ordering::Release);
+                self.install(NameIndex::default());
+                Err(error)
+            }
+        }
+    }
+
+    /// The open step and a reopen: a suggestions cache that cannot be read
+    /// never fails the open; it stays empty and the next commit retries.
+    fn rebuild_or_degrade(&self, collection: &Collection) {
+        if let Err(error) = self.rebuild(collection) {
+            tracing::warn!(%error, "the name index could not be built");
+        }
     }
 
     /// Applies one committed change set.
     fn apply(&self, changes: &ChangeSet, rows: &ObserverRows<'_>) -> Result<(), EngineError> {
+        let stale = self.stale.load(Ordering::Acquire);
         let sections = Sections::of(changes);
-        if !sections.any() {
+        if !stale && !sections.any() {
             return Ok(());
         }
         let _building = self.building.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut index = (*self.index()).clone();
         let source = CommitRows(rows);
-        let result = fill(&mut index, &source, sections, Some(changes));
-        if result.is_err() {
-            // The changed rows could not be read one by one: read everything
-            // the commit holds, or keep the index as it was.
+        let mut index = (*self.index()).clone();
+        let updated = !stale && fill(&mut index, &source, sections, Some(changes)).is_ok();
+        if !updated {
+            // Stale, or the changed rows could not be read one by one: read
+            // everything the commit holds. When that fails too, the index
+            // stays as it was and the next commit tries again.
             let mut whole = NameIndex::default();
-            fill(&mut whole, &source, Sections::ALL, None)?;
+            if let Err(error) = fill(&mut whole, &source, Sections::ALL, None) {
+                self.stale.store(true, Ordering::Release);
+                return Err(error.into());
+            }
             index = whole;
         }
+        self.stale.store(false, Ordering::Release);
         self.install(index);
         Ok(())
     }
@@ -94,7 +132,8 @@ impl OpenStep for NameIndexProvider {
         NAME
     }
     fn run(&self, collection: &Collection) -> Result<(), EngineError> {
-        self.rebuild(collection)
+        self.rebuild_or_degrade(collection);
+        Ok(())
     }
 }
 
@@ -117,7 +156,8 @@ impl GenerationListener for NameIndexProvider {
         NAME
     }
     fn collection_reopened(&self, collection: &Collection) -> Result<(), EngineError> {
-        self.rebuild(collection)
+        self.rebuild_or_degrade(collection);
+        Ok(())
     }
     fn collection_replaced(&self, _old: Generation, _new: Generation) {}
 }
@@ -213,7 +253,7 @@ fn fill(
     }
     if sections.tags {
         match changes {
-            Some(changes) if !changes.whole_collection => {
+            Some(changes) if !changes.whole_collection && changes.tags.len() <= TAG_CHANGES_ONE_BY_ONE => {
                 for change in &changes.tags {
                     match change.kind {
                         ChangeKind::Removed => index.remove_tag(&change.name),
