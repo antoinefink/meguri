@@ -12,7 +12,7 @@
 mg_job gate host mg_gate \
   "Merge gate (R1950, R1951): static checks and canaries first, then T0 for the changed paths and T1 when core/ changed (tools/gate/tiers.yaml); [--local] (every run but the similarity scan and oracle-image jobs) [--base <rev>] [--all] [--only <run>[,<run>]...] [--plan]; receipt in build/mg/gate/<run>/receipt.json"
 mg_job static-checks host mg_static_checks \
-  "Gate static checks (tools/gate/static-checks/): no AnkiWeb host in tests, scripts or scenarios (R1876), provenance trailers on every commit of the branch (R1958), no test retries (R1953); [--base <rev>] [--rev <rev> (that commit's tree)] [--check ankiweb-hosts|trailers|no-retries]..."
+  "Gate static checks (tools/gate/static-checks/): no AnkiWeb host in tests, scripts or scenarios (R1876), provenance trailers on every commit of the branch (R1958), session records only added and every Session: trailer recorded (R1958), no test retries (R1953); [--base <rev>] [--rev <rev> (that commit's tree)] [--check ankiweb-hosts|trailers|sessions|no-retries]..."
 
 MG_GATE_PY="tools/gate/gate.py"
 MG_GATE_TIERS="tools/gate/tiers.yaml"
@@ -388,15 +388,15 @@ mg_static_checks() {
       --base) [ "$#" -ge 2 ] || { mg_gate__usage "--base needs a revision"; return 0; }; base="$2"; shift 2 ;;
       --rev) [ "$#" -ge 2 ] || { mg_gate__usage "--rev needs a revision"; return 0; }; rev="$2"; shift 2 ;;
       --check)
-        [ "$#" -ge 2 ] && mg_word_in "$2" "ankiweb-hosts trailers no-retries" ||
-          { mg_gate__usage "--check takes ankiweb-hosts, trailers or no-retries"; return 0; }
+        [ "$#" -ge 2 ] && mg_word_in "$2" "ankiweb-hosts trailers sessions no-retries" ||
+          { mg_gate__usage "--check takes ankiweb-hosts, trailers, sessions or no-retries"; return 0; }
         checks="$checks $2"
         shift 2
         ;;
       *) mg_gate__usage "unknown argument '$1'; usage: tools/mg static-checks [--base <rev>] [--rev <rev>] [--check <name>]..."; return 0 ;;
     esac
   done
-  [ -n "$checks" ] || checks="ankiweb-hosts trailers no-retries"
+  [ -n "$checks" ] || checks="ankiweb-hosts trailers sessions no-retries"
   if [ -n "$rev" ]; then
     rev="$(mg_gate__commit "$rev")" || true
     [ -n "$rev" ] || { mg_gate__usage "--rev is not a commit"; return 0; }
@@ -410,6 +410,7 @@ mg_static_checks() {
     case "$c" in
       ankiweb-hosts) out="$(/bin/bash "$dir/ankiweb-hosts.sh" "$MG_ROOT" ${rev:+"$rev"})" ;;
       trailers) out="$(/bin/bash "$dir/trailers.sh" "$MG_ROOT" "$base" "${rev:-HEAD}")" ;;
+      sessions) out="$(python3 -I -B "$dir/sessions.py" "$MG_ROOT" "$base" "${rev:-HEAD}")" ;;
       no-retries) out="$(/bin/bash "$dir/no-retries.sh" "$MG_ROOT" ${rev:+"$rev"})" ;;
     esac
     rc=$?
@@ -418,9 +419,11 @@ mg_static_checks() {
       0) passed=$((passed + 1)) ;;
       1)
         failed=$((failed + 1))
-        printf '%s\n' "$out" | jq -c --arg repro "tools/mg static-checks --check $c" '
+        printf '%s\n' "$out" | jq -c --arg repro "tools/mg static-checks --check $c --base $base${rev:+ --rev $rev}" '
           if .check == "trailers" then
             {id: ("trailers:" + .commit[0:12]), message: (.commit[0:12] + " (" + .subject + "): " + .message), repro: $repro}
+          elif .check == "sessions" then
+            {id: ("sessions:" + .commit[0:12] + ":" + .key), message: (.commit[0:12] + " (" + .subject + "): " + .message), repro: $repro}
           elif .check == "ankiweb-hosts" then
             {id: ("ankiweb-hosts:" + .path + ":" + (.line | tostring)),
              message: (.path + ":" + (.line | tostring) + " names an AnkiWeb host (\(.match)); tests, scripts and scenarios never do (R1876): use the local sync server, or build AnkiWeb cases from meguri-sync'"'"'s ANKIWEB_HOST"),
