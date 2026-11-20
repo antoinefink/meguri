@@ -92,7 +92,7 @@ Changed 2026-11-20 (round 9 review): `restore_summary(id, kind?)` reads one snap
 
 ### D7.2 Refusals and result
 
-- Refusals, writing nothing: `NotFound` when no note type has the id (Anki fails the same way); `NeedsStockKind` (D2, an unknown kind or one of the other `kind`); `NoteFieldCountMismatch` (`notetypes/structure-changes` S1.2 item 4); `SafetyBackupFailed` (D5; `package/backup-triggers` T6.2); `Stale` only when the internal precondition fails a second time after D6's replan; `LossesChanged { restore_summary }` (D7's round 9 line, D7.1, D6's round 9 review line; changed 2026-11-20, round 9 review). There are no others: no `invalid_notetype`, `ProtectedField` or template-check refusal (D3, D4). Planning can also end with `Cancelled` (D6).
+- Refusals, writing nothing: `NotFound` when no note type has the id at the call and no confirmed losses or digest were passed (Anki fails the same way); `NeedsStockKind` (D2, an unknown kind or one of the other `kind`); `NoteFieldCountMismatch` (`notetypes/structure-changes` S1.2 item 4); `SafetyBackupFailed` (D5; `package/backup-triggers` T6.2); `Stale` when the internal precondition fails a second time after D6's replan, and when the note type whose digest or confirmed losses were passed no longer exists (D6's round 9 review line: it was deleted after the summary was read; `Stale` wins over `LossesChanged`); `LossesChanged { restore_summary }` (D7's round 9 line, D7.1, D6's round 9 review line; changed 2026-11-20, round 9 review). There are no others: no `invalid_notetype`, `ProtectedField` or template-check refusal (D3, D4). Planning can also end with `Cancelled` (D6).
 - Result as `notetypes/structure-changes` S1.3.
 
 ## D8. Scenarios
