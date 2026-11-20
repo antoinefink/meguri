@@ -50,7 +50,9 @@ enum MeguriSetupSequence {
         // A Cancel that landed after the preparation ended reached no job: the
         // prepared download replaced nothing and is discarded.
         guard proceed() else {
-            _ = try? await bridge.discard(download)
+            // A refused discard is returned, so the caller shows the core's own answer.
+            let discarded = try await bridge.discard(download)
+            if case .refused = discarded.outcome { return discarded }
             throw CancellationError()
         }
         return try await bridge.confirmSetupDownload(decision, download: download, choice: choice, progress: progress)

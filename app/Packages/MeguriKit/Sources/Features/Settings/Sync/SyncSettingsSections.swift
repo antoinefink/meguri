@@ -173,6 +173,9 @@ struct SyncServiceRows: View {
                 // A choice in the Service control clears the update hold, by writing
                 // `paused: false` before the change itself is asked for (P25.2).
                 guard await current.clearUpdateHold() else { failed = true; changing = false; return }
+                // The selection is not reserved across those waits: a change of it
+                // ends this switch, and the person confirms again.
+                guard current.providerState?.selection == source else { destination = nil; changing = false; return }
                 let succeeded: Bool
                 if value == "localOnly", source == .iCloud {
                     // V27.5's rows, through the retained operations.
