@@ -23,7 +23,14 @@ under `local-data/`, `refs/` or `oracle/`.
    overtaken and indistinct, the FSRS facts mapping, the Study alert, the
    refused service change and sign-in, no file intake, rows 3 and 6 of the
    dormant iCloud decision).
-2. Second pass after the fixes below: see the end of this file.
+2. Second pass on 433c22a55: two should-fix findings and two nits. The
+   file-intake bullet now names every entry that opens the collection-file
+   picker (Welcome, Settings › Import Collection, the Mac's Import
+   Collection…), which corrects pass 1's finding 18; the three MP6 lines
+   whose text differs from the built app say "text not built"; "started" is
+   now "started or joined" in F5.3 and A1.4. Nit 4 (row 23b is a fallback
+   the built code never reaches) was accepted as written.
+3. Third pass: see the end of this file.
 
 ## Findings of pass 1 and what was done
 
