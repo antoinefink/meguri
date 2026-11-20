@@ -1,5 +1,6 @@
 import AppModel
 import CoreBridge
+import DesignSystem
 import SwiftUI
 
 /// The same quiet control is injected into the platform toolbar and review.
@@ -53,6 +54,10 @@ public struct CloudSyncStatusButton: View {
             .disabled(collection.syncPresentation.statusHandoffPending)
             .popover(isPresented: presented(compact: false)) {
                 status
+                    // A navigation stack has no size of its own: without one the popover
+                    // shrinks to the two buttons under the form and hides the status.
+                    .frame(idealWidth: ContentWidth.primaryAction,
+                        idealHeight: ContentWidth.primaryAction + ControlMetrics.minimumTarget + ControlMetrics.minimumTarget)
                     .presentationCompactAdaptation(.sheet)
                     .presentationDetents([.medium, .large])
             }

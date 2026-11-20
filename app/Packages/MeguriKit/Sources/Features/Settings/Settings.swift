@@ -149,52 +149,48 @@ struct SettingsCollectionFilesSection: View {
         return collection.navigation.sheet == nil && !collection.manualTransfers.busy
             && collection.manualTransfers.preview == nil && collection.manualTransfers.mediaPreview == nil
     }
+    private var canImport: Bool { fileActionsAvailable && collection?.entry.canPresent == true }
+    private var canExport: Bool { fileActionsAvailable && collection?.collectionExport.canPresent == true }
+    private func importCollection() {
+        if let present { present(.collectionEntry) } else { collection?.entry.present() }
+    }
+    private func exportCollection() {
+        if let present { present(.collectionExport) } else { collection?.collectionExport.start() }
+    }
     var body: some View {
         Section {
+            #if os(macOS)
             CollectionActionRow {
-                Button { if let present { present(.collectionEntry) } else { collection?.entry.present() } } label: {
-                    Text("Import Collection", bundle: .module)
-                        #if !os(macOS)
-                        // Borderless draws no bezel: the label carries the touch target.
-                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                        .contentShape(Rectangle())
-                        #endif
-                }
-                #if os(macOS)
-                .buttonStyle(.bordered)
-                #else
-                .buttonStyle(.borderless)
-                #endif
-                .controlSize(.regular)
-                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                .contentShape(Rectangle())
-                .disabled(!fileActionsAvailable || collection?.entry.canPresent != true)
-                .accessibilityIdentifier("settings.root.importCollection")
+                Button(action: importCollection) { Text("Import Collection", bundle: .module) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                    .contentShape(Rectangle())
+                    .disabled(!canImport)
+                    .accessibilityIdentifier("settings.root.importCollection")
             } label: {
                 Label { Text("From a file", bundle: .module) } icon: { Image(systemName: "square.and.arrow.down") }
             }
             CollectionActionRow {
-                Button { if let present { present(.collectionExport) } else { collection?.collectionExport.start() } } label: {
-                    Text("Export Collection", bundle: .module)
-                        #if !os(macOS)
-                        // Borderless draws no bezel: the label carries the touch target.
-                        .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                        .contentShape(Rectangle())
-                        #endif
-                }
-                #if os(macOS)
-                .buttonStyle(.bordered)
-                #else
-                .buttonStyle(.borderless)
-                #endif
-                .controlSize(.regular)
-                .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
-                .contentShape(Rectangle())
-                .disabled(!fileActionsAvailable || collection?.collectionExport.canPresent != true)
-                .accessibilityIdentifier("settings.root.exportCollection")
+                Button(action: exportCollection) { Text("Export Collection", bundle: .module) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .frame(minWidth: ControlMetrics.minimumTarget, minHeight: ControlMetrics.minimumTarget)
+                    .contentShape(Rectangle())
+                    .disabled(!canExport)
+                    .accessibilityIdentifier("settings.root.exportCollection")
             } label: {
                 Label { Text("To a file", bundle: .module) } icon: { Image(systemName: "square.and.arrow.up") }
             }
+            #else
+            // N15.1: plain rows, as the system's Settings has for an action that opens a sheet.
+            Button(action: importCollection) { Text("Import Collection…", bundle: .module) }
+                .disabled(!canImport)
+                .accessibilityIdentifier("settings.root.importCollection")
+            Button(action: exportCollection) { Text("Export Collection…", bundle: .module) }
+                .disabled(!canExport)
+                .accessibilityIdentifier("settings.root.exportCollection")
+            #endif
         } header: {
             Text("Collection", bundle: .module)
                 .accessibilityIdentifier("settings.root.collectionHeading")
@@ -208,7 +204,8 @@ struct SettingsCollectionFilesSection: View {
 
 }
 
-/// Compact native Mac rows; other platforms retain their labeled Form layout.
+#if os(macOS)
+/// Compact native Mac rows: the label leading, its button trailing.
 private struct CollectionActionRow<Content: View, RowLabel: View>: View {
     private let content: Content
     private let label: RowLabel
@@ -216,19 +213,14 @@ private struct CollectionActionRow<Content: View, RowLabel: View>: View {
         self.content = content(); self.label = label()
     }
     var body: some View {
-        #if os(macOS)
         HStack(alignment: .center) {
             label
             Spacer()
             content
         }
-        #else
-        LabeledContent { content } label: { label }
-        #endif
     }
 }
 
-#if os(macOS)
 /// Native Settings shares the collection. Only this device-local section is restored.
 public struct MacSettingsView: View {
     private let collection: ReviewCollection

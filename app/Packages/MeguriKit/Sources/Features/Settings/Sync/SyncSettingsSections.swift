@@ -200,31 +200,37 @@ struct MeguriAccountRows: View {
         Group {
             if showsFields {
                 Group {
-                    TextField(SyncText.value("sync.meguri.address"), text: Binding(get: { address }, set: {
-                        guard !processing else { return }
-                        address = $0; password = ""; sync.meguriAddressEdited()
-                    }))
-                        #if os(iOS)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("settings.sync.meguri.address")
-                    TextField(SyncText.value("sync.meguri.username"), text: Binding(get: { username }, set: {
-                        if !processing { username = $0 }
-                    }))
-                        .textContentType(.username)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("settings.sync.meguri.username")
-                    SecureField(SyncText.value("sync.meguri.password"), text: Binding(get: { password }, set: {
-                        if !processing { password = $0 }
-                    }))
-                        .textContentType(.password)
-                        .onSubmit(signIn)
-                        .accessibilityIdentifier("settings.sync.meguri.password")
+                    field("sync.meguri.address") {
+                        TextField(SyncText.value("sync.meguri.address"), text: Binding(get: { address }, set: {
+                            guard !processing else { return }
+                            address = $0; password = ""; sync.meguriAddressEdited()
+                        }), prompt: fieldPrompt)
+                            #if os(iOS)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("settings.sync.meguri.address")
+                    }
+                    field("sync.meguri.username") {
+                        TextField(SyncText.value("sync.meguri.username"), text: Binding(get: { username }, set: {
+                            if !processing { username = $0 }
+                        }), prompt: fieldPrompt)
+                            .textContentType(.username)
+                            #if os(iOS)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("settings.sync.meguri.username")
+                    }
+                    field("sync.meguri.password") {
+                        SecureField(SyncText.value("sync.meguri.password"), text: Binding(get: { password }, set: {
+                            if !processing { password = $0 }
+                        }), prompt: fieldPrompt)
+                            .textContentType(.password)
+                            .onSubmit(signIn)
+                            .accessibilityIdentifier("settings.sync.meguri.password")
+                    }
                 }
                 .disabled(processing || changing)
                 Button(SyncText.value("sync.meguri.signIn"), action: signIn)
@@ -277,6 +283,27 @@ struct MeguriAccountRows: View {
         .sheet(isPresented: Binding(get: { sync.meguriPreview != nil && !choosing }, set: { _ in })) {
             if let preview = sync.meguriPreview { MeguriSetupPreviewSheet(collection: collection, preview: preview) }
         }
+    }
+    /// MP2's labelled fields: the label leading and the value trailing, as the
+    /// system's Settings forms have. A Mac form already draws a field's title that way.
+    /// The leading label names the field, so the field repeats no placeholder.
+    private var fieldPrompt: Text? {
+        #if os(macOS)
+        nil
+        #else
+        Text(verbatim: "")
+        #endif
+    }
+    @ViewBuilder private func field(_ key: String, @ViewBuilder content: () -> some View) -> some View {
+        #if os(macOS)
+        content()
+        #else
+        // The field carries the same name for VoiceOver, so the visible label is not read twice.
+        HStack {
+            Text(SyncText.value(key)).accessibilityHidden(true)
+            content().multilineTextAlignment(.trailing)
+        }
+        #endif
     }
     private func signIn() {
         let secret = password; password = ""
@@ -387,6 +414,8 @@ struct SyncMainStatusRows: View {
         if status.titleKey == "sync.status.upToDate.title" {
             let instant: Int64? = meguri ? sync.meguriLastExchange : {
                 if case .upToDate(let at) = sync.status?.state { return at }
+                // T19.4: with only issues present the row shows the state underneath, detail included.
+                if case .upToDate(let at) = sync.status?.stateWithoutAttention { return at }
                 return nil
             }()
             if let instant { return SyncText.format("sync.status.upToDate.detail", SyncText.instant(instant, now: clock.now())) }
