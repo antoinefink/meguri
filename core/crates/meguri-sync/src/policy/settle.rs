@@ -36,7 +36,14 @@ pub fn judge_upload(operation: &Operation, candidate: &LocalFacts, server: &Remo
         && server.usn == candidate.usn
         && server.empty == (candidate.cards == 0);
     let is_baseline = server == baseline;
+    // A baseline whose collection facts are the candidate's cannot be told
+    // from it: a change of the media sequence alone proves no acceptance.
+    let alike = baseline.modified == candidate.modified
+        && baseline.schema_modified == candidate.schema_modified
+        && baseline.usn == candidate.usn
+        && baseline.empty == (candidate.cards == 0);
     Some(match (is_candidate, is_baseline) {
+        (true, false) if alike => UploadSettlement::Indistinct,
         (true, false) => UploadSettlement::Accepted,
         (false, true) => UploadSettlement::NotAccepted,
         (false, false) => UploadSettlement::Neither,
@@ -287,6 +294,11 @@ mod tests {
         same.schema_modified = 400;
         same.usn = 5;
         let (outcome, _) = policy.settle_upload(&op, &same, &remote(500, 400, 5)).unwrap();
+        assert_eq!(outcome, UploadSettlement::Indistinct);
+        // Only the media sequence moved: still nothing about the collection upload.
+        let mut media_only = remote(500, 400, 5);
+        media_only.media_usn = 1;
+        let (outcome, _) = policy.settle_upload(&op, &same, &media_only).unwrap();
         assert_eq!(outcome, UploadSettlement::Indistinct);
         assert_eq!(policy.active().unwrap(), Some(op));
     }

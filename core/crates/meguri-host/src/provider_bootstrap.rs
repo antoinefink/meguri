@@ -178,12 +178,14 @@ impl CoreHost {
         Ok(())
     }
     pub fn prepare_meguri_bootstrap(&self, access: MeguriAccess, direction: MeguriBootstrapDirection) -> Result<ManualTransferTask<Preview>> {
-        self.setup_retest.disarm();
         self.check_meguri_bootstrap(access.connection())?;
         if self.provider_authority().network_blocked()
             || self.manual_transfer_history().active().map_err(|_| MeguriBootstrapError::Busy)?.is_some() {
             return Err(MeguriBootstrapError::Busy);
         }
+        // Only an admitted preparation disarms: a refused call must not clear
+        // the retest of a confirmation that is still running.
+        self.setup_retest.disarm();
         let direction = match direction { MeguriBootstrapDirection::UseServerCollection => Direction::Import,
             MeguriBootstrapDirection::UseDeviceCollection => Direction::Export };
         Ok(self.prepare_manual_transfer(access.into_transfer_access()?, direction, Scope::CollectionAndMedia)?)
@@ -195,13 +197,15 @@ impl CoreHost {
     /// phase for this one confirmation; every other confirmation disarms it.
     pub(crate) fn confirm_meguri_bootstrap_retesting(&self, access: MeguriAccess, preview: Preview,
         retest: Option<crate::provider_setup::Retest>) -> Result<ManualTransferTask<Operation>> {
-        self.setup_retest.disarm();
         let generation = self.cloud_connection_generation()?;
         self.check_meguri_bootstrap(access.connection())?;
         let active = self.manual_transfer_history().active().map_err(|_| MeguriBootstrapError::Busy)?;
         if active.as_ref() != Some(&preview.operation) || preview.operation.phase != Phase::Preview {
             return Err(MeguriBootstrapError::Busy);
         }
+        // Only the confirmation of the active preview disarms; a refused call
+        // leaves another confirmation's retest armed.
+        self.setup_retest.disarm();
         self.publish_provider_metadata(generation, |publication| Ok(self.provider_authority().record_meguri_bootstrap_intent(
             access.connection(), access.username(), &preview, generation.0, publication)))??;
         let access = access.into_transfer_access()?;

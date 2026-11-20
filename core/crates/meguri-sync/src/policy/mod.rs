@@ -623,7 +623,8 @@ fn decode(doc: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<St
                 && (op.direction != Direction::Export
                     || op.phase != Phase::Failed
                     || op.activation_identity.is_some()
-                    || op.collection_complete))
+                    || op.collection_complete
+                    || state.active.as_ref() == Some(&op.id)))
             || (op.phase == Phase::Complete && (op.receipt.is_none() || !selected_complete(op)))
             || (op.receipt.is_some() && op.phase != Phase::Complete)
         {
