@@ -1,11 +1,11 @@
 //! The SQL writer's pieces (`specs/search/query-model.md` Q9): bound
 //! parameters, the statement around the predicate, and each term's SQL.
 
-use crate::ast::{CardState, Term};
-use crate::context::{ContextReads, ContextValue, SearchContext};
+use crate::ast::Term;
+use crate::context::{ContextReads, SearchContext};
 use crate::error::{ErrorKind, SearchFailure};
 
-use super::{Rows, SearchMode, names};
+use super::{Rows, SearchMode, history, names, props, state};
 
 /// A bound parameter. All user text goes in parameters; numbers and ids may
 /// be written into the statement (Q9).
@@ -80,28 +80,17 @@ pub fn compile_term(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Resu
             slow: false,
             reads: ContextReads::NONE,
         }),
-        // state-and-flags S1, S3: compare stored due, never type or odue.
-        Term::State(CardState::Due) => {
-            let today = params.bind(Param::Integer(i64::from(env.ctx.today)));
-            // S3 permits saturating the upper cutoff over the whole i64 domain.
-            // Compute before SQL so SQLite cannot promote an overflow to REAL.
-            let cutoff = env.ctx.now.saturating_add(i64::from(env.ctx.learn_ahead_secs));
-            let cutoff = params.bind(Param::Integer(cutoff));
-            TermOutcome::Sql(TermSql {
-                sql: format!("(c.queue IN (2, 3) AND c.due <= {today}) OR (c.queue IN (1, 4) AND c.due <= {cutoff})"),
-                slow: false,
-                reads: ContextReads::NONE
-                    .with(ContextValue::Now)
-                    .with(ContextValue::Today)
-                    .with(ContextValue::LearnAhead),
-            })
+        Term::State(state) => TermOutcome::Sql(state::state(*state, env, params)),
+        Term::Flag(flag) => TermOutcome::Sql(state::flag(*flag)),
+        Term::Property { property, comparison } => {
+            TermOutcome::Sql(props::property(property, *comparison, env, params)?)
         }
-        // S2: this stored predicate performs no unburying or day query.
-        Term::State(CardState::Buried) => TermOutcome::Sql(TermSql {
-            sql: "c.queue IN (-2, -3)".to_owned(),
-            slow: false,
-            reads: ContextReads::NONE,
-        }),
+        Term::HasCustomData(key) => TermOutcome::Sql(props::has_custom_data(key, params)),
+        Term::Added(days) => TermOutcome::Sql(history::added(*days, env.ctx)),
+        Term::Edited(days) => TermOutcome::Sql(history::edited(*days, env.ctx)),
+        Term::Introduced(days) => TermOutcome::Sql(history::introduced(*days, env.ctx)),
+        Term::Rated { days, button } => TermOutcome::Sql(history::rated(*days, *button, env.ctx)),
+        Term::Rescheduled(days) => TermOutcome::Sql(history::rescheduled(*days, env.ctx)),
         _ => TermOutcome::NotYetSupported,
     })
 }

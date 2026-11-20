@@ -27,6 +27,8 @@ meguri-storage.workspace = true
 regex.workspace = true
 # Connection-local pure scalar functions; no collection SQL is issued here.
 rusqlite.workspace = true
+# Custom data values are read as Anki's reader reads them (properties P12).
+serde_json.workspace = true
 # The combining-free transform of `nc:` tag terms (text-matching T8.1).
 unicode-normalization.workspace = true
 

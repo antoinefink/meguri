@@ -106,7 +106,7 @@ fn field_text(name: &str, mode: TextMode, text: &str) -> String {
 }
 
 /// F5 and F6 for one term.
-fn term_text(term: &Term) -> String {
+pub(crate) fn term_text(term: &Term) -> String {
     match term {
         Term::WholeCollection => "deck:*".to_owned(),
         Term::Text(text) => quoted(&text.replace(':', "\\:")),

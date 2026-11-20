@@ -20,5 +20,7 @@ pub mod config_keys;
 pub mod names_and_ids;
 #[path = "parse_props.rs"]
 pub mod parse_props;
+#[path = "props_and_history.rs"]
+pub mod props_and_history;
 #[path = "state_and_flags.rs"]
 pub mod state_and_flags;

@@ -3,8 +3,11 @@
 //! rows the query's scope needs, the slow terms, the context values read,
 //! and the run errors that need no database (`errors.md` E3).
 
+mod history;
 mod names;
+mod props;
 pub mod sql;
+mod state;
 
 use std::ops::Range;
 
@@ -148,6 +151,15 @@ pub fn query_scope(query: &Query) -> Scope {
         .fold(Scope::Either, Scope::combine)
 }
 
+/// E7's `{term}`: the term as it stands in the search, quotes included and
+/// without a negating `-` (the term node's span); a built query writes the
+/// term's canonical text.
+fn term_text(query: &Query, span: &Range<usize>, term: &Term) -> String {
+    query
+        .source_text(span)
+        .unwrap_or_else(|| crate::canonical::term_text(term))
+}
+
 /// E3: the key of an id list as typed, then `:`.
 fn typed_key(query: &Query, span: &Range<usize>, term: &Term) -> String {
     let typed = query.source_text(span).and_then(|text| {
@@ -219,6 +231,11 @@ fn build_with(
                             slow: false,
                             reads: ContextReads::NONE,
                         })
+                    }
+                    Err(ErrorKind::SearchFailed(SearchFailure::NumberOutOfRange { .. })) => {
+                        let term = term_text(query, &node.span, term);
+                        let kind = ErrorKind::SearchFailed(SearchFailure::NumberOutOfRange { term });
+                        return Err(SearchError::new(kind, node.span.clone()).into());
                     }
                     Err(kind) => return Err(SearchError::new(kind, node.span.clone()).into()),
                 };
