@@ -313,6 +313,35 @@ final class LocalReviewJourneyTests: XCTestCase {
         try assertSavedAndRestart(app, bundleIdentifier: bundleIdentifier, answers: answers, evidence: "waiting")
     }
 
+    #if os(macOS)
+    /// N20.8 on the Mac: Card › Edit Note (⌘E) opens the form over the card,
+    /// Esc is its Cancel and not Back to Decks, and Bury Card (⌘J) names
+    /// Edit › Undo after itself.
+    func testCardMenuKeysEditTheNoteAndBuryTheCard() throws {
+        let (app, bundleIdentifier) = try startFreshReview()
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 20))
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey("e", modifierFlags: .command)
+        let form = element(app, "review.editCurrent")
+        XCTAssertTrue(form.waitForExistence(timeout: 15), "⌘E reaches Card › Edit Note")
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        XCTAssertTrue(form.waitForNonExistence(timeout: 10), "Esc is the form's Cancel")
+        XCTAssertTrue(element(app, "review.session.screen").exists, "Esc did not leave the review")
+        XCTAssertTrue(element(app, "review.session.reveal").waitForExistence(timeout: 10))
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey("j", modifierFlags: .command)
+        let menu = editMenu(app)
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        try click(menu, in: app, bundleIdentifier: bundleIdentifier)
+        let undo = editItem(menu, "Undo")
+        XCTAssertTrue(undo.waitForExistence(timeout: 10))
+        XCTAssertEqual(undo.title, "Undo Bury Card")
+        try app.bringToFront(bundleIdentifier: bundleIdentifier)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+    }
+    #endif
+
     func testAllEasyExhaustionAndRestart() throws {
         let (app, bundleIdentifier) = try startFreshReview()
         guard let answers = try reachExhaustion(app, bundleIdentifier: bundleIdentifier) else { return }

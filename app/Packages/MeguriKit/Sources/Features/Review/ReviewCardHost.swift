@@ -20,7 +20,8 @@ struct ReviewCardHost {
     private func key(_ input: String, command: Bool, shift: Bool, repeated: Bool = false) -> Bool {
         guard let pages = model.surface as? ReviewPages, pages.presenter.isAvailable,
               ReviewInputOwnership.admits(cardFocused: ReviewInputOwnership.cardFocused(in: pair.current.webView),
-                  editing: model.surface.editing, paused: model.paused, repeated: repeated) else { return false }
+                  // An open Edit Note form owns the keys like a sheet (N11.1, E2).
+                  editing: model.surface.editing, paused: model.paused || model.editingNote, repeated: repeated) else { return false }
         if command {
             if input.lowercased() == "z" { model.restore(redo: shift); return true }
             return false
@@ -182,7 +183,7 @@ extension ReviewCardHost: UIViewControllerRepresentable {
         host.handle = { key($0, command: $1, shift: $2) }
         host.canHandle = { _ in
             ReviewInputOwnership.admits(cardFocused: ReviewInputOwnership.cardFocused(in: pair.current.webView),
-                editing: model.surface.editing, paused: model.paused, repeated: false)
+                editing: model.surface.editing, paused: model.paused || model.editingNote, repeated: false)
         }
         host.focusChanged = {
             (model.surface as? ReviewPages)?.establishInitialFocus()

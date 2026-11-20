@@ -37,13 +37,24 @@ extension ReviewCoordinatorTests {
         _ = await fixture.model.end()
     }
 
-    @Test func aFailedCardActionKeepsTheCardAndSaysWhy() async throws {
+    @Test(arguments: [false, true])
+    func aFailedCardActionKeepsTheCardOnItsSideAndSaysWhy(answerSide: Bool) async throws {
         let fixture = Fixture()
         await fixture.model.start()
+        fixture.now = 10
+        if answerSide { fixture.model.reveal(); await fixture.model.settled() }
+        let presented = fixture.surface.presented
         fixture.model.startCardAction = { _, _, _ in throw BridgeError.internal("refused") }
+        fixture.now = 12
         fixture.model.act(.suspend); await fixture.model.settled()
-        #expect(fixture.model.item?.cardId == 1 && fixture.model.phase == .question)
+        #expect(fixture.model.item?.cardId == 1 && fixture.model.phase == (answerSide ? .answer : .question))
+        #expect(fixture.surface.presented == presented, "Nothing is presented again (A1)")
         #expect(fixture.model.notice != nil && fixture.model.cardActionAnnouncement == nil)
+        if answerSide {
+            fixture.now = 15
+            fixture.model.rate(.good); await fixture.model.settled()
+            #expect(fixture.client.elapsed == [15_000], "12 s before the action and 3 s after: the timer went on")
+        }
         _ = await fixture.model.end()
     }
 

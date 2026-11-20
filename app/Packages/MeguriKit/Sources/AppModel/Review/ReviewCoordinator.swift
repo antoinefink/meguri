@@ -396,14 +396,18 @@ public final class ReviewCoordinator {
                 refreshPending = false; forceQuestion = false
                 let head = needsRefresh ? try await client.head(sessionID: sessionID) : mutation.headDiff!.head
                 try await apply(head, question: true, inputTime: inputTime, intent: intent)
+                // A new step: what was undone can no longer be redone.
+                record.undone.removeAll()
                 cardActionAnnouncement = (UUID(), action)
             } catch {
-                // A refused or failed op changes nothing on screen but its error (A1).
+                // A refused or failed op changes nothing on screen but its error
+                // (A1): the same card keeps its side and its timer goes on.
                 notice = String(describing: error)
                 let intent = restorationIntent
                 refreshPending = false; forceQuestion = false
-                do { try await apply(client.head(sessionID: sessionID), question: true, intent: intent) }
+                do { try await apply(client.head(sessionID: sessionID), question: false, intent: intent) }
                 catch { fail(error) }
+                if phase == .question || phase == .answer { timer.resume(at: uptime()) }
             }
             completeOperation()
         }
