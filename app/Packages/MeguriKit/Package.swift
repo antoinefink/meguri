@@ -75,13 +75,14 @@ let package = Package(
         .target(name: "HeatmapKit", swiftSettings: settings),
         .testTarget(
             name: "AppModelTests",
-            dependencies: ["AppModel", "CardRendering", "Editor", .product(name: "CoreBridge", package: "MeguriCore"), .product(name: "Instrumentation", package: "MeguriCore")],
+            dependencies: ["AppModel", "CardRendering", "Editor", "HeatmapKit", .product(name: "CoreBridge", package: "MeguriCore"), .product(name: "Instrumentation", package: "MeguriCore")],
             exclude: ["AGENTS.md"],
             resources: [.copy("Fixtures/schema-18.anki2"), .copy("Fixtures/review.colpkg")],
             swiftSettings: settings
         ),
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"], swiftSettings: settings),
         .testTarget(name: "HomeTests", dependencies: ["Home"], swiftSettings: settings),
+        .testTarget(name: "HeatmapKitTests", dependencies: ["HeatmapKit"], swiftSettings: settings),
         .testTarget(name: "ReviewTests", dependencies: ["Review", "AppModel", "Settings"], swiftSettings: settings),
         .testTarget(
             name: "CardRenderingTests",
@@ -98,7 +99,7 @@ let package = Package(
     ] + features.map { name in
         .target(
             name: name,
-            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (["Home", "Review", "Settings", "Editor"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (name == "Editor" ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
+            dependencies: ["AppModel", "DesignSystem"] + (name == "Review" ? ["CardRendering"] : []) + (name == "Home" ? ["HeatmapKit"] : []) + (["Home", "Review", "Settings", "Editor"].contains(name) ? [.product(name: "CoreBridge", package: "MeguriCore")] : []) + (name == "Editor" ? [.product(name: "Instrumentation", package: "MeguriCore")] : []),
             path: "Sources/Features/\(name)",
             resources: ["Home", "Review", "Settings", "Editor"].contains(name) ? [.process("Resources")] : [],
             swiftSettings: settings

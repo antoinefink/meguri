@@ -314,6 +314,21 @@ mg__remove_unreserved_run_containers() {
   return 0
 }
 
+# mg_git_mount: in a worktree, /work/.git is a file naming the main
+# checkout's git directory by its host path, which a container does not see,
+# so git there fails ("not a git repository"). Sets MG_GIT_MOUNT to mount that
+# common git directory read-only at the same path (empty in a main checkout,
+# whose .git is inside /work already).
+mg_git_mount() {
+  local common
+  MG_GIT_MOUNT=()
+  [ -f "$MG_ROOT/.git" ] || return 0
+  common="$(git -C "$MG_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  case "$common" in /*) ;; *) return 0 ;; esac
+  [ -d "$common" ] || return 0
+  MG_GIT_MOUNT=(-v "$common:$common:ro")
+}
+
 # Run a docker job: build the service image, then re-enter tools/mg inside it.
 mg__invoke_docker() {
   local service="$1" fn="$2"
@@ -334,9 +349,11 @@ mg__invoke_docker() {
   if [ -n "${MEGURI_INITIAL_ADOPTION_FIXTURE:-}" ]; then
     fixture_env=(-e "MEGURI_INITIAL_ADOPTION_FIXTURE=$MEGURI_INITIAL_ADOPTION_FIXTURE")
   fi
+  local MG_GIT_MOUNT
+  mg_git_mount
   mg_compose run --pull never --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
     -e MG_JOB="$MG_JOB" -e MG_RUN_ID="$MG_RUN_ID" -e MG_DEFAULT_REPRO="$MG_DEFAULT_REPRO" \
-    ${fixture_env[0]+"${fixture_env[@]}"} \
+    ${fixture_env[0]+"${fixture_env[@]}"} ${MG_GIT_MOUNT[0]+"${MG_GIT_MOUNT[@]}"} \
     "$service" tools/mg __exec "$MG_JOB" "$rel" -- ${1+"$@"} </dev/null
 }
 
