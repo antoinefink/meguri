@@ -26,6 +26,10 @@ on:
         description: Also build the unsigned Mac and simulator Core XCFramework
         type: boolean
         default: false
+      base:
+        description: Select suites from the change since this branch or commit (default every suite)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -56,14 +60,16 @@ jobs:
       # core-test` changed: the Rust workspace, the conformance data and specs
       # its tests read (servers/ specs excepted), its tools/mg job, the dev
       # image and the timing-sensitive list. A change to docs/ or to Markdown
-      # outside those directories runs neither. Manual runs, new branches and
-      # anything that cannot be compared run every suite.
+      # outside those directories runs neither. Manual runs (unless given a
+      # base), new branches and anything that cannot be compared run every
+      # suite.
       - name: Select the suites this change affects
         id: select
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
+          BASE_INPUT: ${{ inputs.base }}
         run: |
           base=
           case "$EVENT" in
@@ -73,6 +79,13 @@ jobs:
               if [[ -n "$BEFORE" && ! "$BEFORE" =~ ^0+$ ]] &&
                  git fetch --no-tags --depth=1 origin "$BEFORE"; then
                 base="$BEFORE"
+              fi
+              ;;
+            workflow_dispatch)
+              if [[ -n "$BASE_INPUT" ]]; then
+                [[ "$BASE_INPUT" =~ ^[A-Za-z0-9._/][A-Za-z0-9._/-]*$ ]] || { echo "::error::Bad base: $BASE_INPUT"; exit 1; }
+                git fetch --no-tags --depth=1 origin "$BASE_INPUT"
+                base=FETCH_HEAD
               fi
               ;;
           esac
