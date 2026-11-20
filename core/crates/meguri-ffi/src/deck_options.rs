@@ -414,6 +414,8 @@ pub struct DeckOptionsSnapshot {
     pub effective_new_limit: u32,
     pub effective_review_limit: u32,
     pub effective_retention: f32,
+    /// O17.3: the deck values the save leaves as stored.
+    pub kept_deck_values: Vec<OptionField>,
 }
 fn view(d: &engine::Draft) -> DeckOptionsSnapshot {
     let effective = |a, b, p| {
@@ -499,6 +501,7 @@ fn view(d: &engine::Draft) -> DeckOptionsSnapshot {
             values::Field::ReviewsPerDay,
         ) as u32,
         effective_retention: retention as f32,
+        kept_deck_values: d.kept.iter().map(|f| (*f).into()).collect(),
     }
 }
 #[derive(Clone, Debug, uniffi::Enum)]
@@ -539,6 +542,10 @@ pub enum DeckOptionsEdit {
     Configure {
         subtree: bool,
     },
+    /// O17.3: the save writes none of these deck values.
+    Keep {
+        fields: Vec<OptionField>,
+    },
 }
 #[derive(Debug, uniffi::Object)]
 pub struct DeckOptionsEditor {
@@ -571,6 +578,11 @@ impl DeckOptionsEditor {
             DeckOptionsEdit::RestoreDefault { preset, field } => d.restore_default(preset, field.into())?,
             DeckOptionsEdit::Configure { subtree } => {
                 d.subtree = subtree;
+            }
+            DeckOptionsEdit::Keep { fields } => {
+                for field in fields {
+                    d.keep(field.into())?;
+                }
             }
         }
         let snapshot = view(&d);

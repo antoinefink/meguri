@@ -1869,7 +1869,9 @@ dependencies = [
  "meguri-text",
  "regex",
  "rusqlite",
+ "serde_json",
  "tempfile",
+ "unicode-normalization",
 ]
 
 [[package]]

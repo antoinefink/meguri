@@ -291,6 +291,19 @@ class MissingIdentifier(unittest.TestCase):
             el("scrollBar", f=(390, 0, 10, 800)), el("button", label="Load more", f=(16, 700, 200, 44))]))
         self.assertEqual([(i["kind"], i["label"]) for i in hierarchy_check.check(tree)], [("missing-identifier", "Load more")])
 
+    def test_a_mac_steppers_arrows_are_appkits(self):
+        def tree(ident="deckOptions.options.stepper.desiredRetention", platform="mac", arrow_id=""):
+            stepper = el("stepper", ident, "Desired Retention", f=(100, 100, 22, 26), children=[
+                el("incrementArrow", arrow_id, f=(101, 101, 20, 12)), el("decrementArrow", f=(101, 113, 20, 12))])
+            d = doc(stepper)
+            d["platform"] = platform
+            return d
+        self.assertEqual(hierarchy_check.check(tree()), [])
+        # An unnamed stepper, another platform, or an arrow the app named keeps the arrows' checks.
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(tree(ident=""))))
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(tree(platform="ios"))))
+        self.assertTrue(hierarchy_check.check(tree(arrow_id="Up")))
+
     def test_the_split_views_sidebar_toggle_is_the_systems(self):
         # Seen in real exports: the Mac toolbar's toggle and the iPad
         # sidebar's, in its navigation bar; neither takes an identifier.
