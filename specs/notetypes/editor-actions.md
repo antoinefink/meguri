@@ -4,6 +4,7 @@ Spec: notetypes/editor-actions
 Requirements: R915, R916, R917, R918 (the selection after a delete), R920, R922, R925, R926, R932, R933, R934, R935, R936, R938 (the card type an editor opens at), R944, R945, R946, R947 (the pickers and the loss list)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/notetypes/manage/
+Status: Under review (round 9, `docs/design/decisions.md` 2026-11-20, row `noteTypes`) for the lines that begin "Changed 2026-11-20 (round 9)": do not implement them until approved. Every other section is in force and unchanged.
 
 What the actions of the Note Types list, the card template editor, the field editor and the Change Note Type sheet do to their draft, where that must match Anki: list order and counts, the Add sheet's choices and names, the text Flip, Add Card Type, Insert Field and Copy Info produce, the values Browser Appearance and Deck Override store, and how Reposition moves an item. Each action here changes only the editor's draft (`notetypes/structure-changes` S1.1, `notetypes/records` N3) until Save, except where a section says otherwise. Layout, controls and wording are the screen contracts' (`docs/design/screen-inventory.yaml`: `noteTypes.list`, `noteTypes.templates`, `noteTypes.fields`, `noteTypes.changeNoteType`); Anki's own words are `editor/editing-strings`. Validation is `notetypes/validation`, saves `notetypes/records` and `notetypes/structure-changes`, the preview `render/preview`.
 
@@ -29,6 +30,8 @@ Terms. **Trimmed** means with every character that has the Unicode White_Space p
 
 ## A3. Add (R916)
 
+Changed 2026-11-20 (round 9): Meguri's screen offers New Note Type… with the six stock kinds and a direct Duplicate instead of the Add sheet's Clone rows (`notetypes/workspace` W11).
+
 - **Choices**, in this order: one `Add: <name>` per stock kind, in `notetypes/stock-kinds` K1's order, with K1's name; then one `Clone: <name>` per note type of the collection. The first choice is selected.
 - **Clone order.** Meguri lists the clones in A2's order. Anki sorts them by the stored names' code points, letter case included, so `Zeta` comes before `alpha` there; nothing depends on that order.
 - **Name.** After the choice the user gives a name, prefilled with the choice's default: the stock kind's K1 name, or `<name> copy` (`notetypes/records` N7, the clone's source name as stored). Meguri disables Add while the name is blank once every `"` is removed. Anki ignores a blank name; a name made only of `"` and white space reaches its add and is refused there with an error (`invalid_notetype`, N4 step 1). Otherwise the name goes to the add as typed, not trimmed, and the add's normalization applies (`notetypes/records` N4 steps 1, 2 and 7: `"` removed, NFC, `+` appended while another note type has an equal name under unicase). So in Meguri "Add: Basic" with the default name in a collection that has `Basic` adds `Basic+`.
@@ -51,6 +54,8 @@ The name is prefilled with the stored name. Meguri disables Rename while the nam
 
 ## A6. Add Card Type (R932)
 
+Changed 2026-11-20 (round 9): no question when adding; the Save sheet gives the cards created (`notetypes/draft-save` D4, D8). The new template's texts stay A6's.
+
 Standard note types only (`editor/editing-strings` E7).
 
 - When the note type has at least one note, the user is asked first (`templates.addCardType.confirm`, its count the note type's note count); declining changes nothing. With no note nothing is asked.
@@ -62,6 +67,8 @@ Standard note types only (`editor/editing-strings` E7).
 - Its front equals the copied template's front, so unless that front contains the `{{Card}}` reference that V3 item 1 exempts, the live checks report `duplicate_front` at once (`notetypes/validation` V3, V4) and Save is refused until one of the two fronts is edited. Anki behaves the same: its save refuses the duplicate.
 
 ## A7. Remove Card Type (R933)
+
+Changed 2026-11-20 (round 9): no question when removing; the card type is crossed out in the draft and the Save sheet gives S11's counts (`notetypes/draft-save` D4, D8).
 
 - Disabled while the draft has one template (`editor/editing-strings` E7, E11).
 - The question gives the selected template's card count and the notes left with no card from `notetypes/structure-changes` S11, asked with the base ordinals of the templates the draft already removes plus this template's origin. A template the draft added has no origin and no cards: its count is 0, and it adds no ordinal to the query. Anki counts the cards of the template's stored ordinal in the same way.
@@ -90,6 +97,8 @@ The same rule moves a template (Reposition Card Type, standard note types only) 
 
 ## A10. Field editor actions (R920, R922, R925, R926)
 
+Changed 2026-11-20 (round 9): Delete asks nothing; the field is crossed out and the Save sheet gives its content count (`notetypes/draft-save` D8). The options shown are `notetypes/workspace` W4: Collapsed in Editor, Right-to-Left and Placeholder; font, size, HTML by default and exclude from search are kept but not shown.
+
 - **Add Field.** The typed name goes through `notetypes/validation` V5: when V5 step 2 finds it empty nothing happens, a refusal is explained, and an accepted name (V5 step 6's text) becomes a new field (N5.2 defaults: font `Arial`, size 20, every option off, description empty) after the last field, and it is selected.
 - **Rename.** The name is prefilled with the field's draft name. V5 on the typed name, with the same outcomes as Add Field; the field keeps its origin (S1.1) and only its name changes in the draft. The save rewrites template references (`notetypes/field-rename` F3).
 - **Delete.** Refused for the last field and for a protected field (`notetypes/structure-changes` S1.2 items 2 and 3); otherwise the question of `editor/editing-strings` E8 with the note type's note count, asked even at 0. Accepting removes the field from the draft. The field that now holds the deleted field's position is selected, or the new last field when the deleted one was last (Meguri's choice); Anki selects the first field.
@@ -114,6 +123,8 @@ Standard note types only; it acts on the selected template's `target_deck_id` (`
 - The override is never a schema change (R950) and changes no existing card; it places only cards created later (D2, D3).
 
 ## A12. Browser Appearance (R935)
+
+Changed 2026-11-20 (round 9): not offered in this version (`notetypes/workspace` W5); stored values are kept.
 
 Either kind of note type; it acts on the selected template's browser front and back (`q_format_browser`, `a_format_browser`; schema-11 `bqfmt`, `bafmt`) and browser font (`browser_font_name`, `browser_font_size`; `bfont`, `bsize`). How Browse uses them is `browser/columns` and `render/card-render-pipeline` K5 step 1.
 

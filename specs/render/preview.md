@@ -4,6 +4,7 @@ Spec: render/preview
 Requirements: R938, R939, R940, R941, R1835; supports R442, R502
 Anki: 26.09.3
 Scenarios: conformance/scenarios/render/preview/
+Status: Under review (round 9, `docs/design/decisions.md` 2026-11-20, row `noteTypes`) for the lines that begin "Changed 2026-11-20 (round 9)": do not implement them until approved. Every other section is in force and unchanged.
 
 How the engine renders a card that is not stored as it would look: a note type draft (the template editor, U200 and U202) or a note draft (the Add and Edit previews, U190 and U195), with Fill empty fields and the simulated type-in. The pipeline is review's (`card-render-pipeline.md` K4, `display-transform.md`), with the inputs this file names. U71 owns the engine call and the preview page. Debounce, layout and pane switching are U200's and U202's.
 
@@ -144,6 +145,8 @@ The `RenderedCard` of K11, in preview mode:
 The comparable form (K11) is K4's question and answer texts before display. The `template` observation reports them without AV extraction (`conformance/render-ops#Q1.4`).
 
 ## V12. The preview page (R940, R442, R502)
+
+Changed 2026-11-20 (round 9): the Note Types preview has a Light and Dark switch and no device or platform-class picker (`notetypes/workspace` W9).
 
 U71's `CardPreviewView` shows one card side in a single persistent page (`card-runtime.md`), not a page pair. It uses the shared web view configuration and the persistent website data store of R502, so `localStorage` and IndexedDB are shared with review.
 
