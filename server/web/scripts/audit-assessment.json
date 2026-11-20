@@ -289,8 +289,8 @@
         "sha256": "269909162afaf7b24d5a09db7d2499e07787120e00977e799817b5b5a59ce1d2"
       },
       "tools/mg.d/meguri-sync.sh": {
-        "bytes": 55521,
-        "sha256": "57b4ccb4982863dbb6a1057921465ecbe10aaccb8578115acbfb49cc32e248a6"
+        "bytes": 55489,
+        "sha256": "d736e66aa22ce67713304193e4c1fc72865f80aab1ff087ac98e8fbb97b28210"
       },
       "tools/mg.d/sync-package.sh": {
         "bytes": 43420,
