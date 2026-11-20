@@ -63,6 +63,62 @@ final class DeckOptionsUITests: XCTestCase {
         XCTAssertFalse(save.isEnabled, "A page that opens has nothing to save")
     }
 
+    /// A value that fails validation, then its correction typed in the same
+    /// field: ⌘S and then ⌘↩ save the correction (O15.3, CodeRabbit on #16).
+    func testBothSaveShortcutsSaveACorrectionTypedAfterAnError() throws {
+        let (app, bundle) = try launch()
+        defer { app.terminate() }
+        let save = element(app, "deckOptions.options.save")
+        let field = element(app, "deckOptions.options.option.desiredRetention")
+        for (shortcut, corrected) in [("s", "85%"), ("\r", "86%")] {
+            try app.bringToFront(bundleIdentifier: bundle)
+            app.typeKey("o", modifierFlags: [.command, .option])
+            XCTAssertTrue(save.waitForExistence(timeout: 20))
+            try app.bringToFront(bundleIdentifier: bundle)
+            field.clickOrTap()
+            app.typeKey("a", modifierFlags: .command)
+            app.typeText("50%\t")
+            let issue = app.descendants(matching: .any).matching(NSPredicate(
+                format: "identifier BEGINSWITH %@", "deckOptions.options.issue.desiredRetention")).firstMatch
+            XCTAssertTrue(issue.waitForExistence(timeout: 10), "the out-of-range value shows its error")
+            try app.bringToFront(bundleIdentifier: bundle)
+            field.clickOrTap()
+            app.typeKey("a", modifierFlags: .command)
+            app.typeText(corrected)
+            XCTAssertTrue(waitForEnabled(save), "a typed correction enables Save")
+            try app.bringToFront(bundleIdentifier: bundle)
+            app.typeKey(shortcut, modifierFlags: .command)
+            XCTAssertTrue(save.waitForNonExistence(timeout: 20), "\(shortcut == "s" ? "⌘S" : "⌘↩") saves the correction")
+            try app.bringToFront(bundleIdentifier: bundle)
+            app.typeKey("o", modifierFlags: [.command, .option])
+            XCTAssertTrue(save.waitForExistence(timeout: 20))
+            XCTAssertTrue(waitForValue(field, corrected))
+            // The next round's ⌥⌘O leaves this open, unchanged page as it is.
+        }
+    }
+
+    private func launch() throws -> (XCUIApplication, String) {
+        let build = try BuildUnderTest.current()
+        guard build.hasHooks else { throw XCTSkip("generated fixtures require a hook build") }
+        let bundle = try build.bundleIdentifier
+        guard bundle.hasSuffix(".dev") else { throw XCTSkip("development container required") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = MeguriLaunch(
+            fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"),
+            now: "2030-01-15T10:00:00+01:00", timeZone: "Europe/Paris", locale: "en_US", animations: false).arguments
+        app.launch()
+        XCTAssertTrue(element(app, "home.collection.add").waitForExistence(timeout: 20))
+        let row = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "home.sidebar.deck.")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        try app.bringToFront(bundleIdentifier: bundle)
+        row.clickOrTap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "home.deck.page.")).firstMatch.waitForExistence(timeout: 10))
+        return (app, bundle)
+    }
+
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
