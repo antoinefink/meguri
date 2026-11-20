@@ -764,6 +764,9 @@ $TRAILERS"
 name = "demo"
 autotests = false
 
+[features]
+hooks = []
+
 [[test]]
 name = "demo_it"
 path = "tests/main.rs"
@@ -814,6 +817,34 @@ pub mod a;'
   mg static-checks --check test-targets
   [ "$status" -eq 1 ]
   [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/main.rs:10 test-targets:$crate/tests/main.rs:12" ]
+
+  # A module gated on a feature the crate lacks never builds; a commented-out
+  # line lists nothing.
+  git -C "$SB" checkout -q -- "$crate/tests/main.rs"
+  printf '#[cfg(feature = "hook")]\n#[path = "b.rs"]\npub mod b;\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/main.rs:7" ]
+  git -C "$SB" checkout -q -- "$crate/tests/main.rs"
+  printf '/*\n#[path = "b.rs"]\npub mod b;\n*/\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/b.rs:0" ]
+
+  # A test that other code re-runs by its bare name (`--exact <name>`) needs
+  # an entry of that name at the binary's root.
+  git -C "$SB" checkout -q -- "$crate/tests/main.rs"
+  printf '#[path = "b.rs"]\npub mod b;\n' >>"$SB/$crate/tests/main.rs"
+  mkdir -p "$SB/$crate/src"
+  printf 'pub fn spawn() -> [&'"'"'static str; 2] { ["--exact", "child_entry"] }\n' >"$SB/$crate/src/lib.rs"
+  printf '#[test]\nfn child_entry() {}\n' >>"$SB/$crate/tests/b.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-targets:$crate/tests/b.rs:4" ]
+  [[ "$(field '.failures[0].message')" == *'needs a root-level `fn child_entry` test'* ]]
+  printf '#[test]\nfn child_entry() {}\n' >>"$SB/$crate/tests/main.rs"
+  mg static-checks --check test-targets
+  [ "$status" -eq 0 ]
 
   # A crate that keeps Cargo's discovery is not checked.
   git -C "$SB" checkout -q -- "$crate/tests/main.rs"

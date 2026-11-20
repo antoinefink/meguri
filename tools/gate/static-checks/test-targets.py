@@ -12,7 +12,11 @@ Checks, in the working tree or in <rev>'s tree, for each such crate:
 - a listed file does not need a binary of its own: it re-runs the test binary
   by test name (`current_exe()`; names gain the module prefix in a shared
   binary), sets a `#[global_allocator]`, or names insta snapshots (named after
-  the binary's module path). Its `tests/<stem>/` modules count as the file.
+  the binary's module path). Its `tests/<stem>/` modules count as the file;
+- a listed file that defines a test some code re-runs by a bare name
+  (`"--exact", "<name>"` anywhere in the tree, e.g. a testkit child process)
+  has a test of that name at the binary's root;
+- every feature a root's `#[cfg(feature = ...)]` names is in [features].
 Prints one JSON line per finding ({check, path, line, message}) and exits 1
 when there is one, 2 when it cannot check. Standard library only: it runs
 under macOS's python3.
@@ -27,6 +31,9 @@ import sys
 TABLE = re.compile(r"^\s*(\[\[?)\s*([A-Za-z0-9_.\-\"']+)\s*\]\]?\s*(#.*)?$")
 KEY = re.compile(r"^\s*([A-Za-z0-9_\-]+)\s*=\s*(.*?)\s*(#.*)?$")
 PATH_ATTR = re.compile(r'^#\[path\s*=\s*"([^"]+)"\]\s*(.*)$')
+EXACT = re.compile(r'"--exact",\s*"([A-Za-z_][A-Za-z0-9_]*)"')
+FEATURE = re.compile(r'feature\s*=\s*"([^"]+)"')
+BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 MOD = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?mod\s+(r#)?([A-Za-z_][A-Za-z0-9_]*)\s*;")
 NEEDS_OWN = [
     (re.compile(r"current_exe\(\)"), "re-runs the test binary by test name (current_exe())"),
@@ -51,6 +58,19 @@ class Tree:
             out = self.git("ls-files", "-z", "--cached", "--others", "--exclude-standard")
         return sorted({p for p in out.decode("utf-8", "surrogateescape").split("\0") if p})
 
+    def grep(self, pattern):
+        """Lines of tracked (and, in the working tree, untracked) .rs files."""
+        args = ["grep", "-I", "-h", "-E", "-e", pattern]
+        if self.rev:
+            args += [self.rev]
+        else:
+            args.insert(1, "--untracked")
+        result = subprocess.run(["git", "-C", self.checkout] + args + ["--", "*.rs", ":!core/vendor/"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode not in (0, 1):
+            raise OSError(result.stderr.decode("utf-8", "replace").strip())
+        return result.stdout.decode("utf-8", "replace").splitlines()
+
     def read(self, path):
         if self.rev:
             data = self.git("show", self.rev + ":" + path)
@@ -61,8 +81,8 @@ class Tree:
 
 
 def manifest(text):
-    """(autotests, [[test]] entries as dicts) from a Cargo.toml's text."""
-    autotests, tests, table = True, [], None
+    """(autotests, [[test]] entries as dicts, features) from a Cargo.toml's text."""
+    autotests, tests, table, features = True, [], None, set()
     for line in text.splitlines():
         m = TABLE.match(line)
         if m:
@@ -74,6 +94,8 @@ def manifest(text):
         if not m:
             continue
         key, value = m.group(1), m.group(2)
+        if table == "features":
+            features.add(key)
         if table == "package" and key == "autotests":
             autotests = value != "false"
         elif table == "array:test" and key in ("name", "path"):
@@ -81,13 +103,18 @@ def manifest(text):
                 tests[-1][key] = json.loads(value)
             except ValueError:
                 raise ValueError("unreadable [[test]] %s: %s" % (key, value))
-    return autotests, tests
+    return autotests, tests, features
+
+
+def uncomment(text):
+    """Block comments blanked out, line numbers kept."""
+    return BLOCK_COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
 
 
 def listed(root, text, present):
     """Files a target root declares with `mod` lines: (path, line) pairs."""
     base, pending, out = posixpath.dirname(root), None, []
-    for n, raw in enumerate(text.splitlines(), 1):
+    for n, raw in enumerate(uncomment(text).splitlines(), 1):
         line = raw.strip()
         m = PATH_ATTR.match(line)
         if m:
@@ -112,6 +139,7 @@ def check(tree):
     paths = tree.paths()
     present = set(paths)
     findings = []
+    exact = {m.group(1) for line in tree.grep('"--exact",') for m in EXACT.finditer(line)}
 
     def finding(path, line, message):
         findings.append({"check": "test-targets", "path": path, "line": line, "message": message})
@@ -119,7 +147,7 @@ def check(tree):
     for cargo in paths:
         if posixpath.basename(cargo) != "Cargo.toml" or cargo.startswith("core/vendor/"):
             continue
-        autotests, tests = manifest(tree.read(cargo))
+        autotests, tests, features = manifest(tree.read(cargo))
         if autotests:
             continue
         crate = posixpath.dirname(cargo)
@@ -142,15 +170,21 @@ def check(tree):
             if root not in present:
                 finding(cargo, 0, "[[test]] %s names %s, which does not exist" % (roots[root], root))
                 continue
-            for path, line in listed(root, tree.read(root), present):
+            root_text = tree.read(root)
+            for n, line in enumerate(uncomment(root_text).splitlines(), 1):
+                if line.lstrip().startswith("#[cfg"):
+                    for f in FEATURE.findall(line):
+                        if f not in features:
+                            finding(root, n, "feature %r is not in %s's [features], so the module never builds" % (f, cargo))
+            for path, line in listed(root, root_text, present):
                 if path not in files:
                     continue  # a helper module (tests/common/ and the like)
                 if path in roots:
                     finding(root, line, "%s is also its own [[test]], so it is compiled twice" % path)
                 elif path in seen:
-                    finding(root, line, "%s is already listed by %s" % (path, seen[path]))
+                    finding(root, line, "%s is already listed by %s" % (path, seen[path][0]))
                 else:
-                    seen[path] = root
+                    seen[path] = (root, root_text)
         for path in files:
             if path in roots:
                 continue
@@ -160,6 +194,7 @@ def check(tree):
                         % (cargo, posixpath.basename(path), posixpath.basename(path)[:-3]))
                 continue
             stem = path[:-3] if path.endswith(".rs") and not path.endswith("/main.rs") else posixpath.dirname(path)
+            root, root_text = seen[path]
             for part in [path] + sorted(p for p in paths if p.startswith(stem + "/") and p.endswith(".rs")):
                 text = tree.read(part)
                 for rx, why in NEEDS_OWN:
@@ -167,7 +202,15 @@ def check(tree):
                     if m:
                         line = text.count("\n", 0, m.start()) + 1
                         finding(part, line, "%s %s, so it needs its own [[test]] in %s, not a line in %s"
-                                % (path, why, cargo, seen[path]))
+                                % (path, why, cargo, root))
+            text = tree.read(path)
+            for name in sorted(exact):
+                m = re.search(r"\bfn\s+%s\s*\(" % name, text)
+                if m and not re.search(r"^fn\s+%s\s*\(" % name, uncomment(root_text), re.M):
+                    finding(path, text.count("\n", 0, m.start()) + 1,
+                            "defines %s, which code re-runs with `--exact %s`; in %s its name gains the module "
+                            "prefix, so %s needs a root-level `fn %s` test too (or the file its own [[test]])"
+                            % (name, name, root, root, name))
     return findings
 
 
