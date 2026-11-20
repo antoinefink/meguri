@@ -713,6 +713,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 | 1 | Add Note | `square.and.pencil` | | absent |
 | 2 | Rename… | `pencil` | ⇧⌘R | shown |
 | 2 | New Subdeck… | `folder.badge.plus` | | absent |
+| 2 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | absent |
 | 3 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | shown |
 
 - A filtered deck's menu holds Rename… and Delete Deck (R53).
@@ -761,7 +762,7 @@ The menu bar, in order: Meguri, File, Edit, View, Deck, Card, Window, Help. The 
 | Deck | Rename… | ⇧⌘R | a deck is shown, filtered included |
 | Deck | New Subdeck… | | a normal deck is shown |
 | Deck | Delete Deck | ⌘⌫ | a deck is shown, filtered included, outside review, and no text field, sheet or panel owns the keys (N4, H9.2); N20.7 |
-| Deck | Deck Options… | ⌥⌘O | arrives with the Deck Options unit; a normal deck |
+| Deck | Deck Options… | ⌥⌘O | a normal deck is shown, outside review; N20.9 |
 | Card | Show Answer | Space | review shows a question side |
 | Card | Again, Hard, Good, Easy | 1, 2, 3, 4 | review shows an answer side |
 | Card | Back to Decks | Esc | during review |
@@ -805,7 +806,7 @@ The English text of the screens above. "New" marks text not used before this rou
 | Import Collection…, Export Collection…, Sync Now, Close | File menu | |
 | Undo, Redo, Undo <operation>, Redo <operation> | Edit menu (R173) | |
 | Find… | Edit menu | new |
-| Deck Options… | the Deck menu | with its unit |
+| Deck Options… | the Deck menu, the deck menu | N20.9 |
 | Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
 | Edit Note | the Card menu, the card's context menu (Mac), the touch review toolbar button, the form's title | N20.8 |
 
@@ -857,3 +858,21 @@ Decided 2026-11-20 (`decisions.md`, `review.editNote`, option 7A). The review si
 - Later, not now: when Bury, Suspend and Flag arrive, the pencil becomes a ⋯ menu that holds Edit Note first.
 - Strings: "Edit Note" (exists, `review.menu.editNote`), "<deck> · <note type>" with " · " (space, U+00B7, space) between them (new), "Done", "Cancel", "Discard changes?", "Discard", "Keep Editing" (all existing).
 - Replaces: R394's iPad "trailing inspector" and its panel as U190's editor in edit mode; R397's Close button (now Cancel and Done); R824 and R863's Esc that saves, for this form (`editor/edit-flows` W3 now names Browse's pane only); the touch review toolbar of N16.2 ("Close and Undo"), which gains this button; `review.editCurrent`'s purpose.
+
+### N20.9 Deck Options, first version
+
+Decided 2026-11-20 (`decisions.md`, `deck.options`, option 6B). The scope, the save input and the strings are `sched/deck-options` O17 and `decks/deck-options-strings` K10. The Advanced page comes later and does not change this page.
+
+- Entries: the deck menu's Deck Options… (`gearshape`, group 2 after New Subdeck…, normal decks only; N20.2), Deck › Deck Options… (⌥⌘O, N20.4), the O key on the deck list and the deck page (`decks/deck-list` H9.2) and the finished state's Deck Options link (H5.2). Not offered during a review in this version: the Deck menu is disabled then (N20.4), and the review menu's item comes with the review menu.
+- One grouped form, three sections:
+  1. no header: **Preset**, a menu picker of the collection's presets, each listed as `decks/deck-options-strings` K6 gives it ("Default (used by 6 decks)"); the row shows the chosen preset's name. Footer: "Used by N decks. Changes apply to all of them.", or "Used by this deck only." when N is 1, with N the count the picker shows (`sched/deck-options` O6.1).
+  2. **Daily Limits**: New Cards per Day, Maximum Reviews per Day, each a number field trailing in its row.
+  3. **Memory**: Desired Retention, a percentage field with a stepper of 1 %. Footer: "How likely you are to remember a card when it comes back."
+- When the deck holds its own value for a row (a This deck or active Today only limit, or its own desired retention; O2 item 3), the section's footer adds "This deck has its own limits, which stay in force." (Daily Limits) or "This deck has its own desired retention, which stays in force." (Memory). The page cannot change or remove them in this version.
+- No limit tabs, no Advanced row, no FSRS switch (N18.1), no preset Add, Clone, Rename or Remove, no Save to All Subdecks, no restore-default or help controls.
+- Issues: O4's errors and warnings of the three rows show under their row as N11.9 says; an error disables Save.
+- Placement, pushed like a page: compact (iPhone, the Duo folded or held tall, iPad at compact width) full screen with a back button; the Duo held wide, iPad and Mac in the detail area in place of the deck page. Touch: the navigation title "Deck Options" and Save as the confirmation action. Mac: the toolbar title "Deck Options" with the deck's path joined with " › " as its subtitle, the back button, and Save as the toolbar's confirmation (⌘S; ⌘↩ too, O15.3).
+- Save runs O17's save; on success the page returns to the deck page. A refused save keeps the page with its issues.
+- Leaving: while the draft differs (O6.6), Cancel replaces the back button and swipe back is off on every platform (N11.9's iPhone rule); Cancel, Esc (Mac) and choosing another sidebar row ask "Discard changes?" with Discard (destructive) and Keep Editing. With no change, back leaves at once.
+- Strings (new unless marked): "Deck Options" (title; the undo step's name exists), "Deck Options…" (exists in R283), "Preset" (K4's tab text, here a row label), "Daily Limits" (K2), "New Cards per Day", "Maximum Reviews per Day", "Memory", "Desired Retention", "Used by %@ decks. Changes apply to all of them.", "Used by this deck only.", "How likely you are to remember a card when it comes back.", "This deck has its own limits, which stay in force.", "This deck has its own desired retention, which stays in force.", "Save", and the existing "Discard changes?", "Discard", "Keep Editing", "Cancel". Keys: K10.
+- Replaces, for this version: N11.9's Preset Actions menu, Save to All Subdecks, restore-default and help buttons, the reload row, two columns and the review-time sheet (each comes back with the unit that brings its part); R736's Anki labels for these three options (6B: Apple title case, K10); R740's and R742's tabs; the screen contract `deckOptions.options`' layout until the Advanced page lands.

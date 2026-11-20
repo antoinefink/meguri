@@ -221,7 +221,7 @@ The preset menu, the selection after a removal (O6.5) and the save's write order
 
 ## O7. The save (R737)
 
-One op, named "Deck Options" (undo id `deck_options`, `conformance/undo-ops#V4`), source user. Input: the target deck; the target preset (an existing preset or one the draft staged); the draft's presets with their values and names; the staged presets; the removals; whether to save to all subdecks; the five deck values; and the three global options. Changed 2026-10-27: the input no longer says whether the user confirmed a schema change (`notetypes/schema-changes#G4`).
+One op, named "Deck Options" (undo id `deck_options`, `conformance/undo-ops#V4`), source user. Input: the target deck; the target preset (an existing preset or one the draft staged); the draft's presets with their values and names; the staged presets; the removals; whether to save to all subdecks; the five deck values, each of which may be `keep` (O17.3); and the three global options. Changed 2026-10-27: the input no longer says whether the user confirmed a schema change (`notetypes/schema-changes#G4`).
 
 A save whose removals contain an existing preset is a structural edit: it takes one safety backup after O7.1's checks pass and before its first write (`package/backup-triggers#T6.1`, T6.2). When the backup fails, the save is refused with `SafetyBackupFailed` and writes nothing.
 
@@ -473,3 +473,46 @@ The save rebuilds the study queue (O7.2). The review continues by `sched/review-
 ## O16. Options Anki's screen shows only without FSRS
 
 Added 2026-11-10. Anki's FSRS screen hides the SM-2 options that R752 hides. It also hides Minimum interval (Lapses), which R745 keeps in Meguri. FSRS never reads that value (`sched/fsrs-transitions#T2.5`). The control only edits the stored `lapse.minInt` that SM-2 clients use. Anki shows the relearning-steps warning against Minimum interval only without FSRS, so Meguri has no such warning. O12 records the difference. R745 keeps the row.
+
+## O17. The first version of the screen (Meguri UI)
+
+Added 2026-11-20 (`docs/design/native-interface-contract.md` N20.9, decided by Antoine, option 6B). The first version of the deck options screen shows a part of O3. The core of this file is unchanged except for O17.3's input.
+
+### O17.1 What it shows
+
+| Row | Option (O3) | Editor | Checks (O4) |
+|---|---|---|---|
+| Preset | the target preset (O6.1) | a menu of the snapshot's presets in O2's order | |
+| New Cards per Day | `new_per_day` of the selected preset | integer 0 to 9999 | `out_of_range`, `not_whole` |
+| Maximum Reviews per Day | `reviews_per_day` of the selected preset | integer 0 to 9999 | `out_of_range`, `not_whole`, `reviews_below_ten_times_new` |
+| Desired Retention | `desired_retention` of the selected preset | 70 % to 99 %, whole percent, stepper 1 % (O3) | `out_of_range`, `retention_low`, `retention_high` |
+
+- The rows edit the selected preset's values: there are no limit tabs, so O14 does not apply. An emptied field or text that is not a number changes nothing, and the field shows its value again when committed. A committed value outside the range is kept in the draft and gives O4's error, which disables Save.
+- The warnings compare the values the rows show (O14.6): `reviews_below_ten_times_new` the two limit rows, the retention warnings the Desired Retention row. The deck's own values (O2 item 3) play no part in them.
+- Not shown, and so not changed: every other option of O3, the hidden options, the deck values, the global options. No Add, Clone, Rename, Remove or Save to All Subdecks (O6.3 to O6.5): the draft never stages or removes a preset, and "Save to all subdecks" is off.
+- During a review the screen is not offered in this version (N20.9); O15.1's review rows apply once it is.
+- The footer count is O6.1's use count of the selected preset. The facts for the "own value" footers of N20.9 are O2 item 3: a This-deck limit set, a Today-only limit active, or the deck's own desired retention set.
+
+### O17.2 Switching the preset
+
+Selecting another preset makes it the target preset (O6.1); the rows then show its draft values (an edit made to the first preset stays in the draft and is saved too, O6.2). A save that only switches the preset writes the deck's `config_id` (O7.2 step 3) and no preset row (step 2 writes a preset only when it differs from the preset as read). It still applies O7.2 steps 4 to 6, which follow from the change of preset as in Anki: new cards are re-sorted when the two insertion orders differ, the remaining learning steps are translated, and memory states are recomputed when the desired retention in force changes.
+
+### O17.3 The save
+
+- O7's save, with: the draft's presets (only those whose shown values changed differ from the snapshot), no staged presets, no removals, "save to all subdecks" off, the three global options as the snapshot read them (step 7 writes none), and the five deck values as **keep**.
+- **Keep** is a new value of O7's deck-value input, used only by this screen: O9 writes nothing for that field and the deck record keeps it byte for byte. O9's "value given" and "value none" would rewrite a Today-only limit's day (or remove a future one), which the page does not show. The target deck is then written only when its `config_id` changes.
+- A preset that the save writes keeps every field the page does not show as read, with the read bounds applied (O3's hidden-options rule, as Anki writes it): a field only another client could have stored out of bounds is written as its V3 replacement. Every preset the save does not write keeps its stored bytes.
+- A change to a preset applies to every deck that uses it: the save writes the preset row, not the decks.
+- Refusals and the undo step are O7.1's and O7's ("Deck Options"). After a save the screen closes (N20.9).
+
+### O17.4 Tests
+
+| Case | Required result |
+|---|---|
+| Open on a deck with a This-deck limit, an active Today-only limit and its own desired retention; change New Cards per Day; save | The preset's `new_per_day` changes; the deck's three values and their stored days are unchanged byte for byte; the "own value" footers show. |
+| A future Today-only limit (stored day after today); switch preset; save | `config_id` changes; the Today-only limit stays as stored (keep), unlike O9's none. |
+| Switch to a preset with another insertion order and save | `config_id` written, no preset row written, new cards re-sorted (O8). |
+| Edit a shared preset used by 3 decks; save | One preset row written; all 3 decks use the new value; the footer read "Used by 3 decks. Changes apply to all of them." |
+| 10000 in New Cards per Day; 65 % in Desired Retention; an empty field | `out_of_range` under the row and Save disabled; the empty field shows its value again. |
+| Untouched page; back | Nothing written, no step, no prompt. |
+| A change, then Cancel (it replaces back) or another sidebar row | "Discard changes?"; Keep Editing keeps the draft; Discard leaves with nothing written. |
