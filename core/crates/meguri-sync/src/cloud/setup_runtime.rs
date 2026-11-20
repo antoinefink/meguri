@@ -110,17 +110,18 @@ impl Runtime {
         })
     }
 
-    fn require_setup_row(
+    /// Recomputes the row from this runtime's current preview and tracking,
+    /// and admits only the start that `SetupDecision::silent_start` names.
+    fn require_silent_start(
         &self,
         preview: &Preview,
         other_service: OtherServiceHistory,
-        rows: &[SetupRow],
-    ) -> Result<SetupRow, RuntimeError> {
-        let decision = self.connection_setup_decision(preview, other_service)?;
-        if decision.question != SetupQuestion::None || !rows.contains(&decision.row) {
-            return Err(PublicationError::NotOffered.into());
+        starts: &[SilentStart],
+    ) -> Result<SilentStart, RuntimeError> {
+        match self.connection_setup_decision(preview, other_service)?.silent_start() {
+            Some(start) if starts.contains(&start) => Ok(start),
+            _ => Err(PublicationError::NotOffered.into()),
         }
-        Ok(decision.row)
     }
 
     /// Row 4, with no confirmation. Row 6 needs a proof this build cannot
@@ -131,7 +132,7 @@ impl Runtime {
         other_service: OtherServiceHistory,
         collection: &Collection,
     ) -> Result<[u8; 16], RuntimeError> {
-        self.require_setup_row(preview, other_service, &[SetupRow::Publish])?;
+        self.require_silent_start(preview, other_service, &[SilentStart::Publication])?;
         if preview.active.is_some() || preview.active_epoch.is_some() {
             return Err(PublicationError::NotOffered.into());
         }
@@ -147,15 +148,15 @@ impl Runtime {
         collection: Option<&Collection>,
         engine: &meguri_engine::Engine,
     ) -> Result<[u8; 16], RuntimeError> {
-        let row = self.require_setup_row(
+        let start = self.require_silent_start(
             preview,
             other_service,
-            &[SetupRow::AdoptInitial, SetupRow::AdoptOverNoContent],
+            &[SilentStart::AdoptionInitial, SilentStart::AdoptionOverNoContent],
         )?;
-        if (row == SetupRow::AdoptInitial) != collection.is_none() {
+        if (start == SilentStart::AdoptionInitial) != collection.is_none() {
             return Err(PublicationError::AuthorityChanged.into());
         }
-        self.record_cloud_adoption(preview, collection, engine, row == SetupRow::AdoptOverNoContent)
+        self.record_cloud_adoption(preview, collection, engine, start == SilentStart::AdoptionOverNoContent)
     }
 
     /// Row 3, with no confirmation: only with a durable record that no other
@@ -166,7 +167,7 @@ impl Runtime {
         other_service: OtherServiceHistory,
         collection: &Collection,
     ) -> Result<(), RuntimeError> {
-        self.require_setup_row(preview, other_service, &[SetupRow::Resume])?;
+        self.require_silent_start(preview, other_service, &[SilentStart::Resume])?;
         self.confirm_connection_resume(preview, collection)
     }
 }
@@ -220,5 +221,47 @@ mod tests {
         let file = folder.path().join("not-a-folder");
         std::fs::write(&file, b"x").unwrap();
         assert_eq!(content_proof(no_rows(), Ok(0), &file), ContentProof::HoldsOrUnproved);
+    }
+    /// A preview serialized before `local_content` existed decodes with the
+    /// test not made, which the decision reads as holding user content.
+    #[test]
+    fn a_preview_written_before_the_content_proof_decodes_as_unproved() {
+        let preview = Preview {
+            id: 1,
+            local: Counts {
+                counts: Default::default(),
+                empty: true,
+            },
+            cloud: None,
+            published_at_ms: None,
+            decision: ConnectDecision::ConfirmUpload,
+            account: OpaqueBytes(vec![1]),
+            native_file: Some(NativeFileIdentity {
+                device: 1,
+                inode: 2,
+                created_seconds: 3,
+                created_nanos: 4,
+            }),
+            decision_before: None,
+            active: None,
+            active_epoch: None,
+            unpublished_by_kind: Default::default(),
+            resume_binding: None,
+            unsent_by_kind: Default::default(),
+            unsent_counts_exact: true,
+            retained_work: Default::default(),
+            local_content: Some(ContentProof::ProvedNone),
+        };
+        let mut earlier = serde_json::to_value(&preview).unwrap();
+        assert!(earlier.as_object_mut().unwrap().remove("local_content").is_some());
+        let decoded: Preview = serde_json::from_value(earlier).unwrap();
+        assert_eq!(decoded.local_content, None);
+        assert!(
+            decoded
+                == Preview {
+                    local_content: None,
+                    ..preview
+                }
+        );
     }
 }

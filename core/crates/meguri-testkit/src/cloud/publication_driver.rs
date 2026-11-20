@@ -278,21 +278,26 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
         Input::SetupDecision(preview, history) => {
             value(device.runtime()?.connection_setup_decision(&preview, history)?)
         }
-        Input::SetupStart(preview, history) => {
-            use meguri_sync::cloud::setup::SetupRow;
+        Input::SetupStart(preview, history, forced) => {
+            use meguri_sync::cloud::setup::SilentStart;
             let runtime = device.runtime()?;
-            let started: Option<[u8; 16]> = match runtime.connection_setup_decision(&preview, history)?.row {
-                SetupRow::Resume => {
+            // With no decided start, production's refusing call is made.
+            let start = match forced {
+                Some(start) => start,
+                None => runtime
+                    .connection_setup_decision(&preview, history)?
+                    .silent_start()
+                    .unwrap_or(SilentStart::Publication),
+            };
+            let started: Option<[u8; 16]> = match start {
+                SilentStart::Resume => {
                     runtime.start_setup_resume(&preview, history, &collection)?;
                     None
                 }
-                SetupRow::AdoptInitial | SetupRow::AdoptOverNoContent => Some(runtime.start_setup_adoption(
-                    &preview,
-                    history,
-                    Some(&collection),
-                    device.host.engine(),
-                )?),
-                _ => Some(runtime.start_setup_publication(&preview, history, &collection)?),
+                SilentStart::AdoptionInitial | SilentStart::AdoptionOverNoContent => Some(
+                    runtime.start_setup_adoption(&preview, history, Some(&collection), device.host.engine())?,
+                ),
+                SilentStart::Publication => Some(runtime.start_setup_publication(&preview, history, &collection)?),
             };
             value(started)
         }

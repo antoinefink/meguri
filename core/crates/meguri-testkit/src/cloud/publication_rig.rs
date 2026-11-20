@@ -535,11 +535,28 @@ impl PublicationRig {
         preview: &ConnectionPreview,
         history: cloud::setup::OtherServiceHistory,
     ) -> Result<Option<[u8; 16]>> {
+        self.start_setup_call(preview, history, None)
+    }
+    /// One named no-question start, called whatever the decision is.
+    pub fn force_setup_start(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+        start: cloud::setup::SilentStart,
+    ) -> Result<Option<[u8; 16]>> {
+        self.start_setup_call(preview, history, Some(start))
+    }
+    fn start_setup_call(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+        start: Option<cloud::setup::SilentStart>,
+    ) -> Result<Option<[u8; 16]>> {
         let started = self
             .sdk
             .get_mut()
             .driver
-            .call(Input::SetupStart(preview.production.clone(), history))?;
+            .call(Input::SetupStart(preview.production.clone(), history, start))?;
         self.work = None;
         self.refresh()?;
         Ok(started)

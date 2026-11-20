@@ -438,8 +438,13 @@ pub(crate) enum Input {
     AdoptionConfirm(core::publication::Preview),
     /// V27.2: the decision for a ready preview, under a supplied history.
     SetupDecision(core::publication::Preview, core::setup::OtherServiceHistory),
-    /// V27.2: the decided row's recovery call, with no confirmation.
-    SetupStart(core::publication::Preview, core::setup::OtherServiceHistory),
+    /// V27.2: the decided row's recovery call, with no confirmation. A named
+    /// start is called whatever the decision is, to prove that it refuses.
+    SetupStart(
+        core::publication::Preview,
+        core::setup::OtherServiceHistory,
+        Option<core::setup::SilentStart>,
+    ),
     AdoptionReply(core::adoption::AdoptionWork, core::adoption::AdoptionReply),
     AdoptionLocal(core::adoption::AdoptionWork),
     Capacity(Option<u64>),

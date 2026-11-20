@@ -142,6 +142,38 @@ pub struct SetupDecision {
     pub keep_cloud_offered: bool,
 }
 
+/// The recovery call a decision may make with no confirmation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SilentStart {
+    /// Row 4: `publish` while `MGActive` names no epoch.
+    Publication,
+    /// Row 2: `adopt` into a device with no collection.
+    AdoptionInitial,
+    /// Row 5: `adopt`, tested again inside its exclusive phase.
+    AdoptionOverNoContent,
+    /// Row 3: `resume_binding`.
+    Resume,
+}
+
+impl SetupDecision {
+    /// The only gate of the no-question starts. A question of any kind gives
+    /// `None`, and so do row 1 (the app creates the collection first), row 6
+    /// (this build has no prefetch and no switch-time fetch, so it cannot
+    /// make or re-check that proof) and row 7.
+    pub fn silent_start(&self) -> Option<SilentStart> {
+        if self.question != SetupQuestion::None {
+            return None;
+        }
+        match self.row {
+            SetupRow::AdoptInitial => Some(SilentStart::AdoptionInitial),
+            SetupRow::Resume => Some(SilentStart::Resume),
+            SetupRow::Publish => Some(SilentStart::Publication),
+            SetupRow::AdoptOverNoContent => Some(SilentStart::AdoptionOverNoContent),
+            SetupRow::CreateAndPublish | SetupRow::PublishOverNoContent | SetupRow::KeepCollection => None,
+        }
+    }
+}
+
 /// The first matching row of V27.2, after the cases that always ask.
 pub fn decide(inputs: &SetupInputs) -> SetupDecision {
     let local_present = matches!(inputs.local, LocalSide::Present(_));
@@ -505,6 +537,70 @@ mod tests {
                 assert!(!d.keep_device_offered && !d.keep_cloud_offered && d.reason.is_none(), "{i:?}");
             } else {
                 assert!(d.reason.is_some(), "{i:?}");
+            }
+        }
+    }
+    /// Over the whole table: no start is admitted for a question, and an
+    /// admitted start is exactly its row's, from that row's two sides.
+    #[test]
+    fn no_start_is_admitted_while_the_decision_is_a_question() {
+        let mut admitted = [0usize; 4];
+        for i in every_input() {
+            let d = decide(&i);
+            let start = d.silent_start();
+            if d.question != SetupQuestion::None {
+                assert_eq!(start, None, "{i:?}");
+                continue;
+            }
+            match (d.row, start) {
+                (SetupRow::Publish, Some(SilentStart::Publication)) => {
+                    assert!(matches!(i.local, LocalSide::Present(_)) && i.cloud == CloudSide::NoActive, "{i:?}");
+                    assert!(!i.retained_binding && !i.other_account_binding && !i.fence_pending, "{i:?}");
+                    admitted[0] += 1;
+                }
+                (SetupRow::AdoptInitial, Some(SilentStart::AdoptionInitial)) => {
+                    assert!(i.local == LocalSide::Absent && matches!(i.cloud, CloudSide::Complete(_)), "{i:?}");
+                    admitted[1] += 1;
+                }
+                (SetupRow::AdoptOverNoContent, Some(SilentStart::AdoptionOverNoContent)) => {
+                    assert!(i.local == LocalSide::Present(NoContent) && !i.work_at_risk, "{i:?}");
+                    assert!(!i.other_account_binding && !i.fence_pending && !i.layout_unproved, "{i:?}");
+                    admitted[2] += 1;
+                }
+                (SetupRow::Resume, Some(SilentStart::Resume)) => {
+                    assert!(i.resume_offered && i.other_service == OtherServiceHistory::NoneSinceStop, "{i:?}");
+                    admitted[3] += 1;
+                }
+                // Row 1 is the app's create; row 6 has no proof in this build.
+                (SetupRow::CreateAndPublish | SetupRow::PublishOverNoContent, None) => {}
+                other => panic!("{other:?} for {i:?}"),
+            }
+        }
+        // The property is not vacuous: every start is reached.
+        assert!(admitted.iter().all(|count| *count != 0), "{admitted:?}");
+    }
+    /// The same gate over every decision value, also ones `decide` never gives.
+    #[test]
+    fn a_question_never_admits_a_start_whatever_row_it_names() {
+        let rows = [
+            SetupRow::CreateAndPublish,
+            SetupRow::AdoptInitial,
+            SetupRow::Resume,
+            SetupRow::Publish,
+            SetupRow::AdoptOverNoContent,
+            SetupRow::PublishOverNoContent,
+            SetupRow::KeepCollection,
+        ];
+        for row in rows {
+            for question in [SetupQuestion::ConfirmResume, SetupQuestion::Keep] {
+                let decision = SetupDecision {
+                    row,
+                    question,
+                    reason: None,
+                    keep_device_offered: true,
+                    keep_cloud_offered: true,
+                };
+                assert_eq!(decision.silent_start(), None, "{decision:?}");
             }
         }
     }

@@ -971,31 +971,30 @@ impl CloudConnection {
     /// is `NotOffered` and leaves the preview usable. Call
     /// `ProviderOwner.accept_icloud_connection` after it, as after a confirm.
     pub fn start_setup(&self, preview: Arc<CloudConnectionPreview>) -> Result<CloudSetupStarted, CoreError> {
-        use c::setup::{SetupQuestion, SetupRow};
+        use c::setup::SilentStart;
         callback::enter("CloudConnection.start_setup");
         self.owns(&preview.owner)?;
         self.owner.check_generation(preview.generation)?;
         let ready = preview.ready()?;
         let decision = self.owner.host.cloud_setup_decision(&ready).map_err(error)?;
-        if decision.question != SetupQuestion::None {
+        // A question, row 1, row 6 and row 7 name no start. The host call
+        // below decides the row again before it starts anything.
+        let Some(start) = decision.silent_start() else {
             return Err(failure(CloudConnectionFailure::NotOffered));
-        }
+        };
         let generation = meguri_engine::Generation(preview.generation);
         let host = &self.owner.host;
-        let started = match decision.row {
-            SetupRow::Resume => host
+        let started = match start {
+            SilentStart::Resume => host
                 .start_cloud_setup_resume(&ready, generation)
                 .map(|()| CloudSetupStarted::Resumed),
-            SetupRow::Publish => host.start_cloud_setup_publication(&ready, generation).map(|id| {
+            SilentStart::Publication => host.start_cloud_setup_publication(&ready, generation).map(|id| {
                 CloudSetupStarted::Operation { operation: self.recovery(id, false, preview.generation) }
             }),
-            SetupRow::AdoptInitial | SetupRow::AdoptOverNoContent => {
+            SilentStart::AdoptionInitial | SilentStart::AdoptionOverNoContent => {
                 host.start_cloud_setup_adoption(&ready).map(|id| CloudSetupStarted::Operation {
                     operation: self.recovery(id, true, preview.generation),
                 })
-            }
-            SetupRow::CreateAndPublish | SetupRow::PublishOverNoContent | SetupRow::KeepCollection => {
-                return Err(failure(CloudConnectionFailure::NotOffered));
             }
         }
         .map_err(error)?;
