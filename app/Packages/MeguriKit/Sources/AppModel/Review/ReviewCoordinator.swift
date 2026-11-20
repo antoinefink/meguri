@@ -126,6 +126,19 @@ public final class ReviewCoordinator {
         (phase == .question || phase == .answer) && item != nil && sessionID != nil &&
             !busy && !paused && !editingNote && !closingAdmission && terminalPresentation == nil
     }
+    /// N20.8: Bury Card and Suspend Card act on the presented card, on either
+    /// side, as Edit Note does.
+    public var canActOnCard: Bool { canEditNote }
+    /// VoiceOver's announcement of the last card action ("Card Buried"); the
+    /// screen posts it once per id. No banner or toast (N20.8).
+    public private(set) var cardActionAnnouncement: (id: UUID, action: ReviewCardAction)?
+    // Tests replace the op; production runs `sched/manual-ops` M2 or M3 on the
+    // card, naming this session so the result carries the head diff (M9).
+    @ObservationIgnored var startCardAction: (ReviewCardAction, Int64, UInt64) async throws -> SchedMutation = ReviewCoordinator.coreCardAction
+    nonisolated static func coreCardAction(_ action: ReviewCardAction, card: Int64, session: UInt64) async throws -> SchedMutation {
+        let operation: SchedOperation = action == .bury ? .bury(.cards([card])) : .suspend(.cards([card]))
+        return try await CoreSchedOpsService().start(operation, sessionID: session).value()
+    }
     public var progress: Double { sessionProgress.fraction }
     /// Answers given and cards left in this session, for the bottom-edge bar (N16.1).
     public var sessionProgress: ReviewSessionProgress {
@@ -367,15 +380,50 @@ public final class ReviewCoordinator {
         }
     }
 
+    /// Bury Card or Suspend Card (`review/card-actions` A4, A5): the card
+    /// leaves the head and the next card shows on its question side, or the
+    /// end of the session. One undo step brings it back.
+    public func act(_ action: ReviewCardAction) {
+        guard canActOnCard, let item, let sessionID else { return }
+        busy = true; phase = .transition
+        let inputTime = uptime()
+        timer.pause(at: inputTime)
+        operation = Task {
+            do {
+                let mutation = try await startCardAction(action, item.cardId, sessionID)
+                let intent = restorationIntent
+                let needsRefresh = refreshPending || mutation.headDiff == nil
+                refreshPending = false; forceQuestion = false
+                let head = needsRefresh ? try await client.head(sessionID: sessionID) : mutation.headDiff!.head
+                try await apply(head, question: true, inputTime: inputTime, intent: intent)
+                cardActionAnnouncement = (UUID(), action)
+            } catch {
+                // A refused or failed op changes nothing on screen but its error (A1).
+                notice = String(describing: error)
+                let intent = restorationIntent
+                refreshPending = false; forceQuestion = false
+                do { try await apply(client.head(sessionID: sessionID), question: true, intent: intent) }
+                catch { fail(error) }
+            }
+            completeOperation()
+        }
+    }
+
     public func restore(redo: Bool = false) {
         guard (redo ? canRedo : canUndo), let sessionID else { return }
+        // Only an answer step moves the record's answers; a bury, a suspend or an edit does not.
+        let answerStep: Bool = {
+            if case .available(let step) = redo ? redoStatus : undoStatus { return step.kind == .answer }
+            return false
+        }()
         busy = true; phase = .transition
         let intent = beginRestoration()
         timer.pause(at: uptime())
         operation = Task {
             do {
                 let head = try await client.restore(sessionID: sessionID, redo: redo)
-                if redo {
+                if !answerStep {
+                } else if redo {
                     if var answer = record.undone.popLast() { answer.durable = false; record.answers.append(answer) }
                 } else if let answer = record.answers.popLast() { record.undone.append(answer) }
                 do { try await apply(head, question: true, intent: intent) }
@@ -902,5 +950,25 @@ public final class ReviewCoordinator {
     }
     public static func name(_ rating: ReviewRating) -> String {
         switch rating { case .again: "again"; case .hard: "hard"; case .good: "good"; case .easy: "easy" }
+    }
+}
+
+/// The More menu's card actions (N20.8).
+public nonisolated enum ReviewCardAction: Sendable, Hashable {
+    case bury, suspend
+}
+
+/// `review/reviewer-strings` S5's display names: the review's steps in
+/// Apple's style ("Undo Answer", "Undo Bury Card"); any other step keeps the
+/// core's name ("Undo Rename Deck").
+public nonisolated enum ReviewStepNames {
+    public static func display(_ name: String) -> String {
+        switch name {
+        case "Answer Card": "Answer"
+        case "Bury": "Bury Card"
+        case "Suspend": "Suspend Card"
+        case "Update Note": "Edit Note"
+        default: name
+        }
     }
 }

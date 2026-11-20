@@ -32,14 +32,15 @@ public struct ReviewView: View {
             phase: model.phase, states: model.item?.nextStates, enabled: !model.paused,
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
             reveal: model.reveal, rate: model.rate,
-            status: status, canEditNote: editNote?.flow.canOpen ?? false, editNote: { editNote?.open() }) {
+            redoDescription: redoDescription, status: status,
+            actions: moreActions) {
             ZStack {
                 if let pair = model.pair {
                     #if os(macOS)
-                    ReviewCardHost(model: model, pair: pair, close: close)
+                    ReviewCardHost(model: model, pair: pair, close: close, actions: moreActions)
                         .opacity(model.phase == .question || model.phase == .answer || model.phase == .transition ? 1 : 0)
                     #else
-                    ReviewCardHost(model: model, pair: pair, close: close)
+                    ReviewCardHost(model: model, pair: pair, close: close, actions: moreActions)
                         .accessibilityIdentifier("review.session.card")
                         .accessibilityAction(named: Text("Show Answer", bundle: .module)) { model.reveal() }
                         .accessibilityAction(.magicTap) { model.reveal() }
@@ -51,7 +52,18 @@ public struct ReviewView: View {
         }
         #if os(iOS)
         .modifier(ReviewEditNotePresentation(editNote: editNote))
+        #else
+        // N20.8: on the Mac the form is a panel over the card, which owns the
+        // keys while it shows (the review's input is held, N11.1).
+        .overlay {
+            if let editNote, editNote.flow.isPresented { editNote.form }
+        }
         #endif
+        // N20.8: no banner or toast; VoiceOver says what happened.
+        .onChange(of: model.cardActionAnnouncement?.id) { _, id in
+            guard id != nil, let action = model.cardActionAnnouncement?.action else { return }
+            AccessibilityNotification.Announcement(Self.announcement(action)).post()
+        }
         .onAppear { visibilityChanged(true) }
         .onDisappear { visibilityChanged(false) }
         .task { await appearance() }
@@ -96,9 +108,24 @@ public struct ReviewView: View {
         case .question, .answer: EmptyView()
         }
     }
+    private var moreActions: ReviewMoreActions {
+        ReviewMoreActions(canEditNote: editNote?.flow.canOpen ?? false, editNote: { editNote?.open() },
+                          canActOnCard: model.canActOnCard, act: model.act)
+    }
+    static func announcement(_ action: ReviewCardAction) -> String {
+        switch action {
+        case .bury: String(localized: "Card Buried", bundle: .module)
+        case .suspend: String(localized: "Card Suspended", bundle: .module)
+        }
+    }
+    /// S5: "Redo <step>" by the step's display name.
+    private var redoDescription: String {
+        if case .available(let step) = model.redoStatus { return "Redo \(ReviewStepNames.display(step.name))" }
+        return String(localized: "Redo", bundle: .module)
+    }
     private var undoDescription: String {
         switch model.undoStatus {
-        case .available(let step): "Undo \(step.name)"
+        case .available(let step): "Undo \(ReviewStepNames.display(step.name))"
         case .unavailable(let reason):
             switch reason {
             case .none: String(localized: "No answer to undo", bundle: .module)
@@ -160,9 +187,9 @@ struct ReviewLayout<Card: View>: View {
     let redo: () -> Void
     let reveal: () -> Void
     let rate: (ReviewRating) -> Void
+    var redoDescription = "Redo"
     var status: AnyView? = nil
-    var canEditNote = false
-    var editNote: () -> Void = {}
+    var actions = ReviewMoreActions()
     @State private var noticeContentHeight: CGFloat?
     @ViewBuilder let card: () -> Card
     var body: some View {
@@ -202,7 +229,7 @@ struct ReviewLayout<Card: View>: View {
         .accessibilityIdentifier("review.session.screen")
         .accessibilityAction(named: Text("Show Answer", bundle: .module)) { reveal() }
         .accessibilityAction(named: Text(verbatim: undoDescription)) { if canUndo { undo() } }
-        .accessibilityAction(named: Text("Redo Answer", bundle: .module)) { if canRedo { redo() } }
+        .accessibilityAction(named: Text(verbatim: redoDescription)) { if canRedo { redo() } }
     }
     #else
     /// System bars hold the corners, so they move to the side on a foldable (R10).
@@ -242,18 +269,13 @@ struct ReviewLayout<Card: View>: View {
                     .accessibilityIdentifier("review.session.back")
                     if canRedo {
                         Button { if canRedo { redo() } } label: {
-                            Label { Text("Redo Answer", bundle: .module) } icon: { Image(systemName: "arrow.uturn.forward") }
+                            Label { Text(verbatim: redoDescription) } icon: { Image(systemName: "arrow.uturn.forward") }
                         }
-                        .help(Text("Redo Answer", bundle: .module))
+                        .help(redoDescription)
                         .accessibilityIdentifier("review.session.redo")
                     }
-                    // N20.8: after Undo and Redo, before the sync status.
-                    Button(action: editNote) {
-                        Label { Text("Edit Note", bundle: .module) } icon: { Image(systemName: "pencil") }
-                    }
-                    .disabled(!canEditNote)
-                    .help(Text("Edit Note", bundle: .module))
-                    .accessibilityIdentifier("review.session.editNote")
+                    // N20.8: one More menu after Undo, before the sync status.
+                    ReviewMoreMenu(actions: actions)
                 }
                 if let status {
                     ToolbarItem(placement: .primaryAction) { status }
@@ -629,3 +651,55 @@ private struct CentredHalfRow: Layout {
     }
 }
 #endif
+
+/// What the review's More menu and the Mac's card context menu act with (N20.8).
+struct ReviewMoreActions {
+    var canEditNote = false
+    var editNote: () -> Void = {}
+    var canActOnCard = false
+    var act: (ReviewCardAction) -> Void = { _ in }
+}
+
+/// N20.8: the touch review's More button (`ellipsis`, "More"), a pull-down
+/// menu in groups, each item with its system symbol. Later card actions slot
+/// into these groups or new ones after them.
+struct ReviewMoreMenu: View {
+    let actions: ReviewMoreActions
+    var body: some View {
+        Menu {
+            ReviewCardActionItems(actions: actions)
+        } label: {
+            Label { Text("More", bundle: .module) } icon: { Image(systemName: "ellipsis") }
+        }
+        .help(Text("More", bundle: .module))
+        .accessibilityIdentifier("review.session.more")
+    }
+}
+
+/// The items of the More menu and the Mac card's context menu, in groups:
+/// Edit Note | Bury Card, Suspend Card.
+struct ReviewCardActionItems: View {
+    let actions: ReviewMoreActions
+    var body: some View {
+        Section {
+            Button(action: actions.editNote) {
+                Label { Text("Edit Note", bundle: .module) } icon: { Image(systemName: "pencil") }
+            }
+            .disabled(!actions.canEditNote)
+            .accessibilityIdentifier("review.menu.editNote")
+        }
+        Section {
+            Button { actions.act(.bury) } label: {
+                Label { Text("Bury Card", bundle: .module) } icon: { Image(systemName: "moon") }
+            }
+            .disabled(!actions.canActOnCard)
+            .accessibilityIdentifier("review.menu.buryCard")
+            Button { actions.act(.suspend) } label: {
+                Label { Text("Suspend Card", bundle: .module) } icon: { Image(systemName: "pause.circle") }
+            }
+            .disabled(!actions.canActOnCard)
+            .accessibilityIdentifier("review.menu.suspendCard")
+        }
+        .labelStyle(.titleAndIcon)
+    }
+}

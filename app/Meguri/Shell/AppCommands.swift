@@ -1,5 +1,6 @@
 import AppModel
 import CoreBridge
+import Editor
 import Home
 import SwiftUI
 #if os(macOS)
@@ -250,6 +251,26 @@ struct AppCommands: Commands {
             rating("Good", .good, key: "3")
             rating("Easy", .easy, key: "4")
             Divider()
+            // N20.8: the review's card actions, with the More menu's keys.
+            Button("Edit Note") {
+                guard let context, context.reviewInputAvailable, context.collection.editNoteFlow.canOpen else { return }
+                Task { await context.collection.openEditNote() }
+            }
+            .keyboardShortcut("e", modifiers: .command)
+            .disabled(!cardEnabled(context?.collection.editNoteFlow.canOpen))
+            Button("Bury Card") {
+                guard context?.reviewInputAvailable == true else { return }
+                context?.review?.act(.bury)
+            }
+            .keyboardShortcut("j", modifiers: .command)
+            .disabled(!cardEnabled(context?.review?.canActOnCard))
+            Button("Suspend Card") {
+                guard context?.reviewInputAvailable == true else { return }
+                context?.review?.act(.suspend)
+            }
+            .keyboardShortcut("j", modifiers: [.command, .shift])
+            .disabled(!cardEnabled(context?.review?.canActOnCard))
+            Divider()
             Button("Back to Decks") {
                 guard let context, context.reviewInputAvailable, context.review?.canFinish == true else { return }
                 Task { await context.collection.finishReview() }
@@ -262,9 +283,12 @@ struct AppCommands: Commands {
     /// R173: "Undo <operation>" while one can be undone, plain "Undo" otherwise.
     private static func title(_ title: EditUndoRouting.Title, redo: Bool) -> String {
         switch title {
-        case .text(let text): text
-        case .named(let name): redo ? String(localized: "Redo \(name)") : String(localized: "Undo \(name)")
-        case .plain: redo ? String(localized: "Redo") : String(localized: "Undo")
+        case .text(let text): return text
+        case .named(let step):
+            // S5: the review's steps by their display names ("Undo Bury Card").
+            let name = ReviewStepNames.display(step)
+            return redo ? String(localized: "Redo \(name)") : String(localized: "Undo \(name)")
+        case .plain: return redo ? String(localized: "Redo") : String(localized: "Undo")
         }
     }
 

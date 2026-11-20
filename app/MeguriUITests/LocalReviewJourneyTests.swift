@@ -115,8 +115,8 @@ final class LocalReviewJourneyTests: XCTestCase {
             let command = editItem(menu, verb)
             XCTAssertTrue(command.waitForExistence(timeout: 10))
             XCTAssertEqual(command.isEnabled, enabled, "Edit > \(verb) must respect history and native input ownership")
-            // R173: "Undo Answer Card" while there is a step, plain "Undo" otherwise.
-            XCTAssertEqual(command.title, enabled ? "\(verb) Answer Card" : verb)
+            // R173 with S5's display name: "Undo Answer" while there is a step, plain "Undo" otherwise.
+            XCTAssertEqual(command.title, enabled ? "\(verb) Answer" : verb)
         }
         // Escape belongs to the open menu and must not exit the review.
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
