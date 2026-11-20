@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use common::{empty_collection, open, plain};
 use meguri_model::ids::DeckId;
+use meguri_model::rng::{RandomSource, SeededRandom};
 use meguri_storage::queries::activity::{
     ACTIVITY_DAYS, ActivityScope, COLLECTION_SQL, deck_sql, window_start,
 };
@@ -178,20 +179,10 @@ fn neither_statement_scans_the_review_log() {
     assert_plans(&conn, "analyzed file");
 }
 
-/// A deterministic generator (SplitMix64), so the expected counts can be
-/// computed from the same sequence.
-struct Mix(u64);
-impl Mix {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-    fn below(&mut self, n: u64) -> u64 {
-        self.next() % n
-    }
+/// Draws below `n` from the model's deterministic source, so the expected
+/// counts can be computed from the same sequence.
+fn below(source: &SeededRandom, n: u64) -> u64 {
+    source.next_u64() % n
 }
 
 const CARDS: i64 = 100_000;
@@ -213,7 +204,7 @@ fn home_and_current(card: i64) -> (i64, i64, i64) {
 #[test]
 fn a_million_reviews_count_correctly_and_quickly() {
     let (_dir, path) = empty_collection();
-    let mut mix = Mix(20_261_120);
+    let mix = SeededRandom::new(20_261_120);
     let mut expected_all = vec![0u32; ACTIVITY_DAYS as usize];
     let mut expected_large = vec![0u32; ACTIVITY_DAYS as usize];
     let mut expected_small = vec![0u32; ACTIVITY_DAYS as usize];
@@ -242,15 +233,15 @@ fn a_million_reviews_count_correctly_and_quickly() {
             let mut used = std::collections::HashSet::with_capacity(REVIEWS as usize);
             let mut inserted = 0;
             while inserted < REVIEWS {
-                let id = end - mix.below(span_ms as u64) as i64;
+                let id = end - below(&mix, span_ms as u64) as i64;
                 if !used.insert(id) {
                     continue;
                 }
                 inserted += 1;
                 // A tenth of the cards hold no row (deleted cards' rows: ids past CARDS).
-                let card = 1 + mix.below((CARDS + CARDS / 10) as u64) as i64;
-                let ease = if mix.below(20) == 0 { 0 } else { 1 + mix.below(4) as i64 };
-                let kind = if ease == 0 { 4 } else { mix.below(3) as i64 };
+                let card = 1 + below(&mix, (CARDS + CARDS / 10) as u64) as i64;
+                let ease = if below(&mix, 20) == 0 { 0 } else { 1 + below(&mix, 4) as i64 };
+                let kind = if ease == 0 { 4 } else { below(&mix, 3) as i64 };
                 reviews.execute(params![id, card, ease, kind]).unwrap();
                 if ease == 0 || id < window_start(N) {
                     continue;
