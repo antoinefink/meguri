@@ -2,6 +2,7 @@
 strings and pruned by the repository, and the scan of files and of a
 commit's staged lines. Every collection here is made up."""
 
+import errno
 import hashlib
 import io
 import json
@@ -1516,7 +1517,14 @@ class PublicSourceLineTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "raw filenames require POSIX")
     def test_raw_filename_bytes_do_not_skip_the_scan(self):
         raw = os.path.join(os.fsencode(self.repo), b"bad-\xff.rs")
-        write(raw, b"sentinelprivate\n", "wb")
+        try:
+            write(raw, b"sentinelprivate\n", "wb")
+        except OSError as error:
+            # APFS (macOS) refuses names that are not valid UTF-8; the dev
+            # container's filesystem accepts them, so tools/mg selftest runs it.
+            if error.errno != errno.EILSEQ:
+                raise
+            self.skipTest("this filesystem refuses non-UTF-8 file names (EILSEQ)")
         git(self.repo, "add", "-A")
         self.assertTrue(private_scan.scan_staged(self.matcher, self.repo)[0])
         self.assertTrue(private_scan.scan_paths(self.matcher, [os.fsdecode(raw)], self.repo)[0])

@@ -326,8 +326,19 @@ mg_core_test() {
   # removed test would otherwise leave the list silently checking nothing.
   local listed_complete=true listed_results missing scope=""
   if [ "$list_mode" = only ] && [ "$stopped" = false ]; then
+    # nextest names a library's unit tests `<package>::<lib name>$<test>` in
+    # its JSON but gives the binary id `<package>`; compare by binary id,
+    # from the event's nextest fields when it has them.
     if listed_results="$( { [ ! -f "$main" ] || cat "$main"; } | jq -sc --arg listed "$listed" '
-      [.[] | select(.type == "test" and .event != "started")] as $tests
+      def binary_id: split("::") as $p
+        | if ($p | length) == 2 and $p[1] == ($p[0] | gsub("-"; "_")) then $p[0] else . end;
+      def listed_id:
+        (.name | index("$")) as $i
+        | (if (.nextest | type) == "object" and (.nextest.crate | type) == "string" and (.nextest.test_binary | type) == "string"
+           then (if .nextest.kind == "lib" or .nextest.kind == "proc-macro" then .nextest.crate
+                 else .nextest.crate + "::" + .nextest.test_binary end)
+           else (.name[:$i] | binary_id) end) + .name[$i:];
+      [.[] | select(.type == "test" and .event != "started") | .name = listed_id] as $tests
       | [$listed | splits("\n") | select(. != "") | split("\t") | .[0] + "$" + .[1]]
       | map(. as $n | [$tests[] | select(.name == $n) | .event] as $e
         | {name: $n, event: (if ($e | length) == 1 then $e[0] elif ($e | length) == 0 then "not-run" else "duplicate" end)})')"; then
