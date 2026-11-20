@@ -534,7 +534,8 @@ fn user_content_rows_count_only_what_v27_1_names() {
     assert!(reader.user_content_rows().unwrap().none());
 
     // Each of a note, a card, a review, a second deck and a saved note type counts alone.
-    let cases: [(&str, fn(&mut UserContentRows)); 5] = [
+    type Change = fn(&mut UserContentRows);
+    let cases: [(&str, Change); 5] = [
         ("note", |rows| rows.notes = 1),
         ("card", |rows| rows.cards = 1),
         ("review", |rows| rows.reviews = 1),

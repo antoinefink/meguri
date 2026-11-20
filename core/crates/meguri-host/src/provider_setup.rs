@@ -114,6 +114,8 @@ pub enum MeguriSetupSettlement {
 }
 
 /// What one confirmation tests again inside the replacement's exclusive phase.
+// At most one value exists at a time, armed for one confirmation: its size costs nothing.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Retest {
     /// Row 2: the collection about to be replaced still holds no user content.
     NoUserContent(Option<MediaStore>),
