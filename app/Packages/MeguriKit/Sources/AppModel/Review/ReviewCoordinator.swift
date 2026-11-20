@@ -844,11 +844,13 @@ public final class ReviewCoordinator {
         if !paused {
             (surface as? ReviewPages)?.inputActive = true
             if phase == .question || phase == .answer { timer.resume(at: uptime()) }
-            // The keys come back to the card, as before the form opened.
+            #if os(macOS)
+            // The keys come back to the card, as before the panel opened.
             if let pages = surface.pair {
                 pages.ownsKeyboardFocus = true
                 ReviewInputOwnership.focusCard(pages.current.webView)
             }
+            #endif
         }
         if saved {
             // The same card and side, presented again from the saved note.
