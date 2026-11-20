@@ -5,7 +5,7 @@
 mod common;
 
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use common::{empty_collection, open, plain};
 use meguri_model::ids::DeckId;
@@ -14,6 +14,7 @@ use meguri_storage::queries::activity::{
 };
 use meguri_storage::rusqlite::{Connection, params};
 use meguri_storage::{ReadRows, ReaderRole};
+use meguri_testkit::wallclock::Stopwatch;
 
 /// 2026-10-13 04:00 Europe/Paris: `stats/day-buckets` B3's `N`.
 const N: i64 = 1_791_856_800;
@@ -211,7 +212,7 @@ fn a_million_reviews_count_correctly_and_quickly() {
     let mut expected_all = vec![0u32; ACTIVITY_DAYS as usize];
     let mut expected_large = vec![0u32; ACTIVITY_DAYS as usize];
     let mut expected_small = vec![0u32; ACTIVITY_DAYS as usize];
-    let built = Instant::now();
+    let built = Stopwatch::start();
     {
         let mut conn = plain(&path);
         let tx = conn.transaction().unwrap();
@@ -268,10 +269,10 @@ fn a_million_reviews_count_correctly_and_quickly() {
     let reader = collection.reader_factory().open(ReaderRole::Query).unwrap();
     let timed = |scope: ActivityScope<'_>| {
         // The first run reads the pages in; report the warm one too.
-        let cold = Instant::now();
+        let cold = Stopwatch::start();
         let first = reader.activity_day_counts(scope, N).unwrap();
         let cold = cold.elapsed();
-        let warm = Instant::now();
+        let warm = Stopwatch::start();
         let second = reader.activity_day_counts(scope, N).unwrap();
         let warm = warm.elapsed();
         assert_eq!(first, second);

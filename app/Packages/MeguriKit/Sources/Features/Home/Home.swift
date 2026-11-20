@@ -35,7 +35,10 @@ public struct HomeView: View {
                     isExpansionPending: { collection.isStudyExpansionPending(deckID: $0) },
                     setExpanded: { id, expanded, descendants in
                         collection.setStudyExpanded(deckID: id, expanded: expanded, includingDescendants: descendants)
-                    }, today: todayRow) { id in
+                    }, today: todayRow,
+                    // N14.11: beside Today the list leaves the collection's activity to Today.
+                    activity: todayRow == nil ? collection.activity : nil,
+                    activityActive: collection.heatmapRefreshes) { id in
                     collection.navigation.select(.deck(DeckID(id)))
                 }
             } else if collection.state == .noFile {
@@ -363,6 +366,8 @@ public struct HomeView: View {
                         .accessibilityIdentifier("home.deck.subdecksHeader")
                 }
             }
+            // N14.11: this deck's and its subdecks' activity, after the subdecks.
+            ActivityHeatmapSection(store: collection.activity, scope: .deck(deck.id))
             if let error = collection.error {
                 Text(verbatim: error).foregroundStyle(.token(.statusError))
                     .accessibilityIdentifier("home.collection.error")
@@ -381,6 +386,7 @@ public struct HomeView: View {
         // N14.3: system grouped sections on the grouped background.
         .listStyle(.insetGrouped)
         #endif
+        .activityLoading(collection.activity, scope: .deck(deck.id), active: collection.heatmapRefreshes)
     }
     @ViewBuilder private func deckAction(_ deck: ReviewCollection.DeckPageDetail, empty: Bool) -> some View {
         if empty {
@@ -569,6 +575,9 @@ public struct HomeDeckTree: View {
     private let isExpansionPending: ((Int64) -> Bool)?
     private let setExpanded: ((Int64, Bool, Bool) -> Void)?
     private let today: HomeTodayRow?
+    /// N14.11: the collection's activity after the deck rows; nil beside Today, which shows it.
+    private let activity: ActivityHeatmapStore?
+    private let activityActive: Bool
     @State private var rowFrames: [Int64: CGRect] = [:]
     @State private var restoring: Int64?
     @State private var tracking = false
@@ -579,12 +588,14 @@ public struct HomeDeckTree: View {
                 isExpansionPending: ((Int64) -> Bool)? = nil,
                 setExpanded: ((Int64, Bool, Bool) -> Void)? = nil,
                 today: HomeTodayRow? = nil,
+                activity: ActivityHeatmapStore? = nil, activityActive: Bool = true,
                 select: @escaping (Int64) -> Void) {
         self.nodes = nodes; self.navigation = navigation; self.collection = collection
         self.previousAnswerCount = previousAnswerCount; self.error = error; self.select = select
         self.isExpanded = isExpanded; self.setExpanded = setExpanded
         self.isExpansionPending = isExpansionPending
         self.today = today
+        self.activity = activity; self.activityActive = activityActive
     }
 
     public var body: some View {
@@ -597,6 +608,9 @@ public struct HomeDeckTree: View {
                         Section { branches }
                     } else {
                         branches
+                    }
+                    if let activity {
+                        ActivityHeatmapSection(store: activity, scope: .collection)
                     }
                     if let error {
                         Section {
@@ -619,6 +633,7 @@ public struct HomeDeckTree: View {
                     }
                 }
                 .coordinateSpace(name: "home.deck.list")
+                .activityLoading(activity, scope: .collection, active: activityActive)
                 // List does not use the ScrollView target-layout modifier.
                 // Track actual row geometry, not lazy row creation, so cached
                 // off-screen rows cannot overwrite the saved navigation anchor.

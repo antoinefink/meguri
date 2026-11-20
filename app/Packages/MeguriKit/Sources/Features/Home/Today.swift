@@ -119,6 +119,8 @@ public struct TodayView: View {
                 // No header: the title and totals already say what the rows are (N14.1).
                 ForEach(today.entries) { row($0) }
             }
+            // N14.11: the collection's activity, after the decks.
+            ActivityHeatmapSection(store: collection.activity, scope: .collection)
             if let error = collection.error, !besideDeckList {
                 Section {
                     Text(verbatim: error)
@@ -140,6 +142,7 @@ public struct TodayView: View {
         #if !os(macOS)
         .listStyle(.plain)
         #endif
+        .activityLoading(collection.activity, scope: .collection, active: collection.heatmapRefreshes)
         .modifier(TodayTitle(enabled: besideDeckList, subtitle: HomeHeading.todaySubtitle(today.totals, locale: locale)))
     }
 
