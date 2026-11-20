@@ -109,8 +109,9 @@ public struct ReviewView: View {
         }
     }
     private var moreActions: ReviewMoreActions {
-        ReviewMoreActions(canEditNote: editNote?.flow.canOpen ?? false, editNote: { editNote?.open() },
-                          canActOnCard: model.canActOnCard, act: model.act)
+        let editNote = editNote, model = model
+        return ReviewMoreActions(editNoteEnabled: { editNote?.flow.canOpen ?? false }, editNote: { editNote?.open() },
+                                 cardActionsEnabled: { model.canActOnCard }, act: model.act)
     }
     static func announcement(_ action: ReviewCardAction) -> String {
         switch action {
@@ -120,12 +121,14 @@ public struct ReviewView: View {
     }
     /// S5: "Redo <step>" by the step's display name.
     private var redoDescription: String {
-        if case .available(let step) = model.redoStatus { return "Redo \(ReviewStepNames.display(step.name))" }
+        if case .available(let step) = model.redoStatus {
+            return String(localized: "Redo \(ReviewStepNames.display(step.name))", bundle: .module)
+        }
         return String(localized: "Redo", bundle: .module)
     }
     private var undoDescription: String {
         switch model.undoStatus {
-        case .available(let step): "Undo \(ReviewStepNames.display(step.name))"
+        case .available(let step): String(localized: "Undo \(ReviewStepNames.display(step.name))", bundle: .module)
         case .unavailable(let reason):
             switch reason {
             case .none: String(localized: "No answer to undo", bundle: .module)
@@ -653,11 +656,15 @@ private struct CentredHalfRow: Layout {
 #endif
 
 /// What the review's More menu and the Mac's card context menu act with (N20.8).
+/// The states are read when asked, so a key handler or a menu made once
+/// still sees the current card (N4).
 struct ReviewMoreActions {
-    var canEditNote = false
+    var editNoteEnabled: () -> Bool = { false }
     var editNote: () -> Void = {}
-    var canActOnCard = false
+    var cardActionsEnabled: () -> Bool = { false }
     var act: (ReviewCardAction) -> Void = { _ in }
+    var canEditNote: Bool { editNoteEnabled() }
+    var canActOnCard: Bool { cardActionsEnabled() }
 }
 
 /// N20.8: the touch review's More button (`ellipsis`, "More"), a pull-down

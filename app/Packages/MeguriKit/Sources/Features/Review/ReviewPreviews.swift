@@ -59,7 +59,7 @@ private struct ReviewFixture: View {
             undoDescription: "Undo Answer", canUndo: true, canRedo: false,
             phase: state == .loading ? .loading : (answer ? .answer : .question), states: states,
             enabled: true, close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in },
-            actions: ReviewMoreActions(canEditNote: state != .loading, canActOnCard: state != .loading)) {
+            actions: ReviewMoreActions(editNoteEnabled: { state != .loading }, cardActionsEnabled: { state != .loading })) {
                 if state == .loading {
                     ReviewStatusLayout { LoadingStateView(Text(verbatim: "Preparing review…")) }
                 }

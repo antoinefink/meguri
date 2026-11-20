@@ -99,8 +99,11 @@ public final class EditNoteFlow {
                 host?.shutDown()
                 reset()
                 self.error = String(describing: error)
-                review.endEditingNote(saved: false)
+                // The form never showed: the review says why (A1's error path).
+                review.showNotice(String(describing: error))
             }
+            // Whatever ended the attempt, the review gets its input back.
+            if review.editingNote, !isPresented { review.endEditingNote(saved: false) }
             return false
         }
     }
@@ -155,6 +158,8 @@ public final class EditNoteFlow {
     @discardableResult public func requestCancel() async -> Bool {
         if let closeTask { return await closeTask.value }
         guard isPresented else { return true }
+        // Still opening: the page never held an edit, so nothing is asked.
+        if opening { finish(saved: false); return true }
         guardingClose = true
         let work = Task { () -> Bool in
             _ = await saveTask?.value
@@ -200,7 +205,10 @@ public final class EditNoteFlow {
     /// The collection is replaced or closed: the form ends without a write.
     func generationEnded() {
         if let confirmation = discardConfirmation { answerDiscard(confirmation, discard: false) }
+        let review = session
         epoch = UUID(); runtime?.shutDown(); reset()
+        // A review that outlives the collection change gets its input back.
+        review?.endEditingNote(saved: false)
     }
 
     private func handleHeldChanges() {

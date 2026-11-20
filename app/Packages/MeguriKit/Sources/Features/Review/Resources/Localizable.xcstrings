@@ -167,6 +167,28 @@
         }
       }
     },
+    "Redo %@": {
+      "comment": "S5: the redo button with the step's display name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redo %@"
+          }
+        }
+      }
+    },
+    "Undo %@": {
+      "comment": "S5: the undo button with the step's display name (Undo Bury Card).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Undo %@"
+          }
+        }
+      }
+    },
     "Review Paused": {
       "localizations": {
         "en": {
