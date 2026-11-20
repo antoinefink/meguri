@@ -29,12 +29,11 @@ public struct ActivityDays: Sendable, Hashable {
         self.today = today; self.counts = counts
     }
 
-    init(_ raw: MeguriCoreBindings.ActivityHeatmap) {
-        let date = raw.todayDate
-        self.init(generation: raw.generation, schedulerDay: raw.today, nextDayAt: raw.nextDayAt,
-                  today: Day(year: Int(date.year), month: Int(date.month), day: Int(date.day),
-                             weekday: Int(date.weekday) + 1),
-                  counts: raw.counts)
+    init(_ raw: MeguriCoreBindings.ActivityCounts) {
+        self.init(generation: raw.generation, schedulerDay: raw.schedulerDay, nextDayAt: raw.boundarySecs,
+                  today: Day(year: Int(raw.dayZeroYear), month: Int(raw.dayZeroMonth), day: Int(raw.dayZeroDay),
+                             weekday: Int(raw.dayZeroWeekday) + 1),
+                  counts: raw.perDay)
     }
 }
 

@@ -5,44 +5,37 @@ use meguri_model::ids::DeckId;
 
 use crate::{callback, error::CoreError, runtime};
 
-/// A calendar date (proleptic Gregorian) and its weekday, 0 Sunday to 6
-/// Saturday.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct ActivityDate {
-    pub year: i32,
-    pub month: u8,
-    pub day: u8,
-    pub weekday: u8,
-}
-
-/// AH6: the counts of days 0 (today) to 370 for one scope.
+/// One scope's reviews per day (AH6), flattened for the host: the counts
+/// first, then where day 0 falls in the calendar and in the scheduler.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct ActivityHeatmap {
+pub struct ActivityCounts {
+    /// Reviews on each day, index = days before today (0 to 370).
+    pub per_day: Vec<u32>,
+    /// `T0`: day 0's proleptic Gregorian date.
+    pub day_zero_year: i32,
+    pub day_zero_month: u32,
+    pub day_zero_day: u32,
+    /// 0 Sunday to 6 Saturday.
+    pub day_zero_weekday: u32,
+    /// The scheduler day number, and `N` (epoch seconds) it ends at.
+    pub scheduler_day: u32,
+    pub boundary_secs: i64,
+    /// The collection generation the read saw.
     pub generation: u64,
-    /// The scheduler day number the counts were taken for.
-    pub today: u32,
-    /// `N`, epoch seconds.
-    pub next_day_at: i64,
-    /// `T0`, the date of day 0.
-    pub today_date: ActivityDate,
-    /// Reviews per day; index = days ago.
-    pub counts: Vec<u32>,
 }
 
-impl From<meguri_engine::activity::ActivityHeatmap> for ActivityHeatmap {
-    fn from(value: meguri_engine::activity::ActivityHeatmap) -> Self {
-        let date = value.today_date;
-        Self {
-            generation: value.generation,
-            today: value.today,
-            next_day_at: value.next_day_at,
-            today_date: ActivityDate {
-                year: date.year,
-                month: date.month,
-                day: date.day,
-                weekday: date.weekday,
-            },
-            counts: value.counts,
+impl From<meguri_engine::activity::ActivityHeatmap> for ActivityCounts {
+    fn from(read: meguri_engine::activity::ActivityHeatmap) -> Self {
+        let t0 = read.today_date;
+        ActivityCounts {
+            per_day: read.counts,
+            day_zero_year: t0.year,
+            day_zero_month: t0.month.into(),
+            day_zero_day: t0.day.into(),
+            day_zero_weekday: t0.weekday.into(),
+            scheduler_day: read.today,
+            boundary_secs: read.next_day_at,
+            generation: read.generation,
         }
     }
 }
@@ -51,7 +44,7 @@ impl From<meguri_engine::activity::ActivityHeatmap> for ActivityHeatmap {
 /// its subdecks by home deck. Reads only, on the query reader. A deck id
 /// that names no deck gives zeros (AH4).
 #[uniffi::export]
-pub fn activity_heatmap(deck_id: Option<i64>) -> Result<ActivityHeatmap, CoreError> {
+pub fn activity_heatmap(deck_id: Option<i64>) -> Result<ActivityCounts, CoreError> {
     callback::enter("activity_heatmap");
     let host = runtime::host()?;
     let collection = host.collection()?;
