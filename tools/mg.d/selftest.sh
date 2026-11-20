@@ -67,9 +67,16 @@ mg_selftest() {
     case "$arg" in --jobs|-j|--jobs=*|-j[0-9]*) defaults=(); break ;; esac
   done
   # Named test files replace the whole list: passed beside it, bats ran each
-  # named file twice (two runs of one file share its fixtures and fail).
+  # named file twice (two runs of one file share its fixtures and fail). The
+  # value of an option that takes one (a --filter regex) is never a file.
+  local value_next=false
   for arg in ${1+"$@"}; do
+    if [ "$value_next" = true ]; then value_next=false; continue; fi
     case "$arg" in
+      -f|--filter|--filter-status|--filter-tags|-j|--jobs|-F|--formatter|--report-formatter|-o|--output|--code-quote-style|--line-reference-format|--gather-test-outputs-in|--setup-suite-file)
+        value_next=true
+        ;;
+      -*) ;;
       *.bats)
         if [ ! -f "$arg" ]; then
           mg_failure usage "selftest: no test file $arg; name files by their path, e.g. tools/tests/gate.bats" "tools/mg selftest tools/tests/gate.bats"

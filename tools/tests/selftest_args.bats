@@ -52,3 +52,12 @@ run_selftest() {
   grep -qx "failure usage" "$WORK/status"
   grep -qx "status error" "$WORK/status"
 }
+
+@test "an option value that ends in .bats is a filter, not a test file" {
+  BIN="$BATS_TEST_TMPDIR/bin" run_selftest --filter 'runs once|\.bats' --filter-tags x.bats
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '\.bats$' "$BATS_TEST_TMPDIR/args")" -eq 4 ]
+  grep -qx 'tools/tests/a.bats' "$BATS_TEST_TMPDIR/args"
+  grep -qx 'tools/tests/b.bats' "$BATS_TEST_TMPDIR/args"
+  grep -qx "status pass" "$WORK/status"
+}
