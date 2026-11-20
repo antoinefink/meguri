@@ -101,3 +101,7 @@ CodeRabbit posted four comments. All four were taken:
   if a new read still finds a status that is not `ok`. Taken.
 - Third AI review (one comment): the rule for the end of the wait must say
   which status read is used. Now stated as built in F5.2. Taken.
+
+## Approval
+
+Antoine delegated this approval and the open question on 2026-11-20 ("Can you please decide for me? Use your best judgment"). Under that delegation Claude approved the lines dated 2026-11-20 in `specs/sync/meguri-provider.md` and `specs/sync/cloudkit-recovery.md`, which record behaviour already built and reviewed, and decided the late-commit question in MP6.9 as kept as built. The pull request was merged while its hosted Linux core check was failing on two `meguri-ffi` media-port tests; the pull request changed documentation only.
