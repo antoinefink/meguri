@@ -60,3 +60,10 @@ Columns: date (YYYY-MM-DD), screen id from `screen-inventory.yaml` (or `design-s
 | 2026-11-19 | settings.importExport | Export prepares the file with a progress bar, then opens the system save dialog. Cancelling discards the prepared file; no separate prepare, save or discard steps | "3B" | chat, round 5 |
 | 2026-11-19 | settings.accountSync | The round 2 sync and Settings specs (`sync/policy` P25, `sync/cloudkit-recovery` V27, `sync/meguri-provider` MP6) are approved for implementation after the independent review | "approve the round 2 specs" | chat; `docs/process/review-log/redesign-specs-20261119.md` |
 | 2026-11-20 | sync.connect | iCloud Sync work is paused. Bug fixes only; Meguri Sync is the service to finish | Antoine will use the Meguri Sync server | chat |
+| 2026-11-20 | home.goToDeck | On Mac and iPad a search field at the top of the sidebar replaces the Go to Deck sheet; the toolbar keeps sync and one Add menu (New Note, New Deck…) | "1C" | chat, round 6 |
+| 2026-11-20 | home.deckActions | The deck menu is Study and Add Note, then Rename… and New Subdeck…, then Delete Deck in red, each with its system symbol. Overview and the Mac hover button are removed | "2C" | chat, round 6 |
+| 2026-11-20 | home.deckName | Naming a deck uses two rows, Name and Parent Deck. The path notation with two colons is no longer shown; changing the parent moves the deck | "3B" | chat, round 6 |
+| 2026-11-20 | home.deckActions | Delete Deck asks only when cards would be lost and says how many; an empty deck is deleted at once; Undo restores either | "4B" | chat, round 6 |
+| 2026-11-20 | shell.commands | Mac menus are organised by object: File, Edit, Deck, Card. New Note ⌘N, New Deck… ⇧⌘N, Find… ⌘F, Delete Deck ⌘⌫; one Undo, in Edit | "5B" | chat, round 6 |
+| 2026-11-20 | deck.options | Deck Options first version: the preset, the two daily limits and Desired Retention on one page; the rest under Advanced | "6B" | chat, round 6 |
+| 2026-11-20 | review.editNote | Edit Note from the review toolbar opens the Add Note form on the current note; the card browser comes later | "7A" | chat, round 6 |
