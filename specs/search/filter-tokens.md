@@ -41,6 +41,7 @@ What Browse's search field holds and means (`docs/design/native-interface-contra
 | Studied | Today `rated:1`; Last 7 Days `rated:7`; Last 30 Days `rated:30` (answered in d days, any button) | none |
 | Field f (one kind per field name; label "<f>") | contains t: the field contains item (T3.1); is empty: the field empty item (T3.1); has content: field present (`f:_*`) | none |
 | Duplicates (made only by Find Duplicates, `browser/workspace` V10) | the note ids of the duplicate groups: J3 note ids | none |
+| Studied On (made only by a heatmap day, `browser/workspace` V15; label "Studied on <date>") | the ids of the cards answered inside that heatmap day's bounds: J3 card ids | none |
 
 - Day meanings are `search/history` H2 to H5 and `search/properties` P4. "Last 7 Days" is today and the six days before it.
 - Labels are Meguri's (T15). A value whose built item J3 refuses (a negative id, a field name J3.3 refuses) is not offered.
@@ -128,13 +129,13 @@ Examples:
 
 ### T7.1 Round trip
 
-For every query the UI can make from T3 values and text that stays text (T5): reading its run text by T7 gives back the same tokens, values, flags and order, and text that runs the same (T16). The exceptions: a Duplicates token (it comes back advanced); a Deck or Note Type value written by id (J3.5; it comes back advanced); a text that holds Anki syntax (it is converted on commit); a Tag token holding only `leech` (it comes back as Card State: Leech, which finds the same rows); a value whose object was renamed or deleted since the search was saved (it comes back advanced).
+For every query the UI can make from T3 values and text that stays text (T5): reading its run text by T7 gives back the same tokens, values, flags and order, and text that runs the same (T16). The exceptions: a Duplicates or Studied On token (it comes back advanced); a Deck or Note Type value written by id (J3.5; it comes back advanced); a text that holds Anki syntax (it is converted on commit); a Tag token holding only `leech` (it comes back as Card State: Leech, which finds the same rows); a value whose object was renamed or deleted since the search was saved (it comes back advanced).
 
 ## T8. When the field changes the query
 
 - **Live** (R1106): every edit of the text runs the query at once (debounce at most 60 ms, a newer run cancels the older, `browser/result-sets` H3). Return is never needed.
 - **Incomplete text** (R1107): while the user is typing (before a commit) and `search/editing-services` D5 classifies the text at the cursor as incomplete (a key with no value, an unclosed quote or bracket, a dangling `-`, `and` or `or`), the last results stay and nothing changes.
-- **Commit**: Return, a paste, accepting a suggestion, or the field losing focus. A commit reads the text by T7 and puts its tokens before the remaining text; text that stays text stays as typed. After a commit, text T7 turned into literal words (it did not parse) runs as those literal words; D5's incomplete rule no longer applies to it.
+- **Commit**: Return, a paste, accepting a suggestion, or the field losing focus. A commit reads the text by T7 and puts its tokens after the tokens already in the query, before the remaining text; text that stays text stays as typed. T7 step 4 counts the query's existing tokens too: with Deck: Spanish in the query, committing `deck:French` gives the advanced token `deck:French` (both must hold, as typed), never a second Deck token and never a widened one. To widen a token, the user adds a value from its menu or the suggestions (T10, T12), which add to the existing token. After a commit, text T7 turned into literal words (it did not parse) runs as those literal words; D5's incomplete rule no longer applies to it.
 - A sidebar click, a token menu action, a Filters sheet change and an entry point (R1114) change the query directly and run it.
 
 ## T9. The sidebar and the tokens
@@ -212,6 +213,7 @@ The list under the field while it has focus (Mac, iPad: under the field; iPhone 
 
 - **First open on a device** (the first time Browse opens after the app is installed on this device, or after the collection is replaced): the query is T7's reading of `defaultSearchText` (`browser/config-keys` K6.4) when it is set, otherwise the empty query (the whole collection). R1112's `deck:current` is superseded.
 - **Later opens**: the query, mode, selection and scroll Browse had when the user left it on this device, while the app runs (`browser/workspace` V1).
+- **After a relaunch**: the query's run text (T4) and the mode are kept on the device and read back by T7; selection and scroll start at the top. `defaultSearchText` is not read again. A restored query that finds nothing shows the empty state with Clear Search (`browser/entry-points` E2's fallback to `deck:current` does not apply to Browse).
 - **With a search** (R1114, `browser/entry-points` E3): T7's reading of the given search replaces the query. Stats' joined text (`stats/browse-queries` Q3) is read by T7 too; it usually gives advanced tokens.
 
 ## T15. Strings

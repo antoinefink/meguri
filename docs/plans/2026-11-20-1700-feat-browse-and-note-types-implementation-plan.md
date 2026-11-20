@@ -5,7 +5,9 @@ Decisions: `docs/design/decisions.md`, the 2026-11-20 rows `browser`, `home.deck
 Specs: `search/filter-tokens`, `browser/workspace`, `notetypes/workspace`, `notetypes/draft-save`, `sync/meguri-provider` MP7, `notetypes/schema-changes` G4 (changed), the "Changed 2026-11-20" lines in `search/*`, `browser/*`, `notetypes/editor-actions`, `render/preview`, `stats/card-info`; layout `docs/design/native-interface-contract.md` N21 and N22.
 Parent plan: `docs/plans/2026-10-12-1926-feat-meguri-anki-compatible-apple-app-plan.md` (its units U34, U35, U81–U92, U190–U203, U210–U223 are reused below; its superseded requirements carry notes).
 
-**Gate before any unit starts.** Every new spec line above is marked "Under review" in its file's Status line. No unit implements a section until Antoine approves it and the Status line says so (`specs/README-format.md`). The units that only need sections already in force (the existing U81, U82, U84, U85, U88 builder, U34, U35, U92 specs) can start now.
+**Gate before any unit starts.** Every new spec line above is marked "Under review" in its file's Status line. No unit implements a section until Antoine approves it and the Status line says so (`specs/README-format.md`). The units that only need sections already in force (the existing U81, U82, U84, U85, U88 builder, U34, U35, U92 specs) can start now, without the sections under review that touch them: U84 leaves out `browser/columns` C5's and C7.4's round 8 lines, U85 leaves out `browser/result-sets` H7's `fld:` keys, U92 is unaffected in data (C7's line is placement only), and U88a leaves out T3.1. Those parts start once approved.
+
+**Round 10.** The decisions of round 10 (`decisions.md`, `home.today`, `sync.statusPopover`, 2026-11-20) change the sidebar and Today: Today becomes a summary where the sidebar is visible, a deck's sidebar number counts every waiting card, and double-click, Return or S on a deck row starts it. A round 10 unit will change the sidebar and Today; Browse's units build on its sidebar. With Browse selected, the sidebar's deck rows are filters (`search/filter-tokens` T9): a click and Return set the Deck token, S and double-click do nothing, and their numbers are Browse's filter counts (T12.4), not waiting counts.
 
 ## 1. What already exists (master, 2026-11-20)
 
@@ -108,7 +110,7 @@ Ids U81–U92, U34, U35 are the parent plan's (their specs are in force). U260 o
 - U82, U81 and U88a need nothing new: they start first, in parallel. U84 needs U82 (shared due expression); U85 needs U81, U82, U84. U260 needs U88a; U261 and U262 need U84; U263 needs U260 and U85; U264 needs U85, U260, U262, U263.
 - Lane B: U86 needs U85; U87 needs U86; U265 needs U86; U266 needs U85; U92 is independent (start any time).
 - Lane C: U264 needs U85; U264a needs U264, U260, U262, U263; U270 needs U264a; U270a needs U270; U271 needs U270 and U263; U272 needs U270a and U261; U273 needs U270a and U87 (its Deck row runs Change Deck; its Type menu's Change Note Type… stays disabled until U284); U274 needs U92; U275 needs U270a and U87; U276 needs U275; U277 needs U275, U265, U266, U260 and U271 (the Duplicates token); U278 and U279 need U271 and U275; U280 needs U270 and U263 (the Suspended Cards count is a filter count of Deck + Suspended).
-- Lane D: U34 and U35 are independent of lanes A–C and start early; U267 and U268 need nothing beyond what exists (U267's summary needs U34's planner); U269 needs U34; U281 needs U267; U282 and U283 need U281 (U283 also U268); U284 needs U281 and U35; U285 needs U269 and U281; U286 needs U282; U287 needs U281 and U273.
+- Lane D: U34 and U35 are independent of lanes A–C and start early; U267 needs U34 (its summary runs U34's planner); U268 needs nothing beyond what exists; U269 needs U34; U281 needs U267; U282 and U283 need U281 (U283 also U268); U284 needs U281 and U35; U285 needs U269 and U281; U286 needs U282; U287 needs U281 and U273.
 - Up to three at a time, for example: {U82, U81, U88a} → {U84, U260, U34} → {U85, U262, U267} → {U86, U263, U268} → {U264, U87, U269} → {U264a, U265, U266} → then the Swift lanes two at a time (one VM job at a time), with U92 and U35 slotted in wherever a lane waits.
 
 ### Recommended first three
@@ -150,7 +152,7 @@ Each carries a note in the parent plan ("Superseded 2026-11-20 …"), with the d
 
 ## 7. Open points for the owner
 
-- The five open points of the first version of this plan (decisions 2, 12, 16, 18 and 19) were decided by Claude (coordinator) under Antoine's delegation of 2026-11-20; the coordinator adds the decisions row.
+- The five open points of the first version of this plan (decisions 2, 12, 16, 18 and 19) were decided by Claude (coordinator) under Antoine's delegation of 2026-11-20 and recorded in `decisions.md` (row `browser`, "Five points the specs raised"), as earlier delegated choices are (the rows that say "decided by Claude at Antoine's request").
 - Approve the spec lines under review (section 8), so the units of section 4 can start.
 
 ## 8. Spec lines awaiting approval

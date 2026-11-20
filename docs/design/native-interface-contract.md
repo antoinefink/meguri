@@ -844,6 +844,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `ho
 - Mac and iPad: the sidebar always starts with Today (`calendar`) and Browse (`magnifyingglass`), each with its system symbol; deck rows keep text only. Selecting Browse turns the rest of the sidebar into the filters (`browser/workspace` V6); selecting Today shows the decks again. One window, three panes: sidebar, table, inspector. No separate Browse window.
 - iPhone and the Duo folded or held tall: a third tab, Browse, between Decks and Settings; on the Duo, the middle symbol of the side tab bar (`browser/workspace` V14.3).
 - Mac: View › Browse ⇧⌘B. The Browse row returns to Browse's kept state (V1).
+- Round 10 (`decisions.md` `home.today`, 2026-11-20) makes Today a summary and gives deck rows waiting counts and Return, double-click and S to start a deck. Those apply with Today selected. With Browse selected the deck rows are filters: a click or Return sets the Deck token, S and double-click do nothing, and the number is Browse's count of the cards the value finds (T12.4).
 
 ### N21.2 The search field (2A)
 
