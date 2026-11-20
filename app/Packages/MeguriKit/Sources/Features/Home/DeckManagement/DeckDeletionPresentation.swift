@@ -15,9 +15,10 @@ public struct DeckDeletionFeedback: ViewModifier {
             #if os(macOS)
             .alert(Text(verbatim: model?.confirmation.map(DeckDeletionText.title) ?? ""),
                    isPresented: DeckDeletionBinding.question(model) { _ in true }) {
-                // Delete is never the default: Return cancels, as Esc does.
+                // Delete is never the default: Return cancels, as Esc does. The
+                // system gives the cancel role Esc, and Return when the other
+                // button is destructive.
                 Button(role: .cancel) { model?.cancel() } label: { Text("Cancel", bundle: .module) }
-                    .keyboardShortcut(.defaultAction)
                 Button(role: .destructive) { model?.confirm() } label: { Text("Delete", bundle: .module) }
             } message: {
                 Text(verbatim: model?.confirmation.map(DeckDeletionText.message) ?? "")

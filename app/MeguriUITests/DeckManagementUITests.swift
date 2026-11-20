@@ -265,10 +265,8 @@ final class DeckManagementUITests: XCTestCase {
         // Return deletes nothing: Delete is never the default.
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("\r", modifierFlags: [])
-        XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
-        XCTAssertTrue(parent.exists, "Return cancels")
-        alert = try ask()
-        // Esc cancels too.
+        XCTAssertFalse(parent.waitForNonExistence(timeout: 2), "Return deletes nothing")
+        // Esc cancels.
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
         XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
         XCTAssertTrue(parent.exists, "Esc cancels")
@@ -302,14 +300,22 @@ final class DeckManagementUITests: XCTestCase {
     func testDeckMenuDeleteActsOnTheShownDeckAndLeavesTextFieldsTheirKey() throws {
         let (app, bundle) = try launch()
         defer { app.terminate() }
-        let page = try create(["QZ71"], app: app, bundle: bundle)[0]
+        let pages = try create(["QZ71", "QZ72"], app: app, bundle: bundle)
         let deckMenu = app.menuBars.menuBarItems["Deck"]
-        try click(deckMenu, app: app, bundle: bundle)
         let item = deckMenu.menuItems["Delete Deck"]
+        // The last deck made is shown and no text field has focus: ⌘⌫ deletes it at once (empty).
+        XCTAssertTrue(element(app, pages[1]).waitForExistence(timeout: 10))
+        try click(deckMenu, app: app, bundle: bundle)
         XCTAssertTrue(item.waitForExistence(timeout: 10))
         XCTAssertTrue(item.isEnabled)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-        // In the search field ⌘⌫ deletes text: the command is disabled there.
+        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: .command)
+        XCTAssertFalse(app.sheets.firstMatch.waitForExistence(timeout: 2), "An empty deck: no question")
+        XCTAssertTrue(sidebarRow(app, label: "QZ72").waitForNonExistence(timeout: 10))
+        XCTAssertTrue(element(app, pages[1]).waitForNonExistence(timeout: 10), "The workspace returns to its root")
+        // In the search field ⌘⌫ deletes text and no deck.
+        try click(sidebarRow(app, label: "QZ71"), app: app, bundle: bundle)
+        XCTAssertTrue(element(app, pages[0]).waitForExistence(timeout: 10))
         let search = app.searchFields.firstMatch
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey("f", modifierFlags: .command)
@@ -317,15 +323,8 @@ final class DeckManagementUITests: XCTestCase {
         XCTAssertTrue(waitForValue(search, "QZ7"))
         app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: .command)
         XCTAssertTrue(waitForValue(search, ""), "⌘⌫ stays the field's")
-        XCTAssertTrue(element(app, page).exists, "The deck is kept")
+        XCTAssertTrue(sidebarRow(app, label: "QZ71").exists, "The deck is kept")
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-        // With the focus back in the sidebar, ⌘⌫ deletes the empty shown deck at once.
-        try click(sidebarRow(app, label: "QZ71"), app: app, bundle: bundle)
-        XCTAssertTrue(element(app, page).waitForExistence(timeout: 10))
-        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: .command)
-        XCTAssertFalse(app.sheets.firstMatch.waitForExistence(timeout: 2), "⌘⌫ acts on the shown, empty deck: no question")
-        XCTAssertTrue(sidebarRow(app, label: "QZ71").waitForNonExistence(timeout: 10))
-        XCTAssertTrue(element(app, page).waitForNonExistence(timeout: 10))
     }
 
     // MARK: Support
