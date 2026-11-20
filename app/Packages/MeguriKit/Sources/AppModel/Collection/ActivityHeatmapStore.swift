@@ -51,6 +51,9 @@ public final class ActivityHeatmapStore {
     /// an unavailable collection), so the pages that failed ask again.
     private var attempt: UInt64 = 0
     @ObservationIgnored private var failed = false
+    /// Counts readiness signals, so a read that fails after one arrived mid-flight
+    /// asks again at once instead of waiting for the next.
+    @ObservationIgnored private var readiness: UInt64 = 0
 
     public init(service: any ActivityService = CoreActivityService()) {
         self.service = service
@@ -76,10 +79,12 @@ public final class ActivityHeatmapStore {
             return
         }
         let expected = generation
+        let ready = readiness
         let deckID: Int64? = if case .deck(let id) = scope { id } else { nil }
         let days: ActivityDays
         do { days = try await service.heatmap(deckID: deckID) } catch {
-            if !Task.isCancelled { failed = true }
+            guard !Task.isCancelled else { return }
+            if ready != readiness { attempt &+= 1 } else { failed = true }
             return
         }
         guard !Task.isCancelled, request.stamp == stamp(for: scope),
@@ -110,6 +115,7 @@ public final class ActivityHeatmapStore {
     /// The collection is ready (again), or a long op released it: a read that failed
     /// meanwhile is asked again.
     public func collectionReady() {
+        readiness &+= 1
         guard failed else { return }
         failed = false
         attempt &+= 1

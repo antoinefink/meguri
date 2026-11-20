@@ -36,12 +36,12 @@ import Testing
                 _calls.append(deckID)
                 return (holding, self.generation, self.value, self.fails)
             }
-            if fails { throw .unavailable(reason: "exclusive phase") }
             if wait {
                 await withCheckedContinuation { continuation in
                     lock.withLock { holds.append(continuation) }
                 }
             }
+            if fails { throw .unavailable(reason: "exclusive phase") }
             return ActivityDays(generation: generation, schedulerDay: 10, nextDayAt: 0,
                 today: .init(year: 2026, month: 10, day: 12, weekday: 2),
                 counts: [UInt32](repeating: value, count: 371))
@@ -198,6 +198,24 @@ import Testing
         let current = store.request(.collection)
         store.collectionReady()
         #expect(store.request(.collection) == current)
+    }
+
+    @Test func aReadyCollectionDuringAFailingReadAsksAgainAtOnce() async {
+        let service = FakeService()
+        let store = ActivityHeatmapStore(service: service)
+        service.fails = true
+        service.hold()
+        let first = store.request(.collection)
+        let task = Task { await store.load(first) }
+        while service.held == 0 { await Task.yield() }
+        // Ready arrives while the read is out, before it fails: no later signal will come.
+        store.collectionReady()
+        service.release()
+        await task.value
+        #expect(store.request(.collection) != first, "the page's task runs again")
+        service.fails = false
+        await loaded(store, .collection)
+        #expect(store.days(.collection) != nil)
     }
 
     @Test func onlyAFewScopesAreKept() async {

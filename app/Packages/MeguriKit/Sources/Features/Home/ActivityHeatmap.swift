@@ -63,7 +63,10 @@ struct ActivityHeatmapSection: View {
     #endif
 
     var body: some View {
-        let width = measured ?? widths.row(page)
+        // A shared width cleared by a resize while no row showed (hidden or away) clears
+        // this row's too: it shows again to measure, rather than judge by an old width.
+        let shared = widths.row(page)
+        let width = shared == 0 ? 0 : measured ?? shared
         let geometry = ActivityGrid.Geometry(width: width, minimumPitch: Self.minimumPitch)
         let days = store.days(scope)
         let grid = days.map {
@@ -83,31 +86,27 @@ struct ActivityHeatmapSection: View {
         }
         if visible {
             Section {
-                VStack(alignment: .leading, spacing: 0) {
-                    // Measures the width the row offers, whatever the squares below take: a
-                    // remembered width from another column must not widen the row it is
-                    // measured from, or a stale width would keep itself.
+                VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                    // Only this clear view sizes the row, and it reports the width offered.
+                    // The squares sit in its overlay, so an old width (taken before a fold
+                    // or in another column) can never feed itself.
                     Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: 0)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: geometry.height)
                         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
                             measured = $0
                             widths.measuredRow(page, $0)
                         }
-                    VStack(alignment: .leading, spacing: Spacing.xSmall) {
-                        Group {
+                        .overlay(alignment: .leading) {
                             if let grid, let days {
                                 ActivityGridView(grid: grid, geometry: geometry, today: days.today)
-                            } else {
-                                Color.clear
                             }
                         }
-                        .frame(width: width, height: geometry.height, alignment: .leading)
-                        summary(grid, weeks: geometry.weeks)
-                            .font(.footnote)
-                            .quietText()
-                            .fixedSize(horizontal: false, vertical: true)
-                            .opacity(shown ? 1 : 0)
-                    }
+                    summary(grid, weeks: geometry.weeks)
+                        .font(.footnote)
+                        .quietText()
+                        .fixedSize(horizontal: false, vertical: true)
+                        .opacity(shown ? 1 : 0)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onAppear { widths.rowAppeared(page) }
