@@ -116,7 +116,7 @@ extension ReviewCollectionStartupTests {
             // First deliver actual settings/visible work in Available's window,
             // before Swift foreground entry can perform any repair or gate.
             let windowReferences = ["available-current.png", "available-head.mp3"]
-            app.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            app.sync.setDeviceSettings(paused: false, automatic: false)
             app.sync.visibleMedia(windowReferences, generation: generation)
             await app.sync.waitForInputs()
             try #require(try await serviceAppSignal(priorityDone.stream, stage: "Available settings and visible media ACK before Swift foreground entry"))
@@ -126,7 +126,7 @@ extension ReviewCollectionStartupTests {
             // the unchanged screen's replay and the original SDK result/ACK.
             foreground = Task { @MainActor in await app.sync.foregroundAfterLocalResume() }
             try #require(try await serviceAppSignal(account.entered, stage: "ordinary foreground account read held"))
-            app.sync.setDeviceSettings(paused: false, automatic: false, media: true)
+            app.sync.setDeviceSettings(paused: false, automatic: false)
             await app.sync.waitForInputs()
             try #require(try await serviceAppSignal(priorityDone.stream, stage: "replayed visible media ACK before foreground proof"))
             #expect(completedReferences == [windowReferences, windowReferences])
@@ -144,6 +144,9 @@ extension ReviewCollectionStartupTests {
             }
             try #require(try await serviceAppSignal(drained.stream, stage: "original SDK result and command ACK drain while account proof held"))
             await drain?.value
+            // The original Sync Now exchange has returned its result. Take its completion
+            // here: the later exchange must wait for its own, or it is still running at close.
+            try await backend.waitForExchange()
             #expect(await sdk.deliveredSentBatches.filter { $0.id == batch && $0.zone == heldZone }.count == 1)
             for (name, revision) in heldRevisions {
                 let ack = try #require(try await backend.workflow.entityFacts(name: name))

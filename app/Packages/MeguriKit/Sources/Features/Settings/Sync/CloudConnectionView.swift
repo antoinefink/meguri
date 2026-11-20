@@ -31,7 +31,7 @@ public struct CloudConnectionView: View {
     private var page: CloudSyncEntry { collection.syncPresentation.connectionPath.last ?? entry }
     private var publicationReady: Bool {
         SyncStatusPresentation.publicationReady(summary?.decision,
-            accountAvailable: sync.status?.accountStatus == .available, paused: sync.settings.paused,
+            accountAvailable: sync.status?.accountStatus == .available,
             busy: preparing || confirming || cancelling || submitted
                 || sync.connectionPreviewActive || sync.connectionOperationActive)
     }
@@ -43,9 +43,6 @@ public struct CloudConnectionView: View {
         }
         .interactiveDismissDisabled(confirming || preparing || cancelling || sync.initialAdoptionActive)
         .task { await prepare() }
-        .onChange(of: sync.settings.paused) { _, paused in
-            if paused, !submitted { Task { await sync.cancelConnectionPreview() } }
-        }
         .onChange(of: sync.generation) { _, _ in publication.invalidate() }
         .onDisappear {
             publication.invalidate()
@@ -106,7 +103,7 @@ public struct CloudConnectionView: View {
             } else if confirming {
                 ProgressView(SyncText.value("sync.publish.preparing"))
             } else if submitted {
-                if confirmation == .resume { SyncStatusRows(collection: collection) }
+                if confirmation == .resume { SyncMainStatusRows(collection: collection) }
                 else if let recovery = sync.recovery { CloudRecoveryContent(collection: collection, recovery: recovery) }
                 else if publication.accepted, sync.connectionOperationActive {
                     ProgressView(SyncText.value("sync.publish.uploading"))
@@ -124,7 +121,7 @@ public struct CloudConnectionView: View {
                     Text(SyncText.value("sync.counts.unknown"))
                         .accessibilityIdentifier("sync.connect.unknown")
                     Button(SyncText.value("sync.recovery.tryAgain")) { Task { await prepare() } }
-                        .disabled(sync.settings.paused || sync.connectionOperationActive)
+                        .disabled(sync.connectionOperationActive)
                         .accessibilityIdentifier("sync.connect.tryAgain")
                     if sync.connectionOperationActive { Text(SyncText.value("sync.recovery.error.busy")) }
                 }
@@ -155,7 +152,7 @@ public struct CloudConnectionView: View {
                 || (confirming && confirmation == .resume)) {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(SyncText.value("sync.connect.continue.confirm")) { Task { await confirm(.resume) } }
-                        .disabled(confirming || preparing || cancelling || submitted || sync.settings.paused
+                        .disabled(confirming || preparing || cancelling || submitted
                             || sync.connectionPreviewActive || sync.connectionOperationActive)
                         .accessibilityIdentifier("sync.connect.continue")
                 }
@@ -166,7 +163,6 @@ public struct CloudConnectionView: View {
                         Button(SyncText.value(page == .connect ? "sync.connect.useICloud.confirm" : "sync.adopt.confirm"), role: .destructive) {
                             Task { await confirm(.adoption) }
                         }
-                        .disabled(sync.settings.paused)
                         .accessibilityIdentifier("sync.replaceLocal.replace")
                     }
                 }
@@ -193,7 +189,7 @@ public struct CloudConnectionView: View {
             case .confirmResume:
                 Text(SyncText.format("sync.connect.continue.message", Int64(clamping: summary.unsentChangeCount)))
             case .chooseCollection: Text(SyncText.value("sync.connect.two.message"))
-            case .cloudUnreadable: Text(SyncText.value("sync.attention.rootUnreadable"))
+            case .cloudUnreadable: Text(SyncText.value("sync.needsYou.rootUnreadable"))
             }
         }
         if page == .connect, SyncStatusPresentation.permitsResume(summary.decision) {
@@ -272,23 +268,22 @@ public struct CloudConnectionView: View {
     }
     private var publicationChoice: some View {
         Group {
-            Text(SyncText.value("sync.decision.title.none"))
+            Text(SyncText.value("sync.needsYou.fence.none"))
             Text(SyncText.value("sync.decision.message"))
             if let summary {
                 CloudCountSection(counts: summary.localCounts, cloud: false)
-                if !sync.settings.paused, let counts = summary.manifestCounts {
+                if let counts = summary.manifestCounts {
                     CloudCountSection(counts: counts, cloud: true, publishedAt: summary.publishedAtMilliseconds)
                 }
             }
             Section {
-                if sync.settings.paused || sync.status?.accountStatus == .available {
+                if sync.status?.accountStatus == .available {
                     NavigationLink(value: CloudSyncEntry.replaceCloud) {
                         Text(SyncText.value("sync.decision.replace"))
                     }
                     .disabled(!publicationReady)
                     .accessibilityIdentifier("sync.publicationChoice.replaceICloud")
                     Text(SyncText.value("sync.decision.replace.caption"))
-                    if sync.settings.paused { Text(SyncText.value("sync.status.paused.user")) }
                 }
                 Button(SyncText.value("sync.decision.keepLocal")) { Task { await keepLocalOnly() } }
                     .disabled(sync.connectionOperationActive)
@@ -304,7 +299,6 @@ public struct CloudConnectionView: View {
                 Text(SyncText.value(caption)).foregroundStyle(.secondary)
             }
         }
-        .disabled(sync.settings.paused)
         .accessibilityIdentifier(destination == .replaceLocal ? "sync.connect.choice.useICloud" : "sync.connect.choice.replaceICloud")
     }
     private func canAdopt(_ summary: CloudConnectionSummary, page: CloudSyncEntry) -> Bool {
@@ -330,7 +324,7 @@ public struct CloudConnectionView: View {
     }
     private func prepare() async {
         guard !preparing, !cancelling, !sync.connectionPreviewActive, !sync.connectionOperationActive,
-              !sync.settings.paused, sync.preview == nil, !submitted else { return }
+              sync.preview == nil, !submitted else { return }
         preparing = true; errorKey = nil
         publication.clearRefusal()
         defer { preparing = false }
@@ -343,7 +337,7 @@ public struct CloudConnectionView: View {
     }
     private func confirm(_ intent: CloudConnectionConfirmation) async {
         guard !confirming, !submitted, !cancelling, !preparing, !sync.connectionOperationActive,
-              !sync.settings.paused, let summary else { return }
+              let summary else { return }
         if intent != .publication, collection.review != nil { errorKey = "sync.recovery.error.sessionActive"; return }
         switch intent {
         case .adoption: guard canAdopt(summary, page: page) else { return }

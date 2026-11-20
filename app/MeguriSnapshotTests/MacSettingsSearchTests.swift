@@ -58,10 +58,11 @@ import Testing
                         window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded(); window.displayIfNeeded()
                         let graph = nativeAccountGraph(in: controller.view, window: window, controller: controller)
                         lastObservedGraph = graph
-                        return graph.complete && graph.matches("settings.accountSync.service").count == 1
+                        return graph.complete && graph.matches("settings.sync.service").count == 1
                     }
                     guard let graph = lastObservedGraph else { throw NativeAccountStateFailure.incompleteGraph }
-                    try selectNativeService(SyncText.value("sync.service.meguri"), in: graph)
+                    // T19.2: a choice made while the value is Off opens no confirmation.
+                    try selectNativeService(.meguri, in: graph)
                 } catch {
                     lastObservedGraph?.recordDiagnostic()
                     throw error
@@ -69,25 +70,32 @@ import Testing
                 try await waitForNativeAccountState {
                     collection.sync.providerState?.selection == .meguri && !collection.sync.meguriBusy
                 }
+                #expect(window.attachedSheet == nil)
                 window.layoutIfNeeded(); controller.view.layoutSubtreeIfNeeded()
                 let accountGraph = nativeAccountGraph(in: controller.view, window: window, controller: controller)
                 for id in ["address", "username", "password", "signIn"] {
-                    let accountElementResult = try accountGraph.element("settings.accountSync.meguri.\(id)")
+                    let accountElementResult = try accountGraph.element("settings.sync.meguri.\(id)")
                     _ = try #require(accountElementResult)
                 }
-                let passwordElementResult = try accountGraph.element("settings.accountSync.meguri.password")
+                let passwordElementResult = try accountGraph.element("settings.sync.meguri.password")
                 let password = try #require(passwordElementResult)
                 let securePassword = try nativeAccountString(in: password,
                     selector: #selector(NSAccessibilityProtocol.accessibilitySubrole)) == NSAccessibility.Subrole.secureTextField.rawValue
                 #expect(securePassword)
-                for id in ["settings.accountSync.iCloudHeading", "settings.accountSync.connect", "settings.accountSync.automatic", "settings.accountSync.media"] {
+                // P25.3: selected and not yet connected, Sync Automatically shows and is disabled.
+                let automaticElementResult = try accountGraph.element("settings.sync.automatic")
+                _ = try #require(automaticElementResult)
+                #expect(!collection.sync.automaticSwitchAvailable && collection.sync.automaticSwitchValue)
+                // T19.6: no media toggle, Pause, Sign Out, Stop Using or Connect; no iCloud footer.
+                for id in ["settings.sync.media", "settings.sync.pause", "settings.sync.stop", "settings.sync.connect",
+                           "settings.sync.meguri.signOut", "settings.sync.privacyFooter"] {
                     let absent = try accountGraph.element(id) == nil
                     #expect(absent)
                 }
                 #expect(collection.sync.meguriPhase == .unconfigured)
                 #expect(collection.sync.meguriPreview == nil && collection.sync.meguriRoundReport == nil)
                 let currentGraph = nativeAccountGraph(in: controller.view, window: window, controller: controller)
-                do { try selectNativeService(SyncText.value("sync.service.iCloud"), in: currentGraph) }
+                do { try selectNativeService(.iCloud, in: currentGraph) }
                 catch { currentGraph.recordDiagnostic(); throw error }
                 try await waitForNativeAccountState { window.attachedSheet != nil }
                 let sheet = try #require(window.attachedSheet)
@@ -173,7 +181,7 @@ import Testing
         func recordDiagnostic() {
             print("nativeAccountGraph mounted=\(mounted) complete=\(complete)"
                 + " visited=\(visited.count) nodes=\(nodes.count)"
-                + " exactServiceCount=\(matches("settings.accountSync.service").count)"
+                + " exactServiceCount=\(matches("settings.sync.service").count)"
                 + " objectLimit=\(objectLimit) depthLimit=\(depthLimit) foreign=\(foreign)"
                 + " unsupported=\(unsupported) malformed=\(malformed) unknownNilChildren=\(unknownNilChildren)")
         }
@@ -283,8 +291,8 @@ import Testing
         inspect(root, parent: nil, depth: 0, native: false)
         return graph
     }
-    private func selectNativeService(_ intendedLabel: String, in graph: NativeAccountGraph) throws {
-        let matches = graph.matches("settings.accountSync.service")
+    private func selectNativeService(_ intended: SyncProviderSelection, in graph: NativeAccountGraph) throws {
+        let matches = graph.matches("settings.sync.service")
         guard graph.complete else { throw NativeAccountStateFailure.incompleteGraph }
         guard matches.count == 1, let service = matches.first else {
             throw NativeAccountStateFailure.duplicateIdentifier
@@ -299,14 +307,26 @@ import Testing
             guard let role = $0.role else { return false }
             return optionRoles.contains(role)
         }
-        guard options.count == 2 else { throw NativeAccountStateFailure.invalidOptions }
+        // T19.2: Off, Meguri Sync and iCloud. iCloud's one-line menu caption carries
+        // its Beta label; an element that reports the spoken label instead is the same choice.
+        guard options.count == 3 else { throw NativeAccountStateFailure.invalidOptions }
         let labels = try options.map {
             try nativeAccountString(in: $0.object, selector: #selector(NSAccessibilityProtocol.accessibilityLabel))
         }
-        let expected: Set<String> = [SyncText.value("sync.service.iCloud"), SyncText.value("sync.service.meguri")]
-        guard expected.count == 2, labels.allSatisfy({ $0 != nil }),
-              Set(labels.compactMap { $0 }) == expected else { throw NativeAccountStateFailure.invalidOptions }
-        let targets = zip(options, labels).filter { $0.1 == intendedLabel }.map { $0.0 }
+        let off = SyncText.value("sync.service.off"), meguri = SyncText.value("sync.service.meguri")
+        let iCloud: Set<String> = ["\(SyncText.value("sync.service.iCloud.name")) (\(SyncText.value("sync.service.beta")))",
+            SyncText.value("sync.service.iCloud.accessibility")]
+        let found = labels.compactMap { $0 }
+        guard found.count == 3, found.filter({ $0 == off }).count == 1, found.filter({ $0 == meguri }).count == 1,
+              found.filter({ iCloud.contains($0) }).count == 1 else { throw NativeAccountStateFailure.invalidOptions }
+        let targets = zip(options, labels).filter { _, label in
+            guard let label else { return false }
+            switch intended {
+            case .localOnly: return label == off
+            case .meguri: return label == meguri
+            case .iCloud: return iCloud.contains(label)
+            }
+        }.map { $0.0 }
         guard targets.count == 1, let target = targets.first else { throw NativeAccountStateFailure.invalidOptions }
         // Only options ALREADY exposed by this exact control are actionable here.
         // Never open the picker: public menu-opening actions may synchronously track.

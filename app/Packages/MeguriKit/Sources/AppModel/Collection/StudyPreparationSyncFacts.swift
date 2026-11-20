@@ -54,10 +54,12 @@ extension StudyPreparationSyncFacts {
             switch input.meguriRoutine {
             case .exchanging:
                 return .init(exchangeExpected: true, activity: .exchanging)
-            case nil, .unreported, .network, .waiting:
+            case nil, .unreported, .network, .waiting, .cancelled:
+                // A round cancelled when the app left the foreground ended no
+                // exchange: the next round is still to come.
                 return waiting
             case .idle, .pending, .mediaBlocked, .authentication, .acceptanceUnknown, .fullSyncRequired,
-                 .server, .cancelled, .failed:
+                 .server, .failed:
                 return .init(exchangeExpected: true, activity: .settled(endedMilliseconds: input.meguriLastExchange))
             }
         case .iCloud:

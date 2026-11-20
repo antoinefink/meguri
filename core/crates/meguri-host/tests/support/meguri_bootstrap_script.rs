@@ -63,7 +63,13 @@ pub fn meta(modified: i64, usn: i32) -> Vec<u8> {
         NOW - 5000, NOW / 1000).into_bytes()
 }
 struct Step { method: Method, reply: Reply }
-pub enum Reply { Bytes(Vec<u8>), Lost }
+pub enum Reply {
+    Bytes(Vec<u8>),
+    Lost,
+    /// Runs the action when the request has arrived, then answers with the bytes.
+    #[allow(dead_code)]
+    After(Box<dyn FnOnce() + Send>, Vec<u8>),
+}
 #[derive(Default)]
 pub struct Script { steps: Mutex<VecDeque<Step>>, calls: Mutex<Vec<String>> }
 impl Script {
@@ -95,7 +101,12 @@ impl SyncTransport for ScriptTransport {
             }
             zstd::stream::decode_all(compressed.as_slice()).unwrap();
             self.0.calls.lock().unwrap().push(request.url);
-            match step.reply {
+            let reply = match step.reply {
+                Reply::After(action, bytes) => { action(); Reply::Bytes(bytes) }
+                other => other,
+            };
+            match reply {
+                Reply::After(..) => unreachable!("the action ran above"),
                 Reply::Lost => Err(SyncError::Network(meguri_sync::NetworkError {
                     cause: meguri_sync::NetworkCause::Connection, head_arrived: true, detail: "scripted lost answer".into() })),
                 Reply::Bytes(bytes) => Ok(TransportResponse { status: 200,

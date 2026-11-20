@@ -966,32 +966,32 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
         }
     }
 
-    @Test(.timeLimit(.minutes(1))) func coldMeguriPausedResumePersistsAfterAttachmentAndReload() async throws {
+    @Test(.timeLimit(.minutes(1))) func coldMeguriStoredPauseBecomesAutomaticOffAtTheAttachment() async throws {
+        // sync/policy P25.2: no Resume exists. A pause that an earlier build stored
+        // is turned into Sync Automatically off, in one provider write, when the
+        // person's first sync action attaches the service.
         try await withNativeMeguriNoFileOwner(coldSelected: true, coldPaused: true) { app in
             let sync = app.sync
             try #require(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
-            try #require(sync.providerState?.selection == .meguri && sync.settings.paused)
+            try #require(sync.providerState?.selection == .meguri && sync.settings.paused && sync.updateHold)
             try #require(app.backends.isEmpty && !sync.meguriSignInAttached)
-            let automatic = sync.settings.automatic, media = sync.settings.media
-            let gate = StartupResultGate()
-            app.beforeBackend = { await gate.hold() }
+            app.defaults.removeObject(forKey: "meguri.sync.round2Migrated")
+            app.defaults.removeObject(forKey: "meguri.sync.automatic")
             let calls = Mutex<[BridgeCall]>([])
             try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
-                app.owner.resumeMeguri()
-                #expect(app.owner.meguriSignInPreparing)
-                app.owner.resumeMeguri()
-                await gate.requested()
-                #expect(sync.settings.paused)
-                #expect(calls.withLock { !$0.contains(.providerSaveSettings) })
-                gate.release()
-                await app.owner.waitForMeguriSignInPreparation()
+                // Choosing or signing in to the service clears the hold first, then attaches.
+                #expect(await sync.clearUpdateHold())
+                #expect(!sync.storedAutomatic)
+                try await app.owner.prepareSyncServiceSelection()
                 await sync.waitForInputs()
                 await sync.waitForMeguriAction()
                 try #require(app.sync === sync && sync.meguriSignInAttached && app.backends.count == 1)
-                #expect(!app.owner.meguriSignInPreparing && !sync.deviceSettingsSettling && !sync.settings.paused)
+                #expect(!app.owner.meguriSignInPreparing && !sync.deviceSettingsSettling)
+                #expect(!sync.settings.paused && !sync.settings.automatic && sync.settings.media && !sync.updateHold)
                 let provider = try await CoreProviderService.attached()
                 let committed = try #require(try await provider.refresh().settings)
-                #expect(!committed.paused && committed.automatic == automatic && committed.media == media)
+                #expect(!committed.paused && !committed.automatic)
+                #expect(app.defaults.bool(forKey: "meguri.sync.round2Migrated"))
                 sync.loadMeguriConnection()
                 await sync.waitForMeguriAction()
                 let reloaded = try #require(try await provider.refresh().settings)
@@ -1000,11 +1000,65 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
                 #expect(try await CoreCollectionService().lifecycle() == .noCollection)
                 #expect(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
                 #expect(!FileManager.default.fileExists(atPath: app.owner.configuration.collectionLocation.collectionFile.path))
-                #expect(calls.withLock { $0.filter { $0 == .prepareCloudConnectionHost }.count } == 1)
                 #expect(calls.withLock { $0.filter { $0 == .providerSaveSettings }.count } == 1)
                 #expect(calls.withLock { !$0.contains(.providerConfigureMeguri) && !$0.contains(.providerStartLogin) })
                 #expect(calls.withLock { Set($0).isDisjoint(with: nativeMeguriTransferCalls) })
                 #expect(sync.meguriPreview == nil && sync.meguriLastCommand == nil && sync.meguriRoundReport == nil)
+            }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)), arguments: [true, false])
+    func coldMeguriHoldClearedBeforeARelaunchCommitsAutomaticOffAtTheLaterAttachment(clearsAgain: Bool) async throws {
+        // sync/policy P25.2, P25.3: with no provider attached, a clearing act changes
+        // only this device's own values, and the app may quit before the service
+        // attaches. The earlier build left the device paused and stored no value of
+        // its own for Sync Automatically, which then reads on (P25.3). The later
+        // attachment must commit the pause as off, with or without a second act, and
+        // the device's own value must stay off so a completed setup cannot turn it on.
+        try await withNativeMeguriNoFileOwner(coldSelected: true, coldPaused: true) { app in
+            let sync = app.sync
+            try #require(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
+            try #require(sync.providerState?.selection == .meguri && sync.settings.paused && sync.updateHold)
+            try #require(app.backends.isEmpty && !sync.meguriSignInAttached)
+            app.defaults.removeObject(forKey: "meguri.sync.round2Migrated")
+            app.defaults.removeObject(forKey: "meguri.sync.automatic")
+            try #require(sync.storedAutomatic)
+            let calls = Mutex<[BridgeCall]>([])
+            try await MaintenanceCallObservation.$capture.withValue({ value in calls.withLock { $0.append(value) } }) {
+                #expect(await sync.clearUpdateHold())
+                #expect(!sync.storedAutomatic && !sync.settings.paused && !sync.settings.automatic)
+                // Nothing reached the provider: no Host was prepared for this owner.
+                #expect(app.backends.isEmpty && calls.withLock { !$0.contains(.providerSaveSettings) })
+                #expect(!app.defaults.bool(forKey: "meguri.sync.round2Migrated"))
+                #expect(app.defaults.object(forKey: "meguri.sync.automatic") as? Bool == false)
+                try #require(await app.owner.close())
+                // The next launch: the same installation and the same stored values.
+                let relaunched = try ServiceAppHarness(root: app.root, wire: app.wire, defaults: app.defaults,
+                    cachedIdentityAvailable: false, clock: .system)
+                do {
+                    await relaunched.owner.start()
+                    let later = relaunched.sync
+                    try #require(relaunched.owner.state == .noFile && later.providerState?.selection == .meguri)
+                    try #require(relaunched.backends.isEmpty && !later.meguriSignInAttached)
+                    // The service's own record was never written, yet the switch reads off.
+                    #expect(!later.storedAutomatic && !later.automaticSwitchValue)
+                    if clearsAgain { #expect(await later.clearUpdateHold()) }
+                    try await relaunched.owner.prepareSyncServiceSelection()
+                    await later.waitForInputs()
+                    await later.waitForMeguriAction()
+                    try #require(relaunched.sync === later && later.meguriSignInAttached && relaunched.backends.count == 1)
+                    #expect(!later.settings.paused && !later.settings.automatic && later.settings.media && !later.updateHold)
+                    #expect(!later.storedAutomatic && !later.automaticSwitchValue && !later.deviceSettingsSettling)
+                    let provider = try await CoreProviderService.attached()
+                    let committed = try #require(try await provider.refresh().settings)
+                    #expect(!committed.paused && !committed.automatic)
+                    #expect(app.defaults.bool(forKey: "meguri.sync.round2Migrated"))
+                    #expect(app.defaults.object(forKey: "meguri.sync.automatic") as? Bool == false)
+                    #expect(calls.withLock { $0.filter { $0 == .providerSaveSettings }.count } == 1)
+                    #expect(calls.withLock { !$0.contains(.providerConfigureMeguri) && !$0.contains(.providerStartLogin) })
+                    try #require(await relaunched.owner.close())
+                } catch { _ = await relaunched.owner.close(); throw error }
             }
         }
     }

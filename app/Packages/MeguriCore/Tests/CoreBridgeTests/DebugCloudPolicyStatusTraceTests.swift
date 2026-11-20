@@ -140,7 +140,7 @@ struct DebugCloudPolicyStatusTraceTests {
     private func policyStatus(counts: (UInt64, UInt64, UInt64, UInt64) = (0, 0, 0, 0),
                               completed: MeguriCoreBindings.CloudPolicyExchangeRecord? = nil,
                               attempt: MeguriCoreBindings.CloudPolicyExchangeRecord? = nil) -> CoreBridge.CloudPolicyStatus {
-        .init(MeguriCoreBindings.CloudPolicyStatus(state: .awaitingEvidence,
+        .init(MeguriCoreBindings.CloudPolicyStatus(state: .awaitingEvidence, stateWithoutAttention: nil,
             pending: counts.0, heldBack: counts.1, inFlight: counts.2, incomingWaiting: counts.3,
             attention: [], media: policyMedia, mediaPaused: false, error: nil, accountStatus: .available,
             accountMatchesBinding: true, asOfMs: nil, lastCompleted: completed, lastAttempt: attempt,

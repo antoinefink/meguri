@@ -1140,7 +1140,8 @@ fn zero_progress_apply_waits_for_guarded_media_arrival_without_losing_ready_work
                 publication_control_record(&inventory.zones[&sdk.collection_zone].records[&record_name]).unwrap();
             assert_eq!(saved.system_fields.0, entity.acked_system_fields);
             assert_eq!(saved.encrypted.as_deref(), Some(entity.acked_envelope.0.as_slice()));
-            assert!(policy.status().unwrap().media_paused);
+            // P25.1: the status never reports media as paused.
+            assert!(!policy.status().unwrap().media_paused);
             let enabled = policy
                 .clone()
                 .input(CloudPolicyEvent::Settings {
@@ -1673,7 +1674,8 @@ fn unsyncable_local_file_blocks_download_candidates_and_retained_admission() {
             .consume_media_feed(&fixture.workflow.host.collection().unwrap(), &service)
             .unwrap();
         let policy = media_policy(&fixture);
-        assert!(policy.status().unwrap().media_paused);
+        // P25.1: the status never reports media as paused.
+            assert!(!policy.status().unwrap().media_paused);
         let enabled = policy
             .clone()
             .input(CloudPolicyEvent::Settings {
