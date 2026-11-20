@@ -799,6 +799,17 @@ impl Runtime {
         collection: Option<&Collection>,
         engine: &Engine,
     ) -> Result<[u8; 16], RuntimeError> {
+        self.record_cloud_adoption(preview, collection, engine, false)
+    }
+    /// `proved_no_user_content` is V27.2 row 5's condition, recorded in the op
+    /// so the exclusive phase tests it again. Only `start_setup_adoption` sets it.
+    pub(super) fn record_cloud_adoption(
+        &self,
+        preview: &Preview,
+        collection: Option<&Collection>,
+        engine: &Engine,
+        proved_no_user_content: bool,
+    ) -> Result<[u8; 16], RuntimeError> {
         self.wait_incoming_idle();
         if preview.active.is_none() || preview.active_epoch.is_none() {
             return Err(PublicationError::NotOffered.into());
@@ -900,6 +911,7 @@ impl Runtime {
             started_at_ms: self.adapter_now()?,
             transport_wait: false,
             retry_after_ms: None,
+            requires_no_user_content: proved_no_user_content,
         };
         self.check_adoption_preview(preview, collection)?;
         let cleanup_evidence = collection
@@ -2343,6 +2355,15 @@ impl Runtime {
         owner.slot.check_verified_review(ReplaceReason::CloudAdopt)?;
         self.check_adoption_before(op, Some(exclusive.collection()))?;
         require_registered_media(media)?;
+        // V27.2 row 5, "proof is checked again where it is used": no writer
+        // runs in this phase, so what this reads is what would be replaced.
+        // Refusing before the stage is taken leaves the caller's abort
+        // (V14.3's first `ready` row) with nothing replaced.
+        if op.requires_no_user_content
+            && Self::exclusive_content_proof(&working, media) != crate::cloud::setup::ContentProof::ProvedNone
+        {
+            return Err(PublicationError::AuthorityChanged.into());
+        }
         let stage = owner
             .stage
             .lock()
@@ -2823,6 +2844,7 @@ mod tests {
             started_at_ms: 1,
             transport_wait: false,
             retry_after_ms: None,
+            requires_no_user_content: false,
         };
         let payload = codec::Payload::MediaName(codec::MediaName {
             name: b"photo.jpg".to_vec(),

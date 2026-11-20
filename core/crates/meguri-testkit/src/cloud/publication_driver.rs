@@ -271,6 +271,31 @@ pub(super) fn handle(device: &mut Device, input: Input) -> Result<serde_json::Va
                 .confirm_connection_publication(&preview, &collection)?,
         ),
         Input::AdoptionConfirm(preview) => value(device.host.confirm_cloud_adoption(&preview)?),
+        Input::StopICloud => {
+            device.host.stop_using_icloud()?;
+            value(())
+        }
+        Input::SetupDecision(preview, history) => {
+            value(device.runtime()?.connection_setup_decision(&preview, history)?)
+        }
+        Input::SetupStart(preview, history) => {
+            use meguri_sync::cloud::setup::SetupRow;
+            let runtime = device.runtime()?;
+            let started: Option<[u8; 16]> = match runtime.connection_setup_decision(&preview, history)?.row {
+                SetupRow::Resume => {
+                    runtime.start_setup_resume(&preview, history, &collection)?;
+                    None
+                }
+                SetupRow::AdoptInitial | SetupRow::AdoptOverNoContent => Some(runtime.start_setup_adoption(
+                    &preview,
+                    history,
+                    Some(&collection),
+                    device.host.engine(),
+                )?),
+                _ => Some(runtime.start_setup_publication(&preview, history, &collection)?),
+            };
+            value(started)
+        }
         Input::AdoptionReply(work, reply) => {
             let mut diagnostic = meguri_sync::cloud::adoption::AdoptionDiagnosticRecorder::new(&work.task);
             let result = device.host.cloud_adoption_reply_with_diagnostic(

@@ -193,6 +193,70 @@ impl CoreHost {
             self.engine(),
         )
     }
+    /// V27.6, "not after the other service". Provider metadata keeps no durable
+    /// record that Meguri Sync was never ready since an iCloud stop: a handoff
+    /// clears `meguri_binding`, so its absence proves nothing. Until such a
+    /// record exists this is `Unknown`, and Resume keeps its confirmation.
+    pub fn cloud_setup_other_service_history(&self) -> meguri_sync::cloud::setup::OtherServiceHistory {
+        meguri_sync::cloud::setup::OtherServiceHistory::Unknown
+    }
+    /// V27.2: the row the core picked for this ready preview.
+    pub fn cloud_setup_decision(
+        &self,
+        preview: &Preview,
+    ) -> Result<meguri_sync::cloud::setup::SetupDecision, RuntimeError> {
+        self.cloud_connection_generation()?;
+        self.cloud_runtime()
+            .ok_or_else(unavailable)?
+            .connection_setup_decision(preview, self.cloud_setup_other_service_history())
+    }
+    /// Rows 2 and 5 of V27.2, with no confirmation.
+    pub fn start_cloud_setup_adoption(&self, preview: &Preview) -> Result<[u8; 16], RuntimeError> {
+        self.cloud_runtime().ok_or_else(unavailable)?.start_setup_adoption(
+            preview,
+            self.cloud_setup_other_service_history(),
+            self.cloud_adoption_collection()?.as_ref(),
+            self.engine(),
+        )
+    }
+    /// Row 4 of V27.2, with no confirmation.
+    pub fn start_cloud_setup_publication(
+        &self,
+        preview: &Preview,
+        generation: meguri_engine::Generation,
+    ) -> Result<[u8; 16], RuntimeError> {
+        if self.cloud_connection_generation()? != generation {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let collection = self.cloud_connection_collection()?;
+        if collection.generation() != generation {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        self.cloud_runtime().ok_or_else(unavailable)?.start_setup_publication(
+            preview,
+            self.cloud_setup_other_service_history(),
+            &collection,
+        )
+    }
+    /// Row 3 of V27.2, with no confirmation.
+    pub fn start_cloud_setup_resume(
+        &self,
+        preview: &Preview,
+        generation: meguri_engine::Generation,
+    ) -> Result<(), RuntimeError> {
+        if self.cloud_connection_generation()? != generation {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        let collection = self.cloud_connection_collection()?;
+        if collection.generation() != generation {
+            return Err(RuntimeError::StaleIncarnation);
+        }
+        self.cloud_runtime().ok_or_else(unavailable)?.start_setup_resume(
+            preview,
+            self.cloud_setup_other_service_history(),
+            &collection,
+        )
+    }
     pub fn cloud_adoption_cancellable(&self, id: [u8; 16]) -> Result<bool, RuntimeError> {
         Ok(self.cloud_adoption_cancellation(id)? != AdoptionCancellation::NotOffered)
     }

@@ -160,6 +160,7 @@ impl Runtime {
                 unsent_by_kind: BTreeMap::new(),
                 unsent_counts_exact: true,
                 retained_work,
+                local_content: None,
             },
             false,
         ));
@@ -223,7 +224,14 @@ impl Runtime {
         let incarnation = self.state().incarnation;
         let lease = collection.reader(ReaderRole::Cloud)?;
         let snapshot = lease.snapshot()?;
-        let local = super::super::local_publication::count_local_rows(&*snapshot, media.tracked_names()?.names.len())?;
+        let media_names = media.tracked_names()?;
+        let local = super::super::local_publication::count_local_rows(&*snapshot, media_names.names.len())?;
+        // V27.1, in the same read view as the counts. Any failed read is content.
+        let local_content = super::setup_impl::content_proof(
+            snapshot.user_content_rows().map_err(drop),
+            Ok(media_names.names.len()),
+            &media_names.root,
+        );
         let layout_refused = match self.preview_native_layouts(&*snapshot, file, &account, &decision) {
             Ok(()) => false,
             Err(RuntimeError::Tracking(Error::ValidatedUnprovedLayout { .. })) => true,
@@ -305,6 +313,7 @@ impl Runtime {
                 unsent_by_kind,
                 unsent_counts_exact,
                 retained_work,
+                local_content: Some(local_content),
             },
             false,
         ));

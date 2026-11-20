@@ -512,6 +512,38 @@ impl PublicationRig {
         self.refresh()?;
         Ok(id)
     }
+    pub fn stop_using_icloud(&mut self) -> Result<()> {
+        self.sdk.get_mut().driver.call::<()>(Input::StopICloud)?;
+        self.work = None;
+        self.refresh()
+    }
+    /// `sync/cloudkit-recovery#V27.2`: the row the core picks for this preview.
+    pub fn setup_decision(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+    ) -> Result<cloud::setup::SetupDecision> {
+        self.sdk
+            .get_mut()
+            .driver
+            .call(Input::SetupDecision(preview.production.clone(), history))
+    }
+    /// The decided row's recovery call, made with no confirmation. `None`
+    /// is a resumed binding; otherwise the recovery op's id.
+    pub fn start_setup(
+        &mut self,
+        preview: &ConnectionPreview,
+        history: cloud::setup::OtherServiceHistory,
+    ) -> Result<Option<[u8; 16]>> {
+        let started = self
+            .sdk
+            .get_mut()
+            .driver
+            .call(Input::SetupStart(preview.production.clone(), history))?;
+        self.work = None;
+        self.refresh()?;
+        Ok(started)
+    }
     pub fn adopt_cloud(&mut self, preview: &ConnectionPreview) -> Result<[u8; 16]> {
         let id = self
             .sdk
