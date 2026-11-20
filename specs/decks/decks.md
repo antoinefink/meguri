@@ -348,7 +348,7 @@ The Name field opens with focus and the cursor at the end.
 ### D19.5 What the confirm button does
 
 - New Deck…, New Subdeck… and the create row run D5 with the full name. A deck that already exists is opened as H7 says; nothing is written.
-- After a write, the form shows H7's final-name report ("Saved As", N20.3) when the stored name D5 or D6 returns differs from the human form of D1's conversion of the full name sent; otherwise it closes. Either way the created or renamed deck's page then opens in every layout.
+- When D5 or D6 returns, after a write or with a deck that already existed (H7), the form shows H7's final-name report ("Saved As", N20.3) when the stored name D5 or D6 returns differs from the human form of D1's conversion of the full name sent; otherwise it closes. Either way the returned deck's page then opens in every layout.
 - Rename… runs D6 with the deck and the full name. A different Parent Deck is a rename like any other: the deck and its whole subtree take the new name (D6 step 6) in one "Rename Deck" step. It is not D7's move: D1's conversion, case adoption and the creation of missing ancestors apply.
 - A refusal (`filtered_parent`, `too_deep`, `under_descendant`, `NotFound`) shows in the form, which stays with the draft. With D19.2's candidates the first three can come only from a `::` typed in the Name; `NotFound` comes from a change made elsewhere.
 
