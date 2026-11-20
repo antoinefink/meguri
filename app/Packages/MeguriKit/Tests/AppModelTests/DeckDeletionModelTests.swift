@@ -221,7 +221,7 @@ import Testing
     @Test func aRunningRenameBlocksDeletion() async {
         let owner = await makeOwner(), gate = DeletionGate()
         owner.deckActions.startRename = { _, _ in await gate.hold(); throw BridgeError.cancelled }
-        owner.deckActions.present(.rename(2)); owner.deckActions.name = "Parent::Renamed"
+        owner.deckActions.present(.rename(2)); owner.deckActions.name = "Renamed"
         owner.deckActions.submit(); await gate.entered()
         owner.navigation.dismissSheet()
         #expect(!owner.deckDeletion.canDelete(deckID: 3))

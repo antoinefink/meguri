@@ -183,32 +183,12 @@
         }
       }
     },
-    "Couldn’t Load Decks": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Couldn’t Load Decks"
-          }
-        }
-      }
-    },
     "Couldn’t Open Collection": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Couldn’t Open Collection"
-          }
-        }
-      }
-    },
-    "Couldn’t open this deck. Try Go again, or cancel.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Couldn’t open this deck. Try Go again, or cancel."
           }
         }
       }
@@ -243,42 +223,12 @@
         }
       }
     },
-    "Create Deck": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Create Deck"
-          }
-        }
-      }
-    },
     "Create deck named %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Create deck named %@"
-          }
-        }
-      }
-    },
-    "Deck Actions": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Deck Actions"
-          }
-        }
-      }
-    },
-    "Deck name": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Deck name"
+            "value": "Create deck named “%@”"
           }
         }
       }
@@ -313,36 +263,6 @@
         }
       }
     },
-    "Go": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Go"
-          }
-        }
-      }
-    },
-    "Go to Deck": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Go to Deck"
-          }
-        }
-      }
-    },
-    "Go to Deck…": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Go to Deck…"
-          }
-        }
-      }
-    },
     "Import a collection in Settings to see your decks here.": {
       "localizations": {
         "en": {
@@ -359,16 +279,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Learning"
-          }
-        }
-      }
-    },
-    "Loading decks…": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Loading decks…"
           }
         }
       }
@@ -399,6 +309,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "New Subdeck…"
+          }
+        }
+      }
+    },
+    "Its %lld subdecks move with it.": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Its subdeck moves with it."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Its %lld subdecks move with it."
+                }
+              }
+            }
           }
         }
       }
@@ -463,16 +395,6 @@
         }
       }
     },
-    "Overview": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Overview"
-          }
-        }
-      }
-    },
     "Previous Session": {
       "localizations": {
         "en": {
@@ -533,32 +455,12 @@
         }
       }
     },
-    "Saved name": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Saved name"
-          }
-        }
-      }
-    },
     "Saving deck name…": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Saving deck name…"
-          }
-        }
-      }
-    },
-    "Search Decks": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Search Decks"
           }
         }
       }
@@ -583,42 +485,12 @@
         }
       }
     },
-    "Studying filtered decks isn’t supported yet. Choose a regular deck.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Studying filtered decks isn’t supported yet. Choose a regular deck."
-          }
-        }
-      }
-    },
-    "The collection is busy or has changed. Cancel and open Go to Deck again.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The collection is busy or has changed. Cancel and open Go to Deck again."
-          }
-        }
-      }
-    },
     "There is no collection in Meguri yet. Local collection import is coming next.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "There is no collection in Meguri yet. Local collection import is coming next."
-          }
-        }
-      }
-    },
-    "The deck was saved. Couldn’t open it. Try Go again, or cancel.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The deck was saved. Couldn’t open it. Try Go again, or cancel."
           }
         }
       }
@@ -831,6 +703,66 @@
           "stringUnit": {
             "state": "translated",
             "value": "Begin with no decks and add your own notes."
+          }
+        }
+      }
+    },
+    "Inside %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inside %@."
+          }
+        }
+      }
+    },
+    "Name": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name"
+          }
+        }
+      }
+    },
+    "Parent Deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parent Deck"
+          }
+        }
+      }
+    },
+    "None": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "None"
+          }
+        }
+      }
+    },
+    "New Deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Deck"
+          }
+        }
+      }
+    },
+    "Saved As": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved As"
           }
         }
       }
