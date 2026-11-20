@@ -3,9 +3,9 @@
 
 use crate::ast::{CardState, Term};
 use crate::context::{ContextReads, ContextValue, SearchContext};
-use crate::error::ErrorKind;
+use crate::error::{ErrorKind, SearchFailure};
 
-use super::{Rows, SearchMode};
+use super::{Rows, SearchMode, names};
 
 /// A bound parameter. All user text goes in parameters; numbers and ids may
 /// be written into the statement (Q9).
@@ -62,9 +62,18 @@ pub enum TermOutcome {
 
 /// Q9: the term's SQL. U80 compiles the whole collection; the text terms are
 /// U81's and the name, id, state, property and history terms U82's, which
-/// replace their stubs here.
+/// replace their stubs here. An `Err` is a plan error of E4 step 3: pattern
+/// errors ([`is_pattern_error`]) wait for the statement checks of every term.
 pub fn compile_term(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermOutcome, ErrorKind> {
     Ok(match term {
+        Term::Tag { mode, text } => TermOutcome::Sql(names::tag(*mode, text, params)?),
+        Term::Deck(value) => TermOutcome::Sql(names::deck(value, env, params)?),
+        Term::Preset(value) => TermOutcome::Sql(names::preset(value, params)),
+        Term::Notetype(value) => TermOutcome::Sql(names::notetype(value, params)?),
+        Term::Template(template) => TermOutcome::Sql(names::template(template, params)?),
+        Term::Ids { kind, list } => TermOutcome::Sql(names::ids(*kind, list, env)),
+        Term::NotetypeId(id) => TermOutcome::Sql(names::notetype_id(*id)),
+        Term::Duplicates { notetype, text } => TermOutcome::Sql(names::duplicates(*notetype, text, env, params)),
         // Q2: true for every row.
         Term::WholeCollection => TermOutcome::Sql(TermSql {
             sql: "1".to_owned(),
@@ -95,6 +104,17 @@ pub fn compile_term(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Resu
         }),
         _ => TermOutcome::NotYetSupported,
     })
+}
+
+/// E4 step 3.2: the errors of the pattern checks (pattern size, then the
+/// compilation of an expression). Every other plan error is a statement
+/// check, which comes first.
+pub fn is_pattern_error(kind: &ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::InvalidRegex { .. }
+            | ErrorKind::SearchFailed(SearchFailure::PatternTooLong | SearchFailure::ExpressionTooLarge { .. })
+    )
 }
 
 /// Q5, Q9: the statement selecting the mode's ids from the rows, with no

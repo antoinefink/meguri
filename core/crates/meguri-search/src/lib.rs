@@ -19,6 +19,7 @@ pub mod context;
 pub mod error;
 mod lexer;
 mod parser;
+mod pattern;
 pub mod plan;
 pub mod sqlfns;
 
