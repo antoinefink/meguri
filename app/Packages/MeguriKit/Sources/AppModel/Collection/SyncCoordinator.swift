@@ -670,12 +670,26 @@ public final class SyncCoordinator {
             // A setup that a block stopped with no choice offered (its readiness
             // read failed) reads Core again once the phase recovers, so that
             // Try Again or the sheet returns. A failed read never meant "gone".
-            if oldValue?.phase == .blocked, let state = providerState, state.phase != .blocked,
-               state.phase != .handoffRecovery, state.selection == .meguri,
-               meguriStage == .failed, !meguriChoiceAllowed {
-                Task { self.loadMeguriConnection() }
+            if oldValue?.phase == .blocked, providerState?.phase != .blocked {
+                meguriRecoveryReloadPending = true
+                Task { self.reloadMeguriAfterRecoveryIfNeeded() }
             }
         }
+    }
+    /// Kept until a reload can be issued: a setup action still running when the
+    /// phase recovers rechecks it when it ends (`issueMeguri`).
+    @ObservationIgnored private var meguriRecoveryReloadPending = false
+    private func reloadMeguriAfterRecoveryIfNeeded() {
+        guard meguriRecoveryReloadPending else { return }
+        guard let state = providerState, state.phase != .blocked, state.phase != .handoffRecovery,
+              state.selection == .meguri, meguriStage == .failed, !meguriChoiceAllowed else {
+            // Recovered without a stuck setup, or blocked again: nothing to reload.
+            if providerState?.phase == .blocked || !meguriBusy { meguriRecoveryReloadPending = false }
+            return
+        }
+        guard !meguriBusy else { return }
+        meguriRecoveryReloadPending = false
+        loadMeguriConnection()
     }
     public var providerNeedsAttention: Bool { SyncStatusPresentation.providerNeedsAttention(providerState) }
     /// Copy Debug Info's names for why the phase is blocked; nil while it is not.
@@ -926,6 +940,7 @@ public final class SyncCoordinator {
             if !closing, !replacing, !suspended, !providerHandoffInProgress { await body(id) }
             if meguriAction?.id == id {
                 meguriAction = nil; meguriActiveFacade = nil; meguriBusy = false; meguriProgress = nil
+                reloadMeguriAfterRecoveryIfNeeded()
                 if meguriReadyWakePending {
                     meguriReadyWakePending = false
                     requestMeguriWake(automatic: true)
