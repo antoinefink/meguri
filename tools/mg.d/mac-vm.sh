@@ -439,6 +439,60 @@ mg_sim_pool_take() {
   mg_sim_take --no-copy
 }
 
+# mg_ui_suite_fixtures <suite>...: the generated recipe fixtures
+# (build/fixtures/recipes/<name>) that the selected MeguriUITests classes
+# launch with, read from the source files that declare those classes, into
+# MG_UI_SUITE_FIXTURES (absolute paths, one per line). Call it before
+# building. A fixture this checkout has not generated (a new worktree) is
+# made with the nested fixtures job; when that fails it records a failure
+# naming the command and returns 1. owned-sync-review-1 is left out: the
+# owned journey prepares and stages it itself.
+mg_ui_suite_fixtures() {
+  local s class files names name recipe seed missing=""
+  MG_UI_SUITE_FIXTURES=""
+  names=""
+  for s in "$@"; do
+    class="${s%%/*}"
+    files="$(grep -rlE "(class|struct|extension) $class([^A-Za-z0-9_]|$)" "$MG_ROOT/app/MeguriUITests" 2>/dev/null)" || continue
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      names="$names $name"
+    done < <(printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 grep -ohE 'build/fixtures/recipes/[A-Za-z0-9._-]+' 2>/dev/null |
+      sed 's|^build/fixtures/recipes/||' | sort -u)
+  done
+  for name in $(printf '%s\n' $names | sort -u); do
+    [ "$name" != owned-sync-review-1 ] || continue
+    recipe="${name%-*}"; seed="${name##*-}"
+    if [ ! -d "$MG_ROOT/build/fixtures/recipes/$name" ]; then
+      echo "$MG_JOB: generating the suites' fixture $name: tools/mg fixtures $recipe --seed $seed" >&2
+      "$MG_TOOLS/mg" fixtures "$recipe" --seed "$seed" >&2 </dev/null || true
+    fi
+    if [ -d "$MG_ROOT/build/fixtures/recipes/$name" ]; then
+      MG_UI_SUITE_FIXTURES="$MG_UI_SUITE_FIXTURES$MG_ROOT/build/fixtures/recipes/$name"$'\n'
+      continue
+    fi
+    missing="$missing; tools/mg fixtures $recipe --seed $seed"
+  done
+  [ -n "$missing" ] || return 0
+  mg_failure fixture "the selected suites launch with recipe fixtures that could not be generated in this checkout; nothing was built or launched; see: ${missing#; }"
+  mg_message "$MG_JOB: the suites' fixtures are missing and could not be generated: ${missing#; }"
+  return 1
+}
+
+# mg_ui_suite_fixtures_stage <runner>: puts MG_UI_SUITE_FIXTURES at their own
+# paths in the leased VM (runner vm; nothing to do on this Mac). Returns as
+# mg_vm_fixture does: 1 recorded, 2 queued.
+mg_ui_suite_fixtures_stage() {
+  local path rc
+  [ "$1" = vm ] || return 0
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    mg_vm_fixture "$path"
+    rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+  done <<<"$MG_UI_SUITE_FIXTURES"
+}
+
 # mg_vm_fixture <path>: puts a launch fixture (a -MeguriFixture value, or a
 # drive script's launch.fixture) where the app in the leased VM reads it,
 # and sets MG_VM_FIXTURE to the path the launch must name there: a fixture in
