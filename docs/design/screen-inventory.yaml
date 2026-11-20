@@ -577,12 +577,12 @@ screens:
       after every answer is undone (C9). Layout, one scrolling grouped list: (1) the stats rows of
       C4.1 in the core's order, the label leading and the value trailing, values exactly as the core
       writes them and selectable; never an Ease row (R1250); labels from the String Catalog (C12).
-      (2) Forgetting Curve (C7), only when the snapshot has a curve (C7.1): a Swift Charts line, the
+      (3) Forgetting Curve (C7), drawn after Review History (round 8), only when the snapshot has a curve (C7.1): a Swift Charts line, the
       past solid and the future dashed, a today marker, and the dashed Desired Retention line when it
       is above the chart's lower bound (C7.5); a segmented range picker (First Week, First Month,
       First Year, All Time) only when more than one range is offered, starting on the last one
       (C7.3); the tooltip of C7.6 on hover (Mac) or touch. The section is a disclosure; collapsing it
-      is R1258's hide, saved on the device. (3) Review History (C6), newest first: on Mac and at
+      is R1258's hide, saved on the device. (2) Review History (C6), newest first: on Mac and at
       regular width, table-like rows of the same list, not a separate Table view, so there is one
       scroll area (N2): a header row naming the columns, then one row per entry with Grid-aligned
       columns (Date, with the time when wide; Type in its state colour; Rating, Again in the

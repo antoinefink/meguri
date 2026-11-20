@@ -4,7 +4,7 @@ Spec: storage/config-table
 Requirements: R323, R324, R1466, R1468, R1472, R1474
 Anki: 26.09.3
 Scenarios: conformance/scenarios/storage/config/
-Status: Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R1232; round 8, decided 2026-11-20) for the lines of C8 that begin "Changed 2026-11-20 (round 8)". Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R1232) for the lines of C8 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). Every other section is in force and unchanged.
 
 The `config` table holds the collection's synced settings: Anki's own keys, keys that other clients and add-ons write, and Meguri's own keys. Meguri reads and writes it without disturbing any key it does not change. Stamping terms (`usn`, `now_s`, `now_ms`, `col.mod`) are those of `ids-usn-mtime.md`.
 

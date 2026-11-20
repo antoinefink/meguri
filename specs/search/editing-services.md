@@ -4,7 +4,7 @@ Spec: search/editing-services
 Requirements: R1086, R1087, R1088, R1089, R1094, R1095, R1096, R1097, R1098, R1099, R1100, R1101, R1102, R1103, R1104, R1107, R1108, R1109; AE42 (core part)
 Anki: none (Meguri design; it reads text by the 26.09.3 grammar)
 Scenarios: conformance/scenarios/search/errors/ae42.yaml (the commit error kind only); tests in `core/crates/meguri-search/tests/edit_services.rs`
-Status: Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R1232; round 8, decided 2026-11-20) for the lines of D2, D3, D5, D6 that begin "Changed 2026-11-20 (round 8)". Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R1232) for the lines of D2, D3, D5, D6 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). Every other section is in force and unchanged.
 
 The core services behind Browse's search field (U88): canonical text for a commit, token spans for chips, edits of one token, classification of the text at the cursor while the user types, and suggestions. Anki's search field has none of these; the grammar they read is `grammar.md`, the errors `errors.md`, the text they write `canonical-form.md` and `join-and-replace.md` J3–J5. The field itself is U214, the suggestion list U215, the query pipeline U210. Swift never reads search text by its own rules: every token, tail and suggestion comes from here.
 

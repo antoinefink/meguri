@@ -4,7 +4,7 @@ Spec: browser/columns
 Requirements: R1118, R1119, R1120, R1121, R1122, R1123, R1124, R1125, R1126, R1127, R1128, R1129, R1130, R1131, R1268; supports R96, R935, R976, R1132, R1146, R1147, R1148, R1149, R1150, R1242, R1859
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/columns/
-Status: Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R1232; round 8, decided 2026-11-20) for the lines of C5, C7.4 that begin "Changed 2026-11-20 (round 8)". Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R1232) for the lines of C5, C7.4 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). Every other section is in force and unchanged.
 
 What Browse shows for one card or one note: the catalog of the 19 columns, the row record the core gives the UI (row state, tint, font, cells), the value of every column in cards mode and in notes mode, and the card excerpts call (C16) that gives the review summary a card's Question and Deck cells before Browse exists. Values are typed; the UI formats them with the app's formatters (U210, DesignSystem). C12 gives Anki's English display of each value, which the conformance observation compares and which the UI's formatters follow where a requirement quotes it. How rows sort is `browser/sorting`. Column keys, the active-column lists and the stored sort are `browser/config-keys` (K3 to K5). The observations are `specs/conformance/browser-ops.md` (Browse rows) and `specs/conformance/card-excerpt-ops.md` (card excerpts).
 

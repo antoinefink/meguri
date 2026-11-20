@@ -4,7 +4,7 @@ Spec: browser/config-keys
 Requirements: R1115, R1134, R1135, R1137, R1138, R1141, R1265, R1266, R1267, R1038, R1196, R1198; supports R42, R366, R725, R1037, R1112, R1133, R1139, R1146, R1157, R1171, R1172, R1173, R1218, R2020
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/config/
-Status: Approved 2026-11-20 by Antoine in chat, after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`) (R1232; round 8, decided 2026-11-20) for the lines of K4, K6.2, K6.4, K11 that begin "Changed 2026-11-20 (round 8)". Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R1232) for the lines of K4, K6.2, K6.4, K11 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). Every other section is in force and unchanged.
 
 Browse, its sidebar, the previewer, Settings › Browse and the search engine keep their synced settings in collection config keys (`storage/config-table`). Meguri reads and writes them with Anki's names and JSON shapes, so Anki clients and Meguri share them through sync. This file gives, for each key, its shape, its default, how a stored value is read, and what each user action writes. Stamping and the compact form are `storage/config-table` C4 and C5.
 
