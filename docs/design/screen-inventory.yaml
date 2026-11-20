@@ -164,13 +164,17 @@ screens:
       One menu for a deck, shown as the row's context menu (right-click on Mac, long press on touch;
       native-interface-contract N20.2, decided 2026-11-20). Groups, each item with its SF Symbol:
       Study (play) and Add Note (square.and.pencil); Rename… (pencil) and New Subdeck…
-      (folder.badge.plus); then Delete Deck (trash, destructive), which arrives with the Delete Deck
-      unit. A filtered deck's menu holds only Rename… (and Delete Deck once it exists; R53). No
+      (folder.badge.plus); then Delete Deck (trash, destructive). A filtered deck's menu holds only
+      Rename… and Delete Deck (R53). No
       Overview and no hover ⋯ button: a tap or click on the row opens the deck page. On Mac the menu
       shows the Deck menu's keys (Study ⌘R, Rename… ⇧⌘R). iPhone Duo held wide: the menu opens beside
       the row in the list's half. On iPhone a row swipe shows Options and More, never Delete (R49).
-      The menu bar's Deck menu is N20.4's. Delete Deck, its confirmation and its undo are the Delete
-      Deck unit's; moves end with an Undo toast.
+      The menu bar's Deck menu is N20.4's. Delete Deck (N20.7, decks/decks D8): with no card to lose
+      (an empty deck, a filtered deck) it deletes at once; otherwise it asks first with the title
+      "Delete “<name>”?" and the subdeck and card counts, as the system's confirmation dialog on touch
+      (on iOS 27 a popover from the row, at every width) and an alert on Mac, Delete never the
+      default. One undo step (Edit › Undo Delete Deck) restores it; no toast. Moves end with an
+      Undo toast.
   - id: home.deckName
     title: Deck name form
     units: [U156]

@@ -734,9 +734,9 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 | 1 | Add Note | `square.and.pencil` | | absent |
 | 2 | Rename… | `pencil` | ⇧⌘R | shown |
 | 2 | New Subdeck… | `folder.badge.plus` | | absent |
-| 3 | Delete Deck (destructive role; arrives with the Delete Deck unit) | `trash` | ⌘⌫ | shown |
+| 3 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | shown |
 
-- Until Delete Deck arrives the menu has groups 1 and 2, and a filtered deck's menu holds Rename… alone (R53).
+- A filtered deck's menu holds Rename… and Delete Deck (R53).
 - Study is disabled under N14.3's condition, through the same availability function. Add Note opens `editor.add` with that deck (`notes/add-defaults`). Rename… and New Subdeck… open N20.3's form.
 - Overview and the Mac row's hover ⋯ button ("Deck Actions") are removed; a tap or click on the row opens the deck page.
 - Mac: the menu shows the Deck menu's keys beside its items (N20.4). Touch menus show no keys.
@@ -782,7 +782,7 @@ The menu bar, in order: Meguri, File, Edit, View, Deck, Card, Window, Help. The 
 | Deck | Study | ⌘R | the shown deck's Study is available (N14.3); never for a filtered deck (H3) |
 | Deck | Rename… | ⇧⌘R | a deck is shown, filtered included |
 | Deck | New Subdeck… | | a normal deck is shown |
-| Deck | Delete Deck | ⌘⌫ | arrives with the Delete Deck unit |
+| Deck | Delete Deck | ⌘⌫ | a deck is shown, filtered included, outside review, and no text field, sheet or panel owns the keys (N4, H9.2); N20.7 |
 | Deck | Deck Options… | ⌥⌘O | arrives with the Deck Options unit; a normal deck |
 | Card | Show Answer | Space | review shows a question side |
 | Card | Again, Hard, Good, Easy | 1, 2, 3, 4 | review shows an answer side |
@@ -825,7 +825,7 @@ The English text of the screens above. "New" marks text not used before this rou
 | Its %lld subdecks move with it. | footer, other counts; a String Catalog plural with the one form above | new |
 | Inside %@. | footer; %@ is the parent path joined with " › " | new |
 | Study, Add Note, Rename…, New Subdeck… | the deck menu; Rename…, New Subdeck… and Study in the Deck menu | Rename… new in the Deck menu |
-| Delete Deck | the deck menu, the Deck menu | with its unit |
+| Delete Deck | the deck menu, the Deck menu, the touch confirmation's button | new (N20.7) |
 | Deck, Card | top-level menu titles | Card new |
 | Import Collection…, Export Collection…, Sync Now, Close | File menu | |
 | Undo, Redo, Undo <step name>, Redo <step name> | Edit menu; <step name> is the core's undo step name until S5's keys exist (R173) | |
@@ -835,6 +835,41 @@ The English text of the screens above. "New" marks text not used before this rou
 | Edit Note | the Card menu | with its unit |
 
 - No longer used: "Go to Deck…", "Create Deck", "Overview", "Deck Actions", "Deck name", "Rename Deck…", "Close Review", the Study menu's title and its "Undo Answer" and "Redo Answer" items (Edit's Undo still reads "Undo Answer Card" after an answer, from the core's step name), "Import…", "Export…".
+
+### N20.7 Deleting a deck
+
+Decided 2026-11-20 (`decisions.md`, `home.deckActions`, option 4B). The operation is `decks/decks` D8; its summary D8.5.
+
+- Entries: the deck menu's Delete Deck (N20.2, third group, destructive role, `trash`; filtered decks too) and Deck › Delete Deck (⌘⌫, N20.4), both on that one deck. No other entry; no swipe action (R49).
+- Delete Deck first reads D8.5's summary for the deck. With `cards` 0 the deck is deleted at once, with no question: an empty deck, and a filtered deck, whose cards return home (D9). With `cards` 1 or more Meguri asks first. After the user confirms, the summary is read again right before the delete; when it differs from the one the question showed and `cards` is 1 or more, Meguri asks again with the new counts instead of deleting. A delete that asked nothing reads it the same way, so a card added after a zero-card read is asked about. A new generation in between ends the delete with nothing written. A card added between that last read and the delete's commit is not caught; binding the delete to the summary the user saw is a core follow-up (`decks/decks` D8.5).
+- The question: the title `Delete “<name>”?` with the deck's last name component, and one message line from the subdecks (S = `decks` − 1, the deck's descendants) and C = `cards`:
+
+| S | C | Message |
+|---|---|---|
+| 0 | 1 | Its 1 card will also be deleted. |
+| 0 | 2 or more | Its C cards will also be deleted. |
+| 1 | 1 | Its subdeck and 1 card will also be deleted. |
+| 1 | 2 or more | Its subdeck and C cards will also be deleted. |
+| 2 or more | 1 | Its S subdecks and 1 card will also be deleted. |
+| 2 or more | 2 or more | Its S subdecks and C cards will also be deleted. |
+
+  Numbers use the locale's grouping ("412", "1,204").
+- The system's confirmation, in each place:
+
+| Where | Form | Buttons |
+|---|---|---|
+| iPhone; iPhone Duo folded or held tall; iPad at compact width | the system's confirmation dialog, which iOS 27 shows as a popover from the deck's row (earlier systems: from the bottom) | Delete Deck (destructive); Cancel where the system shows one, otherwise tapping elsewhere cancels |
+| Regular width on touch (iPad, the Duo held wide) | a popover beside the deck's row, in the list's half; from the menu bar, the system's placement | Delete Deck (destructive); tapping elsewhere cancels, so there is no Cancel |
+| Mac | an alert on the window, with the app icon | Cancel and Delete; Delete has the destructive role and is never the default, so Return deletes nothing; Esc cancels |
+
+- Cancelling changes nothing.
+- Deleting is one undo step, "Delete Deck" (D8 step 2): Edit › Undo Delete Deck (R173) on Mac and on iPad's menu bar restores the deck, its subdecks and cards; on iPhone, shake to undo where the system offers it. No banner and no toast.
+- When the deck shown in the detail, or the deck page on the stack, is one of the deleted decks, the workspace returns to its root: Today in the sidebar layouts and on the Duo held wide; the deck list in the tab layout. N14.1's rule for a deck that leaves the collection covers it. Otherwise the detail stays.
+- The default deck (D8, R68): Delete Deck on it removes its cards and subdecks and keeps the deck, renamed "Default" (or "Default+" when another deck has that name, D8's unique-name rule) and moved to the top level. It asks as any deck does. Afterwards it is an empty deck: D12 hides it when another top-level deck exists, otherwise its row shows its name with no count (AE1). The workspace returns to its root as above, since the deck shown was emptied.
+- A delete that takes the backup of D8 step 4 shows nothing extra. A delete that fails writes nothing and shows an alert: the title `Couldn’t Delete “<name>”`, the message "Meguri couldn’t make a backup first, so nothing was deleted." for `SafetyBackupFailed` and "Nothing was deleted." for any other failure, and OK.
+- While the delete runs, the deck's menu items and the Deck menu are disabled.
+- Strings, all new: `Delete “%@”?`, the six messages above (a String Catalog entry with plural variations for S and C), "Delete Deck", "Delete" (Mac alert), "Cancel", `Couldn’t Delete “%@”`, "Meguri couldn’t make a backup first, so nothing was deleted.", "Nothing was deleted.", "OK", and Edit's "Undo Delete Deck" and "Redo Delete Deck" (R173's pattern).
+- Replaces: R66's toast "Deleted <deck> (N cards)" with Undo (no toast); `home.deckMenu`'s "deletes … end with an Undo toast"; R67 stays as D8.5 states it.
 
 ## N21. Round 8: Browse (2026-11-20)
 
