@@ -4,10 +4,13 @@ Spec: browser/sorting
 Requirements: R1139, R1140, R1143, R1144, R1145; supports R1083, R1141, R1142, R1146, R1920, R2016
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/sort/
+Status: Under review (round 8, `docs/design/decisions.md` 2026-11-20, row `browser`) for the lines that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 How Browse orders the rows of a search for each sortable column, in cards mode and notes mode, ascending and descending. Anki's order is given as a list of keys per column; Meguri adds one final key so that the order is total (R1145). Terms (cards of a note, first card, home due, card data, memory state, now, today) are `browser/columns` C1. Which rows a search returns is `search/query-model`; the sort never changes that set, except as S9 says.
 
 ## S1. Sortable columns
+
+Changed 2026-11-20 (round 8): field columns `fld:<name>` sort in both modes by `browser/workspace` V4.2, first direction ascending.
 
 | Key | Cards mode | Notes mode | First direction |
 |---|---|---|---|

@@ -4,6 +4,7 @@ Spec: browser/columns
 Requirements: R1118, R1119, R1120, R1121, R1122, R1123, R1124, R1125, R1126, R1127, R1128, R1129, R1130, R1131, R1268; supports R96, R935, R976, R1132, R1146, R1147, R1148, R1149, R1150, R1242, R1859
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/columns/
+Status: Under review (round 8, `docs/design/decisions.md` 2026-11-20, row `browser`) for the lines that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 What Browse shows for one card or one note: the catalog of the 19 columns, the row record the core gives the UI (row state, tint, font, cells), the value of every column in cards mode and in notes mode, and the card excerpts call (C16) that gives the review summary a card's Question and Deck cells before Browse exists. Values are typed; the UI formats them with the app's formatters (U210, DesignSystem). C12 gives Anki's English display of each value, which the conformance observation compares and which the UI's formatters follow where a requirement quotes it. How rows sort is `browser/sorting`. Column keys, the active-column lists and the stored sort are `browser/config-keys` (K3 to K5). The observations are `specs/conformance/browser-ops.md` (Browse rows) and `specs/conformance/card-excerpt-ops.md` (card excerpts).
 
@@ -96,6 +97,8 @@ A row request names a mode, a list of ids (card ids in cards mode, note ids in n
 
 ## C5. Tint (R1147)
 
+Changed 2026-11-20 (round 8): Meguri tints no row; a state column shows a symbol (`browser/workspace` V2.5).
+
 The row background the UI derives from DesignSystem tokens (R1148).
 
 - Cards mode: the first that applies:
@@ -130,6 +133,8 @@ C10.
 Text: the name of the card's template (C1). For a cloze note type: that name, one U+0020, and the card's ordinal + 1 in decimal: `Cloze 1`, `Cloze 2`, `Cloze 10`. The core composes this text; the UI does not (C14).
 
 ### C7.4 Deck (`deck`, R1122, R1268)
+
+Changed 2026-11-20 (round 8): Meguri shows the deck as its name with the parent path in secondary text, cut from the path's end (`browser/workspace` V5.1); dates in every cell read as `browser/workspace` V5.2 says. The cell values here stay the core's.
 
 Text: the full name of the deck `did` names. When the card is filtered: that name, ` (` (U+0020, U+0028), the full name of the deck `odid` names, `)`: `Filtered 1 (Japanese::Mining)`, `Cram (Spanish::Verbs)`. The deck shown first is the filtered deck the card is in; the one in parentheses is its home deck.
 

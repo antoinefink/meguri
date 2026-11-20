@@ -4,6 +4,7 @@ Spec: browser/result-sets
 Requirements: R1080, R1083, R1084, R1116, R1117, R1142, R1154, R1155, R1156, R1241, R1242, R1244, R1851; exposes R1776–R1778; supports R1106, R1109–R1111, R1113, R1152, R1153, R1215, R1826
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/modes/
+Status: Under review (round 8, `docs/design/decisions.md` 2026-11-20, row `browser`) for the lines that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 How the core runs searches for Browse and the local servers, and what it hands back: a search session, its requests and events, the result handle with its ordered ids, row pages, reverse order and resorting, invalidation by change sets, the Cards/Notes toggle, selection by id and index, and the one-shot id search. Which rows a query returns is `search/query-model`; their order is `browser/sorting`; the cells of a row are `browser/columns`. Most of this file is Meguri's own contract (U85); the toggle and selection rules of H11 and H12 reproduce what Anki's browser does.
 
@@ -91,6 +92,8 @@ A handle holds:
   The plan's U85 text and the B1 brief's test row ("a handle used after `CollectionReplaced` → `StaleGeneration`") predate this bullet; this bullet governs. No tombstone of a released handle is kept.
 
 ## H7. Rows
+
+Changed 2026-11-20 (round 8): `rows` also accepts field column keys `fld:<field name>` (`browser/workspace` V3), and `resort` (H8) their sort key (V4.2).
 
 - `rows(handle, revision, range, columns)` returns the row records of `browser/columns` C3 for the indexes in `range` (at most 1000), in index order, from one short read transaction on the query reader. Every requested column is computed except `question` and `answer`: their cells are the value `deferred` (`browser/columns` C9). A range of more than 1000 indexes, or a column key outside the 19 of `browser/columns` C2, fails the call with `InvalidArgument` and returns nothing.
 - `qa_cells(handle, revision, range, which, cancel)` returns the Question cells, the Answer cells or both (`browser/columns` C10) for those indexes, on the query lane, cancellable between rows, with the same range limit. For an index whose row is a row error (`deleted` or `damaged`, `browser/columns` C3.1) it returns that error in the cell's place. The UI asks for them only while those columns are visible (R1242).

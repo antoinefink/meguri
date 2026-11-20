@@ -4,6 +4,7 @@ Spec: browser/config-keys
 Requirements: R1115, R1134, R1135, R1137, R1138, R1141, R1265, R1266, R1267, R1038, R1196, R1198; supports R42, R366, R725, R1037, R1112, R1133, R1139, R1146, R1157, R1171, R1172, R1173, R1218, R2020
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/config/
+Status: Under review (round 8, `docs/design/decisions.md` 2026-11-20, row `browser`) for the lines that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 Browse, its sidebar, the previewer, Settings › Browse and the search engine keep their synced settings in collection config keys (`storage/config-table`). Meguri reads and writes them with Anki's names and JSON shapes, so Anki clients and Meguri share them through sync. This file gives, for each key, its shape, its default, how a stored value is read, and what each user action writes. Stamping and the compact form are `storage/config-table` C4 and C5.
 
@@ -89,6 +90,8 @@ The 19 columns, each named by a key that `activeCols`, `activeNoteCols`, `sortTy
 - The first sort direction is the direction a column sorts in when the user first sorts by it (R1139, K5.2). What each column shows and how it sorts is U84's.
 
 ## K4. Active columns (`activeCols`, `activeNoteCols`)
+
+Changed 2026-11-20 (round 8): Browse shows the column sets of `meguriBrowserColumnSets` (`browser/workspace` V2.4) and never reads or writes K4's and K5's keys, which keep their bytes for other clients. K4 and K5 stay the definition of those keys.
 
 Cards mode uses `activeCols`, notes mode `activeNoteCols`. The rules are the same for both.
 
@@ -187,6 +190,8 @@ Anki's desktop browser falls back to `noteCrt` only when the stored value is not
 Toggling Browse's Cards/Notes switch writes the new mode: true for notes. Nothing else is written by the toggle; the column and sort keys of the other mode are only read.
 
 ### K6.2 Sidebar sections (R1157)
+
+Changed 2026-11-20 (round 8): Browse's sidebar folding is device state; the `collapse*` keys are not read or written by it (`browser/workspace` V6).
 
 | Sidebar section | Key |
 |---|---|

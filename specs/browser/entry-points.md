@@ -4,6 +4,7 @@ Spec: browser/entry-points
 Requirements: R1112, R1113, R1114; supports R48, R98, R216, R300, R319, R807, R815, R1092, R1102, R1106, R1109, R1110, R1116, R1153, R1322, R1417, R1615, R1728, R1733, R1782, R1786, R1792
 Anki: 26.09.3 for the Anki rows of E2 to E9 (what Anki's desktop browser does when it opens, when it is handed a card or a search, when a search is committed, what it remembers and how long its field text can be); none for the rest (Meguri design)
 Scenarios: conformance/scenarios/browser/entry/ (recorded, inactive: E11)
+Status: Under review (round 8, `docs/design/decisions.md` 2026-11-20, row `browser`) for the lines that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 Which search Browse runs when it opens, what each entry point hands it, what a commit does to the field text and which text it runs, which searches the recent-search list records, and what Clear, Select All, Invert Selection and Select Notes do. The field-text rule is `search/join-and-replace` J2, the canonical text `search/canonical-form` (through `search/editing-services` D2), the built items `search/join-and-replace` J3 and J4, the runs, handles and selection mapping `browser/result-sets` H3, H11 and H12, the stored keys `browser/config-keys` K5, K6.1 and K6.4. The query pipeline, debounce and layout are U210's; the field, tokens and inline errors U214's; the suggestions U215's.
 
@@ -17,6 +18,8 @@ Which search Browse runs when it opens, what each entry point hands it, what a c
 - **Result.** The handle Browse shows (`browser/result-sets` H6), with its mode, sort, selection, current row and scroll position.
 
 ## E2. Plain open (R1112)
+
+Changed 2026-11-20 (round 8): Browse opens on the query it had while the app runs, and on first open on `defaultSearchText` read into tokens or the whole collection (`search/filter-tokens` T14); `deck:current` is not the default. Entry points with a search: `browser/workspace` V15.
 
 1. **Browse already holds a result** of the open collection (shown before in this collection generation, `engine/lifecycle` L3): a plain open shows it as it was. Nothing runs; the search, mode, selection, current row and scroll position are kept. Selecting the Browse sidebar section or tab is a plain open, and so is ⌘F from Home or the deck page (R216), which also focuses the field and selects its text. Anki: opening its browser while the window exists only brings that window forward; Anki focuses its field on every open.
 2. **Otherwise** Browse runs the default search:
@@ -78,6 +81,8 @@ Meguri:
 8. With no card shown (the congratulations screen, the session summary), an open from the review screen is a plain open (E2).
 
 ## E5. Commit (R1109)
+
+Changed 2026-11-20 (round 8): a commit reads the text into tokens (`search/filter-tokens` T8); the field never shows canonical text.
 
 What commits: Return in the field; accepting a suggestion (U215); a sidebar item or chip action (U216, U223); a token action (`search/editing-services` D4, U214); an open with a search (E3, E4 rule 5).
 
