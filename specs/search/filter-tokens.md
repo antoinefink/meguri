@@ -146,7 +146,7 @@ Browse's sidebar (`browser/sidebar`, changed by `browser/workspace` V6) lists va
 |---|---|---|
 | click, Return | tap | K's token becomes is {v}; every other token and the text stay |
 | ⌘-click | | in K's token, v is added when absent and removed when present (a token left with no value is removed); with no K token, is {v} is made; the token's is / is not stays |
-| ⌥-click | | K's token becomes is not {v} |
+| ⌥-click | | K's token becomes is not {v}; on No Flag it becomes is {Any Flag} and on Any Flag is {No Flag} (T10's normal form, so the token reads back the same after a relaunch); on Untagged, which has no opposite value, it acts as a click |
 | click on a saved search | tap | the whole query is replaced by T7's reading of its text |
 
 - A row shows selected exactly when its value is in K's token and the token is **is**. Rows of an **is not** token are not selected; the token in the field says "is not". Removing a token deselects its rows; the clear button empties the query.
