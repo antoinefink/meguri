@@ -25,6 +25,7 @@ setup_file() {
   cp -R "$REPO_ROOT/docs/design/." "$t/docs/design/"
   cp "$REPO_ROOT/AGENTS.md" "$REPO_ROOT/.gitignore" "$REPO_ROOT/.gitattributes" "$t/"
   : >"$t/docs/process/provenance/sessions.jsonl"
+  rm -rf "$t/docs/process/provenance/sessions"
   git -C "$t" init -q
   git -C "$t" add -A
   git -C "$t" -c user.name=selftest -c user.email=selftest@localhost commit -qm template
@@ -787,8 +788,9 @@ PY
   [ "$(field .status)" = pass ]
   [ "$(field '.details.statuses["sample.deckOverview"]')" = verified ]
   [ "$(field .details.session)" != "$first" ]
-  [ "$(grep -c '"role":"critic"' "$SB/docs/process/provenance/sessions.jsonl")" -eq 2 ]
-  [ "$(git -C "$SB" log -1 --format=%s -- docs/process/provenance/sessions.jsonl)" = "Record session $(field .details.session) (critic, critic-$(field .run_id))" ]
+  [ "$(cat "$SB"/docs/process/provenance/sessions/*.json | grep -c '"role":"critic"')" -eq 2 ]
+  [ ! -s "$SB/docs/process/provenance/sessions.jsonl" ]
+  [ "$(git -C "$SB" log -1 --format=%s -- docs/process/provenance/sessions)" = "Record session $(field .details.session) (critic, critic-$(field .run_id))" ]
 }
 
 @test "a snapshots run without every platform a screen is registered on is refused before any session starts" {

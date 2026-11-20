@@ -305,6 +305,10 @@ t_similarity() {
   fi
 }
 EOF
+  # The session that $TRAILERS names (the sessions static check resolves it).
+  mkdir -p "$t/docs/process/provenance/sessions"
+  printf '{"session":"s-20261016T000000Z-0badcafe","role":"implementer","kind":"session","created_at":"2026-10-16T00:00:00Z"}\n' \
+    >"$t/docs/process/provenance/sessions/s-20261016T000000Z-0badcafe.json"
   git -C "$t" init -q -b trunk
   # Sparse settings stay per worktree, as in the real repository.
   git -C "$t" config extensions.worktreeConfig true
