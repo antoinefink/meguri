@@ -325,6 +325,7 @@ The form of New Deck…, New Subdeck… and Rename… (`docs/design/native-inter
 
 - First None, the top level. Then the nodes of D12's tree in preorder (a deck before its children, siblings in D12's order), each with its depth (0 for a top-level deck). Collapse flags play no part: a collapsed deck's descendants are listed.
 - Left out: filtered decks, since nothing can be created or renamed under one (D3, D9); every deck D12 leaves out (a deck whose parent is missing, and the hidden empty default deck); for Rename, the deck itself and its descendants (D3), which would put it inside its own subtree.
+- Exception: New Subdeck… of the default deck while D12 hides it (top-level, empty, no children) lists that deck as one extra entry after None, at depth 0, so D19.3's default holds. It is never listed otherwise while hidden.
 - The form reads the tree once, when it opens. Its candidates, the chosen deck's full name and D19.6's count come from that read; a later change in the collection does not update an open form.
 
 ### D19.3 Defaults
@@ -365,6 +366,7 @@ Swift unit tests of the form's model; no core write is needed except where a row
 |---|---|
 | D19.1's table; Parent Deck None | The full names in the table; the Name text is sent unchanged, with no trimming or normalization in the UI. |
 | Candidates of a tree with collapsed parents, a filtered deck, a hidden empty Default, a Default with one card, a deck with a missing parent | Preorder with depths; collapsed descendants listed; the filtered deck, the hidden Default and the missing-parent deck left out; the Default with a card listed. |
+| New Subdeck… of the hidden empty default deck | None, then that deck, which is preselected; it is absent from New Deck…'s candidates. |
 | Rename of `a::b` with `a::b::c`, `a::b::c::d` and `a::bc` | `a::b`, `a::b::c` and `a::b::c::d` left out; `a` and `a::bc` listed. |
 | Each entry point of D19.3; Rename of a top-level deck | The table's Name and Parent Deck; None for the top-level deck. |
 | Enablement: Name of spaces, of U+3000, `::`; Rename untouched; Parent Deck changed and changed back; a space added at the end of the Name | Disabled, disabled, enabled; disabled; disabled; enabled, and with the core, D6 writes nothing and records no step. |
