@@ -77,6 +77,7 @@ Shown under the editor for every card type of the draft, recomputed about 300 ms
 | each failure of `notetypes/validation` V4 (V3's kinds) | red; blocks Save | "<card type> · <Front or Back>, line <n>." then the failure in words: "No field is named “<x>”.", "{{#<x>}} is opened but never closed.", "The front repeats “<card type>”.", "The front shows no field.", "A cloze note type needs a cloze field on the front and the back." | unknown field with a near name (W7.1): "Use “<name>”"; unclosed section: "Add {{/<x>}}" at the end of the part |
 | no card for some notes (W8) | yellow; does not block | "<card type> · The front is blank for <k> notes." with the reason "Their <fields> are empty, so the front is blank." when one field decides it | "Show Notes" (opens Browse on them, `browser/workspace` V15) |
 
+- Issues are computed on the draft as it would be saved: field renames are applied to the templates first (`notetypes/field-rename` F3, as `notetypes/validation` V3 runs "after field renames rewrote the references"), so renaming `Front` to `Prompt` does not report `{{Front}}` as unknown.
 - Clicking an issue moves the caret to its line. Red issues name the line from T12's spans; an issue without a line names the part.
 - The bottom line reads "Fix the <n> red issues to save." while any is red; Save is disabled.
 
@@ -86,7 +87,7 @@ For an unknown field name x, the suggested name is the draft's field whose name 
 
 ## W8. No card for some notes
 
-- For each card type of the draft (standard note types), `notes_without_card(notetype, draft templates)` counts the notes of the type for which that card type's front would not render something (`render/template-syntax` T11.2, strict form) with the note's non-empty names (`notes/card-generation` G2), and returns up to 1,000 of their note ids (for Show Notes). It reads one snapshot, off the main thread, cancellable, recomputed when a front changes (debounced as W7).
+- For each card type of the draft (standard note types), `notes_without_card(notetype, draft templates)` counts the notes of the type for which that card type's front would not render something (`render/template-syntax` T11.2, strict form) with the note's non-empty names (`notes/card-generation` G2), and returns all their note ids (8 bytes each; Show Notes opens Browse on all of them). It reads one snapshot, off the main thread, cancellable, recomputed when a front changes (debounced as W7).
 - The reason line names fields when the same one field is empty in every counted note and the front needs it alone; otherwise only the count shows.
 - This is a warning about the draft, not a check of saved cards: existing cards are never removed by a save (`notetypes/structure-changes` S7), and the count includes notes that keep an older card.
 - Budget: 1 s for 50,000 notes of the type.

@@ -23,7 +23,7 @@ How the Note Types section saves: one draft per note type, one Save, and one she
 - `changes`, in this order: each field added (name); each field removed with `notes_with_content` (W3.1's count for its base ordinal); each field renamed (old and new name); a field order change (once); a sort field change (new name); each card type added with `cards_created` (the cards S7 would generate for it); each card type removed with `cards_removed` and `notes_without_cards` (S11 over every removed base ordinal together); each card type renamed; a card type order change (once); the note type renamed; template text and styling changed (once, without detail);
 - `loses_content`: true when a removed field has `notes_with_content` > 0, or a removed card type has `cards_removed` > 0.
 
-Counts come from the same snapshot; the counts S1.3 later reports can differ when the collection changed in between, and the op's own result is what is shown afterwards.
+Counts come from the same snapshot; the counts S1.3 later reports can differ when the collection changed in between, and the op's own result is what is shown after the save.
 
 ## D3. When Save asks
 
@@ -66,15 +66,16 @@ The Save button reads "Save…" when D3 says the sheet will show, "Save" otherwi
 1. The live checks (`notetypes/validation` V4) pass, or Save is disabled (W7).
 2. The sheet, when D3 shows one, is accepted.
 3. Deck creations for deck overrides (A11's order).
-4. The S1 op: its safety backup when schema-classified (`package/backup-triggers#T6.1`), then the save in one transaction and one undo step "Update Note Type" (S1, S13). While it runs the toolbar shows its progress ("Updating <i> of <n> notes", S10) and the note type cannot be edited; the rest of the app stays usable.
-5. On success the draft is gone and the detail shows the saved note type. On a refusal the draft stays with the refusal shown (`Stale`: D1's row; `SafetyBackupFailed`: an alert that nothing was changed; a V3 failure cannot occur after step 1 unless the stored note type changed, and then shows as an issue).
+4. Right before submitting, `draft_summary` (D2) is read again; when `loses_content` turned true, a listed loss count grew, or the service changed, D3 is applied again and its sheet is shown again (with the new counts) before anything is submitted. The window left between this read and the op's commit is covered by the safety backup.
+5. The S1 op: its safety backup when schema-classified (`package/backup-triggers#T6.1`), then the save in one transaction and one undo step "Update Note Type" (S1, S13). While it runs the toolbar shows its progress ("Updating <i> of <n> notes", S10) and the note type cannot be edited; the rest of the app stays usable.
+6. On success the draft is gone and the detail shows the saved note type. On a refusal the draft stays with the refusal shown (`Stale`: D1's row; `SafetyBackupFailed`: an alert that nothing was changed; a V3 failure cannot occur after step 1 unless the stored note type changed, and then shows as an issue).
 
 ## D6. Saving with Meguri Sync
 
 When the service is Meguri Sync and the summary is schema-classified, Save and Upload runs one job (`sync/meguri-provider` MP7):
 
 1. **Sync first**: one normal round (MP5) so this device holds everything the server has. When the round brings a change to this note type, the job stops before saving and the draft meets `Stale` (D1). When the round fails or needs the user, the job stops, nothing is saved and the sync status shows why.
-2. **Back up and save**: D5 steps 3 and 4 (the safety backup of `package/backup-triggers#T6.1`).
+2. **Back up and save**: D5 steps 3 to 5 (the safety backup of `package/backup-triggers#T6.1`).
 3. **Upload**: the collection replaces the server's (MP7's upload, the MP4 safety mechanics). Its progress shows in the sync status.
 4. When step 3 cannot run or fails after the save committed, the save stays; the sync status shows the needs-you line "Upload this collection to finish your note type changes." with Upload… (N15.4's needs-you kind). Upload… runs MP7 step 5: admission, a read of the server's facts and the upload, with no new question (the sheet was the consent).
 

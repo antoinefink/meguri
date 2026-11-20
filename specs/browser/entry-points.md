@@ -4,7 +4,7 @@ Spec: browser/entry-points
 Requirements: R1112, R1113, R1114; supports R48, R98, R216, R300, R319, R807, R815, R1092, R1102, R1106, R1109, R1110, R1116, R1153, R1322, R1417, R1615, R1728, R1733, R1782, R1786, R1792
 Anki: 26.09.3 for the Anki rows of E2 to E9 (what Anki's desktop browser does when it opens, when it is handed a card or a search, when a search is committed, what it remembers and how long its field text can be); none for the rest (Meguri design)
 Scenarios: conformance/scenarios/browser/entry/ (recorded, inactive: E11)
-Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of E2, E5 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of E2, E3, E4, E5, E6 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 Which search Browse runs when it opens, what each entry point hands it, what a commit does to the field text and which text it runs, which searches the recent-search list records, and what Clear, Select All, Invert Selection and Select Notes do. The field-text rule is `search/join-and-replace` J2, the canonical text `search/canonical-form` (through `search/editing-services` D2), the built items `search/join-and-replace` J3 and J4, the runs, handles and selection mapping `browser/result-sets` H3, H11 and H12, the stored keys `browser/config-keys` K5, K6.1 and K6.4. The query pipeline, debounce and layout are U210's; the field, tokens and inline errors U214's; the suggestions U215's.
 
@@ -37,6 +37,8 @@ Changed 2026-11-20 (round 8): Browse opens on the query it had while the app run
 
 ## E3. Open with a search (R1114)
 
+Changed 2026-11-20 (round 8): the given search is read into tokens by `search/filter-tokens` T7 and T14; Browse never shows its canonical text, and a search that does not parse becomes literal words (T5) instead of an error. The steps below that show canonical text or report a parse error do not apply to Browse.
+
 1. The text gets J2. A built item's text (J4) is already canonical and J2 changes nothing in it.
 2. It is put in canonical form (`search/editing-services` D2).
 3. **It parses.** The field shows the canonical text and that text runs as a commit (E5): it is recorded in recent searches (E6). When Browse holds a result, the selection and current row are mapped into the new one (R1154, `browser/result-sets` H12, same mode); otherwise E2 rule 5 applies. An entry point whose own spec sets the selection (the Selection column below) sets it instead, once the result is complete. The mode stays the stored mode, and the sort is that mode's stored sort, unless the entry point's spec writes another (`guiBrowse`'s `reorderCards`, `servers/ankiconnect-gui` G3). Anki records a search another window hands to its browser in its history as well, and keeps the browser's mode.
@@ -67,6 +69,8 @@ The entry points, what each hands Browse, and the spec that builds it:
 
 ## E4. Open from review (R1113)
 
+Changed 2026-11-20 (round 8): Show in Browse keeps the query when it finds the card, otherwise the query becomes one advanced token `cid:<id>` (`browser/workspace` V15); no canonical text is shown.
+
 Anki: its browser, opened from the review screen, is handed the card the reviewer shows. It runs the default search (E2 rule 2), also when the browser was already open on another search, then selects that card's row alone (in notes mode, the row of the card's note), makes it current and scrolls to it. When the result does not hold the card, nothing is selected. Its search runs to the end before it looks, so nothing can happen in between.
 
 Meguri:
@@ -82,7 +86,7 @@ Meguri:
 
 ## E5. Commit (R1109)
 
-Changed 2026-11-20 (round 8): a commit reads the text into tokens (`search/filter-tokens` T8); the field never shows canonical text.
+Changed 2026-11-20 (round 8): a commit reads the text into tokens (`search/filter-tokens` T8). Steps 2 to 4 change for Browse: the field never shows canonical text, and a text that does not parse becomes literal words (T5, T7 step 1) instead of an error; no parse error remains for Browse's field.
 
 What commits: Return in the field; accepting a suggestion (U215); a sidebar item or chip action (U216, U223); a token action (`search/editing-services` D4, U214); an open with a search (E3, E4 rule 5).
 
@@ -98,6 +102,8 @@ Before a commit changes the result, the inspector's pending save is flushed and 
 5. A commit keeps the mode; its selection and current row are mapped from the earlier result (R1154, `browser/result-sets` H12).
 
 ## E6. Recent searches (R1102, R1109)
+
+Changed 2026-11-20 (round 8): Browse's suggestions show saved searches, not recent searches (`search/filter-tokens` T12.1); recent searches are kept only as the ranking list of accepted suggestions (D6.5 step 4).
 
 1. The list is newest first and holds at most 30 texts.
 2. Recording a text t removes every entry equal to t (code point for code point), puts t first and drops the entries after the 30th. Anki keeps its search history the same way (30 entries, newest first, an equal entry moved to the front).
