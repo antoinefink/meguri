@@ -31,7 +31,10 @@ import sys
 TABLE = re.compile(r"^\s*(\[\[?)\s*([A-Za-z0-9_.\-\"']+)\s*\]\]?\s*(#.*)?$")
 KEY = re.compile(r"^\s*([A-Za-z0-9_\-]+)\s*=\s*(.*?)\s*(#.*)?$")
 PATH_ATTR = re.compile(r'^#\[path\s*=\s*"([^"]+)"\]\s*(.*)$')
-EXACT = re.compile(r'"--exact",\s*"([A-Za-z_][A-Za-z0-9_]*)"')
+# `"--exact", "<name>"` or `.arg("--exact").arg(<name>)`, over line breaks;
+# <name> is a literal or a constant of the same file.
+EXACT = re.compile(r'"--exact"\s*(?:,|\)\s*\.arg\()\s*(?:"([A-Za-z_][A-Za-z0-9_]*)"|([A-Z][A-Z0-9_]*)\b)')
+CFG = re.compile(r"#\[cfg\((.*?)\)\]", re.S)
 FEATURE = re.compile(r'feature\s*=\s*"([^"]+)"')
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 MOD = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?mod\s+(r#)?([A-Za-z_][A-Za-z0-9_]*)\s*;")
@@ -59,8 +62,8 @@ class Tree:
         return sorted({p for p in out.decode("utf-8", "surrogateescape").split("\0") if p})
 
     def grep(self, pattern):
-        """Lines of tracked (and, in the working tree, untracked) .rs files."""
-        args = ["grep", "-I", "-h", "-E", "-e", pattern]
+        """Tracked (and, in the working tree, untracked) .rs files that match."""
+        args = ["grep", "-I", "-l", "-E", "-e", pattern]
         if self.rev:
             args += [self.rev]
         else:
@@ -69,7 +72,9 @@ class Tree:
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if result.returncode not in (0, 1):
             raise OSError(result.stderr.decode("utf-8", "replace").strip())
-        return result.stdout.decode("utf-8", "replace").splitlines()
+        prefix = self.rev + ":" if self.rev else ""
+        return [p[len(prefix):] if p.startswith(prefix) else p
+                for p in result.stdout.decode("utf-8", "replace").splitlines()]
 
     def read(self, path):
         if self.rev:
@@ -139,7 +144,17 @@ def check(tree):
     paths = tree.paths()
     present = set(paths)
     findings = []
-    exact = {m.group(1) for line in tree.grep('"--exact",') for m in EXACT.finditer(line)}
+    exact = set()
+    for path in tree.grep('"--exact"'):
+        text = tree.read(path)
+        for m in EXACT.finditer(text):
+            if m.group(1):
+                exact.add(m.group(1))
+            else:
+                const = re.search(r'\bconst\s+%s\s*:\s*&(?:\'static\s+)?str\s*=\s*"([A-Za-z_][A-Za-z0-9_]*)"'
+                                  % m.group(2), text)
+                if const:
+                    exact.add(const.group(1))
 
     def finding(path, line, message):
         findings.append({"check": "test-targets", "path": path, "line": line, "message": message})
@@ -171,11 +186,12 @@ def check(tree):
                 finding(cargo, 0, "[[test]] %s names %s, which does not exist" % (roots[root], root))
                 continue
             root_text = tree.read(root)
-            for n, line in enumerate(uncomment(root_text).splitlines(), 1):
-                if line.lstrip().startswith("#[cfg"):
-                    for f in FEATURE.findall(line):
-                        if f not in features:
-                            finding(root, n, "feature %r is not in %s's [features], so the module never builds" % (f, cargo))
+            clean = uncomment(root_text)
+            for m in CFG.finditer(clean):
+                for f in FEATURE.findall(m.group(1)):
+                    if f not in features:
+                        finding(root, clean.count("\n", 0, m.start()) + 1,
+                                "feature %r is not in %s's [features], so the module never builds" % (f, cargo))
             for path, line in listed(root, root_text, present):
                 if path not in files:
                     continue  # a helper module (tests/common/ and the like)
@@ -203,11 +219,13 @@ def check(tree):
                         line = text.count("\n", 0, m.start()) + 1
                         finding(part, line, "%s %s, so it needs its own [[test]] in %s, not a line in %s"
                                 % (path, why, cargo, root))
-            text = tree.read(path)
-            for name in sorted(exact):
-                m = re.search(r"\bfn\s+%s\s*\(" % name, text)
-                if m and not re.search(r"^fn\s+%s\s*\(" % name, uncomment(root_text), re.M):
-                    finding(path, text.count("\n", 0, m.start()) + 1,
+            for part in [path] + sorted(p for p in paths if p.startswith(stem + "/") and p.endswith(".rs")):
+                text = tree.read(part)
+                for name in sorted(exact):
+                    m = re.search(r"\bfn\s+%s\s*\(" % name, text)
+                    if not m or re.search(r"^(?:pub(?:\([^)]*\))?\s+)?fn\s+%s\s*\(" % name, uncomment(root_text), re.M):
+                        continue
+                    finding(part, text.count("\n", 0, m.start()) + 1,
                             "defines %s, which code re-runs with `--exact %s`; in %s its name gains the module "
                             "prefix, so %s needs a root-level `fn %s` test too (or the file its own [[test]])"
                             % (name, name, root, root, name))
