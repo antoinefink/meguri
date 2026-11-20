@@ -94,7 +94,7 @@ struct ActivityHeatmapSection: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text("Review activity", bundle: .module))
                 .accessibilityValue(summary(grid, weeks: geometry.weeks))
-                .accessibilityIdentifier("home.activity")
+                .accessibilityIdentifier("home.activity.grid")
                 .accessibilityHidden(!shown)
                 .listRowSeparator(.hidden)
             } header: {
