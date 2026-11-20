@@ -98,7 +98,10 @@ struct ActivityHeatmapSection: View {
                 .accessibilityHidden(!shown)
                 .listRowSeparator(.hidden)
             } header: {
+                // The secondary token on touch: the system's header grey nearly misses 4.5:1 on the
+                // grouped background (accessibility audit).
                 Text("Activity", bundle: .module)
+                    .quietText()
                     .accessibilityIdentifier("home.activity.header")
             }
         }
