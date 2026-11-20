@@ -11,7 +11,7 @@ The behaviour of Browse as round 8 decided it: columns and column sets, field co
 ## V1. Terms and state
 
 - **Rows**: cards in Cards mode, notes in Notes mode (`search/query-model` Q4). **Results**: the rows of the current query (`browser/result-sets` handle). **Total**: the number of cards (Cards) or notes (Notes) in the collection.
-- **Selection** and **current row**: `browser/result-sets` H12 and R1152; the current row drives the inspector.
+- **Selection** and **current row**: `browser/result-sets` H12 and R1152. The Note tab follows the selection: with exactly one row selected it shows that row (V7, V12; `browser/inspector` I2), otherwise V7's summary. The Info tab follows the current row (V13, R1247).
 - **Kept while the app runs** (device, never in the collection): the query, the mode's results, the selection, the current row and the scroll position. Leaving Browse for Today, a deck or review and coming back restores them; a relaunch starts as `search/filter-tokens` T14 says.
 
 ## V2. Column sets
