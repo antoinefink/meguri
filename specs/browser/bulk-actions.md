@@ -4,6 +4,7 @@ Spec: browser/bulk-actions
 Requirements: R1117, R1181, R1182, R1184, R1187, R1188, R1189, R1190, R1191, R1192, R1193, R1194, R1195, R1196, R1197, R1198, R1199, R1212, R1213, R1214, R1215, R1268, AE45; supports R645, R1183, R1185, R1831
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/bulk/, conformance/scenarios/notes/change-deck/
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of B3, B5, B11, B16 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 What each of Browse's card and note actions does: which cards or notes it acts on (B1), which item decides a toggle (B2), the toggles (B3 to B6), Change Deck (B7), and how the other actions hand their targets to the operations other specs define (B8 to B14), with filtered decks (B15), the results and undo steps (B16) and the scenarios (B17). Most actions are operations of other areas, which this file names instead of restating; Change Deck's operation is specified here (B7.2). How a bulk action runs (job, phases, cancellation, progress, change set, one undo entry, the result message) is the Meguri design doc `browser/bulk-framework` (U86). Find and Replace is `browser/find-replace`; Edit Field is the Meguri design doc `browser/batch-edit`. The scenario op Change Deck needs is `specs/conformance/bulk-ops.md` X2.
 
@@ -30,6 +31,8 @@ The menu items show the current item's state as a checkmark (R1193): Toggle Susp
 
 ## B3. Toggle Suspend (R1193, AE45)
 
+Changed 2026-11-20 (round 8): Browse offers Suspend and Unsuspend as two commands and Bury and Unbury as two commands, shown by what the selection holds (`browser/workspace` V8.1); B3 and B4's toggles and B2's current-card direction are not used by Browse. M3, M4 and M2 stay the operations.
+
 | Current card's `queue` | Operation on every target card |
 |---|---|
 | -1 | unsuspend and unbury (`sched/manual-ops` M4): suspended and buried targets get the queue of their type; others are untouched |
@@ -45,6 +48,8 @@ So with three unsuspended cards selected, one Toggle Suspend suspends all three 
 | anything else, or no current card | bury by hand (M2): queue -3; suspended targets are untouched |
 
 ## B5. Flag 1–7 and No Flag (R1195)
+
+Changed 2026-11-20 (round 8): Browse's Flag menu sets the chosen flag on every target (No Flag clears it); it does not toggle (`browser/workspace` V8.1).
 
 `tags/flags-and-marked` F3 with the targets of B1: Flag N sets N on every target card, or 0 when the current card's flag is N; No Flag sets 0. With no current card Flag N does nothing; No Flag still clears. Anki's Browse Flag menu has only the seven flags (clearing is choosing the current card's flag again); R1195 adds No Flag. The operation is F2 ("Set Flag").
 
@@ -122,6 +127,8 @@ The target notes go to `notetypes/change-notetype`. The item is enabled on any n
 
 ## B11. Delete Notes (R1212)
 
+Changed 2026-11-20 (round 8): Delete asks when more than one note goes or the one note has more than one card (`browser/workspace` V8.2); one note with one card is deleted at once.
+
 - `notes/note-records` D1 on the target notes: every card of each note goes too, one step "Delete Note", fully undoable. No confirmation.
 - Before deleting, Anki selects and focuses one row whose note is not a target, skipping rows of deleted items: the nearest such row below the bottom selected row, else the nearest above the top selected row, else none (the selection is cleared). Meguri does the same.
 - Anki's operation returns the number of cards removed and its message counts cards ("`N` cards deleted."). Meguri's operation returns both counts, notes removed and cards removed; its message counts notes (R1212).
@@ -165,6 +172,8 @@ Meguri never creates or rebuilds a filtered deck (`decks/decks` D9), but cards t
 The Deck column shows such a card as `browser/columns` C7.4 says.
 
 ## B16. Results and undo steps (R1182, R1184)
+
+Changed 2026-11-20 (round 8): no result message or toast; the Undo titles use Meguri's display names (`browser/workspace` V8.3). The step ids and counts here stay.
 
 Each action is one operation and one undo step on the shared stack (`engine/undo`), named after Anki's operation. An operation that changes nothing records no step.
 

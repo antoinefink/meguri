@@ -1542,3 +1542,6 @@ screens:
   sync.keepCollection:
     status: sketch
     fix_rounds: 0
+  browse.findDuplicates:
+    status: sketch
+    fix_rounds: 0

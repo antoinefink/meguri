@@ -4,6 +4,7 @@ Spec: search/join-and-replace
 Requirements: R1078, R1079; supports R1076, R1077, R1109, R1114, R1153, R1322 (AE43, core part; AE60 only for J11's test that its text parses and that its canonical form equals a golden)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/builder/, conformance/scenarios/search/join-replace/
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of J3 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 The search text Meguri writes for UI actions: searches built from structured items (a deck, a tag, a flag, ids), a built item joined to the current search with AND or OR, and a built item put in place of the current search's terms of the same kind. Every Meguri-generated search except Stats' joined text goes through these services (U88): sidebar and chips, Home "Browse", editor duplicates, Select Notes, AnkiConnect GUI actions. Which entry point hands Browse which built item is `browser/entry-points` E3; Select Notes is E8. Stats "Show in Browser" is not a caller: its text is the literal join of `stats/browse-queries` Q3, which is not J6's canonical join, and its Deck scope text (`deck:"..."`, `stats/browse-queries` Q2.2) is not the form J3 builds for a deck. U88 tests only that AE60's text parses and that its canonical form equals a golden (J11). The text is written by `canonical-form.md`; what it means is `query-model.md`. The token spans, incomplete-tail classification and suggestions of U88 are Meguri's own and live in `search/editing-services` (not this file).
 
@@ -26,6 +27,8 @@ The search text Meguri writes for UI actions: searches built from structured ite
 Text taken from the search field (typed, pasted, picked from history) has every character U+001C–U+001F replaced by U+0020 before anything reads it, as Anki's search field does; `grammar.md` G1 then handles the other white space. The services that take field text apply this rule: `join` and `replace` to `existing`, U210's commit and live search to the field text, and entry points that open Browse with a search to that search (R1114). The canonical text observation (`canonical_search`) and the local servers' searches do not: Anki's own search reads those characters as term characters (`grammar.md` G1).
 
 ## J3. Built items
+
+Changed 2026-11-20 (round 8): two more items, "field contains" and "field empty", are added for Browse's Field tokens; their rows are `search/filter-tokens` T3.1.
 
 Each built item makes one query item (`query-model.md` Q1, Q3). "E(s)" below is the name escape:
 

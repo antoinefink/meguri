@@ -4,6 +4,7 @@ Spec: notetypes/change-notetype
 Requirements: R944, R945, R946, R947, R948; supports R949, R951, R1189, R1475, R1476, R2008, R2053
 Anki: 26.09.3
 Scenarios: conformance/scenarios/notetypes/change/
+Status: Under review (R915; round 9, decided 2026-11-20) for the lines of M8 that begin "Changed 2026-11-20 (round 9)": do not implement them until approved. Every other section is in force and unchanged.
 
 Moving selected notes to another note type, or remapping the fields and templates of their own note type: the info query that gives the default mappings, the loss preview and the schema stamp, and the change itself. The screens are U203 (and the Browse entry, U87 and U210); the scenario ops are `specs/conformance/change-notetype-ops.md`. The sheet's pickers (target order, opening state, template choices another row uses, the collapsed loss list) are `notetypes/editor-actions` A16.
 
@@ -99,6 +100,10 @@ A change whose new note type is the old one, whose field map is the identity (en
 Anki's screen refuses such a save ("No changes to save") before its backend sees it only when the change has a template map (two standard note types). For a cloze note type to itself there is none, its test fails, and the screen sends the save: Anki's backend then sets `col.scm`, stamps every selected note and removes control characters from its fields (M9 step 3). Decided 2026-10-27 (data safety: a schema change that changes nothing would make the next manual Anki transfer one-way for no reason): Meguri refuses that case with `no_changes` too. The oracle driver does not yet reproduce the screen's test for this case: it also refuses a missing template map with `no_changes`, so a golden for it would record Meguri's answer, not Anki's. No scenario sends the case, and `conformance/deviations.yaml` has no entry for it. Before a scenario sends it, the driver must run Anki's change when the template map is absent, as `change-notetype-ops` H3 requires ("as Anki's screen decides it" is the screen's test above); that scenario then adds the deviation entry `change-notetype-cloze-unchanged` with its golden. Until then U35's tests cover it (M12).
 
 ## M8. The change: input, checks and safety backup
+
+Changed 2026-11-20 (round 9; decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day): the input also carries the **confirmed losses**, what M6's preview showed and the user accepted: for each old field the map leaves out, the number of selected notes with content in it (`text/field-emptiness` E1), and for each old template the map leaves out, the number of cards removed. Inside the write transaction, with checks 3 and 4, the change counts them again on the live rows; when any live count is larger it writes nothing, records no step and returns `LossesChanged { preview }` with a new M6 preview, and the sheet shows again. Callers pass what their M6 preview showed (a caller with no sheet, the local API, passes the preview it read). This is a precondition like the schema stamp, not a confirmation input.
+
+Changed 2026-11-20 (round 9): with Meguri Sync as the service and a ready binding, Change Note Type's sheet carries `notetypes/draft-save` D4's sync paragraph and its button reads Save and Upload, and the save runs as `sync/meguri-provider` MP7's job; this replaces "asks nothing" beyond M6's preview for that case (`notetypes/schema-changes` G4 as changed). The op itself still takes no confirmation input.
 
 Input: the selection (M4), the old note type the info query reported, the new note type, a field map, a template map exactly when M1 gives one, and the schema stamp the info query returned. There is no confirmation input (`notetypes/schema-changes#G4`).
 
