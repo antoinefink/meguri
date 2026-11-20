@@ -8,7 +8,7 @@ final class HomeTests: XCTestCase {
     func testNativeDeckDisclosureAndSelectionStayIndependent() throws {
         let app = try launchFixture()
         let parent = try row(app, named: "Local Review")
-        let child = try row(app, named: "Local Review::Cards")
+        let child = try row(app, named: "Local Review › Cards")
         let parentID = parent.identifier
         let childID = child.identifier
         XCTAssertNotEqual(parentID, childID)
@@ -45,7 +45,7 @@ final class HomeTests: XCTestCase {
     func testStudyCollapseSurvivesRestartWithoutReseeding() throws {
         let app = try launchFixture()
         let parent = try row(app, named: "Local Review")
-        let child = try row(app, named: "Local Review::Cards")
+        let child = try row(app, named: "Local Review › Cards")
         let parentID = parent.identifier
         let childID = child.identifier
         let parentDisclosure = try disclosure(app, rowIdentifier: parentID)
@@ -69,7 +69,7 @@ final class HomeTests: XCTestCase {
         restoredDisclosure.tap()
         let restoredChild = app.buttons[childID]
         XCTAssertTrue(restoredChild.waitForExistence(timeout: 10))
-        XCTAssertEqual(restoredChild.label, "Local Review::Cards")
+        XCTAssertEqual(restoredChild.label, "Local Review › Cards")
         assertCounts(restoredParent)
         assertCounts(restoredChild)
         try assertHierarchy(app)

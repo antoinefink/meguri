@@ -36,13 +36,13 @@ final class LocalReviewJourneyTests: XCTestCase {
         let thirdQuestion = try cardSnapshot(app, answer: false)
         XCTAssertNotEqual(thirdQuestion.cardText, secondQuestion.cardText)
 
-        try performStudyCommand("Undo Answer", in: app, bundleIdentifier: bundleIdentifier)
+        try performEditCommand("shell.command.undo", in: app, bundleIdentifier: bundleIdentifier)
         try assertQuestion(secondQuestion, in: app)
         try assertStudyHistory(app, bundleIdentifier: bundleIdentifier, undo: true, redo: true)
-        try performStudyCommand("Redo Answer", in: app, bundleIdentifier: bundleIdentifier)
+        try performEditCommand("shell.command.redo", in: app, bundleIdentifier: bundleIdentifier)
         try assertQuestion(thirdQuestion, in: app)
         try assertStudyHistory(app, bundleIdentifier: bundleIdentifier, undo: true, redo: false)
-        try performStudyCommand("Undo Answer", in: app, bundleIdentifier: bundleIdentifier)
+        try performEditCommand("shell.command.undo", in: app, bundleIdentifier: bundleIdentifier)
         try assertQuestion(secondQuestion, in: app)
         try assertStudyHistory(app, bundleIdentifier: bundleIdentifier, undo: true, redo: true)
 
@@ -86,28 +86,32 @@ final class LocalReviewJourneyTests: XCTestCase {
         try assertSavedAndRestart(app, bundleIdentifier: bundleIdentifier, answers: 1, evidence: "native-close", due: 3)
     }
 
-    private func studyMenu(_ app: XCUIApplication) -> XCUIElement {
-        app.menuBars.menuBarItems["Study"]
+    /// N20.4: one Undo and one Redo, in Edit, titled after the step (R173).
+    private func editMenu(_ app: XCUIApplication) -> XCUIElement {
+        app.menuBars.menuBarItems["Edit"]
     }
 
-    private func performStudyCommand(_ title: String, in app: XCUIApplication, bundleIdentifier: String) throws {
-        let menu = studyMenu(app)
+    private func performEditCommand(_ identifier: String, in app: XCUIApplication, bundleIdentifier: String) throws {
+        let menu = editMenu(app)
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         try click(menu, in: app, bundleIdentifier: bundleIdentifier)
-        let command = menu.menuItems[title]
+        let command = menu.menuItems.matching(identifier: identifier).firstMatch
         XCTAssertTrue(command.waitForExistence(timeout: 10))
-        XCTAssertTrue(command.isEnabled, "Study > \(title) must be available to the card")
+        XCTAssertTrue(command.isEnabled, "Edit > \(command.title) must be available to the card")
         try click(command, in: app, bundleIdentifier: bundleIdentifier)
     }
 
     private func assertStudyHistory(_ app: XCUIApplication, bundleIdentifier: String, undo: Bool, redo: Bool) throws {
-        let menu = studyMenu(app)
+        XCTAssertFalse(app.menuBars.menuBarItems["Study"].exists, "The Study menu is gone (N20.4)")
+        let menu = editMenu(app)
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         try click(menu, in: app, bundleIdentifier: bundleIdentifier)
-        for (title, enabled) in [("Undo Answer", undo), ("Redo Answer", redo)] {
-            let command = menu.menuItems[title]
+        for (identifier, verb, enabled) in [("shell.command.undo", "Undo", undo), ("shell.command.redo", "Redo", redo)] {
+            let command = menu.menuItems.matching(identifier: identifier).firstMatch
             XCTAssertTrue(command.waitForExistence(timeout: 10))
-            XCTAssertEqual(command.isEnabled, enabled, "Study > \(title) must respect history and native input ownership")
+            XCTAssertEqual(command.isEnabled, enabled, "Edit > \(verb) must respect history and native input ownership")
+            // R173: "Undo Answer Card" while there is a step, plain "Undo" otherwise.
+            XCTAssertEqual(command.title, enabled ? "\(verb) Answer Card" : verb)
         }
         // Escape belongs to the open menu and must not exit the review.
         try app.bringToFront(bundleIdentifier: bundleIdentifier)
@@ -419,7 +423,7 @@ final class LocalReviewJourneyTests: XCTestCase {
             try click(element(app, "review.session.rate.\(rating)"), in: app, bundleIdentifier: bundleIdentifier)
         }
         #if os(macOS)
-        try performStudyCommand("Undo Answer", in: app, bundleIdentifier: bundleIdentifier)
+        try performEditCommand("shell.command.undo", in: app, bundleIdentifier: bundleIdentifier)
         try assertQuestion(try XCTUnwrap(easyQuestion), in: app)
         try assertStudyHistory(app, bundleIdentifier: bundleIdentifier, undo: true, redo: true)
         #else
