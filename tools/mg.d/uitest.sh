@@ -216,7 +216,7 @@ mg_ui_test__review_prepare() {
   # hide its home and mount the compiler output volume read-only.
   mg_conf__dev -- "cd core && cargo build -q -p meguri-cli" || return 1
   mg_conf__dev -u "$(id -u):$(id -g)" -v "$MG_RUN_DIR/empty-cargo-home:/cargo-home:ro" \
-    -v "$(mg_compose_project)_cargo-target:/cargo-target:ro" -- \
+    -v "${MEGURI_DOCKER_CARGO_TARGET:-$(mg_compose_project)_cargo-target}:/cargo-target:ro" -- \
     "python3 /work/tools/scripts/native-media-review-capture.py derive '$container_run' '$MG_UI_REVIEW_PLATFORM' '$revision'" || return 1
   python3 "$helper" bind "$MG_RUN_DIR" "$(mg_app_products "$app_platform" Debug)/Meguri.app" Debug || return 1
   paths="$(python3 "$helper" stage-paths "$MG_RUN_DIR")" || return 1
@@ -362,6 +362,14 @@ mg_ui_test() {
   if mg_ui_test__media_selected "$suites"; then
     media=1
     [ -z "$physical" ] || { mg_ui_test__usage "native media export capture is unsupported on physical devices; use the leased VM"; return 0; }
+    # Its generated parent with media files, made once per checkout (a new
+    # worktree has none) before any build or lease.
+    if [ ! -d "$MG_ROOT/build/fixtures/recipes/typical-1" ] &&
+        ! "$MG_TOOLS/mg" fixtures typical --seed 1 --media files >&2 </dev/null; then
+      mg_failure native-media-source "the media parent build/fixtures/recipes/typical-1 is missing and could not be generated: tools/mg fixtures typical --seed 1 --media files"
+      mg_status error
+      return 0
+    fi
   fi
   if mg_ui_test__review_selected "$suites"; then
     review=1
@@ -406,22 +414,16 @@ mg_ui_test() {
   fi
   if [ "$platform" = mac ]; then
     [ -z "$device" ] || { mg_ui_test__usage "--device is for simulators"; return 0; }
+    mg_ui_suite_fixtures $suites || { mg_status error; return 0; }
     mg_mac_ui_begin || return 0
     mg_app_build mac "$config" ${build_args[0]+"${build_args[@]}"} || return 0
     mg_mac_ui_take || return 0
-    for s in $suites; do
-      case "$s" in
-        DeckManagementUITests|DeckManagementUITests/*|MacHomeHierarchyTests|MacHomeHierarchyTests/*)
-          mg_vm_fixture "$MG_ROOT/build/fixtures/recipes/local-review-1"
-          result=$?
-          if [ "$result" -ne 0 ]; then
-            if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
-            return 0
-          fi
-          break
-          ;;
-      esac
-    done
+    mg_ui_suite_fixtures_stage "$MG_MAC_RUNNER"
+    result=$?
+    if [ "$result" -ne 0 ]; then
+      if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
+      return 0
+    fi
     if [ -n "$media" ]; then
       mg_ui_test__media_prepare "$MG_MAC_RUNNER"
       result=$?
@@ -448,12 +450,19 @@ mg_ui_test() {
     mg_ui_test__report "$MG_RUN_DIR/mac" "$result"
     return 0
   fi
+  mg_ui_suite_fixtures $suites || { mg_status error; return 0; }
   mg_sim_begin || return 0
   if [ -n "$device" ]; then
     mg_sim_check_given "$device" || return 0
   fi
   mg_app_build ios-sim "$config" ${build_args[0]+"${build_args[@]}"} || return 0
   mg_sim_take || return 0
+  mg_ui_suite_fixtures_stage "$MG_SIM_RUNNER"
+  result=$?
+  if [ "$result" -ne 0 ]; then
+    if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
+    return 0
+  fi
   if [ -n "$device" ]; then
     mg_sim_check_given "$device" || return 0
     udid="$device"
