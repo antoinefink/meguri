@@ -10,6 +10,7 @@ import Testing
         let widths = ActivityRowWidths()
         #expect(widths.row(.deck) == 0)
         widths.measuredList(.deck, 402)
+        widths.rowAppeared(.deck)
         widths.measuredRow(.deck, 322)
         // A new view instance (a pushed page, a recreated row) reads it back.
         #expect(widths.row(.deck) == 322)
@@ -22,9 +23,20 @@ import Testing
         #expect(widths.row(.deck) == 322, "the same width changes nothing")
         widths.measuredList(.deck, 402)
         #expect(widths.row(.deck) == 0)
-        #expect(widths.row(.collection) == 0, "pages are kept apart")
-        widths.measuredRow(.deck, 322)
-        widths.measuredList(.deck, 874)
-        #expect(widths.row(.deck) == 322)
+        #expect(widths.row(.today) == 0, "each list keeps its own")
+    }
+
+    @Test func anOverlappingReplacementKeepsTheWidthWhateverTheCallbackOrder() {
+        let widths = ActivityRowWidths()
+        widths.measuredList(.deckList, 402)
+        widths.rowAppeared(.deckList)
+        widths.measuredRow(.deckList, 362)
+        // The new row appears and measures before the old one's disappear arrives,
+        // then the list reports its new width.
+        widths.rowAppeared(.deckList)
+        widths.measuredRow(.deckList, 700)
+        widths.rowLeft(.deckList)
+        widths.measuredList(.deckList, 740)
+        #expect(widths.row(.deckList) == 700)
     }
 }

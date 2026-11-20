@@ -121,7 +121,7 @@ public struct TodayView: View {
             }
             // N14.11: the collection's activity, after the decks.
             ActivityHeatmapSection(store: collection.activity, scope: .collection,
-                                   widths: collection.navigation.activityRowWidths)
+                                   widths: collection.navigation.activityRowWidths, page: .today)
             if let error = collection.error, !besideDeckList {
                 Section {
                     Text(verbatim: error)
@@ -144,7 +144,7 @@ public struct TodayView: View {
         .listStyle(.plain)
         #endif
         .activityLoading(collection.activity, scope: .collection, active: collection.heatmapRefreshes,
-                         widths: collection.navigation.activityRowWidths)
+                         widths: collection.navigation.activityRowWidths, page: .today)
         .modifier(TodayTitle(enabled: besideDeckList, subtitle: HomeHeading.todaySubtitle(today.totals, locale: locale)))
     }
 

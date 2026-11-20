@@ -368,7 +368,7 @@ public struct HomeView: View {
             }
             // N14.11: this deck's and its subdecks' activity, after the subdecks.
             ActivityHeatmapSection(store: collection.activity, scope: .deck(deck.id),
-                                   widths: collection.navigation.activityRowWidths)
+                                   widths: collection.navigation.activityRowWidths, page: .deck)
             if let error = collection.error {
                 Text(verbatim: error).foregroundStyle(.token(.statusError))
                     .accessibilityIdentifier("home.collection.error")
@@ -388,7 +388,7 @@ public struct HomeView: View {
         .listStyle(.insetGrouped)
         #endif
         .activityLoading(collection.activity, scope: .deck(deck.id), active: collection.heatmapRefreshes,
-                         widths: collection.navigation.activityRowWidths)
+                         widths: collection.navigation.activityRowWidths, page: .deck)
     }
     @ViewBuilder private func deckAction(_ deck: ReviewCollection.DeckPageDetail, empty: Bool) -> some View {
         if empty {
@@ -612,7 +612,8 @@ public struct HomeDeckTree: View {
                         branches
                     }
                     if let activity, let navigation {
-                        ActivityHeatmapSection(store: activity, scope: .collection, widths: navigation.activityRowWidths)
+                        ActivityHeatmapSection(store: activity, scope: .collection, widths: navigation.activityRowWidths,
+                                               page: .deckList)
                     }
                     if let error {
                         Section {
@@ -636,7 +637,7 @@ public struct HomeDeckTree: View {
                 }
                 .coordinateSpace(name: "home.deck.list")
                 .activityLoading(activity, scope: .collection, active: activityActive,
-                                 widths: navigation?.activityRowWidths)
+                                 widths: navigation?.activityRowWidths, page: .deckList)
                 // List does not use the ScrollView target-layout modifier.
                 // Track actual row geometry, not lazy row creation, so cached
                 // off-screen rows cannot overwrite the saved navigation anchor.

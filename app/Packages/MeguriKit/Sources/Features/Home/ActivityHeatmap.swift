@@ -10,32 +10,30 @@ import SwiftUI
 @Observable
 @MainActor
 final class ActivityRowWidths {
-    enum Page: Hashable { case collection, deck }
+    /// Each list has its own row insets, so each keeps its own width.
+    enum Page: Hashable { case today, deckList, deck }
     private var rows: [Page: CGFloat] = [:]
     @ObservationIgnored private var lists: [Page: CGFloat] = [:]
-    /// Pages whose group is not on screen (hidden, or the page left): their row cannot
-    /// measure itself, so a new list width makes them measure again.
-    @ObservationIgnored private var unmeasured: Set<Page> = []
+    /// Rows of the page on screen now. Two can overlap while one page replaces another
+    /// (a pushed deck page, a fold), and their appear and disappear calls come in any order.
+    @ObservationIgnored private var mounted: [Page: Int] = [:]
 
     func row(_ page: Page) -> CGFloat { rows[page] ?? 0 }
 
     func measuredRow(_ page: Page, _ width: CGFloat) {
-        unmeasured.remove(page)
         if rows[page] != width { rows[page] = width }
     }
 
-    func rowLeft(_ page: Page) { unmeasured.insert(page) }
+    func rowAppeared(_ page: Page) { mounted[page, default: 0] += 1 }
+    func rowLeft(_ page: Page) { mounted[page] = max(0, mounted[page, default: 0] - 1) }
 
-    /// The hosting list's width: when it changes while the row is away (a rotation, a
-    /// window resize, a fold), the row's last width no longer holds.
+    /// The hosting list's width. When it changes while no row of the page is on screen
+    /// (hidden, or the page left), the row's last width no longer holds and the row
+    /// measures again when it next shows.
     func measuredList(_ page: Page, _ width: CGFloat) {
         defer { lists[page] = width }
-        guard let previous = lists[page], previous != width, unmeasured.contains(page) else { return }
+        guard let previous = lists[page], previous != width, mounted[page, default: 0] == 0 else { return }
         rows[page] = nil
-    }
-
-    static func page(_ scope: ActivityScope) -> Page {
-        if case .deck = scope { .deck } else { .collection }
     }
 }
 
@@ -50,6 +48,7 @@ struct ActivityHeatmapSection: View {
     let store: ActivityHeatmapStore
     let scope: ActivityScope
     let widths: ActivityRowWidths
+    let page: ActivityRowWidths.Page
     @Environment(\.calendar) private var calendar
 
     /// The narrowest column (a square and its gap) the grid packs before it drops a week.
@@ -60,7 +59,6 @@ struct ActivityHeatmapSection: View {
     #endif
 
     var body: some View {
-        let page = ActivityRowWidths.page(scope)
         let width = widths.row(page)
         let geometry = ActivityGrid.Geometry(width: width, minimumPitch: Self.minimumPitch)
         let days = store.days(scope)
@@ -90,6 +88,7 @@ struct ActivityHeatmapSection: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { widths.measuredRow(page, $0) }
+                .onAppear { widths.rowAppeared(page) }
                 .onDisappear { widths.rowLeft(page) }
                 // One element: the grid's squares say nothing one by one (N14.11).
                 .accessibilityElement(children: .ignore)
@@ -199,13 +198,13 @@ extension View {
     /// It also tells `widths` the list's width, so a group that is not on screen learns of
     /// a rotation, a resize or a fold.
     func activityLoading(_ store: ActivityHeatmapStore?, scope: ActivityScope, active: Bool,
-                         widths: ActivityRowWidths?) -> some View {
+                         widths: ActivityRowWidths?, page: ActivityRowWidths.Page) -> some View {
         task(id: active ? store?.request(scope) : nil) {
             guard active, let store else { return }
             await store.load(store.request(scope))
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-            widths?.measuredList(ActivityRowWidths.page(scope), width)
+            widths?.measuredList(page, width)
         }
     }
 }
