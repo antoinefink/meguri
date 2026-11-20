@@ -218,6 +218,40 @@ import Testing
         #expect(reads == 1 && !model.busy && model.canDelete(deckID: 1) && owner.deckActions.canPresent(.create))
     }
 
+    @Test func theQuestionKeepsWhereItWasAskedAcrossARereadAndTheMenuBarAsksInTheWindow() async throws {
+        let owner = await makeOwner(), model = owner.deckDeletion
+        var summaries = [DeckDeletionSummary(decks: 1, cards: 1), .init(decks: 1, cards: 2)]
+        model.readSummary = { _ in summaries.removeFirst() }
+        model.deleteDecks = { deletion(removed: $0) }
+        model.delete(deckID: 2, anchor: .row(place: "sidebar")); await model.waitForCompletion()
+        #expect(model.confirmation?.anchor == .row(place: "sidebar"))
+        model.confirm(); await model.waitForCompletion()
+        #expect(model.confirmation?.anchor == .row(place: "sidebar") && model.confirmation?.cards == 2)
+        model.cancel()
+        summaries = [DeckDeletionSummary(decks: 1, cards: 1)]
+        model.delete(deckID: 2); await model.waitForCompletion()
+        #expect(try #require(model.confirmation).anchor == .window)
+    }
+
+    @Test func editUndoIsTitledDeleteDeckAfterADeleteAndWaitsWhileItRuns() async {
+        let owner = await makeOwner(), model = owner.deckDeletion, history = owner.collectionUndo
+        let undo = DeletionUndo(), gate = DeletionGate()
+        history.service = undo
+        await history.waitForRefresh()
+        model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 0) }
+        model.deleteDecks = { ids in
+            await gate.hold(); await undo.record("Delete Deck"); return deletion(removed: ids)
+        }
+        model.delete(deckID: 3); await gate.entered()
+        #expect(!history.canUndo, "The history waits for the delete")
+        gate.release(); await model.waitForCompletion(); await history.waitForRefresh()
+        #expect(history.undoName == "Delete Deck" && history.canUndo)
+        let route = EditUndoRouting.route(.init(collectionStep: history.undoName))
+        #expect(route == .init(target: .collection, title: .named("Delete Deck"), enabled: true))
+        history.undo(); await history.waitForCompletion()
+        #expect(history.redoName == "Delete Deck" && history.undoName == nil)
+    }
+
     @Test func aRunningRenameBlocksDeletion() async {
         let owner = await makeOwner(), gate = DeletionGate()
         owner.deckActions.startRename = { _, _ in await gate.hold(); throw BridgeError.cancelled }
@@ -252,6 +286,29 @@ private func deletion(removed: [Int64], generation: UInt64 = 11) -> DeckDeletion
         skippedIncomingNotes: [], skippedIncomingDecks: [], collectionRow: false)
     return DeckDeletion(summary: MutationSummary(seq: 1, generation: generation, undoName: "Delete Deck",
         changes: changes, pastCancelPoint: true), deleted: DeckDeletionSummary(decks: UInt64(removed.count), cards: 0))
+}
+
+private actor DeletionUndo: UndoService {
+    private var undoName: String?
+    private var redoName: String?
+    func record(_ name: String) { undoName = name; redoName = nil }
+    private func status(_ name: String?) -> ReviewUndoStatus {
+        name.map { .available(step: ReviewStepInfo(id: 1, name: $0, kind: .other, session: nil, longWrite: nil)) }
+            ?? .unavailable(reason: .none)
+    }
+    private var head: ReviewHead {
+        ReviewHead(items: [], counts: .init(new: 0, learning: 0, review: 0), validUntil: Int64.max, terminalState: .finished)
+    }
+    func peekUndo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus { status(undoName) }
+    func peekRedo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus { status(redoName) }
+    func startUndo(scope: ReviewUndoScope) throws(BridgeError) -> CoreUndoStart {
+        redoName = undoName; undoName = nil
+        return .restored(head: head)
+    }
+    func startRedo(scope: ReviewUndoScope) throws(BridgeError) -> CoreUndoStart {
+        undoName = redoName; redoName = nil
+        return .restored(head: head)
+    }
 }
 
 @MainActor

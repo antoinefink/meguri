@@ -29,9 +29,19 @@ public final class DeckDeletionModel {
         }
     }
 
+    /// Where the question shows on touch at regular width (N20.7): beside the
+    /// row whose menu asked, or in the system's place for the menu bar.
+    public nonisolated enum Anchor: Hashable, Sendable {
+        case window
+        /// A row of one deck list (`place` names the list, so two lists showing
+        /// the same deck do not both present it).
+        case row(place: String)
+    }
+
     /// The question: title `Delete “<name>”?` and one message line.
     public struct Confirmation: Hashable, Sendable {
         public let deckID: Int64
+        public let anchor: Anchor
         /// The deck's last name component.
         public let name: String
         public let subdecks: UInt64
@@ -89,10 +99,10 @@ public final class DeckDeletionModel {
 
     /// Delete Deck: reads D8.5's summary; with no card to lose it deletes at
     /// once, otherwise it sets `confirmation`.
-    public func delete(deckID: Int64, host: AppNavigation.SheetHost = .main) {
+    public func delete(deckID: Int64, host: AppNavigation.SheetHost = .main, anchor: Anchor = .window) {
         guard canDelete(deckID: deckID, host: host), let owner else { return }
         let name = Self.lastComponent(owner: owner, deckID: deckID)
-        start(deckID: deckID, name: name, shown: nil, owner: owner)
+        start(deckID: deckID, name: name, anchor: anchor, shown: nil, owner: owner)
     }
 
     /// The destructive button. The summary is read again first; when it no
@@ -101,7 +111,7 @@ public final class DeckDeletionModel {
         guard let pending = confirmation, !busy, let owner, pending.generation == owner.generation,
               owner.deckWriteAllowed(host: .main) else { return }
         confirmation = nil
-        start(deckID: pending.deckID, name: pending.name, shown: pending.summary, owner: owner)
+        start(deckID: pending.deckID, name: pending.name, anchor: pending.anchor, shown: pending.summary, owner: owner)
     }
 
     /// Cancel, Esc, or a tap outside the popover: nothing changes.
@@ -111,7 +121,7 @@ public final class DeckDeletionModel {
 
     public func waitForCompletion() async { await task?.value }
 
-    private func start(deckID: Int64, name: String, shown: DeckDeletionSummary?, owner: ReviewCollection) {
+    private func start(deckID: Int64, name: String, anchor: Anchor, shown: DeckDeletionSummary?, owner: ReviewCollection) {
         // Reserve synchronously, before the task can yield to another request.
         revision &+= 1; busy = true; failure = nil
         let current = revision, expected = owner.generation
@@ -124,7 +134,7 @@ public final class DeckDeletionModel {
                 guard isCurrent(), summary.decks > 0 else { return }
                 let subdecks = summary.decks - 1
                 if summary != shown, let message = Message(subdecks: subdecks, cards: summary.cards) {
-                    confirmation = Confirmation(deckID: deckID, name: name, subdecks: subdecks,
+                    confirmation = Confirmation(deckID: deckID, anchor: anchor, name: name, subdecks: subdecks,
                         cards: summary.cards, message: message, summary: summary, generation: expected)
                     return
                 }
@@ -152,6 +162,8 @@ public final class DeckDeletionModel {
     private func finish(processed: Set<Int64>, owner: ReviewCollection, generation: UInt64) async {
         owner.navigation.deckPagesRemoved(Set(processed.map { DeckID(rawValue: $0) }))
         _ = try? await owner.refreshDeckNames(generation: generation)
+        // Edit › Undo Delete Deck (R173) reads the new step.
+        owner.deckWriteFinished()
     }
 
     /// Background and close: a queued delete stops; an admitted one completes.

@@ -220,6 +220,101 @@ final class DeckManagementUITests: XCTestCase {
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
     }
 
+    /// N20.7: an empty deck goes at once; a deck with cards asks first, Cancel
+    /// keeps it, Delete removes it, and Edit › Undo Delete Deck restores it.
+    func testDeleteDeckAsksOnlyWhenCardsWouldBeLostAndUndoRestoresIt() throws {
+        let (app, bundle) = try launch()
+        defer { app.terminate() }
+        // An empty deck: deleted at once from its menu, its page returns to Today.
+        let emptyPage = try create(["QZ70"], app: app, bundle: bundle)[0]
+        let empty = sidebarRow(app, label: "QZ70")
+        XCTAssertTrue(empty.waitForExistence(timeout: 10))
+        let emptyID = empty.identifier.dropFirst("home.sidebar.deck.".count)
+        try app.bringToFront(bundleIdentifier: bundle)
+        empty.rightClick()
+        let deleteEmpty = app.menuItems.matching(identifier: "home.deckMenu.delete.\(emptyID)").firstMatch
+        XCTAssertTrue(deleteEmpty.waitForExistence(timeout: 10))
+        try click(deleteEmpty, app: app, bundle: bundle)
+        XCTAssertTrue(empty.waitForNonExistence(timeout: 10), "No card to lose: no question")
+        XCTAssertFalse(app.sheets.firstMatch.exists)
+        XCTAssertTrue(element(app, emptyPage).waitForNonExistence(timeout: 10), "The workspace returns to its root")
+
+        // A deck with a subdeck and 4 cards asks, with N20.7's exact text.
+        let parent = sidebarRow(app, label: "Local Review")
+        XCTAssertTrue(parent.waitForExistence(timeout: 10))
+        let parentID = parent.identifier.dropFirst("home.sidebar.deck.".count)
+        func ask() throws -> XCUIElement {
+            try app.bringToFront(bundleIdentifier: bundle)
+            parent.rightClick()
+            let delete = app.menuItems.matching(identifier: "home.deckMenu.delete.\(parentID)").firstMatch
+            XCTAssertTrue(delete.waitForExistence(timeout: 10))
+            try click(delete, app: app, bundle: bundle)
+            let alert = app.sheets.firstMatch
+            XCTAssertTrue(alert.waitForExistence(timeout: 10))
+            XCTAssertTrue(alert.staticTexts["Delete “Local Review”?"].exists)
+            XCTAssertTrue(alert.staticTexts["Its subdeck and 4 cards will also be deleted."].exists)
+            return alert
+        }
+        var alert = try ask()
+        // Return deletes nothing: Delete is never the default.
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("\r", modifierFlags: [])
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(parent.exists, "Return cancels")
+        alert = try ask()
+        try click(alert.buttons["Cancel"], app: app, bundle: bundle)
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(parent.exists, "Cancel changes nothing")
+        alert = try ask()
+        try click(alert.buttons["Delete"], app: app, bundle: bundle)
+        XCTAssertTrue(parent.waitForNonExistence(timeout: 10))
+        XCTAssertFalse(sidebarRow(app, label: "Cards").exists, "Its subdeck goes with it")
+
+        // One undo step: Edit › Undo Delete Deck brings the deck and its subdeck back.
+        let edit = app.menuBars.menuBarItems["Edit"]
+        try click(edit, app: app, bundle: bundle)
+        let undo = edit.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", "Undo")).firstMatch
+        XCTAssertTrue(undo.waitForExistence(timeout: 10))
+        XCTAssertEqual(undo.title, "Undo Delete Deck")
+        XCTAssertTrue(undo.isEnabled)
+        try click(undo, app: app, bundle: bundle)
+        XCTAssertTrue(sidebarRow(app, label: "Local Review").waitForExistence(timeout: 10))
+        try click(edit, app: app, bundle: bundle)
+        let redo = edit.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", "Redo")).firstMatch
+        XCTAssertTrue(redo.waitForExistence(timeout: 10))
+        XCTAssertEqual(redo.title, "Redo Delete Deck")
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+    }
+
+    /// N20.4: Deck › Delete Deck (⌘⌫) acts on the shown deck, never on a focused text field's ⌘⌫.
+    func testDeckMenuDeleteActsOnTheShownDeckAndLeavesTextFieldsTheirKey() throws {
+        let (app, bundle) = try launch()
+        defer { app.terminate() }
+        let page = try create(["QZ71"], app: app, bundle: bundle)[0]
+        let deckMenu = app.menuBars.menuBarItems["Deck"]
+        try click(deckMenu, app: app, bundle: bundle)
+        let item = deckMenu.menuItems["Delete Deck"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        XCTAssertTrue(item.isEnabled)
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        // In the search field ⌘⌫ deletes text: the command is disabled there.
+        let search = app.searchFields.firstMatch
+        try app.bringToFront(bundleIdentifier: bundle)
+        app.typeKey("f", modifierFlags: .command)
+        app.typeText("QZ7")
+        XCTAssertTrue(waitForValue(search, "QZ7"))
+        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: .command)
+        XCTAssertTrue(waitForValue(search, ""), "⌘⌫ stays the field's")
+        XCTAssertTrue(element(app, page).exists, "The deck is kept")
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        // With the focus back in the sidebar, ⌘⌫ deletes the empty shown deck at once.
+        try click(sidebarRow(app, label: "QZ71"), app: app, bundle: bundle)
+        XCTAssertTrue(element(app, page).waitForExistence(timeout: 10))
+        app.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: .command)
+        XCTAssertTrue(sidebarRow(app, label: "QZ71").waitForNonExistence(timeout: 10))
+        XCTAssertTrue(element(app, page).waitForNonExistence(timeout: 10))
+    }
+
     // MARK: Support
 
     private func launch() throws -> (XCUIApplication, String) {

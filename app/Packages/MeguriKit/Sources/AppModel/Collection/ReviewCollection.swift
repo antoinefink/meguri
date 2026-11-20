@@ -296,6 +296,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     func deckWriteAllowed(host: AppNavigation.SheetHost) -> Bool {
         deckNamesOwner?.busy != true && deckNamesAllowed(host: host, route: nil)
     }
+    /// After a deck write outside the name form: Edit's titles peek again.
+    func deckWriteFinished() { undoOwner?.scheduleRefresh() }
     /// The deck and its descendants in the tree.
     func deckSubtree(_ id: Int64) -> Set<Int64> {
         func ids(_ node: CountedDeckNode) -> [Int64] { [node.id] + node.children.flatMap(ids) }
