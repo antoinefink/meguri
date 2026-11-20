@@ -1064,7 +1064,7 @@ private struct HomeSidebarBranch: View {
         #if !os(macOS)
         .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
         #endif
-        .deckMenu(collection: collection, deck: node)
+        .deckMenu(collection: collection, deck: node, place: "sidebar")
         .tag(SidebarItem.deck(DeckID(node.id)))
         #if os(macOS)
         // An integer badge, which the system hides at zero (N11.5).

@@ -267,10 +267,18 @@ public final class ReviewCollection: ChangeFanoutSink {
         deckNamesAllowed(host: .main, route: nil) && deckNamesOwner?.busy != true
     }
 
+    private var deckDeletionOwner: DeckDeletionModel?
+    public var deckDeletion: DeckDeletionModel {
+        if let deckDeletionOwner { return deckDeletionOwner }
+        let value = DeckDeletionModel(owner: self)
+        deckDeletionOwner = value
+        return value
+    }
+
     private var deckNamesReserved: Bool {
         if case .deckName = navigation.sheet { return true }
         if deckOptionsOwner?.phase == .saving { return true }
-        return deckNamesOwner?.busy == true || undoOwner?.busy == true
+        return deckNamesOwner?.busy == true || undoOwner?.busy == true || deckDeletionOwner?.busy == true
     }
     private var undoOwner: CollectionUndoModel?
     /// Edit › Undo and Redo outside review (N20.4, R173).
@@ -311,9 +319,22 @@ public final class ReviewCollection: ChangeFanoutSink {
               exportOwner?.artifact == nil, exportOwner?.providerLease == nil,
               manualOwner?.busy != true, manualOwner?.preview == nil, manualOwner?.mediaPreview == nil,
               deckOptionsOwner?.phase != .saving,
+              deckDeletionOwner?.busy != true,
               navigation.sheet == route else { return false }
         return route == nil || navigation.sheetHost == .main
     }
+    /// A deck write with no sheet of its own (N20.7): no other deck write runs.
+    func deckWriteAllowed(host: AppNavigation.SheetHost) -> Bool {
+        deckNamesOwner?.busy != true && deckNamesAllowed(host: host, route: nil)
+    }
+    /// After a deck write outside the name form: Edit's titles peek again.
+    func deckWriteFinished() { undoOwner?.scheduleRefresh() }
+    /// The deck and its descendants in the tree.
+    func deckSubtree(_ id: Int64) -> Set<Int64> {
+        func ids(_ node: CountedDeckNode) -> [Int64] { [node.id] + node.children.flatMap(ids) }
+        return Set(deck(id).map(ids) ?? [id])
+    }
+
     public func fullDeckName(_ id: Int64) -> String? {
         func find(_ nodes: [CountedDeckNode], parents: [String]) -> String? {
             for node in nodes {
@@ -1104,6 +1125,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         undoOwner?.generationEnded()
         deckNamesOwner?.invalidate()
         deckOptionsOwner?.invalidate()
+        deckDeletionOwner?.invalidate()
         selectedDeckDetail = nil
         selectionRevision &+= 1; collapseRevision &+= 1; countsRevision &+= 1; deckTreeRevision &+= 1
         pendingStudyCollapse.removeAll()
@@ -1570,7 +1592,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             await previous?.value
             if !active {
                 await meguriSignInPreparationTask?.value
-                await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
+                await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
             }
             await openTask?.value
             guard !closed, state != .unopened else { resuming = false; return }
@@ -1681,6 +1703,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         invalidateDeckActions()
         await deckNamesOwner?.cancelAndDrain()
         await deckOptionsOwner?.cancelAndDrain()
+        await deckDeletionOwner?.cancelAndDrain()
         _ = await selectionTask?.value
         await collapseTask?.value
         await manualOwner?.cancelAndDrain()

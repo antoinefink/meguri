@@ -302,6 +302,20 @@ public final class AppNavigation {
         setPath([], for: .home)
     }
 
+    /// N20.7, N14.1: when the selected deck or a deck page on Home's stack is
+    /// among `decks` (deleted, or the default deck emptied), Home returns to
+    /// its root (Today, or the tab layout's deck list). The section stays.
+    func deckPagesRemoved(_ decks: Set<DeckID>) {
+        let stacked = path(.home).contains {
+            if case .deckPage(let deck) = $0 { return decks.contains(deck) }
+            return false
+        }
+        guard stacked || selectedDeck.map(decks.contains) == true else { return }
+        intentRevision &+= 1
+        selectedDeck = nil; showsDeckPage = false; restoredDeckPagePending = false
+        setPath([], for: .home)
+    }
+
     /// Drop presentation bound to the old generation. Entry keeps its progress
     /// sheet until its FFI result confirms that the new host is retained. The
     /// server workflow survives adoption to show its outcome and media decision.

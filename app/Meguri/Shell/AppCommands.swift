@@ -83,6 +83,22 @@ struct NativeCommandContext {
         guard host == .main, review == nil, collection.navigation.sheet == nil, let deck = shownDeck else { return false }
         return collection.deckOptions.canOpen(deckID: deck)
     }
+    /// N20.4, N20.7: the shown deck, filtered included, outside review, with no
+    /// sheet, panel or text input owning ⌘⌫ (H9.2): a focused text view keeps
+    /// it for deleting to the line's start.
+    var canDeleteShownDeck: Bool {
+        guard let deck = shownDeck, collection.deckDeletion.canDelete(deckID: deck, host: host) else { return false }
+        #if os(macOS)
+        return !(MacUndoResponder.shared.firstResponder is NSText)
+        #else
+        // UIKit gives a text input's own ⌘⌫ priority over menu key commands.
+        return true
+        #endif
+    }
+    func deleteShownDeck() {
+        guard canDeleteShownDeck, let deck = shownDeck else { return }
+        collection.deckDeletion.delete(deckID: deck, host: host)
+    }
 
     // MARK: Card
 
@@ -227,6 +243,10 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("o", modifiers: [.command, .option])
             .disabled(context?.canOpenDeckOptions != true)
+            Divider()
+            Button("Delete Deck") { context?.deleteShownDeck() }
+                .keyboardShortcut(.delete, modifiers: .command)
+                .disabled(context?.canDeleteShownDeck != true)
         }
         CommandMenu("Card") {
             Button("Show Answer") {
