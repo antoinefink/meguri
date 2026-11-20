@@ -143,9 +143,16 @@ def no_constant(name):
     raise ValueError("not JSON: " + name)
 
 
+def finite(text):
+    value = float(text)
+    if value in (float("inf"), float("-inf")):
+        raise ValueError("number out of range: " + text)
+    return value
+
+
 def parse(raw):
     try:
-        value = json.loads(raw.decode("utf-8"), parse_constant=no_constant)
+        value = json.loads(raw.decode("utf-8"), parse_constant=no_constant, parse_float=finite)
     except (UnicodeDecodeError, ValueError):
         return None
     return value if isinstance(value, dict) else None
@@ -253,8 +260,9 @@ class Check:
             return "adds an archive line without a session id: %s" % shown
         if parent is None or self.repo.entry(parent, MARKER) is not None:
             return ("adds session %s to the archive %s, which takes no new records since the switch to %s<id>.json. "
-                    "Remove the line in a new commit and record the session again (tools/mg session record)"
-                    % (session, ARCHIVE, RECORDS))
+                    "Move it: remove the line in one commit, then commit the same record alone as %s%s.json "
+                    "(Role: infra, Session: %s), so commits that cite the session still resolve"
+                    % (session, ARCHIVE, RECORDS, RECORDS, session, session))
         if len(changes) != 1:
             return "adds session %s to the archive together with other changes; a session record is committed alone" % session
         if session not in values.get("session", []) or values.get("role") != ["infra"]:
@@ -287,6 +295,8 @@ class Check:
         changes = self.changes(sha)
         values = trailer_values(trailers)
         for status, mode, oid, path in changes:
+            if path == RECORDS[:-1] and status != "D":
+                self.find(sha, subject, "puts a file at %s, where the session records directory goes" % path)
             if path.startswith(RECORDS):
                 if status != "A":
                     verb = {"D": "deletes", "M": "modifies", "T": "changes the type of"}.get(status, "changes")
@@ -330,6 +340,7 @@ class Check:
 
     def check_range(self, bases, subject):
         rev = self.rev
+        self.check_directory(rev, subject)
         after = self.repo.record_files(rev)
         base_tip = self.repo.record_files(self.base)
         before = {}
@@ -381,9 +392,15 @@ class Check:
         counts.pop(None, None)
         return counts
 
+    def check_directory(self, sha, subject):
+        entry = self.repo.entry(sha, RECORDS[:-1])
+        if entry is not None and entry[1] != "tree":
+            self.find(sha, subject, "%s is a %s (mode %s), not the session records directory" % (RECORDS[:-1], entry[1], entry[0]))
+
     def check_merge(self, sha, parents, subject):
         """A merge keeps every record and archive line of each parent, as it
         is, and brings none of its own."""
+        self.check_directory(sha, subject)
         files = self.repo.record_files(sha)
         mine = collections.Counter(lines(self.repo.blob(sha, ARCHIVE)))
         known, held = set(), collections.Counter()

@@ -53,7 +53,7 @@ record_at() { git -C "$1" show "${3:-HEAD}:docs/process/provenance/sessions/$2.j
 # newest_record <checkout>: the record the checkout's last commit added.
 newest_record() {
   local path
-  path="$(git -C "$1" diff-tree --no-commit-id --name-only -r --diff-filter=A HEAD -- docs/process/provenance/sessions/)"
+  path="$(git -C "$1" diff-tree -z --no-commit-id --name-only -r --diff-filter=A HEAD -- docs/process/provenance/sessions/ | tr -d '\0')"
   git -C "$1" show "HEAD:$path"
 }
 
@@ -662,12 +662,23 @@ Session: s-20991231T000000Z-00000000"
   archive_line "$SB" s-20261101T000000Z-0000000b 2026-11-01T00:00:00Z
   sessions_py "$new" HEAD
   [ "$status" -eq 1 ]
-  [[ "$output" == *"takes no new records since the switch"*"Remove the line in a new commit"* ]]
-  # Taking that line out in a new commit clears it.
+  [[ "$output" == *"takes no new records since the switch"*"Move it: remove the line in one commit"* ]]
+  # Moving it clears it, and a commit that cites the session still resolves.
+  echo cite >"$SB/docs/cite.md"
+  git -C "$SB" add docs/cite.md
+  git -C "$SB" commit -qm "Cite the session" -m "Session: s-20261101T000000Z-0000000b"
+  local moved
+  moved="$(tail -n 1 "$SESSIONS")"
   sed -i.bak '$d' "$SESSIONS" && rm "$SESSIONS.bak"
   git -C "$SB" commit -qam "Take the line out"
+  mkdir -p "$RECORDS"
+  printf '%s\n' "$moved" >"$RECORDS/s-20261101T000000Z-0000000b.json"
+  git -C "$SB" add "$RECORDS/s-20261101T000000Z-0000000b.json"
+  git -C "$SB" commit -qm "Record session s-20261101T000000Z-0000000b (critic, old)" -m "Role: infra
+Session: s-20261101T000000Z-0000000b"
   sessions_py "$new" HEAD
   [ "$status" -eq 0 ]
+  git -C "$SB" reset -q --hard HEAD~1
   # A valid line the branch added is never taken out again.
   sed -i.bak '$d' "$SESSIONS" && rm "$SESSIONS.bak"
   git -C "$SB" commit -qam "Take the valid line out"
@@ -834,6 +845,24 @@ Session: s-20261201T000000Z-00000015"
   [[ "$all" == *"00000013.json has base_commit \"$tag\""* ]]
   [[ "$all" == *"00000014.json names role_doc docs/process/roles/critic.md, which its base_commit does not hold"* ]]
   [[ "$all" == *"00000015.json is not a regular file (mode 160000)"* ]]
+  # An out-of-range number is no JSON number either.
+  BASE="$(git -C "$SB" rev-parse HEAD)"
+  hand_record "$SB" s-20261201T000000Z-00000016 2026-12-01T00:00:00Z '.extra = 1'
+  sed -i.bak 's/"extra":1/"extra":1e400/' "$RECORDS/s-20261201T000000Z-00000016.json" && rm "$RECORDS/s-20261201T000000Z-00000016.json.bak"
+  git -C "$SB" commit -q --amend -a --no-edit
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"00000016.json is not one JSON object"* ]]
+  # A file where the records directory goes.
+  git -C "$SB" reset -q --hard "$BASE"
+  git -C "$SB" rm -rq docs/process/provenance/sessions 2>/dev/null || true
+  rm -rf "$RECORDS"
+  echo file >"$RECORDS"
+  git -C "$SB" add docs/process/provenance/sessions
+  git -C "$SB" commit -qm "A file for the directory"
+  sessions_check
+  [ "$status" -eq 1 ]
+  [[ "$(field '[.failures[].message] | join(" ")')" == *"puts a file at docs/process/provenance/sessions"* ]]
 }
 
 @test "the sessions check refuses a merge that makes a record executable or names an unknown session" {

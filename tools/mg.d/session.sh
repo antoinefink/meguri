@@ -122,6 +122,8 @@ Session: $id" 2>"$err"; do
       mg__session_unlock
       MG_SESSION_FAILURE=session-private
       MG_SESSION_MESSAGE="the private-token scan (pre-commit) refused the session record: its name, note, branch or path holds a word from the private collection; nothing was recorded, so run again with another name (and --note, --branch or --path when given). The scan never says which word, and this message does not either"
+      [ -z "${MG_SESSION_STAGED:-}" ] ||
+        MG_SESSION_MESSAGE="$MG_SESSION_MESSAGE. The refused record is still staged in $dir: run git rm --cached -- $rel there, then remove the file"
       return 1
     fi
     tries=$((tries + 1))
@@ -137,6 +139,8 @@ Session: $id" 2>"$err"; do
       mg__session_unlock
       MG_SESSION_FAILURE=session-commit
       MG_SESSION_MESSAGE="could not commit the record $rel, so nothing was recorded (see log.txt)"
+      [ -z "${MG_SESSION_STAGED:-}" ] ||
+        MG_SESSION_MESSAGE="could not commit the record $rel, nor unstage it: it is still staged in $dir; run git rm --cached -- $rel there, then remove the file"
       return 1
     fi
     sleep 1
@@ -157,15 +161,26 @@ mg__session_committed() {
 
 # mg__session_drop: removes the record mg_session_store is writing
 # (MG__SESSION_DROP, in checkout MG__SESSION_DROP_DIR) from the index and the
-# working tree unless it was committed, and its temporary file
-# (MG__SESSION_DROP_ERR).
+# working tree unless HEAD holds it, and its temporary file
+# (MG__SESSION_DROP_ERR). When the index stays locked, the file is kept (it
+# matches what is staged) and MG_SESSION_STAGED names it.
 mg__session_drop() {
   [ -n "${MG__SESSION_DROP:-}" ] || return 0
-  local dir="$MG__SESSION_DROP_DIR" rel="$MG__SESSION_DROP"
+  local dir="$MG__SESSION_DROP_DIR" rel="$MG__SESSION_DROP" tries=0
   MG__SESSION_DROP=""
+  MG_SESSION_STAGED=""
   rm -f "$MG__SESSION_DROP_ERR"
-  mg__session_committed "$dir" "$rel" && return 0
-  git -C "$dir" rm -q --cached --ignore-unmatch -- "$rel" >&2 2>&1
+  [ -f "$dir/$rel" ] &&
+    [ "$(git -C "$dir" rev-parse -q --verify "HEAD:$rel" 2>/dev/null)" = "$(git -C "$dir" hash-object -- "$dir/$rel")" ] &&
+    return 0
+  until git -C "$dir" rm -q --cached --ignore-unmatch -- "$rel" >&2 2>&1; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 3 ]; then
+      MG_SESSION_STAGED="$rel"
+      return 1
+    fi
+    sleep 1
+  done
   rm -f "$dir/$rel"
 }
 
