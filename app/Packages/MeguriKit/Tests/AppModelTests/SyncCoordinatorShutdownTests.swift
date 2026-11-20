@@ -19,13 +19,22 @@ extension ReviewCollectionStartupTests {
             let oldDocument = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: providerFile)) as? [String: Any])
             try #require(await harness.owner.close())
             try FileManager.default.removeItem(at: providerFile)
-            harness.defaults.set(["enabled": true, "paused": true, "automatic": false, "media": false], forKey: "meguri.cloud.deviceSettings")
+            // As the earlier build left the device: paused, media off, and nothing of this build stored.
+            harness.defaults.set(["enabled": true, "paused": true, "automatic": true, "media": false], forKey: "meguri.cloud.deviceSettings")
+            harness.defaults.removeObject(forKey: "meguri.sync.round2Migrated")
+            harness.defaults.removeObject(forKey: "meguri.sync.automatic")
             let reopened = try ServiceAppHarness(root: harness.root, wire: harness.wire, defaults: harness.defaults)
             do {
                 await reopened.owner.start()
                 try #require(reopened.owner.state == .ready)
+                // sync/policy P25.1, P25.2: with no `publish` or `adopt` op the pause becomes
+                // Sync Automatically off in one provider write, and media reads on.
                 let settings = reopened.sync.settings
-                #expect(settings.enabled && settings.paused && !settings.automatic && !settings.media)
+                #expect(settings.enabled && !settings.paused && !settings.automatic && settings.media)
+                #expect(reopened.sync.providerState?.settings == settings)
+                #expect(!reopened.sync.storedAutomatic && !reopened.sync.updateHold)
+                #expect(harness.defaults.bool(forKey: "meguri.sync.round2Migrated"))
+                #expect(harness.defaults.object(forKey: "meguri.sync.automatic") as? Bool == false)
                 #expect(reopened.sync.providerState?.selection == .iCloud)
                 let after = try await reopened.backend.workflow.durableSnapshot()
                 #expect(before.binding == after.binding)
@@ -258,7 +267,7 @@ extension ReviewCollectionStartupTests {
                 originalReturned = true
             }
             defer { backend.beforeExecution = nil; gate.release(); held.continuation.finish() }
-            harness.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            harness.sync.setDeviceSettings(paused: false, automatic: true)
             try #require(try await serviceAppSignal(held.stream, stage: "provider original command"))
             let changing = Task {
                 let success = await harness.sync.changeProvider(to: .meguri)
@@ -393,12 +402,12 @@ extension ReviewCollectionStartupTests {
             catch { /* The original Core-issued generation must remain rejected. */ }
             do { try await credentials.deleteCredentialsAfterDrain(); Issue.record("Replaced credential owner remained usable") }
             catch { /* Retired credentials cannot act for the successor. */ }
-            app.sync.setDeviceSettings(paused: true, automatic: false, media: false)
+            app.sync.setDeviceSettings(paused: true, automatic: false)
             await app.sync.waitForInputs()
-            #expect(app.sync.settings.paused && !app.sync.settings.automatic && !app.sync.settings.media)
+            #expect(app.sync.settings.paused && !app.sync.settings.automatic && app.sync.settings.media)
             #expect(app.sync.providerState?.settings == app.sync.settings)
             #expect(!app.sync.operationFailed)
-            app.sync.setDeviceSettings(paused: false, automatic: false, media: false)
+            app.sync.setDeviceSettings(paused: false, automatic: false)
             await app.sync.waitForInputs()
             try #require(await app.sync.changeProvider(to: .localOnly))
             observeShutdownReturnPreview(app, test: .collectionReplacement, stage: .beforePrepare)
@@ -431,7 +440,7 @@ extension ReviewCollectionStartupTests {
             defer { backend.beforeExecution = nil; mediaGate.release(); held.continuation.finish() }
             var quitting: Task<Bool, Never>?
             do {
-                harness.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+                harness.sync.setDeviceSettings(paused: false, automatic: true)
                 try #require(try await serviceAppSignal(held.stream, stage: "owner quit media held"))
                 quitting = Task {
                     let result = await harness.owner.closeForQuit()
@@ -707,7 +716,7 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: [false, true])
     func nativePreparationAndExpiryIntentAloneRemainUnownedAndSticky(alreadyCancelled: Bool) async throws {
         try await withShutdownHarness(mediaEnabled: false) { app in
-            app.sync.setDeviceSettings(paused: false, automatic: true, media: false)
+            app.sync.setDeviceSettings(paused: false, automatic: true)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let original = try app.backend
             let policy = try await original.workflow.policy()
@@ -750,7 +759,7 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: [false, true])
     func nativeOriginalFetchCancellationMatchesExpiryOrReplacementIntent(replacement: Bool) async throws {
         try await withShutdownHarness(mediaEnabled: false) { app in
-            app.sync.setDeviceSettings(paused: false, automatic: true, media: false)
+            app.sync.setDeviceSettings(paused: false, automatic: true)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let sdk = try #require(await app.factory.engines.last)
             await sdk.waitForAutomaticSend()
@@ -868,7 +877,7 @@ extension ReviewCollectionStartupTests {
     @Test(arguments: [false, true])
     func queuedOriginalMediaCancellationOwnsOnlyFrozenQueueAndPreservesEarlierProviderFailure(earlierFailure: Bool) async throws {
         try await withShutdownHarness { app in
-            app.sync.setDeviceSettings(paused: false, automatic: true, media: true)
+            app.sync.setDeviceSettings(paused: false, automatic: true)
             await app.sync.waitForInputs(); await app.sync.drainOperations()
             let original = try app.backend
             let policy = try await original.workflow.policy()
@@ -1151,13 +1160,21 @@ extension ReviewCollectionStartupTests {
                 Issue.record("Expected the real ready return preview")
                 return
             }
-            // Finish discovery's account proof and trailing refresh. Enabling
-            // media changes status while preserving the preview's account authority.
+            // Finish discovery's account proof and trailing refresh. Media is always
+            // on (sync/policy P25.1), so the status change comes from the update hold:
+            // it is set here, and clearing it below changes status while preserving
+            // the preview's account authority.
             await harness.sync.drainOperations()
-            try #require(!harness.sync.settings.enabled && !harness.sync.settings.paused
-                && !harness.sync.settings.automatic && !harness.sync.settings.media)
+            harness.sync.setDeviceSettings(paused: true, automatic: false)
+            await harness.sync.waitForInputs(); await harness.sync.drainOperations()
+            try #require(!harness.sync.settings.enabled && harness.sync.settings.paused
+                && !harness.sync.settings.automatic && harness.sync.settings.media)
+            guard case .ready = harness.sync.preview else {
+                Issue.record("The update hold must leave the ready return preview in place")
+                return
+            }
             let status = try #require(harness.sync.status)
-            try #require(status.media.noSpace != true && status.mediaPaused)
+            try #require(status.media.noSpace != true && status.controls.userPaused == true)
             let originalCoordinator = harness.sync
             let backend = try harness.backend
             let originalGuard = try await backend.workflow.currentGuard()
@@ -1171,7 +1188,7 @@ extension ReviewCollectionStartupTests {
             backend.afterExecution = { command, result in
                 guard case .statusChanged(let status) = command.action, heldCommand == nil else { return }
                 heldCommand = command; heldResult = result
-                #expect(!status.mediaPaused && status.media.noSpace != true)
+                #expect(status.controls.userPaused == false && status.media.noSpace != true)
                 #expect(!Task.isCancelled && result.error == nil && !result.deferred)
                 held.continuation.yield(true)
                 await resultGate.hold()
@@ -1194,7 +1211,7 @@ extension ReviewCollectionStartupTests {
             }
             var choosing: Task<Void, Never>?
             do {
-                originalCoordinator.setDeviceSettings(paused: false, automatic: false, media: true)
+                originalCoordinator.setDeviceSettings(paused: false, automatic: false)
                 // The status Core phase is held by this result: an input
                 // barrier here would wait for the same ACK we have not released.
                 try #require(try await serviceAppSignal(held.stream, stage: "local-only actual status result held"))
@@ -1234,6 +1251,28 @@ extension ReviewCollectionStartupTests {
         }
     }
     #endif
+    @Test func aClearingActBeforeTheMigrationCommitsAutomaticOffThroughTheProvider() async throws {
+        // sync/policy P25.2, on the provider-backed settings path with a real binding.
+        try await withShutdownHarness { harness in
+            let sync = harness.sync
+            // As an earlier build left it: paused by the person with Sync Automatically on,
+            // and this build's migration not yet done (its write failed, or has not run).
+            sync.setDeviceSettings(paused: true, automatic: true)
+            await sync.drainOperations(); await sync.waitForInputs()
+            try #require(sync.settings.paused && sync.settings.automatic && sync.updateHold)
+            try #require(sync.providerState?.settings?.paused == true)
+            harness.defaults.removeObject(forKey: "meguri.sync.round2Migrated")
+            harness.defaults.removeObject(forKey: "meguri.sync.automatic")
+            // Sync Now, a recovery call or a service choice clears the hold first.
+            #expect(await sync.clearUpdateHold())
+            let expected = CloudPolicyDeviceSettings(enabled: true, paused: false, automatic: false, media: true)
+            #expect(sync.settings == expected && sync.providerState?.settings == expected)
+            #expect(!sync.storedAutomatic && !sync.automaticSwitchValue && !sync.updateHold)
+            #expect(harness.defaults.object(forKey: "meguri.sync.automatic") as? Bool == false)
+            await sync.drainOperations(); await sync.waitForInputs()
+            #expect(!sync.operationFailed)
+        }
+    }
     @Test func genuineShutdownResultFinalizesOnOriginalAuthorityBeforeNativeClose() async throws {
         try await withShutdownHarness { harness in
             let backend = try harness.backend

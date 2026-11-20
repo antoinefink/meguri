@@ -329,6 +329,8 @@ pub struct Controls {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Status {
     pub state: StatusState,
+    /// P25.4: only in `NeedsAttention`, the state rows 5 to 10 give for the same inputs.
+    pub state_without_attention: Option<StatusState>,
     pub pending: u64,
     pub held_back: u64,
     pub in_flight: u64,

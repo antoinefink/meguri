@@ -2,91 +2,6 @@ import AppModel
 import CoreBridge
 import SwiftUI
 
-struct SyncServiceSection: View {
-    let collection: ReviewCollection
-    let host: AppNavigation.SheetHost
-    @State private var destination: String?
-    @State private var switchSource: SyncProviderSelection?
-    private var changing: Bool {
-        get { collection.syncPresentation.serviceChanging }
-        nonmutating set { collection.syncPresentation.serviceChanging = newValue }
-    }
-    private var failed: Bool {
-        get { collection.syncPresentation.serviceChangeFailed }
-        nonmutating set { collection.syncPresentation.serviceChangeFailed = newValue }
-    }
-    @State private var recovering = false
-    private var sync: SyncCoordinator { collection.sync }
-    private var selected: String? {
-        switch sync.providerState?.selection {
-        case .iCloud: "iCloud"
-        case .meguri: "meguri"
-        default: nil
-        }
-    }
-    var body: some View {
-        Section {
-            Picker(SyncText.value("sync.service.label"), selection: Binding<String?>(get: { selected }, set: choose)) {
-                Text(SyncText.value("sync.service.iCloud")).tag("iCloud" as String?)
-                Text(SyncText.value("sync.service.meguri")).tag("meguri" as String?)
-            }
-            .disabled(changing || sync.providerNeedsAttention || collection.meguriSignInPreparing || sync.meguriBusy)
-            .accessibilityIdentifier("settings.accountSync.service")
-            if changing { ProgressView(SyncText.value("sync.service.changing")) }
-            if failed { Text(SyncText.value("sync.service.changeFailed")) }
-            if collection.syncPresentation.meguriSigningOut { ProgressView(SyncText.value("sync.meguri.signingOut")) }
-            if collection.syncPresentation.meguriSignOutFailed { Text(SyncText.value("sync.meguri.signOut.failed")) }
-            if sync.providerState?.phase == .blocked {
-                Text(SyncText.value("sync.service.blocked"))
-            } else if sync.providerState?.phase == .handoffRecovery {
-                Text(SyncText.value("sync.service.recovery"))
-                Button(SyncText.value("sync.service.recovery.action")) { recovering = true }
-                    .disabled(changing)
-                    .accessibilityIdentifier("settings.accountSync.serviceRecovery")
-            }
-        } footer: {
-            if selected == nil { Text(SyncText.value("sync.service.none.footer")) }
-        }
-        .sheet(isPresented: Binding(get: { destination != nil }, set: { if !$0 && !changing { destination = nil } })) {
-            if let destination, let switchSource {
-                SyncServiceSwitchSheet(collection: collection, source: switchSource, destination: destination, changing: changing,
-                    failed: failed, cancel: { self.destination = nil }, confirm: { change(destination) })
-            }
-        }
-        .alert(SyncText.value("sync.service.recovery.title"), isPresented: $recovering) {
-            Button(SyncText.value("sync.service.recovery.confirm"), role: .destructive) {
-                changing = true
-                Task { failed = !(await sync.recoverProviderHandoffToLocalOnly()); changing = false }
-            }
-            Button(SyncText.value("sync.service.cancel"), role: .cancel) {}
-        } message: { Text(SyncText.value("sync.service.recovery.message")) }
-    }
-    private func choose(_ value: String?) {
-        guard !collection.meguriSignInPreparing, !sync.meguriBusy, let value, value != selected else { return }
-        if selected != nil { switchSource = sync.providerState?.selection; destination = value }
-        else { change(value) }
-    }
-    private func change(_ value: String) {
-        let hadService = selected != nil
-        changing = true; failed = false
-        Task {
-            do {
-                try await collection.prepareSyncServiceSelection()
-                let current = collection.sync
-                let target: SyncProviderSelection = value == "meguri" ? .meguri : value == "iCloud" ? .iCloud : .localOnly
-                let succeeded = await current.changeProvider(to: target,
-                    removeMeguriCredentials: current.providerState?.selection == .meguri)
-                failed = !succeeded
-                if succeeded {
-                    destination = nil
-                    if !hadService, value == "iCloud" { collection.presentCloudSync(.connect, host: host) }
-                }
-            } catch { failed = true }
-            changing = false
-        }
-    }
-}
-
 struct SyncServiceSwitchSheet: View {
     let collection: ReviewCollection
     let source: SyncProviderSelection
@@ -98,6 +13,14 @@ struct SyncServiceSwitchSheet: View {
     private var sync: SyncCoordinator { collection.sync }
     private var oldService: String {
         SyncText.value(source == .meguri ? "sync.service.meguri" : "sync.service.iCloud")
+    }
+    /// T19.2: the destination's setup follows with no Connect step.
+    private var nextKey: String {
+        switch destination {
+        case "iCloud": "sync.switch.next.iCloud.setup"
+        case "meguri": "sync.switch.next.meguri.setup"
+        default: "sync.switch.next.localOnly"
+        }
     }
     var body: some View {
         NavigationStack {
@@ -129,227 +52,28 @@ struct SyncServiceSwitchSheet: View {
                     Text(SyncText.format("sync.switch.kept", oldService))
                     if destination != "localOnly" { Text(SyncText.value("sync.switch.otherDevices")) }
                     if source == .meguri && !failed { Text(SyncText.value("sync.switch.signOut")) }
-                    Text(SyncText.value("sync.switch.next.\(destination)"))
+                    Text(SyncText.value(nextKey))
                     if !changing && !sync.serviceChangeAvailable { Text(SyncText.value("sync.switch.busy")) }
                     if changing { ProgressView(SyncText.value("sync.service.changing")) }
                     if failed { Text(SyncText.value("sync.service.changeFailed")) }
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle(SyncText.value("sync.switch.title.\(destination)"))
+            .navigationTitle(SyncText.value(destination == "localOnly" ? "sync.switch.title.off" : "sync.switch.title.\(destination)"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(SyncText.value("sync.service.cancel"), role: .cancel, action: cancel)
                         .disabled(changing).accessibilityIdentifier("sync.serviceSwitch.cancel")
                 }
                 ToolbarItem(placement: .destructiveAction) {
-                    Button(SyncText.value("sync.switch.confirm.\(destination)"), role: .destructive, action: confirm)
+                    Button(SyncText.value(destination == "localOnly" ? "sync.switch.confirm.off" : "sync.switch.confirm.\(destination)"),
+                           role: .destructive, action: confirm)
                         .disabled(changing || !sync.serviceChangeAvailable)
                         .accessibilityIdentifier("sync.serviceSwitch.confirm")
                 }
             }
             .interactiveDismissDisabled(changing)
         }
-    }
-}
-
-struct MeguriSyncSections: View {
-    let collection: ReviewCollection
-    @State private var address = ""
-    @State private var username = ""
-    @State private var password = ""
-    @State private var signOut = false
-    private var signingOut: Bool {
-        get { collection.syncPresentation.meguriSigningOut }
-        nonmutating set { collection.syncPresentation.meguriSigningOut = newValue }
-    }
-    private var signOutFailed: Bool {
-        get { collection.syncPresentation.meguriSignOutFailed }
-        nonmutating set { collection.syncPresentation.meguriSignOutFailed = newValue }
-    }
-    @State private var stopping = false
-    private var changing: Bool {
-        get { collection.syncPresentation.serviceChanging }
-        nonmutating set { collection.syncPresentation.serviceChanging = newValue }
-    }
-    private var changeFailed: Bool {
-        get { collection.syncPresentation.serviceChangeFailed }
-        nonmutating set { collection.syncPresentation.serviceChangeFailed = newValue }
-    }
-    private var sync: SyncCoordinator { collection.sync }
-    private var signedIn: Bool { sync.meguriPhase == .setupRequired && sync.meguriRoutine != .authentication }
-    private var processing: Bool { collection.meguriSignInPreparing || sync.meguriBusy }
-    private var plainSignInStatus: Bool {
-        let status = sync.meguriStatus
-        return status.titleKey == "sync.meguri.status.notSetUp.title"
-            || status.titleKey == "sync.meguri.status.signedOut.title"
-                && status.detailKey == "sync.meguri.status.signedOut.detail"
-    }
-    var body: some View {
-        Section {
-            if plainSignInStatus && sync.settings.paused {
-                Text(SyncText.value("sync.meguri.status.paused.title"))
-                Text(SyncText.value("sync.meguri.status.paused.detail"))
-            } else if !plainSignInStatus {
-                SyncStatusRows(collection: collection, showsMeguriProviderLabel: false)
-            }
-            if collection.meguriSignInPreparing {
-                ProgressView(SyncText.value("sync.meguri.signIn.preparing"))
-                    .accessibilityIdentifier("settings.accountSync.meguri.signInProgress")
-            } else if sync.meguriBusy {
-                if let progress = sync.meguriProgress, let total = progress.total, total > 0 {
-                    ProgressView(value: Double(progress.completed), total: Double(total))
-                } else { ProgressView() }
-            }
-            if signedIn {
-                LabeledContent(SyncText.value("sync.meguri.address"), value: sync.meguriEndpoint)
-                Button(SyncText.value("sync.meguri.signOut")) { signOut = true }
-                    .disabled(processing || signingOut || changing)
-                    .accessibilityIdentifier("settings.accountSync.meguri.signOut")
-            } else {
-                Group {
-                    TextField(SyncText.value("sync.meguri.address"), text: Binding(get: { address }, set: {
-                        guard !processing else { return }
-                        address = $0; password = ""; sync.meguriAddressEdited()
-                    }))
-                        #if os(iOS)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("settings.accountSync.meguri.address")
-                    TextField(SyncText.value("sync.meguri.username"), text: Binding(get: { username }, set: {
-                        if !processing { username = $0 }
-                    }))
-                        .textContentType(.username)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("settings.accountSync.meguri.username")
-                    SecureField(SyncText.value("sync.meguri.password"), text: Binding(get: { password }, set: {
-                        if !processing { password = $0 }
-                    }))
-                        .textContentType(.password)
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                        .autocorrectionDisabled()
-                        .onSubmit(signInAction)
-                        .accessibilityIdentifier("settings.accountSync.meguri.password")
-                }
-                .disabled(processing || changing)
-                #if os(macOS)
-                .textFieldStyle(.roundedBorder)
-                #endif
-                Button(SyncText.value("sync.meguri.signIn"), action: signInAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(processing || changing || sync.settings.paused || address.isEmpty || username.isEmpty || password.isEmpty)
-                    .accessibilityIdentifier("settings.accountSync.meguri.signIn")
-            }
-            if let key = sync.meguriSignInErrorKey {
-                Label(SyncText.value(key), systemImage: "exclamationmark.circle")
-                    .accessibilityIdentifier("settings.accountSync.meguri.signInError")
-            }
-            if sync.meguriPhase == .blocked {
-                Button(SyncText.value("sync.meguri.connection.retry")) { sync.loadMeguriConnection() }
-                    .disabled(processing || changing)
-                    .accessibilityIdentifier("settings.accountSync.meguri.retryConnection")
-                Button(SyncText.value("sync.meguri.signOut")) { signOut = true }
-                    .disabled(processing || signingOut || changing)
-                    .accessibilityIdentifier("settings.accountSync.meguri.signOut")
-            }
-        } header: { Text(SyncText.value(signedIn ? "sync.service.meguri" : "sync.meguri.signIn.title")) }
-          footer: { if !signedIn { Text(SyncText.value("sync.meguri.signIn.footer")) } }
-        .disabled(signingOut)
-        .onAppear { address = sync.meguriEndpoint }
-        .onChange(of: sync.meguriEndpoint) { _, endpoint in address = endpoint; password = "" }
-        .onDisappear { password = "" }
-        .alert(SyncText.value("sync.meguri.signOut.title"), isPresented: $signOut) {
-            Button(SyncText.value("sync.meguri.signOut.confirm"), role: .destructive) {
-                password = ""; signingOut = true; signOutFailed = false
-                Task { signOutFailed = !(await sync.removeMeguriConnection()); signingOut = false }
-            }
-            Button(SyncText.value("sync.service.cancel"), role: .cancel) {}
-        } message: { Text(SyncText.value("sync.meguri.signOut.message")) }
-        Section {
-            if sync.meguriCanChoose {
-                if collection.lifecycle == .noCollection {
-                    Button(SyncText.value("sync.meguri.setup.download")) { sync.prepareMeguri(.useServerCollection) }
-                        .accessibilityIdentifier("settings.accountSync.meguri.download")
-                } else {
-                    Button(SyncText.value("sync.meguri.setup.useDevice")) { sync.prepareMeguri(.useDeviceCollection) }
-                        .accessibilityIdentifier("settings.accountSync.meguri.useDevice")
-                    Button(SyncText.value("sync.meguri.setup.useServer")) { sync.prepareMeguri(.useServerCollection) }
-                        .accessibilityIdentifier("settings.accountSync.meguri.useServer")
-                }
-            }
-            if sync.meguriCanFinish {
-                Button(SyncText.value("sync.meguri.setup.finish")) { sync.finishMeguriSetup() }
-                    .accessibilityIdentifier("settings.accountSync.meguri.finishSetup")
-            }
-            if sync.meguriStage == .preparing && sync.meguriBusy {
-                Button(SyncText.value("sync.meguri.cancel"), role: .cancel) { sync.cancelMeguriPreparation() }
-                    .accessibilityIdentifier("settings.accountSync.meguri.cancelSetup")
-            }
-            if MeguriMediaFactRows.isVisible(sync) {
-                MeguriMediaRows(collection: collection)
-            }
-            if sync.meguriCanRetryMedia {
-                Button(SyncText.value("sync.meguri.media.retry")) { sync.retryMeguriMedia() }
-                    .accessibilityIdentifier("settings.accountSync.meguri.retryMedia")
-            }
-            if sync.meguriRoutine != nil || sync.settings.paused {
-                Button(SyncText.value(sync.settings.paused ? "sync.meguri.resume" : "sync.meguri.pause")) {
-                    let settings = sync.settings
-                    if settings.paused { collection.resumeMeguri() }
-                    else { sync.setDeviceSettings(paused: true, automatic: settings.automatic, media: settings.media) }
-                }
-                .disabled(sync.deviceSettingsSettling || (sync.settings.paused && processing))
-                .accessibilityIdentifier("settings.accountSync.meguri.pause")
-                if sync.meguriRoutine == .failed,
-                   sync.meguriRoundReport?.collection.finalization != nil || sync.meguriRoundReport?.media?.finalization != nil {
-                    Button(SyncText.value("sync.meguri.media.retry")) { sync.retryMeguriFinalization() }
-                        .disabled(sync.meguriBusy)
-                }
-            }
-            switch sync.meguriStatus.route {
-            case .account: EmptyView()
-            case .round, .disabled: SyncNowButton(collection: collection, identifier: "settings.accountSync.meguri.syncNow")
-            }
-            if !sync.providerNeedsAttention && sync.meguriPhase != .blocked {
-                Button(SyncText.value("sync.meguri.stop")) { stopping = true }
-                    .disabled(processing || changing)
-                    .accessibilityIdentifier("settings.accountSync.meguri.stop")
-            }
-        }
-        .sheet(isPresented: $stopping) {
-            SyncServiceSwitchSheet(collection: collection, source: .meguri, destination: "localOnly", changing: changing,
-                failed: changeFailed, cancel: { stopping = false }, confirm: {
-                    changing = true; changeFailed = false
-                    Task {
-                        let succeeded = await sync.removeMeguriConnection()
-                        changeFailed = !succeeded; changing = false
-                        if succeeded { stopping = false }
-                    }
-                })
-        }
-        if sync.meguriAutomaticSettingVisible {
-            Section {
-                Toggle(SyncText.value("sync.settings.automatic"), isOn: Binding(
-                    get: { sync.settings.automatic }, set: { sync.setMeguriAutomatic($0) }))
-                    .disabled(!sync.meguriAutomaticSettingAvailable || signingOut || changing)
-                    .accessibilityIdentifier("settings.accountSync.meguri.automatic")
-            } footer: {
-                Text(SyncText.value("sync.settings.automatic.footer"))
-                    .accessibilityIdentifier("settings.accountSync.meguri.automaticFooter")
-            }
-        }
-    }
-    private func signInAction() {
-        let secret = password; password = ""
-        guard !processing, !changing, !sync.settings.paused, !address.isEmpty, !username.isEmpty, !secret.isEmpty else { return }
-        collection.signInMeguri(endpoint: address, username: username, password: secret)
     }
 }
 
@@ -399,7 +123,7 @@ struct MeguriSetupPreviewSheet: View {
                     Button(SyncText.value("sync.meguri.preview.confirm.\(kind)"), role: kind == "download" ? nil : .destructive) {
                         sync.confirmMeguriPreview()
                     }
-                    .disabled(sync.meguriBusy || sync.settings.paused)
+                    .disabled(sync.meguriBusy)
                     .accessibilityIdentifier("sync.meguriSetup.confirm")
                 }
             }
@@ -435,26 +159,6 @@ struct MeguriMediaFactRows: View {
     }
 }
 
-struct MeguriMediaRows: View {
-    let collection: ReviewCollection
-    private var sync: SyncCoordinator { collection.sync }
-    var body: some View {
-        MeguriMediaFactRows(collection: collection)
-        if sync.meguriAccounting?.files.contains(where: { $0.state != .transferred }) == true
-            || !(sync.meguriRoundReport?.media.map { result in
-                if case .media(let media) = result.outcome { return media.affected.isEmpty }
-                return true
-            } ?? true) {
-            Button(SyncText.value("sync.meguri.media.showAffected")) { collection.syncPresentation.meguriAffectedFilesPresented = true }
-                .accessibilityIdentifier("settings.accountSync.meguri.showAffected")
-        }
-        if sync.meguriRoutine == .mediaBlocked {
-            Button(SyncText.value("sync.meguri.media.retry")) { sync.retryMeguriRoundMedia() }
-                .disabled(sync.meguriBusy || sync.settings.paused)
-        }
-    }
-}
-
 struct MeguriAffectedFilesPage: View {
     let collection: ReviewCollection
     var body: some View {
@@ -479,7 +183,7 @@ struct MeguriAffectedFilesPage: View {
             }
         }
         .navigationTitle(SyncText.value("sync.meguri.media.list.title"))
-        .accessibilityIdentifier("settings.accountSync.meguri.affectedList")
+        .accessibilityIdentifier("settings.sync.meguri.affectedList")
     }
     private var hasExcluded: Bool {
         if let accounting = collection.sync.meguriAccounting { return accounting.files.contains { $0.exclusion != nil } }

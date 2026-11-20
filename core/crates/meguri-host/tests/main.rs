@@ -38,6 +38,9 @@ pub mod provider_fixture_transport;
 #[cfg(feature = "test-hooks")]
 #[path = "provider_normal.rs"]
 pub mod provider_normal;
+#[cfg(feature = "test-hooks")]
+#[path = "provider_setup.rs"]
+pub mod provider_setup;
 #[path = "review_close_suspend.rs"]
 pub mod review_close_suspend;
 #[path = "review_media_fixture.rs"]

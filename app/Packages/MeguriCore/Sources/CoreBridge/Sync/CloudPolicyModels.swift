@@ -527,6 +527,8 @@ public struct CloudPolicyControls: Sendable {
 }
 public struct CloudPolicyStatus: Sendable {
     public let state: CloudPolicyStatusState
+    /// P25.4: only in `needsAttention`, the state the device would show with no attention item.
+    public let stateWithoutAttention: CloudPolicyStatusState?
     public let pending: UInt64
     public let heldBack: UInt64
     public let inFlight: UInt64
@@ -545,7 +547,8 @@ public struct CloudPolicyStatus: Sendable {
     public private(set) var controls: CloudPolicyControls = .unknown
     init(_ v: MeguriCoreBindings.CloudPolicyStatus) {
         controls = .init(v.controls)
-        state = .init(v.state); pending = v.pending; heldBack = v.heldBack; inFlight = v.inFlight; incomingWaiting = v.incomingWaiting
+        state = .init(v.state); stateWithoutAttention = v.stateWithoutAttention.map(CloudPolicyStatusState.init)
+        pending = v.pending; heldBack = v.heldBack; inFlight = v.inFlight; incomingWaiting = v.incomingWaiting
         attention = Dictionary(uniqueKeysWithValues: v.attention.map { (CloudPolicyAttention($0.kind), $0.count) })
         media = .init(v.media); mediaPaused = v.mediaPaused; error = v.error.map(CloudPolicyErrorDetail.init)
         accountStatus = .init(v.accountStatus); accountMatchesBinding = v.accountMatchesBinding
@@ -662,5 +665,37 @@ public enum CloudPolicyAdmission: Sendable {
         case .noOperation: .noOperation
         case .policyOutput(let output): .policyOutput(.init(output))
         }
+    }
+}
+
+// Rendering fixtures: synthetic values for screens drawn without a collection,
+// an account or a server. They come from no policy step and grant nothing.
+extension CloudPolicyMediaFacts {
+    public static let renderFixtureNone = CloudPolicyMediaFacts(uploadFiles: 0, downloadFiles: 0)
+    private init(uploadFiles: UInt64?, downloadFiles: UInt64?) {
+        self.uploadFiles = uploadFiles; uploadBytes = nil; self.downloadFiles = downloadFiles; downloadBytes = nil
+        unknownBlobs = nil; missingNames = nil; uploadsRunning = nil; downloadsRunning = nil
+        remainingDownloadMs = nil; rootAcked = nil; zoneMissing = nil; noSpace = nil
+    }
+}
+extension CloudPolicyStatus {
+    public static func renderFixture(state: CloudPolicyStatusState, stateWithoutAttention: CloudPolicyStatusState? = nil,
+                                     attention: [CloudPolicyAttention: UInt64] = [:], pending: UInt64 = 0,
+                                     accountStatus: CloudPolicyAccountStatus = .available,
+                                     syncNow: CloudPolicySyncNowAvailability = .available,
+                                     controls: CloudPolicyControls = .unknown) -> CloudPolicyStatus {
+        var status = CloudPolicyStatus(state: state, stateWithoutAttention: stateWithoutAttention, attention: attention,
+            pending: pending, accountStatus: accountStatus, syncNow: syncNow)
+        status.controls = controls
+        return status
+    }
+    private init(state: CloudPolicyStatusState, stateWithoutAttention: CloudPolicyStatusState?,
+                 attention: [CloudPolicyAttention: UInt64], pending: UInt64,
+                 accountStatus: CloudPolicyAccountStatus, syncNow: CloudPolicySyncNowAvailability) {
+        self.state = state; self.stateWithoutAttention = stateWithoutAttention
+        self.pending = pending; heldBack = 0; inFlight = 0; incomingWaiting = 0
+        self.attention = attention; media = .renderFixtureNone; mediaPaused = false; error = nil
+        self.accountStatus = accountStatus; accountMatchesBinding = true
+        asOfMilliseconds = nil; lastCompleted = nil; lastAttempt = nil; self.syncNow = syncNow
     }
 }

@@ -209,6 +209,8 @@ pub enum TransferAcceptance {
     PossiblyAccepted,
     ExactOk,
     Refused,
+    /// The server held something else when the upload was settled.
+    Overtaken,
 }
 impl From<policy::Acceptance> for TransferAcceptance {
     fn from(v: policy::Acceptance) -> Self {
@@ -217,6 +219,7 @@ impl From<policy::Acceptance> for TransferAcceptance {
             policy::Acceptance::PossiblyAccepted => Self::PossiblyAccepted,
             policy::Acceptance::ExactOk => Self::ExactOk,
             policy::Acceptance::Refused => Self::Refused,
+            policy::Acceptance::Overtaken => Self::Overtaken,
         }
     }
 }
