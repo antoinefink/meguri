@@ -683,3 +683,130 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsShee
 - An error from the last attempt and the previous session's line follow the rows, each in its own group.
 - Start Empty, the import and sync themselves did not change.
 - Replaces: N2's centred "No Collection" state for this page, `workflow.md`'s empty-collection Import button as a button, and `screen-inventory.yaml`'s `onboarding.welcome` layout (app icon, three bordered buttons, the reason line under Connect to iCloud… and its identifiers `onboarding.welcome.*`).
+
+## N20. Round 6 decisions (2026-11-20)
+
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, `home.deckActions`, `home.deckName`, `shell.commands`; round 6 options 1C, 2C, 3B, 5B). Where earlier text differs, this section wins. It covers the screens that exist. Delete Deck (4B), Deck Options (6B) and Edit Note (7A) arrive with their units, which add their own subsections; their places below are kept for them. The name rules of N20.3 are `decks/decks` D19, the create row's D18. Meguri authors these strings; implementers take them from N20.6.
+
+### N20.1 Deck search in the sidebar
+
+- Sidebar layouts (Mac, iPad at regular width): a search field at the top of the sidebar, in the system's sidebar placement for `.searchable`, with the prompt "Search or Create a Deck". It replaces the Go to Deck sheet.
+- Typing replaces the sidebar's list, the Today row included, with the results, as System Settings does. Each result is two lines: the deck's last name component over its parents in secondary text, joined with " › " (a top-level deck has no second line). Matching and order are the touch Search's (N14.2): `decks/deck-list` H6.1 and H6.2. Filtered decks are listed.
+- After the results, while `decks/decks` D18 finds no deck with the typed name: a row with the `plus` symbol, "Create deck named “<query>”". It opens N20.3's New Deck form with the query as the Name and Parent Deck None.
+- With no result and no create row, H6.3's one-line message shows.
+- Return or a click opens a result: its deck page, with the sidebar selection on that deck; a filtered deck shows R53's explanation (`decks/deck-list` H3). The query and results stay while it is open, and the opened deck shows selected among them. Esc clears the field and the tree returns, the opened deck still selected.
+- Mac: after each edit the first result is highlighted, or the create row when nothing is listed; ↑ and ↓ move the highlight over all rows and wrap (H6.3). The highlight does not change the detail; Return opens the highlighted row. iPad: a tap opens a result; Return in the field opens the first.
+- ⌘F (Edit › Find…), ⇧⌘O (a second key of Find…, with no menu item of its own) and "/" in the `decks.list` and `decks.page` contexts (H9.2; never while a text field or other view owns the key, N4) put the focus in the field, showing the sidebar first when it is hidden. In the tab layout the same keys present the deck list's Search (N14.2). During review Find… is disabled.
+- Sidebar layouts' toolbar, on Today and the deck page: the sync status button and one Add menu (`plus`) with New Note (`square.and.pencil`) and New Deck… (`folder.badge.plus`). No separate Add Note, Go to Deck or Create Deck button. On a deck page New Note presets that deck, as Add Note does now (`notes/add-defaults`).
+- "New Deck…" is the one name of that action in every menu; its form is titled "New Deck". "Create Deck" is no longer used.
+- The tab layout keeps N14.2's Search button and Add menu, unchanged.
+- The Go to Deck sheet is retired on every platform: no button, menu item or key opens it. Every list of deck search results shows the two-line rows, never a `::` path, and opens the deck page in every layout (N20.5).
+- Replaces: N14.2's "The Go to Deck sheet stays for the sidebar layouts' toolbar, the "/" key and the Mac's Deck menu" and its "opens the Create Deck sheet" (now the New Deck form); N14.3's "Sidebar layouts keep Go to Deck and Create Deck in the window toolbar"; R26's sheet (its filter stays, H6.2); `decks/deck-list` H6.3's sheet, its highlight on opening and its Return that starts review, and H9.2's `/` and ⇧⌘O rows (now Find…); N18.1's Go to Deck sentence, which no longer has a screen.
+
+### N20.2 The deck menu
+
+- One menu per deck row: right-click on Mac, long press on touch. Its groups, in order:
+
+| Group | Item | Symbol | Mac key | Filtered deck |
+|---|---|---|---|---|
+| 1 | Study | `play` | ⌘R | absent |
+| 1 | Add Note | `square.and.pencil` | | absent |
+| 2 | Rename… | `pencil` | ⇧⌘R | shown |
+| 2 | New Subdeck… | `folder.badge.plus` | | absent |
+| 3 | Delete Deck (destructive role; arrives with the Delete Deck unit) | `trash` | ⌘⌫ | shown |
+
+- Until Delete Deck arrives the menu has groups 1 and 2, and a filtered deck's menu holds Rename… alone (R53).
+- Study is disabled under N14.3's condition, through the same availability function. Add Note opens `editor.add` with that deck (`notes/add-defaults`). Rename… and New Subdeck… open N20.3's form.
+- Overview and the Mac row's hover ⋯ button ("Deck Actions") are removed; a tap or click on the row opens the deck page.
+- Mac: the menu shows the Deck menu's keys beside its items (N20.4). Touch menus show no keys.
+- iPhone Duo held wide: the menu opens beside the row in the list's half, as the system places it; nothing sits on the fold.
+- Replaces: R47's items and order for this menu (an R47 item not listed here comes back only with the unit that brings it, which says where); N14.3's "The long-press deck menu is otherwise unchanged"; `decks/deck-list` H3's "the row menu's Overview opens the deck page"; `home.deckMenu`'s hover ⋯ and its menu of Study and Overview.
+
+### N20.3 Naming a deck
+
+- New Deck…, New Subdeck… and Rename… use one system `Form` with two rows:
+  1. **Name**: a text field labelled "Name", with focus and the cursor at the end when the form opens.
+  2. **Parent Deck**: a menu-style `Picker` labelled "Parent Deck". Its items: "None" (top level), a separator, then D19.2's decks in tree order, each its last name component, indented one level per depth. Each item's accessibility label is its full path joined with " › ". The row shows the chosen deck's last name component; its accessibility value is the full path.
+- Title and confirm button: New Deck… gives "New Deck" and Create; New Subdeck… gives "New Subdeck" and Create; Rename… gives "Rename Deck" and Rename. Cancel is the cancellation action, the confirm button the confirmation action. Defaults and when the confirm button is enabled: D19.3 and D19.4.
+- Footer (D19.6): Rename of a deck with subdecks: "Its subdeck moves with it." or "Its N subdecks move with it.". Otherwise, with a parent: "Inside <parent path>.", the path joined with " › ". With None: no footer.
+- Confirming composes the full name and runs the create or rename of D19.5. A refusal shows in one line under the form, which stays with the draft. The existing-name rule and the final-name report are `decks/deck-list` H7's. A created deck opens its deck page in every layout.
+- Meguri's interface never shows the `::` notation: a deck path in a label, help tag, accessibility label or value joins the components with " › ". A `::` typed in the Name still creates nested decks.
+- Presentation:
+
+| Platform | The form |
+|---|---|
+| iPhone; iPhone Duo folded or held tall | a sheet |
+| iPhone Duo held wide (iPhone at regular width with the list beside the detail, N14.10) | in the detail half, in place of what it showed, with Cancel and the confirm button in that half's navigation bar; no field crosses the fold. Cancel returns the detail to what it showed; the confirm button shows the deck's page. Choosing another row in the list closes the form as Cancel does |
+| iPad | a sheet |
+| Mac | a window sheet; the form keeps the macOS default style, with leading labels |
+
+- Replaces: R59's and R60's pre-filled paths and R60's "typing a different path moves the deck" (a changed Parent Deck moves it; R58 stays); `decks/deck-list` H7's Rename and New Subdeck pre-fills and its untouched-pre-fill rule (D19); `home.deckName`'s single name field and "Deck name" prompt; the `::` form of the full path in N2's and N11.5's hover help and accessibility text (now joined with " › ").
+
+### N20.4 The menu bar by object
+
+The menu bar, in order: Meguri, File, Edit, View, Deck, Card, Window, Help. The Study menu is removed: there is one Undo and one Redo, in Edit. The Go to Deck… item is removed.
+
+| Menu | Item | Key | Enabled when |
+|---|---|---|---|
+| File | New Note | ⌘N | a collection is open and no sheet or panel owns the keys. Opens `editor.add`, with the deck preset on a deck page; during review as N11.1's panel |
+| File | New Deck… | ⇧⌘N | a collection is open, outside review; opens N20.3's New Deck form |
+| File | Import Collection… | ⇧⌘I | as N17.2 |
+| File | Export Collection… | ⇧⌘E | as N17.3 |
+| File | Sync Now | ⇧⌘Y | `syncNowAvailability()` (N11.8) |
+| File | Close | ⌘W | the system's |
+| Edit | Undo <operation>, Redo <operation> | ⌘Z, ⇧⌘Z | R173's titles ("Undo Answer" …); plain "Undo" and "Redo", disabled, when nothing can be undone or redone |
+| Edit | Cut, Copy, Paste | ⌘X, ⌘C, ⌘V | the system's |
+| Edit | Find… | ⌘F; also ⇧⌘O | the deck workspace shows and no sheet or panel owns the keys; focuses N20.1's field (tab layout: presents the Search) |
+| Deck | Study | ⌘R | the shown deck's Study is available (N14.3); never for a filtered deck (H3) |
+| Deck | Rename… | ⇧⌘R | a deck is shown, filtered included |
+| Deck | New Subdeck… | | a normal deck is shown |
+| Deck | Delete Deck | ⌘⌫ | arrives with the Delete Deck unit |
+| Deck | Deck Options… | ⌥⌘O | arrives with the Deck Options unit; a normal deck |
+| Card | Show Answer | Space | review shows a question side |
+| Card | Again, Hard, Good, Easy | 1, 2, 3, 4 | review shows an answer side |
+| Card | Back to Decks | Esc | during review |
+| Card | Edit Note | ⌘E | arrives with the Edit Note unit; during review |
+
+- Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo and Paste; Deck after Study, New Subdeck… and Delete Deck; Card after Show Answer, Easy and Back to Decks. A separator with nothing after it yet is left out.
+- The Deck menu acts on the deck the workspace shows: the sidebar's selection (Mac, iPad), or the deck page shown (tab layout). With none (Today, the welcome, review) its items are disabled.
+- Each command follows N4: disabled outside its context, routed through the action and guard of its visible control, and subject to input ownership. The Card menu's unmodified keys follow N11.3: the card page keeps the first claim. ⌘⌫ and the other menu key equivalents never take a key from a text input (H9.2).
+- iPad with a keyboard: the same menus, items and keys in the iPad menu bar and in the list the system shows while ⌘ is held (SwiftUI `commands`). iPhone and the iPhone Duo have no menu bar: with a keyboard the same keys act, and where the system shows its ⌘-held list it follows these menus.
+- Replaces: N11.3's first bullet's Study menu, and the Undo Answer and Redo Answer items it named; R280's New Deck… ⌥⌘N, Export… ⌘E (⌘E becomes Edit Note's) and the labels "Import…" and "Export…"; R282's ⇧⌘N for Note Types (the key is New Deck…'s; Note Types' key is open); R283's Go to Deck… (⇧⌘O is Find…'s second key), its S and Return as Study's menu keys (S and Return stay deck-list keys, H9.2) and "Delete Deck…" (now "Delete Deck"); the current Deck menu's "Rename Deck…" (now "Rename…").
+
+### N20.5 Consistency fixes
+
+1. Every list of deck search results, on touch and in the sidebar, shows each deck as its name over its parent path joined with " › " (N14.2, N20.1), never a raw `A::B::C` path.
+2. The touch review's close button (N11.1, N13.3): its title, accessibility label, Voice Control name and help are "Back to Decks". "Close Review" is no longer used. The Mac's round Back button is unchanged (N12.3).
+3. Activating a deck search result (Return, a tap or a click) opens its deck page in the compact and sidebar layouts alike, and never starts review.
+
+- Replaces: R27's "starts its review (iPhone layout)" and `decks/deck-list` H6.3's same rule; R284's "Close Review" (N11.3 already named it).
+
+### N20.6 Strings
+
+The English text of the screens above. "New" marks text not used before this round; the others stay as they are. Units that land later own the text marked "with its unit".
+
+| Text | Where | |
+|---|---|---|
+| Search or Create a Deck | the sidebar search prompt (also N14.2's) | |
+| Create deck named “%@” | the search's last row; %@ is the typed text, between U+201C and U+201D | changed: the earlier text had no quotation marks |
+| ` › ` (space, U+203A, space) | between the components of every shown deck path | |
+| New Note | Add menu, File menu | |
+| New Deck… | Add menu, File menu | |
+| New Deck, New Subdeck, Rename Deck | the form's titles | New Deck new |
+| Name, Parent Deck | the form's row labels | new |
+| None | Parent Deck's first item | new |
+| Create, Rename, Cancel | the form's buttons | |
+| Its subdeck moves with it. | footer, one subdeck | new |
+| Its %lld subdecks move with it. | footer, other counts; a String Catalog plural with the one form above | new |
+| Inside %@. | footer; %@ is the parent path joined with " › " | new |
+| Study, Add Note, Rename…, New Subdeck… | the deck menu; Rename…, New Subdeck… and Study in the Deck menu | Rename… new in the Deck menu |
+| Delete Deck | the deck menu, the Deck menu | with its unit |
+| Deck, Card | top-level menu titles | Card new |
+| Import Collection…, Export Collection…, Sync Now, Close | File menu | |
+| Undo, Redo, Undo <operation>, Redo <operation> | Edit menu (R173) | |
+| Find… | Edit menu | new |
+| Deck Options… | the Deck menu | with its unit |
+| Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
+| Edit Note | the Card menu | with its unit |
+
+- No longer used: "Go to Deck…", "Create Deck", "Overview", "Deck Actions", "Deck name", "Rename Deck…", "Close Review", the Study menu's title and its "Undo Answer" and "Redo Answer" items (Edit's Undo still reads "Undo Answer" after an answer, R173), "Import…", "Export…".

@@ -55,3 +55,11 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to fix spec readiness audit findings; 
 | Subject | Anki file | Read for |
 |---|---|---|
 | decks/decks#D10 (one deck written per call in Anki; the browser scope is used by the filter sidebar's deck items) | `qt/aqt/browser/sidebar/tree.py` | Checked that the sidebar's deck items use the browser scope and toggle one deck per write |
+
+## Round 6 deck naming (2026-11-20, session s-20261120T081735Z-785653d0)
+
+No Anki source was read. The sections restate Antoine's round 6 decisions (`docs/design/decisions.md`, 2026-11-20; `docs/design/native-interface-contract.md` N20) as Meguri UI rules over the existing D1 to D6, D12 and D17 rules.
+
+| Spec section | Anki file | Read for |
+|---|---|---|
+| decks/decks#D6 (input line), D18 (create from the deck search), D19 (Name and Parent Deck form) | none | Meguri UI composition rules; no Anki behavior is reproduced |
