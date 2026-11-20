@@ -98,7 +98,10 @@ mg__core_list() {
 # caller's list_mode and features. A build failure is left to the run itself.
 mg__core_settle() {
   [ "$list_mode" = only ] || return 0
-  (cd core && cargo nextest list --workspace ${features[0]+"${features[@]}"} -E "$1" >/dev/null) || true
+  # The listing also names each selected test's binary (mg_core_test).
+  (cd core && cargo nextest list --workspace ${features[0]+"${features[@]}"} --message-format json -E "$1") \
+    >"$MG_RUN_DIR/nextest-list.json" || echo '{}' >"$MG_RUN_DIR/nextest-list.json"
+  mg_artifact nextest-list-json "$MG_RUN_DIR/nextest-list.json"
   sync
 }
 
@@ -326,24 +329,25 @@ mg_core_test() {
   # removed test would otherwise leave the list silently checking nothing.
   local listed_complete=true listed_results missing scope=""
   if [ "$list_mode" = only ] && [ "$stopped" = false ]; then
-    # nextest names a library's unit tests `<package>::<lib name>$<test>` in
-    # its JSON but gives the binary id `<package>`; compare by binary id,
-    # from the event's nextest fields when it has them.
-    if listed_results="$( { [ ! -f "$main" ] || cat "$main"; } | jq -sc --arg listed "$listed" '
-      def binary_id: split("::") as $p
-        | if ($p | length) == 2 and $p[1] == ($p[0] | gsub("-"; "_")) then $p[0] else . end;
-      def listed_id:
-        (.name | index("$")) as $i
-        | (if (.nextest | type) == "object" and (.nextest.crate | type) == "string" and (.nextest.test_binary | type) == "string"
-           then (if .nextest.kind == "lib" or .nextest.kind == "proc-macro" then .nextest.crate
-                 else .nextest.crate + "::" + .nextest.test_binary end)
-           else (.name[:$i] | binary_id) end) + .name[$i:];
-      [.[] | select(.type == "test" and .event != "started") | .name = listed_id] as $tests
-      | [$listed | splits("\n") | select(. != "") | split("\t") | .[0] + "$" + .[1]]
-      | map(. as $n | [$tests[] | select(.name == $n) | .event] as $e
-        | {name: $n, event: (if ($e | length) == 1 then $e[0] elif ($e | length) == 0 then "not-run" else "duplicate" end)})')"; then
+    # The JSON names a test `<package>::<binary name>$<test>`: a library's
+    # unit tests and an integration test named like the library share that
+    # prefix. Find each listed test's binary in nextest's own listing (the
+    # settle step), then its one result.
+    local listing="$MG_RUN_DIR/nextest-list.json"
+    [ -s "$listing" ] || echo '{}' >"$listing"
+    if listed_results="$( { [ ! -f "$main" ] || cat "$main"; } | jq -sc --arg listed "$listed" --slurpfile list "$listing" '
+      (($list[0] // {})["rust-suites"] // {}) as $suites
+      | [.[] | select(.type == "test" and .event != "started")] as $tests
+      | [$listed | splits("\n") | select(. != "") | split("\t")]
+      | map(.[0] as $b | .[1] as $t | ($b + "$" + $t) as $n | $suites[$b] as $s
+        | if $s == null or $s.testcases[$t] == null or $s.testcases[$t]["filter-match"].status != "matches"
+          then {name: $n, event: "not-found"}
+          else (($b | split("::")[0]) + "::" + $s["binary-name"] + "$" + $t) as $json
+            | [$tests[] | select(.name == $json) | .event] as $e
+            | {name: $n, event: (if ($e | length) == 1 then $e[0] elif ($e | length) == 0 then "not-run" else "duplicate" end)}
+          end)')"; then
       mg_detail listed_results "$listed_results"
-      missing="$(jq -r '[.[] | select(.event == "not-run" or .event == "duplicate" or .event == "ignored") | .name] | join(", ")' <<<"$listed_results")"
+      missing="$(jq -r '[.[] | select(.event == "not-found" or .event == "not-run" or .event == "duplicate" or .event == "ignored") | .name] | join(", ")' <<<"$listed_results")"
     else
       missing="(nextest output unreadable)"
     fi

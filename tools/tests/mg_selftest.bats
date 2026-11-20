@@ -1377,11 +1377,14 @@ core_report_names() {
   core_modes_fixture
   local quick excluded only one two
   # A library unit test: its binary id is the package, its JSON name is not.
+  # An integration test named like the library keeps its package::target id.
   write_file core/crates/meguri-ffi/src/lib.rs '#[cfg(test)] mod tests { #[test] fn unit_case() {} }'
+  write_file core/crates/meguri-ffi/tests/meguri_ffi.rs '#[test] fn same_named() {}'
   write_file list.txt "# Header comments and blank lines are ignored.
 
 meguri-ffi::hooks hooks_enabled  # needs the FFI hooks feature
 meguri-ffi tests::unit_case  # a library unit test
+meguri-ffi::meguri_ffi same_named  # an integration test named like the library
 meguri-engine::session_predict ${SESSION_CASE}_extra"
   mg core-test --quick
   [ "$status" -eq 0 ]
@@ -1390,10 +1393,10 @@ meguri-engine::session_predict ${SESSION_CASE}_extra"
   mg core-test --quick --exclude-list list.txt
   [ "$status" -eq 0 ]
   excluded="$(core_report_names)"
-  jq -e '.details.hosted_selection | .list_mode == "exclude" and .list_file == "list.txt" and (.listed | length) == 3' "$result"
+  jq -e '.details.hosted_selection | .list_mode == "exclude" and .list_file == "list.txt" and (.listed | length) == 4' "$result"
   jq -ne --argjson q "$quick" --argjson e "$excluded" --arg s "$SESSION_CASE" '
     ($q - $e) == (["meguri-engine::session_predict$" + $s + "_extra", "meguri-ffi::hooks$hooks_enabled",
-      "meguri-ffi::meguri_ffi$tests::unit_case"] | sort)
+      "meguri-ffi::meguri_ffi$tests::unit_case", "meguri-ffi::meguri_ffi$same_named"] | sort)
     and ($e - $q) == []'
   validate "$result"
 
@@ -1402,8 +1405,8 @@ meguri-engine::session_predict ${SESSION_CASE}_extra"
   only="$(core_report_names)"
   jq -ne --argjson o "$only" --arg s "$SESSION_CASE" '
     $o == (["meguri-engine::canary_pins$pin_held", "meguri-engine::session_predict$" + $s + "_extra",
-      "meguri-ffi::hooks$hooks_enabled", "meguri-ffi::meguri_ffi$tests::unit_case"] | sort)'
-  jq -e '[.details.listed_results[].event] == ["ok", "ok", "ok"]' "$result"
+      "meguri-ffi::hooks$hooks_enabled", "meguri-ffi::meguri_ffi$tests::unit_case", "meguri-ffi::meguri_ffi$same_named"] | sort)'
+  jq -e '[.details.listed_results[].event] == ["ok", "ok", "ok", "ok"]' "$result"
   validate "$result"
 
   # Every shard runs the canary; apart from it the shards are disjoint and
@@ -1425,7 +1428,7 @@ meguri-engine::session_predict ${SESSION_CASE}_extra"
   mg core-test --quick --only-list list.txt
   [ "$status" -eq 1 ]
   [ "$(failure_ids)" = listed-test-not-run ]
-  jq -e '.details.listed_results == [{"name": "meguri-ffi::hooks$hooks_renamed", "event": "not-run"}]' "$result"
+  jq -e '.details.listed_results == [{"name": "meguri-ffi::hooks$hooks_renamed", "event": "not-found"}]' "$result"
   validate "$result"
 }
 
