@@ -548,9 +548,32 @@ fn glob_expressions_over_the_size_limit_fail_at_plan_time_after_statement_checks
             context: "nid:".to_owned()
         })
     );
-    // The pattern checks run in reading order.
+    // The pattern checks run in reading order, each with its term's range.
     assert!(matches!(
         build_error(&format!("\"tag:re:(\" deck:{many}")),
         ErrorKind::InvalidRegex { .. }
     ));
+    assert!(matches!(
+        build_error(&format!("deck:{many} tag:re:[")),
+        ErrorKind::SearchFailed(SearchFailure::ExpressionTooLarge { .. })
+    ));
+    let query = format!("a -deck:{many} tag:re:[");
+    match Plan::build(&parse(&query).unwrap(), SearchMode::Cards, &context()) {
+        Err(BuildError::Search(error)) => assert_eq!(error.range(), 3..3 + 5 + 30_000),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn nc_tag_wildcards_include_characters_whose_compatibility_form_is_one() {
+    let (_dir, db) = collection();
+    for (id, tags) in [(1, " Übung "), (2, " ubx "), (3, " u*b "), (4, " other ")] {
+        note(&db, id, 1, tags, "f", 0);
+    }
+    assert_eq!(notes(&db, "tag:nc:ub*"), [1, 2]);
+    assert_eq!(notes(&db, "tag:nc:u_ng"), Vec::<i64>::new());
+    assert_eq!(notes(&db, "tag:nc:_bung"), [1]);
+    // Fullwidth `＊` (U+FF0A) has the compatibility form `*`: a wildcard.
+    assert_eq!(notes(&db, "tag:nc:u＊"), [1, 2, 3]);
+    assert_eq!(notes(&db, "tag:u＊"), Vec::<i64>::new());
 }

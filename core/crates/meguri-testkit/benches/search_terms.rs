@@ -1,5 +1,5 @@
-//! U82: one search statement per term family of `specs/search/names-and-ids`,
-//! `state-and-flags`, `properties` and `history`, run whole on a working
+//! U82: one search statement per term of `specs/search/names-and-ids`
+//! (and, with U82's second part, the other term families), run whole on a working
 //! copy of a generated collection (plan section 3: every unit that adds a
 //! query adds its bench row). Each sample builds the plan and reads every
 //! matching card id, unsorted, on a query reader with the product's SQL
@@ -122,7 +122,10 @@ fn main() -> ExitCode {
             criterion.bench_function(&format!("{name}/{size}"), |b| {
                 b.iter_custom(|n| measurement.run(n, |_| black_box(run())))
             });
-            suite.push(measurement.finish());
+            // A criterion filter skips the other searches: no row for them.
+            if measurement.samples().count() > 0 {
+                suite.push(measurement.finish());
+            }
         }
         drop(reader);
         db.close().expect("it closes");

@@ -185,7 +185,7 @@ pub(super) fn ids(kind: IdKind, list: &str, env: &TermEnv<'_>) -> TermSql {
         return fast("0".to_owned());
     }
     fast(match kind {
-        IdKind::Decks => format!("c.did IN ({ids}) OR (c.odid != 0 AND c.odid IN ({ids}))"),
+        IdKind::Decks => in_decks(&ids),
         IdKind::Cards => format!("c.id IN ({ids})"),
         // Q5: from the card when cards are tested alone.
         IdKind::Notes if env.rows == Rows::Cards => format!("c.nid IN ({ids})"),

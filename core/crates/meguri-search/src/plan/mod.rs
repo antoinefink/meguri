@@ -77,9 +77,10 @@ impl From<SearchError> for BuildError {
 }
 
 impl Plan {
-    /// Q9: compiles `query` for `mode`. A negated operator word, or an id
-    /// list holding a digit other than ASCII `0`-`9`, is `search_failed`
-    /// (E3), whatever else the query holds.
+    /// Q9: compiles `query` for `mode`. Plan errors follow `errors.md` E4
+    /// step 3: the statement checks of every term (a negated operator word,
+    /// a digit other than ASCII `0`-`9` in an id list, ...) in reading
+    /// order, then the pattern checks (every expression compiled).
     pub fn build(query: &Query, mode: SearchMode, ctx: &SearchContext) -> Result<Plan, BuildError> {
         build_with(query, mode, ctx, &mut sql::compile_term)
     }
