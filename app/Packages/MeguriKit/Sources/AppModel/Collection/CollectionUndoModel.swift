@@ -52,6 +52,8 @@ public final class CollectionUndoModel {
             }
             guard expected == owner.generation else { return }
             await owner.collectionUndoFinished()
+            // The tree's refresh scheduled a peek; this one replaces it.
+            refreshTask?.cancel(); refreshTask = nil
             await refreshNow()
         }
     }
@@ -63,6 +65,8 @@ public final class CollectionUndoModel {
     }
 
     func refreshNow() async {
+        // A refresh cancelled before it started leaves the newer one alone.
+        guard !Task.isCancelled else { return }
         revision &+= 1
         let current = revision
         let undo = try? await service.peekUndo(scope: .global)
@@ -79,6 +83,7 @@ public final class CollectionUndoModel {
     }
 
     public func waitForCompletion() async { await task?.value }
+    func waitForRefresh() async { await refreshTask?.value }
 
     /// The step's name while one is available.
     public nonisolated static func stepName(_ status: ReviewUndoStatus) -> String? {

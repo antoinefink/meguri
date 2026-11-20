@@ -176,11 +176,9 @@ struct AppCommands: Commands {
                 Button(Self.title(undo.title, redo: false)) { context.performUndo(redo: false) }
                     .keyboardShortcut(undoKey("z", modifiers: .command, review: context.review != nil))
                     .disabled(!undo.enabled)
-                    .accessibilityIdentifier("shell.command.undo")
                 Button(Self.title(redo.title, redo: true)) { context.performUndo(redo: true) }
                     .keyboardShortcut(undoKey("z", modifiers: [.command, .shift], review: context.review != nil))
                     .disabled(!redo.enabled)
-                    .accessibilityIdentifier("shell.command.redo")
             }
         }
         // The system's Find, Spelling, Substitutions and other text groups stay;
@@ -190,7 +188,6 @@ struct AppCommands: Commands {
             Button("Find…") { context?.find() }
                 .keyboardShortcut("f", modifiers: .command)
                 .disabled(context?.canFind != true)
-                .accessibilityIdentifier("shell.command.find")
         }
         CommandMenu("Deck") {
             Button("Study") {

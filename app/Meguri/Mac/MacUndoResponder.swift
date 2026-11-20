@@ -21,9 +21,9 @@ final class MacUndoResponder {
             })
         }
         // A window updates after every event; only a new first responder counts.
-        observers.append(center.addObserver(forName: NSWindow.didUpdateNotification, object: nil, queue: .main) { note in
+        observers.append(center.addObserver(forName: NSWindow.didUpdateNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated {
-                guard let window = note.object as? NSWindow, window.isKeyWindow else { return }
+                guard let window = NSApp.keyWindow else { return }
                 let responder = MacUndoResponder.shared
                 if responder.lastResponder !== window.firstResponder {
                     responder.lastResponder = window.firstResponder

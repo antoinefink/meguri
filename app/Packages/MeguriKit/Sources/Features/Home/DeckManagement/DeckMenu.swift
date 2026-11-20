@@ -11,7 +11,7 @@ struct DeckMenu: View {
 
     var body: some View {
         if !deck.filtered {
-            Section {
+            Group {
                 Button { Task { await collection.startStudy(deckID: deck.id) } } label: {
                     Label { Text("Study", bundle: .module) } icon: { Image(systemName: "play") }
                 }
@@ -28,8 +28,11 @@ struct DeckMenu: View {
                 .disabled(!collection.addNotePresentation.canPresent(presetDeck: deck.id))
                 .accessibilityIdentifier("home.deckMenu.addNote.\(deck.id)")
             }
+            // A separator, not a Section: a section's header item took the
+            // items' identifiers away in the Mac's context menu.
+            Divider()
         }
-        Section {
+        Group {
             Button { collection.deckActions.present(.rename(deck.id)) } label: {
                 Label { Text("Rename…", bundle: .module) } icon: { Image(systemName: "pencil") }
             }

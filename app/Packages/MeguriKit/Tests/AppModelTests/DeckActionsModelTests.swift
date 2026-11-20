@@ -342,7 +342,8 @@ extension ReviewCollectionStartupTests {
             let parentID = try #require(owner.decks.first { $0.name == "Native Parent" }?.id)
             model.present(.rename(parentID)); model.name = "Native Renamed"
             model.submit(); await model.waitForCompletion()
-            #expect(owner.navigation.homeDeckPage?.rawValue == childID)
+            // N20.3: Rename shows the renamed deck's page.
+            #expect(owner.navigation.homeDeckPage?.rawValue == parentID)
             #expect(owner.fullDeckName(childID) == "Native Renamed::Child")
             model.cancel()
             model.present(.subdeck(parentID))

@@ -224,18 +224,13 @@ public struct HomeSidebarDeckSearch<Content: View>: View {
         }
         .searchable(text: $search.text, placement: .sidebar, prompt: Text("Search or Create a Deck", bundle: .module))
         .searchFocused($focused)
+        #if !os(macOS)
         .onSubmit(of: .search) {
-            guard let query = search.query else { return }
-            let targets = targets(query)
-            #if os(macOS)
-            // Return opens the highlighted row.
-            let target = DeckSearch.highlight(search.chosen, in: targets)
-            #else
-            // iPad: Return in the field opens the first row.
-            let target = targets.first
-            #endif
-            if let target { DeckSearchActivation.activate(target, collection: collection, search: search, layout: .sidebar) }
+            // iPad: Return in the field opens the first row. (The Mac's Return is the monitor's.)
+            guard let query = search.query, let target = targets(query).first else { return }
+            DeckSearchActivation.activate(target, collection: collection, search: search, layout: .sidebar)
         }
+        #endif
         .onChange(of: search.focusRequest, initial: true) { _, _ in
             guard search.focusPending else { return }
             focused = true
@@ -283,12 +278,16 @@ public struct HomeSidebarDeckSearch<Content: View>: View {
     }
 
     #if os(macOS)
-    /// ↑ and ↓ in this sidebar's field move the highlight (H6.3); the field keeps
-    /// the focus. Only this window's field: never Settings or another window.
+    /// ↑ and ↓ in this sidebar's field move the highlight (H6.3), and Return opens
+    /// the highlighted row; the field keeps the focus. In the Mac VM run, Return
+    /// in the sidebar's field opened nothing through `onSubmit(of: .search)`, so
+    /// the field's own keys are read here. Only this window's field: never Settings.
     private func installArrows() {
         guard arrows == nil else { return }
         arrows = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [search, collection, window] event in
-            guard event.keyCode == 125 || event.keyCode == 126,
+            let arrow = event.keyCode == 125 || event.keyCode == 126
+            let enter = event.keyCode == 36 || event.keyCode == 76
+            guard arrow || enter, !event.isARepeat || arrow,
                   event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
                   let host = window.value, let eventWindow = event.window, eventWindow === host, host.isKeyWindow,
                   host.attachedSheet == nil,
@@ -298,7 +297,12 @@ public struct HomeSidebarDeckSearch<Content: View>: View {
             let targets = DeckSearchRows.results(collection, search, query: query)?
                 .targets(offeringCreate: search.offersCreate(generation: collection.generation)) ?? []
             let current = DeckSearch.highlight(search.chosen, in: targets)
-            search.chosen = DeckSearch.move(current, by: event.keyCode == 125 ? 1 : -1, in: targets)
+            if enter {
+                // With no row at all, Return does nothing (H6.3).
+                if let current { DeckSearchActivation.activate(current, collection: collection, search: search, layout: .sidebar) }
+            } else {
+                search.chosen = DeckSearch.move(current, by: event.keyCode == 125 ? 1 : -1, in: targets)
+            }
             return nil
         }
     }

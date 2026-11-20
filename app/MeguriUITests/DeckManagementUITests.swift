@@ -55,7 +55,9 @@ final class DeckManagementUITests: XCTestCase {
         // The row's menu: New Subdeck… starts empty inside the deck it came from.
         try app.bringToFront(bundleIdentifier: bundle)
         row.rightClick()
-        let subdeck = app.menuItems["New Subdeck…"].firstMatch
+        // The row's own menu item: the menu bar's Deck menu has items of the same title.
+        let deckID = row.identifier.dropFirst("home.sidebar.deck.".count)
+        let subdeck = app.menuItems.matching(identifier: "home.deckMenu.subdeck.\(deckID)").firstMatch
         XCTAssertTrue(subdeck.waitForExistence(timeout: 10))
         try click(subdeck, app: app, bundle: bundle)
         XCTAssertTrue(field.waitForExistence(timeout: 10))
@@ -86,7 +88,7 @@ final class DeckManagementUITests: XCTestCase {
         // The parent's rename says its subdeck moves with it.
         try app.bringToFront(bundleIdentifier: bundle)
         row.rightClick()
-        let rename = app.menuItems["Rename…"].firstMatch
+        let rename = app.menuItems.matching(identifier: "home.deckMenu.rename.\(deckID)").firstMatch
         XCTAssertTrue(rename.waitForExistence(timeout: 10))
         try click(rename, app: app, bundle: bundle)
         XCTAssertTrue(waitForLabel(element(app, "home.deckName.footer"), "Its subdeck moves with it."))

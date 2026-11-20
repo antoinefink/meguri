@@ -34,7 +34,7 @@ import Testing
     @Test func collectionUndoIsTitledAdmittedOnceAndRefreshesTheTree() async {
         let owner = await makeOwner(), history = owner.collectionUndo, fake = FakeUndo()
         history.service = fake
-        await history.refreshNow()
+        await history.waitForRefresh(); await history.refreshNow()
         #expect(history.undoName == "Rename Deck" && history.redoName == nil)
         #expect(history.canUndo && !history.canRedo)
         var loads = 0
@@ -52,7 +52,7 @@ import Testing
     @Test func collectionUndoWaitsWhileASheetHoldsTheKeys() async {
         let owner = await makeOwner(), history = owner.collectionUndo
         history.service = FakeUndo()
-        await history.refreshNow()
+        await history.waitForRefresh(); await history.refreshNow()
         #expect(history.canUndo)
         owner.navigation.present(.collectionExport)
         #expect(!history.canUndo && history.undoName == "Rename Deck")
