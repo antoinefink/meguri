@@ -230,6 +230,22 @@ extension EventTests {
             #expect(backupURL.pathExtension == "colpkg")
             let backupFile = try backupURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
             try #require(backupFile.isRegularFile == true && (backupFile.fileSize ?? 0) > 0)
+            // N20.7: one step "Delete Deck", so Edit shows "Undo Delete Deck" and "Redo Delete Deck" (R173).
+            #expect(deletedDeck.summary.undoName == "Delete Deck")
+            guard case .available(let deleteStep) = try await undo.peekUndo(scope: .global) else {
+                Issue.record("Delete Deck undo missing"); try await collectionService.close(); return
+            }
+            #expect(deleteStep.name == "Delete Deck" && deleteStep.kind == .other)
+            _ = try await undo.startUndo(scope: .global).value()
+            #expect(try await notes.readNote(id: note.id) == noteBeforeDelete)
+            #expect(try await decks.treeWithCounts().nodes.first { $0.id == deck.id } == deckBeforeDelete)
+            guard case .available(let redoStep) = try await undo.peekRedo(scope: .global) else {
+                Issue.record("Delete Deck redo missing"); try await collectionService.close(); return
+            }
+            #expect(redoStep.name == "Delete Deck")
+            _ = try await undo.startRedo(scope: .global).value()
+            #expect(try await decks.treeWithCounts().nodes.allSatisfy { $0.id != deck.id })
+            await #expect(throws: BridgeError.noteNotFound(id: note.id)) { try await notes.readNote(id: note.id) }
             let entryService = CoreCollectionEntryService(clock: clock, diskSpace: capacity)
             let inspection = try await entryService.inspect(source: backupURL, location: location,
                 operation: CollectionEntryOperation(), progress: { _ in })

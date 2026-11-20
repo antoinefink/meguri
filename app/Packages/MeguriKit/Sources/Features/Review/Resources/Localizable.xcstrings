@@ -21,16 +21,6 @@
         }
       }
     },
-    "Close Review": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Close Review"
-          }
-        }
-      }
-    },
     "review.congrats.continue": {
       "localizations": {
         "en": {

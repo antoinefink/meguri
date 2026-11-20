@@ -226,10 +226,11 @@ struct ReviewLayout<Card: View>: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    // N20.5: the xmark's name is "Back to Decks", as the sidebar layouts' button.
                     Button(action: close) {
-                        Label { Text("Close Review", bundle: .module) } icon: { Image(systemName: "xmark") }
+                        Label { Text("Back to Decks", bundle: .module) } icon: { Image(systemName: "xmark") }
                     }
-                    .help(Text("Close Review", bundle: .module))
+                    .help(Text("Back to Decks", bundle: .module))
                     .accessibilityIdentifier("review.session.close")
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
