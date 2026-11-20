@@ -5,7 +5,7 @@ Requirements: R230, R398, R399, R400, R818, R824 (replaced here, E2); Meguri sid
 Anki: 26.09.3 for E1, E3 to E6 and the Anki column of E8 (what Anki desktop's reviewer edits, how its edit window behaves and how it shows the card after the note changed), except the differences E8 lists; none for E2 and E7 (Meguri's form, from the Product Contract and `docs/design/native-interface-contract.md` N4, N11.1, N17.1, N20.8)
 Scenarios: conformance/scenarios/review/edit/ (drafts, not recorded yet, E9)
 
-What the review screen does when the user edits the current card's note with Edit Note (the touch review toolbar's pencil, Card › Edit Note ⌘E and the card's context menu on Mac, the E key): what is edited, what holds while the form is open, and how the card is shown again when it closes. The form is round 5's Add Note form (`docs/design/native-interface-contract.md` N17.1) titled Edit Note, with Cancel and Done (N20.8, decided 2026-11-20, option 7A). The editor itself (fields, tags, saves, undo merging) is the editor area's (U190); this file is the review side, which U184 builds.
+What the review screen does when the user edits the current card's note with Edit Note (the touch review's More menu, Card › Edit Note ⌘E and the card's context menu on Mac, the E key): what is edited, what holds while the form is open, and how the card is shown again when it closes. The form is round 5's Add Note form (`docs/design/native-interface-contract.md` N17.1) titled Edit Note, with Cancel and Done (N20.8, decided 2026-11-20, option 7A). The editor itself (fields, tags, saves, undo merging) is the editor area's (U190); this file is the review side, which U184 builds.
 
 ## E1. What is edited (R230, R394)
 
@@ -57,7 +57,7 @@ The note's other cards keep their places in the queue. Their prepared pages are 
 
 ## E7. The form (Meguri, R394, R397)
 
-- Entries (N20.8): touch, the review toolbar's Edit Note button (`pencil`, labelled "Edit Note", after Undo and Redo); Mac, Card › Edit Note (⌘E) and the card's context menu, with no toolbar button; and the E key (`review/commands`). They are enabled while a card is presented, on either side.
+- Entries (N20.8): touch, the review toolbar's More menu (`ellipsis`, labelled "More", after Undo), whose first item is Edit Note (`pencil`); Mac, Card › Edit Note (⌘E) and the card's context menu, with no toolbar button; and the E key (`review/commands`). They are enabled while a card is presented, on either side.
 - Placement, as Add Note's (N17.1): iPhone and the iPhone Duo folded or held tall, a sheet; the Duo held wide (any iPhone at regular width), the whole screen with the form in a centred column of the readable width; iPad, the system page sheet; Mac, N11.1's in-window panel over the card area, which owns the keys. Never a separate window (R6, N11.1).
 - Done (the confirmation action; ⌘Return, Anki's Close shortcut being Ctrl+Return) saves and closes as E2 says. Cancel (the cancellation action), Esc, ⌘W (N11.1: never Back to Decks) and the swipe down on touch close as Cancel, asking first when the draft has a change. Esc while the tag editor shows suggestions first hides them (`editor/tag-editor` G4).
 - The same form opens over the session summary for a missed card's Edit Note (U157); E3 then has no side to render.
