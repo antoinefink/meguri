@@ -27,6 +27,8 @@ meguri-storage.workspace = true
 regex.workspace = true
 # Connection-local pure scalar functions; no collection SQL is issued here.
 rusqlite.workspace = true
+# The combining-free transform of `nc:` tag terms (text-matching T8.1).
+unicode-normalization.workspace = true
 
 [dev-dependencies]
 # Turns test-hooks on for the tests (testkit depends on this crate with it):

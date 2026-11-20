@@ -195,7 +195,14 @@ fn search(
         today: day.today,
         next_day_at: day.next_day_at,
         learn_ahead_secs: SchedConfig::new(rows).collapse_time()?,
-        current_deck: crate::decks::current(rows)?,
+        // search/names-and-ids N3.4: `curDeck` as stored, 1 when it does not
+        // read as an integer; a missing deck is then matched by the name
+        // `Default`, so no fallback to deck 1's row here.
+        current_deck: meguri_model::ids::DeckId(
+            rows.config_value("curDeck")?
+                .and_then(|value| value.as_i64())
+                .unwrap_or(1),
+        ),
         normalize_note_text: bool_key("normalize_note_text", true)?,
         ignore_accents: bool_key("ignoreAccentsInSearch", false)?,
         fold: meguri_search::FoldMode::Unicode,

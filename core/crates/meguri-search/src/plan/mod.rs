@@ -3,6 +3,7 @@
 //! rows the query's scope needs, the slow terms, the context values read,
 //! and the run errors that need no database (`errors.md` E3).
 
+mod names;
 pub mod sql;
 
 use std::ops::Range;
@@ -73,9 +74,10 @@ impl From<SearchError> for BuildError {
 }
 
 impl Plan {
-    /// Q9: compiles `query` for `mode`. A negated operator word, or an id
-    /// list holding a digit other than ASCII `0`-`9`, is `search_failed`
-    /// (E3), whatever else the query holds.
+    /// Q9: compiles `query` for `mode`. Plan errors follow `errors.md` E4
+    /// step 3: the statement checks of every term (a negated operator word,
+    /// a digit other than ASCII `0`-`9` in an id list, ...) in reading
+    /// order, then the pattern checks (every expression compiled).
     pub fn build(query: &Query, mode: SearchMode, ctx: &SearchContext) -> Result<Plan, BuildError> {
         build_with(query, mode, ctx, &mut sql::compile_term)
     }
@@ -173,6 +175,10 @@ fn build_with(
     let mut slow = Vec::new();
     let mut reads = ContextReads::NONE;
     let mut not_yet = None;
+    // E4 step 3: the statement checks of every term in reading order, then
+    // the pattern checks. A pattern error waits until every term passed its
+    // statement checks.
+    let mut pattern_error = None;
     // Left to right, so the first error the source names is the one raised.
     let mut stack = vec![Piece::Node(query.root())];
     while let Some(piece) = stack.pop() {
@@ -204,8 +210,18 @@ fn build_with(
                     let kind = ErrorKind::SearchFailed(SearchFailure::IdList { context });
                     return Err(SearchError::new(kind, node.span.clone()).into());
                 }
-                let outcome =
-                    compile(term, &env, &mut params).map_err(|kind| SearchError::new(kind, node.span.clone()))?;
+                let outcome = match compile(term, &env, &mut params) {
+                    Ok(outcome) => outcome,
+                    Err(kind) if sql::is_pattern_error(&kind) => {
+                        pattern_error.get_or_insert_with(|| SearchError::new(kind, node.span.clone()));
+                        TermOutcome::Sql(TermSql {
+                            sql: "0".to_owned(),
+                            slow: false,
+                            reads: ContextReads::NONE,
+                        })
+                    }
+                    Err(kind) => return Err(SearchError::new(kind, node.span.clone()).into()),
+                };
                 match outcome {
                     TermOutcome::Sql(term_sql) => {
                         predicate.push('(');
@@ -223,6 +239,9 @@ fn build_with(
                 }
             }
         }
+    }
+    if let Some(error) = pattern_error {
+        return Err(error.into());
     }
     if let Some((term, range)) = not_yet {
         return Err(BuildError::NotYetSupported { term, range });

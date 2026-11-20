@@ -16,6 +16,8 @@ pub mod canonical_roundtrip;
 pub mod card_extractors;
 #[path = "config_keys.rs"]
 pub mod config_keys;
+#[path = "names_and_ids.rs"]
+pub mod names_and_ids;
 #[path = "parse_props.rs"]
 pub mod parse_props;
 #[path = "state_and_flags.rs"]
