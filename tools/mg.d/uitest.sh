@@ -406,22 +406,16 @@ mg_ui_test() {
   fi
   if [ "$platform" = mac ]; then
     [ -z "$device" ] || { mg_ui_test__usage "--device is for simulators"; return 0; }
+    mg_ui_suite_fixtures $suites || { mg_status error; return 0; }
     mg_mac_ui_begin || return 0
     mg_app_build mac "$config" ${build_args[0]+"${build_args[@]}"} || return 0
     mg_mac_ui_take || return 0
-    for s in $suites; do
-      case "$s" in
-        DeckManagementUITests|DeckManagementUITests/*|MacHomeHierarchyTests|MacHomeHierarchyTests/*)
-          mg_vm_fixture "$MG_ROOT/build/fixtures/recipes/local-review-1"
-          result=$?
-          if [ "$result" -ne 0 ]; then
-            if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
-            return 0
-          fi
-          break
-          ;;
-      esac
-    done
+    mg_ui_suite_fixtures_stage "$MG_MAC_RUNNER"
+    result=$?
+    if [ "$result" -ne 0 ]; then
+      if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
+      return 0
+    fi
     if [ -n "$media" ]; then
       mg_ui_test__media_prepare "$MG_MAC_RUNNER"
       result=$?
@@ -448,12 +442,19 @@ mg_ui_test() {
     mg_ui_test__report "$MG_RUN_DIR/mac" "$result"
     return 0
   fi
+  mg_ui_suite_fixtures $suites || { mg_status error; return 0; }
   mg_sim_begin || return 0
   if [ -n "$device" ]; then
     mg_sim_check_given "$device" || return 0
   fi
   mg_app_build ios-sim "$config" ${build_args[0]+"${build_args[@]}"} || return 0
   mg_sim_take || return 0
+  mg_ui_suite_fixtures_stage "$MG_SIM_RUNNER"
+  result=$?
+  if [ "$result" -ne 0 ]; then
+    if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
+    return 0
+  fi
   if [ -n "$device" ]; then
     mg_sim_check_given "$device" || return 0
     udid="$device"

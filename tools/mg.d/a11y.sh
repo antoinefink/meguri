@@ -71,9 +71,16 @@ mg_a11y() {
   MG_A11Y_PLATFORM="$platform"
   if [ "$platform" = mac ]; then
     [ -z "$device" ] || { mg_a11y__usage "--device is for simulators"; return 0; }
+    mg_ui_suite_fixtures $suites || { mg_status error; return 0; }
     mg_mac_ui_begin || return 0
     mg_app_build mac Debug || return 0
     mg_mac_ui_take || return 0
+    mg_ui_suite_fixtures_stage "$MG_MAC_RUNNER"
+    result=$?
+    if [ "$result" -ne 0 ]; then
+      if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
+      return 0
+    fi
     since="$(mg_app_log_now)"
     mg_app_xcodebuild_test "$MG_RUN_DIR/mac" mac "platform=macOS,arch=arm64" Debug "${only[@]}"
     result=$?
@@ -87,12 +94,19 @@ mg_a11y() {
     mg_a11y__report "$MG_RUN_DIR/mac" "$result"
     return 0
   fi
+  mg_ui_suite_fixtures $suites || { mg_status error; return 0; }
   mg_sim_begin || return 0
   if [ -n "$device" ]; then
     mg_sim_check_given "$device" || return 0
   fi
   mg_app_build ios-sim Debug || return 0
   mg_sim_take || return 0
+  mg_ui_suite_fixtures_stage "$MG_SIM_RUNNER"
+  result=$?
+  if [ "$result" -ne 0 ]; then
+    if [ "$result" -eq 2 ]; then mg_queued_settle; else mg_status error; fi
+    return 0
+  fi
   if [ -n "$device" ]; then
     mg_sim_check_given "$device" || return 0
     udid="$device"
