@@ -58,6 +58,14 @@
   [ "$output" = "$(git -C "$task" rev-parse HEAD)" ]
   run mg_cleanroom_source_commit worker
   [ "$status" -eq 0 ]
+  # A working-tree change to a committed record, hidden from status, never counts.
+  git -C "$task" update-index --assume-unchanged "$MG_SESSIONS_DIR/fixer-1.json"
+  printf '%s\n' '{"session":"fixer-1","role":"critic"}' >"$task/$MG_SESSIONS_DIR/fixer-1.json"
+  [ -z "$(git -C "$task" status --porcelain)" ]
+  run mg_cleanroom_source_commit fixer-1
+  [ "$status" -eq 0 ]
+  git -C "$task" update-index --no-assume-unchanged "$MG_SESSIONS_DIR/fixer-1.json"
+  git -C "$task" checkout -q -- "$MG_SESSIONS_DIR/fixer-1.json"
   # A file whose session is not its name is no record.
   printf '%s\n' '{"session":"fixer-2","role":"fixer"}' >"$task/$MG_SESSIONS_DIR/fixer-x.json"
   git -C "$task" add "$MG_SESSIONS_DIR/fixer-x.json"
