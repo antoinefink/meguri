@@ -129,7 +129,7 @@ public final class NoteEditorDraft {
         for (ord, field) in fields.enumerated() where field.target != field.baseline { changed[ord] = field.target }
         let tags = self.tags == baselineTags ? nil : self.tags
         guard !changed.isEmpty || tags != nil else { return nil }
-        return NoteFieldPatch(id: noteID, notetype: notetype, fields: changed, tags: tags)
+        return NoteFieldPatch(id: noteID, notetype: notetype, fields: changed, tags: tags, generation: generation)
     }
 
     /// Edit mode, for a change made elsewhere (`editor/edit-flows` W5.2 with

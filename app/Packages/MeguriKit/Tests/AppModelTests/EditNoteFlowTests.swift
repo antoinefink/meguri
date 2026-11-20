@@ -246,6 +246,11 @@ extension ReviewCollectionStartupTests {
 
             await owner.finishReview()
             #expect(await owner.close())
-        } catch { _ = await owner.close(); throw error }
+        } catch {
+            // A failure with a changed draft open would make close() wait for a
+            // Discard answer nobody gives: end the test's form first.
+            owner.editNoteFlow.generationEnded()
+            _ = await owner.close(); throw error
+        }
     }
 }

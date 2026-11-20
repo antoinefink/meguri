@@ -166,6 +166,10 @@ pub struct NoteFieldValue {
 /// them, the fields it changed, and the whole tag list only when it changed.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct NotePatchRequest {
+    /// The generation the editor loaded the note in; the patch is refused
+    /// with `StaleGeneration` on any other, so a draft never lands in a
+    /// replacement collection. None for hosts that do not track it.
+    pub expected_generation: Option<u64>,
     pub id: i64,
     pub notetype_id: i64,
     pub field_layout: Vec<AddFieldIdentity>,
@@ -190,9 +194,17 @@ pub fn patch_note(request: NotePatchRequest, session_id: Option<u64>) -> Result<
         tags: request.tags,
     };
     let host = runtime::host()?;
+    // Resolve the collection once and check it against the editor's
+    // generation; the op then runs on that collection only.
+    let collection = host.collection()?;
+    if let Some(expected) = request.expected_generation.map(meguri_engine::Generation) {
+        if collection.generation() != expected {
+            return Err(meguri_engine::EngineError::StaleGeneration { planned: expected, current: collection.generation() }.into());
+        }
+    }
     let r = match session_id {
         Some(session) => host.review().patch_note(input, meguri_engine::SessionId(session))?,
-        None => notes::patch(&host.collection()?, input, OpSource::UserUndoable)?,
+        None => notes::patch(&collection, input, OpSource::UserUndoable)?,
     };
     Ok(NoteMutation::with_cards(MutationSummary::of(&r), id, r.value.cards, r.value.written))
 }

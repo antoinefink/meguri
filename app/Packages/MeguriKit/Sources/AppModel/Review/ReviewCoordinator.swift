@@ -389,8 +389,10 @@ public final class ReviewCoordinator {
         let inputTime = uptime()
         timer.pause(at: inputTime)
         operation = Task {
+            var acted = false
             do {
                 let mutation = try await startCardAction(action, item.cardId, sessionID)
+                acted = true
                 let intent = restorationIntent
                 let needsRefresh = refreshPending || mutation.headDiff == nil
                 refreshPending = false; forceQuestion = false
@@ -401,11 +403,13 @@ public final class ReviewCoordinator {
                 cardActionAnnouncement = (UUID(), action)
             } catch {
                 // A refused or failed op changes nothing on screen but its error
-                // (A1): the same card keeps its side and its timer goes on.
+                // (A1): the same card keeps its side and its timer goes on. When
+                // the op committed and only showing the next card failed, that
+                // card shows on its question side (A4).
                 notice = String(describing: error)
                 let intent = restorationIntent
                 refreshPending = false; forceQuestion = false
-                do { try await apply(client.head(sessionID: sessionID), question: false, intent: intent) }
+                do { try await apply(client.head(sessionID: sessionID), question: acted, intent: intent) }
                 catch { fail(error) }
                 if phase == .question || phase == .answer { timer.resume(at: uptime()) }
             }

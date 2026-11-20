@@ -1542,7 +1542,15 @@ public final class ReviewCollection: ChangeFanoutSink {
     public func finishReview() async {
         guard let review else { return }
         // E7: leaving the review closes Edit Note as Cancel does, asking first.
-        guard await editFlowOwner?.requestCancel() != false, self.review === review else { return }
+        guard await editFlowOwner?.requestCancel() != false, self.review === review else {
+            // Keep Editing: a navigation that already dropped the review
+            // (another row, another section) presents it again, so the
+            // collection never holds a review nothing shows.
+            if self.review === review, navigation.review == nil {
+                navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: review.record.deckID), session: review))
+            }
+            return
+        }
         guard await review.end() else { return }
         previousRecord = review.record
         self.review = nil; navigation.endReview()
