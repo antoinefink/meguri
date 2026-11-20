@@ -19,3 +19,7 @@ Core reports the document's phase only when the closure is the selected Meguri c
 ## Independent review
 
 Fresh read-only reviewer, round 1: no P0/P1. Resolved: P2 FFI mapping now tested through `admitted_snapshot`; P3 predicate narrowed to the Meguri setup operation; P3 explicit linear style; P3 spec wording (no Pause reference; preparation left to end; "this run's files"); P3 stop limited to the action that was running. Noted, not changed: `validateRetainedMeguriAttachment` now passes during setup (Core still guards every start); a transient settings-write failure, already reported as blocked, now also stops a running round; the `didSet` stop path has no coordinator-level test (no fake provider exists for it; its decision is tested as `stopsWorkOnBlock`).
+
+## CodeRabbit
+
+Four comments. Fixed: setup continuations now stop while blocked; the media stop identifies its step by facade and stage, so it works on an adopted coordinator. Answered: no routine-round progress bar (unchanged behaviour); the MP6.5 lines are built and await approval before merge.
