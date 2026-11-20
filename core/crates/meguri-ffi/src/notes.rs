@@ -157,6 +157,51 @@ pub fn update_note(request: UpdateNoteRequest) -> Result<NoteMutation, CoreError
         r.value.written,
     ))
 }
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct NoteFieldValue {
+    pub ord: u32,
+    pub html: String,
+}
+/// `editor/field-html` S2: the note type and layout as the editor loaded
+/// them, the fields it changed, and the whole tag list only when it changed.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct NotePatchRequest {
+    pub id: i64,
+    pub notetype_id: i64,
+    pub field_layout: Vec<AddFieldIdentity>,
+    pub fields: Vec<NoteFieldValue>,
+    pub tags: Option<Vec<String>>,
+}
+#[uniffi::export]
+pub fn patch_note(request: NotePatchRequest) -> Result<NoteMutation, CoreError> {
+    callback::enter("patch_note");
+    let id = NoteId(request.id);
+    let input = notes::NotePatch {
+        id,
+        notetype_id: NotetypeId(request.notetype_id),
+        field_layout: request.field_layout.into_iter().map(|field| notes::AddFieldIdentity {
+            ord: field.ord,
+            id: field.id,
+            name: field.name,
+        }).collect(),
+        fields: request.fields.into_iter().map(|field| (field.ord, field.html)).collect(),
+        tags: request.tags,
+    };
+    let r = notes::patch(&runtime::host()?.collection()?, input, OpSource::UserUndoable)?;
+    Ok(NoteMutation::with_cards(MutationSummary::of(&r), id, r.value.cards, r.value.written))
+}
+/// The deck a card is in now (`review/edit-current` E1's subtitle).
+#[uniffi::export]
+pub fn card_deck(card_id: i64) -> Result<i64, CoreError> {
+    callback::enter("card_deck");
+    let c = runtime::host()?.collection()?;
+    let r = c.reader(ReaderRole::Query)?;
+    let card = r.card(meguri_model::ids::CardId(card_id))?.ok_or_else(|| meguri_engine::EngineError::NotFound {
+        table: meguri_storage::Table::Cards,
+        key: card_id.to_string(),
+    })?;
+    Ok(card.deck_id.0)
+}
 #[uniffi::export]
 pub fn read_note(id: i64) -> Result<NoteRecord, CoreError> {
     callback::enter("read_note");
