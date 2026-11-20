@@ -1241,7 +1241,14 @@ public final class SyncCoordinator {
                 if case .refused = result.outcome { return nil }
                 release(); self.meguriOperation = nil
                 self.meguriStage = .required; self.meguriChoiceAllowed = true
-            } catch { if current() { self.meguriLastError = error } }
+            } catch {
+                guard current() else { return nil }
+                self.meguriLastError = error
+                // The discard failed: the core says whether setup can run again, so
+                // that a preparation with no sheet is not left without an action.
+                try? await self.readMeguriReadiness(facade, owner: owner, expected: expected, revision: revision)
+                if self.meguriChoiceAllowed { release(); self.meguriStage = .failed }
+            }
             return nil
         }
         let reservation = admission.id
@@ -1451,6 +1458,8 @@ public final class SyncCoordinator {
                                 choice: MeguriSetupChoice, reloads: Int) async {
         guard Self.meguriSetupConfirmsPreview(decision.facts.row, choice) != nil else { return }
         meguriSetupDonePending = choice == .noQuestion ? Self.meguriSetupDone(decision.facts.row) : nil
+        // This attempt's own answer: an earlier attempt's refusal reloads nothing.
+        var attempt: MeguriBootstrapOutcome?
         let current = await runMeguriCollection(id: id, facade: facade, owner: owner,
             held: { self.meguriSetupPreview === preview },
             discard: { try await facade.discard(preview) },
@@ -1459,14 +1468,16 @@ public final class SyncCoordinator {
                 guard let result = try await MeguriSetupSequence.transfer(facade, decision: decision, preview: preview,
                     choice: choice, progress: self.progressForMeguri(id),
                     proceed: { !self.meguriCancelling && !self.settings.paused }) else { throw CancellationError() }
+                attempt = result.outcome
                 return result
             })
         meguriSetupDonePending = nil
         // Changed facts stopped the transfer with nothing replaced. Both sides
         // are read again once; the row they give now decides, and two
         // collections get the sheet with a new choice.
-        guard let current,
-              let key = MeguriSetupSequence.reloadNotice(after: current.meguriCollectionCommand?.outcome, reloads: reloads,
+        // A Cancel during the transfer starts no new preparation.
+        guard let current, !meguriCancelling,
+              let key = MeguriSetupSequence.reloadNotice(after: attempt, reloads: reloads,
                                                          choiceAllowed: current.meguriChoiceAllowed),
               let facade = current.meguriBootstrap, let owner = current.meguriConnectionOwner else { return }
         current.meguriSetupNoticeKey = key
