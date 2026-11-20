@@ -254,7 +254,7 @@ extension ReviewCollectionStartupTests {
             owner.entry.inspect(source); await owner.entry.waitForCompletion()
             try #require(owner.entry.preview != nil)
             _ = try await CoreDeckService().addDeck(name: "Committed after preview")
-            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             #expect(owner.entry.failure?.issue == .staleConfirmation)
             #expect(owner.entry.preview == nil && owner.entry.needsReinspection)
             #expect(owner.state == .ready && owner.generation == generation)
@@ -269,7 +269,7 @@ extension ReviewCollectionStartupTests {
             }
             owner.entry.inspect(source); await owner.entry.waitForCompletion()
             try #require(owner.entry.preview != nil)
-            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             #expect(owner.entry.failure?.issue == .core(.sessionActive))
             #expect(owner.generation == generation)
             try await Core.endSession(sessionID: session)

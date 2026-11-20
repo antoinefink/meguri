@@ -1493,7 +1493,7 @@ import notify
         capture(app, "entry-preview-restored")
         #endif
         try click(confirm, app, bundle)
-        // Real activation dismisses entry. FSRS policy is the production gate.
+        // Real activation dismisses entry; nothing asks after it (N18.1).
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: entryContent)], timeout: 30), .completed)
         let importedDeck = deckRows(app, identifier: "home.deck.row.1788249600212")
@@ -1749,27 +1749,15 @@ import notify
         }
     }
     private func waitForAdmission(_ query: XCUIElementQuery, _ app: XCUIApplication, _ bundle: String) throws {
-        let enable = element(app, "home.policy.enable")
-        let policy = element(app, "home.policy.sheet")
+        // The collection is presented as soon as it is open: no sheet, no prompt (N18.1).
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            if enable.isHittable { return true }
             #if os(macOS)
             guard query.count == 1 else { return false }
             #endif
-            return query.allElementsBoundByIndex.contains { $0.exists && $0.isHittable } && !policy.exists
+            return query.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
         }, object: nil)
         XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, app.debugDescription)
-        if enable.isHittable {
-            try click(enable, app, bundle)
-            let admitted = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                guard !policy.exists else { return false }
-                #if os(macOS)
-                guard query.count == 1 else { return false }
-                #endif
-                return query.allElementsBoundByIndex.contains { $0.exists && $0.isHittable }
-            }, object: nil)
-            XCTAssertEqual(XCTWaiter().wait(for: [admitted], timeout: 30), .completed, app.debugDescription)
-        }
+        XCTAssertEqual(app.sheets.count, 0, "Nothing asks after a collection opens")
     }
     private func waitForShellSection(_ app: XCUIApplication, tabIdentifier: String, sidebarIdentifier: String,
                                      compactLabel: String, timeout: TimeInterval) -> XCUIElement? {

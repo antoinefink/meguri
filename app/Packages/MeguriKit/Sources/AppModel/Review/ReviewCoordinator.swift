@@ -191,7 +191,7 @@ public final class ReviewCoordinator {
             switch result {
             case .refused(.fsrsPolicyPending):
                 recordDiagnostic(.init(component: .review, operation: .start, stage: .admission, outcome: .refused))
-                onPolicyRefusal?(); phase = .error; notice = "Enable FSRS before studying."
+                onPolicyRefusal?(); phase = .error; notice = "Meguri couldn’t prepare this collection for study."
             case .refused(.presetUnsupported):
                 recordDiagnostic(.init(component: .review, operation: .start, stage: .admission, outcome: .refused))
                 phase = .error; notice = "This preset needs a newer Meguri"

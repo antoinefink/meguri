@@ -176,7 +176,7 @@ import AppKit
             let baseline = try durableOperation(try await nativeState(rig), direction: "Import").successCooldown
             try click(element(app, "settings.anki.confirm"), app, bundle)
             try confirmNative(app, bundle)
-            try completeOptionalFsrsAdmission(app, bundle)
+            try returnToMainWindow(app, bundle)
             try openSettings(app, bundle)
             _ = try await allowAndFinishMedia(app, bundle, rig: rig, stage: "Import", baseline: baseline, name: "rf4-account-a-import")
         }
@@ -186,7 +186,7 @@ import AppKit
 
         // Save an answer in the imported deck before restarting the app.
         try openHome(app, bundle)
-        try completeOptionalFsrsAdmission(app, bundle)
+        try returnToMainWindow(app, bundle)
         // N14: the deck's row is in the sidebar where the detail shows Today.
         let deckRows = HomeControls.deckRows(app, deckID: String(rig.deckID))
         XCTAssertTrue(deckRows.firstMatch.waitForExistence(timeout: 20))
@@ -227,7 +227,7 @@ import AppKit
         try click(element(app, "settings.anki.confirm"), app, bundle)
         attachSuccess(app, "rf4-account-a-export-fresh-backup-preview")
         try confirmNative(app, bundle)
-        try completeOptionalFsrsAdmission(app, bundle)
+        try returnToMainWindow(app, bundle)
         try openSettings(app, bundle)
         let aExported = try await allowAndFinishMedia(app, bundle, rig: rig, stage: "AExport",
             baseline: aPrepared.successCooldown, name: "rf4-account-a-export")
@@ -252,7 +252,7 @@ import AppKit
         try click(element(app, "settings.anki.confirm"), app, bundle)
         attachSuccess(app, "rf4-account-b-export-backup-preview")
         try confirmNative(app, bundle)
-        try completeOptionalFsrsAdmission(app, bundle)
+        try returnToMainWindow(app, bundle)
         try openSettings(app, bundle)
         _ = try await allowAndFinishMedia(app, bundle, rig: rig, stage: "Export", baseline: bPrepared.successCooldown, name: "rf4-account-b-export")
         let retained = try await nativeState(rig)
@@ -404,7 +404,7 @@ import AppKit
             app.terminate()
             app.launchArguments = MeguriLaunch(timeZone: "UTC", locale: "en_US", animations: false, extra: ["-ShowAnkiServerInterface", "YES"]).arguments
             app.launch()
-            try completeOptionalFsrsAdmission(app, bundle)
+            try returnToMainWindow(app, bundle)
             try openSettings(app, bundle)
             try waitForText(element(app, "settings.anki.loginIdentity"), importing ? rig.username : rig.exportUsername, app, bundle)
             try showHistory(app, bundle)
@@ -919,25 +919,13 @@ import AppKit
         if outcome != .completed { attach(app, "rf4-text-wait-failure", target: target) }
         XCTAssertEqual(outcome, .completed)
     }
-    private func completeOptionalFsrsAdmission(_ app: XCUIApplication, _ bundle: String) throws {
+    private func returnToMainWindow(_ app: XCUIApplication, _ bundle: String) throws {
         #if os(macOS)
-        // Admission belongs to the main window, even when Settings initiated
-        // replacement. Closing the workflow neither cancels nor grants consent.
+        // Nothing asks after a replacement (N18.1); the journey goes on from
+        // the main window, as it did when a sheet was shown there.
         try closeSettings(app, bundle)
         #endif
         try app.bringToFront(bundleIdentifier: bundle)
-        let admission = element(app, "home.policy.enable")
-        if admission.waitForExistence(timeout: 2), admission.isEnabled {
-            try click(admission, app, bundle)
-        }
-        // A disabled button means admission is already running; wait for that
-        // job rather than clicking again or navigating behind its modal sheet.
-        try app.bringToFront(bundleIdentifier: bundle)
-        let sheet = element(app, "home.policy.sheet")
-        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !sheet.exists }, object: nil)
-        let outcome = XCTWaiter().wait(for: [dismissed], timeout: 30)
-        if outcome != .completed { attach(app, "rf4-policy-admission-failure") }
-        XCTAssertEqual(outcome, .completed, "FSRS admission must finish before continuing.")
     }
     private func openSettings(_ app: XCUIApplication, _ bundle: String) throws {
         #if os(macOS)
@@ -1432,13 +1420,11 @@ import AppKit
         lines.append("passwordFieldPresent=\(element(app, "settings.anki.password").exists)")
         lines.append("sheetCount=\(app.sheets.count)")
         lines.append("alertCount=\(app.alerts.count)")
-        lines.append("home.policy.sheetPresent=\(element(app, "home.policy.sheet").exists)")
         let settingsRoot = element(app, "settings.root.content")
         let homeRoot = element(app, "home.collection.screen")
         lines.append(state(settingsRoot, "settingsRoot"))
         lines.append("settingsRootHittable=\(settingsRoot.exists && settingsRoot.isHittable)")
         lines.append("homeRootHittable=\(homeRoot.exists && homeRoot.isHittable)")
-        lines.append("policyErrorPresent=\(element(app, "home.policy.error").exists)")
         let report = XCTAttachment(string: lines.joined(separator: "\n"))
         report.name = name; report.lifetime = .keepAlways; add(report)
     }

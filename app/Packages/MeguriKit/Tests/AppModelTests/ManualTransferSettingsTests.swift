@@ -1204,7 +1204,7 @@ extension ManualTransferSettingsTests {
 
 extension ManualTransferSettingsTests {
     @Test func connectionTestAllowsOnlyItsOwnWorkflowAcrossWindowHosts() async {
-        let routes: [SheetRoute?] = [nil, .manualTransfer, .add(deck: nil), .fsrsAdmission, .collectionEntry, .collectionExport]
+        let routes: [SheetRoute?] = [nil, .manualTransfer, .add(deck: nil), .collectionEntry, .collectionExport]
         for host in [AppNavigation.SheetHost.main, .settings] {
             for route in routes {
                 var configuration = LaunchConfiguration()

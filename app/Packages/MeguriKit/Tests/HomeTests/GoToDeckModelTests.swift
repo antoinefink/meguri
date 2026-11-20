@@ -382,7 +382,8 @@ import Testing
         var calls = 0
         owner.saveSelectedDeck = { _ in calls += 1; return 11 }
         let entry = DeckNameEntry(id: 42, fullName: "Japanese::Lesson1", filtered: false)
-        #expect(await owner.activateGoToDeck(entry, generation: 11, presentation: token, layout: .compact).value == .failed)
+        // A collection that cannot be prepared refuses study before any write (F5.3).
+        #expect(await owner.activateGoToDeck(entry, generation: 11, presentation: token, layout: .compact).value == .studyRefused)
         #expect(calls == 0 && owner.navigation.review == nil && owner.navigation.sheet == .goToDeck)
     }
 

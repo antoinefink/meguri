@@ -46,7 +46,7 @@ extension ReviewCollectionStartupTests {
         await owner.start()
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
-        owner.entry.confirm(); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
         try #require(owner.state == .ready)
         let coordinator = owner.collectionExport
         do {
@@ -86,7 +86,7 @@ extension ReviewCollectionStartupTests {
             try await receipt.discard()
             // Reuse the real RF2 replacement, with its safety backup.
             owner.entry.inspect(saved); await owner.entry.waitForCompletion()
-            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             try #require(owner.state == .ready)
             #expect(owner.generation != artifact.metadata.sourceGeneration)
             #expect(coordinator.artifact === artifact)
@@ -121,7 +121,7 @@ extension ReviewCollectionStartupTests {
         await owner.start()
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
-        owner.entry.confirm(); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
         let coordinator = owner.collectionExport
         do {
             try #require(owner.state == .ready)
@@ -135,7 +135,7 @@ extension ReviewCollectionStartupTests {
             let entryStage = owner.entry.stage
             #expect(!owner.entry.canPresent)
             owner.entry.inspect(source); await owner.entry.waitForCompletion()
-            owner.entry.confirm(); await owner.entry.waitForCompletion()
+            owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
             #expect(owner.entry.stage == entryStage)
             #expect(owner.generation == generation)
             #expect(coordinator.destinationPresented && coordinator.providerLease === lease)
@@ -175,7 +175,7 @@ extension ReviewCollectionStartupTests {
         await owner.start()
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
-        owner.entry.confirm(); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
         let failNext = Mutex(true)
         let coordinator = CollectionExportCoordinator(owner: owner, service: CoreCollectionExportService(), recordDiagnostic: configuration.recordDiagnostic, finishLease: { lease in
             if failNext.withLock({ fail in let previous = fail; fail = false; return previous }) {
@@ -236,7 +236,7 @@ extension ReviewCollectionStartupTests {
         await owner.start()
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
-        owner.entry.confirm(); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
         try #require(owner.state == .ready)
         let generic = "The collection could not be exported. Check available space and collection access, then try again. Unused prepared output from an earlier launch is recovered when you prepare again."
         let cases: [(BridgeError, String)] = [
@@ -290,7 +290,7 @@ extension ReviewCollectionStartupTests {
         await owner.start()
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
-        owner.entry.confirm(); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
         try #require(owner.state == .ready)
         let coordinator = owner.collectionExport
         // Preparation, then the hand-off that acquires the provider's lease.
@@ -348,7 +348,7 @@ extension ReviewCollectionStartupTests {
         await owner.start()
         let source = try #require(Bundle.module.url(forResource: "review", withExtension: "colpkg"))
         owner.entry.inspect(source); await owner.entry.waitForCompletion()
-        owner.entry.confirm(); await owner.entry.waitForCompletion()
+        owner.entry.confirm(); await owner.entry.waitForCompletion(); await owner.studyPreparation.waitForJob()
         try #require(owner.state == .ready)
         let service = ObservedExportService()
         let coordinator = CollectionExportCoordinator(owner: owner, service: service)

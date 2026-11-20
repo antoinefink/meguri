@@ -495,10 +495,6 @@ final class LocalReviewJourneyTests: XCTestCase {
         app.launchArguments = launchArguments(fixture: build.repositoryRoot.appending(path: "build/fixtures/recipes/local-review-1"), extra: extra)
         app.launch()
         addTeardownBlock { @MainActor in app.terminate() }
-        let enable = element(app, "home.policy.enable")
-        if enable.waitForExistence(timeout: 5) {
-            try click(enable, in: app, bundleIdentifier: bundleIdentifier)
-        }
         try openDeck(app, bundleIdentifier: bundleIdentifier)
         let freshCounts = waitForDeckCounts(app, due: 4)
         if !freshCounts { attach(app, "review-fresh-counts") }

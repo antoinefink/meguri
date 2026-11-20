@@ -41,6 +41,26 @@
         }
       }
     },
+    "study.prepare.failed": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meguri couldn’t prepare this collection for study."
+          }
+        }
+      }
+    },
+    "study.prepare.tryAgain": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try Again"
+          }
+        }
+      }
+    },
     "This path has too many new parent decks. Choose a shorter path.": {
       "localizations": {
         "en": {
@@ -119,16 +139,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "%llu of %llu cards": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%llu of %llu cards"
           }
         }
       }
@@ -299,16 +309,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Due"
-          }
-        }
-      }
-    },
-    "Enable FSRS": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Enable FSRS"
           }
         }
       }
@@ -579,16 +579,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Study Now"
-          }
-        }
-      }
-    },
-    "Study with FSRS": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Study with FSRS"
           }
         }
       }

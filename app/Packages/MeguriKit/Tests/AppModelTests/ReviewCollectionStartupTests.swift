@@ -795,19 +795,14 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
                 #expect(app.sync.settings == settings)
                 #expect(app.sync.meguriPreview == nil && app.sync.meguriLastCommand == nil)
                 #expect(app.sync.meguriStatus.route == .account("sync.meguri.setup.continue"))
-                try #require(app.owner.policy == .needsEnable)
-                try #require(app.owner.navigation.sheet == .fsrsAdmission)
-                #if os(macOS)
-                #expect(app.owner.syncPresentation.settingsRequest == nil)
-                #endif
-                #expect(!app.owner.requestSyncNow())
-                #if os(macOS)
-                #expect(app.owner.syncPresentation.settingsRequest == nil)
-                #endif
-                // Public admission action on this disposable synthetic collection.
+                // No sheet asks (N18.1): the step runs by itself and study joins it.
+                try #require(app.owner.navigation.sheet == nil)
                 await app.owner.enableFsrs()
                 try #require(try await Core.fsrsPolicyStatus() == .ok)
-                try #require(app.owner.navigation.sheet == nil)
+                try #require(app.owner.policy == .ok && app.owner.navigation.sheet == nil)
+                #if os(macOS)
+                #expect(app.owner.syncPresentation.settingsRequest == nil)
+                #endif
                 #expect(app.owner.requestSyncNow())
                 #if os(macOS)
                 #expect(app.owner.syncPresentation.settingsRequest != nil)
@@ -1422,6 +1417,77 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
             #expect(current == nil)
             #expect(app.owner.state == .noFile && app.owner.lifecycle == .noCollection)
             #expect(!FileManager.default.fileExists(atPath: app.owner.configuration.collectionLocation.collectionFile.path))
+        }
+    }
+
+    /// `sched/app-coordination` F5.1 on a cold launch with Meguri Sync selected,
+    /// with the preparation running unprompted and the real coordinator. The
+    /// core refuses Sync Automatically for Meguri without a binding, and this
+    /// harness has no signed-in Meguri server: the setting stays off here, so
+    /// the job runs at once (F5.1's first item). What the coordinator publishes
+    /// while a connection load is in flight is read as it is, and the mapping
+    /// is asked what it means with Sync Automatically on: not a known state.
+    @Test(.timeLimit(.minutes(1))) func coldMeguriLaunchPreparesUnpromptedAndALoadInFlightIsNotAKnownState() async throws {
+        try await withNativeMeguriSetupOwner { first in
+            try #require(await first.sync.changeProvider(to: .meguri))
+            await first.sync.waitForMeguriAction()
+            let provider = try await CoreProviderService.attached()
+            let selected = try await provider.refresh()
+            try #require(selected.selection == .meguri && selected.settings?.automatic == false)
+            // The scripted first owner never ran the step: the switch is still off.
+            try #require(try await Core.fsrsPolicyStatus() == .needsEnable)
+            try #require(await first.owner.close())
+
+            let app = try ServiceAppHarness(root: first.root, wire: first.wire, cachedIdentityAvailable: false, clock: .system)
+            defer { app.defaults.removePersistentDomain(forName: app.suite) }
+            let owner = app.owner
+            owner.studyPreparation.runsUnprompted = true
+            var environment = try #require(owner.studyPreparation.environment)
+            let start = environment.start
+            let waiting = StudyPreparationSyncFacts(exchangeExpected: true, activity: .waiting)
+            /// The published state as it is, read as if Sync Automatically were on.
+            @MainActor func automatic(_ sync: SyncCoordinator) -> StudyPreparationSyncFacts {
+                var input = sync.studyPreparationInput
+                input.automatic = true
+                return .mapping(input)
+            }
+            var factsAtStart: [StudyPreparationSyncFacts] = [], consistentAtStart: [Bool] = []
+            environment.start = {
+                let sync = owner.sync
+                factsAtStart.append(sync.studyPreparationFacts)
+                // Whenever the job starts, a load still in flight reads as waiting.
+                consistentAtStart.append(automatic(sync) == (sync.meguriLocalActionAvailable ? .none : waiting))
+                return try await start()
+            }
+            owner.studyPreparation.environment = environment
+            do {
+                await owner.start()
+                try #require(owner.state == .ready)
+                let sync = owner.sync
+                try #require(sync.providerState?.selection == .meguri && !sync.settings.automatic && !sync.settings.paused)
+                await sync.waitForMeguriAction()
+                await owner.studyPreparation.waitForJob()
+                // One job, at once: with Sync Automatically off no exchange comes by itself.
+                #expect(factsAtStart == [.none])
+                #expect(consistentAtStart == [true])
+                #expect(sync.meguriPhase == .unconfigured && owner.policy == .ok)
+                #expect(try await Core.fsrsPolicyStatus() == .ok)
+                #expect(automatic(sync) == .none)
+                // A reload (the retry control of the setup view) is a load in
+                // flight again: an exchange may follow, so nothing is "known".
+                sync.loadMeguriConnection()
+                #expect(sync.meguriBusy && !sync.studyPreparationInput.meguriSettled && !sync.studyPreparationInput.meguriReady)
+                #expect(automatic(sync) == waiting)
+                // With the setting off, as it is here, the state is known all along.
+                #expect(sync.studyPreparationFacts == .none)
+                await sync.waitForMeguriAction()
+                #expect(sync.studyPreparationInput.meguriSettled && automatic(sync) == .none)
+                #expect(factsAtStart.count == 1)
+                try #require(await owner.close())
+            } catch {
+                _ = await owner.close()
+                throw error
+            }
         }
     }
 

@@ -63,8 +63,14 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
     public private(set) var review: ReviewCoordinator?
     public private(set) var previousRecord: ReviewRecord?
-    public private(set) var policy: FsrsPolicyStatus?
-    public private(set) var enabling = false
+    /// Turns FSRS on by itself for an open collection (`sched/fsrs-policy` A1).
+    public let studyPreparation = StudyPreparation()
+    public var policy: FsrsPolicyStatus? { studyPreparation.status }
+    public var enabling: Bool { studyPreparation.running }
+    /// A study entry point was refused because the collection could not be
+    /// prepared (`sched/app-coordination` F5.3). Try Again runs the step again.
+    public struct StudyRefusal: Equatable, Sendable { public let deckID: Int64 }
+    public private(set) var studyRefusal: StudyRefusal?
     public private(set) var progress: CoreProgress?
     public private(set) var error: String?
     public private(set) var deferredSuspend: UInt64?
@@ -204,7 +210,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         case nil, .add: allowsSheet = true
         default: allowsSheet = false
         }
-        return editorReplacement == nil && ownsAddGeneration(generation) && foreground && !resuming && !closing && !opening && !starting && !enabling &&
+        return editorReplacement == nil && ownsAddGeneration(generation) && foreground && !resuming && !closing && !opening && !starting &&
             !deckNamesReserved && !meguriSignInPreparing && !sync.providerHandoffInProgress &&
             !sync.meguriCollectionWorkHeld && entryOwner?.busy != true && entryOwner?.preview == nil &&
             entryOwner?.pickerPresented != true && manualOwner?.busy != true && manualOwner?.preview == nil &&
@@ -253,7 +259,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?, allowGoToDeckRecovery: Bool = false) -> Bool {
         guard host == .main, foreground, !resuming, !closed, !closing, !sync.providerHandoffInProgress,
               !sync.meguriCollectionWorkHeld,
-              !opening, (!starting || (route == .goToDeck && goToDeckBusy)), !enabling, state == .ready,
+              !opening, (!starting || (route == .goToDeck && goToDeckBusy)), state == .ready,
               case .ready(let current) = lifecycle, current == generation,
               review == nil, navigation.review == nil,
               (goToDeckReview == nil || route == .goToDeck || allowGoToDeckRecovery),
@@ -264,7 +270,7 @@ public final class ReviewCollection: ChangeFanoutSink {
               navigation.sheet == route else { return false }
         return route == nil || navigation.sheetHost == .main
     }
-    public enum GoToDeckResult: Equatable, Sendable { case opened, unavailable, filtered, filteredParent, tooDeep, failed, saved }
+    public enum GoToDeckResult: Equatable, Sendable { case opened, unavailable, filtered, filteredParent, tooDeep, failed, saved, studyRefused }
 
     public func canPresentGoToDeck(host: AppNavigation.SheetHost = .main) -> Bool {
         !goToDeckBusy && deckNamesOwner?.busy != true &&
@@ -421,7 +427,11 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard await drainGoToDeckReview() else { return .failed }
         guard current() else { return .unavailable }
         if !overview, layout() == .compact {
-            let opened = await startStudy(deckID: entry.id, goToDeckAdmission: current)
+            // After F5.3's sentence, Go is the control that tries again.
+            let retry = goToDeckRefusedPresentation == token
+            let opened = await startStudy(deckID: entry.id, goToDeckAdmission: current, entry: retry ? .tryAgain : .study)
+            if !opened, goToDeckStudyRefused { goToDeckRefusedPresentation = token; return .studyRefused }
+            if opened { goToDeckRefusedPresentation = nil }
             return opened ? .opened : .failed
         }
         do {
@@ -515,7 +525,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         lifecycle = .noCollection; state = restored
     }
     var exportAllowed: Bool {
-        guard !opening, !enabling, !deckNamesReserved, !sync.providerHandoffInProgress,
+        guard !opening, !deckNamesReserved, !sync.providerHandoffInProgress,
               !sync.meguriCollectionWorkHeld, state == .ready, case .ready = lifecycle else { return false }
         return true
     }
@@ -544,8 +554,11 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var opening = false
     private var preparedGeneration: UInt64?
     private var starting = false
-    private var policyReadAfterSession = false
-    private var pendingDeck: Int64?
+    @ObservationIgnored private var studySyncFacts: StudyPreparationSyncFacts?
+    @ObservationIgnored private var goToDeckStudyRefused = false
+    /// The Go to Deck presentation whose last Go was refused with F5.3's
+    /// sentence: its next Go is the Try Again of that sentence.
+    @ObservationIgnored private var goToDeckRefusedPresentation: UInt64?
     private var closed = false
     private var closing = false
     private var closeTask: Task<Bool, Never>?
@@ -575,6 +588,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         collection = CoreCollectionService(clock: LaunchCollectionClock(clock: configuration.clock, zone: configuration.timeZone))
         records = ReviewRecordStore(file: configuration.collectionLocation.directory.appending(path: "meguri-review-session.json"))
         configureSyncOwnership()
+        configureStudyPreparation()
         navigation.deckSelectionAction = { [weak self] deck in
             self?.openDeckPage(deckID: deck.rawValue)
         }
@@ -709,6 +723,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         let task = Task { await openCollection() }
         openTask = task
         await task.value
+        // The collection is presented and usable by now (F5.1). Only this
+        // caller waits, so that a launch ends with the step that follows it.
+        await studyPreparation.waitForJob()
     }
     public var canStartEmpty: Bool {
         state == .noFile && lifecycle == .noCollection && foreground && sceneActive && applicationActive
@@ -871,6 +888,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         } else {
             startupForeground = nil
         }
+        // The open-time exchange may end before the steps below do (F5.1).
+        studyPreparation.hostOpened()
         await sync.completeOpenedHost(generation: value, startupForeground: startupForeground)
         if loadRecord {
             do { previousRecord = try await records.load() }
@@ -887,7 +906,8 @@ public final class ReviewCollection: ChangeFanoutSink {
             didCheck: { [weak self] in self?.refreshCounts(); self?.review?.requestRefresh() })
         if foreground { await day?.checkNow() }
         await refreshMedia()
-        await readPolicy()
+        // Presented whatever the status: the read never waits for the job (F5.1).
+        await studyPreparation.collectionOpened()
         await loadCounts()
         preparedGeneration = generation
     }
@@ -1014,7 +1034,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func allowsManualActivation(entry: CollectionEntryCoordinator? = nil) -> Bool {
         !meguriSignInPreparing && !sync.providerHandoffInProgress && cloudPreparationTasks.isEmpty && cloudHostPreparationTask == nil && !deckNamesReserved &&
             (entryOwner?.busy != true || (entry != nil && entryOwner === entry)) && exportOwner?.busy != true &&
-            !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed)
+            !opening && !starting && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed)
     }
     private func allowsEntryActivation(entry: CollectionEntryCoordinator? = nil) -> Bool {
         !sync.meguriCollectionWorkHeld && (state == .ready || manualOwner?.preview == nil) &&
@@ -1052,7 +1072,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         do {
             if candidateActive {
                 navigation.collectionReplaced()
-                previousRecord = nil; pendingDeck = nil; recoveryDrops.removeAll()
+                previousRecord = nil; recoveryDrops.removeAll()
                 try await records.remove()
                 try await completeOpenedHost(loadRecord: false)
             } else {
@@ -1141,6 +1161,10 @@ public final class ReviewCollection: ChangeFanoutSink {
             if changes.wholeCollection || !changes.mediaAdded.isEmpty || !changes.mediaRemoved.isEmpty {
                 scheduleMediaRefresh(names: changes.mediaAdded, generation: event.generation)
             }
+            if event.generation == generation, !opening,
+               changes.source == .cloudIncoming || changes.source == .syncIncoming {
+                Task { await studyPreparation.changesCommitted(changes) }
+            }
         case .mediaArrived(let names): scheduleMediaRefresh(names: names, generation: event.generation)
         case .collectionReplaced(let next):
             sync.collectionReplaced(next)
@@ -1152,8 +1176,9 @@ public final class ReviewCollection: ChangeFanoutSink {
             generation = next; day?.pause()
             invalidateMedia()
             review?.generationEnded(); review = nil; navigation.endReview()
-            previousRecord = nil; pendingDeck = nil; policyReadAfterSession = false
-            policy = nil; decks = []; countTimer?.invalidate(); countsTask?.cancel()
+            previousRecord = nil; studyRefusal = nil
+            studyPreparation.collectionEnded()
+            decks = []; countTimer?.invalidate(); countsTask?.cancel()
             navigation.collectionReplaced(keepingEntrySheet: opening)
             if !opening {
                 navigation.dismissSheet()
@@ -1172,7 +1197,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             }
         case .recoveryDropped(_, let cardID, _): recoveryDrops.append(cardID)
         case .sessionEnded:
-            if policyReadAfterSession, !opening { Task { await readPolicy() } }
+            if !opening { Task { await studyPreparation.sessionEnded() } }
         default: break
         }
     }
@@ -1456,43 +1481,87 @@ public final class ReviewCollection: ChangeFanoutSink {
         return DeckPageDetail(id: id, name: fullName, counts: state.listCounts)
     }
 
-    public func readPolicy() async {
-        guard !enabling else { return }
-        let expected = generation
-        do {
-            let status = try await Core.fsrsPolicyStatus()
-            guard expected == generation, !closed else { return }
-            policy = status
-            if review?.sessionID != nil {
-                policyReadAfterSession = status != .ok
-            } else if status != .ok { navigation.present(.fsrsAdmission) }
-        } catch { if expected == generation, !closed { self.error = String(describing: error) } }
+    /// Runs the preparation now and waits for it, as a study entry point does.
+    public func enableFsrs() async { _ = await studyPreparation.prepare(for: .tryAgain) }
+    public func dismissStudyRefusal() { studyRefusal = nil }
+    /// Try Again of F5.3: runs the step again and goes on to study when it commits.
+    public func retryRefusedStudy() async {
+        guard let refusal = studyRefusal else { return }
+        studyRefusal = nil
+        _ = await startStudy(deckID: refusal.deckID, goToDeckAdmission: nil, entry: .tryAgain)
     }
-    public func enableFsrs() async {
-        guard !enabling, review?.sessionID == nil else { return }
-        enabling = true; error = nil
-        defer { enabling = false; progress = nil }
-        do {
-            let job = try await Core.enableFsrs()
-            let progressTask = Task { for await value in job.progress { progress = value } }
-            defer { progressTask.cancel() }
-            try await job.value()
-            policy = .ok; navigation.dismissSheet()
-            refreshCounts()
-            if let deck = pendingDeck { pendingDeck = nil; Task { await startStudy(deckID: deck) } }
-        } catch { self.error = String(describing: error) }
+    private func configureStudyPreparation() {
+        studyPreparation.environment = .init(
+            status: { try await Core.fsrsPolicyStatus() },
+            start: {
+                let job = try await Core.enableFsrs()
+                let reported = Task { @MainActor in
+                    var last: UInt64?
+                    for await value in job.progress { last = value.completed }
+                    return last
+                }
+                return .init(cancel: { try? await job.cancel() }, finish: {
+                    try await job.value()
+                    return await reported.value
+                })
+            },
+            sessionOpen: { [weak self] in self?.review?.sessionID != nil || self?.goToDeckReview?.sessionID != nil },
+            syncFacts: { [weak self] in self?.sync.studyPreparationFacts ?? .none },
+            nowMilliseconds: { [configuration] in Int64(configuration.clock.now().timeIntervalSince1970 * 1_000) },
+            record: configuration.recordDiagnostic,
+            committed: { [weak self] in self?.refreshCounts() })
+        observeStudySyncFacts()
     }
-    public var canStudy: Bool { !sync.meguriCollectionWorkHeld && !deckNamesReserved && !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting && review == nil && policy == .ok }
+    /// Reads what the service already publishes; no timer and no request (F5.1).
+    private func observeStudySyncFacts() {
+        let facts = withObservationTracking { sync.studyPreparationFacts } onChange: { [weak self] in
+            Task { @MainActor in self?.observeStudySyncFacts() }
+        }
+        guard facts != studySyncFacts else { return }
+        studySyncFacts = facts
+        Task { await studyPreparation.syncChanged() }
+    }
+    public var canStudy: Bool { !sync.meguriCollectionWorkHeld && !deckNamesReserved && !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting && review == nil }
     public func startStudy(deckID: Int64) async {
         _ = await startStudy(deckID: deckID, goToDeckAdmission: nil)
     }
 
+    private enum StudyAttempt { case started, stopped, notReady, refusedByCore }
+
+    /// Every study entry point ends here. A collection that is not ready for
+    /// study is prepared first; the entry point shows the loading state of a
+    /// starting session meanwhile and never waits for sync (F4, F5.1). When
+    /// that fails, study is refused with Try Again and nothing else changes (F5.3).
+    private func startStudy(deckID: Int64, goToDeckAdmission: (@MainActor () -> Bool)?,
+                            entry: StudyPreparation.Entry = .study) async -> Bool {
+        var entry = entry
+        goToDeckStudyRefused = false
+        while true {
+            switch await attemptStudy(deckID: deckID, goToDeckAdmission: goToDeckAdmission, entry: entry) {
+            case .started: return true
+            case .stopped: return false
+            case .refusedByCore where entry != .refusedByCore:
+                // The core found the switch off after our last read: read
+                // again, run the step and go on (F1 item 5).
+                entry = .refusedByCore
+            case .notReady, .refusedByCore:
+                if goToDeckAdmission == nil { studyRefusal = .init(deckID: deckID) }
+                else { goToDeckStudyRefused = true }
+                return false
+            }
+        }
+    }
+
     /// A picker continuation may prepare behind its own sheet. It uses the same
     /// selection, media, policy and session gates, then publishes review atomically.
-    private func startStudy(deckID: Int64, goToDeckAdmission: (@MainActor () -> Bool)?) async -> Bool {
+    private func attemptStudy(deckID: Int64, goToDeckAdmission: (@MainActor () -> Bool)?,
+                              entry: StudyPreparation.Entry) async -> StudyAttempt {
         let admitted = { goToDeckAdmission?() ?? self.canStudy }
-        guard admitted(), policy == .ok, foreground,
-              sceneActive, applicationActive, windowVisible, reviewWindowActive else { return false }
+        guard admitted(), foreground,
+              sceneActive, applicationActive, windowVisible, reviewWindowActive else { return .stopped }
+        // Refused before anything is written: with no open collection to
+        // prepare, and after a failed step, where Try Again runs it (F5.3).
+        if !studyPreparation.available || (entry == .study && studyPreparation.phase == .failed) { return .notReady }
         starting = true
         defer { starting = false }
         let expected = generation, intent = navigation.intentRevision
@@ -1505,7 +1574,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         do {
             try configuration.nativeReviewInput?.admitStudy(deck: deckID, name: fullDeckName(deckID))
             guard await selectDeck(deckID: deckID, intent: intent, admission: current).value,
-                  current(), let resolver = await mediaResolverForReview(), current() else { return false }
+                  current(), let resolver = await mediaResolverForReview(), current() else { return .stopped }
             if goToDeckAdmission == nil { previousRecord = nil }
             let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
                 store: records, clock: configuration.clock, client: reviewSessionClient,
@@ -1517,32 +1586,42 @@ public final class ReviewCollection: ChangeFanoutSink {
                     self.sceneActive && self.applicationActive && self.windowVisible && self.reviewWindowActive &&
                     (self.review === model || self.goToDeckReview === model)
             }
-            model.onPolicyRefusal = { [weak self] in self?.pendingDeck = deckID }
+            var refusedByCore = false
+            model.onPolicyRefusal = { refusedByCore = true }
             if goToDeckAdmission == nil { presentReview(model) }
             else { goToDeckReview = model }
-            await model.start()
+            // The session's own loading state shows while the collection is
+            // prepared. No session is open yet, so the step may run.
+            let prepared = await studyPreparation.prepare(for: entry)
             if goToDeckAdmission != nil {
-                guard current(), model.sessionID != nil, model.phase != .error else {
+                if prepared, current(), goToDeckReview === model { await model.start() }
+                guard prepared, !refusedByCore, current(), model.sessionID != nil, model.phase != .error else {
                     // Drain a partially started session before releasing the reservation.
-                    if pendingDeck == deckID { pendingDeck = nil }
                     if expected != generation {
                         model.generationEnded()
                         if goToDeckReview === model { goToDeckReview = nil }
                     } else if await model.end(), goToDeckReview === model {
                         goToDeckReview = nil
                     }
-                    return false
+                    if !prepared { return .notReady }
+                    return refusedByCore ? .refusedByCore : .stopped
                 }
                 goToDeckReview = nil
                 previousRecord = nil
                 if let token = goToDeckPresentation { cancelGoToDeckAfterActivation(token) }
                 presentReview(model)
-                return true
+                return .started
             }
+            guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return .stopped }
+            guard prepared else {
+                navigation.endReview(); review = nil
+                return .notReady
+            }
+            await model.start()
             #if DEBUG
             logStartupActivity("startup.complete", model: model, generation: expected)
             #endif
-            guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return false }
+            guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return .stopped }
             // Startup has released its operation. Serialize with lifecycle work
             // now: a pause may have awaited it, or coalesced resumes may have
             // returned before the session ID arrived. Never await this in start().
@@ -1561,18 +1640,18 @@ public final class ReviewCollection: ChangeFanoutSink {
             #if DEBUG
             logStartupActivity("startup.reconciled", model: model, generation: expected)
             #endif
-            guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return false }
+            guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return .stopped }
             if let activityFailure { throw activityFailure }
             if model.sessionID == nil {
                 navigation.endReview(); review = nil
-                if pendingDeck != nil { await readPolicy() }
-                else { error = model.notice }
-                return false
+                if refusedByCore { return .refusedByCore }
+                error = model.notice
+                return .stopped
             }
-            return true
+            return .started
         } catch {
             if goToDeckAdmission == nil { self.error = String(describing: error) }
-            return false
+            return .stopped
         }
     }
     #if DEBUG
@@ -1603,7 +1682,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard await review.end() else { return }
         previousRecord = review.record
         self.review = nil; navigation.endReview()
-        if policyReadAfterSession { await readPolicy(); policyReadAfterSession = false }
+        await studyPreparation.sessionEnded()
         refreshCounts()
     }
     public func navigationChanged() {
@@ -1809,7 +1888,15 @@ public final class ReviewCollection: ChangeFanoutSink {
                 guard quitAllowed else { return false }
             }
             guard await sync.cancelAndDrain() else { return false }
-            try await collection.close()
+            // A close is the one reason to stop the step; the next open starts it again (F5.1).
+            studyPreparation.collectionEnded(); await studyPreparation.drain()
+            studyRefusal = nil
+            do { try await collection.close() }
+            catch {
+                // Still open: study must stay reachable.
+                await studyPreparation.collectionOpened()
+                throw error
+            }
             ChangeFanout.shared.unsubscribe(self)
             try await configuration.nativeReviewInput?.closed()
             closed = true; day?.close(); countTimer?.invalidate(); countsTask?.cancel()

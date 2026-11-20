@@ -1,6 +1,7 @@
 import AppModel
 import CoreBridge
 import Editor
+import Home
 import SwiftUI
 
 /// The root of the window (KTD10): the tab layout at compact width, the
@@ -157,9 +158,6 @@ struct RootView: View {
             }
         }
         .onChange(of: navigation.sheet) { _, sheet in
-            #if os(macOS)
-            if sheet == .fsrsAdmission { openWindow(id: WindowMetrics.mainWindowID) }
-            #endif
             updateReviewObscuration()
             collection?.entry.presentationChanged()
         }
@@ -183,6 +181,7 @@ struct RootView: View {
         }
         .modifier(ReviewLifecycle(collection: collection))
         .modifier(AddNoteRequestFeedback(collection: collection))
+        .modifier(StudyRefusalFeedback(collection: collection))
         .modifier(LaunchEnvironment(configuration: configuration))
     }
 

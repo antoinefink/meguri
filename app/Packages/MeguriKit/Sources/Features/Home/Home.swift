@@ -1112,37 +1112,20 @@ private func studyDisclosureIncludesDescendants() -> Bool {
     #endif
 }
 
-public struct FsrsAdmissionView: View {
-    public let collection: ReviewCollection
-    public init(collection: ReviewCollection) { self.collection = collection }
-    public var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.large) {
-            Label { Text("Study with FSRS", bundle: .module) } icon: { Image(systemName: "brain") }
-                .font(.title2.bold())
-            Text(collection.policy == .needsReEnable
-                 ? String(localized: "Another device turned FSRS off. Meguri will turn it on again for this collection.", bundle: .module)
-                 : String(localized: "Meguri schedules with FSRS. Enabling it computes memory states from your review history without changing due dates or intervals. The change reaches your other devices when you sync.", bundle: .module))
-            if let error = collection.error {
-                Text(verbatim: error).foregroundStyle(.token(.statusError))
-                    .accessibilityIdentifier("home.policy.error")
-            }
-            if collection.enabling {
-                if let progress = collection.progress, let total = progress.total {
-                    ProgressView(value: Double(progress.completed), total: Double(max(1, total)))
-                    Text("\(progress.completed) of \(total) cards", bundle: .module)
-                } else { ProgressView() }
-            }
-            Button { Task { await collection.enableFsrs() } } label: {
-                Text("Enable FSRS", bundle: .module).frame(maxWidth: .infinity, minHeight: 44)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(collection.enabling)
-            .accessibilityIdentifier("home.policy.enable")
+/// Study is refused while the collection could not be prepared for it
+/// (`sched/app-coordination` F5.3). Shown at the entry point that was used;
+/// everything else in the collection stays usable.
+public struct StudyRefusalFeedback: ViewModifier {
+    let collection: ReviewCollection?
+    public init(collection: ReviewCollection?) { self.collection = collection }
+    public func body(content: Content) -> some View {
+        content.alert(Text("study.prepare.failed", bundle: .module), isPresented: Binding(
+            get: { collection?.studyRefusal != nil && collection?.navigation.sheet == nil },
+            set: { if !$0 { collection?.dismissStudyRefusal() } }
+        )) {
+            Button { Task { await collection?.retryRefusedStudy() } } label: { Text("study.prepare.tryAgain", bundle: .module) }
+                .keyboardShortcut(.defaultAction)
+            Button(role: .cancel) { collection?.dismissStudyRefusal() } label: { Text("Cancel", bundle: .module) }
         }
-        .padding(Spacing.large)
-        .frame(maxWidth: ContentWidth.readable)
-        .interactiveDismissDisabled()
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("home.policy.sheet")
     }
 }
