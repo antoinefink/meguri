@@ -99,6 +99,10 @@ public final class StudyPreparation {
     private var deferredForSession = false
     private var exchangeSeen = false
     private var exchangeMark: Int64 = 0
+    /// Between `hostOpened()` and `collectionOpened()`: exchanges are followed
+    /// although no status was read yet.
+    private var followingHost = false
+    private var exchangeEndedSinceHost = false
 
     public init() {}
 
@@ -107,13 +111,31 @@ public final class StudyPreparation {
     /// After the collection opens and after `CollectionReplaced` (F1 items 1
     /// and 2). Waits for the status read only, never for the job.
     public func collectionOpened() async {
+        let followed = followingHost, early = exchangeEndedSinceHost, seen = exchangeSeen, mark = exchangeMark
         retire()
         guard let environment else { return }
         opened = true
-        // Only an exchange that ends from now on is evidence (F5.1).
+        var ended = false
+        if followed {
+            // The open-time round may be over already: it counts (F5.1).
+            exchangeSeen = seen; exchangeMark = mark; ended = early
+        } else {
+            // Only an exchange that ends from now on is evidence (F5.1).
+            exchangeSeen = false
+            exchangeMark = environment.nowMilliseconds() - 1
+        }
+        if exchangeEnded(environment.syncFacts()) { ended = true }
+        await read(.afterOpen, mayWait: !ended)
+    }
+
+    /// The host is open and the service is about to attach, before the steps
+    /// that precede `collectionOpened()`. An exchange that ends from this
+    /// instant on is the open-time exchange of F5.1, however fast it is.
+    public func hostOpened() {
+        guard !opened, let environment else { return }
+        followingHost = true; exchangeEndedSinceHost = false
         exchangeSeen = environment.syncFacts().activity == .exchanging
         exchangeMark = environment.nowMilliseconds() - 1
-        await read(.afterOpen, mayWait: true)
     }
 
     /// The collection closed or was replaced: the job is asked to stop and
@@ -132,6 +154,7 @@ public final class StudyPreparation {
         if let jobTask { retiredJob = jobTask }
         jobTask = nil; cancelJob = nil
         status = nil; phase = .idle; deferredForSession = false
+        followingHost = false; exchangeEndedSinceHost = false
     }
 
     // MARK: Reads (F1)
@@ -139,8 +162,12 @@ public final class StudyPreparation {
     /// The service's published state changed. Finds the end of a collection
     /// exchange (F1 item 3) and the states that end the wait of F5.1.
     public func syncChanged() async {
-        guard opened, let environment else { return }
+        guard let environment else { return }
         let facts = environment.syncFacts()
+        guard opened else {
+            if followingHost, exchangeEnded(facts) { exchangeEndedSinceHost = true }
+            return
+        }
         let ended = exchangeEnded(facts)
         if phase == .waitingForExchange {
             if !facts.exchangeExpected { act(.afterOpen, mayWait: false) }
@@ -255,8 +282,29 @@ public final class StudyPreparation {
             deferredForSession = true; phase = .idle
             return false
         }
+        if Self.contended(failure) {
+            // Other work held or took the collection (an export, an import,
+            // a replacement, writes that kept changing the plan, a suspension
+            // or a close by the core). The op did not fail: the next read or
+            // study entry point runs it (F5.2).
+            phase = .idle
+            return false
+        }
         phase = .failed
         return false
+    }
+
+    /// The core refused, gave up or stopped the job for other work on the
+    /// collection, not for a fault of the op itself (F5.3 is for the latter).
+    /// The app requests a cancel only when the collection ends, and that job
+    /// is no longer current: a cancel seen here is the core's own (it stops
+    /// running jobs to suspend and to close).
+    static func contended(_ failure: any Error) -> Bool {
+        switch failure {
+        case BridgeError.busy, BridgeError.unavailable, BridgeError.stale, BridgeError.staleGeneration,
+             BridgeError.cancelled: true
+        default: false
+        }
     }
 
     /// One content-free entry per job (F5.4). The existing timeline vocabulary

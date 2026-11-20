@@ -136,6 +136,66 @@ import Testing
         #expect(core.starts == 1)
     }
 
+    // The host opens some steps before the status is read (`hostOpened()`).
+
+    @Test func exchangeThatEndedBetweenTheHostOpenAndTheStatusReadCounts() async {
+        let (preparation, core) = make { $0.facts = Self.connected }
+        preparation.hostOpened()
+        // The whole round ran while the open finished its other steps.
+        core.now = 1_000_400
+        core.facts = Self.settled(1_000_300)
+        await preparation.collectionOpened()
+        await preparation.waitForJob()
+        #expect(core.starts == 1 && preparation.status == .ok && core.records.first?.stage == .activation)
+    }
+
+    @Test func failedExchangeSeenBetweenTheHostOpenAndTheStatusReadCounts() async {
+        // It reports no end instant: it counts because it was seen running.
+        let (preparation, core) = make { $0.facts = Self.connected }
+        preparation.hostOpened()
+        core.facts = Self.exchanging
+        await preparation.syncChanged()
+        core.facts = Self.settled(nil)
+        await preparation.syncChanged()
+        #expect(core.reads == 0 && core.starts == 0)
+        await preparation.collectionOpened()
+        await preparation.waitForJob()
+        #expect(core.starts == 1 && preparation.status == .ok)
+    }
+
+    @Test func exchangeStillRunningAtTheStatusReadIsWaitedFor() async {
+        let (preparation, core) = make { $0.facts = Self.connected }
+        preparation.hostOpened()
+        core.facts = Self.exchanging
+        await preparation.syncChanged()
+        await preparation.collectionOpened()
+        #expect(preparation.phase == .waitingForExchange && core.starts == 0)
+        core.facts = Self.settled(nil)
+        await preparation.syncChanged()
+        await preparation.waitForJob()
+        #expect(core.starts == 1)
+    }
+
+    @Test func exchangeThatEndedBeforeTheHostOpenedIsNoEvidence() async {
+        let (preparation, core) = make { $0.facts = Self.settled(999_000) }
+        preparation.hostOpened()
+        core.now = 1_000_400
+        await preparation.collectionOpened()
+        await preparation.syncChanged()
+        #expect(preparation.phase == .waitingForExchange && core.starts == 0)
+    }
+
+    @Test func hostOpenOfOneCollectionIsNoEvidenceForTheNext() async {
+        let (preparation, core) = make { $0.facts = Self.connected }
+        preparation.hostOpened()
+        core.facts = Self.settled(1_000_300)
+        await preparation.syncChanged()
+        preparation.collectionEnded()
+        core.now = 1_000_900
+        await preparation.collectionOpened()
+        #expect(preparation.phase == .waitingForExchange && core.starts == 0)
+    }
+
     @Test func exchangeThatBroughtTheSwitchOnStartsNoJob() async {
         let (preparation, core) = make { $0.facts = Self.exchanging }
         await preparation.collectionOpened()
@@ -285,14 +345,57 @@ import Testing
         let (preparation, core) = make { $0.status = .ok }
         await preparation.collectionOpened()
         core.status = .needsReEnable
-        core.results = [.failure(BridgeError.busy(runningOperation: "synthetic"))]
+        core.results = [.failure(BridgeError.internal("synthetic"))]
         await preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["fsrs"]))
         await preparation.waitForJob()
         #expect(preparation.phase == .failed)
         #expect(core.records.last == .init(component: .scheduling, operation: .recover, stage: .statusObserved,
-            outcome: .failed, failure: .unavailable))
+            outcome: .failed, failure: .other))
         #expect(await !preparation.prepare(for: .study))
         #expect(await preparation.prepare(for: .tryAgain))
+    }
+
+    private static let contention: [BridgeError] = [.busy(runningOperation: "synthetic"), .unavailable(reason: "synthetic"),
+        .stale(table: .config, key: "fsrs"), .staleGeneration(planned: 1, current: 2), .cancelled]
+
+    @Test(arguments: 0..<5)
+    func otherWorkHoldingTheCollectionIsNotAFailureAndTheNextStudyRunsTheJob(index: Int) async {
+        // An export, an import, a replacement, a suspension: the core refuses or stops the job.
+        let (preparation, core) = make { $0.results = [.failure(Self.contention[index])] }
+        await preparation.collectionOpened()
+        await preparation.waitForJob()
+        #expect(preparation.phase == .idle && preparation.status == .needsEnable && core.starts == 1 && core.commits == 0)
+        #expect(core.records.count == 1 && core.records.first?.outcome != .succeeded)
+        // A Study control is not refused with the failure sentence: it runs the job and goes on.
+        #expect(await preparation.prepare(for: .study))
+        #expect(core.starts == 2 && preparation.status == .ok && preparation.phase == .idle)
+    }
+
+    @Test func otherWorkHoldingTheCollectionLetsTheNextReadRunTheJob() async {
+        let (preparation, core) = make { $0.status = .ok }
+        await preparation.collectionOpened()
+        core.status = .needsReEnable
+        core.results = [.failure(BridgeError.busy(runningOperation: "synthetic"))]
+        await preparation.changesCommitted(Self.changes(source: .cloudIncoming, keys: ["fsrs"]))
+        await preparation.waitForJob()
+        #expect(preparation.phase == .idle && core.starts == 1)
+        #expect(core.records.last == .init(component: .scheduling, operation: .recover, stage: .statusObserved,
+            outcome: .failed, failure: .unavailable))
+        core.facts = Self.exchanging
+        await preparation.syncChanged()
+        core.facts = Self.settled(1_000_700)
+        await preparation.syncChanged()
+        await preparation.waitForJob()
+        #expect(core.starts == 2 && preparation.status == .ok)
+    }
+
+    @Test func studyThatMeetsOtherWorkIsRefusedOnceAndNotLeftFailed() async {
+        let (preparation, core) = make { $0.facts = Self.connected; $0.results = [.failure(BridgeError.busy(runningOperation: "synthetic"))] }
+        await preparation.collectionOpened()
+        #expect(await !preparation.prepare(for: .study))
+        #expect(preparation.phase == .idle && core.starts == 1)
+        #expect(await preparation.prepare(for: .study))
+        #expect(core.starts == 2)
     }
 
     @Test func laterReadAfterAFailureRunsTheJobAgain() async {

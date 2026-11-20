@@ -866,6 +866,102 @@ extension ReviewCollectionStartupTests {
         }
     }
 
+    /// A scripted preparation over the real open collection, whose switch is
+    /// already on: the session start itself is the core's.
+    @MainActor private final class ScriptedPreparation {
+        var committed = false
+        var starts = 0
+        var failures = 0
+        var held: CheckedContinuation<Void, Never>?
+        var holds = false
+        func install(on owner: ReviewCollection) async {
+            owner.studyPreparation.environment = .init(
+                status: { [unowned self] in committed ? .ok : .needsEnable },
+                start: { [unowned self] in
+                    starts += 1
+                    return .init(cancel: { [unowned self] in held?.resume(); held = nil }, finish: { [unowned self] in
+                        if holds { await withCheckedContinuation { held = $0 } }
+                        if failures > 0 { failures -= 1; throw BridgeError.internal("synthetic") }
+                        committed = true
+                        return nil
+                    })
+                },
+                sessionOpen: { false }, syncFacts: { .none }, nowMilliseconds: { 0 })
+            await owner.studyPreparation.collectionOpened()
+        }
+        func release() { holds = false; held?.resume(); held = nil }
+    }
+
+    @Test func goToDeckAfterAFailedPreparationIsRefusedThenGoTriesAgainAndOpensStudy() async throws {
+        try await withDeckNameOwner { owner in
+            let service = CoreDeckService()
+            let snapshot = try await service.allDeckNames()
+            let entry = try #require(try await eligibleRegularDeck(in: snapshot, service: service))
+            owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
+            let script = ScriptedPreparation()
+            script.failures = 2
+            await script.install(on: owner)
+            await owner.studyPreparation.waitForJob()
+            try #require(owner.studyPreparation.phase == .failed && script.starts == 1)
+            owner.presentGoToDeck()
+            let token = try #require(owner.goToDeckPresentation)
+            // The first Go shows F5.3's sentence and starts nothing.
+            #expect(await owner.activateGoToDeck(entry, generation: snapshot.generation,
+                presentation: token, layout: .compact).value == .studyRefused)
+            #expect(script.starts == 1 && owner.review == nil && owner.navigation.sheet == .goToDeck)
+            // Go is the control that tries again: it runs the job. A second failure refuses again.
+            #expect(await owner.activateGoToDeck(entry, generation: snapshot.generation,
+                presentation: token, layout: .compact).value == .studyRefused)
+            #expect(script.starts == 2 && owner.review == nil && owner.navigation.sheet == .goToDeck)
+            #expect(await owner.activateGoToDeck(entry, generation: snapshot.generation,
+                presentation: token, layout: .compact).value == .opened)
+            #expect(script.starts == 3 && owner.studyPreparation.phase == .idle)
+            #expect(owner.review?.sessionID != nil && owner.navigation.sheet == nil)
+            await owner.finishReview()
+            // A refusal belongs to its own presentation: a new picker starts with a Study entry.
+            script.committed = false; script.failures = 1
+            await owner.studyPreparation.collectionOpened()
+            await owner.studyPreparation.waitForJob()
+            owner.presentGoToDeck()
+            let next = try #require(owner.goToDeckPresentation)
+            #expect(await owner.activateGoToDeck(entry, generation: snapshot.generation,
+                presentation: next, layout: .compact).value == .studyRefused)
+            #expect(script.starts == 4)
+            owner.navigation.dismissSheet()
+        }
+    }
+
+    @Test func goToDeckJoinsARunningPreparationAndOtherWorkStaysAllowed() async throws {
+        try await withDeckNameOwner { owner in
+            let service = CoreDeckService()
+            let snapshot = try await service.allDeckNames()
+            let entry = try #require(try await eligibleRegularDeck(in: snapshot, service: service))
+            owner.makeReviewSurface = { _ in ReviewCoordinatorTests.Surface() }
+            let before = [owner.canBeginAddAction, owner.exportAllowed, owner.entryAllowed, owner.manualAllowed,
+                owner.deckNamesAllowed(host: .main, route: nil)]
+            let script = ScriptedPreparation()
+            script.holds = true
+            await script.install(on: owner)
+            for _ in 0..<12 { await Task.yield() }
+            try #require(owner.enabling && script.starts == 1)
+            // Everything but study stays as usable as it was while the job runs (A1.2, F5.2).
+            #expect(before == [owner.canBeginAddAction, owner.exportAllowed, owner.entryAllowed, owner.manualAllowed,
+                owner.deckNamesAllowed(host: .main, route: nil)])
+            #expect(owner.exportAllowed && owner.deckNamesAllowed(host: .main, route: nil))
+            try #require(owner.canPresentGoToDeck())
+            owner.presentGoToDeck()
+            let token = try #require(owner.goToDeckPresentation)
+            let activation = owner.activateGoToDeck(entry, generation: snapshot.generation, presentation: token, layout: .compact)
+            for _ in 0..<12 { await Task.yield() }
+            // Go waits for the job: no second job, no refusal, no generic failure.
+            #expect(owner.goToDeckBusy && script.starts == 1 && owner.review == nil)
+            script.release()
+            #expect(await activation.value == .opened)
+            #expect(script.starts == 1 && owner.review?.sessionID != nil && owner.navigation.sheet == nil)
+            await owner.finishReview()
+        }
+    }
+
     private func eligibleRegularDeck(in snapshot: DeckNameSnapshot, service: CoreDeckService) async throws -> DeckNameEntry? {
         for entry in snapshot.decks where !entry.filtered {
             let state = try await service.studyState(deckID: entry.id)

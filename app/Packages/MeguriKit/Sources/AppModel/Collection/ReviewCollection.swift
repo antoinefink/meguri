@@ -210,7 +210,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         case nil, .add: allowsSheet = true
         default: allowsSheet = false
         }
-        return editorReplacement == nil && ownsAddGeneration(generation) && foreground && !resuming && !closing && !opening && !starting && !enabling &&
+        return editorReplacement == nil && ownsAddGeneration(generation) && foreground && !resuming && !closing && !opening && !starting &&
             !deckNamesReserved && !meguriSignInPreparing && !sync.providerHandoffInProgress &&
             !sync.meguriCollectionWorkHeld && entryOwner?.busy != true && entryOwner?.preview == nil &&
             entryOwner?.pickerPresented != true && manualOwner?.busy != true && manualOwner?.preview == nil &&
@@ -259,7 +259,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     func deckNamesAllowed(host: AppNavigation.SheetHost, route: SheetRoute?, allowGoToDeckRecovery: Bool = false) -> Bool {
         guard host == .main, foreground, !resuming, !closed, !closing, !sync.providerHandoffInProgress,
               !sync.meguriCollectionWorkHeld,
-              !opening, (!starting || (route == .goToDeck && goToDeckBusy)), !enabling, state == .ready,
+              !opening, (!starting || (route == .goToDeck && goToDeckBusy)), state == .ready,
               case .ready(let current) = lifecycle, current == generation,
               review == nil, navigation.review == nil,
               (goToDeckReview == nil || route == .goToDeck || allowGoToDeckRecovery),
@@ -427,8 +427,11 @@ public final class ReviewCollection: ChangeFanoutSink {
         guard await drainGoToDeckReview() else { return .failed }
         guard current() else { return .unavailable }
         if !overview, layout() == .compact {
-            let opened = await startStudy(deckID: entry.id, goToDeckAdmission: current)
-            if !opened, goToDeckStudyRefused { return .studyRefused }
+            // After F5.3's sentence, Go is the control that tries again.
+            let retry = goToDeckRefusedPresentation == token
+            let opened = await startStudy(deckID: entry.id, goToDeckAdmission: current, entry: retry ? .tryAgain : .study)
+            if !opened, goToDeckStudyRefused { goToDeckRefusedPresentation = token; return .studyRefused }
+            if opened { goToDeckRefusedPresentation = nil }
             return opened ? .opened : .failed
         }
         do {
@@ -522,7 +525,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         lifecycle = .noCollection; state = restored
     }
     var exportAllowed: Bool {
-        guard !opening, !enabling, !deckNamesReserved, !sync.providerHandoffInProgress,
+        guard !opening, !deckNamesReserved, !sync.providerHandoffInProgress,
               !sync.meguriCollectionWorkHeld, state == .ready, case .ready = lifecycle else { return false }
         return true
     }
@@ -553,6 +556,9 @@ public final class ReviewCollection: ChangeFanoutSink {
     private var starting = false
     @ObservationIgnored private var studySyncFacts: StudyPreparationSyncFacts?
     @ObservationIgnored private var goToDeckStudyRefused = false
+    /// The Go to Deck presentation whose last Go was refused with F5.3's
+    /// sentence: its next Go is the Try Again of that sentence.
+    @ObservationIgnored private var goToDeckRefusedPresentation: UInt64?
     private var closed = false
     private var closing = false
     private var closeTask: Task<Bool, Never>?
@@ -882,6 +888,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         } else {
             startupForeground = nil
         }
+        // The open-time exchange may end before the steps below do (F5.1).
+        studyPreparation.hostOpened()
         await sync.completeOpenedHost(generation: value, startupForeground: startupForeground)
         if loadRecord {
             do { previousRecord = try await records.load() }
@@ -1039,7 +1047,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func allowsManualActivation(entry: CollectionEntryCoordinator? = nil) -> Bool {
         !meguriSignInPreparing && !sync.providerHandoffInProgress && cloudPreparationTasks.isEmpty && cloudHostPreparationTask == nil && !deckNamesReserved &&
             (entryOwner?.busy != true || (entry != nil && entryOwner === entry)) && exportOwner?.busy != true &&
-            !opening && !starting && !enabling && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed)
+            !opening && !starting && review == nil && (state == .ready || state == .noFile || state == .unavailable || isFailed)
     }
     private func allowsEntryActivation(entry: CollectionEntryCoordinator? = nil) -> Bool {
         !sync.meguriCollectionWorkHeld && (state == .ready || manualOwner?.preview == nil) &&
