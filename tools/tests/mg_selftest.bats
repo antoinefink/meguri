@@ -1281,10 +1281,14 @@ core_report_names() {
   jq -ne --argjson q "$quick" --argjson s "$stress" --argjson all "$whole" '
     ($q + $s | sort) == $all and ($q - $s) == $q'
 
-  # Legacy bare and explicit callers must not inherit the new feature.
+  # Legacy bare and explicit callers must not inherit the new feature. A bare
+  # run leaves out the stress cases; explicit arguments (above) keep them.
   mg core-test
   [ "$status" -eq 0 ]
   jq -e 'index("meguri-ffi::hooks$hooks_enabled") == null' <<<"$(core_report_names)"
+  jq -ne --argjson bare "$(core_report_names)" --argjson s "$stress" --arg extra "$SESSION_CASE" '
+    ($bare - $s) == $bare and ($bare | index("meguri-engine::engine_it$session_predict::" + $extra + "_extra")) != null'
+  [[ "$(field .message)" == *"the three --stress cases left out"* ]]
   mg core-test -- -E 'package(=meguri-ffi)'
   [ "$status" -eq 1 ]
   [ "$(failure_ids)" = no-tests-matched ]

@@ -1,7 +1,7 @@
 # Rust core jobs. Sourced by tools/mg; they run inside the `dev` container.
 
 mg_job core-test docker:dev mg_core_test \
-  "Rust tests: cargo nextest on core/ (no retries), canary_* first; --canaries only, --quick excludes three stress cases (hosted shards: [--partition hash:M/N] [--exclude-list <file> | --only-list <file>]), --stress requires those three (--stress --case session|suspend|merge: one of them), building only their test binaries; args after -- go to nextest"
+  "Rust tests: cargo nextest on core/ (no retries), canary_* first; --canaries only; a bare run and --quick leave out the three stress cases (hosted shards: [--partition hash:M/N] [--exclude-list <file> | --only-list <file>]), --stress requires those three (--stress --case session|suspend|merge: one of them), building only their test binaries; args after -- go to nextest"
 mg_job core-lint docker:dev mg_core_lint \
   "Rust lint: clippy -D warnings on all targets and features, layering-check (edges.toml), and no AnkiWeb name in meguri-sync built without its features; source formatting is optional"
 mg_job core-deny docker:dev mg_core_deny \
@@ -56,6 +56,22 @@ mg__core_stress() {
     }' <<<"$MG_CORE_STRESS_CASES"
 }
 MG_CORE_STRESS="$(mg__core_stress all filter)"
+
+# mg__core_stress_present: the filter of the stress cases whose package has
+# their test binary in this workspace, or nothing. nextest rejects a
+# binary() filter that matches no binary, so a bare run in a workspace
+# without them must not name them.
+mg__core_stress_present() {
+  local have
+  have="$( (cd core && cargo metadata --no-deps --format-version 1) |
+    jq -r '.packages[] | .name as $p | .targets[] | select(any(.kind[]; . == "test")) | $p + " " + .name')" || return 0
+  awk 'NR == FNR { have[$0] = 1; next }
+    ($2 " " $3) in have {
+      n++
+      filter = filter (n > 1 ? " | " : "") "(package(=" $2 ") & binary(=" $3 ") & test(=" $4 "))"
+    }
+    END { if (n) print filter }' <(printf '%s\n' "$have") <(printf '%s\n' "$MG_CORE_STRESS_CASES")
+}
 
 # mg__core_canary_packages: workspace packages with a canary_* test target, one per line.
 mg__core_canary_packages() {
@@ -127,6 +143,8 @@ mg__core_settle() {
 }
 
 # tools/mg core-test [--canaries | --quick [hosted options] | --stress [--case <case>] | -- nextest args]
+# A bare run (no arguments) leaves out the stress cases; -- nextest args select
+# exactly what they say.
 # --canaries runs the canary phase alone (the gate's canary stage, U19) and
 # fails when the workspace has no canary. Quick keeps that ordering; stress
 # runs only its exact three cases (or the one --case names), and builds only
@@ -272,6 +290,17 @@ mg_core_test() {
     # shellcheck disable=SC2046 # the --test words of the selected cases
     set -- $(mg__core_stress "$stress_case" targets) -E "$(mg__core_stress "$stress_case" filter)"
   fi
+  # A bare run leaves out the three scale cases, as --quick does: they take
+  # about 45 minutes and run with --stress. Explicit nextest arguments (the
+  # gate's core-test run passes some) select as before, the cases included.
+  local bare=false bare_out=""
+  if [ "$mode" = default ] && [ "$#" -eq 0 ]; then
+    bare_out="$(mg__core_stress_present)"
+    if [ -n "$bare_out" ]; then
+      bare=true
+      ordinary_filter="$ordinary_filter & not ($bare_out)"
+    fi
+  fi
   if [ "$mode" != stress ] && { [ "$#" -eq 0 ] || [ "$mode" = quick ]; }; then
     while IFS= read -r pkg; do
       if [ -n "$pkg" ]; then canaries+=(-p "$pkg"); fi
@@ -301,6 +330,7 @@ mg_core_test() {
     fi
   else
     [ "$#" -gt 0 ] || set -- --no-tests=pass
+    [ "$bare" = false ] || set -- "$@" -E "not ($bare_out)"
     mg__core_settle "${quick_filter:-}"
     mg__nextest "$main" --workspace ${features[0]+"${features[@]}"} ${hosted[0]+"${hosted[@]}"} "$@"
     rc=$?
@@ -381,6 +411,7 @@ mg_core_test() {
         "tools/mg core-test --quick --only-list $list_file"
     fi
   fi
+  [ "$bare" = false ] || scope="; the three --stress cases left out"
   [ -z "$partition" ] || scope="; partition $partition"
   [ "$list_mode" != exclude ] || scope="$scope; $(printf '%s' "$listed" | grep -c . || true) listed tests left to the --only-list run"
   [ "$list_mode" != only ] || scope="$scope; only the $(printf '%s' "$listed" | grep -c . || true) tests of $list_file, one at a time"
