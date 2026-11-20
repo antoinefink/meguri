@@ -23,3 +23,4 @@ Fresh read-only reviewer, round 1: no P0/P1. Resolved: P2 FFI mapping now tested
 ## CodeRabbit
 
 Four comments. Fixed: setup continuations now stop while blocked; the media stop identifies its step by facade and stage, so it works on an adopted coordinator. Answered: no routine-round progress bar (unchanged behaviour); the MP6.5 lines are built and await approval before merge.
+- Round 2: a block during admission now ends the unconfirmed preparation (Try Again offered, also after a refused or failed discard); a media step a block keeps from starting shows as media blocked with Retry. Untested at unit level: no fake exists for the bootstrap facade or editor admission.
