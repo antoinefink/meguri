@@ -618,6 +618,10 @@ public final class CardPage: NSObject, WKNavigationDelegate {
         invalidate()
         hostReports.close()
         webView.onHostGeometryChange = nil
+        #if os(macOS)
+        // The card menu's provider holds the review's actions: drop it with the page.
+        webView.contextActions = nil
+        #endif
         configuration.hostBridge.unregister(self)
         configuration.bridge.unregister(self)
         configuration.media.unbind(webView)

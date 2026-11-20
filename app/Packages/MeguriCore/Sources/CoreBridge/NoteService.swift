@@ -79,18 +79,27 @@ public struct NoteFieldPatch: Sendable, Hashable {
     public let notetype: NotetypeRecord
     public let fields: [Int: String]
     public let tags: [String]?
-    public init(id: Int64, notetype: NotetypeRecord, fields: [Int: String], tags: [String]? = nil) {
+    /// The generation the editor loaded the note in (the core refuses another).
+    public let generation: UInt64?
+    public init(id: Int64, notetype: NotetypeRecord, fields: [Int: String], tags: [String]? = nil, generation: UInt64? = nil) {
+        self.generation = generation
         self.id = id
         self.notetype = notetype
         self.fields = fields
         self.tags = tags
     }
     var isEmpty: Bool { fields.isEmpty && tags == nil }
-    var raw: MeguriCoreBindings.NotePatchRequest {
-        .init(id: id, notetypeId: notetype.id,
-              fieldLayout: notetype.fields.map { .init(ord: $0.ord, id: $0.id, name: $0.name) },
-              fields: fields.sorted { $0.key < $1.key }.map { .init(ord: UInt32($0.key), html: $0.value) },
-              tags: tags)
+    /// Nil when an ordinal cannot be a field ordinal at all (negative or
+    /// past `UInt32`); the core checks representable ordinals against the layout.
+    var raw: MeguriCoreBindings.NotePatchRequest? {
+        var pairs: [MeguriCoreBindings.NoteFieldValue] = []
+        for (ord, html) in fields.sorted(by: { $0.key < $1.key }) {
+            guard let ord = UInt32(exactly: ord) else { return nil }
+            pairs.append(.init(ord: ord, html: html))
+        }
+        return .init(expectedGeneration: generation, id: id, notetypeId: notetype.id,
+                     fieldLayout: notetype.fields.map { .init(ord: $0.ord, id: $0.id, name: $0.name) },
+                     fields: pairs, tags: tags)
     }
 }
 
@@ -234,8 +243,9 @@ public actor CoreNoteService: NoteService {
     /// `sessionID`: the open review session when the review's Edit Note saves
     /// (`review/edit-current` E2), so the step is that session's.
     public func patchNote(_ request: NoteFieldPatch, sessionID: UInt64?) async throws(BridgeError) -> NoteMutation {
-        try await InteractiveLane.shared.call(.patchNote) {
-            NoteMutation(try MeguriCoreBindings.patchNote(request: request.raw, sessionId: sessionID))
+        guard let raw = request.raw else { throw .invalidArgument("field ordinal out of range") }
+        return try await InteractiveLane.shared.call(.patchNote) {
+            NoteMutation(try MeguriCoreBindings.patchNote(request: raw, sessionId: sessionID))
         }
     }
     /// The deck the card is in now.

@@ -157,6 +157,8 @@ public final class EditNoteFlow {
         saveTask = work
         let result = await work.value
         saveTask = nil; saving = false
+        // A foreign change that arrived while Done waited reloads now.
+        startReload()
         return result
     }
 
@@ -241,20 +243,35 @@ public final class EditNoteFlow {
             while reloadPending, isPresented, !saving, let draft, let host = runtime, let note = draft.noteID {
                 reloadPending = false
                 let expected = epoch
+                // Input waits from the flush to the last field loaded, so a
+                // keystroke never lands in a field the reload then replaces.
+                var held = false
                 do {
-                    try await host.flush(hold: false)
+                    try await host.flush(hold: true)
+                    held = true
                     guard epoch == expected else { break }
                     let stored = try await CoreNoteService().readNote(id: note)
-                    guard epoch == expected, self.draft === draft else { break }
-                    // A changed layout is Done's Stale refusal to report; no field is reinterpreted here.
-                    guard stored.notetypeId == draft.notetype.id, stored.fields.count == draft.fields.count else { break }
+                    let notetype = try await CoreNotetypeService().readNotetype(id: stored.notetypeId)
+                    guard epoch == expected else { break }
+                    guard self.draft === draft else { try? await host.release(); held = false; break }
+                    // A changed layout (also a reorder of the same count) is Done's
+                    // Stale refusal to report; no value is loaded by an ordinal
+                    // that may now mean another field.
+                    let layout = { (type: NotetypeRecord) in type.fields.map { "\($0.ord)|\(String(describing: $0.id))|\($0.name)" } }
+                    guard stored.notetypeId == draft.notetype.id, stored.fields.count == draft.fields.count,
+                          layout(notetype) == layout(draft.notetype) else {
+                        try? await host.release(); held = false; break
+                    }
                     let ords = draft.reloadUnchanged(stored: stored.fields, tags: stored.tags)
                     if !ords.isEmpty { try await host.reload(fields: ords) }
+                    try? await host.release(); held = false
                 } catch {
+                    if held, runtime === host { try? await host.release() }
                     guard epoch == expected else { break }
                     if case .noteNotFound = error as? BridgeError { noteDeleted(droppingChanges: draft.hasChanges); break }
                     self.error = String(describing: error)
                 }
+                if held, epoch == expected, runtime === host { try? await host.release() }
             }
             reloadTask = nil
         }

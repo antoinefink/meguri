@@ -146,6 +146,15 @@ extension EventTests {
             await #expect(throws: BridgeError.noteNotFound(id: -5)) {
                 try await notes.patchNote(.init(id: -5, notetype: loaded, fields: [0: "x"]))
             }
+            // A patch loaded in another generation, or with an ordinal no field can
+            // have, is refused before anything is written.
+            await #expect(throws: BridgeError.staleGeneration(planned: generation &+ 1, current: generation)) {
+                try await notes.patchNote(.init(id: note.id, notetype: loaded, fields: [1: "other"], generation: generation &+ 1))
+            }
+            await #expect(throws: BridgeError.self) {
+                try await notes.patchNote(.init(id: note.id, notetype: loaded, fields: [-1: "other"]))
+            }
+            #expect(try await notes.readNote(id: note.id).fields == ["persisted", "patched"])
             #expect(try await notes.cardDeck(cardId: note.cards[0]) == deck.id)
             #expect(try await tags.markNotes(notes: [note.id]).count == 1)
             #expect(try await notes.readNote(id: note.id).tags.contains("marked"))
