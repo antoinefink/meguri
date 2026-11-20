@@ -78,7 +78,9 @@ jobs:
           esac
           core=yes
           linux=yes
-          if [[ -n "$base" ]] && changed="$(git diff --name-only "$base" HEAD)"; then
+          # -z: git would quote a name with non-ASCII or special bytes, and
+          # the anchored patterns below would miss it.
+          if [[ -n "$base" ]] && changed="$(git diff -z --name-only "$base" HEAD | tr '\0' '\n')"; then
             printf 'Changed files:\n%s\n' "$changed"
             linux_dirs='app|conformance|core|docker|server|specs|tools'
             if ! grep -qE "^(($linux_dirs)/|\.github/workflows/meguri-verification\.yml$)" <<<"$changed"; then
