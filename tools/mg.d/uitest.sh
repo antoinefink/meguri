@@ -362,6 +362,14 @@ mg_ui_test() {
   if mg_ui_test__media_selected "$suites"; then
     media=1
     [ -z "$physical" ] || { mg_ui_test__usage "native media export capture is unsupported on physical devices; use the leased VM"; return 0; }
+    # Its generated parent with media files, made once per checkout (a new
+    # worktree has none) before any build or lease.
+    if [ ! -d "$MG_ROOT/build/fixtures/recipes/typical-1" ] &&
+        ! "$MG_TOOLS/mg" fixtures typical --seed 1 --media files >&2 </dev/null; then
+      mg_failure native-media-source "the media parent build/fixtures/recipes/typical-1 is missing and could not be generated: tools/mg fixtures typical --seed 1 --media files"
+      mg_status error
+      return 0
+    fi
   fi
   if mg_ui_test__review_selected "$suites"; then
     review=1
