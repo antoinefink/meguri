@@ -1019,7 +1019,18 @@ impl ReviewService {
         }
         let _admission = MutationAdmission(&self.inner.state);
         self.drain_until(crate::monotonic::now() + Duration::from_secs(5))?;
-        let result = crate::notes::patch_for(&c, input, meguri_model::changes::OpSource::UserUndoable, Some(session))?;
+        let result = match crate::notes::patch_for(&c, input, meguri_model::changes::OpSource::UserUndoable, Some(session)) {
+            Ok(result) => result,
+            // The patch committed although the call reports an error: it is
+            // still a new step, so what was undone can no longer be redone.
+            Err(error @ (EngineError::CommitCompleted { .. } | EngineError::MediaCommitPending { .. })) => {
+                if let Some(s) = self.inner.state.lock().unwrap().session.as_mut() {
+                    s.redo.clear();
+                }
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        };
         // A new step of the session: what was undone can no longer be redone.
         let projected = (|| {
             let (tx, rx) = mpsc::sync_channel(1);

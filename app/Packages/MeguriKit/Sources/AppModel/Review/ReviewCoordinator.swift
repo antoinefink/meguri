@@ -132,6 +132,8 @@ public final class ReviewCoordinator {
     /// VoiceOver's announcement of the last card action ("Card Buried"); the
     /// screen posts it once per id. No banner or toast (N20.8).
     public private(set) var cardActionAnnouncement: (id: UUID, action: ReviewCardAction)?
+    /// S5: a successful Undo or Redo, with the restored step's core name.
+    public private(set) var restoreAnnouncement: (id: UUID, redo: Bool, step: String)?
     // Tests replace the op; production runs `sched/manual-ops` M2 or M3 on the
     // card, naming this session so the result carries the head diff (M9).
     @ObservationIgnored var startCardAction: (ReviewCardAction, Int64, UInt64) async throws -> SchedMutation = ReviewCoordinator.coreCardAction
@@ -426,16 +428,28 @@ public final class ReviewCoordinator {
             if case .available(let step) = redo ? redoStatus : undoStatus { return step.kind == .answer }
             return false
         }()
+        // The answer this step moves, read now: a commit failure reported while
+        // the restore runs may remove answers, and then this one is gone too.
+        let moving = answerStep ? (redo ? record.undone.last?.id : record.answers.last?.id) : nil
+        let stepName: String? = {
+            if case .available(let step) = redo ? redoStatus : undoStatus { return step.name }
+            return nil
+        }()
         busy = true; phase = .transition
         let intent = beginRestoration()
         timer.pause(at: uptime())
         operation = Task {
             do {
                 let head = try await client.restore(sessionID: sessionID, redo: redo)
-                if !answerStep {
-                } else if redo {
-                    if var answer = record.undone.popLast() { answer.durable = false; record.answers.append(answer) }
-                } else if let answer = record.answers.popLast() { record.undone.append(answer) }
+                if let moving {
+                    if redo {
+                        if record.undone.last?.id == moving, var answer = record.undone.popLast() {
+                            answer.durable = false; record.answers.append(answer)
+                        }
+                    } else if record.answers.last?.id == moving, let answer = record.answers.popLast() {
+                        record.undone.append(answer)
+                    }
+                }
                 do { try await apply(head, question: true, intent: intent) }
                 catch {
                     // The original Undo/Redo record must drain even if rendering fails.
@@ -443,6 +457,7 @@ public final class ReviewCoordinator {
                     throw error
                 }
                 try await persist()
+                if let stepName { restoreAnnouncement = (UUID(), redo, stepName) }
             } catch {
                 notice = String(describing: error)
                 let recoveryIntent = restorationIntent

@@ -89,6 +89,8 @@ fn the_edit_is_a_new_step_so_an_undone_answer_can_no_longer_be_redone() {
         .answer(id, answered.card_id, Rating::Good, answered.state_token, EpochMillis(h.clock.now_ms()), 0)
         .unwrap();
     h.review.undo(UndoScope::Session(id)).unwrap();
+    // The undo may still be queued behind the answer's commit: wait for it.
+    h.review.flush_for_background().unwrap();
     assert!(matches!(h.review.peek_redo(UndoScope::Session(id)).unwrap(), UndoStatus::Available(_)));
     let note = h.review.head(id, 3).unwrap().items[0].note_id;
     h.review.patch_note(patch(&h, note, "edited"), id, None).unwrap();

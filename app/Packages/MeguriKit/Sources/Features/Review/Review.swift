@@ -64,6 +64,14 @@ public struct ReviewView: View {
             guard id != nil, let action = model.cardActionAnnouncement?.action else { return }
             AccessibilityNotification.Announcement(Self.announcement(action)).post()
         }
+        // S5: "Answer undone", "Edit Note redone"; nothing when the restore failed.
+        .onChange(of: model.restoreAnnouncement?.id) { _, id in
+            guard id != nil, let restored = model.restoreAnnouncement else { return }
+            let name = ReviewStepNames.display(restored.step)
+            let text = restored.redo ? String(localized: "\(name) redone", bundle: .module)
+                : String(localized: "\(name) undone", bundle: .module)
+            AccessibilityNotification.Announcement(text).post()
+        }
         .onAppear { visibilityChanged(true) }
         .onDisappear { visibilityChanged(false) }
         .task { await appearance() }

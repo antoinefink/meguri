@@ -145,6 +145,28 @@
         }
       }
     },
+    "%@ undone": {
+      "comment": "S5: VoiceOver announcement after Undo in review, with the step's display name (Answer undone).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ undone"
+          }
+        }
+      }
+    },
+    "%@ redone": {
+      "comment": "S5: VoiceOver announcement after Redo in review, with the step's display name (Answer redone).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ redone"
+          }
+        }
+      }
+    },
     "Card Buried": {
       "comment": "N20.8: VoiceOver announcement after Bury Card.",
       "localizations": {

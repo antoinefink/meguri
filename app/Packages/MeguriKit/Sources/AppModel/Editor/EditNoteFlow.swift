@@ -93,6 +93,9 @@ public final class EditNoteFlow {
             isPresented = true
             try await made.start()
             guard current(), runtime === made else { throw Self.ownerChanged }
+            // A foreign change that arrived while the page started reloads now.
+            opening = false
+            startReload()
             return true
         } catch {
             if epoch == expected {
@@ -245,7 +248,8 @@ public final class EditNoteFlow {
     private func startReload() {
         guard reloadTask == nil, reloadPending else { return }
         reloadTask = Task {
-            while reloadPending, isPresented, !saving, let draft, let host = runtime, let note = draft.noteID {
+            // While the page starts it is not editable: the change waits (open() restarts it).
+            while reloadPending, isPresented, !saving, !opening, let draft, let host = runtime, let note = draft.noteID {
                 reloadPending = false
                 let expected = epoch
                 // Input waits from the flush to the last field loaded, so a
