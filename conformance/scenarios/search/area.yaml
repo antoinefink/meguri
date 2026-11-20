@@ -6,7 +6,6 @@
 # tagged needs-*, the terms of U81 and U82; they become active as those land.
 area: search
 active:
-  - "builder/items"
   - "canonical/*"
   - "extractors/*"
   - "errors/arguments"
