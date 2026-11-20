@@ -4478,7 +4478,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This device is connected to Meguri Sync, so there is no collection to replace now. Meguri asks which collection to keep when setup has to run again."
+            "value": "Not available while this device is connected to Meguri Sync."
           }
         }
       }

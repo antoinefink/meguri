@@ -63,6 +63,9 @@ struct SyncSettingsSections: View {
     public var address = ""
     public var username = ""
     public var password = ""
+    /// A Sign In made in the fields continues into setup (MP6.3). Kept here, not
+    /// in the view, so a layout change between Sign In and setup does not lose it.
+    public var setupAfterSignIn = false
     public init() {}
 }
 
@@ -192,7 +195,9 @@ struct MeguriAccountRows: View {
     let draft: MeguriSignInDraft
     /// A Sign In made here continues into setup (MP6.3). Setup that was left
     /// unfinished earlier continues only from a user action.
-    @State private var setupAfterSignIn = false
+    private var setupAfterSignIn: Bool {
+        get { draft.setupAfterSignIn } nonmutating set { draft.setupAfterSignIn = newValue }
+    }
     private var address: String { get { draft.address } nonmutating set { draft.address = newValue } }
     private var username: String { get { draft.username } nonmutating set { draft.username = newValue } }
     private var password: String { get { draft.password } nonmutating set { draft.password = newValue } }
@@ -321,6 +326,9 @@ struct MeguriAccountRows: View {
         let secret = password; password = ""
         guard !processing, !changing, !address.isEmpty, !username.isEmpty, !secret.isEmpty else { return }
         setupAfterSignIn = true
+        // A request left by an earlier status action is not this sign-in's:
+        // Cancel during this setup leaves the service Off (MP6.3).
+        collection.syncPresentation.keepCollectionRequested = false
         Task {
             // Signing in to set the service up is a service choice: it clears the hold.
             guard await sync.clearUpdateHold() else { return }
@@ -335,6 +343,8 @@ struct MeguriAccountRows: View {
         guard setupAfterSignIn || requested else { return }
         if sync.meguriCanSettle {
             setupAfterSignIn = false
+            // The request is used up here too: what follows the settling needs its own tap.
+            collection.syncPresentation.keepCollectionRequested = false
             sync.settleMeguriSetup()
         } else if sync.meguriCanChoose, sync.meguriSetupDecision == nil, sync.meguriPreview == nil,
                   sync.meguriStage == .required || requested {
@@ -453,7 +463,6 @@ struct MeguriKeepCollectionSheet: View {
             .formStyle(.grouped)
             #if os(macOS)
             .navigationTitle(SyncText.value(titleKey))
-            .defaultFocus($cancelFocused, true)
             #else
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -470,6 +479,10 @@ struct MeguriKeepCollectionSheet: View {
             }
             .interactiveDismissDisabled()
         }
+        #if os(macOS)
+        // On the stack, so that the toolbar's Cancel is inside the focus scope.
+        .defaultFocus($cancelFocused, true)
+        #endif
         .accessibilityIdentifier("sync.keepCollection.sheet")
     }
     @ViewBuilder private func rows(_ side: MeguriSetupSide) -> some View {
