@@ -155,7 +155,7 @@ public struct DeckOptionsPage: View {
                         label(.desiredRetention)
                     }
                     .labelsHidden()
-                    .accessibilityIdentifier("deckOptions.options.retentionStepper")
+                    .accessibilityIdentifier("deckOptions.options.stepper.desiredRetention")
                 }
             } label: {
                 label(.desiredRetention)
