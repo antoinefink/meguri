@@ -4,6 +4,7 @@ Spec: browser/inspector
 Requirements: R1221, R1223, R1224, R1229 (Go commands), R261; supports R262, R263, R822, R1185, R1222, R1247, R1830
 Anki: 26.09.3 for I2 to I7 (the desktop browser's editor area and Go menu); none for the Meguri rules I8 lists
 Scenarios: none (UI behaviour; I10 lists the tests)
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of I8 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 Which note Browse's editor pane shows (U221), what follows the current row and what follows the selection, how moving between rows keeps the focused field, and the Go commands that move the current row or the keyboard focus. How the pane saves, what blocks a row change and what it does when another writer changes its note are `editor/edit-flows` W2 and W5 (U196); this file adds only what Browse's commands do with them. The editor itself is `editor/field-html` (U190); Card Info is `stats/card-info` (U222); the preview is `browser/preview`; selection and the current row are U212's (`browser/result-sets` H12). The oracle does not run Anki's browser window, so Meguri's tests check this file (I10).
 
@@ -61,6 +62,8 @@ Each pane updates when its input changes: a click, a key, a search that changes 
 The preview opens only when there is a shown card (`browser/preview` P1, P2). Anki opens it only when its editor shows a note, which is the same condition except for a note without cards in notes mode.
 
 ## I8. Meguri rules
+
+Changed 2026-11-20 (round 8): the inspector has two tabs, Note (preview, Deck and Type, fields with the empty ones folded, tags) and Info (Card Info with the forgetting curve under the history): `browser/workspace` V12, V13.
 
 - With several rows selected the editor pane shows the summary ("12 cards selected", or notes in notes mode) with the bulk actions (R1221); Anki hides its editor area then. The summary's wording is Meguri's (`browser/browse-strings` W6).
 - The inspector sits on the right or below the table by the device setting (`browser/config-keys` K11), and can be collapsed (R1222). Collapsing it does not change I2: a collapsed editor still flushes on row changes. Whether it is collapsed and which tab it shows are kept on the device, never in the collection.

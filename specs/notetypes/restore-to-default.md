@@ -4,6 +4,7 @@ Spec: notetypes/restore-to-default
 Requirements: R914, R949, R1475, R1477, R2008 (core side)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/notetypes/structure/ (`restore-*`)
+Status: Under review (R915; round 9, decided 2026-11-20) for the lines of  that begin "Changed 2026-11-20 (round 9)": do not implement them until approved. Every other section is in force and unchanged.
 
 "Restore to Default" (R914, offered from the Note Types screen and the template editor, R919, R932) replaces a note type's fields, templates and styling with Meguri's stock version of its kind, keeping the note type itself and its notes. The stock kinds are `notetypes/stock-kinds` (K1 to K6); what happens to notes and cards reuses `notetypes/structure-changes` S5 to S7.
 
@@ -79,6 +80,8 @@ One transaction and one undo step named "Update Note Type" (U25 step id `update_
 Decided 2026-10-27: the op carries an internal precondition instead, the U29 `AggregateDigest` of the note type as its planning snapshot read it (the same digest as `notetypes/structure-changes#S1.1`'s token), checked inside the write transaction (`engine/op-model` O7). Everything planned from that note type (D2's kind, the by-position draft, D5's classification and backup decision, the card removals and renumbering, the generation plan) is covered by it. On a mismatch (a sync or a local API edit changed the note type while the restore planned or backed up) the transaction rolls back and the op replans once from the live note type, without the caller and without reporting `Stale`; D2 to D5 are decided again, and `NeedsStockKind` or `NoteFieldCountMismatch` from the replan refuse as usual. The replan takes no second safety backup when one was taken (T6.2); when the replan is schema-classified and the first plan was not, it takes one then (T6.1's coalescing applies). If the precondition fails again, the op returns `Stale` and writes nothing; the caller may submit the restore again.
 
 ## D7. Result and refusals
+
+Changed 2026-11-20 (round 9; decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day): Restore to Default is destructive when the default has fewer fields or templates than the note type, so its question (R914) states the losses with counts ("Its content in <n> notes is deleted" for the fields past the default's count; "<c> cards and their progress are deleted" for the templates past it, from `notetypes/structure-changes` S11) and the input carries those **confirmed losses**. Inside the write transaction the restore counts them again; when any live count is larger it writes nothing, takes no step and returns `LossesChanged { summary }`, and the question shows again. A precondition, not a confirmation input.
 
 - Refusals, writing nothing: `NotFound` when no note type has the id (Anki fails the same way); `NeedsStockKind` (D2, an unknown kind or one of the other `kind`); `NoteFieldCountMismatch` (`notetypes/structure-changes` S1.2 item 4); `SafetyBackupFailed` (D5; `package/backup-triggers` T6.2); `Stale` only when the internal precondition fails a second time after D6's replan. There are no others: no `invalid_notetype`, `ProtectedField` or template-check refusal (D3, D4). Planning can also end with `Cancelled` (D6).
 - Result as `notetypes/structure-changes` S1.3.

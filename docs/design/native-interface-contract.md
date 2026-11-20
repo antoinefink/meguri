@@ -283,6 +283,8 @@ Decided 2026-10-27 (screen contract `deckOptions.options`):
 
 ### N11.10 Note types (U200, U201, U203)
 
+Replaced 2026-11-20 by N22 (round 9), under review until Antoine approves it: the Note Types section, one draft and one Save sheet. The text below stays until then.
+
 Decided 2026-10-27 (screen contracts `noteTypes.list`, `noteTypes.templates`, `noteTypes.fields`, `noteTypes.changeNoteType`):
 
 - Settings › Collection holds U160's Note Types row (R915, R18). On Mac it brings the main window forward on the Note Types section. N11.4's section list is unchanged.
@@ -617,7 +619,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, rows `editor.addNote`,
 - One grouped form. Its first group has two rows, Deck then Type, each a system menu on its current value (`editor.add.deck`, `editor.add.type`). The deck list follows `editor/add-flow` A2; the deck starts as `notes/add-defaults` gives it. Choosing a type maps the content as A3 says and keeps the deck.
 - Each field is a section of that form: its name is the header and one box sits below. The rounded name button and the rounded HTML button on every field are gone. A tap on the header still collapses or expands the field (`editor/field-html` F3).
 - The fields stay in one web view, which keeps their scrolling, focus and caret (R5). The Deck and Type group sits above it and does not scroll; it is a real form sized to its two rows.
-- One HTML control for the focused field, the `chevron.left.forwardslash.chevron.right` symbol labelled "HTML Editor", selected while that field shows its HTML. Touch: at the leading end of the keyboard bar, with Previous Field, Next Field and Done; the bar is a system toolbar that replaces WebKit's own. Mac: at the leading end of the panel's bottom bar, opposite Add. ⇧⌘X stays. The control takes the identifier of the field it acts on (`editor.field.<ord>.htmlToggle`), and `editor.add.htmlToggle` while no field has had focus.
+- One HTML control for the focused field, the `chevron.left.forwardslash.chevron.right` symbol labelled "HTML Editor", selected while that field shows its HTML. Touch: at the leading end of the key row, with Previous Field, Next Field and Done; the bar is a system toolbar that replaces WebKit's own. Mac: at the leading end of the panel's bottom bar, opposite Add. ⇧⌘X stays. The control takes the identifier of the field it acts on (`editor.field.<ord>.htmlToggle`), and `editor.add.htmlToggle` while no field has had focus.
 - Add is disabled until the first field has content: typing counts at once, and a committed value follows the live field check. The live "Enter content in the first field." line is gone. The line still names a refused add (`editor/add-flow` A5 step 4), which now needs a race to reach.
 - After an add the fields clear (sticky values stay), focus returns to the first field, and the navigation bar's subtitle reads "Added to <deck>", the deck's last name component; on Mac it sits beside the panel's title (`editor.add.result`). It covers no field. VoiceOver announces it. It stays until the next note is started, the selection changes or the sheet closes. The sheet stays open.
 - iPhone Duo opened wide, and any iPhone at regular width: Add Note covers the whole screen, with the form in a centred column no wider than the readable width. Folded or held tall: the sheet. iPad: the system page sheet. A fold or unfold while it is open moves the same draft and web view to the other presentation.
@@ -833,3 +835,144 @@ The English text of the screens above. "New" marks text not used before this rou
 | Edit Note | the Card menu | with its unit |
 
 - No longer used: "Go to Deck…", "Create Deck", "Overview", "Deck Actions", "Deck name", "Rename Deck…", "Close Review", the Study menu's title and its "Undo Answer" and "Redo Answer" items (Edit's Undo still reads "Undo Answer Card" after an answer, from the core's step name), "Import…", "Export…".
+
+## N21. Round 8: Browse (2026-11-20)
+
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `home.deckList`; round 8 answers 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A, with the forgetting curve in the first version, system symbols on the Today and Browse rows, every bulk action in the first version, a Note menu and ⇧⌘B). Where earlier text differs, this section wins. Behaviour is `browser/workspace` and `search/filter-tokens`; this section is the layout. Under review with those specs until Antoine approves them. Strings: `browser/workspace` V16 and `search/filter-tokens` T15.
+
+### N21.1 Where Browse lives (11A)
+
+- Mac and iPad: the sidebar always starts with Today (`calendar`) and Browse (`magnifyingglass`), each with its system symbol; deck rows keep text only. Selecting Browse turns the rest of the sidebar into the filters (`browser/workspace` V6); selecting Today shows the decks again. One window, three panes: sidebar, table, inspector. No separate Browse window.
+- iPhone and the Duo folded or held tall: a third tab, Browse, between Decks and Settings; on the Duo, the middle symbol of the side tab bar (`browser/workspace` V14.3).
+- Mac: View › Browse ⇧⌘B. The Browse row returns to Browse's kept state (V1).
+- Round 10 (`decisions.md` `home.today`, 2026-11-20) makes Today a summary and gives deck rows waiting counts and Return, double-click and S to start a deck. Those apply with Today selected. With Browse selected the deck rows are filters: a click or Return sets the Deck token, S and double-click do nothing, and the number is Browse's count of the cards the value finds (T12.4).
+
+### N21.2 The search field (2A)
+
+- In the window toolbar, after the title and the Cards / Notes control (N21.3), as wide as the toolbar allows; on touch at the top of the list.
+- Tokens are system search tokens (`searchable` with tokens) where the system's token view supports a token menu and the keys of T10; if it does not, the token view is a custom view, recorded as this screen's exception (need: T10's per-token menu and ⌘-click; verified against the system field's look in the VM screenshots). Each token shows the kind label in the secondary style then the values; an **is not** token adds "is not" after the kind; an advanced token is grey and shows its text. A flag value shows its colour dot.
+- Suggestions are the system's search suggestions list, in sections (T12), each row with its symbol, label, secondary detail and trailing count.
+- No syntax mode, no syntax reference, no error line: the field never shows Anki syntax errors (T5). The prompt is "Search".
+- Esc closes the suggestions, then empties the query. The field's clear button empties it.
+
+### N21.3 Mac layout (1A, 3A, 4B)
+
+- Toolbar, leading to trailing: the title "Browse", the Cards / Notes segmented control, the search field, the Add menu (round 6's), the inspector toggle (`sidebar.trailing`). Nothing else: no action buttons (7A).
+- Table: a native `Table` with sortable, resizable, reorderable columns; the state column first (V2.5); text leading, numbers and dates trailing, tabular figures; system selection; no row tints, no alternating colours beyond the system's.
+- Status line under the table in the footnote style: V11's text at the leading edge, the column set menu at the trailing edge.
+- Under about 900 points the inspector hides itself first; Return or a double click on a row shows it over the table.
+
+### N21.4 The inspector (6A)
+
+- Trailing pane with a segmented control Note | Info at its top.
+- Note: the card preview (folds with its header), Deck and Type rows as round 5's form, the filled fields as labelled boxes, one "<n> Empty Fields" disclosure row, Tags as a token field, and a formatting bar under the fields (Bold, Italic, Underline, Cloze when it applies, Attach, HTML).
+- Info: the stats rows, Review History, then the Forgetting Curve chart (Swift Charts, system style), as `cardInfo.card` draws them.
+
+### N21.5 Several rows selected (7A)
+
+- The inspector shows a title ("12 Cards Selected"), one secondary line (V7), then the commands as plain buttons in one column, each with its key at the trailing edge, Delete last in red. No toolbar change.
+- The row context menu holds the same commands with their keys, grouped: [Change Deck…, Add Tags…, Remove Tags…] | [Flag ▸, Suspend, Unsuspend, Bury, Unbury] | [Set Due Date…, Forget…] | [Change Note Type…, Edit Note Type…] | [Find and Replace…, Find Duplicates…] | [Delete].
+
+### N21.6 Sheets
+
+- Change Deck…: a sheet with round 6's deck search and create row. Add Tags… and Remove Tags…: a sheet with a token field. Set Due Date…: a sheet with one text field (days, or a range "3-7"), its footer explaining the forms. Forget…: a sheet with the two options and "Review history is kept.".
+- Find and Replace… (8A): a window sheet (Mac), form sheet (iPad, the Duo opened), full sheet (iPhone): the rows of V9 as a system `Form`, then the preview list, then a bottom line with "Undo restores every note.", Cancel and "Replace in <c> Notes" (the default action).
+- Find Duplicates…: a small sheet with Field and Notes and Find.
+- The Delete question: N20.7's forms (Mac alert; touch confirmation dialog).
+
+### N21.7 iPad and the Duo opened (9A)
+
+- iPad in landscape shows the Mac's three panes with touch-sized rows and fewer default columns; in portrait the sidebar appears from its toolbar button. Select (toolbar) starts Select mode, whose commands sit in a toolbar under the list: Change Deck, Tags, Suspend, Flag, More.
+- The Duo opened: the list in the left half, the inspector in the right half; the Filters button opens the Filters sheet in the left half; nothing interactive on the fold; Select mode's bar stays in the left half.
+
+### N21.8 Mac menus (7A)
+
+Round 6's menu bar (N20.4) gains a **Note** menu between Deck and Card, and these items. Each command acts on Browse's selection while Browse is shown; outside Browse the Browse-only items are disabled.
+
+| Menu | Item | Key |
+|---|---|---|
+| Edit | Select All | ⌘A (table focused); ⌥⌘A anywhere in Browse |
+| Edit | Select Sibling Cards | |
+| Edit | Find… | ⌘F: in Browse it focuses Browse's search field (round 6's deck search otherwise) |
+| Edit | Find and Replace… | ⌥⌘F |
+| Edit | Find Duplicates… | |
+| View | Browse | ⇧⌘B (disabled while review presents a card, when Card › Show in Browse takes the key) |
+| View | Note Types | ⇧⌘T (N22.1) |
+| View | Cards and Notes (toggles) | ⌥⌘T |
+| View | Card Info | ⌥⌘I |
+| Format | Bold, Italic, Underline, Highlight, Text Colour, Superscript, Subscript, Lists ▸, Remove Formatting | `editor/formatting`'s keys, while a field has focus |
+| Note | Edit Note | ⌘E (Browse: focuses the inspector's first field; review: round 7's) |
+| Note | Add Tags…, Remove Tags… | ⇧⌘A, ⌥⇧⌘A |
+| Note | Change Note Type…, Edit Note Type… | ⇧⌘M, none |
+| Note | Delete Note / Delete <n> Notes… | ⌘⌫ (table focused) |
+| Card | Show in Browse | ⇧⌘B, while review presents a card |
+| Card | Change Deck…, Flag ▸ | ⌘D; flags ⌘1 to ⌘7, No Flag ⌘0 |
+| Card | Bury Card(s), Unbury, Suspend Card(s), Unsuspend | ⌘J, none, ⇧⌘J, none (round 7's keys) |
+| Card | Set Due Date…, Forget… | ⇧⌘D, ⌥⌘N |
+
+- The Deck menu's items are disabled while Browse or Note Types is shown: Browse's deck rows are filters, not the shown deck. So ⌘⌫ is Delete Note in Browse and the focused list's Delete in Note Types, never Delete Deck.
+- Card Info stays ⌥⌘I (R1226), not ⌘I, which is Italic while a field has focus.
+- Separators: Note after Edit Note, Remove Tags… and Edit Note Type…; Card after Show in Browse, Flag, Unsuspend and Forget….
+
+### N21.9 Other ways in (11A)
+
+- The deck menu (N20.2) gains Browse Cards (`magnifyingglass`) after Add Note in group 1, for normal and filtered decks.
+- The deck page gains, while the deck has suspended cards, a row "Suspended Cards" with the count, after Study's row (touch: in the summary group; Mac: under Study), opening Browse on Deck + Suspended.
+- The touch review's More menu (N20.8) gains Show in Browse (`magnifyingglass`) after Edit Note in its first group; the Mac's Card menu has it with ⇧⌘B.
+- A click on a heatmap day (Mac), or its menu (touch), opens Browse on that day's answers (V15).
+
+### N21.10 iPhone and the Duo folded (10A)
+
+- The Browse tab's navigation bar: the inline title Browse, then the Filters menu (`line.3.horizontal.decrease`: Filters…, Select, Note Types) and the Add menu as one glass group. The search field under it, with tokens.
+- The list is an inset grouped list of two-line rows (V14.3), the count in its footer. Swipes and the context menu as V14.3.
+- Filters is a sheet (Clear, Filters, Done) with Cards / Notes at its top, Sort By, Saved Searches and Filter By rows.
+- A tap pushes round 7's Edit Note form; its More menu holds Preview, Card Info, the card's commands and Delete Note.
+
+### N21.11 What this replaces
+
+R1076, R1086, R1090, R1093 (canonical text, syntax mode and reference: dropped; pasted Anki syntax is still read), R1131 (middle-cut deck names), R1168 (a sidebar click replaces the whole search: it now replaces only its kind), R1193 and R1228 (Suspend toggle and its keys: two commands with round 7's keys), R1212 (Delete never asks: it asks when more than one note goes or the one note has more than one card), R1234 (iPhone chips: suggestions and a Filters sheet), and the earlier Browse text of `screen-inventory.yaml` `browse.browser`. Each requirement carries its note in the plan.
+
+## N22. Round 9: Note Types (2026-11-20)
+
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` rows; round 9 answers 1B 2B 3C 4B 5A 6B 7B 8B, with a preview that has a Light and Dark switch and no device picker, and ⇧⌘T). Behaviour is `notetypes/workspace` and `notetypes/draft-save`; this section is the layout. Under review with those specs until Antoine approves them.
+
+### N22.1 Where Note Types lives (1B)
+
+- Mac and iPad: a Note Types row in the sidebar under Browse, with its system symbol (`rectangle.stack`, matching Today and Browse; decided by Claude under Antoine's delegation, 2026-11-20). Its detail is list · detail: a column listing the note types (filter field, + button) and the selected note type's detail with Fields | Cards tabs in the toolbar, Revert and Save (Save… when it will ask) at the trailing edge, and the title "<name>" with "<n> notes · <c> cards" as its subtitle.
+- View › Note Types ⇧⌘T; File › New Note Type… (no key). ⇧⌘N stays New Deck…. R282's and R915's ⇧⌘N for Note Types are superseded.
+- iPhone and the Duo folded: Settings › Collection › Note Types and the Filters menu of Browse push the list; no tab.
+- Under about 1,100 points the sidebar hides itself while the Cards tab shows, as Mail and Xcode do with their navigators.
+
+### N22.2 Fields tab (2B)
+
+A native `Table` (Name, Sort, Used On, Notes with a share indicator) with drag reordering, + and − under it, and an inspector beside it holding Name, Collapsed in Editor, Right-to-Left and Placeholder (`notetypes/workspace` W4). No Advanced group in this version. A deleted field is crossed out until Save.
+
+### N22.3 Cards tab (4B, 5A)
+
+Three columns: the card types list (with counts and an issue dot) over the Fields list; the code editor with Front | Back | Styling and the Insert menu in its bar and the issues list under it; the live preview with its note menu, Question | Answer, Light | Dark (sun and moon), and the Cloze Number menu for cloze types. No device or size picker.
+
+### N22.4 Styling (6B)
+
+The Styling part shows "Shared by All Card Types" in its bar, and above the CSS one Card Text row: Font, Size, Alignment (a three-segment control), Text Colour and Background (colour controls). The row is absent when the CSS has no single plain `.card` rule (`notetypes/workspace` W10).
+
+### N22.5 Save (3C)
+
+One Save in the toolbar. When D3 asks, a sheet titled `Save Changes to “<name>”?` lists the changes (losses first, in red, each with its count), then the sync paragraph, then Cancel and the confirm button (Save and Upload with Meguri Sync; Save otherwise; destructive when content is lost). Progress while it saves shows in the toolbar ("Updating 212 of 412 notes").
+
+### N22.6 New and Duplicate (7B)
+
+New Note Type… is a sheet listing the six stock kinds as rows, each with its one-line explanation in secondary text, and a Name field; Cancel and Create. Duplicate is a direct command (⌘D, context menu).
+
+### N22.7 iPad, the Duo, the iPhone (8B)
+
+- iPad: the Mac's design with touch sizes; field rows open their options in a popover; Edit gives drag handles and delete buttons. Opening a card type hides the two lists: code and preview half each, the card type as a menu in the bar. A key row over the software keyboard: `{{` `}}` `<` `>` `/` `"` `=`, Insert Field, Done (Insert Field only with a hardware keyboard).
+- The Duo opened: the list in one half and the note type's page (Card Types, then Fields sections) in the other; a card type gives the code one half and the preview the other, with one keyboard across the bottom; the side tab bar's tool is Light | Dark.
+- iPhone and the Duo folded: pushed pages; fields editable; templates read-only with the preview (W13).
+
+### N22.8 Change Note Type… (from Browse)
+
+A sheet: From (the note type and the number of selected notes), To (a menu); two sections, Fields (one row per new field with a menu of old fields or Nothing) and Card Types (one row per new card type with a menu of old ones or Nothing; hidden when either side is cloze, R946); then What Will Be Lost (fields whose content is discarded and cards removed, with counts, or "Nothing." and the cards created); then, with Meguri Sync, `notetypes/draft-save` D4's sync paragraph. Cancel and Save (Save and Upload with Meguri Sync). Mappings and losses are `notetypes/change-notetype` M2 to M6.
+
+### N22.9 What this replaces
+
+N11.10's sheets for the template and field editors and its "No schema-change confirmation" bullet (replaced by N22.5's one question; its list of other questions is replaced by `notetypes/draft-save` D8), `screen-inventory.yaml`'s earlier `noteTypes.*` layouts, R919's per-row Fields and Cards actions, R920's "1: Name" list and Reposition, R925's full option list (W4), R931's card type picker, R932's Options menu, R938's sheet-sized editor, R940's platform classes, and R951's "Ordinary edits show no full-upload warning" for Meguri Sync.
