@@ -68,6 +68,35 @@ final class DeckSearchTouchUITests: XCTestCase {
         XCTAssertEqual(search.value as? String, "Cards", "The query stays while the result is open")
     }
 
+    /// N20.7 on touch: long press, Delete Deck, the system's confirmation, Delete Deck.
+    func testLongPressDeleteDeckAsksThenDeletes() throws {
+        let app = try launch(sizeClass: "compact")
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+            "home.deck.row.", "Local Review")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        let deckID = row.identifier.dropFirst("home.deck.row.".count)
+        row.press(forDuration: 1.2)
+        let delete = element(app, "home.deckMenu.delete.\(deckID)")
+        XCTAssertTrue(delete.waitForExistence(timeout: 10))
+        delete.tap()
+        // The system's confirmation dialog, with the exact title and message.
+        XCTAssertTrue(app.staticTexts["Delete “Local Review”?"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Its subdeck and 4 cards will also be deleted."].exists)
+        // iOS 27 shows it as a popover from the row with no Cancel: a tap elsewhere (the bar's empty middle) cancels.
+        let cancel = app.buttons["Cancel"].firstMatch
+        if cancel.exists { cancel.tap() } else { app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
+        XCTAssertTrue(app.staticTexts["Delete “Local Review”?"].waitForNonExistence(timeout: 10))
+        XCTAssertTrue(row.exists, "Cancel changes nothing")
+        row.press(forDuration: 1.2)
+        XCTAssertTrue(delete.waitForExistence(timeout: 10))
+        delete.tap()
+        let confirm = app.buttons.matching(NSPredicate(format: "label == %@", "Delete Deck")).element(boundBy: 0)
+        XCTAssertTrue(app.staticTexts["Delete “Local Review”?"].waitForExistence(timeout: 10))
+        XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+        confirm.tap()
+        XCTAssertTrue(row.waitForNonExistence(timeout: 10), "Delete Deck removes the deck and its subdeck")
+    }
+
     private func launch(sizeClass: String) throws -> XCUIApplication {
         continueAfterFailure = false
         let build = try BuildUnderTest.current()
