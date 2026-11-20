@@ -74,6 +74,8 @@ pub struct Draft {
     pub deck_values: BTreeMap<Field, Value>,
     pub globals: BTreeMap<Field, Value>,
     pub subtree: bool,
+    /// O17.3: deck values the save leaves exactly as stored (`keep`).
+    pub kept: BTreeSet<Field>,
     next_handle: i64,
 }
 fn invalid(message: impl Into<String>) -> EngineError {
@@ -284,6 +286,7 @@ impl Draft {
             base,
             removals: BTreeSet::new(),
             subtree: false,
+            kept: BTreeSet::new(),
             next_handle: -1,
         }
     }
@@ -322,6 +325,7 @@ impl Draft {
                 .values
                 .insert(field, value);
         } else if Field::DECK.contains(&field) {
+            self.kept.remove(&field);
             self.deck_values.insert(field, value);
         } else if Field::GLOBAL.contains(&field) {
             self.globals.insert(field, value);
@@ -329,6 +333,25 @@ impl Draft {
             return Err(invalid("not a deck options field"));
         }
         Ok(())
+    }
+    /// O17.3: the save writes nothing for this deck value; an edit of the
+    /// field afterwards gives it a value again.
+    pub fn keep(&mut self, field: Field) -> Result<(), EngineError> {
+        if !Field::DECK.contains(&field) {
+            return Err(invalid("not a deck value"));
+        }
+        let stored = self.base.deck_values.get(&field).cloned().unwrap_or(Value::None);
+        self.deck_values.insert(field, stored);
+        self.kept.insert(field);
+        Ok(())
+    }
+    /// The deck values the editor shows: a kept value plays no part (O17.1).
+    fn shown_deck_values(&self) -> BTreeMap<Field, Value> {
+        let mut values = self.deck_values.clone();
+        for field in &self.kept {
+            values.insert(*field, Value::None);
+        }
+        values
     }
     /// O6.2: selecting a less specific tab clears the more specific values.
     pub fn set_limit(&mut self, review: bool, scope: LimitScope, value: f64) -> Result<(), EngineError> {
@@ -506,7 +529,7 @@ impl Draft {
             issues.extend(options::validate::effective_warnings(
                 p.key,
                 &p.values,
-                &self.deck_values,
+                &self.shown_deck_values(),
             ));
         }
         issues
@@ -740,7 +763,7 @@ where
             if deck.id == target.id || descendant || ctx.scope().deck_config(DeckConfigId(normal.config_id))?.is_none()
             {
                 normal.config_id = selected.0;
-                set_deck(normal, &draft.deck_values, day.today)?;
+                set_deck(normal, &draft.deck_values, &draft.kept, day.today)?;
                 crate::decks::save_in(ctx.scope(), deck)?;
             }
         }
@@ -886,15 +909,26 @@ fn optional(values: &BTreeMap<Field, Value>, field: Field) -> Result<Option<f64>
 fn set_deck(
     normal: &mut meguri_model::proto::deck::NormalDeck,
     values: &BTreeMap<Field, Value>,
+    kept: &BTreeSet<Field>,
     today: u32,
 ) -> Result<(), EngineError> {
-    normal.new_limit = optional(values, Field::NewLimit)?.map(|n| n as u32);
-    normal.review_limit = optional(values, Field::ReviewLimit)?.map(|n| n as u32);
-    normal.desired_retention = optional(values, Field::DeckDesiredRetention)?.map(|n| n as f32);
+    // O17.3: a kept value is not written; the record keeps it as stored.
+    if !kept.contains(&Field::NewLimit) {
+        normal.new_limit = optional(values, Field::NewLimit)?.map(|n| n as u32);
+    }
+    if !kept.contains(&Field::ReviewLimit) {
+        normal.review_limit = optional(values, Field::ReviewLimit)?.map(|n| n as u32);
+    }
+    if !kept.contains(&Field::DeckDesiredRetention) {
+        normal.desired_retention = optional(values, Field::DeckDesiredRetention)?.map(|n| n as f32);
+    }
     for (field, limit) in [
         (Field::NewLimitToday, &mut normal.new_limit_today),
         (Field::ReviewLimitToday, &mut normal.review_limit_today),
     ] {
+        if kept.contains(&field) {
+            continue;
+        }
         if let Some(value) = optional(values, field)? {
             if let Some(stored) = limit {
                 stored.limit = value as u32;
