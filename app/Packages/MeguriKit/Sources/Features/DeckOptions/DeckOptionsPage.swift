@@ -1,6 +1,9 @@
 import AppModel
 import CoreBridge
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// The first version's Deck Options page (`native-interface-contract` N20.9,
 /// `sched/deck-options` O17, strings `decks/deck-options-strings` K6 and K10).
@@ -13,6 +16,13 @@ public struct DeckOptionsPage: View {
     @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 64
     @FocusState private var focused: DeckOptionsPageRow?
     @Environment(\.locale) private var locale
+    #if os(macOS)
+    /// app/AGENTS.md: no alert while the app is hidden; a save that fails
+    /// then keeps its failure in the model until the app shows again.
+    @State private var appVisible = !NSApplication.shared.isHidden
+    #else
+    private let appVisible = true
+    #endif
 
     public init(model: DeckOptionsPageModel, onClose: @escaping () -> Void) {
         self.model = model
@@ -35,7 +45,7 @@ public struct DeckOptionsPage: View {
                 Button(role: .cancel) { model.keepEditing() } label: { Text("deckOptions.discard.keepEditing", bundle: .module) }
             }
             .alert(Text("deckOptions.saveFailed.title", bundle: .module), isPresented: Binding(
-                get: { model.saveFailure != nil }, set: { if !$0 { model.saveFailure = nil } })) {
+                get: { appVisible && model.saveFailure != nil }, set: { if !$0, appVisible { model.saveFailure = nil } })) {
                 Button(role: .cancel) { model.saveFailure = nil } label: { Text("deckOptions.saveFailed.ok", bundle: .module) }
             } message: {
                 switch model.saveFailure {
@@ -43,6 +53,10 @@ public struct DeckOptionsPage: View {
                 default: Text("deckOptions.saveFailed.failed", bundle: .module)
                 }
             }
+            #if os(macOS)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didHideNotification)) { _ in appVisible = false }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didUnhideNotification)) { _ in appVisible = true }
+            #endif
             .onChange(of: model.outcome) { _, outcome in
                 // The model already returned to the deck page; the view only acknowledges.
                 guard outcome != nil else { return }

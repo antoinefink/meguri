@@ -279,7 +279,21 @@ public final class DeckOptionsPageModel {
     /// Selecting a preset makes it the target preset (O17.2); edits to the
     /// first one stay in the draft.
     public func selectPreset(_ id: Int64) {
-        commitAll()
+        if commitAll() {
+            // A value typed for the current preset is checked first: its error
+            // must show on its own rows, not hide behind another preset's.
+            let current = revision
+            Task { [weak self] in
+                await self?.waitForCompletion()
+                guard let self, self.revision == current else { return }
+                self.switchPreset(to: id)
+            }
+            return
+        }
+        switchPreset(to: id)
+    }
+
+    private func switchPreset(to id: Int64) {
         guard phase == .editing, id != selectedPreset, presets.contains(where: { $0.id == id }),
               canSwitchPreset else { return }
         selectedPreset = id
@@ -302,6 +316,8 @@ public final class DeckOptionsPageModel {
 
     /// The Desired Retention stepper: one whole percent, within the range.
     public func stepRetention(by percent: Int) {
+        // A typed value is where the step starts.
+        commit(.desiredRetention)
         guard let current = value(.desiredRetention) else { return }
         var next = ((current * 100).rounded() + Double(percent)) / 100
         if let range = range(.desiredRetention) { next = min(max(next, range.lowerBound), range.upperBound) }
@@ -310,17 +326,22 @@ public final class DeckOptionsPageModel {
 
     /// Commits a row's typed text. Text that is not a number changes nothing
     /// and the field shows its value again (O17.1).
-    public func commit(_ row: DeckOptionsPageRow) {
-        guard phase == .editing else { return }
-        if let text = fieldText[row], let parsed = parse(text, row: row), parsed != value(row) {
+    @discardableResult public func commit(_ row: DeckOptionsPageRow) -> Bool {
+        guard phase == .editing else { return false }
+        // Text the field shows unchanged is not parsed back: a stored value
+        // with more decimals than the field shows stays as it is.
+        let shown = formatted(row)
+        if let text = fieldText[row], text != shown, let parsed = parse(text, row: row), parsed != value(row) {
             setValue(row, parsed)
-        } else {
-            fieldText[row] = formatted(row)
+            return true
         }
+        fieldText[row] = shown
+        return false
     }
 
-    private func commitAll() {
-        for row in DeckOptionsPageRow.allCases { commit(row) }
+    /// Commits every row; true when a value changed.
+    @discardableResult private func commitAll() -> Bool {
+        DeckOptionsPageRow.allCases.map { commit($0) }.contains(true)
     }
 
     /// The text a row's field shows for the current value.

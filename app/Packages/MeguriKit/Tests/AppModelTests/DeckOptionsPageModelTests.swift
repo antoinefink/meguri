@@ -104,6 +104,29 @@ import Testing
         #expect(model.value(.desiredRetention) == 0.98)
     }
 
+    @Test func untouchedTextKeepsAFinerStoredValueAndTheStepStartsFromTypedText() async throws {
+        let (owner, _) = await makeOwner(retention: 0.875123)
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        #expect(model.fieldText[.desiredRetention] == "87.51%")
+        // Back commits every row: the field's unchanged text is not parsed back.
+        #expect(model.requestLeave() && model.phase == .closed)
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.fieldText[.desiredRetention] = "80%"
+        model.stepRetention(by: 1)
+        #expect(model.value(.desiredRetention) == 0.81)
+    }
+
+    @Test func aTypedErrorIsCheckedBeforeAnotherPresetIsChosen() async throws {
+        let (owner, _) = await makeOwner()
+        let model = owner.deckOptions
+        model.open(deckID: 1); await model.waitForCompletion()
+        model.fieldText[.newPerDay] = "10000"
+        model.selectPreset(2)
+        await model.waitForCompletion(); await Task.yield(); await model.waitForCompletion()
+        #expect(model.selectedPreset == 1 && model.issues(for: .newPerDay).map(\.code) == [.outOfRange])
+    }
+
     @Test func leavingAsksOnlyWhenTheDraftDiffers() async throws {
         let (owner, core) = await makeOwner()
         let model = owner.deckOptions
