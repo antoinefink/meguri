@@ -9,7 +9,7 @@
 use meguri_model::ids::NotetypeId as Ntid;
 use meguri_search::ast::{CardState, IdKind, NodeKind};
 use meguri_search::builder::{BuilderError, BuiltItem, ErrorSource, InvalidItem, Joiner, build, build_query};
-use meguri_search::plan::{BuildError, Plan, SearchMode};
+use meguri_search::plan::{Plan, SearchMode};
 use meguri_search::{canonical_text, parse};
 
 use crate::canonical_roundtrip::{
@@ -595,9 +595,10 @@ fn built_searches_round_trip() {
         for mode in [SearchMode::Cards, SearchMode::Notes] {
             let first = Plan::build_with(&query, mode, &context(), &mut stand_in);
             let second = Plan::build_with(&again, mode, &context(), &mut stand_in);
+            // Every kept case runs: F7's shapes are excluded and the
+            // stand-in compiles every other term.
             match (first, second) {
                 (Ok(first), Ok(second)) => assert_eq!(ids(&conn, &first), ids(&conn, &second), "{o:?} in {mode:?}"),
-                (Err(BuildError::Search(a)), Err(BuildError::Search(b))) => assert_eq!(a.code(), b.code(), "{o:?}"),
                 (a, b) => panic!("{o:?} in {mode:?}: {a:?} / {b:?}"),
             }
         }

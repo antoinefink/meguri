@@ -101,12 +101,14 @@ impl NameIndexProvider {
 
     /// Applies one committed change set.
     fn apply(&self, changes: &ChangeSet, rows: &ObserverRows<'_>) -> Result<(), EngineError> {
-        let stale = self.stale.load(Ordering::Acquire);
         let sections = Sections::of(changes);
+        // Read the flag under the lock: a rebuild that fails while this
+        // commit waits leaves an empty index that only a full reread mends.
+        let _building = self.building.lock().unwrap_or_else(PoisonError::into_inner);
+        let stale = self.stale.load(Ordering::Acquire);
         if !stale && !sections.any() {
             return Ok(());
         }
-        let _building = self.building.lock().unwrap_or_else(PoisonError::into_inner);
         let source = CommitRows(rows);
         let mut index = (*self.index()).clone();
         let updated = !stale && fill(&mut index, &source, sections, Some(changes)).is_ok();

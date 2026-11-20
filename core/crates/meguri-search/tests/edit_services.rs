@@ -131,6 +131,7 @@ fn each_form_needs_its_cursor() {
     // dangling_minus: only a bare `-` ending at the cursor.
     assert_eq!(incomplete("a -| b"), (DanglingMinus, 2..3));
     assert_eq!(tail("a| -"), Tail::Valid);
+    assert_eq!(tail("a - |b"), Tail::Valid);
     assert_eq!(tail("a \\-"), Tail::Valid);
     assert_eq!(tail("a \"-\""), Tail::Valid);
     assert_eq!(tail("--"), Tail::Valid);
