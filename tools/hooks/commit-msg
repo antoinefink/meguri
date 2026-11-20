@@ -8,7 +8,8 @@
 # - Implementer and fixer commits touching those paths also need Spec: (one
 #   or more spec ids, specs/README-format.md, or Product Contract requirement
 #   ids such as R1987 for UI work no spec covers) and Session: (the session id
-#   from docs/process/provenance/sessions.jsonl).
+#   of a record in docs/process/provenance/sessions/, or in the archive
+#   sessions.jsonl; tools/gate/static-checks/sessions.py checks it resolves).
 # Merge commits are not checked. Runs under macOS /bin/bash 3.2.
 #
 # `commit-msg --commit <rev>` applies the same rules to a commit already made

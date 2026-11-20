@@ -426,7 +426,7 @@ SH
 candidate_shell() {
   run bash -c '
     mg_job() { :; }
-    . "$1/tools/mg.d/meguri-sync.sh"
+    . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"
     export MG_ROOT="$1" MG_RUN_DIR="$2" MG_JOB=sync-server-interop MG_RUN_ID=20261115T000000Z-1
     mg_failure() { printf "%s\n" "$1"; }
     mg_status() { printf "status:%s\n" "$1"; }
@@ -457,12 +457,12 @@ candidate_build_fixture() {
   mkdir -p "$CANDIDATE_BUILD/source" "$CANDIDATE_BUILD/product"
   mkdir -m 700 "$CANDIDATE_BUILD/target"
   mkdir "$CANDIDATE_BUILD/target/debug"
-  bash -c 'mg_job() { :; }; . "$1/tools/mg.d/meguri-sync.sh"; MG_ROOT="$1"; mg_sync_server__archive HEAD' fixture "$SB" >"$CANDIDATE_BUILD/source.tar"
+  bash -c 'mg_job() { :; }; . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"; MG_ROOT="$1"; mg_sync_server__archive HEAD' fixture "$SB" >"$CANDIDATE_BUILD/source.tar"
   tar -xf "$CANDIDATE_BUILD/source.tar" -C "$CANDIDATE_BUILD/source"
   printf 'synthetic build executable; never executed\n' >"$CANDIDATE_BUILD/product/meguri-sync-server"
   cp "$CANDIDATE_BUILD/product/meguri-sync-server" "$CANDIDATE_BUILD/target/debug/meguri-sync-server"
   local script
-  script="$(bash -c 'mg_job() { :; }; . "$1/tools/mg.d/meguri-sync.sh"; mg_sync_server__build_script' fixture "$SB")"
+  script="$(bash -c 'mg_job() { :; }; . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"; mg_sync_server__build_script' fixture "$SB")"
   python3 - "$SB" "$CANDIDATE_BUILD" "$(git -C "$SB" rev-parse HEAD)" "$script" <<'PY'
 import hashlib, json, pathlib, stat, sys
 root, base = map(pathlib.Path, sys.argv[1:3])
@@ -499,7 +499,7 @@ PY
 candidate_build_check() {
   run bash -c '
     mg_job() { :; }
-    . "$1/tools/mg.d/meguri-sync.sh"
+    . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"
     export MG_ROOT="$1" MG_RUN_DIR="$2" MG_RUN_ID=20261115T000000Z-1
     mg_failure() { echo "$1"; }
     mg_detail() { :; }
@@ -633,7 +633,7 @@ PY
 
 @test "sync-server: empty owned build target image command mount and copied executable are revalidated" {
   mkdir -m 700 "$BATS_TEST_TMPDIR/fresh-target"
-  run bash -c 'mg_job() { :; }; . "$1/tools/mg.d/meguri-sync.sh"; mg_sync_server__target_identity "$2" empty' fixture "$SB" "$BATS_TEST_TMPDIR/fresh-target"
+  run bash -c 'mg_job() { :; }; . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"; mg_sync_server__target_identity "$2" empty' fixture "$SB" "$BATS_TEST_TMPDIR/fresh-target"
   [ "$status" -eq 0 ]
   candidate_build_fixture
   candidate_build_check
@@ -669,13 +669,13 @@ PY
     [ "$status" -ne 0 ] && [[ "$output" != *fixture-ready-for-runtime* ]]
     [[ "$output" == *build-command* || "$output" == *build-measurement* ]]
   done
-  run bash -c 'mg_job() { :; }; . "$1/tools/mg.d/meguri-sync.sh"; mg_sync_server__target_identity "$2" empty' fixture "$SB" "$CANDIDATE_BUILD/target"
+  run bash -c 'mg_job() { :; }; . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"; mg_sync_server__target_identity "$2" empty' fixture "$SB" "$CANDIDATE_BUILD/target"
   [ "$status" -ne 0 ] && [[ "$output" == *'not empty'* ]]
 }
 
 @test "sync-server: image discovery resolves configured tags without existing containers" {
   run bash -c '
-    mg_job() { :; }; . "$1/tools/mg.d/meguri-sync.sh"
+    mg_job() { :; }; . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"
     MG_ROOT="$1"
     # The service config may name an explicit tag or the Compose default tag.
     mg_compose() {
@@ -843,7 +843,7 @@ PY
   candidate_shell mg_sync_server__interop_owned "$dir/result.json" '[]' producer-fixture
   [ "$status" -ne 0 ] && [[ "$output" == *build-source* ]]
   # Even after a current archive is supplied, a stale retained lock is refused.
-  bash -c 'mg_job() { :; }; . "$1/tools/mg.d/meguri-sync.sh"; MG_ROOT="$1"; mg_sync_server__archive HEAD' fixture "$SB" >"$dir/source.tar"
+  bash -c 'mg_job() { :; }; . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"; MG_ROOT="$1"; mg_sync_server__archive HEAD' fixture "$SB" >"$dir/source.tar"
   printf 'unrelated lock' >"$dir/source/server/Cargo.lock"
   candidate_shell mg_sync_server__interop_owned "$dir/result.json" '[]' producer-fixture
   [ "$status" -ne 0 ] && [[ "$output" == *build-source* ]]
@@ -865,7 +865,7 @@ PY
     run bash -c '
       mg_job() { :; }
       . "$1/tools/mg.d/host.sh"
-      . "$1/tools/mg.d/meguri-sync.sh"
+      . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"
       export MG_ROOT="$1" MG_RUN_DIR="$2" MG_JOB=sync-server-interop MG_RUN_ID=20261115T000000Z-1
       fixture_rc="$3" fixture_validation_rc="$4"
       mg_failure() { echo "$1" >>"$MG_RUN_DIR/failures"; }
@@ -1213,7 +1213,7 @@ SH
     mkdir "$dir"
     [ "$mode" = absent ] || touch "$dir/present"
     run bash -c '
-      mg_job() { :; }; . "$1/tools/mg.d/meguri-sync.sh"
+      mg_job() { :; }; . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"
       MG_RUN_ID=20261115T000000Z-1
       dir="$2" mode="$3" owner=synthetic-owner
       mg_failure() { echo "$1"; }
@@ -1388,7 +1388,7 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps([s.st_dev, s.st_ino, s.st_uid]))
 PY
     if [ "$mode" = replaced ]; then mv "$dir" "$dir-original"; mkdir -m 700 "$dir"; fi
     run bash -c '
-      mg_job() { :; }; . "$1/tools/mg.d/meguri-sync.sh"
+      mg_job() { :; }; . "$1/tools/mg.d/session.sh"; . "$1/tools/mg.d/meguri-sync.sh"
       mg_failure() { echo "$1"; }; mg_status() { echo "status:$1"; }
       mg_sync_server__remove_secret "$2" "$3"
     ' fixture "$SB" "$dir" "$BATS_TEST_TMPDIR/secret-owner-$mode.json"

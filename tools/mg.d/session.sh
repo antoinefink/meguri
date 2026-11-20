@@ -1,23 +1,30 @@
 # Agent session records (U2, R1958). Sourced by tools/mg.
 #
-# docs/process/provenance/sessions.jsonl is append-only: one JSON object per
-# agent session, with its role, base commit, what it could read (sparse
+# One file per agent session, docs/process/provenance/sessions/<id>.json: one
+# JSON object with its role, base commit, what it could read (sparse
 # exclusions, deny-profile hash) and the version of its role instructions.
-# Every record is committed where it is appended, that file only, so no
-# checkout is left with an uncommitted ledger and records reach the
-# integration branch with their branch (union merge driver, .gitattributes).
-# `tools/mg worktree new` commits a record for each worktree it creates as
-# that branch's first commit, and also writes it to <worktree git
-# dir>/meguri-session.json, which marks the worktree's role for other jobs (the
-# similarity scan refuses implementer worktrees). `tools/mg session record`
-# covers sessions without a worktree, on the current branch of the checkout it
-# runs in.
+# Files are only ever added: two branches never touch the same file, so their
+# merges (GitHub's included) never conflict on records. Every record is
+# committed where it is made, that file only, so no checkout is left with an
+# uncommitted record. docs/process/provenance/sessions.jsonl is the archive of
+# the records made before the switch, one per line; nothing here appends to
+# it. Readers take both (mg_session_records); tools/gate/static-checks/
+# sessions.py checks both. `tools/mg worktree new` commits a record for each
+# worktree it creates as that branch's first commit, and also writes it to
+# <worktree git dir>/meguri-session.json, which marks the worktree's role for
+# other jobs (the similarity scan refuses implementer worktrees).
+# `tools/mg session record` covers sessions without a worktree, on the current
+# branch of the checkout it runs in.
 
 mg_job session host mg_session \
   "Agent session records (R1958): tools/mg session record --role <role> [--name <name>] [--note <text>]"
 
 MG_ROLES="spec-writer implementer fixer oracle-maintainer infra critic integrator"
-MG_SESSIONS_FILE="docs/process/provenance/sessions.jsonl"
+MG_SESSIONS_ARCHIVE="docs/process/provenance/sessions.jsonl"
+MG_SESSIONS_DIR="docs/process/provenance/sessions"
+# A session name goes into its record, its commit subject and, for a
+# worktree, a branch and a path: plain words only.
+MG_SESSION_NAME_RE='^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$'
 
 # mg_word_in <value> <space-separated words>: the value is one of the words,
 # exactly (a compound value such as "implementer fixer" is none of them).
@@ -30,6 +37,12 @@ mg_word_in() {
 }
 
 mg_role_valid() { mg_word_in "$1" "$MG_ROLES"; }
+
+# mg_plain_name <value> <ERE>: the whole value, one line, matches the pattern.
+mg_plain_name() {
+  case "$1" in *$'\n'* | *$'\r'*) return 1 ;; esac
+  printf '%s' "$1" | LC_ALL=C grep -Eq "$2"
+}
 
 # Role instructions per role (fixers work under the implementer rules).
 mg_role_doc() {
@@ -53,33 +66,99 @@ mg_session_new_id() {
   printf 's-%s-%s\n' "$(date -u +%Y%m%dT%H%M%SZ)" "$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
 }
 
-# mg_session_store <checkout> <record JSON>: appends the record to the
-# checkout's ledger and commits it on the checkout's current branch, that path
-# only (other staged changes stay staged; the commit goes through the
-# commit-msg hook like any other). Records made in parallel (critic sessions,
-# spec writers in the main checkout) would race on git's index.lock: one run
-# fails while another commits its line, or a line stays uncommitted. A mkdir
-# lock in the repository's common git dir serializes append and commit across
-# all its checkouts, waiting at most MG_SESSION_LOCK_SECONDS. A commit that
-# fails is tried again, since another git command may hold index.lock for a
-# moment; once HEAD's ledger has the line (a commit that was not a session
-# record took it along), the record is stored. On failure sets
-# MG_SESSION_FAILURE (failure id) and MG_SESSION_MESSAGE and returns 1.
+# mg_session_store <checkout> <record JSON>: writes the record to
+# $MG_SESSIONS_DIR/<id>.json in the checkout and commits it on the checkout's
+# current branch, that path only (other staged changes stay staged; the
+# commit goes through the commit-msg and pre-commit hooks like any other).
+# Records made in parallel (critic sessions, spec writers in the main
+# checkout) would race on git's index.lock, so the ledgers' lock
+# (mg__ledger_lock) covers write and commit; a commit that fails is tried
+# again, since another git command may hold index.lock for a moment. When the
+# pre-commit private-token scan refuses the record, the file is removed and
+# the failure is session-private: the caller picks another name (or note, or
+# path); neither the hook nor this message names the word it matched. On
+# failure sets MG_SESSION_FAILURE (failure id) and MG_SESSION_MESSAGE and
+# returns 1.
 mg_session_store() {
-  local id role name
+  local dir="$1" id role name rel file line tries=0 err
   id="$(jq -r .session <<<"$2")"
   role="$(jq -r .role <<<"$2")"
   name="$(jq -r '.name // ""' <<<"$2")"
-  mg_ledger_store "$1" "$MG_SESSIONS_FILE" "$2" "Record session $id ($role${name:+, $name})
+  rel="$MG_SESSIONS_DIR/$id.json"
+  file="$dir/$rel"
+  MG_SESSION_FAILURE=session-ledger
+  MG_SESSION_MESSAGE="could not write the record $rel; see log.txt"
+  mg_plain_name "$id" '^[A-Za-z0-9][A-Za-z0-9._-]{2,}$' || return 1
+  line="$(jq -c . <<<"$2")" && [ -n "$line" ] || return 1
+  mg__ledger_lock "$dir" || return 1
+  if [ -e "$file" ] || git -C "$dir" cat-file -e "HEAD:$rel" 2>/dev/null; then
+    mg__session_unlock
+    MG_SESSION_MESSAGE="$rel already exists; records are never rewritten"
+    return 1
+  fi
+  if ! { mkdir -p "$(dirname "$file")" && printf '%s\n' "$line" >"$file"; }; then
+    rm -f "$file"
+    mg__session_unlock
+    return 1
+  fi
+  err="$(mktemp "${TMPDIR:-/tmp}/meguri-session.XXXXXX")" || {
+    rm -f "$file"
+    mg__session_unlock
+    return 1
+  }
+  until mg__ledger_commit "$dir" "$rel" "Record session $id ($role${name:+, $name})
 
 Role: infra
-Session: $id"
+Session: $id" 2>"$err"; do
+    cat "$err" >&2
+    if grep -q '^pre-commit: staged lines hold' "$err"; then
+      git -C "$dir" rm -q --cached --ignore-unmatch -- "$rel" >&2 2>&1
+      rm -f "$file" "$err"
+      mg__session_unlock
+      MG_SESSION_FAILURE=session-private
+      MG_SESSION_MESSAGE="the private-token scan (pre-commit) refused the session record: its name, note, branch or path holds a word from the private collection; nothing was recorded, so run again with another name (and --note, --branch or --path when given). The scan never says which word, and this message does not either"
+      return 1
+    fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 3 ]; then
+      rm -f "$err"
+      mg__session_unlock
+      MG_SESSION_FAILURE=session-commit
+      MG_SESSION_MESSAGE="wrote the record $rel but could not commit it (see log.txt)"
+      return 1
+    fi
+    sleep 1
+  done
+  cat "$err" >&2
+  rm -f "$err"
+  mg__session_unlock
+}
+
+# mg_session_records <checkout> <commit>: every session record committed at
+# <commit>, one compact JSON object per line: the archive's lines, then each
+# file of the records directory. Reads git objects only (never a working tree
+# or a replace ref), so an uncommitted record never counts. Returns non-zero
+# when git cannot read the commit or a record does not parse: callers refuse
+# then, never read it as no records.
+mg_session_records() {
+  (
+    set -o pipefail
+    {
+      if git --no-replace-objects -C "$1" cat-file -e "$2:$MG_SESSIONS_ARCHIVE" 2>/dev/null; then
+        git --no-replace-objects -C "$1" cat-file blob "$2:$MG_SESSIONS_ARCHIVE" || exit 1
+      fi
+      git --no-replace-objects -C "$1" ls-tree -r "$2^{commit}" -- "$MG_SESSIONS_DIR/" |
+        awk -F '\t' '$2 ~ /\.json$/ { split($1, m, " "); if (m[2] == "blob") print m[3] }' |
+        git --no-replace-objects -C "$1" cat-file --batch='%(rest)'
+    } | jq -c .
+  )
 }
 
 # mg_ledger_store <checkout> <ledger path> <record JSON> <commit message>:
-# mg_session_store for any append-only ledger under docs/process/provenance/
-# (sessions, escalations). One lock for all of them: they commit in the same
-# checkouts. Same failure contract as mg_session_store.
+# appends a record to an append-only ledger under docs/process/provenance/
+# (escalations) and commits it, that file only, under the ledgers' lock (the
+# one session records take: they commit in the same checkouts). Same failure
+# contract as mg_session_store.
 mg_ledger_store() {
   local dir="$1" rel="$2" record="$3" message="$4" file="$1/$2" line tries=0
   MG_SESSION_FAILURE=session-ledger
@@ -249,6 +328,11 @@ mg_session() {
   done
   if ! mg_role_valid "$role"; then
     mg_failure bad-role "--role must be one of: $MG_ROLES"
+    mg_status error
+    return 0
+  fi
+  if [ -n "$name" ] && ! mg_plain_name "$name" "$MG_SESSION_NAME_RE"; then
+    mg_failure bad-name "--name must match $MG_SESSION_NAME_RE"
     mg_status error
     return 0
   fi

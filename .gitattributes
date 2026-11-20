@@ -1,4 +1,6 @@
-# Append-only session records: branches each append lines, so a merge keeps both.
+# The archive of session records made before the per-session files
+# (docs/process/provenance/sessions/<id>.json): branches made before the switch
+# may still append to it, so a local merge keeps both sides' lines.
 docs/process/provenance/sessions.jsonl merge=union
 # Append-only escalations (tools/mg escalation, merge): the same rule.
 docs/process/provenance/escalations.jsonl merge=union
