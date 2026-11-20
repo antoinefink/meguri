@@ -91,6 +91,8 @@ A schema-classified save never runs a normal round that would discover the full-
 
 ## D8. Questions that move into the sheet
 
+**Rule for every destructive note type operation** (decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day): each confirmed destructive operation carries what the user confirmed, and its op refuses inside its write transaction, writing nothing and returning `LossesChanged` with the new counts, when the live loss is larger; the question is then shown again. The four operations: the draft save's field and card type removals (`notetypes/structure-changes` S1.2), Delete Note Type (S12), Restore to Default (`notetypes/restore-to-default` D7) and Change Note Type (`notetypes/change-notetype` M8). No other note type operation deletes content.
+
 These questions are no longer asked at the moment of the edit; D4's rows replace them: Add Card Type's "This will create N cards. Proceed?" (R932, `notetypes/editor-actions` A6), Remove Card Type's question (R933, A7), the field delete question "Delete field from N notes?" (R922, A10). Restore to Default (R914) and Delete Note Type (R918, W12) keep their own questions; Change Note Type keeps its sheet (N22.8) with D4's sync paragraph.
 
 ## D9. Strings

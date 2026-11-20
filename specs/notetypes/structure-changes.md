@@ -213,6 +213,8 @@ Example: a note type with templates `Forward` and `Reverse` where five notes hav
 
 ## S12. Removing a note type (R918)
 
+Changed 2026-11-20 (round 9; decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day): the input also carries the **confirmed counts** the delete question showed (W12: the note type's notes and cards). Inside the write transaction the removal counts them again; when either live count is larger it writes nothing, takes no step and returns `LossesChanged { notes, cards }`, and the question shows again with the new counts. A precondition, not a confirmation input.
+
 - **Input**: the note type id. There is no confirmation input: the delete question of R918 ("Delete this note type and all its cards?", or "Delete this unused note type?") is the caller's, accepted before the op is submitted (`notetypes/schema-changes` G4, which supersedes R918's schema-change confirmation).
 - **Refusals**, writing nothing: `LastNotetype` when it is the collection's only note type (R918; Anki's core instead removes it and adds a new stock Basic note type, which Meguri's callers never want); `SafetyBackupFailed` when the safety backup fails (`package/backup-triggers` T6.1 row "deleting a note type", T6.2: taken after planning, before the first write; R2008).
 - Removing a note type that no longer exists succeeds, changes nothing and takes no backup. Decided 2026-10-27: T6.1's "always" applies to a removal that removes something; with nothing to remove there is nothing to protect.

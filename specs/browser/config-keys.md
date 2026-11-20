@@ -4,7 +4,7 @@ Spec: browser/config-keys
 Requirements: R1115, R1134, R1135, R1137, R1138, R1141, R1265, R1266, R1267, R1038, R1196, R1198; supports R42, R366, R725, R1037, R1112, R1133, R1139, R1146, R1157, R1171, R1172, R1173, R1218, R2020
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/config/
-Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of K4, K6.2, K11 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of K4, K6.2, K6.4, K11 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
 
 Browse, its sidebar, the previewer, Settings › Browse and the search engine keep their synced settings in collection config keys (`storage/config-table`). Meguri reads and writes them with Anki's names and JSON shapes, so Anki clients and Meguri share them through sync. This file gives, for each key, its shape, its default, how a stored value is read, and what each user action writes. Stamping and the compact form are `storage/config-table` C4 and C5.
 
@@ -210,6 +210,8 @@ Collapsing a section writes true to its key, expanding it writes false. Decks an
 True: the previewer shows each card directly on its answer side, so question and answer appear together, and moving goes from card to card. Toggling writes the new value. What the previewer does with the setting (the side shown, moving through the results, audio): `browser/preview` P3, P6 and P7.
 
 ### K6.4 Default search (`defaultSearchText`, R1112, R1267)
+
+Changed 2026-11-20 (round 8): for Browse, the "not set" rows and sentence are replaced by `browser/entry-points` E2's round 8 line and `search/filter-tokens` T14: a first open without the text runs the whole collection with an empty field, not `deck:current`; a set text is read into tokens by T7 (literal words when it does not parse), never shown as stored text. The set and not-set test above stands.
 
 - Settings › Browse writes the text exactly as typed, untrimmed.
 - The text **is set** when it still has a character after removing these characters from both ends: U+0009–U+000D, U+001C–U+001F, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000. Browse then opens with the stored text, untrimmed, and shows it in the field. When it is not set, Browse opens with `deck:current` and an empty field with a placeholder (R1112, U210).

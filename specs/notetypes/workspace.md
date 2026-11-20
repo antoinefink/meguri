@@ -19,7 +19,7 @@ What the Note Types section shows and does: the list, the Fields tab, the Cards 
 
 - Every note type with its note count (`notetypes/editor-actions` A2: order, and names first then counts). A filter field above narrows the list by simple case-folded substring of the name.
 - A note type whose draft differs from its base shows "Edited" after its name.
-- The + button opens New Note Type… (W11). The row's context menu: Duplicate (⌘D while the list has focus), Rename…, Restore to Default… (stock kinds only, `notetypes/restore-to-default`; its question stays R914's), Delete… (W12).
+- The + button opens New Note Type… (W11). The row's context menu: Duplicate (⌘D while the list has focus), Rename…, Restore to Default… (stock kinds only, `notetypes/restore-to-default`; its question is R914's, stating the losses with counts when the default has fewer fields or card types, D7), Delete… (W12).
 
 ## W3. The Fields tab
 

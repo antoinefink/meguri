@@ -101,6 +101,8 @@ Anki's screen refuses such a save ("No changes to save") before its backend sees
 
 ## M8. The change: input, checks and safety backup
 
+Changed 2026-11-20 (round 9; decided 2026-11-20 by Claude (coordinator) under Antoine's delegation of that day): the input also carries the **confirmed losses**, what M6's preview showed and the user accepted: for each old field the map leaves out, the number of selected notes with content in it (`text/field-emptiness` E1), and for each old template the map leaves out, the number of cards removed. Inside the write transaction, with checks 3 and 4, the change counts them again on the live rows; when any live count is larger it writes nothing, records no step and returns `LossesChanged { preview }` with a new M6 preview, and the sheet shows again. Callers pass what their M6 preview showed (a caller with no sheet, the local API, passes the preview it read). This is a precondition like the schema stamp, not a confirmation input.
+
 Changed 2026-11-20 (round 9): with Meguri Sync as the service and a ready binding, Change Note Type's sheet carries `notetypes/draft-save` D4's sync paragraph and its button reads Save and Upload, and the save runs as `sync/meguri-provider` MP7's job; this replaces "asks nothing" beyond M6's preview for that case (`notetypes/schema-changes` G4 as changed). The op itself still takes no confirmation input.
 
 Input: the selection (M4), the old note type the info query reported, the new note type, a field map, a template map exactly when M1 gives one, and the schema stamp the info query returned. There is no confirmation input (`notetypes/schema-changes#G4`).
