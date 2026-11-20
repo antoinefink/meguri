@@ -1,0 +1,110 @@
+//! This crate's integration tests in one binary (`[[test]] testkit_it`).
+//! Each `tests/*.rs` file is a module, loaded by `#[path]` so its own `mod`
+//! lines resolve as they did at its crate root; `pub` keeps its public items
+//! exported. Add a new test file here, or give it its own `[[test]]` when it
+//! cannot share a binary (`tools/mg static-checks --check test-targets`).
+
+// Each file keeps its own copy of the helper modules it declares (`mod
+// common;`), as it did in a binary of its own.
+#![allow(clippy::duplicate_mod)]
+
+#[path = "anonymize.rs"]
+pub mod anonymize;
+#[path = "answer_adapters.rs"]
+pub mod answer_adapters;
+#[path = "answer_conformance.rs"]
+pub mod answer_conformance;
+#[path = "answer_labels.rs"]
+pub mod answer_labels;
+#[path = "backup_triggers.rs"]
+pub mod backup_triggers;
+#[path = "browser_config_conformance.rs"]
+pub mod browser_config_conformance;
+#[path = "card_excerpts.rs"]
+pub mod card_excerpts;
+#[path = "card_extractors.rs"]
+pub mod card_extractors;
+#[path = "catalog.rs"]
+pub mod catalog;
+#[path = "clock.rs"]
+pub mod clock;
+#[path = "cloud_checks.rs"]
+pub mod cloud_checks;
+#[path = "cloud_fake_service.rs"]
+pub mod cloud_fake_service;
+#[path = "cloud_media_checks.rs"]
+pub mod cloud_media_checks;
+#[path = "cloud_r1_regressions.rs"]
+pub mod cloud_r1_regressions;
+#[path = "cloud_schedule.rs"]
+pub mod cloud_schedule;
+#[path = "cloze_adapter.rs"]
+pub mod cloze_adapter;
+#[path = "compare.rs"]
+pub mod compare;
+#[path = "day_adapters.rs"]
+pub mod day_adapters;
+#[path = "deck_options_conformance.rs"]
+pub mod deck_options_conformance;
+#[path = "fsrs_next.rs"]
+pub mod fsrs_next;
+#[path = "fuzz_table.rs"]
+pub mod fuzz_table;
+#[path = "generate_cloud_small.rs"]
+pub mod generate_cloud_small;
+#[path = "generate_validity.rs"]
+pub mod generate_validity;
+#[path = "image_occlusion_adapter.rs"]
+pub mod image_occlusion_adapter;
+#[path = "live.rs"]
+pub mod live;
+#[path = "media_conformance.rs"]
+pub mod media_conformance;
+#[path = "memory.rs"]
+pub mod memory;
+#[path = "native_review.rs"]
+pub mod native_review;
+#[path = "next_states.rs"]
+pub mod next_states;
+#[path = "oracle_pool.rs"]
+pub mod oracle_pool;
+#[path = "overlay.rs"]
+pub mod overlay;
+#[path = "parties.rs"]
+pub mod parties;
+#[path = "prepared_batches.rs"]
+pub mod prepared_batches;
+#[path = "preservation_adapters.rs"]
+pub mod preservation_adapters;
+#[path = "preservation_dump.rs"]
+pub mod preservation_dump;
+#[path = "private.rs"]
+pub mod private;
+#[path = "queue_conformance.rs"]
+pub mod queue_conformance;
+#[path = "runner.rs"]
+pub mod runner;
+#[path = "scenario_format.rs"]
+pub mod scenario_format;
+#[path = "sched_ops_conformance.rs"]
+pub mod sched_ops_conformance;
+#[path = "search_adapter.rs"]
+pub mod search_adapter;
+#[path = "session_conformance.rs"]
+pub mod session_conformance;
+#[path = "stock_render_handoff.rs"]
+pub mod stock_render_handoff;
+#[path = "storage_adapters.rs"]
+pub mod storage_adapters;
+#[path = "tags_adapters.rs"]
+pub mod tags_adapters;
+#[path = "template_adapter.rs"]
+pub mod template_adapter;
+#[path = "text_adapter.rs"]
+pub mod text_adapter;
+#[path = "timing.rs"]
+pub mod timing;
+#[path = "type_answer_adapter.rs"]
+pub mod type_answer_adapter;
+#[path = "u28_conformance.rs"]
+pub mod u28_conformance;
