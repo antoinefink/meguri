@@ -112,6 +112,16 @@ public struct HomeView: View {
             DeckSearchFocus.request(collection, layout: searchLayout)
             return .handled
         }
+        // H9.2: O on a normal deck's page opens its Deck Options (N20.9).
+        .onKeyPress(keys: [KeyEquivalent("o")], phases: .down) { press in
+            guard press.modifiers.isEmpty, !press.phase.contains(.repeat), let deckID,
+                  collection.deckOptions.canOpen(deckID: deckID) else { return .ignored }
+            #if os(macOS)
+            guard homeKeyboardActive else { return .ignored }
+            #endif
+            collection.openDeckOptions(deckID: deckID)
+            return .handled
+        }
         .accessibilityIdentifier("home.collection.screen")
     }
     #if !os(macOS)

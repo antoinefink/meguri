@@ -52,6 +52,15 @@ struct DeckMenu: View {
                 }
                 .disabled(!collection.deckActions.canPresent(.subdeck(deck.id)))
                 .accessibilityIdentifier("home.deckMenu.subdeck.\(deck.id)")
+                // N20.9: the deck's options, normal decks only.
+                Button { collection.openDeckOptions(deckID: deck.id) } label: {
+                    Label { Text("Deck Options…", bundle: .module) } icon: { Image(systemName: "gearshape") }
+                }
+                #if os(macOS)
+                .keyboardShortcut("o", modifiers: [.command, .option])
+                #endif
+                .disabled(!collection.deckOptions.canOpen(deckID: deck.id))
+                .accessibilityIdentifier("home.deckMenu.options.\(deck.id)")
             }
         }
     }

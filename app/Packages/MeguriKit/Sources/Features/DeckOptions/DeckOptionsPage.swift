@@ -50,6 +50,8 @@ public struct DeckOptionsPage: View {
                 if let previous { model.commit(previous) }
             }
             .onAppear { model.locale = locale }
+            // Back with nothing changed ends the draft; the system's pop already left the page.
+            .onDisappear { if model.phase == .editing, !model.hasChanges { model.requestLeave() } }
     }
 
     @ViewBuilder private var content: some View {

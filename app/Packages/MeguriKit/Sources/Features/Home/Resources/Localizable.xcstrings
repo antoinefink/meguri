@@ -1020,6 +1020,17 @@
           }
         }
       }
+    },
+    "Deck Options…": {
+      "comment": "N20.9: the deck menu's entry to the Deck Options page.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deck Options…"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

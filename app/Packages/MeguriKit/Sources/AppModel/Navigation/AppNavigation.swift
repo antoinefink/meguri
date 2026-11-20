@@ -121,6 +121,14 @@ public final class AppNavigation {
         setPath(path(section) + [destination], for: section)
     }
 
+    /// N20.9: back from Deck Options to its deck page, once.
+    public func popDeckOptions(_ deck: DeckID) {
+        var current = path(section)
+        guard case .deckOptions(deck)? = current.last else { return }
+        current.removeLast()
+        setPath(current, for: section)
+    }
+
     /// The deck whose page the Home section shows, if it shows one.
     public var homeDeckPage: DeckID? {
         showsDeckPage ? selectedDeck : nil

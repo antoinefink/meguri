@@ -1,4 +1,5 @@
 import AppModel
+import DeckOptions
 import DesignSystem
 import Editor
 import Home
@@ -36,6 +37,8 @@ struct ShellFeatures {
     var availableSections: [AppSection] = AppSection.sidebar
     var syncStatus: () -> AnyView = { AnyView(EmptyView()) }
     var settingsPage: (SettingsPage) -> AnyView = { _ in AnyView(EmptyView()) }
+    /// N20.9: the Deck Options page pushed on a deck page.
+    var deckOptions: (DeckID, AppNavigation) -> AnyView = { _, _ in AnyView(EmptyView()) }
     var addPanel: () -> AnyView = { AnyView(EmptyView()) }
     /// N17.2: Import opens the file picker on the presenting window, before any sheet.
     var collectionEntry: CollectionEntryCoordinator?
@@ -76,6 +79,9 @@ struct ShellFeatures {
         features.syncStatus = { AnyView(CloudSyncStatusButton(collection: collection)) }
         features.settingsPage = { AnyView(SettingsPageView(collection: collection, page: $0)) }
         features.deckPage = { deck, _ in AnyView(HomeView(collection: collection, deckID: deck.rawValue)) }
+        features.deckOptions = { deck, navigation in
+            AnyView(DeckOptionsPage(model: collection.deckOptions) { navigation.popDeckOptions(deck) })
+        }
         features.sidebarDecks = { _ in AnyView(HomeSidebarDecks(collection: collection)) }
         features.sidebarSearch = { list in AnyView(HomeSidebarDeckSearch(collection: collection) { list }) }
         features.deckNameBesideList = { AnyView(DeckNameForm(model: collection.deckActions, embedded: true)) }
@@ -124,12 +130,14 @@ struct SectionDestinationView: View {
     enum Screen: Hashable {
         case root(AppSection)
         case deckPage(DeckID)
+        case deckOptions(DeckID)
         case settingsPage(SettingsPage)
 
         /// The screen a pushed destination shows.
         init(_ destination: Destination) {
             switch destination {
             case let .deckPage(deck): self = .deckPage(deck)
+            case let .deckOptions(deck): self = .deckOptions(deck)
             case .noteTypes: self = .root(.noteTypes)
             case .settingsPage(let page): self = .settingsPage(page)
             }
@@ -144,6 +152,7 @@ struct SectionDestinationView: View {
         switch screen {
         case let .root(section): features.sectionRoot(section, navigation)
         case let .deckPage(deck): features.deckPage(deck, navigation)
+        case let .deckOptions(deck): features.deckOptions(deck, navigation)
         case let .settingsPage(page): features.settingsPage(page)
         }
     }

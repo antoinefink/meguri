@@ -79,6 +79,10 @@ struct NativeCommandContext {
     }
     var canRenameShownDeck: Bool { shownDeck.map { collection.deckActions.canPresent(.rename($0), host: host) } ?? false }
     var canAddSubdeck: Bool { shownDeck.map { collection.deckActions.canPresent(.subdeck($0), host: host) } ?? false }
+    var canOpenDeckOptions: Bool {
+        guard host == .main, review == nil, collection.navigation.sheet == nil, let deck = shownDeck else { return false }
+        return collection.deckOptions.canOpen(deckID: deck)
+    }
 
     // MARK: Card
 
@@ -216,6 +220,13 @@ struct AppCommands: Commands {
                 context.collection.deckActions.present(.subdeck(deck), host: context.host)
             }
             .disabled(context?.canAddSubdeck != true)
+            // N20.9: the shown normal deck's options; disabled during review.
+            Button("Deck Options…") {
+                guard let context, let deck = context.shownDeck, context.canOpenDeckOptions else { return }
+                context.collection.openDeckOptions(deckID: deck)
+            }
+            .keyboardShortcut("o", modifiers: [.command, .option])
+            .disabled(context?.canOpenDeckOptions != true)
         }
         CommandMenu("Card") {
             Button("Show Answer") {

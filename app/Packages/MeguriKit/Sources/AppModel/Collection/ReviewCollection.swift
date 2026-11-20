@@ -249,6 +249,18 @@ public final class ReviewCollection: ChangeFanoutSink {
         deckOptionsOwner = value
         return value
     }
+    /// N20.9's entries: the deck's page, then its Deck Options pushed on it.
+    public func openDeckOptions(deckID: Int64) {
+        guard deckOptions.canOpen(deckID: deckID) else { return }
+        Task {
+            if navigation.section != .home || navigation.homeDeckPage?.rawValue != deckID {
+                guard await openDeckPage(deckID: deckID).value else { return }
+            }
+            guard deckOptions.canOpen(deckID: deckID) else { return }
+            deckOptions.open(deckID: deckID)
+            navigation.setPath([.deckOptions(DeckID(deckID))], for: .home)
+        }
+    }
     /// Deck Options reads and saves under the deck name writers' admission.
     var deckOptionsAllowed: Bool {
         deckNamesAllowed(host: .main, route: nil) && deckNamesOwner?.busy != true
