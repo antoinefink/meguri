@@ -28,7 +28,10 @@ struct SyncSettingsSections: View {
                     get: { sync.automaticSwitchValue }, set: { sync.setAutomatic($0) }))
                     .disabled(!sync.automaticSwitchAvailable)
                     .accessibilityIdentifier("settings.sync.automatic")
-                SyncNowButton(collection: collection, identifier: "settings.sync.syncNow")
+                // Until the service is connected the status row says what is missing; the
+                // not-connected reason ("Sync is off…") would contradict the Service row.
+                SyncNowButton(collection: collection, identifier: "settings.sync.syncNow",
+                    showsUnavailableReason: sync.serviceConnected)
             }
         } header: {
             Text(SyncText.value("sync.settings.sync.section"))
