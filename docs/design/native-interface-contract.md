@@ -765,7 +765,7 @@ The menu bar, in order: Meguri, File, Edit, View, Deck, Card, Window, Help. The 
 | Card | Show Answer | Space | review shows a question side |
 | Card | Again, Hard, Good, Easy | 1, 2, 3, 4 | review shows an answer side |
 | Card | Back to Decks | Esc | during review |
-| Card | Edit Note | ⌘E | arrives with the Edit Note unit; during review |
+| Card | Edit Note | ⌘E | a card is presented, on either side; N20.8 |
 
 - Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo and Paste; Deck after Study, New Subdeck… and Delete Deck; Card after Show Answer, Easy and Back to Decks. A separator with nothing after it yet is left out.
 - The Deck menu acts on the deck the workspace shows: the sidebar's selection (Mac, iPad), or the deck page shown (tab layout). With none (Today, the welcome, review) its items are disabled.
@@ -807,7 +807,7 @@ The English text of the screens above. "New" marks text not used before this rou
 | Find… | Edit menu | new |
 | Deck Options… | the Deck menu | with its unit |
 | Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
-| Edit Note | the Card menu | with its unit |
+| Edit Note | the Card menu, the card's context menu (Mac), the touch review toolbar button, the form's title | N20.8 |
 
 - No longer used: "Go to Deck…", "Create Deck", "Overview", "Deck Actions", "Deck name", "Rename Deck…", "Close Review", the Study menu's title and its "Undo Answer" and "Redo Answer" items (Edit's Undo still reads "Undo Answer" after an answer, R173), "Import…", "Export…".
 
@@ -845,3 +845,15 @@ Decided 2026-11-20 (`decisions.md`, `home.deckActions`, option 4B). The operatio
 - While the delete runs, the deck's menu items and the Deck menu are disabled.
 - Strings, all new: `Delete “%@”?`, the six messages above (a String Catalog entry with plural variations for S and C), "Delete Deck", "Delete" (Mac alert), "Cancel", `Couldn’t Delete “%@”`, "Meguri couldn’t make a backup first, so nothing was deleted.", "Nothing was deleted.", "OK", and Edit's "Undo Delete Deck" and "Redo Delete Deck" (R173's pattern).
 - Replaces: R66's toast "Deleted <deck> (N cards)" with Undo (no toast); `home.deckMenu`'s "deletes … end with an Undo toast"; R67 stays as D8.5 states it.
+
+### N20.8 Edit Note during a review
+
+Decided 2026-11-20 (`decisions.md`, `review.editNote`, option 7A). The review side is `review/edit-current`; the card browser is not part of this round.
+
+- Touch: the review toolbar gains an Edit Note button, the `pencil` symbol labelled "Edit Note", after Undo (and Redo when there is one) and before the sync status button (N16.2). Mac: Card › Edit Note (⌘E) and the card's context menu; no toolbar button, as with Undo (N11.1). The E key opens it on every platform (`review/commands`). All are enabled while a card is presented, on either side, and disabled in the waiting, paused, finished and loading states.
+- It opens round 5's Add Note form (N17.1) on the current card's note, titled "Edit Note", with Cancel and Done. Its first group, Deck and Type, is replaced by the navigation bar's subtitle "<deck> · <note type>": the card's deck by its last name component, and the note type's name. Neither can be changed here. The fields, the HTML control and the tags are N17.1's; the first field has focus.
+- Placement, as Add Note's: iPhone, and the iPhone Duo folded or held tall, a sheet; the Duo held wide (any iPhone at regular width), the whole screen with the form in a centred column of the readable width; iPad, the system page sheet; Mac, a panel over the card, as Add Note's panel during a review, which owns the keys (N11.1). A fold or unfold moves the same draft to the other presentation.
+- Changes are a draft. Done saves them with one note update (`review/edit-current#E2`) and closes; the card is shown again, re-rendered, at the same place in the session, with its timing and undo history kept (E3). Done with no change closes. Cancel, Esc, ⌘W and the swipe down close without saving; with a change they first ask "Discard changes?" with Discard (destructive) and Keep Editing (`editor/editing-strings`, the wording of the editors that save on confirm). ⌘Return is Done on Mac.
+- Later, not now: when Bury, Suspend and Flag arrive, the pencil becomes a ⋯ menu that holds Edit Note first.
+- Strings: "Edit Note" (exists, `review.menu.editNote`), "<deck> · <note type>" with " · " (space, U+00B7, space) between them (new), "Done", "Cancel", "Discard changes?", "Discard", "Keep Editing" (all existing).
+- Replaces: R394's iPad "trailing inspector" and its panel as U190's editor in edit mode; R397's Close button (now Cancel and Done); R824 and R863's Esc that saves, for this form (`editor/edit-flows` W3 now names Browse's pane only); the touch review toolbar of N16.2 ("Close and Undo"), which gains this button; `review.editCurrent`'s purpose.

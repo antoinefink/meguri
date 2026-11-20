@@ -67,7 +67,7 @@ the others use the pairwise set (U252).
 - `review.menu`: In-place card actions (bury, suspend, flag, mark, edit) and their toasts.
 - `review.setDueDate`: Set the current card's due date from the review screen.
 - `review.forget`: Reset the current card to new with its two remembered options.
-- `review.editCurrent`: Edit the note of the card under review without leaving the session.
+- `review.editCurrent`: Edit the note of the card under review without leaving the session (native-interface-contract N20.8, review/edit-current; decided 2026-11-20): round 5's Add Note form titled "Edit Note", with Cancel and Done and the subtitle "<deck> · <note type>", which cannot be changed here. Opened from the touch review toolbar's pencil button, Card › Edit Note (⌘E) and the card's context menu on Mac, and E. iPhone and the Duo folded or held tall: a sheet; the Duo held wide: the whole screen with a centred column; iPad: a page sheet; Mac: a panel over the card. Changes are a draft: Done saves them in one note update and returns to the same card, re-rendered; Cancel asks "Discard changes?" when there is a change. Error: a failed save keeps the form open with its text and the reason. Overflow: long fields scroll in the form.
 - `review.congratulations`: The end of a session (native-interface-contract N16.5), with the number of cards studied, the time, and Done.
 
 ## editor
