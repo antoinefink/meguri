@@ -1,0 +1,69 @@
+//! `review/edit-current` E2: the review's Edit Note saves as a step of the
+//! review session, so the session's Undo covers it, admitted only for the
+//! open session.
+mod session_support;
+use meguri_engine::{SessionId, StepKind, UndoScope, UndoStatus, notes};
+use meguri_model::ids::NoteId;
+use meguri_storage::{ReadRows, ReaderRole};
+
+fn patch(h: &session_support::Harness, note: NoteId, back: &str) -> notes::NotePatch {
+    let r = h.collection.reader(ReaderRole::Query).unwrap();
+    let stored = r.note(note).unwrap().unwrap();
+    let layout = r
+        .notetype(stored.notetype_id)
+        .unwrap()
+        .unwrap()
+        .fields
+        .iter()
+        .map(|field| notes::AddFieldIdentity {
+            ord: field.ord,
+            id: field.config.id,
+            name: field.name.clone(),
+        })
+        .collect();
+    notes::NotePatch {
+        id: note,
+        notetype_id: stored.notetype_id,
+        field_layout: layout,
+        fields: vec![(1, back.to_owned())],
+        tags: None,
+    }
+}
+
+fn back(h: &session_support::Harness, note: NoteId) -> String {
+    let stored = h.collection.reader(ReaderRole::Query).unwrap().note(note).unwrap().unwrap();
+    stored.field_values().nth(1).unwrap().to_owned()
+}
+
+#[test]
+fn the_reviews_edit_is_a_step_of_its_session_and_its_undo_restores_the_note() {
+    let h = session_support::Harness::new(3);
+    let (id, head) = h.start();
+    let note = head.items[0].note_id;
+    let before = back(&h, note);
+    let saved = h.review.patch_note(patch(&h, note, "edited"), id).unwrap();
+    assert!(saved.value.written);
+    assert_eq!(back(&h, note), "edited");
+    match h.collection.peek_undo(UndoScope::Session(id)).unwrap() {
+        UndoStatus::Available(step) => {
+            assert_eq!(step.session, Some(id));
+            assert_eq!(step.kind, StepKind::Other);
+            assert_eq!(step.name, "Update Note");
+        }
+        other => panic!("the session's undo offers the edit: {other:?}"),
+    }
+    h.review.undo(UndoScope::Session(id)).unwrap();
+    assert_eq!(back(&h, note), before, "Undo restores the note");
+    h.review.end(id).unwrap();
+}
+
+#[test]
+fn an_edit_naming_no_open_session_is_refused_and_writes_nothing() {
+    let h = session_support::Harness::new(2);
+    let (id, head) = h.start();
+    let note = head.items[0].note_id;
+    let before = back(&h, note);
+    assert!(h.review.patch_note(patch(&h, note, "edited"), SessionId(id.0 + 100)).is_err());
+    assert_eq!(back(&h, note), before);
+    h.review.end(id).unwrap();
+}

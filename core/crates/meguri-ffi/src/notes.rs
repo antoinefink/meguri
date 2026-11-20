@@ -173,7 +173,9 @@ pub struct NotePatchRequest {
     pub tags: Option<Vec<String>>,
 }
 #[uniffi::export]
-pub fn patch_note(request: NotePatchRequest) -> Result<NoteMutation, CoreError> {
+/// `session_id`: the open review session when the review's Edit Note saves
+/// (`review/edit-current` E2); the step then belongs to that session.
+pub fn patch_note(request: NotePatchRequest, session_id: Option<u64>) -> Result<NoteMutation, CoreError> {
     callback::enter("patch_note");
     let id = NoteId(request.id);
     let input = notes::NotePatch {
@@ -187,7 +189,11 @@ pub fn patch_note(request: NotePatchRequest) -> Result<NoteMutation, CoreError> 
         fields: request.fields.into_iter().map(|field| (field.ord, field.html)).collect(),
         tags: request.tags,
     };
-    let r = notes::patch(&runtime::host()?.collection()?, input, OpSource::UserUndoable)?;
+    let host = runtime::host()?;
+    let r = match session_id {
+        Some(session) => host.review().patch_note(input, meguri_engine::SessionId(session))?,
+        None => notes::patch(&host.collection()?, input, OpSource::UserUndoable)?,
+    };
     Ok(NoteMutation::with_cards(MutationSummary::of(&r), id, r.value.cards, r.value.written))
 }
 /// The deck a card is in now (`review/edit-current` E1's subtitle).

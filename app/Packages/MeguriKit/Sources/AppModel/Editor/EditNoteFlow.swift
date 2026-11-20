@@ -126,7 +126,8 @@ public final class EditNoteFlow {
                 guard let patch = draft.patch() else { finish(saved: false); return true }
                 patchInFlight = true
                 let result: NoteMutation
-                do { result = try await CoreNoteService().patchNote(patch) }
+                // E2: the save is a step of the review session, so the review's Undo covers it.
+                do { result = try await CoreNoteService().patchNote(patch, sessionID: session?.sessionID) }
                 catch { patchInFlight = false; throw error }
                 ownPatches.insert(result.summary.seq); patchInFlight = false
                 await afterPatching?(result)

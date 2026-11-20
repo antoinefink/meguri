@@ -976,6 +976,58 @@ impl ReviewService {
         })?;
         Ok(result)
     }
+    /// `review/edit-current` E2: Edit Note's save from the review, admitted
+    /// as a card action is (the open session, not ending or restoring; answers
+    /// in flight drained first) and recorded as a step of that session, so the
+    /// review's Undo covers it. The session reacts to the committed change
+    /// through its observer, as to any other change.
+    pub fn patch_note(
+        &self,
+        input: crate::notes::NotePatch,
+        session: SessionId,
+    ) -> Result<crate::OpResult<crate::notes::Updated>, EngineError> {
+        let _control = self.control.try_acquire()?;
+        let (c, journal) = self.bound()?;
+        journal.check(c.generation())?;
+        {
+            let mut state = self.inner.state.lock().unwrap();
+            if state.paused || state.mutating {
+                return Err(EngineError::unavailable("review admission is closed"));
+            }
+            let s = state.session.as_ref().filter(|s| s.id == session).ok_or_else(no_session)?;
+            if s.ending || s.restoring || s.failed.load(Ordering::Acquire) {
+                return Err(EngineError::unavailable("review is restoring"));
+            }
+            state.mutating = true;
+        }
+        struct MutationAdmission<'a>(&'a Mutex<State>);
+        impl Drop for MutationAdmission<'_> {
+            fn drop(&mut self) {
+                self.0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .mutating = false;
+            }
+        }
+        let _admission = MutationAdmission(&self.inner.state);
+        self.drain_until(crate::monotonic::now() + Duration::from_secs(5))?;
+        let result = crate::notes::patch_for(&c, input, meguri_model::changes::OpSource::UserUndoable, Some(session))?;
+        // A new step of the session: what was undone can no longer be redone.
+        let projected = (|| {
+            let (tx, rx) = mpsc::sync_channel(1);
+            self.inner.tx.send(Work::ApplicationBarrier(tx)).map_err(invalid)?;
+            rx.recv().map_err(invalid)?;
+            if let Some(s) = self.inner.state.lock().unwrap().session.as_mut() {
+                s.redo.clear();
+            }
+            Ok::<_, EngineError>(())
+        })();
+        projected.map_err(|error| EngineError::CommitCompleted {
+            seq: result.seq,
+            message: error.to_string(),
+        })?;
+        Ok(result)
+    }
     pub fn head(&self, id: SessionId, count: usize) -> Result<Head, EngineError> {
         if !(1..=10).contains(&count) {
             return Err(invalid("head count must be 1..10"));

@@ -234,6 +234,13 @@ extension ReviewCollectionStartupTests {
             await review.settled()
             #expect(review.item?.cardId == card && review.phase == .question && review.record.answers.isEmpty)
             #expect(owner.review === review && review.canReveal)
+            // N20.8: the review's own Undo covers the saved edit ("Undo Edit Note") and restores the note.
+            if case .available(let step) = review.undoStatus {
+                #expect(ReviewStepNames.display(step.name) == "Edit Note")
+            } else { Issue.record("The review's Undo offers the saved edit: \(review.undoStatus)") }
+            review.restore(); await review.settled()
+            #expect(try await stored().first != "Mine", "Undo restores the note")
+            #expect(review.item?.cardId == card && review.record.answers.isEmpty)
 
             await owner.finishReview()
             #expect(await owner.close())
