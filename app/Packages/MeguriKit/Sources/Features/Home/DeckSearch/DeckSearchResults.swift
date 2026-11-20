@@ -185,7 +185,11 @@ public struct HomeSidebarDeckSearch<Content: View>: View {
             #endif
             if let target { DeckSearchActivation.activate(target, collection: collection, search: search, layout: .sidebar) }
         }
-        .onChange(of: search.focusRequest) { _, _ in focused = true }
+        .onChange(of: search.focusRequest, initial: true) { _, _ in
+            guard search.focusPending else { return }
+            focused = true
+            search.focusTaken()
+        }
         .onChange(of: collection.navigation.homeDeckPage) { _, deck in
             // The opened deck shows highlighted among the results.
             if let deck, search.query != nil { search.chosen = .deck(deck.rawValue) }

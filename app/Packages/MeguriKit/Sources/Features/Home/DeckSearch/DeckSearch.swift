@@ -118,7 +118,11 @@ public final class DeckListSearch {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return query.isEmpty ? nil : query
     }
-    public func requestFocus() { focusRequest &+= 1 }
+    /// A request the field has not taken yet: a sidebar that was hidden takes it
+    /// when it appears.
+    public private(set) var focusPending = false
+    public func requestFocus() { focusPending = true; focusRequest &+= 1 }
+    public func focusTaken() { focusPending = false }
 
     // MARK: Whether a deck has the typed name (D18)
 
