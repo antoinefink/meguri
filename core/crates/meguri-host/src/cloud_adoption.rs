@@ -221,8 +221,19 @@ impl CoreHost {
             .ok_or_else(unavailable)?
             .connection_setup_decision(preview, self.cloud_setup_other_service())
     }
+    /// V27.2: "A review session refuses it with `SessionActive`". Every
+    /// no-question start is part of choosing iCloud, so each one refuses
+    /// while a review session is open and starts nothing. The sheet's
+    /// confirmations keep their own V20 rules.
+    fn refuse_setup_start_during_review(&self) -> Result<(), RuntimeError> {
+        if self.review().active_session().is_some() {
+            return Err(RuntimeError::Engine(meguri_engine::EngineError::SessionActive));
+        }
+        Ok(())
+    }
     /// Rows 2 and 5 of V27.2, with no confirmation.
     pub fn start_cloud_setup_adoption(&self, preview: &Preview) -> Result<[u8; 16], RuntimeError> {
+        self.refuse_setup_start_during_review()?;
         self.cloud_runtime().ok_or_else(unavailable)?.start_setup_adoption(
             preview,
             self.cloud_setup_other_service(),
@@ -236,6 +247,7 @@ impl CoreHost {
         preview: &Preview,
         generation: meguri_engine::Generation,
     ) -> Result<[u8; 16], RuntimeError> {
+        self.refuse_setup_start_during_review()?;
         if self.cloud_connection_generation()? != generation {
             return Err(RuntimeError::StaleIncarnation);
         }
@@ -255,6 +267,7 @@ impl CoreHost {
         preview: &Preview,
         generation: meguri_engine::Generation,
     ) -> Result<(), RuntimeError> {
+        self.refuse_setup_start_during_review()?;
         if self.cloud_connection_generation()? != generation {
             return Err(RuntimeError::StaleIncarnation);
         }

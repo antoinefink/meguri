@@ -5562,6 +5562,48 @@ fn stopped_resume_reaffirmation_requires_accepted_read_and_current_original_auth
     }
 }
 
+/// V27.2: a review session refuses choosing iCloud with `SessionActive`, so
+/// each no-question setup start refuses and starts nothing.
+#[test]
+fn a_review_session_refuses_every_setup_start_and_changes_nothing() {
+    use cloud::entity_codec::{Kind, Payload};
+    use meguri_engine::session::StartResult;
+    use meguri_model::ids::DeckId;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("setup-during-review");
+    generated(&dir);
+    let host = open_prior_icloud_host(&dir, keys());
+    let mut service = Service::open(temp.path(), Config::default(), SeededRandom::new(733)).unwrap();
+    publish_actual_collection(&host, &mut service);
+    let runtime = host.cloud_runtime().unwrap();
+    let card = runtime.entity_facts_page(Kind::Card, None).unwrap().remove(0);
+    let Payload::Card(card) = card.payload else {
+        panic!("published card")
+    };
+    runtime.adapter_stop_syncing().unwrap();
+    let preview = actual_preview(&host, &mut service, &scope());
+    assert_eq!(preview.decision, ConnectDecision::ConfirmResume);
+    let generation = host.cloud_connection_generation().unwrap();
+    let before = runtime.status().unwrap().binding;
+    let StartResult::Started { session_id, .. } = host.review().start(DeckId(card.did), None).unwrap() else {
+        panic!("the local collection is reviewable")
+    };
+    let refused = |result: Result<(), cloud::runtime::RuntimeError>| {
+        assert!(matches!(
+            result,
+            Err(cloud::runtime::RuntimeError::Engine(meguri_engine::EngineError::SessionActive))
+        ));
+    };
+    refused(host.start_cloud_setup_resume(&preview, generation));
+    refused(host.start_cloud_setup_publication(&preview, generation).map(drop));
+    refused(host.start_cloud_setup_adoption(&preview).map(drop));
+    assert!(runtime.publication_op().unwrap().is_none() && runtime.adoption_op().unwrap().is_none());
+    assert_eq!(runtime.status().unwrap().binding, before);
+    host.review().end(session_id).unwrap();
+    host.close().unwrap();
+}
+
 /// Retained authority refuses stale explicit actions without changing the binding.
 #[test]
 fn resume_proof_refuses_changed_account_file_fence_operation_and_replaced_preview() {

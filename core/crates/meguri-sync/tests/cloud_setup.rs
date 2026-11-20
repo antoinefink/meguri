@@ -826,6 +826,7 @@ fn after_the_other_service_both_buttons_of_the_sheet_work_over_a_binding_that_co
             assert_eq!((before.id, before.state), (bound, BindingState::Isolated(IsolationReason::Stopped)));
             // The confirmation consumed the preview: the other button is gone.
             assert!(rig.confirm_publication(&preview).is_err());
+            assert!(rig.setup_decision(&preview, OtherServiceHistory::ReadySinceStop).is_err());
             rig.drive_ready(&mut service, STEPS).unwrap();
             let facts = rig.facts().unwrap();
             assert!(facts.recovery_ops.is_empty());

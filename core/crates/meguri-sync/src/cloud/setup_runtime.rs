@@ -77,6 +77,15 @@ impl Runtime {
         if s.publication.preview.as_ref() != Some(&(preview.clone(), true)) {
             return Err(PublicationError::AuthorityChanged.into());
         }
+        // A Resume preview whose retained resume context was dropped (a
+        // status pass whose provider validation failed drops it) can no
+        // longer resume: no row is computed for it, and a fresh preview
+        // gives the current one.
+        if preview.decision == ConnectDecision::ConfirmResume
+            && s.publication.resume.as_ref().map(|context| context.binding.id) != preview.resume_binding
+        {
+            return Err(PublicationError::AuthorityChanged.into());
+        }
         let bindings =
             with_tracking_access(|| retained_setup_bindings(s.store.as_ref(), preview.native_file.is_some()))?;
         let local = match (preview.native_file, preview.local_content) {

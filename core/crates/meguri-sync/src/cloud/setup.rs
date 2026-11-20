@@ -223,7 +223,14 @@ pub fn decide(inputs: &SetupInputs) -> SetupDecision {
     let local = match (inputs.local, inputs.cloud) {
         // An unreadable `MGActive` proves nothing about iCloud: never a row.
         (_, CloudSide::Unreadable) => return ask(AskReason::CloudUnreadable),
+        // V27.4: the fence shows the sheet whatever the two sides hold.
+        (LocalSide::Absent, _) if inputs.fence_pending => return ask(AskReason::Fence),
         (LocalSide::Absent, CloudSide::NoActive) => return run(SetupRow::CreateAndPublish),
+        // V27.6: another account's binding asks also when this device has
+        // no collection; the sheet then offers only the iCloud collection.
+        (LocalSide::Absent, CloudSide::Complete(_)) if inputs.other_account_binding => {
+            return ask(AskReason::OtherAccount);
+        }
         (LocalSide::Absent, CloudSide::Complete(_)) => return run(SetupRow::AdoptInitial),
         (LocalSide::Present(local), _) => local,
     };
@@ -366,6 +373,9 @@ mod tests {
         }
         all
     }
+    fn asks(d: SetupDecision) -> (SetupRow, SetupQuestion, Option<AskReason>, bool, bool) {
+        (d.row, d.question, d.reason, d.keep_device_offered, d.keep_cloud_offered)
+    }
     fn silent(row: SetupRow) -> SetupDecision {
         SetupDecision {
             row,
@@ -448,6 +458,25 @@ mod tests {
                 keep_cloud_offered: true,
             }
         );
+    }
+    #[test]
+    fn with_no_local_collection_the_fence_and_another_account_still_ask() {
+        for cloud in [CloudSide::NoActive, CloudSide::Complete(NoContent), CloudSide::Complete(Holds)] {
+            let mut i = inputs(LocalSide::Absent, cloud);
+            i.fence_pending = true;
+            let d = decide(&i);
+            assert_eq!((d.row, d.question, d.reason), (SetupRow::KeepCollection, SetupQuestion::Keep, Some(AskReason::Fence)));
+            assert!(!d.keep_device_offered && d.keep_cloud_offered == (cloud != CloudSide::NoActive));
+        }
+        for cloud in [NoContent, Holds] {
+            let mut i = inputs(LocalSide::Absent, CloudSide::Complete(cloud));
+            i.other_account_binding = true;
+            // The one-direction form: only the iCloud collection can be kept.
+            assert_eq!(
+                asks(decide(&i)),
+                (SetupRow::KeepCollection, SetupQuestion::Keep, Some(AskReason::OtherAccount), false, true)
+            );
+        }
     }
     #[test]
     fn the_fence_and_an_unproved_layout_always_show_the_sheet() {
@@ -593,7 +622,9 @@ mod tests {
                 ),
                 SetupRow::KeepCollection => panic!("row 7 always asks: {i:?}"),
             }
-            assert!(!i.fence_pending && !i.layout_unproved || i.local == LocalSide::Absent, "{i:?}");
+            assert!(!i.fence_pending, "{i:?}");
+            // The layout is this device's: with no collection it is not read.
+            assert!(!i.layout_unproved || i.local == LocalSide::Absent, "{i:?}");
         }
     }
     /// The other direction of the same rule: two sides that are not proved
@@ -648,6 +679,7 @@ mod tests {
                 }
                 (SetupRow::AdoptInitial, Some(SilentStart::AdoptionInitial)) => {
                     assert!(i.local == LocalSide::Absent && matches!(i.cloud, CloudSide::Complete(_)), "{i:?}");
+                    assert!(!i.fence_pending && !i.other_account_binding, "{i:?}");
                     admitted[1] += 1;
                 }
                 (SetupRow::AdoptOverNoContent, Some(SilentStart::AdoptionOverNoContent)) => {
