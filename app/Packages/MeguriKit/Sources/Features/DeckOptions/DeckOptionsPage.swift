@@ -249,8 +249,7 @@ public struct DeckOptionsPage: View {
     }
 
     private func save() {
-        // O15.3: the field being edited is committed before the save.
-        if let focused { model.commit(focused) }
+        // O15.3: the model commits the field being edited, then validates it, before it saves.
         model.save()
     }
 

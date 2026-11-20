@@ -127,6 +127,11 @@ import Testing
         // The correction is still in the field: Save commits and validates it first.
         model.fieldText[.desiredRetention] = "85%"
         #expect(model.canSave)
+        // The page's ⌘S, ⌘↩ and Save may run after the field committed itself
+        // (focus left it): the old error still shows until validation, and
+        // Save checks only after it.
+        model.commit(.desiredRetention)
+        #expect(model.issues(for: .desiredRetention).contains { $0.severity == .error })
         model.save(); await model.waitForCompletion()
         #expect(model.outcome == .saved)
         // A correction that still fails keeps the page, with its error.
@@ -294,9 +299,11 @@ import Testing
         let gate = PageGate()
         core.saveGate = gate
         model.save()
-        // The save was admitted: without this the wait below would never end.
+        // The save was admitted, and a save that ends before the gate fails the test.
         try #require(model.phase == .saving)
+        Task { await model.waitForCompletion(); gate.abandon() }
         await gate.entered()
+        try #require(!gate.abandoned, "the save reached the core")
         #expect(model.phase == .saving && !owner.canStudy && !owner.deckActions.canPresent(.create))
         #expect(!model.requestLeave() && !model.canOpen(deckID: 2))
         gate.release(); await model.waitForCompletion()
@@ -431,10 +438,13 @@ final class PageGate {
     private var didEnter = false
     private var entry: CheckedContinuation<Void, Never>?
     private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var abandoned = false
     func entered() async {
-        if didEnter { return }
+        if didEnter || abandoned { return }
         await withCheckedContinuation { entry = $0 }
     }
+    /// The save ended without reaching the gate: the wait ends, so the test fails instead of hanging.
+    func abandon() { if !didEnter { abandoned = true; entry?.resume(); entry = nil } }
     func hold() async {
         await withCheckedContinuation {
             continuation = $0; didEnter = true; entry?.resume(); entry = nil

@@ -403,9 +403,11 @@ public final class DeckOptionsPageModel {
     /// O17.3's save, after committing the field being edited (O15.3). On
     /// success the page closes with `.saved`.
     public func save() {
-        let allowed = canSave
+        // Errors are checked after the commits below are validated (in the
+        // task): a correction just committed must not meet its old error.
         commitAll()
-        guard allowed, let session, let owner else { return }
+        guard phase == .editing, hasChanges, let session, let owner,
+              owner.generation == generation, owner.deckOptionsAllowed else { return }
         phase = .saving; saveFailure = nil; saveCancelled = false; leftWhileSaving = false
         let current = revision, expected = generation
         task = Task {
