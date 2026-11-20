@@ -138,9 +138,10 @@ jobs:
 
   # Builds the dev image once per change of its inputs and shares it through
   # GitHub Container Registry, tagged with a hash of those inputs
-  # (.github/dev-image.sh names them). Master pushes, the schedule and manual
-  # runs on master push to meguri-dev; pull requests reuse that image or push
-  # to meguri-dev-pr, which master never reads. Jobs pull it and tools/mg uses it
+  # (.github/dev-image.sh names them and explains the trust). Master runs
+  # push to meguri-dev and record the digest in a master-only cache entry;
+  # every run takes master's image by that digest. Pull requests without a
+  # record push to meguri-dev-pr, which master never reads. Jobs pull it and tools/mg uses it
   # instead of building (MEGURI_CI_DEV_IMAGE). An empty ref (cold runs, fork
   # pull requests that cannot push, a registry failure) makes each job build
   # the image itself, as before.
@@ -161,6 +162,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Hash the image inputs
+        id: hash
+        shell: bash
+        run: |
+          hash="$(.github/dev-image.sh hash)"
+          echo "hash=$hash" >>"$GITHUB_OUTPUT"
+
+      # The digest of master's image of this hash. Only master runs save it,
+      # so a pull request cannot change which image master uses.
+      - name: Restore the record of master's image
+        if: github.event_name != 'schedule' && inputs.cold != true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/dev-image-digest
+          key: dev-image-v1-${{ steps.hash.outputs.hash }}
+
       - name: Find or build the dev image
         id: image
         shell: bash
@@ -169,7 +186,15 @@ jobs:
           CAN_PUSH: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           TRUSTED: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/master' }}
           TOKEN: ${{ github.token }}
+          DIGEST_FILE: ${{ runner.temp }}/dev-image-digest
         run: .github/dev-image.sh ensure
+
+      - name: Save the record of master's image
+        if: steps.image.outputs.record == 'yes'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/dev-image-digest
+          key: dev-image-v1-${{ steps.hash.outputs.hash }}
 
   core-shard:
     name: Linux · core · shard ${{ matrix.shard }}/${{ strategy.job-total }}
