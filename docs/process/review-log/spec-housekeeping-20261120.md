@@ -81,3 +81,19 @@ Welcome, Settings › Import Collection and the Mac's Import Collection…
 command on master, the three "text not built" marks against the setup-fix
 branch, and "started or joined" against `StudyPreparation.prepare(for:)`.
 Verdict: clean.
+
+## AI reviewer on pull request 5
+
+CodeRabbit posted four comments. All four were taken:
+
+- F5.2 during the open-time wait: added. A read during F5.1's wait leaves
+  the job waiting.
+- The MP6.9 table row marked "changed 2026-11-20": now named in the Status
+  line.
+- `media_usn` 0: now cites `sync/server-media#M3`. Every effective media
+  change takes the next USN, the USN never wraps, and tombstones are kept.
+- The exclusion released on "neither" (and the premise of "not accepted"):
+  recorded as an open point for Antoine in MP6.9. The server contract does
+  not bound a late commit after a disconnect. The rule stays as built and as
+  approved on 2026-11-19, because changing it needs Antoine and possibly a
+  server capability.
