@@ -818,6 +818,72 @@ fn adoption_preview(connection: &CloudConnection) -> (Arc<CloudConnectionPreview
     assert!(summary.manifest_counts.is_some());
     (preview, active)
 }
+/// V27.2 row 2 through the bridge: no collection here and a complete epoch
+/// starts the adoption with no confirmation call, as a confirmed op would.
+#[test]
+fn setup_start_adopts_into_a_device_with_no_collection_with_no_question() {
+    let fixture = Fixture::without_collection(Keys::new([]));
+    let connection = fixture.workflow.connection().unwrap();
+    let (preview, active) = adoption_preview(&connection);
+    let setup = connection.setup_decision(preview.clone()).unwrap();
+    assert_eq!((setup.row, setup.row_number), (CloudSetupRow::AdoptInitial, 2));
+    assert_eq!((setup.question, setup.reason), (CloudSetupQuestion::None, None));
+    assert!(!setup.device.present && !setup.device.holds_user_content);
+    // Manifest counts never prove an empty iCloud collection.
+    assert!(setup.cloud.present && !setup.cloud.counts_exact && setup.cloud.holds_user_content);
+    assert_eq!(setup.active_change_tag, Some(active.system_fields.clone()));
+    assert!(setup.epoch_id.is_some());
+    assert!(fixture.workflow.core.adoption_op().unwrap().is_none(), "the decision starts nothing");
+    let CloudSetupStarted::Operation { operation } = connection.start_setup(preview.clone()).unwrap() else {
+        panic!("row 2 starts an adoption")
+    };
+    let op = fixture.workflow.core.adoption_op().unwrap().unwrap();
+    // Nothing local is replaced, so no row 5 re-test is asked of this op.
+    assert!(!op.requires_no_user_content);
+    let status = connection.recovery_status().unwrap().unwrap();
+    assert!(matches!(status.step, CloudRecoveryStep::Staging) && status.adoption_cancellable);
+    // The start consumed the preview: it confirms nothing afterwards.
+    failure_is(connection.start_setup(preview.clone()), CloudConnectionFailure::Consumed);
+    failure_is(connection.confirm_adoption(preview), CloudConnectionFailure::Consumed);
+    connection.cancel_operation(operation).unwrap();
+    assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+}
+/// V27.2 row 5 through the bridge: a new collection and a complete epoch
+/// start the adoption with no confirmation call, and the op carries the
+/// condition that its exclusive phase tests again.
+#[test]
+fn setup_start_adopts_over_a_new_collection_and_records_the_condition_to_test_again() {
+    let fixture = Fixture::new(Keys::new([]));
+    let connection = fixture.workflow.connection().unwrap();
+    let (preview, active) = adoption_preview(&connection);
+    let setup = connection.setup_decision(preview.clone()).unwrap();
+    assert_eq!((setup.row, setup.row_number), (CloudSetupRow::AdoptOverNoContent, 5));
+    assert_eq!((setup.question, setup.reason), (CloudSetupQuestion::None, None));
+    assert!(!setup.keep_device_offered && !setup.keep_cloud_offered);
+    assert!(setup.device.present && !setup.device.holds_user_content);
+    assert!(setup.cloud.present && setup.cloud.holds_user_content);
+    assert_eq!(setup.active_change_tag, Some(active.system_fields));
+    // Reading the decision twice starts nothing and keeps the preview.
+    assert_eq!(connection.setup_decision(preview.clone()).unwrap().row_number, 5);
+    assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+    let CloudSetupStarted::Operation { operation } = connection.start_setup(preview.clone()).unwrap() else {
+        panic!("row 5 starts an adoption")
+    };
+    assert!(fixture.workflow.core.adoption_op().unwrap().unwrap().requires_no_user_content);
+    assert_eq!(
+        fixture.workflow.host.engine().slot_holder(),
+        Some(meguri_engine::LongOp::CloudAdopt)
+    );
+    failure_is(connection.start_setup(preview), CloudConnectionFailure::Consumed);
+    connection.cancel_operation(operation).unwrap();
+    assert!(fixture.workflow.core.adoption_op().unwrap().is_none());
+    assert_eq!(fixture.workflow.host.engine().slot_holder(), None);
+    // The user's own confirmation records no such condition.
+    let (preview, _) = adoption_preview(&connection);
+    let operation = connection.confirm_adoption(preview).unwrap();
+    assert!(!fixture.workflow.core.adoption_op().unwrap().unwrap().requires_no_user_content);
+    connection.cancel_operation(operation).unwrap();
+}
 #[test]
 fn bridge_adoption_confirmation_takes_actual_host_slot_and_exact_cancel_releases_it() {
     assert_adoption_recovery_operation(Fixture::new(Keys::new([])));

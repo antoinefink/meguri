@@ -2892,4 +2892,49 @@ mod tests {
         damaged[0] ^= 1;
         assert!(received_bytes(&op, &record, Some(&damaged)).is_err());
     }
+
+    /// A row written before `requires_no_user_content` existed is a confirmed
+    /// op: it decodes, and it never asks for the row 5 re-test.
+    #[test]
+    fn an_adopt_op_row_written_before_the_row_5_field_still_decodes_as_confirmed() {
+        let op = AdoptOp {
+            id: [13; 16],
+            step: AdoptStep::Ready,
+            binding_before: None,
+            binding_after: BindingId([14; 16]),
+            account: OpaqueBytes(vec![15]),
+            before: None,
+            file_before: None,
+            candidate: Publication {
+                identity: PublicationId::from_bytes([16; 16]),
+                binding: AccountBinding::LocalOnly,
+                decision: PublicationDecision::Clear,
+            },
+            active: ControlRecord {
+                encrypted: None,
+                system_fields: OpaqueBytes(vec![17]),
+            },
+            epoch: EpochId([11; 16]),
+            epoch_record: None,
+            media_root: None,
+            staging_name: ".meguri-stage-earlier".into(),
+            started_at_ms: 1,
+            transport_wait: true,
+            retry_after_ms: Some(7),
+            requires_no_user_content: true,
+        };
+        let mut row = serde_json::to_value(&op).unwrap();
+        // The row 5 condition survives a round trip of today's row.
+        assert!(serde_json::from_value::<AdoptOp>(row.clone()).unwrap() == op);
+        assert!(row.as_object_mut().unwrap().remove("requires_no_user_content").is_some());
+        let earlier: AdoptOp = crate::cloud::store::decode(&row.to_string()).unwrap();
+        assert!(!earlier.requires_no_user_content);
+        assert!(
+            earlier
+                == AdoptOp {
+                    requires_no_user_content: false,
+                    ..op
+                }
+        );
+    }
 }
