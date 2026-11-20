@@ -1361,6 +1361,170 @@ fn retained_no_collection_host_adopts_real_inline_rows_without_backup_and_reopen
     reopened.close().unwrap();
     pair.close();
 }
+/// `sync/cloudkit-recovery#V27.2` row 2 run to completion: no collection on
+/// this device and a complete epoch adopt it through the row's own start,
+/// with no confirmation call and nothing to back up.
+#[test]
+fn setup_row_2_adopts_into_a_device_with_no_collection_to_completion_with_no_question() {
+    use cloud::setup::{SetupQuestion, SetupRow};
+    let mut pair = Pair::published();
+    let expected = pair.sender.driver().collection_rows().unwrap();
+    let directory = pair._root.path().join("initial");
+    let (config, _, backup) = initial_config(&directory);
+    prepare_prior_icloud_fixture_configuration(&config);
+    let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+    let host = process.prepare_cloud_connection(config.clone()).unwrap();
+    let generation = host.engine().generation();
+    let preview = initial_preview(&host, &mut pair.service);
+    let decision = host.cloud_setup_decision(&preview).unwrap();
+    assert_eq!(
+        (decision.row, decision.question, decision.reason),
+        (SetupRow::AdoptInitial, SetupQuestion::None, None)
+    );
+    assert!(!decision.keep_device_offered && !decision.keep_cloud_offered);
+    assert!(host.cloud_runtime().unwrap().adoption_op().unwrap().is_none());
+    assert!(host.collection().is_err() && !directory.join("collection.anki2").exists());
+    let id = host.start_cloud_setup_adoption(&preview).unwrap();
+    let op = host.cloud_runtime().unwrap().adoption_op().unwrap().unwrap();
+    assert_eq!(op.id, id);
+    assert!(op.before.is_none() && op.file_before.is_none());
+    // Nothing local is replaced, so no row 5 condition is recorded.
+    assert!(!op.requires_no_user_content);
+    // The start consumed the preview: it starts and confirms nothing again.
+    assert!(host.start_cloud_setup_adoption(&preview).is_err());
+    assert!(host.confirm_cloud_adoption(&preview).is_err());
+    for _ in 0..64 {
+        if host.cloud_runtime().unwrap().adoption_op().unwrap().is_none() {
+            break;
+        }
+        initial_step(&host, &mut pair.service).unwrap();
+    }
+    assert!(host.cloud_runtime().unwrap().adoption_op().unwrap().is_none());
+    assert_eq!(host.engine().generation().0, generation.0 + 1);
+    assert!(matches!(
+        host.engine().state(),
+        meguri_engine::LifecycleState::Ready { .. }
+    ));
+    assert_eq!(host.engine().slot_holder(), None);
+    assert_eq!(initial_rows(&host), expected);
+    let live = directory.join("collection.anki2");
+    assert_eq!(
+        DeviceState::for_collection(&live).settled_publication().unwrap(),
+        Some(op.candidate.clone())
+    );
+    assert_eq!(backup.0.load(Ordering::SeqCst), 0);
+    host.close().unwrap();
+    let saved = store(&directory);
+    let binding = saved.binding(op.binding_after).unwrap().unwrap();
+    assert_eq!(binding.facts.publication, op.candidate.identity);
+    assert_eq!(binding.facts.epoch, op.epoch);
+    drop(saved);
+    pair.close();
+}
+/// V27.2 row 1 as a sequence: no collection on either side is decided as row
+/// 1 and starts nothing in the core; the empty collection is created; its
+/// preview is row 4, which publishes it with no question.
+#[test]
+fn setup_row_1_creates_an_empty_collection_that_row_4_then_publishes_with_no_question() {
+    use cloud::{
+        publication::{PreviewWork, RecordRead},
+        setup::{OtherServiceHistory, SetupQuestion, SetupRow},
+    };
+    let root = tempfile::tempdir().unwrap();
+    let mut service = Service::open(root.path(), Config::default(), SeededRandom::new(811)).unwrap();
+    let directory = root.path().join("initial");
+    let (config, _, _) = initial_config(&directory);
+    prepare_prior_icloud_fixture_configuration(&config);
+    let process = meguri_host::ProcessCore::new(config.engine.clone()).unwrap();
+    let host = process.prepare_cloud_connection(config).unwrap();
+    // The actual read: iCloud holds nothing for this account.
+    let read = service
+        .request(
+            &scope(),
+            Caller::default(),
+            Operation::Read {
+                zone: "meguri-root".into(),
+                name: "active".into(),
+                fields: meguri_testkit::cloud::RequestedFields::All,
+            },
+        )
+        .unwrap();
+    assert!(read.result.is_err());
+    let PreviewWork::ReadActive { id } = host.begin_cloud_connection_preview().unwrap() else {
+        panic!("active")
+    };
+    let PreviewWork::Ready(preview) = host
+        .cloud_runtime()
+        .unwrap()
+        .connection_active_read(id, RecordRead::ZoneMissing)
+        .unwrap()
+    else {
+        panic!("ready")
+    };
+    assert!(preview.native_file.is_none() && preview.active.is_none());
+    let decision = host.cloud_setup_decision(&preview).unwrap();
+    assert_eq!(
+        (decision.row, decision.question, decision.reason),
+        (SetupRow::CreateAndPublish, SetupQuestion::None, None)
+    );
+    // The core starts nothing for row 1: the collection is created first.
+    assert!(host.start_cloud_setup_adoption(&preview).is_err());
+    assert!(host.confirm_cloud_adoption(&preview).is_err());
+    assert!(host.cloud_runtime().unwrap().adoption_op().unwrap().is_none());
+    assert!(!directory.join("collection.anki2").exists());
+    host.cloud_runtime().unwrap().cancel_connection_preview();
+    host.close().unwrap();
+    drop(process);
+    let sent = |service: &Service<SeededRandom>| {
+        service
+            .request_log()
+            .unwrap()
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.kind,
+                    RequestKind::CreateZone | RequestKind::DeleteZone | RequestKind::Modify
+                )
+            })
+            .count()
+    };
+    assert_eq!(sent(&service), 0);
+
+    // The create (R161): the Default deck and the stock note types as created.
+    meguri_engine::bootstrap::create(
+        &directory.join("collection.anki2"),
+        &FixedClock::new(NOW, UtcOffset::UTC),
+        &SeededRandom::new(882),
+    )
+    .unwrap();
+    let mut rig = online(&directory);
+    let rows = rig.driver().collection_rows().unwrap();
+    assert!(rows.iter().all(|payload| payload.kind() != codec::Kind::Note));
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    let decision = rig.setup_decision(&preview, OtherServiceHistory::Unknown).unwrap();
+    assert_eq!(
+        (decision.row, decision.question, decision.reason),
+        (SetupRow::Publish, SetupQuestion::None, None)
+    );
+    assert_eq!(sent(&service), 0);
+    assert!(rig.start_setup(&preview, OtherServiceHistory::Unknown).unwrap().is_some());
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    let facts = rig.facts().unwrap();
+    assert!(facts.recovery_ops.is_empty());
+    let current = facts.current.unwrap();
+    assert_eq!(current.facts.state, cloud::BindingState::Active);
+    assert_eq!(rig.driver().collection_rows().unwrap(), rows);
+    // `MGActive` now names the empty collection this device published.
+    let root_zone = &service.inspect(&scope()).unwrap().unwrap().zones["meguri-root"];
+    let Field::EncryptedBytes(active) = &root_zone.records["active"].fields["e"] else {
+        panic!("actual active record")
+    };
+    assert_eq!(
+        cloud::control_codec::Active::decode(active).unwrap().epoch,
+        current.facts.epoch.0
+    );
+    rig.close_clean().unwrap();
+}
 #[test]
 fn initial_adoption_cancel_account_change_and_destination_collision_leave_no_false_binding() {
     for case in ["cancel", "account", "collision", "missing-stage"] {

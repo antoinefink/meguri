@@ -884,6 +884,80 @@ fn setup_start_adopts_over_a_new_collection_and_records_the_condition_to_test_ag
     assert!(!fixture.workflow.core.adoption_op().unwrap().unwrap().requires_no_user_content);
     connection.cancel_operation(operation).unwrap();
 }
+/// V27.2 row 3 and V27.6 through the bridge, with the history the host
+/// itself supplies: no durable record says that no other service was ready
+/// since the stop, so a `stopped` binding that could resume keeps its
+/// confirmation and `start_setup` starts nothing. This pins the production
+/// value; a test's own history never reaches this path.
+#[test]
+fn setup_keeps_the_resume_confirmation_for_a_stopped_binding_and_starts_nothing() {
+    let fixture = Fixture::previously_confirmed(keys());
+    fixture.baseline();
+    let workflow = &fixture.workflow;
+    let bound = workflow.core.status().unwrap().binding.unwrap();
+    assert_eq!(bound.facts.state, c::BindingState::Active);
+    let epoch_bytes = workflow.core.bound_epoch_bytes_for_testing(0, false).unwrap();
+    // Off in the Service control (V27.5, V16).
+    workflow.stop_syncing().unwrap();
+    let stopped = c::BindingState::Isolated(c::IsolationReason::Stopped);
+    let state = || workflow.core.status().unwrap().binding.unwrap().facts.state;
+    assert_eq!(state(), stopped);
+
+    let connection = workflow.connection().unwrap();
+    let active = CloudControlRecord {
+        encrypted: Some(
+            control_codec::Active {
+                epoch: bound.facts.epoch.0,
+                activated_at_ms: NOW,
+                previous: None,
+                replaced_through_ms: None,
+            }
+            .encode()
+            .unwrap(),
+        ),
+        system_fields: vec![1],
+    };
+    let epoch = CloudControlRecord {
+        encrypted: Some(epoch_bytes),
+        system_fields: vec![2],
+    };
+    let CloudConnectionPreviewWork::ReadActive { preview, .. } = connection.begin_connection_preview().unwrap() else {
+        panic!("active")
+    };
+    let CloudConnectionPreviewWork::ReadEpoch { preview, .. } = connection
+        .connection_active_read(preview, CloudControlRead::Found { record: active.clone() })
+        .unwrap()
+    else {
+        panic!("epoch")
+    };
+    let CloudConnectionPreviewWork::Ready { preview, summary } = connection
+        .connection_epoch_read(preview, CloudControlRead::Found { record: epoch })
+        .unwrap()
+    else {
+        panic!("ready")
+    };
+    assert!(matches!(summary.decision, CloudConnectionDecision::ConfirmResume));
+    assert_eq!(summary.resume_binding_id, Some(bound.id.0.to_vec()));
+
+    let setup = connection.setup_decision(preview.clone()).unwrap();
+    assert_eq!((setup.row, setup.row_number), (CloudSetupRow::Resume, 3));
+    assert_eq!(setup.question, CloudSetupQuestion::ConfirmResume);
+    assert_eq!(setup.reason, Some(CloudSetupAskReason::OtherServiceUnknown));
+    assert!(!setup.keep_device_offered && !setup.keep_cloud_offered);
+    assert_eq!(setup.active_change_tag, Some(active.system_fields));
+    // No start runs for the question, and the preview stays for the answer.
+    failure_is(connection.start_setup(preview.clone()), CloudConnectionFailure::NotOffered);
+    failure_is(connection.start_setup(preview.clone()), CloudConnectionFailure::NotOffered);
+    assert_eq!(state(), stopped);
+    assert!(workflow.core.adoption_op().unwrap().is_none() && workflow.core.publication_op().unwrap().is_none());
+    let again = connection.setup_decision(preview.clone()).unwrap();
+    assert_eq!((again.row, again.question), (CloudSetupRow::Resume, CloudSetupQuestion::ConfirmResume));
+    // The sheet's download is not offered for it either (V27.6).
+    failure_is(connection.confirm_adoption(preview), CloudConnectionFailure::NotOffered);
+    assert_eq!(state(), stopped);
+    assert!(workflow.core.adoption_op().unwrap().is_none());
+    assert_eq!(workflow.host.engine().slot_holder(), None);
+}
 #[test]
 fn bridge_adoption_confirmation_takes_actual_host_slot_and_exact_cancel_releases_it() {
     assert_adoption_recovery_operation(Fixture::new(Keys::new([])));

@@ -11,16 +11,19 @@ use meguri_model::{
     clock::{FixedClock, UtcOffset},
     rng::SeededRandom,
 };
+use meguri_engine::device_state::{PendingDecisionReason, PublicationDecision};
 use meguri_sync::cloud::{
     BindingFacts, BindingId, BindingState, BuildScope, ConflictCopy, ConflictKind, ConflictReason, ContainerId, CopyId,
     Environment, EpochId, IsolationReason, OpaqueBytes, OpenOutcome, PayloadDigest, RecordKey, TrackingStore,
+    adoption::{RecoveryKind, RecoveryStep},
     entity_codec as codec,
+    publication::ConnectDecision,
     runtime::{KeyByteSource, KeySourceError},
     setup::{AskReason, OtherServiceHistory, SetupDecision, SetupQuestion, SetupRow, SilentStart},
 };
 use meguri_testkit::{
     cloud::{
-        Config, RequestKind, Scope, Service,
+        Config, Record, RequestKind, RequestedFields, Scope, Service,
         coordinator::{Point, PublicationRig},
         devices::IdentityReads,
     },
@@ -98,7 +101,12 @@ fn open(dir: &Path, scope: &Scope) -> PublicationRig {
     .unwrap()
 }
 fn service(root: &Path) -> Service<SeededRandom> {
-    Service::open(root, Config::default(), SeededRandom::new(SEED)).unwrap()
+    // Native adoption fetches ask for at most 32 records a page.
+    let config = Config {
+        page_size: 32,
+        ..Config::default()
+    };
+    Service::open(root, config, SeededRandom::new(SEED)).unwrap()
 }
 fn cursor(service: &Service<SeededRandom>) -> u64 {
     service.request_log().unwrap().last().map_or(0, |r| r.request_id)
@@ -703,6 +711,423 @@ fn no_start_runs_while_the_decision_is_a_question() {
         rig.driver().put_media("only-media.bin", b"abc").unwrap();
         let preview = rig.preview(&mut service, STEPS).unwrap();
         refuses_every_start(&mut rig, &service, &preview, UNKNOWN);
+        rig.close_clean().unwrap();
+    }
+}
+
+const EVERY_HISTORY: [OtherServiceHistory; 3] = [
+    OtherServiceHistory::Unknown,
+    OtherServiceHistory::NoneSinceStop,
+    OtherServiceHistory::ReadySinceStop,
+];
+/// Every record of every zone that iCloud holds for this scope.
+fn server_records(service: &Service<SeededRandom>, scope: &Scope) -> std::collections::BTreeMap<String, Vec<Record>> {
+    service
+        .inspect(scope)
+        .unwrap()
+        .unwrap()
+        .zones
+        .into_iter()
+        .map(|(name, zone)| (name, zone.records.into_values().collect()))
+        .collect()
+}
+/// Another device publishes its collection as the active epoch, over any epoch there.
+fn publish_from_another_device(
+    root: &Path,
+    name: &str,
+    service: &mut Service<SeededRandom>,
+    scope: &Scope,
+) -> Vec<codec::Payload> {
+    let mut publisher = open(&generated(root, name, true), scope);
+    let preview = publisher.preview(service, STEPS).unwrap();
+    publisher.confirm_publication(&preview).unwrap();
+    publisher.drive_ready(service, STEPS).unwrap();
+    assert!(publisher.facts().unwrap().recovery_ops.is_empty());
+    let rows = publisher.driver().collection_rows().unwrap();
+    publisher.close_clean().unwrap();
+    rows
+}
+fn asks(decision: &SetupDecision) -> (SetupRow, SetupQuestion, Option<AskReason>, bool, bool) {
+    (
+        decision.row,
+        decision.question,
+        decision.reason,
+        decision.keep_device_offered,
+        decision.keep_cloud_offered,
+    )
+}
+
+/// V27.6, "not after the other service", with V27.4: the sheet that replaces
+/// Resume has two working buttons. "Keep the iCloud collection" is V14 with
+/// its safety backup; "Keep this device's collection" is V15. Neither is
+/// admitted for that preview while the decision is still Resume.
+#[test]
+fn after_the_other_service_both_buttons_of_the_sheet_work_over_a_binding_that_could_resume() {
+    for keep_cloud in [true, false] {
+        let run = tempfile::tempdir().unwrap();
+        let mut service = service(run.path());
+        let scope = scope("bothbuttons");
+        let dir = generated(run.path(), "local", true);
+        let bound = stopped(&dir, &scope, &mut service);
+        let mut rig = open(&dir, &scope);
+        let in_icloud = rig.driver().collection_rows().unwrap();
+        let epoch = rig.facts().unwrap().bindings[0].facts.epoch;
+        // An edit made while the service was Off: the two collections differ.
+        let mid = notetype(&in_icloud);
+        rig.driver().add_note(mid, 1, &["made while off", "back"]).unwrap();
+        let on_device = rig.driver().collection_rows().unwrap();
+        assert_eq!(notes(&on_device), notes(&in_icloud) + 1);
+        let replaced = rig.facts().unwrap().decision.publication.identity;
+        let preview = rig.preview(&mut service, STEPS).unwrap();
+        assert!(preview.decision == ConnectDecision::ConfirmResume);
+        assert_eq!(
+            asks(&rig.setup_decision(&preview, OtherServiceHistory::ReadySinceStop).unwrap()),
+            (SetupRow::KeepCollection, SetupQuestion::Keep, Some(AskReason::TwoCollections), true, true)
+        );
+        // While the decision is Resume, with or without its confirmation,
+        // the sheet's download is not offered and changes nothing.
+        let server = cursor(&service);
+        for history in [OtherServiceHistory::Unknown, OtherServiceHistory::NoneSinceStop] {
+            assert_eq!(rig.setup_decision(&preview, history).unwrap().row, SetupRow::Resume);
+            assert!(rig.keep_cloud_over_resumable(&preview, history).is_err(), "{history:?}");
+            let facts = rig.facts().unwrap();
+            assert!(facts.recovery_ops.is_empty());
+            assert_eq!(
+                facts.bindings.iter().map(|b| (b.id, b.facts.state)).collect::<Vec<_>>(),
+                [(bound, BindingState::Isolated(IsolationReason::Stopped))]
+            );
+        }
+        assert_eq!(mutations_since(&service, server), 0);
+        assert_eq!(rig.driver().collection_rows().unwrap(), on_device);
+        let directory = run.path().join("local/collection.anki2");
+        let evidence = || {
+            meguri_engine::device_state::DeviceState::for_collection(&directory)
+                .replacement_evidence_for(replaced)
+                .unwrap()
+        };
+        assert!(evidence().is_none());
+
+        if keep_cloud {
+            let op = rig
+                .keep_cloud_over_resumable(&preview, OtherServiceHistory::ReadySinceStop)
+                .unwrap();
+            let recorded = rig.facts().unwrap();
+            assert_eq!(recorded.recovery_ops.len(), 1);
+            assert_eq!(recorded.recovery_ops[0].id, op);
+            assert_eq!(recorded.recovery_ops[0].epoch, epoch);
+            let RecoveryKind::Adopt(adopt) = &recorded.recovery_ops[0].kind else {
+                panic!("the button is V14")
+            };
+            // The stopped binding is the op's binding before, state unchanged.
+            let before = adopt.binding_before.as_ref().unwrap();
+            assert_eq!((before.id, before.state), (bound, BindingState::Isolated(IsolationReason::Stopped)));
+            // The confirmation consumed the preview: the other button is gone.
+            assert!(rig.confirm_publication(&preview).is_err());
+            rig.drive_ready(&mut service, STEPS).unwrap();
+            let facts = rig.facts().unwrap();
+            assert!(facts.recovery_ops.is_empty());
+            let current = facts.current.unwrap();
+            assert_eq!((current.facts.state, current.facts.epoch), (BindingState::Active, epoch));
+            assert_ne!(current.id, bound);
+            assert_eq!(rig.driver().collection_rows().unwrap(), in_icloud);
+            // V14.2 step 7: the collection that was on this device is backed up.
+            let backup = evidence().unwrap().safety_backup.unwrap();
+            assert_eq!(rig.driver().backup_collection_rows(&backup.name).unwrap(), on_device);
+        } else {
+            let before = server_records(&service, &scope);
+            rig.confirm_publication(&preview).unwrap();
+            assert!(rig.keep_cloud_over_resumable(&preview, OtherServiceHistory::ReadySinceStop).is_err());
+            rig.drive_ready(&mut service, STEPS).unwrap();
+            let facts = rig.facts().unwrap();
+            assert!(facts.recovery_ops.is_empty());
+            let current = facts.current.unwrap();
+            assert_eq!(current.facts.state, BindingState::Active);
+            assert_ne!(current.facts.epoch, epoch);
+            assert_eq!(rig.driver().collection_rows().unwrap(), on_device);
+            // V22 invariant 6: the replaced epoch's zone stays in iCloud.
+            let after = server_records(&service, &scope);
+            let old_zone = meguri_sync::cloud::adapter::collection_zone(epoch);
+            assert!(after[&old_zone] == before[&old_zone]);
+        }
+        rig.close_clean().unwrap();
+    }
+}
+
+/// V27.4 lists an isolated binding under "shown for": a device proved to hold
+/// no user content does not take row 5 over a binding whose epoch was replaced.
+#[test]
+fn row_5_is_not_taken_over_a_stopped_binding_whose_epoch_was_replaced() {
+    let run = tempfile::tempdir().unwrap();
+    let mut service = service(run.path());
+    let scope = scope("row5retained");
+    let dir = fresh(run.path(), "local");
+    let bound = stopped(&dir, &scope, &mut service);
+    publish_from_another_device(run.path(), "remote", &mut service, &scope);
+    let mut rig = open(&dir, &scope);
+    let rows = rig.driver().collection_rows().unwrap();
+    assert_eq!(notes(&rows), 0);
+    let server = cursor(&service);
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    assert!(preview.decision != ConnectDecision::ConfirmResume);
+    for history in EVERY_HISTORY {
+        assert_eq!(
+            asks(&rig.setup_decision(&preview, history).unwrap()),
+            (SetupRow::KeepCollection, SetupQuestion::Keep, Some(AskReason::RetainedBinding), true, true)
+        );
+        refuses_every_start(&mut rig, &service, &preview, history);
+    }
+    assert_eq!(mutations_since(&service, server), 0);
+    assert!(rig.facts().unwrap().bindings.iter().any(|b| b.id == bound));
+    // The sheet's button is the confirmation, bound to the same preview.
+    let op = rig.adopt_cloud(&preview).unwrap();
+    rig.cancel_recovery_op(op).unwrap();
+    assert_eq!(rig.driver().collection_rows().unwrap(), rows);
+    rig.close_clean().unwrap();
+}
+
+/// V27.8: an `MGActive` that appears after row 4's preview read none gives
+/// V15.2 step 5. The other device's records are all as it left them.
+#[test]
+fn row_4_ends_in_a_switch_conflict_when_another_device_published_after_the_preview() {
+    let run = tempfile::tempdir().unwrap();
+    let mut service = service(run.path());
+    let scope = scope("row4race");
+    let mut rig = open(&generated(run.path(), "local", true), &scope);
+    let rows = rig.driver().collection_rows().unwrap();
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    assert_eq!(rig.setup_decision(&preview, UNKNOWN).unwrap(), silent(SetupRow::Publish));
+    publish_from_another_device(run.path(), "remote", &mut service, &scope);
+    let theirs = server_records(&service, &scope);
+    assert_eq!(theirs["meguri-root"].len(), 1);
+    // The decision was true of what the preview read, so the start is admitted.
+    let op = rig.start_setup(&preview, UNKNOWN).unwrap().unwrap();
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    let facts = rig.facts().unwrap();
+    assert_eq!(facts.recovery_ops.len(), 1);
+    assert_eq!(facts.recovery_ops[0].id, op);
+    assert!(matches!(facts.recovery_ops[0].step, RecoveryStep::Publish(_)));
+    assert!(facts.recovery_ops[0].switch_conflict.is_some(), "the conditional save lost");
+    let after = server_records(&service, &scope);
+    assert!(after["meguri-root"] == theirs["meguri-root"], "MGActive still names their epoch");
+    for (zone, records) in &theirs {
+        assert!(&after[zone] == records, "{zone} is as the other device left it");
+    }
+    assert_eq!(rig.driver().collection_rows().unwrap(), rows);
+    // Nothing more is sent to the root zone while the conflict waits for the user.
+    let stopped_at = cursor(&service);
+    rig.advance_clock_ms(24 * 60 * 60 * 1000).unwrap();
+    rig.sync_now_and_drain(&mut service, STEPS).unwrap();
+    assert!(!service.request_log().unwrap().iter().any(|r| r.request_id > stopped_at
+        && r.kind == RequestKind::Modify
+        && r.zone.as_deref() == Some("meguri-root")));
+    assert!(server_records(&service, &scope)["meguri-root"] == theirs["meguri-root"]);
+    rig.close_clean().unwrap();
+}
+
+/// V14.3: a process killed while row 5's op waits at `ready` replaces
+/// nothing, and no relaunch continues it. Content made afterwards is asked
+/// about by row 7; the op's own condition is never what protects it then.
+#[test]
+fn a_killed_row_5_is_not_continued_after_relaunch_and_content_made_meanwhile_is_asked_about() {
+    let run = tempfile::tempdir().unwrap();
+    let mut service = service(run.path());
+    let scope = scope("row5kill");
+    published(run.path(), &mut service, &scope, true);
+    let dir = fresh(run.path(), "local");
+    let mut rig = open(&dir, &scope);
+    let before = rig.driver().collection_rows().unwrap();
+    let mid = notetype(&before);
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    assert_eq!(
+        rig.setup_decision(&preview, UNKNOWN).unwrap(),
+        silent(SetupRow::AdoptOverNoContent)
+    );
+    rig.hold(Point::AdoptionBeforeActivate).unwrap();
+    let op = rig.start_setup(&preview, UNKNOWN).unwrap().unwrap();
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    assert!(rig.is_held(Point::AdoptionBeforeActivate));
+    let ready = rig.facts().unwrap();
+    assert_eq!(ready.recovery_ops.len(), 1);
+    assert_eq!(ready.recovery_ops[0].id, op);
+    assert!(!rig.kill().unwrap().clean_close);
+    let server = cursor(&service);
+
+    let mut rig = open(&dir, &scope);
+    let relaunched = rig.facts().unwrap();
+    assert!(relaunched.recovery_ops.is_empty(), "the op did not survive the relaunch");
+    assert!(relaunched.current.is_none_or(|b| b.facts.state != BindingState::Active));
+    assert_eq!(rig.driver().collection_rows().unwrap(), before);
+    rig.driver().add_note(mid, 1, &["made after the relaunch", "back"]).unwrap();
+    let with_note = rig.driver().collection_rows().unwrap();
+    assert_eq!(notes(&with_note), 1);
+    // Nothing is left to drive: the staged iCloud collection is never activated.
+    let _ = rig.drive_ready(&mut service, STEPS);
+    assert!(rig.facts().unwrap().recovery_ops.is_empty());
+    assert_eq!(rig.driver().collection_rows().unwrap(), with_note, "nothing was replaced");
+    assert_eq!(mutations_since(&service, server), 0);
+    let again = rig.preview(&mut service, STEPS).unwrap();
+    let decision = rig.setup_decision(&again, UNKNOWN).unwrap();
+    assert_eq!((decision.row, decision.question), (SetupRow::KeepCollection, SetupQuestion::Keep));
+    assert!(decision.keep_device_offered && decision.keep_cloud_offered);
+    refuses_every_start(&mut rig, &service, &again, UNKNOWN);
+    assert_eq!(rig.driver().collection_rows().unwrap(), with_note);
+    rig.close_clean().unwrap();
+}
+
+/// V27.1 at the replace itself: a media file added between row 5's start and
+/// its exclusive phase is user content, so the op is cancelled and the file stays.
+#[test]
+fn row_5_a_media_file_that_appears_before_the_replacement_cancels_it_and_asks() {
+    let run = tempfile::tempdir().unwrap();
+    let mut service = service(run.path());
+    let scope = scope("row5media");
+    published(run.path(), &mut service, &scope, true);
+    let mut rig = open(&fresh(run.path(), "local"), &scope);
+    let before = rig.driver().collection_rows().unwrap();
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    assert_eq!(
+        rig.setup_decision(&preview, UNKNOWN).unwrap(),
+        silent(SetupRow::AdoptOverNoContent)
+    );
+    rig.hold(Point::AdoptionBeforeActivate).unwrap();
+    assert!(rig.start_setup(&preview, UNKNOWN).unwrap().is_some());
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    assert!(rig.is_held(Point::AdoptionBeforeActivate));
+    rig.driver().put_media("made-meanwhile.bin", b"media made meanwhile").unwrap();
+    let server = cursor(&service);
+    rig.release(Point::AdoptionBeforeActivate).unwrap();
+    let _ = rig.drive_ready(&mut service, STEPS);
+    let facts = rig.facts().unwrap();
+    assert!(facts.recovery_ops.is_empty(), "the op is cancelled, not waiting");
+    assert!(facts.current.is_none_or(|b| b.facts.state != BindingState::Active));
+    assert_eq!(rig.driver().collection_rows().unwrap(), before, "nothing was replaced");
+    assert_eq!(
+        rig.driver().media_files().unwrap()["made-meanwhile.bin"],
+        b"media made meanwhile"
+    );
+    assert_eq!(mutations_since(&service, server), 0);
+    let again = rig.preview(&mut service, STEPS).unwrap();
+    let decision = rig.setup_decision(&again, UNKNOWN).unwrap();
+    assert_eq!((decision.row, decision.question), (SetupRow::KeepCollection, SetupQuestion::Keep));
+    assert!(rig.start_setup(&again, UNKNOWN).is_err());
+    assert_eq!(
+        rig.driver().media_files().unwrap()["made-meanwhile.bin"],
+        b"media made meanwhile"
+    );
+    rig.close_clean().unwrap();
+}
+
+/// V27.4 and V12.2 through the runtime: a pending fence shows the sheet
+/// whatever else holds, and no start runs before a button.
+#[test]
+fn a_pending_fence_shows_the_sheet_and_starts_nothing() {
+    let run = tempfile::tempdir().unwrap();
+    let mut service = service(run.path());
+    let scope = scope("fence");
+    let mut rig = open(&generated(run.path(), "local", true), &scope);
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    rig.start_setup(&preview, UNKNOWN).unwrap();
+    rig.drive_ready(&mut service, STEPS).unwrap();
+    assert_eq!(rig.facts().unwrap().current.unwrap().facts.state, BindingState::Active);
+    // A restore sets the fence (V12.1).
+    let backup = rig.driver().backup_now().unwrap();
+    rig.driver().restore_backup(&backup).unwrap();
+    let pending = rig.facts().unwrap().decision;
+    assert!(pending.publication.decision == PublicationDecision::Pending);
+    assert_eq!(pending.pending_reason, Some(PendingDecisionReason::Restore));
+    let theirs = server_records(&service, &scope);
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    for history in EVERY_HISTORY {
+        assert_eq!(
+            asks(&rig.setup_decision(&preview, history).unwrap()),
+            (SetupRow::KeepCollection, SetupQuestion::Keep, Some(AskReason::Fence), true, true)
+        );
+        let decision = rig.setup_decision(&preview, history).unwrap();
+        assert_eq!(decision.silent_start(), None);
+        let server = cursor(&service);
+        for start in EVERY_START {
+            assert!(rig.force_setup_start(&preview, history, start).is_err(), "{start:?} {history:?}");
+        }
+        assert!(rig.start_setup(&preview, history).is_err());
+        assert!(rig.facts().unwrap().recovery_ops.is_empty());
+        assert_eq!(mutations_since(&service, server), 0);
+    }
+    assert!(server_records(&service, &scope) == theirs);
+    assert!(rig.facts().unwrap().decision.publication.decision == PublicationDecision::Pending);
+    rig.close_clean().unwrap();
+}
+
+/// V27.6, "another account" (R2055): with a binding of another account and
+/// nothing in the new account, nothing is published before the sheet.
+#[test]
+fn a_binding_of_another_account_is_asked_before_anything_reaches_the_new_account() {
+    let run = tempfile::tempdir().unwrap();
+    let mut service = service(run.path());
+    let first = scope("account");
+    let dir = generated(run.path(), "local", true);
+    stopped(&dir, &first, &mut service);
+    let second = Scope {
+        account: "synthetic-setup-other-account".into(),
+        ..first.clone()
+    };
+    let mut rig = PublicationRig::open(
+        &dir,
+        &second,
+        IdentityReads::Available(second.account.clone()),
+        false,
+        ORIGIN,
+        seed(&dir),
+        Keys::new(),
+    )
+    .unwrap();
+    let server = cursor(&service);
+    let preview = rig.preview(&mut service, STEPS).unwrap();
+    // The new account holds no collection: without the binding this is row 4.
+    assert!(preview.cloud.is_none());
+    for history in EVERY_HISTORY {
+        assert_eq!(
+            asks(&rig.setup_decision(&preview, history).unwrap()),
+            (SetupRow::KeepCollection, SetupQuestion::Keep, Some(AskReason::OtherAccount), true, false)
+        );
+        refuses_every_start(&mut rig, &service, &preview, history);
+    }
+    assert_eq!(mutations_since(&service, server), 0);
+    assert!(service.inspect(&second).unwrap().is_none_or(|account| account.zones.is_empty()));
+    rig.close_clean().unwrap();
+}
+
+/// An `MGActive` that cannot be decoded proves nothing about iCloud: the
+/// sheet, with no iCloud collection to keep, for either kind of device.
+#[test]
+fn an_unreadable_active_record_is_asked_and_offers_no_icloud_collection() {
+    for local_has_content in [false, true] {
+        let run = tempfile::tempdir().unwrap();
+        let mut service = service(run.path());
+        let scope = scope("unreadable");
+        published(run.path(), &mut service, &scope, true);
+        let dir = if local_has_content {
+            generated(run.path(), "local", true)
+        } else {
+            fresh(run.path(), "local")
+        };
+        let mut rig = open(&dir, &scope);
+        let theirs = server_records(&service, &scope);
+        // The actual named-field read: the record is found, its `e` is not.
+        let preview = rig
+            .preview_with_active_fields(&mut service, RequestedFields::Named(vec![]), STEPS)
+            .unwrap();
+        assert!(preview.decision == ConnectDecision::CloudUnreadable);
+        for history in EVERY_HISTORY {
+            assert_eq!(
+                asks(&rig.setup_decision(&preview, history).unwrap()),
+                (SetupRow::KeepCollection, SetupQuestion::Keep, Some(AskReason::CloudUnreadable), true, false)
+            );
+            refuses_every_start(&mut rig, &service, &preview, history);
+        }
+        // No iCloud collection is offered, and none can be kept.
+        assert!(rig.adopt_cloud(&preview).is_err());
+        assert!(rig.facts().unwrap().recovery_ops.is_empty());
+        assert!(server_records(&service, &scope) == theirs);
         rig.close_clean().unwrap();
     }
 }
