@@ -345,3 +345,264 @@ fn rename_under_old_name_moves_subtree_and_keeps_future_blobs() {
     h.collection.undo(UndoScope::Global).unwrap();
     assert_eq!(names(&h), ["A", "A::B", "Default"]);
 }
+
+/// A filtered deck `Filt` (id 500) at the top level, built as Anki leaves one.
+fn add_filtered(scope: &mut meguri_storage::WriteScope<'_>) -> Result<meguri_model::ids::DeckId, EngineError> {
+    use meguri_model::proto::{
+        ProtoBlob,
+        deck::{DeckKind, DeckKindMessage, FilteredDeck},
+    };
+    let mut deck = scope.deck(meguri_model::ids::DeckId(1))?.unwrap();
+    deck.id = meguri_model::ids::DeckId(500);
+    deck.name = "Filt".into();
+    deck.kind = ProtoBlob::new(DeckKindMessage::new(DeckKind::Filtered(FilteredDeck::default())));
+    scope.put(&deck)?;
+    Ok(deck.id)
+}
+
+/// Moves a card into a filtered deck as a filtered-deck build does.
+fn pull_into(
+    scope: &mut meguri_storage::WriteScope<'_>,
+    card: meguri_model::ids::CardId,
+    filtered: meguri_model::ids::DeckId,
+) -> Result<(), EngineError> {
+    let mut row = scope.card(card)?.unwrap();
+    row.original_deck_id = row.deck_id;
+    row.original_due = row.due;
+    row.deck_id = filtered;
+    row.due = -100_000;
+    scope.put(&row)?;
+    Ok(())
+}
+
+fn summary_of(h: &Harness, ids: &[meguri_model::ids::DeckId]) -> decks::DeletionSummary {
+    decks::deletion_summary(&*h.collection.reader(ReaderRole::Query).unwrap(), ids).unwrap()
+}
+
+#[test]
+fn delete_undo_restores_every_row_and_review_history_and_redo_reapplies() {
+    use common::{revlog, steps::dump};
+    let h = common::fresh();
+    let home = decks::add(&h.collection, "Home".into()).unwrap().value.id;
+    let sub = decks::add(&h.collection, "Home::Sub".into()).unwrap().value.id;
+    let other = decks::add(&h.collection, "Other".into()).unwrap().value.id;
+    let (filt, kept_note, other_in_filt) = h
+        .collection
+        .run(OpSpec::named("seed", OpSource::UserNonUndoable), move |ctx| {
+            let s = ctx.scope();
+            let filt = add_filtered(s)?;
+            let mut add = |deck, front: &str| -> Result<_, EngineError> {
+                let nid = s.add_note(&note(&[front, "back"]))?;
+                let mut c = card(nid, 0);
+                c.deck_id = deck;
+                Ok((nid, s.add_card(&c)?))
+            };
+            let (_, h1) = add(home, "h1")?;
+            let (_, h2) = add(home, "h2")?;
+            add(sub, "s1")?;
+            let (_, o1) = add(other, "o1")?;
+            add(other, "o2")?;
+            // One note with a card in Home and one in Other: it keeps a card.
+            let shared = s.add_note(&note(&["shared", "back"]))?;
+            for (ord, deck) in [(0, home), (1, other)] {
+                let mut c = card(shared, ord);
+                c.deck_id = deck;
+                s.add_card(&c)?;
+            }
+            s.add_revlog(&revlog(h1))?;
+            s.add_revlog(&revlog(h1))?;
+            pull_into(s, h2, filt)?;
+            pull_into(s, o1, filt)?;
+            s.set_config(&format!("_deck_{}_lastNotetype", home.0), &ConfigValue::from(4_i64))?;
+            Ok((filt, shared, o1))
+        })
+        .unwrap()
+        .value;
+    h.clock.step_ms(60_000);
+    let before = dump(&h.collection);
+    // h1, h2 (in Filt, home Home), s1 and the shared note's Home card.
+    let summary = summary_of(&h, &[home]);
+    assert_eq!(summary, decks::DeletionSummary { decks: 2, cards: 4 });
+    let backup = Arc::new(Backup::default());
+    let deleted = decks::delete(&h.collection, vec![home], backup.clone()).unwrap();
+    assert_eq!(deleted.value, summary);
+    assert_eq!(backup.0.load(Ordering::SeqCst), 1);
+    assert_eq!(top(&h), Some("Delete Deck"));
+    let after = dump(&h.collection);
+    // Review history is never touched by a delete.
+    assert_eq!(after["revlog"], before["revlog"]);
+    assert_eq!(after["revlog"].len(), 2);
+    assert_eq!(query_int(&h.collection, "SELECT count(*) FROM notes"), 3);
+    assert_eq!(
+        query_int(&h.collection, &format!("SELECT count(*) FROM notes WHERE id = {}", kept_note.0)),
+        1
+    );
+    assert_eq!(
+        query_int(&h.collection, &format!("SELECT did FROM cards WHERE id = {}", other_in_filt.0)),
+        filt.0
+    );
+    assert_eq!(
+        query_int(&h.collection, "SELECT count(*) FROM graves WHERE type = 0 AND usn = -1"),
+        4
+    );
+    assert_eq!(
+        query_int(&h.collection, "SELECT count(*) FROM graves WHERE type = 1 AND usn = -1"),
+        3
+    );
+    assert_eq!(
+        query_int(&h.collection, "SELECT count(*) FROM graves WHERE type = 2 AND usn = -1"),
+        2
+    );
+    assert_eq!(
+        query_int(
+            &h.collection,
+            &format!("SELECT count(*) FROM config WHERE KEY = '_deck_{}_lastNotetype'", home.0)
+        ),
+        0
+    );
+    assert_ne!(after["col"], before["col"]);
+
+    h.collection.undo(UndoScope::Global).unwrap();
+    // Decks, cards, notes, graves, config keys, review history and col.mod.
+    assert_eq!(dump(&h.collection), before);
+    assert_eq!(summary_of(&h, &[home]), summary);
+    match h.collection.peek_redo(UndoScope::Global).unwrap() {
+        UndoStatus::Available(step) => assert_eq!(step.name, "Delete Deck"),
+        other => panic!("no redo step: {other:?}"),
+    }
+
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(dump(&h.collection), after);
+    assert_eq!(top(&h), Some("Delete Deck"));
+    assert!(!names(&h).iter().any(|n| n.starts_with("Home")));
+}
+
+#[test]
+fn filtered_deck_delete_returns_cards_home_and_undo_puts_them_back() {
+    use common::steps::dump;
+    let h = common::fresh();
+    let home = decks::add(&h.collection, "Home".into()).unwrap().value.id;
+    let (filt, pulled) = h
+        .collection
+        .run(OpSpec::named("seed", OpSource::UserNonUndoable), move |ctx| {
+            let s = ctx.scope();
+            let filt = add_filtered(s)?;
+            let mut pulled = vec![];
+            for front in ["a", "b"] {
+                let nid = s.add_note(&note(&[front, "back"]))?;
+                let mut c = card(nid, 0);
+                c.deck_id = home;
+                c.due = 7;
+                let cid = s.add_card(&c)?;
+                pull_into(s, cid, filt)?;
+                pulled.push(cid);
+            }
+            Ok((filt, pulled))
+        })
+        .unwrap()
+        .value;
+    h.clock.step_ms(60_000);
+    let before = dump(&h.collection);
+    // N20.7: no card is lost, so the UI deletes at once.
+    assert_eq!(summary_of(&h, &[filt]), decks::DeletionSummary { decks: 1, cards: 0 });
+    let backup = Arc::new(Backup::default());
+    let deleted = decks::delete(&h.collection, vec![filt], backup.clone()).unwrap();
+    assert_eq!(deleted.value, decks::DeletionSummary { decks: 1, cards: 0 });
+    assert_eq!(backup.0.load(Ordering::SeqCst), 0);
+    assert_eq!(top(&h), Some("Delete Deck"));
+    for cid in &pulled {
+        let reader = h.collection.reader(ReaderRole::Query).unwrap();
+        let row = reader.card(*cid).unwrap().unwrap();
+        assert_eq!((row.deck_id, row.original_deck_id.0, row.due, row.original_due), (home, 0, 7, 0));
+    }
+    assert_eq!(query_int(&h.collection, "SELECT count(*) FROM cards"), 2);
+    assert_eq!(query_int(&h.collection, "SELECT count(*) FROM graves"), 1);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(dump(&h.collection), before);
+}
+
+#[test]
+fn deleting_a_deck_whose_cards_sit_in_a_filtered_deck_keeps_the_filtered_deck() {
+    let h = common::fresh();
+    let home = decks::add(&h.collection, "Home".into()).unwrap().value.id;
+    let filt = h
+        .collection
+        .run(OpSpec::named("seed", OpSource::UserNonUndoable), move |ctx| {
+            let s = ctx.scope();
+            let filt = add_filtered(s)?;
+            let nid = s.add_note(&note(&["only", "back"]))?;
+            let mut c = card(nid, 0);
+            c.deck_id = home;
+            let cid = s.add_card(&c)?;
+            pull_into(s, cid, filt)?;
+            Ok(filt)
+        })
+        .unwrap()
+        .value;
+    // The card is counted for its home deck, not for the filtered deck.
+    assert_eq!(summary_of(&h, &[home]), decks::DeletionSummary { decks: 1, cards: 1 });
+    assert_eq!(summary_of(&h, &[filt]), decks::DeletionSummary { decks: 1, cards: 0 });
+    let deleted = decks::delete(&h.collection, vec![home], Arc::new(Backup::default())).unwrap();
+    assert_eq!(deleted.value.cards, 1);
+    assert_eq!(query_int(&h.collection, "SELECT count(*) FROM cards"), 0);
+    assert!(names(&h).contains(&"Filt".into()));
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(
+        query_int(&h.collection, &format!("SELECT count(*) FROM cards WHERE did = {}", filt.0)),
+        1
+    );
+}
+
+#[test]
+fn deleting_the_nested_default_deck_keeps_it_renamed_at_the_top_and_undo_restores_it() {
+    use common::steps::dump;
+    use meguri_model::ids::DeckId;
+    let h = common::fresh();
+    decks::rename(&h.collection, DeckId(1), "Outer::Inner".into()).unwrap();
+    let outer = h
+        .collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .deck_rows()
+        .unwrap()
+        .into_iter()
+        .find(|d| d.name == "Outer")
+        .unwrap()
+        .id;
+    decks::add(&h.collection, "Default".into()).unwrap();
+    let kid = decks::add(&h.collection, "Outer::Inner::Kid".into()).unwrap().value.id;
+    h.collection
+        .run(OpSpec::named("seed", OpSource::UserNonUndoable), move |ctx| {
+            for (front, deck) in [("d", DeckId(1)), ("k", kid)] {
+                let nid = ctx.scope().add_note(&note(&[front, "back"]))?;
+                let mut c = card(nid, 0);
+                c.deck_id = deck;
+                ctx.scope().add_card(&c)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    h.clock.step_ms(60_000);
+    let before = dump(&h.collection);
+    // The default deck counts among the decks; it asks as any deck does.
+    assert_eq!(summary_of(&h, &[outer]), decks::DeletionSummary { decks: 3, cards: 2 });
+    decks::delete(&h.collection, vec![outer], Arc::new(Backup::default())).unwrap();
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    let default = reader.deck(DeckId(1)).unwrap().unwrap();
+    assert_eq!(default.human_name(), "Default+");
+    assert_eq!(default.mtime.0, (NOW_MS + 60_000) / 1000);
+    assert_eq!(default.usn.0, -1);
+    assert!(reader.deck(outer).unwrap().is_none());
+    assert!(reader.deck(kid).unwrap().is_none());
+    drop(reader);
+    assert_eq!(query_int(&h.collection, "SELECT count(*) FROM cards"), 0);
+    assert_eq!(query_int(&h.collection, "SELECT count(*) FROM graves WHERE type = 2"), 2);
+    assert_eq!(
+        query_int(&h.collection, "SELECT count(*) FROM graves WHERE type = 2 AND oid = 1"),
+        0
+    );
+    assert_eq!(top(&h), Some("Delete Deck"));
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(dump(&h.collection), before);
+    assert!(names(&h).contains(&"Outer::Inner::Kid".into()));
+}
