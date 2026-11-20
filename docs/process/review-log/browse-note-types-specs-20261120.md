@@ -4,7 +4,7 @@ Scope: PR #17 (`unit/browse-specs`): `search/filter-tokens`, `browser/workspace`
 
 Author: spec-writer session `s-20261120T154704Z-1e3b6b1f`. Reviewer: a separate read-only agent session that wrote none of the text and read nothing under `oracle/` (except the new provenance file), `refs/` or `local-data/`, and no Anki source.
 
-## Pass 1 (on 0c2c2a8f and earlier)
+## Pass 1 (on 2a9b5448c)
 
 6 must-fix, 17 should-fix and 8 nits. All were resolved in the commit "Fix the specs where the independent review found them inexact", except as noted below.
 
