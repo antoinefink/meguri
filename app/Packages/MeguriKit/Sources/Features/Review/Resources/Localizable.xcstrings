@@ -101,12 +101,68 @@
         }
       }
     },
-    "Redo Answer": {
+    "Redo": {
+      "comment": "The redo button when no step name is known (S5).",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Redo Answer"
+            "value": "Redo"
+          }
+        }
+      }
+    },
+    "More": {
+      "comment": "N20.8: the review's More button.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More"
+          }
+        }
+      }
+    },
+    "Bury Card": {
+      "comment": "N20.8: More menu, Card menu, card context menu.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bury Card"
+          }
+        }
+      }
+    },
+    "Suspend Card": {
+      "comment": "N20.8: More menu, Card menu, card context menu.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suspend Card"
+          }
+        }
+      }
+    },
+    "Card Buried": {
+      "comment": "N20.8: VoiceOver announcement after Bury Card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card Buried"
+          }
+        }
+      }
+    },
+    "Card Suspended": {
+      "comment": "N20.8: VoiceOver announcement after Suspend Card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Card Suspended"
           }
         }
       }

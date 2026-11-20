@@ -37,7 +37,7 @@ private struct ReviewFinishedFixture: View {
     private var ready: Bool { state == .readyToContinue || state == .finishedWithNewWork }
     var body: some View {
         ReviewLayout(progress: ReviewSessionProgress(answered: 9, remaining: waiting || state == .finishedWithNewWork ? 1 : 0),
-            notice: nil, undoDescription: "Undo Answer Card", canUndo: true, canRedo: false,
+            notice: nil, undoDescription: "Undo Answer", canUndo: true, canRedo: false,
             phase: waiting ? .waiting : .finished, states: nil, enabled: true,
             close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in }) {
                 ReviewStatusLayout {
@@ -56,10 +56,10 @@ private struct ReviewFixture: View {
     var body: some View {
         ReviewLayout(progress: ReviewSessionProgress(answered: 12, remaining: 18),
             notice: state == .error ? "Couldn’t save the answer. Please answer this card again." : nil,
-            undoDescription: "Undo Answer Card", canUndo: true, canRedo: false,
+            undoDescription: "Undo Answer", canUndo: true, canRedo: false,
             phase: state == .loading ? .loading : (answer ? .answer : .question), states: states,
             enabled: true, close: {}, undo: {}, redo: {}, reveal: {}, rate: { _ in },
-            canEditNote: state != .loading) {
+            actions: ReviewMoreActions(canEditNote: state != .loading, canActOnCard: state != .loading)) {
                 if state == .loading {
                     ReviewStatusLayout { LoadingStateView(Text(verbatim: "Preparing review…")) }
                 }

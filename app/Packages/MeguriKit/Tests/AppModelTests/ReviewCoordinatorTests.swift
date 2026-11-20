@@ -1461,8 +1461,9 @@ extension ReviewCollectionStartupTests {
             if case .accepted(let diff, _, _, _) = answerHead { currentHead = diff.head }
             return answerHead
         }
+        var undoStep = (name: "Answer Card", kind: ReviewStepKind.answer)
         func undoStatus(sessionID: UInt64, redo: Bool) async throws -> ReviewUndoStatus {
-            .available(step: ReviewStepInfo(id: 1, name: "Answer Card", kind: .answer, session: sessionID, longWrite: nil))
+            .available(step: ReviewStepInfo(id: 1, name: undoStep.name, kind: undoStep.kind, session: sessionID, longWrite: nil))
         }
         func restore(sessionID: UInt64, redo: Bool) async throws -> ReviewHead {
             restores.append(redo)
