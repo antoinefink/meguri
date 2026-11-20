@@ -49,12 +49,12 @@ What each card action of the review screen does: which card and note it acts on,
 
 - Bury Card buries the current card; Bury Note buries every card of the current card's note (`sched/manual-ops#M2`: suspended cards are skipped and not counted).
 - The current card leaves the head; so do the note's other cards that the head held (Bury Note). The screen presents the new head's item 0 on its question side (C13), or the congratulations content when nothing is left (`review/reviewer-strings#S8`).
-- The toast gives the count of cards the op wrote (`review/reviewer-strings#S4`).
+- Anki shows a tooltip with the count. Meguri (decided 2026-11-20, round 7, `docs/design/native-interface-contract.md` N20.8): no toast or banner; VoiceOver announces "Card Buried" (`review/reviewer-strings#S4`), and the Undo control's label names the step (S5). Bury Note is not offered yet.
 
 ## A5. Suspend Card and Suspend Note (R236, R383)
 
 - Suspend Card suspends the current card; Suspend Note every card of its note (`sched/manual-ops#M3`).
-- The screen moves on as A4 does; the toasts are S4's.
+- The screen moves on as A4 does. Meguri: no toast; VoiceOver announces "Card Suspended" (S4). Suspend Note is not offered yet, and Meguri has no unsuspend yet (N20.8, option 2A): until the notes and cards browser, a suspended card comes back only by Undo or by another client after a sync.
 
 ## A6. Delete Note (R239, R387)
 
@@ -116,6 +116,7 @@ Every item opens over the review, never as a window (R6), in the platform's nati
 ## A13. The ⋯ menu and the card context menu (Meguri, R374, R376, R377, R378, R379)
 
 - Items in R374's order: Edit Note; Redo (iPhone only, when a step can be redone); Flag ▸; Mark Note; Bury Card; Bury Note; Suspend Card; Suspend Note; Set Due Date…; Forget…; Card Info; Previous Card Info; Template Errors… (only when shown, below); Deck Options; Replay Audio; Pause Audio; Audio −5 s; Audio +5 s; Auto Advance; Card Zoom (−, reset, +); Create Copy; Delete Note (destructive, last).
+- This version (decided 2026-11-20, round 7, `docs/design/native-interface-contract.md` N20.8): the touch toolbar's More menu (`ellipsis`, "More") and the card's context menu hold only Edit Note, then Bury Card and Suspend Card in their own group; on the Mac the Card menu holds the same three. The other items of the list above come with their own units; Bury Note and Suspend Note are not offered (A4, A5).
 - The ⋯ menu is the iPhone and iPad toolbar button's menu (N11.1, N13.3). The card's context menu has the same items: on the Mac a secondary click on the card, and on the iPad a pointer secondary click on the card; when text is selected, the system's Copy, Look Up and Translate come first (R379). `M` opens it as `review/commands#K1.1` says.
 - The Flag submenu shows each flag's name (A2) with a circle symbol in the flag's colour, and checks the current flag (A2). The colour is never the only cue: the name is the row's title and its accessibility label.
 - Mark Note shows a check while the note is marked, and Auto Advance while it is on (R376).

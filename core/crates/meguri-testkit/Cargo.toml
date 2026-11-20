@@ -109,6 +109,11 @@ harness = false
 name = "answer"
 harness = false
 
+# U82's search terms, one statement per term family.
+[[bench]]
+name = "search_terms"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]

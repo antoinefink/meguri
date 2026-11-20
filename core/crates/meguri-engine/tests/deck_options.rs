@@ -699,3 +699,225 @@ fn removing_a_preset_with_scm_at_ls_commits_without_confirmation() {
     h.collection.undo(UndoScope::Global).unwrap();
     assert_eq!(dump(&h), before);
 }
+
+// O17: the first version's page edits three preset values and keeps the deck's.
+const DECK_VALUES: [Field; 5] = [
+    Field::NewLimit,
+    Field::ReviewLimit,
+    Field::NewLimitToday,
+    Field::ReviewLimitToday,
+    Field::DeckDesiredRetention,
+];
+fn page_draft(h: &common::Harness, deck: DeckId) -> options::Draft {
+    let mut d = draft(h, deck);
+    for field in DECK_VALUES {
+        d.keep(field).unwrap();
+    }
+    d
+}
+fn set_deck(h: &common::Harness, deck: DeckId, set: impl FnOnce(&mut meguri_model::proto::deck::NormalDeck) + Send + 'static) {
+    h.collection
+        .run(OpSpec::named("deck values", OpSource::Maintenance), move |ctx| {
+            let mut row = ctx.scope().deck(deck)?.unwrap();
+            if let DeckKind::Normal(n) = &mut row.kind.kind {
+                set(n);
+            }
+            ctx.scope().put(&row)?;
+            Ok(())
+        })
+        .unwrap();
+}
+fn normal(h: &common::Harness, deck: DeckId) -> meguri_model::proto::deck::NormalDeck {
+    match &row(h, deck).kind.kind {
+        DeckKind::Normal(n) => n.clone(),
+        _ => panic!("normal deck"),
+    }
+}
+fn preset_row(h: &common::Harness, id: DeckConfigId) -> meguri_model::deck_config::DeckConfig {
+    h.collection
+        .reader(ReaderRole::Query)
+        .unwrap()
+        .deck_config(id)
+        .unwrap()
+        .unwrap()
+}
+#[test]
+fn page_save_changes_only_the_shown_preset_value_and_keeps_every_deck_value() {
+    let h = common::fresh();
+    h.clock.step_ms(3 * 86400000);
+    let today = h.collection.today().unwrap();
+    set_deck(&h, DeckId(1), move |n| {
+        n.new_limit = Some(5);
+        n.review_limit = Some(50);
+        n.new_limit_today = Some(DayLimit::new(10, today));
+        n.review_limit_today = Some(DayLimit::new(70, today - 1));
+        n.desired_retention = Some(0.85);
+    });
+    h.collection
+        .run(OpSpec::named("hidden", OpSource::Maintenance), |ctx| {
+            let mut p = ctx.scope().deck_config(DeckConfigId(1))?.unwrap();
+            p.config.easy_multiplier = 1.7;
+            p.config.learn_steps = vec![2., 30.];
+            ctx.scope().put(&p)?;
+            Ok(())
+        })
+        .unwrap();
+    let deck_before = row(&h, DeckId(1));
+    let preset_before = preset_row(&h, DeckConfigId(1));
+    let mut d = page_draft(&h, DeckId(1));
+    // O2 item 3: the facts behind the page's "own value" footers.
+    assert_eq!(d.base.deck_values[&Field::NewLimit], Value::Number(5.));
+    assert_eq!(d.base.deck_values[&Field::NewLimitToday], Value::Number(10.));
+    assert_eq!(d.base.deck_values[&Field::ReviewLimitToday], Value::None);
+    assert_eq!(d.base.deck_values[&Field::DeckDesiredRetention], Value::Number(f64::from(0.85f32)));
+    d.edit(Some(1), Field::NewPerDay, Value::Number(15.)).unwrap();
+    assert!(d.has_changes());
+    assert!(d.validate(&d.base.today_date.clone()).is_empty());
+    let saved = options::save(&h.collection, d, &Default::default()).unwrap();
+    assert_eq!(saved.undo.as_ref().unwrap().name, "Deck Options");
+    assert!(saved.changes.decks.is_empty());
+    assert_eq!(saved.changes.deck_configs.len(), 1);
+    assert_eq!(format!("{:?}", row(&h, DeckId(1))), format!("{deck_before:?}"));
+    let preset = preset_row(&h, DeckConfigId(1));
+    assert_eq!(preset.config.new_per_day, 15);
+    let mut expected = preset_before.config.clone();
+    expected.new_per_day = 15;
+    assert_eq!(format!("{:?}", *preset.config), format!("{:?}", *expected));
+}
+#[test]
+fn page_switch_keeps_a_future_today_limit_that_none_would_remove() {
+    let h = common::fresh();
+    h.clock.step_ms(3 * 86400000);
+    let today = h.collection.today().unwrap();
+    set_deck(&h, DeckId(1), move |n| {
+        n.new_limit_today = Some(DayLimit::new(12, today + 2));
+    });
+    let b = deck_config::add(&h.collection, "B".into()).unwrap().value;
+    let before = dump(&h);
+    let mut d = page_draft(&h, DeckId(1));
+    d.select(b.0).unwrap();
+    let saved = options::save(&h.collection, d, &Default::default()).unwrap();
+    assert!(saved.changes.deck_configs.is_empty());
+    assert_eq!(saved.changes.decks.len(), 1);
+    let n = normal(&h, DeckId(1));
+    assert_eq!(n.config_id, b.0);
+    let kept = n.new_limit_today.as_ref().unwrap();
+    assert_eq!((kept.limit, kept.today), (12, today + 2));
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(dump(&h), before);
+    // O9's none, which the first version never sends, removes it.
+    let mut d = draft(&h, DeckId(1));
+    d.select(b.0).unwrap();
+    options::save(&h.collection, d, &Default::default()).unwrap();
+    assert!(normal(&h, DeckId(1)).new_limit_today.is_none());
+}
+#[test]
+fn page_switch_to_another_insertion_order_writes_the_deck_and_resorts_new_cards() {
+    let h = common::fresh();
+    h.collection
+        .run(OpSpec::named("cards", OpSource::Maintenance), |ctx| {
+            for id in 100..110 {
+                let mut c = common::card(NoteId(id / 2), 0);
+                c.id = CardId(id);
+                c.due = 500 - id as i32;
+                ctx.scope().put(&c)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    let random = deck_config::add(&h.collection, "Random".into()).unwrap().value;
+    let mut d = draft(&h, DeckId(1));
+    d.edit(Some(random.0), Field::NewCardInsertOrder, Value::Number(1.))
+        .unwrap();
+    options::save(&h.collection, d, &Default::default()).unwrap();
+    let mut d = page_draft(&h, DeckId(1));
+    d.select(random.0).unwrap();
+    let saved = options::save(&h.collection, d, &Default::default()).unwrap();
+    assert!(saved.changes.deck_configs.is_empty());
+    assert_eq!(saved.changes.decks.len(), 1);
+    assert_eq!(normal(&h, DeckId(1)).config_id, random.0);
+    let rows = h.collection.reader(ReaderRole::Query).unwrap();
+    let cards = rows.cards_of_deck(DeckId(1)).unwrap();
+    let positions = cards.iter().map(|c| c.due).collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(positions, (1..=5).collect());
+}
+#[test]
+fn page_edit_of_a_shared_preset_writes_one_preset_row_for_every_deck() {
+    let h = common::fresh();
+    let shared = deck_config::add(&h.collection, "Shared".into()).unwrap().value;
+    let decks = [
+        DeckId(1),
+        decks::add(&h.collection, "A".into()).unwrap().value.id,
+        decks::add(&h.collection, "B".into()).unwrap().value.id,
+    ];
+    for deck in decks {
+        deck_config::assign(&h.collection, deck, shared, false).unwrap();
+    }
+    let mut d = page_draft(&h, DeckId(1));
+    assert_eq!(d.selected, shared.0);
+    assert_eq!(d.use_count(shared.0).unwrap(), 3);
+    d.edit(Some(shared.0), Field::ReviewsPerDay, Value::Number(420.))
+        .unwrap();
+    let saved = options::save(&h.collection, d, &Default::default()).unwrap();
+    assert_eq!(saved.changes.deck_configs.len(), 1);
+    assert!(saved.changes.decks.is_empty());
+    assert_eq!(preset_row(&h, shared).config.reviews_per_day, 420);
+    for deck in decks {
+        assert_eq!(normal(&h, deck).config_id, shared.0);
+    }
+}
+#[test]
+fn page_validation_refuses_out_of_range_values_and_ignores_kept_deck_values_in_warnings() {
+    use meguri_sched::options::{Code, Severity};
+    let h = common::fresh();
+    let before = dump(&h);
+    let mut d = page_draft(&h, DeckId(1));
+    let today = d.base.today_date.clone();
+    d.edit(Some(1), Field::NewPerDay, Value::Number(10000.)).unwrap();
+    d.edit(Some(1), Field::ReviewsPerDay, Value::Number(2.5)).unwrap();
+    d.edit(Some(1), Field::DesiredRetention, Value::Number(0.65)).unwrap();
+    let errors = d
+        .validate(&today)
+        .into_iter()
+        .filter(|i| i.severity == Severity::Error)
+        .map(|i| (i.field, i.code))
+        .collect::<Vec<_>>();
+    assert!(errors.contains(&(Field::NewPerDay, Code::OutOfRange)));
+    assert!(errors.contains(&(Field::ReviewsPerDay, Code::NotWhole)));
+    assert!(errors.contains(&(Field::DesiredRetention, Code::OutOfRange)));
+    assert!(matches!(
+        options::save(&h.collection, d, &Default::default()),
+        Err(EngineError::DeckOptionsInvalid(_))
+    ));
+    assert_eq!(dump(&h), before);
+    // O17.1: the deck's own values play no part in the page's warnings.
+    set_deck(&h, DeckId(1), |n| {
+        n.new_limit = Some(50);
+        n.desired_retention = Some(0.75);
+    });
+    let codes = |d: &options::Draft| d.validate(&today).into_iter().map(|i| i.code).collect::<Vec<_>>();
+    let full = codes(&draft(&h, DeckId(1)));
+    assert!(full.contains(&Code::ReviewsBelowTenTimesNew) && full.contains(&Code::RetentionLow));
+    assert!(codes(&page_draft(&h, DeckId(1))).is_empty());
+}
+#[test]
+fn untouched_page_writes_nothing_and_an_edit_after_keep_writes_the_value() {
+    let h = common::fresh();
+    let before = dump(&h);
+    let undo = h.collection.peek_undo(UndoScope::Global).unwrap();
+    let d = page_draft(&h, DeckId(1));
+    assert!(!d.has_changes());
+    let saved = options::save(&h.collection, d, &Default::default()).unwrap();
+    assert!(saved.undo.is_none());
+    assert_eq!(dump(&h), before);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), undo);
+    let mut d = page_draft(&h, DeckId(1));
+    assert!(matches!(
+        d.keep(Field::NewPerDay),
+        Err(EngineError::InvalidArgument { .. })
+    ));
+    d.edit(None, Field::NewLimit, Value::Number(9.)).unwrap();
+    assert!(!d.kept.contains(&Field::NewLimit));
+    options::save(&h.collection, d, &Default::default()).unwrap();
+    assert_eq!(normal(&h, DeckId(1)).new_limit, Some(9));
+}

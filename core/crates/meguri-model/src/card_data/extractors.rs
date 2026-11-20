@@ -18,10 +18,16 @@ pub struct Fields {
 
 impl Fields {
     pub fn parse(text: &str) -> Self {
-        Self::read(text).unwrap_or_default()
+        Self::read(text).map(|(fields, _)| fields).unwrap_or_default()
     }
 
-    fn read(text: &str) -> Option<Self> {
+    /// X3's `cd`: the custom data text, when the whole text reads and holds
+    /// it (`search/properties` P12 step 1).
+    pub fn custom_data(text: &str) -> Option<String> {
+        Self::read(text)?.1
+    }
+
+    fn read(text: &str) -> Option<(Self, Option<String>)> {
         // Raw capture checks JSON syntax iteratively, including control
         // characters, but permits surrogate escapes in skipped values.
         let raw: &RawValue = serde_json::from_str(text).ok()?;
@@ -51,21 +57,25 @@ impl Fields {
             }
             _ => return None,
         }
-        if values[6].is_some_and(|value| json::string(value).is_none()) {
-            return None;
-        }
+        let custom_data = match values[6] {
+            Some(value) => Some(json::string(value)?),
+            None => None,
+        };
         // JSON -0 has float syntax for the integer readers of X3, without
         // changing the ordinary model's integer conversion behavior.
         fn integer(value: Option<&RawValue>) -> Option<&RawValue> {
             value.filter(|v| v.get() != "-0")
         }
-        Some(Self {
-            position: integer(values[0]).and_then(json::u32_value),
-            stability: values[1].and_then(json::f32_value),
-            difficulty: values[2].and_then(json::f32_value),
-            desired_retention: values[3].and_then(json::f32_value),
-            decay: values[4].and_then(json::f32_value),
-            last_review_secs: integer(values[5]).and_then(json::i64_value),
-        })
+        Some((
+            Self {
+                position: integer(values[0]).and_then(json::u32_value),
+                stability: values[1].and_then(json::f32_value),
+                difficulty: values[2].and_then(json::f32_value),
+                desired_retention: values[3].and_then(json::f32_value),
+                decay: values[4].and_then(json::f32_value),
+                last_review_secs: integer(values[5]).and_then(json::i64_value),
+            },
+            custom_data,
+        ))
     }
 }

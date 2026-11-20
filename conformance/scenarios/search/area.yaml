@@ -7,12 +7,30 @@
 area: search
 active:
   - "canonical/*"
+  # U82: decks, dupe, errors/ae42, history/added-edited, ids,
+  # notetypes/names, props, regex/glob-size and state, after the R1881
+  # search-data scan (similarity/20261120T222836Z-26053) flagged none of
+  # them. history/answers, dst-new-york, dst-paris and odd-ease stay inactive
+  # until their flagged regions have a disposition (R1881).
+  # tags/hierarchy and tags/regex-and-nc stay inactive: their setup note
+  # `Animal` is stored as `animal` beside `animal::mammal` (tags T3,
+  # deviation tags-implicit-parent-spelling), which changes their dumps and
+  # one search.
+  - "decks/*"
+  - "dupe/*"
   - "extractors/*"
+  - "errors/ae42"
   - "errors/arguments"
   - "errors/escapes"
   - "errors/kinds"
   - "errors/order"
   - "errors/run"
+  - "history/added-edited"
+  - "ids/lists"
+  - "notetypes/names"
+  - "props/*"
+  - "regex/glob-size"
+  - "state/*"
   - "lexing/*"
   - "structure/groups"
   - "structure/negation"

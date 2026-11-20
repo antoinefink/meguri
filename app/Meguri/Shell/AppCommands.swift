@@ -79,6 +79,10 @@ struct NativeCommandContext {
     }
     var canRenameShownDeck: Bool { shownDeck.map { collection.deckActions.canPresent(.rename($0), host: host) } ?? false }
     var canAddSubdeck: Bool { shownDeck.map { collection.deckActions.canPresent(.subdeck($0), host: host) } ?? false }
+    var canOpenDeckOptions: Bool {
+        guard host == .main, review == nil, collection.navigation.sheet == nil, let deck = shownDeck else { return false }
+        return collection.deckOptions.canOpen(deckID: deck)
+    }
     /// N20.4, N20.7: the shown deck, filtered included, outside review, with no
     /// sheet, panel or text input owning ⌘⌫ (H9.2): a focused text view keeps
     /// it for deleting to the line's start.
@@ -232,6 +236,13 @@ struct AppCommands: Commands {
                 context.collection.deckActions.present(.subdeck(deck), host: context.host)
             }
             .disabled(context?.canAddSubdeck != true)
+            // N20.9: the shown normal deck's options; disabled during review.
+            Button("Deck Options…") {
+                guard let context, let deck = context.shownDeck, context.canOpenDeckOptions else { return }
+                context.collection.openDeckOptions(deckID: deck)
+            }
+            .keyboardShortcut("o", modifiers: [.command, .option])
+            .disabled(context?.canOpenDeckOptions != true)
             Divider()
             Button("Delete Deck") { context?.deleteShownDeck() }
                 .keyboardShortcut(.delete, modifiers: .command)

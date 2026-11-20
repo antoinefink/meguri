@@ -58,6 +58,8 @@ nonisolated public enum Destination: Hashable, Codable, Sendable {
     /// section's root when the deck is selected; the tab layout pushes it on
     /// the Decks tab.
     case deckPage(DeckID)
+    /// The deck's Deck Options page (N20.9), pushed on its deck page.
+    case deckOptions(DeckID)
     /// Note Types, pushed from Settings or from Browse's ⋯ menu in the tab
     /// layout (R18).
     case noteTypes

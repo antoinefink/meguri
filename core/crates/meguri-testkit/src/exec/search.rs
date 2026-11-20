@@ -4,7 +4,7 @@
 //! canonical texts and never touches the collection.
 
 use meguri_search::{
-    BuildError, ContextReads, ContextValue, FoldMode, Param, Plan, SearchContext, SearchError, SearchMode, parse,
+    BuildError, ContextValue, FoldMode, Param, Plan, SearchContext, SearchError, SearchMode, parse,
 };
 use meguri_storage::raw::SqlValue;
 use meguri_storage::{ConfigValue, ReadRows};
@@ -272,16 +272,14 @@ fn config(session: &Session<'_>, key: &str) -> Result<Option<ConfigValue>, ExecE
 }
 
 /// Q8 from the scenario clock and config. Day values are filled on demand
-/// after planning, before execution; a missing `curDeck` remains unavailable.
-fn context(session: &Session<'_>) -> Result<(SearchContext, ContextReads), ExecError> {
-    let mut unknown = ContextReads::NONE;
-    let current_deck = match config(session, "curDeck")?.as_ref().and_then(ConfigValue::as_i64) {
-        Some(id) => id,
-        None => {
-            unknown = unknown.with(ContextValue::CurrentDeck);
-            0
-        }
-    };
+/// after planning, before execution. The current deck is `curDeck` read as
+/// a 64-bit integer, 1 when it is missing or reads otherwise
+/// (`search/names-and-ids` N3.4 step 1).
+fn context(session: &Session<'_>) -> Result<SearchContext, ExecError> {
+    let current_deck = config(session, "curDeck")?
+        .as_ref()
+        .and_then(ConfigValue::as_i64)
+        .unwrap_or(1);
     let flag = |key: &str, missing: bool| -> Result<bool, ExecError> {
         Ok(config(session, key)?
             .as_ref()
@@ -303,7 +301,7 @@ fn context(session: &Session<'_>) -> Result<(SearchContext, ContextReads), ExecE
         ignore_accents: flag("ignoreAccentsInSearch", false)?,
         fold: FoldMode::Unicode,
     };
-    Ok((context, unknown))
+    Ok(context)
 }
 
 /// S1: one output per request.
@@ -312,7 +310,7 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
     if requests.iter().any(|request| request.order.is_some()) {
         return Err(ExecError::new("unsupported_observation", "sorted search is pending"));
     }
-    let (mut context, unknown) = context(session)?;
+    let mut context = context(session)?;
     let mut day_supplied = false;
     let mut outputs = Vec::with_capacity(requests.len());
     for request in &requests {
@@ -353,15 +351,6 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
             // Only context changed; the same parsed query must still compile.
             plan = Plan::build(&query, mode, &context)
                 .map_err(|e| ExecError::new("core_error", format!("search context replan: {e:?}")))?;
-        }
-        if let Some(value) = plan.reads().iter().find(|v| unknown.contains(*v)) {
-            return Err(ExecError::new(
-                "unsupported_observation",
-                format!(
-                    "search {:?} reads {value:?}, which the search adapter cannot give yet",
-                    request.query
-                ),
-            ));
         }
         outputs.push(run(session, &plan, mode)?);
     }

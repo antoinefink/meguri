@@ -241,6 +241,32 @@ public final class ReviewCollection: ChangeFanoutSink {
         deckNamesOwner = value
         return value
     }
+    private var deckOptionsOwner: DeckOptionsPageModel?
+    /// The Deck Options page's draft (N20.9), above the layout switch.
+    public var deckOptions: DeckOptionsPageModel {
+        if let deckOptionsOwner { return deckOptionsOwner }
+        let value = DeckOptionsPageModel(owner: self)
+        deckOptionsOwner = value
+        navigation.onDeckOptionsLeft = { [weak value] in value?.pageLeft() }
+        return value
+    }
+    /// N20.9's entries: the deck's page, then its Deck Options pushed on it.
+    public func openDeckOptions(deckID: Int64) {
+        guard deckOptions.canOpen(deckID: deckID) else { return }
+        Task {
+            if navigation.section != .home || navigation.homeDeckPage?.rawValue != deckID {
+                guard await openDeckPage(deckID: deckID).value else { return }
+            }
+            guard deckOptions.canOpen(deckID: deckID) else { return }
+            deckOptions.open(deckID: deckID)
+            navigation.setPath([.deckOptions(DeckID(deckID))], for: .home)
+        }
+    }
+    /// Deck Options reads and saves under the deck name writers' admission.
+    var deckOptionsAllowed: Bool {
+        deckNamesAllowed(host: .main, route: nil) && deckNamesOwner?.busy != true
+    }
+
     private var deckDeletionOwner: DeckDeletionModel?
     public var deckDeletion: DeckDeletionModel {
         if let deckDeletionOwner { return deckDeletionOwner }
@@ -251,6 +277,7 @@ public final class ReviewCollection: ChangeFanoutSink {
 
     private var deckNamesReserved: Bool {
         if case .deckName = navigation.sheet { return true }
+        if deckOptionsOwner?.phase == .saving { return true }
         return deckNamesOwner?.busy == true || undoOwner?.busy == true || deckDeletionOwner?.busy == true
     }
     private var undoOwner: CollectionUndoModel?
@@ -291,6 +318,7 @@ public final class ReviewCollection: ChangeFanoutSink {
               exportOwner?.busy != true,
               exportOwner?.artifact == nil, exportOwner?.providerLease == nil,
               manualOwner?.busy != true, manualOwner?.preview == nil, manualOwner?.mediaPreview == nil,
+              deckOptionsOwner?.phase != .saving,
               deckDeletionOwner?.busy != true,
               navigation.sheet == route else { return false }
         return route == nil || navigation.sheetHost == .main
@@ -998,6 +1026,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             refreshCounts()
             // Any write may be a new step (a text-only note edit changes no count); coalesced.
             if event.generation == generation { undoOwner?.scheduleRefresh() }
+            if event.generation == generation { deckOptionsOwner?.changesCommitted(changes, generation: event.generation) }
             if event.generation == generation,
                changes.wholeCollection || !changes.notetypes.isEmpty || !changes.decks.isEmpty {
                 addFlowOwner?.selectionChanged(generation: event.generation)
@@ -1095,6 +1124,7 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func invalidateDeckActions() {
         undoOwner?.generationEnded()
         deckNamesOwner?.invalidate()
+        deckOptionsOwner?.invalidate()
         deckDeletionOwner?.invalidate()
         selectedDeckDetail = nil
         selectionRevision &+= 1; collapseRevision &+= 1; countsRevision &+= 1; deckTreeRevision &+= 1
@@ -1562,7 +1592,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             await previous?.value
             if !active {
                 await meguriSignInPreparationTask?.value
-                await deckNamesOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
+                await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
             }
             await openTask?.value
             guard !closed, state != .unopened else { resuming = false; return }
@@ -1672,6 +1702,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         await meguriSignInPreparationTask?.value
         invalidateDeckActions()
         await deckNamesOwner?.cancelAndDrain()
+        await deckOptionsOwner?.cancelAndDrain()
         await deckDeletionOwner?.cancelAndDrain()
         _ = await selectionTask?.value
         await collapseTask?.value
