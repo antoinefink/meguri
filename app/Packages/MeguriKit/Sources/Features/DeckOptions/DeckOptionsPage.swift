@@ -9,6 +9,8 @@ import SwiftUI
 public struct DeckOptionsPage: View {
     @Bindable private var model: DeckOptionsPageModel
     private let onClose: () -> Void
+    /// Four digits and a margin at the body size (`range` tops at 9999).
+    @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 64
     @FocusState private var focused: DeckOptionsPageRow?
     @Environment(\.locale) private var locale
 
@@ -83,21 +85,28 @@ public struct DeckOptionsPage: View {
                 presetPicker
             } footer: {
                 Text(DeckOptionsStrings.presetFooter(count: model.selectedUseCount, locale: locale))
+                    .accessibilityIdentifier("deckOptions.options.presetFooter")
             }
             Section {
                 numberRow(.newPerDay)
                 numberRow(.reviewsPerDay)
             } header: {
                 Text("deckOptions.v1.section.dailyLimits", bundle: .module)
+                    .accessibilityIdentifier("deckOptions.options.limitsHeader")
             } footer: {
-                if model.ownLimits { Text("deckOptions.v1.ownLimits", bundle: .module) }
+                if model.ownLimits {
+                    Text("deckOptions.v1.ownLimits", bundle: .module)
+                        .accessibilityIdentifier("deckOptions.options.limitsFooter")
+                }
             }
             Section {
                 retentionRow
             } header: {
                 Text("deckOptions.v1.section.memory", bundle: .module)
+                    .accessibilityIdentifier("deckOptions.options.memoryHeader")
             } footer: {
                 Text(verbatim: DeckOptionsStrings.memoryFooter(ownRetention: model.ownRetention, locale: locale))
+                    .accessibilityIdentifier("deckOptions.options.memoryFooter")
             }
         }
         .formStyle(.grouped)
@@ -161,9 +170,10 @@ public struct DeckOptionsPage: View {
         }
         .labelsHidden()
         .multilineTextAlignment(.trailing)
-        // As wide as its value: the row keeps label and value on one line at
-        // compact width, as the system's value rows do.
-        .fixedSize(horizontal: true, vertical: false)
+        // A value's width, scaled with the text: a text field's own ideal
+        // width is wide enough that the row would put its value under the
+        // label at compact width.
+        .frame(width: fieldWidth)
         .focused($focused, equals: row)
         .onSubmit { model.commit(row) }
         #if os(iOS)
