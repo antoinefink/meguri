@@ -1319,6 +1319,85 @@ core_report_names() {
   [ ! -s "$STUB_LOG" ]
 }
 
+@test "core-test hosted options reject malformed selections and lists before Cargo" {
+  make_core_update_stub
+  write_file list.txt 'meguri-ffi sync::tests::listed  # reason'
+  local args
+  for args in "--partition hash:3/2" "--partition hash:0/2" "--partition count:1/2" "--partition" \
+      "--partition hash:1/2 --partition hash:2/2" "--only-list list.txt --partition hash:1/2" \
+      "--exclude-list list.txt --only-list list.txt" "--exclude-list /etc/hosts" "--exclude-list ../list.txt" \
+      "--exclude-list" "--exclude-list list.txt -- -E all()" "--exclude-list list.txt --stress"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg core-test --quick $args
+    [ "$status" -eq 2 ]
+    [ "$(failure_ids)" = usage ]
+  done
+  mg core-test --quick --exclude-list missing.txt
+  [ "$status" -eq 2 ]
+  [ "$(failure_ids)" = list-missing ]
+  local bad
+  for bad in 'meguri-ffi all()' 'meguri-ffi a b  # three fields' 'meguri-ffi *' 'meguri-ffi' 'not(all()) x'; do
+    write_file bad.txt "$bad"
+    mg core-test --quick --only-list bad.txt
+    [ "$status" -eq 2 ]
+    [ "$(failure_ids)" = list-format ]
+  done
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "core-test hosted options leave out, partition or run exactly the listed tests" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  core_modes_fixture
+  local quick excluded only one two
+  write_file list.txt "# Header comments and blank lines are ignored.
+
+meguri-ffi::hooks hooks_enabled  # needs the FFI hooks feature
+meguri-engine::session_predict ${SESSION_CASE}_extra"
+  mg core-test --quick
+  [ "$status" -eq 0 ]
+  quick="$(core_report_names)"
+
+  mg core-test --quick --exclude-list list.txt
+  [ "$status" -eq 0 ]
+  excluded="$(core_report_names)"
+  jq -e '.details.hosted_selection | .list_mode == "exclude" and .list_file == "list.txt" and (.listed | length) == 2' "$result"
+  jq -ne --argjson q "$quick" --argjson e "$excluded" --arg s "$SESSION_CASE" '
+    ($q - $e) == (["meguri-engine::session_predict$" + $s + "_extra", "meguri-ffi::hooks$hooks_enabled"] | sort)
+    and ($e - $q) == []'
+  validate "$result"
+
+  mg core-test --quick --only-list list.txt
+  [ "$status" -eq 0 ]
+  only="$(core_report_names)"
+  jq -ne --argjson o "$only" --arg s "$SESSION_CASE" '
+    $o == (["meguri-engine::canary_pins$pin_held", "meguri-engine::session_predict$" + $s + "_extra",
+      "meguri-ffi::hooks$hooks_enabled"] | sort)'
+  jq -e '[.details.listed_results[].event] == ["ok", "ok"]' "$result"
+  validate "$result"
+
+  # Every shard runs the canary; apart from it the shards are disjoint and
+  # together are exactly the run without the listed tests.
+  mg core-test --quick --partition hash:1/2 --exclude-list list.txt
+  [ "$status" -eq 0 ]
+  one="$(core_report_names)"
+  jq -e '.details.hosted_selection.partition == "hash:1/2"' "$result"
+  mg core-test --quick --partition hash:2/2 --exclude-list list.txt
+  [ "$status" -eq 0 ]
+  two="$(core_report_names)"
+  jq -ne --argjson a "$one" --argjson b "$two" --argjson e "$excluded" '
+    ["meguri-engine::canary_pins$pin_held"] as $c
+    | ($a | index($c[0])) != null and ($b | index($c[0])) != null
+    and (($a - $c) + ($b - $c) | sort) == ($e - $c) and (($a - $c) - ($b - $c)) == ($a - $c)'
+
+  # A listed test that no longer exists fails the only-list run.
+  write_file list.txt 'meguri-ffi::hooks hooks_renamed  # renamed upstream'
+  mg core-test --quick --only-list list.txt
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = listed-test-not-run ]
+  jq -e '.details.listed_results == [{"name": "meguri-ffi::hooks$hooks_renamed", "event": "not-run"}]' "$result"
+  validate "$result"
+}
+
 # --- core-lint and core-deny on a copy of the real workspace -----------------
 
 @test "core-lint and core-deny pass without a Cargo workspace" {

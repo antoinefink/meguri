@@ -1,6 +1,19 @@
 # SPDX-License-Identifier: MIT
 name: Verify Core at scale
 
+# `tools/mg core-test --stress`: exactly the three full-scale Core cases that
+# the quick suite leaves out (docs/process/tiers.md, "Hosted checks").
+#
+# When "stress" runs:
+# - a pull request or master push that changes an input of those cases: the
+#   Rust workspace (core/**), the dev image (docker/compose.yml,
+#   docker/dev.Dockerfile and its .dockerignore), the job that runs them
+#   (tools/mg, tools/mg.d/core.sh) or this file. These are the paths below.
+#   The cases read no specs, conformance data or app sources, so a change to
+#   those alone (or to docs/) does not run them, and then no "stress" check
+#   appears on the pull request at all;
+# - every night at 02:37 UTC on master, and on manual runs.
+
 on:
   pull_request:
     branches: [master]

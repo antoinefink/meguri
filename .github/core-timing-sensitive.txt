@@ -1,0 +1,16 @@
+# Core tests that fail on GitHub's hosted runners for timing reasons only.
+#
+# The hosted "Linux · core" shards leave these out; the advisory job "Linux ·
+# core (timing-sensitive)" runs them alone, one at a time, on every run that
+# runs Core, and its failures do not fail "Linux · core". Local gates and
+# `tools/mg core-test` still run every test. Each failure stays tracked in
+# docs/process/verification-status.md ("Hosted Core timing-sensitive tests").
+#
+# One test per line, as nextest prints it: `<binary id> <test name>  # reason`.
+# When a test is fixed, delete its line: the shards then run it again.
+
+meguri-ffi sync::tests::media_port::payload_assets::asset_reads::actual_handed_pa_conflict_grants_one_uncharged_first_read_after_handler_return  # hosted run 44703674187 (docs and specs only): fixture wait returned None after 7 s
+meguri-ffi sync::tests::media_port::nonempty_download_waits_for_collection_drain_and_arrives_in_engine_media_store  # hosted run 44703674187 (docs and specs only): SuspendDeadline at "resource cutoff"
+meguri-ffi sync::tests::media_port::payload_assets::asset_reads::jobs::lifecycle::asset_lifecycle_jobs_actual_close_keeps_pin_and_accepted_result_through_accounting  # hosted run 44711659224 (docs and specs only): Timeout after 20 s, although it already runs alone
+meguri-ffi sync::tests::media_port::payload_assets::asset_reads::jobs::lifecycle::asset_lifecycle_jobs_close_joins_original_resource_body_before_runtime_release  # hosted run 44711659224 (docs and specs only): fixture wait returned None after 11 s
+meguri-sync::normal_sync sanity_bad_keeps_counts_and_moves_only_scm  # intermittent locally, even when run alone

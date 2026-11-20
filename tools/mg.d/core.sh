@@ -1,7 +1,7 @@
 # Rust core jobs. Sourced by tools/mg; they run inside the `dev` container.
 
 mg_job core-test docker:dev mg_core_test \
-  "Rust tests: cargo nextest on core/ (no retries), canary_* first; --canaries only, --quick excludes three stress cases, --stress requires those three; args after -- go to nextest"
+  "Rust tests: cargo nextest on core/ (no retries), canary_* first; --canaries only, --quick excludes three stress cases (hosted shards: [--partition hash:M/N] [--exclude-list <file> | --only-list <file>]), --stress requires those three; args after -- go to nextest"
 mg_job core-lint docker:dev mg_core_lint \
   "Rust lint: clippy -D warnings on all targets and features, layering-check (edges.toml), and no AnkiWeb name in meguri-sync built without its features; source formatting is optional"
 mg_job core-deny docker:dev mg_core_deny \
@@ -70,14 +70,52 @@ mg__nextest() {
   )
 }
 
-# tools/mg core-test [--canaries | --quick | --stress | -- nextest args]
+# mg__core_list <file>: the hosted timing-sensitive list (.github/
+# core-timing-sensitive.txt). One test per line, `<binary id> <test name>`
+# as nextest prints them, an optional `# reason`. Prints `<binary id>\t<test
+# name>` per test; returns 1 on a malformed line, so no line can widen or
+# narrow the selection beyond exact identities.
+mg__core_list() {
+  local line binary test rest n=0
+  local binary_re='^[A-Za-z0-9_-]+(::[A-Za-z0-9_-]+)?(/[A-Za-z0-9_-]+)?$' test_re='^[A-Za-z0-9_]+(::[A-Za-z0-9_]+)*$'
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    line="${line%%#*}"
+    binary="" test="" rest=""
+    read -r binary test rest <<<"$line"
+    [ -n "$binary" ] || continue
+    if [ -n "$rest" ] || ! [[ "$binary" =~ $binary_re ]] || ! [[ "$test" =~ $test_re ]]; then
+      echo "line $n: expected '<binary id> <test name>  # reason', got: $line" >&2
+      return 1
+    fi
+    printf '%s\t%s\n' "$binary" "$test"
+  done <"$1"
+}
+
+# mg__core_settle <filter>: under --only-list, build the selected tests, then
+# flush the build's writeback, so the listed wall-clock tests start on a
+# settled disk (as the settled-disk wrapper does for the WAL tests). Reads the
+# caller's list_mode and features. A build failure is left to the run itself.
+mg__core_settle() {
+  [ "$list_mode" = only ] || return 0
+  (cd core && cargo nextest list --workspace ${features[0]+"${features[@]}"} -E "$1" >/dev/null) || true
+  sync
+}
+
+# tools/mg core-test [--canaries | --quick [hosted options] | --stress | -- nextest args]
 # --canaries runs the canary phase alone (the gate's canary stage, U19) and
 # fails when the workspace has no canary. Quick keeps that ordering; stress
 # runs only its exact three cases. Both opt into the FFI test hooks locally.
+# Hosted options split quick's ordinary tests across runners; each shard
+# still runs the canaries first. `--partition hash:M/N` keeps the tests of
+# nextest partition M of N. `--exclude-list <file>` leaves out the listed
+# tests; `--only-list <file>` runs exactly them, one at a time after the
+# build has been flushed to disk, and fails when a listed test did not run.
 mg_core_test() {
   local only_canaries=false mode=default arg
+  local partition="" list_mode="" list_file="" listed="" list_expr=""
   case "${1:-}" in
-    --canaries|--quick|--stress)
+    --canaries|--stress)
       mode="${1#--}"
       shift
       if [ "$#" -gt 0 ]; then
@@ -86,6 +124,74 @@ mg_core_test() {
         return 0
       fi
       [ "$mode" != canaries ] || only_canaries=true
+      ;;
+    --quick)
+      mode=quick
+      shift
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --partition)
+            if [ -n "$partition" ] || [ "$#" -lt 2 ] || ! [[ "$2" =~ ^hash:([1-9][0-9]*)/([1-9][0-9]*)$ ]] ||
+               [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+              mg_failure usage "--partition takes one hash:M/N with 1 <= M <= N" "tools/mg core-test --quick --partition hash:1/4"
+              mg_status error
+              return 0
+            fi
+            partition="$2"
+            shift 2
+            ;;
+          --exclude-list|--only-list)
+            if [ -n "$list_mode" ] || [ "$#" -lt 2 ] || [ -z "$2" ]; then
+              mg_failure usage "--quick takes at most one of --exclude-list or --only-list, with a file" "tools/mg core-test --quick --exclude-list .github/core-timing-sensitive.txt"
+              mg_status error
+              return 0
+            fi
+            list_mode="${1#--}"
+            list_mode="${list_mode%-list}"
+            list_file="$2"
+            shift 2
+            ;;
+          *)
+            mg_failure usage "--quick takes only --partition hash:M/N and one of --exclude-list or --only-list <file>" "tools/mg core-test --quick"
+            mg_status error
+            return 0
+            ;;
+        esac
+      done
+      if [ "$list_mode" = only ] && [ -n "$partition" ]; then
+        mg_failure usage "--only-list runs its tests one at a time on one runner; it takes no --partition" "tools/mg core-test --quick --only-list $list_file"
+        mg_status error
+        return 0
+      fi
+      if [ -n "$list_mode" ]; then
+        case "$list_file" in
+          /* | ../* | */../* | *..)
+            mg_failure usage "the list must be a file inside the checkout, given relative to its root" "tools/mg core-test --quick --$list_mode-list .github/core-timing-sensitive.txt"
+            mg_status error
+            return 0
+            ;;
+        esac
+        if [ ! -f "$list_file" ]; then
+          mg_failure list-missing "no list file at $list_file" "tools/mg core-test --quick --$list_mode-list $list_file"
+          mg_status error
+          return 0
+        fi
+        if ! listed="$(mg__core_list "$list_file")"; then
+          mg_failure list-format "$list_file has a malformed line (see log.txt); each line is '<binary id> <test name>  # reason'" "tools/mg core-test --quick --$list_mode-list $list_file"
+          mg_status error
+          return 0
+        fi
+        if [ -n "$listed" ]; then
+          list_expr="$(printf '%s\n' "$listed" | awk -F'\t' '{printf "%s(binary_id(=%s) & test(=%s))", (NR > 1 ? " | " : ""), $1, $2}')"
+        fi
+      fi
+      mg_detail hosted_selection "$(jq -nc --arg partition "$partition" --arg mode "$list_mode" --arg file "$list_file" \
+        --arg sha "$( [ -z "$list_file" ] || sha256sum "$list_file" | cut -c1-64)" --arg listed "$listed" '
+        {partition: (if $partition == "" then null else $partition end),
+         list_mode: (if $mode == "" then null else $mode end),
+         list_file: (if $file == "" then null else $file end),
+         list_sha256: (if $sha == "" then null else $sha end),
+         listed: [$listed | splits("\n") | select(. != "") | split("\t") | .[0] + "$" + .[1]]}')"
       ;;
   esac
   [ "${1:-}" = "--" ] && shift
@@ -119,13 +225,19 @@ mg_core_test() {
   local main="$MG_RUN_DIR/nextest.jsonl" canary="$MG_RUN_DIR/nextest-canary.jsonl"
   local rc stopped=false pkg stress_complete=true
   local ordinary_filter="not ($MG_CORE_CANARIES)"
-  local files=() canaries=() features=()
+  local files=() canaries=() features=() hosted=()
   case "$mode" in
     quick|stress) features=(--features meguri-ffi/test-hooks) ;;
   esac
   if [ "$mode" = quick ]; then
-    ordinary_filter="$ordinary_filter & not ($MG_CORE_STRESS)"
-    set -- --no-tests=pass -E "not ($MG_CORE_STRESS)"
+    local quick_filter="not ($MG_CORE_STRESS)"
+    case "$list_mode" in
+      exclude) [ -z "$list_expr" ] || quick_filter="$quick_filter & not ($list_expr)" ;;
+      only) quick_filter="$quick_filter & (${list_expr:-none()})"; hosted=(--test-threads 1) ;;
+    esac
+    [ -z "$partition" ] || hosted=(--partition "$partition")
+    ordinary_filter="$ordinary_filter & $quick_filter"
+    set -- --no-tests=pass -E "$quick_filter"
   elif [ "$mode" = stress ]; then
     set -- -E "$MG_CORE_STRESS"
   fi
@@ -150,14 +262,16 @@ mg_core_test() {
     elif [ "$only_canaries" = true ]; then
       :
     else
-      mg__nextest "$main" --workspace ${features[0]+"${features[@]}"} --no-tests=pass -E "$ordinary_filter"
+      mg__core_settle "$ordinary_filter"
+      mg__nextest "$main" --workspace ${features[0]+"${features[@]}"} ${hosted[0]+"${hosted[@]}"} --no-tests=pass -E "$ordinary_filter"
       rc=$?
       mg_artifact nextest-jsonl "$main"
       files=("$canary" "$main")
     fi
   else
     [ "$#" -gt 0 ] || set -- --no-tests=pass
-    mg__nextest "$main" --workspace ${features[0]+"${features[@]}"} "$@"
+    mg__core_settle "${quick_filter:-}"
+    mg__nextest "$main" --workspace ${features[0]+"${features[@]}"} ${hosted[0]+"${hosted[@]}"} "$@"
     rc=$?
     mg_artifact nextest-jsonl "$main"
     files=("$main")
@@ -208,17 +322,40 @@ mg_core_test() {
       mg_failure stress-selection "stress requires exactly the three expected cases to pass, with none missing or skipped" "tools/mg core-test --stress"
     fi
   fi
+  # --only-list: every listed test must have run exactly once. A renamed or
+  # removed test would otherwise leave the list silently checking nothing.
+  local listed_complete=true listed_results missing scope=""
+  if [ "$list_mode" = only ] && [ "$stopped" = false ]; then
+    if listed_results="$( { [ ! -f "$main" ] || cat "$main"; } | jq -sc --arg listed "$listed" '
+      [.[] | select(.type == "test" and .event != "started")] as $tests
+      | [$listed | splits("\n") | select(. != "") | split("\t") | .[0] + "$" + .[1]]
+      | map(. as $n | [$tests[] | select(.name == $n) | .event] as $e
+        | {name: $n, event: (if ($e | length) == 1 then $e[0] elif ($e | length) == 0 then "not-run" else "duplicate" end)})')"; then
+      mg_detail listed_results "$listed_results"
+      missing="$(jq -r '[.[] | select(.event == "not-run" or .event == "duplicate" or .event == "ignored") | .name] | join(", ")' <<<"$listed_results")"
+    else
+      missing="(nextest output unreadable)"
+    fi
+    if [ -n "$missing" ]; then
+      listed_complete=false
+      mg_failure listed-test-not-run "listed tests did not run exactly once: $missing; a renamed or removed test must be updated in $list_file" \
+        "tools/mg core-test --quick --only-list $list_file"
+    fi
+  fi
+  [ -z "$partition" ] || scope="; partition $partition"
+  [ "$list_mode" != exclude ] || scope="$scope; $(printf '%s' "$listed" | grep -c . || true) listed tests left to the --only-list run"
+  [ "$list_mode" != only ] || scope="$scope; only the $(printf '%s' "$listed" | grep -c . || true) tests of $list_file, one at a time"
   if [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ] && [ "$only_canaries" = true ]; then
     mg_message "core-test: canaries only: $passed passed, $skipped skipped"
     mg_status pass
-  elif [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ] && [ "$stress_complete" = true ]; then
-    mg_message "core-test: $passed passed, $skipped skipped"
+  elif [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ] && [ "$stress_complete" = true ] && [ "$listed_complete" = true ]; then
+    mg_message "core-test: $passed passed, $skipped skipped$scope"
     mg_status pass
   elif [ "$stopped" = true ] && [ "$failed" -gt 0 ]; then
     mg_message "core-test: canary failed ($failed failed, $passed passed); the other tests did not run (nextest exit $rc)"
     mg_status fail
   else
-    mg_message "core-test: $failed failed, $passed passed, $skipped skipped (nextest exit $rc)"
+    mg_message "core-test: $failed failed, $passed passed, $skipped skipped (nextest exit $rc)$scope"
     mg_status fail
   fi
 }

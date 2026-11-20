@@ -85,6 +85,21 @@ Local scheduled runs remain available. `tools/mg nightly --print-schedule` write
 
 For warm development feedback, select affected cases with `tools/mg core-test -- -E '<filter>'` and group Swift test filters in one `tools/mg swift-test -- --filter '<pattern>' --filter '<pattern>'` call to share its preparation. `tools/mg core-test --quick` runs the canaries and ordinary Core checks with FFI test hooks. `tools/mg core-test --stress` requires successful reports for exactly the 10,000-session review case and the two 150,000-card sync cases. GitHub runs the quick checks for routine verification and the scale checks nightly, manually and for Core or runner input changes. The ordinary full Core job and the local release gate retain all three cases.
 
+### Hosted checks
+
+GitHub Actions runs on every pull request and master push. "Select suites" picks the suites from the changed paths, and every check reports. A suite that the change does not affect passes in seconds with "not selected" in its summary. A change only to `docs/`, or to Markdown outside the directories below, runs no suite. A hosted receipt proves only its own job and arguments on that commit. It is never a gate receipt.
+
+| Check | What it is | Expected time |
+|---|---|---|
+| Select suites | Server, conformance and package-smoke run for changes under `app/`, `conformance/`, `core/`, `docker/`, `server/`, `specs/`, `tools/` or the workflow. Core runs for the inputs of `core-test`: `core/`, `conformance/`, `specs/` (not `specs/servers/`), its tools/mg job, the dev image and the timing-sensitive list. Manual runs and changes it cannot compare run everything. | under 1 min |
+| Linux · core | The Core result. It passes only when all four shards passed on this commit, with the expected arguments. A shard that failed, was cancelled or did not start fails it. | 1 min after the last shard |
+| Linux · core · shard M/4 | `core-test --quick --partition hash:M/4 --exclude-list .github/core-timing-sensitive.txt`: the canaries, then nextest partition M. Each shard builds the dev image and the workspace itself, about 23 minutes before its tests start. | about 30 min (was 46 min in one job) |
+| Linux · core (timing-sensitive) | Advisory. `core-test --quick --only-list .github/core-timing-sensitive.txt` runs the listed tests one at a time, after the build is flushed to disk. It fails when a listed test fails or does not run. Its summary names each result, and Linux · core does not depend on it. | about 25 min |
+| Linux · server, conformance, package-smoke | `sync-server-test`, `conformance --lane docker`, `sync-server-package-test` | 12–15 min |
+| stress (Verify Core at scale) | `core-test --stress`, for changes to `core/`, the dev image, `tools/mg`, `tools/mg.d/core.sh` or its workflow; nightly and manual. Its workflow header lists why. Pull requests that change none of these show no stress check. | about 70 min |
+
+Linux · core covers the quick tests except the listed ones. The listed tests fail on hosted runners for timing reasons only, so they stay advisory until they are fixed. Each one is tracked in `verification-status.md`. When a test is fixed, delete its line in `.github/core-timing-sensitive.txt`: the shards then run it again, and it blocks again. Local `core-test` and the gate still run every test.
+
 Antoine authorized a narrow unsigned Apple pilot on 2026-11-19 for the public Core XCFramework build on GitHub's Xcode runner. This is the exception to the Docker-only cloud placement rule (R1939). It supplies build feedback. The signed app journey, test VM, private data and device requirements retain their designated environments.
 
 ## Milestones and release
