@@ -1855,6 +1855,7 @@ enum OpenFailureDiagnostic {
         case .undoUnavailable: return "undoUnavailable"
         case .notetypeRefused: return "notetypeRefused"
         case .deckRefused: return "deckRefused"
+        case .notetypeStructureRefused: return "notetypeStructureRefused"
         case .noteNotFound: return "noteNotFound"
         case .notFound: return "notFound"
         case .insufficientSpace: return "insufficientSpace"

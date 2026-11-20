@@ -13,7 +13,7 @@ use super::plan::{self, CardOutcome, Layout, Planned};
 use super::{StructureSaved, stale};
 use crate::cardgen::regenerate;
 use crate::executor::op::OpContext;
-use crate::notetypes::{AggregateDigest, random_id, read, rename};
+use crate::notetypes::{AggregateDigest, names, random_id, read, rename};
 use crate::{CancelToken, EngineError, ProgressSink};
 
 /// Notes written per page.
@@ -37,23 +37,14 @@ pub(crate) fn commit(ctx: &mut OpContext<'_, '_>, planned: &Planned) -> Result<S
 
 /// The checks of the write phase, on the rows of its own transaction and
 /// before its first write: the base token (S1.2 item 1, `engine/op-model`
-/// O7), the saved name's uniqueness among the live note types (N4 step 7
-/// was planned on the snapshot), then the notes' value counts (item 4: a
-/// note added since planning counts). A precondition on the live rows that
-/// must hold for the save to write anything goes after the base token
-/// check, here.
+/// O7), then the notes' value counts (item 4: a note added since planning
+/// counts). A precondition on the live rows that must hold for the save to
+/// write anything goes after the base token check, here.
 pub(crate) fn check_live(scope: &WriteScope<'_>, layout: &Layout) -> Result<(), EngineError> {
     let id = layout.base.id;
     let live = scope.notetype(id)?.ok_or_else(|| stale(id))?;
     if AggregateDigest::of(&live) != layout.digest {
         return Err(stale(id));
-    }
-    let name = meguri_text::fold::folded(&layout.saved.name);
-    for (other, other_name) in read::names(scope)? {
-        if other != id && meguri_text::fold::folded(&other_name) == name {
-            // Another note type took the name while this save planned.
-            return Err(stale(other));
-        }
     }
     plan::check_note_values(scope, layout, &CancelToken::new(), &ProgressSink::new())
 }
@@ -89,6 +80,11 @@ pub(crate) fn commit_layout(ctx: &mut OpContext<'_, '_>, layout: &Layout) -> Res
     meguri_model::faultpoint!("notetypes.structure.write_phase")
         .map_err(|error| EngineError::internal(format!("injected write-phase failure: {error}")))?;
     let mut saved = layout.saved.clone();
+    // N4 step 7 re-derived on the live rows (O7): another note type may
+    // have taken the name since planning.
+    let others: Vec<_> = read::names(scope)?.into_iter().filter(|(other, _)| *other != saved.id).collect();
+    saved.name = names::unique_among(&saved.name, saved.id, &others);
+    result.name.clone_from(&saved.name);
     for (field, fresh) in saved.fields.iter_mut().zip(&layout.fresh_fields) {
         if *fresh {
             field.config.id = Some(random_id(random));
@@ -151,6 +147,9 @@ fn rewrite_cards(scope: &mut WriteScope<'_>, layout: &Layout) -> Result<(u64, u6
                 if layout.cards.outcome_of(card.ord) == CardOutcome::Remove {
                     scope.remove_card(card.id)?;
                     scope.add_grave(card.id.0, GraveKind::Card, Usn::PENDING)?;
+                    // Its id, grave and review log stay its own: G9 below
+                    // never gives the id to a new card.
+                    scope.retire_card_ids_through(card.id);
                     gone += 1;
                 }
             }

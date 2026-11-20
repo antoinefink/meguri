@@ -308,6 +308,9 @@ fn repeated_origins_are_invalid_before_stale() {
     assert!(matches!(run(&h, draft.clone()).unwrap_err(), EngineError::Stale { .. }));
     let mut out_of_range = StructureDraft::of(&read(&h, id));
     out_of_range.fields[2].origin = Some(9);
+    assert!(matches!(run(&h, out_of_range.clone()).unwrap_err(), EngineError::InvalidArgument { .. }));
+    // Before `Stale` too (S1.2: "before them all").
+    out_of_range.base = notetypes::AggregateDigest([0; 32]);
     assert!(matches!(run(&h, out_of_range).unwrap_err(), EngineError::InvalidArgument { .. }));
 }
 
@@ -807,9 +810,10 @@ fn a_field_edit_during_planning_survives_at_its_new_position() {
 }
 
 /// N4 step 7 on the live rows: another note type that took the draft's new
-/// name while the save backed up makes it `Stale`, nothing written.
+/// name while the save backed up gets the name; the save stores `+` after
+/// it and reports the stored name.
 #[test]
-fn a_name_taken_during_the_backup_is_stale() {
+fn a_name_taken_during_the_backup_is_uniqued_on_the_live_rows() {
     let (h, backups) = harness();
     let id = trio(&h);
     add(&h, id, &["a", "b", ""]);
@@ -823,7 +827,51 @@ fn a_name_taken_during_the_backup_is_stale() {
         other.name = "renamed".into();
         notetypes::save(c, other, notetypes::SaveOptions::default()).unwrap();
     });
-    let before = state(&h, id);
-    assert!(matches!(run(&h, draft).unwrap_err(), EngineError::Stale { .. }));
-    assert_eq!(state(&h, id), before);
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!(saved.name, "Renamed+");
+    assert_eq!(read(&h, id).name, "Renamed+");
+}
+
+/// A card the save removes keeps its id: a card G9 adds in the same save
+/// never gets it, so the grave and review log stay the removed card's.
+/// Under the test's frozen clock the allocator would otherwise pick the
+/// removed card's id (the largest one plus one, once it is gone).
+#[test]
+fn a_removed_card_id_is_never_given_to_a_generated_card() {
+    let (h, _) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    let removed = state(&h, id).cards.iter().find(|c| c.2 == 1).unwrap().0;
+    let mut draft = draft(&h, id);
+    without_template(&mut draft, "Reverse");
+    draft.templates.push(template("Reverse again", "{{Back}}"));
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!((saved.cards_removed, saved.cards_added), (1, 1));
+    let after = state(&h, id);
+    assert!(after.cards.iter().all(|c| c.0 != removed), "{:?}", after.cards);
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    assert!(reader.grave(removed, GraveKind::Card).unwrap().is_some());
+}
+
+/// V1: a checked draft runs V3 also when it only renames fields (the
+/// field rename op skips it) and when it changes nothing (N3).
+#[test]
+fn checked_drafts_run_the_template_checks_on_every_path() {
+    let (h, _) = harness();
+    let id = trio(&h);
+    let mut broken = draft(&h, id);
+    broken.templates[1].back = "{{Missing}}".into();
+    run(&h, broken).unwrap();
+    let mut renamed = StructureDraft::of(&read(&h, id));
+    renamed.fields[2].name = "Notes".into();
+    let error = run(&h, renamed.clone()).unwrap_err();
+    assert!(matches!(&error, EngineError::NotetypeRefused(r) if r.kind() == "unknown_field"), "{error:?}");
+    renamed.skip_checks = true;
+    run(&h, renamed).unwrap();
+    let unchanged = StructureDraft::of(&read(&h, id));
+    let error = run(&h, unchanged.clone()).unwrap_err();
+    assert!(matches!(&error, EngineError::NotetypeRefused(r) if r.kind() == "unknown_field"), "{error:?}");
+    let mut unchecked = unchanged;
+    unchecked.skip_checks = true;
+    assert!(!run(&h, unchecked).unwrap().value.written);
 }

@@ -495,17 +495,26 @@ pub(crate) fn plan_draft(
     let base = reader
         .notetype(id)?
         .ok_or_else(|| invalid(format!("no note type {id}")))?;
-    // S1.2 item 1, on the planning snapshot.
-    if AggregateDigest::of(&base) != draft.base {
-        return Err(stale(id));
-    }
+    // S1.1: origins outside the base are refused before every refusal,
+    // `Stale` included (against the note type as stored).
     check_range(draft.fields.iter().map(|f| f.origin), base.fields.len(), "a field")?;
     check_range(draft.templates.iter().map(|t| t.origin), base.templates.len(), "a template")?;
     if draft.sort_field.is_some_and(|sort| sort as usize >= draft.fields.len()) {
         return Err(invalid("the sort field is not a field of the draft"));
     }
+    // S1.2 item 1, on the planning snapshot.
+    if AggregateDigest::of(&base) != draft.base {
+        return Err(stale(id));
+    }
     if let Some(request) = rename_only(&base, draft) {
         let plan = rename::plan(reader, request, cancel, progress)?;
+        // The field rename op skips V3 (the field editor's mode); a checked
+        // draft runs it on the renamed note type (V1, S1.2 item 5).
+        if !draft.skip_checks
+            && let Some(failure) = validate::first_failure(plan.renamed())
+        {
+            return Err(failure.into());
+        }
         return Ok(Planned::Rename(Box::new(plan)));
     }
     let mut layout = layout_of_draft(reader, base, draft)?;
@@ -532,6 +541,10 @@ pub(crate) fn finish(
     progress: &ProgressSink,
 ) -> Result<(), EngineError> {
     if !layout.changed {
+        // N3: a checked save validates before it compares.
+        if checked && let Some(failure) = validate::first_failure(&layout.saved) {
+            return Err(failure.into());
+        }
         return Ok(());
     }
     // Item 4.

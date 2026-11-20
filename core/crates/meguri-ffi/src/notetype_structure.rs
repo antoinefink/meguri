@@ -211,11 +211,14 @@ pub struct NotetypeStructureJobStart {
 pub fn start_notetype_structure_save(draft: NotetypeStructureDraft) -> Result<NotetypeStructureJobStart, CoreError> {
     callback::enter("start_notetype_structure_save");
     let draft = StructureDraft::try_from(draft)?;
-    let host = runtime::host()?;
+    // The collection the draft was made on: a handle of an older generation
+    // refuses the op (`StaleGeneration`) if a replacement lands while the
+    // job waits, so the draft never reaches another collection.
+    let collection = runtime::host()?.collection()?;
     let result = Arc::new(Mutex::new(None));
     let out = result.clone();
     let handle = runtime::engine()?.start_job(meguri_engine::JobKind::BulkOp, move |job| {
-        let saved = structure::apply(&host.collection()?, draft, job.cancel.clone(), job.progress.clone())?;
+        let saved = structure::apply(&collection, draft, job.cancel.clone(), job.progress.clone())?;
         *out.lock().unwrap() = Some(saved.into());
         Ok(())
     })?;

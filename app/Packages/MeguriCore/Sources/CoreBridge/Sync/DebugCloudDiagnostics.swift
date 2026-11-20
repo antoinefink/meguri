@@ -653,6 +653,7 @@ public enum DebugCloudDiagnostics {
             case .undoUnavailable: return "bridge.undoUnavailable"
             case .notetypeRefused: return "bridge.notetypeRefused"
             case .deckRefused: return "bridge.deckRefused"
+            case .notetypeStructureRefused: return "bridge.notetypeStructureRefused"
             case .noteNotFound: return "bridge.noteNotFound"
             case .notFound: return "bridge.notFound"
             case .insufficientSpace: return "bridge.insufficientSpace"

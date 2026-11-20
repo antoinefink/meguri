@@ -327,6 +327,7 @@ nonisolated final class ServiceStopEngineTrace: Sendable {
             case .undoUnavailable: category = "bridge.undoUnavailable"
             case .notetypeRefused: category = "bridge.notetypeRefused"
             case .deckRefused: category = "bridge.deckRefused"
+            case .notetypeStructureRefused: category = "bridge.notetypeStructureRefused"
             case .noteNotFound: category = "bridge.noteNotFound"
             case .notFound: category = "bridge.notFound"
             case .insufficientSpace: category = "bridge.insufficientSpace"

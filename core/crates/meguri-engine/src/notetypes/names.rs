@@ -164,7 +164,7 @@ fn sort_field(notetype: &Notetype) -> u32 {
 
 /// Step 7: `+` appended until no other note type has a name equal under
 /// unicase. A note type never collides with itself.
-fn unique_among(name: &str, id: NotetypeId, others: &[(NotetypeId, String)]) -> String {
+pub(crate) fn unique_among(name: &str, id: NotetypeId, others: &[(NotetypeId, String)]) -> String {
     let taken: HashSet<String> = others
         .iter()
         .filter(|(other, _)| *other != id)

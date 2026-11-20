@@ -67,6 +67,11 @@ impl FieldRenamePlan {
     pub(crate) fn regenerates(&self) -> bool {
         self.regeneration.is_some()
     }
+
+    /// The note type the commit stores.
+    pub(crate) fn renamed(&self) -> &Notetype {
+        &self.renamed
+    }
 }
 
 fn invalid(message: &str) -> EngineError {

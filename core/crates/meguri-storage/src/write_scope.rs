@@ -89,6 +89,9 @@ pub struct WriteScope<'c> {
     /// Open savepoints, innermost last: whether the scope had a change when
     /// each was taken.
     savepoints: Vec<bool>,
+    /// New card ids are allocated at or above this: ids of cards removed
+    /// earlier in the transaction are never given to a new card.
+    card_id_floor: i64,
 }
 
 /// A savepoint inside a write scope (`engine/op-model` O3): one step of a
@@ -139,6 +142,7 @@ impl<'c> WriteScope<'c> {
             open: true,
             normal_stage: false,
             savepoints: Vec::new(),
+            card_id_floor: i64::MIN,
         })
     }
 
@@ -398,7 +402,11 @@ impl<'c> WriteScope<'c> {
     }
 
     fn add<R: Record>(&mut self, record: &R) -> Result<i64, StorageError> {
-        let id = ids::allocate(self.conn, R::TABLE, self.now().0)?;
+        let mut at = self.now().0;
+        if R::TABLE == Table::Cards {
+            at = at.max(self.card_id_floor);
+        }
+        let id = ids::allocate(self.conn, R::TABLE, at)?;
         let mut cells = record.to_cells();
         cells[0] = Cell::Integer(id);
         self.put_cells(R::TABLE, cells, false)?;
@@ -408,6 +416,14 @@ impl<'c> WriteScope<'c> {
     /// Adds a note under a new id (I2, I3); the note's own id is ignored.
     pub fn add_note(&mut self, note: &Note) -> Result<NoteId, StorageError> {
         self.add(note).map(NoteId)
+    }
+
+    /// Keeps the ids up to `id` from every card this scope adds later: a
+    /// card removed with its grave and review log must never see its id
+    /// given to a new card in the same transaction, whatever the allocator
+    /// (I3) would pick once the row is gone.
+    pub fn retire_card_ids_through(&mut self, id: CardId) {
+        self.card_id_floor = self.card_id_floor.max(id.0.saturating_add(1));
     }
 
     /// Adds a card under a new id (I2, I3).
