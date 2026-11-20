@@ -33,82 +33,85 @@ import notify
         let settings = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.settings",
             sidebarIdentifier: "shell.root.sidebar.settings", compactLabel: "Settings", timeout: 10), app.debugDescription)
         try click(settings, app, bundle)
-        let accountRows = app.buttons.matching(identifier: "settings.root.accountSync")
-        let account = try XCTUnwrap(waitForHittable(accountRows), app.debugDescription)
-        XCTAssertEqual(accountRows.count, 1)
-        try click(account, app, bundle)
+        // N15.1: the Sync section is on the flat Settings page; no row pushes it.
         XCTAssertTrue(app.staticTexts["Choose a service to sync this collection."].waitForExistence(timeout: 10),
             "Requires fresh synthetic local-only provider state")
-        let services = app.buttons.matching(identifier: "settings.accountSync.service")
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "settings.root.accountSync").count, 0)
+        let services = app.buttons.matching(identifier: "settings.sync.service")
         let service = try XCTUnwrap(waitForHittable(services), app.debugDescription)
         XCTAssertEqual(services.count, 1)
         XCTAssertTrue(service.isEnabled)
         try click(service, app, bundle)
         // The standard iOS Picker exposes menu choices as native buttons.
+        // T19.2: Off, Meguri Sync, iCloud; a choice made from Off asks nothing.
         let options = app.buttons.matching(NSPredicate(format: "label == %@", "Meguri Sync"))
         let meguri = try XCTUnwrap(waitForHittable(options), app.debugDescription)
         XCTAssertEqual(options.count, 1)
         try click(meguri, app, bundle)
 
-        func checkFormAndGoBack() throws {
+        func checkForm(focusPassword: Bool) throws {
             let serviceCommitted = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format:
                 "exists == true AND (label == %@ OR value == %@ OR label == %@)",
-                "Meguri Sync", "Meguri Sync", "Sync Service, Meguri Sync"), object: service)], timeout: 20) == .completed
+                "Meguri Sync", "Meguri Sync", "Service, Meguri Sync"), object: service)], timeout: 20) == .completed
             if !serviceCommitted {
                 // Fixed synthetic targets only; never read credential field values.
-                let identifiers = ["settings.root.accountSync", "settings.accountSync.content",
-                    "settings.accountSync.service", "settings.accountSync.meguri.address",
-                    "settings.accountSync.meguri.username", "settings.accountSync.meguri.password",
-                    "settings.accountSync.meguri.signIn", "sync.serviceSwitch.confirm"]
+                let identifiers = ["settings.root.content", "settings.sync.service", "settings.sync.meguri.address",
+                    "settings.sync.meguri.username", "settings.sync.meguri.password",
+                    "settings.sync.meguri.signIn", "sync.serviceSwitch.confirm"]
                 var context = identifiers.map { identifier in
                     "\(identifier): count=\(app.descendants(matching: .any).matching(identifier: identifier).count)"
                 }
                 if service.exists {
                     context.append("service: label=\(service.label.debugDescription) value=\(String(describing: service.value)) enabled=\(service.isEnabled) hittable=\(service.isHittable)")
                 }
-                context.append("Account & Sync navigation bar: \(app.navigationBars["Account & Sync"].exists)")
                 context.append("Settings navigation bar: \(app.navigationBars["Settings"].exists)")
                 let attachment = XCTAttachment(string: context.joined(separator: "\n"))
-                attachment.name = "settings-account-sync-unsettled"
+                attachment.name = "settings-sync-unsettled"
                 attachment.lifetime = .keepAlways
                 add(attachment)
             }
             XCTAssertTrue(serviceCommitted, "The committed service must survive reopening")
-            XCTAssertTrue(element(app, "settings.accountSync.content").exists)
+            XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "sync.serviceSwitch.confirm").count, 0,
+                "A choice made from Off opens no confirmation")
             for name in ["address", "username", "password"] {
                 let fields = name == "password"
-                    ? app.secureTextFields.matching(identifier: "settings.accountSync.meguri.password")
-                    : app.textFields.matching(identifier: "settings.accountSync.meguri.\(name)")
+                    ? app.secureTextFields.matching(identifier: "settings.sync.meguri.password")
+                    : app.textFields.matching(identifier: "settings.sync.meguri.\(name)")
                 let field = try XCTUnwrap(waitForHittable(fields), "Actionable native \(name) field required")
                 XCTAssertEqual(fields.count, 1)
                 XCTAssertTrue(field.isEnabled)
             }
-            let signIns = app.buttons.matching(identifier: "settings.accountSync.meguri.signIn")
+            let signIns = app.buttons.matching(identifier: "settings.sync.meguri.signIn")
             let signIn = signIns.firstMatch
             XCTAssertTrue(signIn.waitForExistence(timeout: 20), app.debugDescription)
             XCTAssertEqual(signIns.count, 1)
             XCTAssertEqual(signIn.label, "Sign In")
             XCTAssertFalse(signIn.isEnabled, "Empty credentials must not submit")
-            XCTAssertFalse(app.buttons["settings.accountSync.done"].exists, "Use the pushed Settings page")
+            XCTAssertFalse(app.buttons["settings.sync.done"].exists, "Use the flat Settings page, not the sheet")
+            XCTAssertTrue(app.navigationBars["Settings"].exists, "The fields are on the Settings page itself")
+            // T19.6: no Pause, Sign Out or media control.
+            for removed in ["settings.sync.pause", "settings.sync.media", "settings.sync.meguri.signOut"] {
+                XCTAssertEqual(app.descendants(matching: .any).matching(identifier: removed).count, 0, removed)
+            }
+            guard focusPassword else { return }
             // Exercise real secure-field focus without credentials or submission.
-            let password = app.secureTextFields["settings.accountSync.meguri.password"]
+            let password = app.secureTextFields["settings.sync.meguri.password"]
             try click(password, app, bundle)
             XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
             XCTAssertTrue(password.exists && password.isEnabled && password.isHittable)
-            let back = try XCTUnwrap(waitForHittable(app.navigationBars["Account & Sync"].buttons
-                .matching(NSPredicate(format: "label == %@", "Settings"))), app.debugDescription)
-            try click(back, app, bundle)
-            _ = try XCTUnwrap(waitForHittable(accountRows), "One Back must return to the Settings root")
-            XCTAssertTrue(app.navigationBars["Settings"].exists)
-            XCTAssertFalse(element(app, "settings.accountSync.content").exists)
-            XCTAssertFalse(app.secureTextFields["settings.accountSync.meguri.password"].exists)
-            XCTAssertTrue(app.buttons["settings.root.collection"].exists)
         }
 
-        try checkFormAndGoBack()
-        let reopen = try XCTUnwrap(waitForHittable(accountRows), app.debugDescription)
+        try checkForm(focusPassword: false)
+        // Leave Settings and return: the page shows the service the core reports.
+        let decks = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.decks",
+            sidebarIdentifier: "shell.root.sidebar.home", compactLabel: "Decks", timeout: 10), app.debugDescription)
+        try click(decks, app, bundle)
+        XCTAssertTrue(app.staticTexts["Welcome to Meguri"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.secureTextFields["settings.sync.meguri.password"].exists)
+        let reopen = try XCTUnwrap(waitForShellSection(app, tabIdentifier: "shell.root.tab.settings",
+            sidebarIdentifier: "shell.root.sidebar.settings", compactLabel: "Settings", timeout: 10), app.debugDescription)
         try click(reopen, app, bundle)
-        try checkFormAndGoBack()
+        try checkForm(focusPassword: true)
     }
     #endif
 
@@ -146,32 +149,37 @@ import notify
         let choices = ["home.collection.accountSync", "home.collection.import", "home.collection.startEmpty"]
             .map { app.buttons[$0].firstMatch.frame.minY }
         XCTAssertEqual(choices, choices.sorted(), "Sync, then the file, then the empty collection")
-        XCTAssertFalse(element(app, "settings.accountSync.content").exists)
+        XCTAssertFalse(element(app, "settings.sync.content").exists)
         try click(accountSync, app, bundle)
 
         #if os(macOS)
         let settings = app.windows.containing(.any, identifier: "settings.root.content").firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 10), app.debugDescription)
         let root = settings.descendants(matching: .any).matching(identifier: "settings.root.content")
-        XCTAssertEqual(root.count, 1, "Account & Sync must open in the native Settings window")
-        let contents = settings.descendants(matching: .any).matching(identifier: "settings.accountSync.content")
+        XCTAssertEqual(root.count, 1, "Sync must open in the native Settings window")
+        let contents = settings.descendants(matching: .any).matching(identifier: "settings.sync.content")
         let content = contents.firstMatch
         XCTAssertTrue(content.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(contents.count, 1)
         #else
-        let content = element(app, "settings.accountSync.content")
+        let content = element(app, "settings.sync.content")
         XCTAssertTrue(content.waitForExistence(timeout: 10), app.debugDescription)
         #endif
-        let service = content.descendants(matching: .any).matching(identifier: "settings.accountSync.service")
+        let service = content.descendants(matching: .any).matching(identifier: "settings.sync.service")
         XCTAssertTrue(service.firstMatch.waitForExistence(timeout: 10))
-        XCTAssertEqual(service.count, 1, "The standard form must contain its existing Sync Service picker")
+        XCTAssertEqual(service.count, 1, "The standard form must contain its Service picker")
+        // N15.2: while the value is Off the section has the Service row and its footer only.
+        XCTAssertTrue(app.staticTexts["Choose a service to sync this collection."].waitForExistence(timeout: 10))
+        for hidden in ["settings.sync.automatic", "settings.sync.syncNow", "settings.sync.troubleshooting", "settings.sync.status"] {
+            XCTAssertEqual(app.descendants(matching: .any).matching(identifier: hidden).count, 0, hidden)
+        }
         #if os(macOS)
         XCTAssertEqual(service.firstMatch.elementType, .popUpButton)
         try app.bringToFront(bundleIdentifier: bundle)
         settings.typeKey("w", modifierFlags: .command)
         XCTAssertTrue(settings.waitForNonExistence(timeout: 10), "Close the actual Settings window")
         #else
-        let doneButtons = app.buttons.matching(identifier: "settings.accountSync.done")
+        let doneButtons = app.buttons.matching(identifier: "settings.sync.done")
         let done = try XCTUnwrap(waitForHittable(doneButtons), app.debugDescription)
         XCTAssertEqual(doneButtons.count, 1)
         try click(done, app, bundle)
@@ -181,7 +189,7 @@ import notify
             predicate: NSPredicate(format: "exists == false"), object: content)], timeout: 10), .completed)
         _ = try XCTUnwrap(waitForHittable(accountSyncButtons), app.debugDescription)
         XCTAssertTrue(element(app, "home.collection.screen").exists)
-        XCTAssertTrue(app.staticTexts["Welcome to Meguri"].exists, "Opening Account & Sync must leave Home without a collection")
+        XCTAssertTrue(app.staticTexts["Welcome to Meguri"].exists, "Opening Sync must leave Home without a collection")
         _ = try XCTUnwrap(waitForHittable(startEmptyButtons), app.debugDescription)
         XCTAssertEqual(startEmptyButtons.count, 1)
         XCTAssertEqual(startEmpty.label, "Start Empty")
@@ -189,7 +197,7 @@ import notify
         XCTAssertFalse(app.staticTexts["No Decks"].exists)
         XCTAssertTrue(importCollection.exists && importCollection.isEnabled && importCollection.isHittable)
         XCTAssertFalse(element(app, "home.collection.connect").exists)
-        XCTAssertFalse(element(app, "settings.accountSync.done").exists)
+        XCTAssertFalse(element(app, "settings.sync.done").exists)
     }
 
     func testStartEmptyAddNoteAndStudyGeneratedCard() throws {

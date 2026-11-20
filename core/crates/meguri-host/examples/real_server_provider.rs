@@ -51,6 +51,8 @@ fn bootstrap<T>(value: std::result::Result<T, MeguriBootstrapError>, stage: &'st
         MeguriBootstrapError::Username => "Username".into(),
         MeguriBootstrapError::Engine(_) => "Engine".into(),
         MeguriBootstrapError::Transfer(_) => "Transfer".into(),
+        MeguriBootstrapError::SetupChanged(_) => "SetupChanged".into(),
+        MeguriBootstrapError::LocalUnusable => "LocalUnusable".into(),
         // Its formatter emits only a closed category, never account data.
         MeguriBootstrapError::Ready(e) => format!("Ready/{e:?}"),
     }))
@@ -239,6 +241,28 @@ fn retained(config: &HostConfig, op: &Operation, upload: bool) -> Result<()> {
     } else { require(op.safety_backups.is_empty(), "initial-no-backup")?; }
     Ok(())
 }
+/// `sync/meguri-provider#MP6.9` settles an unknown acceptance as "accepted"
+/// when the server's facts are those of the file this device sent. This reads
+/// the packaged server's facts after an upload it acknowledged, and requires
+/// exactly that comparison to hold.
+fn accepted_meta_is_candidate(host: &CoreHost, config: &HostConfig, connection: &MeguriConnection, key: &HostKey,
+    ca: &[u8], op: &Operation) -> Result<()> {
+    let candidate = op.candidate.as_ref().ok_or_else(|| failure("accepted-meta", "candidate"))?;
+    let path = config.manual_transfer_directory.join(op.id.as_str()).join(&candidate.name);
+    let sent = checked(meguri_storage::one_way::verify_server_copy(&path), "accepted-meta-candidate")?
+        .ok_or_else(|| failure("accepted-meta", "candidate-facts"))?;
+    let endpoint = checked(provider::native_endpoint(&connection.endpoint), "endpoint")?;
+    let options = JobOptions::new(endpoint, ServerKind::SelfHosted).trust_root(ca.to_vec());
+    let mut job = checked(meguri_sync::Job::with_transport(&options, Some(key.clone()), config.random.as_ref(),
+        Box::new(transport(connection, ca)?)), "accepted-meta-job")?;
+    let read = checked(meguri_sync::transport::runtime::block_on(host.engine().threads(), &CancelToken::default(),
+        async { Ok(meguri_sync::status::probe(&mut job, config.clock.as_ref()).await) }), "accepted-meta-runtime")?;
+    let server = meguri_sync::policy::RemoteFacts::from(&checked(read, "accepted-meta-read")?.server);
+    require(server.modified == sent.stamps.modified.0, "accepted-meta-modified")?;
+    require(server.schema_modified == sent.stamps.schema_modified.0, "accepted-meta-schema")?;
+    require(server.usn == sent.stamps.usn.0, "accepted-meta-usn")?;
+    require(server.empty == !sent.has_cards(), "accepted-meta-empty")
+}
 fn artifact(root: &Path, artifact: &meguri_sync::policy::Artifact) -> Result<()> {
     let path = root.join(&artifact.name);
     let canonical = checked(fs::canonicalize(&path), "artifact-path")?;
@@ -275,6 +299,7 @@ fn run_bootstrap(host: &CoreHost, config: &HostConfig, fixture: &Fixture, ca: &[
     let op = finish(events, bootstrap(host.confirm_meguri_bootstrap(access(&connection, fixture, &key, ca)?, preview), "confirm")?, "confirm")?;
     require(op.id == id, "collection-operation")?;
     retained(config, &op, upload)?;
+    if upload { accepted_meta_is_candidate(host, config, &connection, &key, ca, &op)?; }
     unbound(host)?;
     let events = host.engine().stream().subscribe();
     let media = finish(events, bootstrap(host.prepare_meguri_bootstrap_media(access(&connection, fixture, &key, ca)?, op.id.clone()), "media-prepare")?, "media-prepare")?;

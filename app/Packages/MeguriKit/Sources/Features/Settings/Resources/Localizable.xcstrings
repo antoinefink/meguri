@@ -228,6 +228,16 @@
         }
       }
     },
+    "Import Collection…": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Import Collection…" } }
+      }
+    },
+    "Export Collection…": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Export Collection…" } }
+      }
+    },
     "In progress": {
       "localizations": {
         "en": {

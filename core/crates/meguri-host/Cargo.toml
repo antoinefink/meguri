@@ -35,6 +35,10 @@ name = "provider_bootstrap"
 required-features = ["test-hooks"]
 
 [[test]]
+name = "provider_setup"
+required-features = ["test-hooks"]
+
+[[test]]
 name = "provider_normal"
 required-features = ["test-hooks"]
 
