@@ -126,7 +126,7 @@ The app side of `sched/fsrs-policy#A1`. No view asks, explains or offers a choic
 
 - A read of F1 items 3 to 5 that finds a status other than `ok` starts the job in the background at once, unless one runs already or a review session is open (F3); it shows nothing. It is one job per status found, not one per read.
 - Study entry points wait for it (F4). Everything else stays usable: browsing, the editor, import, export, sync, settings. Changed 2026-11-20: two settings actions are refused while the job runs, with the reason they already give for a busy collection: changing the sync service (the Service control) and a Meguri Sync sign-in. Both can start a collection replacement, which would cancel the job. Everything else in that list stays usable.
-- Changed 2026-11-20: while F5.1's open-time wait lasts, F5.1 decides when the job starts, and the first bullet does not: a read during the wait that finds a status other than `ok` (a sync's commit that touched `fsrs`, a status read after a round that stopped for the network or was cancelled) leaves the job waiting. The wait ends as F5.1 says; then the job starts at once.
+- Changed 2026-11-20: while F5.1's open-time wait lasts, F5.1 decides when the job starts, and the first bullet does not: a read during the wait that finds a status other than `ok` (a sync's commit that touched `fsrs`, a status read after a round that stopped for the network or was cancelled) leaves the job waiting. The wait ends as F5.1 says; then the status is read again, and the job starts only when it is still not `ok`.
 - `enableFsrs` writes nothing when `fsrs` already reads on, so a job that starts after a sync turned FSRS on again is harmless.
 - `CollectionReplaced` during the job ends it; F5.1 applies to the new collection.
 

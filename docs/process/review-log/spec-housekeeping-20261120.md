@@ -97,3 +97,5 @@ CodeRabbit posted four comments. All four were taken:
   not bound a late commit after a disconnect. The rule stays as built and as
   approved on 2026-11-19, because changing it needs Antoine and possibly a
   server capability.
+- Second AI review (one comment): when the wait ends, the job starts only
+  if a new read still finds a status that is not `ok`. Taken.
