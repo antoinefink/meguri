@@ -167,6 +167,7 @@ private struct DeckSearchReads: ViewModifier {
                     read: { try await CoreDeckService().allDeckNames() },
                     defaultHasCards: { !(try await CoreDeckService().studyState(deckID: 1).empty) })
             }
+            .onChange(of: collection.decks.hashValue, initial: true) { _, tree in search.deckTreeChanged(tree) }
             .task(id: search.nameCheckKey(generation: collection.generation)) {
                 await search.checkName(search.nameCheckKey(generation: collection.generation)) {
                     try await CoreDeckService().matchDeckName(name: $0)

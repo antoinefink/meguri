@@ -172,6 +172,13 @@ public final class DeckListSearch {
         nameCheckState = state
     }
     public func retryNameCheck() { nameCheckAttempt &+= 1 }
+    private var nameCheckTree: Int?
+    /// A change to the deck tree (a deck added, renamed or deleted elsewhere)
+    /// reads the name again for the same text, so the create row follows it.
+    public func deckTreeChanged(_ tree: Int) {
+        if let nameCheckTree, nameCheckTree != tree { nameCheckAttempt &+= 1 }
+        nameCheckTree = tree
+    }
 
     // MARK: The records searched (D17, H6.1)
 
@@ -186,7 +193,11 @@ public final class DeckListSearch {
     public private(set) var listsDefault = false
     public private(set) var snapshotFailed = false
     public private(set) var snapshotAttempt: UInt64 = 0
+    /// The key of the last read that finished and published.
     private var loadedKey: SnapshotKey?
+    /// The newest read started: only it may publish, so an older read still
+    /// pending (a cancelled view's) can neither clear nor replace a newer one.
+    private var loadToken: UInt64 = 0
 
     public func snapshotKey(generation: UInt64, tree: Int) -> SnapshotKey {
         SnapshotKey(generation: generation, tree: tree, attempt: snapshotAttempt)
@@ -201,7 +212,9 @@ public final class DeckListSearch {
     public func loadSnapshot(_ key: SnapshotKey, read: @MainActor () async throws -> DeckNameSnapshot,
                              defaultHasCards: @MainActor () async throws -> Bool) async {
         guard loadedKey != key else { return }
-        loadedKey = key; snapshotFailed = false
+        loadToken &+= 1
+        let token = loadToken
+        snapshotFailed = false
         let outcome: Result<(DeckNameSnapshot, Bool), any Error>
         do {
             let result = try await read()
@@ -210,9 +223,10 @@ public final class DeckListSearch {
         } catch {
             outcome = .failure(error)
         }
-        guard loadedKey == key else { return }
-        // A read cancelled with its view leaves the key free, so the next view reads again.
-        guard !Task.isCancelled else { loadedKey = nil; return }
+        // A cancelled read, or one a newer read replaced, publishes nothing and
+        // leaves the key unread, so the next view reads again.
+        guard token == loadToken, !Task.isCancelled else { return }
+        loadedKey = key
         switch outcome {
         case .success(let (result, listed)):
             guard result.generation == key.generation else { snapshot = nil; snapshotFailed = true; return }

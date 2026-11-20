@@ -222,6 +222,8 @@ public final class DeckActionsModel {
                       owner.deckNamesAllowed(host: .main, route: .deckName(action)) else { return }
                 guard opened else {
                     message = "The deck was saved. Couldn’t open it. Try again."
+                    // Try Again opens it from where the person is now.
+                    submittedIntent = owner.navigation.intentRevision
                     cancelling = false
                     return
                 }

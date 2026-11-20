@@ -85,6 +85,24 @@ import Testing
             "The shown page reads again only where the person still is")
     }
 
+    /// The undo itself is held: Settings chosen while it runs, or before it
+    /// starts, stays chosen when it ends.
+    @Test(arguments: [false, true])
+    func anUndoNeverTakesThePersonBackFromSettings(before: Bool) async {
+        let owner = await makeOwner(), history = owner.collectionUndo, held = HeldUndo()
+        history.service = held
+        await history.waitForRefresh(); await history.refreshNow()
+        owner.navigation.openDeckPage(DeckID(2))
+        owner.saveSelectedDeck = { _ in 11 }
+        if before { owner.navigation.select(.section(.settings)) }
+        history.undo()
+        while !(await held.entered) { await Task.yield() }
+        if !before { owner.navigation.select(.section(.settings)) }
+        await held.release()
+        await history.waitForCompletion()
+        #expect(owner.navigation.section == .settings)
+    }
+
     @Test func aNewGenerationPeeksItsOwnHistory() async {
         let owner = await makeOwner(), history = owner.collectionUndo, fake = FakeUndo()
         history.service = fake
@@ -147,4 +165,24 @@ private actor FakeUndo: UndoService {
         undoNameValue = redoNameValue; redoNameValue = nil
         return .restored(head: head)
     }
+}
+
+/// An undo that waits inside the core until released.
+private actor HeldUndo: UndoService {
+    private(set) var entered = false
+    private var held: CheckedContinuation<Void, Never>?
+    func release() { held?.resume(); held = nil }
+    private var head: ReviewHead {
+        ReviewHead(items: [], counts: .init(new: 0, learning: 0, review: 0), validUntil: Int64.max, terminalState: .finished)
+    }
+    func peekUndo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus {
+        .available(step: ReviewStepInfo(id: 1, name: "Rename Deck", kind: .other, session: nil, longWrite: nil))
+    }
+    func peekRedo(scope: ReviewUndoScope) throws(BridgeError) -> ReviewUndoStatus { .unavailable(reason: .none) }
+    func startUndo(scope: ReviewUndoScope) async throws(BridgeError) -> CoreUndoStart {
+        entered = true
+        await withCheckedContinuation { held = $0 }
+        return .restored(head: head)
+    }
+    func startRedo(scope: ReviewUndoScope) throws(BridgeError) -> CoreUndoStart { .restored(head: head) }
 }
