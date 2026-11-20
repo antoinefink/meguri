@@ -8,6 +8,7 @@
 
 uniffi::setup_scaffolding!("meguri_ffi");
 
+pub mod activity;
 mod callback;
 pub mod cancel;
 pub mod changes;

@@ -13,6 +13,7 @@
 //! `change-stream.md`, `lifecycle.md`, `jobs.md`, `undo.md`,
 //! `specs/sched/day-clock.md`, `specs/notetypes/`.
 
+pub mod activity;
 pub mod backup_limits;
 pub mod bootstrap;
 pub mod browse;
