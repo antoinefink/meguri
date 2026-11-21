@@ -29,7 +29,7 @@ use regex::{NoExpand, Regex};
 
 use super::{BulkCounts, BulkJob, BulkOutcome, NoteTarget, ResolvedNotes, check_ids, op_spec};
 use crate::cancel::CancelToken;
-use crate::cardgen::normal::Fronts;
+use crate::cardgen::placement::Memo;
 use crate::collection::Collection;
 use crate::error::EngineError;
 use crate::executor::op::{OpContext, OpResult};
@@ -463,9 +463,11 @@ fn drifted(id: NoteId) -> EngineError {
 /// F6 steps 4 and 5 for one note in the write transaction: the live row
 /// rewritten again, stamped, and given the cards it now requires. Returns
 /// whether it was written.
+#[allow(clippy::too_many_arguments)]
 fn commit_fields_note(
     scope: &mut WriteScope<'_>,
-    notetypes: &mut HashMap<NotetypeId, Arc<(Notetype, Fronts)>>,
+    notetypes: &mut HashMap<NotetypeId, Arc<(Notetype, Vec<meguri_template::ParsedTemplate>)>>,
+    memo: &Memo,
     mut note: Note,
     mid: NotetypeId,
     siblings: Vec<meguri_model::card::Card>,
@@ -480,7 +482,7 @@ fn commit_fields_note(
         Some(known) => Arc::clone(known),
         None => {
             let notetype = scope.notetype(mid)?.ok_or_else(|| drifted(id))?;
-            let fronts = Fronts::of(&notetype);
+            let fronts = crate::cardgen::normal::fronts(&notetype);
             let known = Arc::new((notetype, fronts));
             notetypes.insert(mid, Arc::clone(&known));
             known
@@ -506,7 +508,7 @@ fn commit_fields_note(
     let complete = notetype.config.kind != 1
         && (0..notetype.templates.len()).all(|ord| siblings.iter().any(|card| usize::from(card.ord) == ord));
     if !complete {
-        let missing = crate::cardgen::plan_note_with(scope, notetype, Some(fronts), &note, &siblings, None, true)?;
+        let missing = crate::cardgen::plan_note_with(scope, memo, notetype, fronts, &note, &siblings, None, true)?;
         crate::cardgen::apply_in(scope, &note, &siblings, &missing)?;
     }
     Ok(true)
@@ -612,6 +614,8 @@ fn commit(context: &mut OpContext<'_, '_>, request: &FindReplace, planned: &Plan
     let mut affected = 0u64;
     let mut registered = HashMap::new();
     let mut notetypes = HashMap::new();
+    // Placement's deck and last-deck reads: this op writes neither.
+    let memo = Memo::default();
     // A page of live rows at a time, each written in the plan's order before
     // the next page is read.
     for chunk in planned.notes.chunks(PAGE) {
@@ -633,7 +637,7 @@ fn commit(context: &mut OpContext<'_, '_>, request: &FindReplace, planned: &Plan
                 commit_tags_note(scope, &mut registered, note, planned)?
             } else {
                 let siblings = cards.remove(&id).unwrap_or_default();
-                commit_fields_note(scope, &mut notetypes, note, mid, siblings, request, planned)?
+                commit_fields_note(scope, &mut notetypes, &memo, note, mid, siblings, request, planned)?
             };
             if written {
                 affected += 1;

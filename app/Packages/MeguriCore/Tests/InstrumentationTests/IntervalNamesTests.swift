@@ -107,7 +107,7 @@ import Testing
             "NoteDeletionJob.result", "add_note", "add_note_for_screen", "update_note", "patch_note", "card_deck", "read_note",
             "check_note_fields", "add_defaults", "add_notetype_selection", "notetype_last_deck", "tag_complete", "editor_field_html", "start_delete_notes", "notetype_names", "read_notetype",
             "add_notetype", "add_stock_notetype", "clone_notetype", "ensure_image_occlusion_notetype",
-            "rename_notetype", "set_notetype_css", "set_notetype_field_options", "set_notetype_template_options",
+            "rename_notetype", "set_notetype_css", "set_notetype_field_options", "set_notetype_template_options", "notetype_card_text", "notetype_card_text_edit",
             "TagMutationJob.result", "tag_tree", "flag_names", "set_tags_collapsed",
             "rename_flag", "restore_flag_name", "add_note_tags", "start_add_note_tags",
             "remove_note_tags", "start_remove_note_tags", "set_card_flag", "start_set_card_flag",
@@ -119,6 +119,7 @@ import Testing
             "DeckRenameJob.result", "DeckMoveJob.result", "DeckCollapseJob.result", "start_undo", "start_redo", "start_add_notes", "NoteAdditionJob.result",
             "parse_due_days", "start_sched_op", "SchedOpJob.result", "start_buried_kinds", "BuriedKindsJob.result",
             "DeckOptionsEditor.snapshot", "DeckOptionsEditor.edit", "DeckOptionsEditor.validate", "parse_option_steps", "format_option_steps", "start_deck_options", "start_save_deck_options", "start_option_ignore_count", "start_scheduling_preferences", "start_save_scheduling_preferences", "DeckOptionsReadJob.result", "DeckOptionsSaveJob.result", "OptionIgnoreCountJob.result", "SchedulingPreferencesJob.result", "SchedulingPreferencesSaveJob.result", "validate_scheduling_preferences",
+            "notetype_list", "start_notetype_note_counts", "NotetypeNoteCountsJob.result", "start_notetype_field_content_counts", "NotetypeFieldContentCountsJob.result", "start_notetype_draft_summary", "NotetypeDraftSummaryJob.result", "start_notetype_notes_without_card", "NotetypeNotesWithoutCardJob.result", "start_notetype_removal_counts", "NotetypeRemovalCountsJob.result", "notetype_near_field_name",
         ])
         for call in BridgeCall.all {
             #expect(call.interval.category == .bridge)

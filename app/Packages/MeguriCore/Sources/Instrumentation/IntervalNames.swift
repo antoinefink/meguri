@@ -296,6 +296,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let setNotetypeCss = BridgeCall("set_notetype_css")
     public static let setNotetypeFieldOptions = BridgeCall("set_notetype_field_options")
     public static let setNotetypeTemplateOptions = BridgeCall("set_notetype_template_options")
+    public static let notetypeCardText = BridgeCall("notetype_card_text")
+    public static let notetypeCardTextEdit = BridgeCall("notetype_card_text_edit")
     public static let tagMutationJobResult = BridgeCall("TagMutationJob.result")
     public static let tagTree = BridgeCall("tag_tree")
     public static let flagNames = BridgeCall("flag_names")
@@ -365,6 +367,19 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let schedulingPreferencesSaveJobResult = BridgeCall("SchedulingPreferencesSaveJob.result")
 
     public static let validateSchedulingPreferences = BridgeCall("validate_scheduling_preferences")
+
+    public static let notetypeList = BridgeCall("notetype_list")
+    public static let startNotetypeNoteCounts = BridgeCall("start_notetype_note_counts")
+    public static let notetypeNoteCountsJobResult = BridgeCall("NotetypeNoteCountsJob.result")
+    public static let startNotetypeFieldContentCounts = BridgeCall("start_notetype_field_content_counts")
+    public static let notetypeFieldContentCountsJobResult = BridgeCall("NotetypeFieldContentCountsJob.result")
+    public static let startNotetypeDraftSummary = BridgeCall("start_notetype_draft_summary")
+    public static let notetypeDraftSummaryJobResult = BridgeCall("NotetypeDraftSummaryJob.result")
+    public static let startNotetypeNotesWithoutCard = BridgeCall("start_notetype_notes_without_card")
+    public static let notetypeNotesWithoutCardJobResult = BridgeCall("NotetypeNotesWithoutCardJob.result")
+    public static let startNotetypeRemovalCounts = BridgeCall("start_notetype_removal_counts")
+    public static let notetypeRemovalCountsJobResult = BridgeCall("NotetypeRemovalCountsJob.result")
+    public static let notetypeNearFieldName = BridgeCall("notetype_near_field_name")
 
     public static let startCreateBackup = BridgeCall("start_create_backup")
     public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
@@ -659,7 +674,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         selectDeck, deckDeletionSummary, startDeleteDecks, noteDeletionJobResult, addNote,
         addNoteForScreen, updateNote, patchNote, cardDeck, readNote, checkNoteFields, addDefaults, addNotetypeSelection, notetypeLastDeck, tagComplete, editorFieldHTML, startDeleteNotes, notetypeNames,
         readNotetype, addNotetype, addStockNotetype, cloneNotetype, ensureImageOcclusionNotetype,
-        renameNotetype, setNotetypeCss, setNotetypeFieldOptions, setNotetypeTemplateOptions, tagMutationJobResult,
+        renameNotetype, setNotetypeCss, setNotetypeFieldOptions, setNotetypeTemplateOptions, notetypeCardText, notetypeCardTextEdit, tagMutationJobResult,
         tagTree, flagNames, setTagsCollapsed, renameFlag, restoreFlagName,
         addNoteTags, startAddNoteTags, removeNoteTags, startRemoveNoteTags, setCardFlag,
         startSetCardFlag, toggleCardFlag, startToggleCardFlag, markNotes, startMarkNotes,
@@ -669,5 +684,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startRedo, startAddNotes, noteAdditionJobResult,
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
+        notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
     ]
 }
