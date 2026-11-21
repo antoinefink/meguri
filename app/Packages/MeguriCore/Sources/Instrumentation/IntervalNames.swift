@@ -296,6 +296,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let setNotetypeCss = BridgeCall("set_notetype_css")
     public static let setNotetypeFieldOptions = BridgeCall("set_notetype_field_options")
     public static let setNotetypeTemplateOptions = BridgeCall("set_notetype_template_options")
+    public static let notetypeCardText = BridgeCall("notetype_card_text")
+    public static let notetypeCardTextEdit = BridgeCall("notetype_card_text_edit")
     public static let tagMutationJobResult = BridgeCall("TagMutationJob.result")
     public static let tagTree = BridgeCall("tag_tree")
     public static let flagNames = BridgeCall("flag_names")
@@ -659,7 +661,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         selectDeck, deckDeletionSummary, startDeleteDecks, noteDeletionJobResult, addNote,
         addNoteForScreen, updateNote, patchNote, cardDeck, readNote, checkNoteFields, addDefaults, addNotetypeSelection, notetypeLastDeck, tagComplete, editorFieldHTML, startDeleteNotes, notetypeNames,
         readNotetype, addNotetype, addStockNotetype, cloneNotetype, ensureImageOcclusionNotetype,
-        renameNotetype, setNotetypeCss, setNotetypeFieldOptions, setNotetypeTemplateOptions, tagMutationJobResult,
+        renameNotetype, setNotetypeCss, setNotetypeFieldOptions, setNotetypeTemplateOptions, notetypeCardText, notetypeCardTextEdit, tagMutationJobResult,
         tagTree, flagNames, setTagsCollapsed, renameFlag, restoreFlagName,
         addNoteTags, startAddNoteTags, removeNoteTags, startRemoveNoteTags, setCardFlag,
         startSetCardFlag, toggleCardFlag, startToggleCardFlag, markNotes, startMarkNotes,
