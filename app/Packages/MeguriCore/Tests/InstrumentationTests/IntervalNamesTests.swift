@@ -73,6 +73,8 @@ import Testing
             "ProviderBootstrapResult.outcome", "ProviderBootstrapResult.media_snapshot", "ProviderBootstrapResult.request_stop",
             "ProviderBootstrapResult.retained_operation",
             "ProviderConnection.start_collection_round", "ProviderConnection.start_media_round", "ProviderRoundResult.outcome", "ProviderRoundResult.retry_finalization",
+            "ProviderConnection.start_structure_save", "ProviderConnection.start_structure_upload", "ProviderStructureJob.advance", "ProviderStructureJob.cancel",
+            "ProviderStructureJob.saved", "ProviderOwner.structure_upload_pending",
             "ProviderConnection.pending_bootstrap_preparation", "ProviderConnection.discard_bootstrap_preview",
             "ProviderConnection.discard_bootstrap_operation", "ProviderConnection.start_bootstrap_recovery",
             "test_cloud_zone_deletion_fixture", "test_cloud_zone_deletion_rows",

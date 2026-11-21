@@ -89,6 +89,13 @@ public actor CoreProviderService: MeguriProviderConnectionService {
         let raw = raw
         return SyncProviderState(try await MaintenanceLane.shared.call(.providerSnapshot) { try raw.snapshot() })
     }
+    /// `sync/meguri-provider` MP7 step 5: a note type structure save is
+    /// committed on this device and its upload has not run. While true the
+    /// status needs you with Upload…, and no round starts.
+    public func structureUploadPending() async throws -> Bool {
+        let raw = raw
+        return try await MaintenanceLane.shared.call(.providerStructureUploadPending) { try raw.structureUploadPending() }
+    }
     public func refresh() async throws -> SyncProviderState {
         let raw = raw
         return SyncProviderState(try await MaintenanceLane.shared.call(.providerRefresh) { try raw.refresh() })

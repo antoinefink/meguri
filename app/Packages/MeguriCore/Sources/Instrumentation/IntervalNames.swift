@@ -183,6 +183,12 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let providerStartMediaRound = BridgeCall("ProviderConnection.start_media_round")
     public static let providerRoundOutcome = BridgeCall("ProviderRoundResult.outcome")
     public static let providerRoundRetryFinalization = BridgeCall("ProviderRoundResult.retry_finalization")
+    public static let providerStartStructureSave = BridgeCall("ProviderConnection.start_structure_save")
+    public static let providerStartStructureUpload = BridgeCall("ProviderConnection.start_structure_upload")
+    public static let providerStructureAdvance = BridgeCall("ProviderStructureJob.advance")
+    public static let providerStructureCancel = BridgeCall("ProviderStructureJob.cancel")
+    public static let providerStructureSaved = BridgeCall("ProviderStructureJob.saved")
+    public static let providerStructureUploadPending = BridgeCall("ProviderOwner.structure_upload_pending")
     public static let providerBootstrapPendingPreparation = BridgeCall("ProviderConnection.pending_bootstrap_preparation")
     public static let providerBootstrapDiscardPreview = BridgeCall("ProviderConnection.discard_bootstrap_preview")
     public static let providerBootstrapDiscardOperation = BridgeCall("ProviderConnection.discard_bootstrap_operation")
@@ -660,6 +666,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         providerBootstrapOutcome, providerBootstrapMediaSnapshot, providerBootstrapRequestStop,
         providerBootstrapRetainedOperation,
         providerStartCollectionRound, providerStartMediaRound, providerRoundOutcome, providerRoundRetryFinalization,
+        providerStartStructureSave, providerStartStructureUpload, providerStructureAdvance, providerStructureCancel,
+        providerStructureSaved, providerStructureUploadPending,
         providerBootstrapPendingPreparation, providerBootstrapDiscardPreview, providerBootstrapDiscardOperation, providerBootstrapRecovery,
         testCloudZoneDeletionFixture, testCloudZoneDeletionRows,
         cloudPolicyExecutionBeginCleanupPass, cloudCleanupPassSubmitInventory, cloudCleanupPassCompleteInventory, cloudCleanupPassFinish,

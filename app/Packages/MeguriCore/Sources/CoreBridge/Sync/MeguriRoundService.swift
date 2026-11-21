@@ -167,6 +167,16 @@ public actor CoreMeguriRoundService {
         if attempt?.id == id { attempt = nil }
         return try result.get()
     }
+    /// The retained connection with the credentials read for it now, for a
+    /// job that this facade does not own (the structure save job).
+    func admittedInputs() async throws -> (MeguriCoreBindings.ProviderConnection, MeguriCoreBindings.ProviderCredentials) {
+        try current()
+        let value = try await credentials()
+        try current()
+        guard value.connection == connection else { throw MeguriProviderCredentialFailure.wrongConnection }
+        return (raw, MeguriCoreBindings.ProviderCredentials(connection: .init(reference: connection.reference,
+            revision: connection.revision, endpoint: connection.endpoint), username: value.username, hostkey: value.hostKey))
+    }
     public func cancelAndDrain() async {
         let original = attempt
         original?.task.cancel()
