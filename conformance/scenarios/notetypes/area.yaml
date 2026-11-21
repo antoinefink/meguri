@@ -12,13 +12,14 @@
 # records/preserve-on-edit legacy_update, blob_decode and legacy_json (U36).
 # The unit that adds the last of them makes each active here. U34's
 # update_notetype edits and notetype_templates made gate/* and the
-# structure/* scenarios of its draft apply op active
-# (specs/notetypes/structure-changes.md S16); remove_notetype and
-# restore_notetype come with its removal and Restore to Default.
+# structure/* scenarios active (specs/notetypes/structure-changes.md S16,
+# specs/notetypes/restore-to-default.md D8), with remove_notetype and
+# restore_notetype (specs/conformance/notetype-structure-ops.md M1, M2).
 area: notetypes
 active:
   - "gate/after-sync"
   - "gate/structure"
+  - "manage/list-order"
   - "records/io-on-demand"
   - "records/names"
   - "records/stock-handoff"
@@ -37,12 +38,20 @@ active:
   - "structure/remove-crucial-fields"
   - "structure/remove-field"
   - "structure/remove-last"
+  - "structure/remove-notetype"
   - "structure/remove-template"
   - "structure/rename-field"
   - "structure/rename-then-remove"
   - "structure/reorder-fields"
   - "structure/reqs-after-rename"
+  - "structure/restore-basic"
+  - "structure/restore-field-count"
+  - "structure/restore-forced-kind"
+  - "structure/restore-stock-references"
+  - "structure/restore-unknown-kind"
   - "structure/rewrite-format"
   - "structure/template-draft-mix"
   - "structure/template-swap-replace"
   - "structure/undo-add-template"
+  - "structure/undo-removals"
+  - "structure/undo-restore"

@@ -18,6 +18,8 @@ import Testing
         (.DeckRefused(refusal: .underDescendant), .deckRefused(.underDescendant)),
         (.NotetypeStructureRefused(refusal: .noteFieldCountMismatch(note: -9)),
          .notetypeStructureRefused(.noteFieldCountMismatch(note: -9))),
+        (.NotetypeStructureRefused(refusal: .removalLossesChanged(notes: 2, cards: 5)),
+         .notetypeStructureRefused(.removalLossesChanged(notes: 2, cards: 5))),
         (.NoteNotFound(id: -37), .noteNotFound(id: -37)),
         (.NotFound(table: .decks, key: "-41"), .notFound(table: .decks, key: "-41")),
         (.InsufficientSpace(required: 100, available: 99), .insufficientSpace(required: 100, available: 99)),

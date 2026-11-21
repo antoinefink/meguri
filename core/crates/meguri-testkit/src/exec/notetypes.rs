@@ -7,7 +7,11 @@
 //! (`notetype-structure-ops.md` M3). Each op uses the public hosted engine
 //! API, including undo and stale-draft checks.
 
-use meguri_engine::notetypes::structure::{self, DraftField, DraftTemplate, FieldOptions, StructureDraft};
+use meguri_engine::notetypes::remove::{RemoveNotetype, remove};
+use meguri_engine::notetypes::restore::{RestoreNotetype, restore, restore_summary};
+use meguri_engine::notetypes::structure::{
+    self, DraftField, DraftTemplate, FieldOptions, StructureDraft, StructureRefusal,
+};
 use meguri_engine::notetypes::{
     self, AggregateDigest, Draft, NewNotetype, NewTemplate, NotetypeKind, SaveOptions, StockKind,
 };
@@ -64,6 +68,8 @@ pub(super) fn register(registry: &mut Registry) {
         registry.op_part(part);
     }
     registry.op("ensure_io_notetype", ensure_io_notetype);
+    registry.op("remove_notetype", remove_notetype);
+    registry.op_rejecting("restore_notetype", &["needs_stock_kind"], restore_notetype);
     registry.observation("notetype_structure", notetype_structure);
     registry.observation("notetype_templates", notetype_templates);
 }
@@ -153,14 +159,7 @@ fn add_stock_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult
             "add_stock_notetype adapter called for another op",
         ));
     };
-    let kind = match args.kind {
-        scenario::StockKind::Basic => StockKind::Basic,
-        scenario::StockKind::BasicAndReversed => StockKind::BasicAndReversed,
-        scenario::StockKind::BasicOptionalReversed => StockKind::BasicOptionalReversed,
-        scenario::StockKind::BasicTyping => StockKind::BasicTyping,
-        scenario::StockKind::Cloze => StockKind::Cloze,
-        scenario::StockKind::ImageOcclusion => StockKind::ImageOcclusion,
-    };
+    let kind = stock_kind(args.kind);
     let collection = session.engine_collection()?;
     Ok(named(
         outcome(notetypes::add_stock(&collection, kind, args.name.clone()))?.map(|a| a.name),
@@ -232,6 +231,9 @@ fn update_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, E
         let stored = find(&*reader, &args.notetype).map_err(core)?.map_err(unknown_ref)?;
         let mut draft = structure_draft(&*reader, &stored, &args.edits)?;
         draft.skip_checks = args.skip_checks;
+        // T9: the losses the draft causes, read at the step itself, are the
+        // ones confirmed (`notetypes/draft-save` D8).
+        draft.confirmed = confirmed_losses(&*reader, &stored, &draft)?;
         draft
     };
     let saved = structure::apply(&collection, draft, CancelToken::new(), ProgressSink::new());
@@ -247,6 +249,119 @@ fn is_plain(edit: &NotetypeEdit) -> bool {
         | NotetypeEdit::RenameTemplate(_) => true,
         NotetypeEdit::Template(edit) => edit.front.is_none() && edit.back.is_none(),
         _ => false,
+    }
+}
+
+/// The losses a draft would cause on the rows as read (T9, D8): the notes
+/// with content in each removed field and the cards of each removed
+/// template (S11).
+fn confirmed_losses(
+    reader: &impl ReadRows,
+    stored: &Notetype,
+    draft: &StructureDraft,
+) -> Result<structure::ConfirmedLosses, ExecError> {
+    let kept_fields: Vec<u32> = draft.fields.iter().filter_map(|f| f.origin).collect();
+    let kept_templates: Vec<u32> = draft.templates.iter().filter_map(|t| t.origin).collect();
+    let removed_fields: Vec<u32> = (0..stored.fields.len() as u32).filter(|o| !kept_fields.contains(o)).collect();
+    let removed_templates: std::collections::BTreeSet<u32> = (0..stored.templates.len() as u32)
+        .filter(|o| !kept_templates.contains(o))
+        .collect();
+    let mut confirmed = structure::ConfirmedLosses::default();
+    if !removed_templates.is_empty() {
+        confirmed.templates = structure::removal_preview(reader, stored.id, &removed_templates)
+            .map_err(core)?
+            .cards;
+    }
+    if !removed_fields.is_empty() {
+        let mut after = None;
+        loop {
+            let page = reader.notetype_notes_after(stored.id, after, 500).map_err(core)?;
+            let Some(last) = page.last() else { break };
+            after = Some(last.id);
+            for note in page {
+                let values: Vec<&str> = note.field_values().collect();
+                for &field in &removed_fields {
+                    let filled = values
+                        .get(field as usize)
+                        .is_some_and(|v| !meguri_text::field_empty::counts_as_empty(v));
+                    *confirmed.fields.entry(field).or_default() += u64::from(filled);
+                }
+            }
+        }
+    }
+    Ok(confirmed)
+}
+
+/// `notetype-structure-ops` M1: `remove_notetype`, with the note type's
+/// notes and cards read at the step as the confirmed counts (T9).
+fn remove_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    let Step::RemoveNotetype(args) = step else {
+        return Err(invalid("expected remove_notetype"));
+    };
+    let collection = session.engine_collection()?;
+    let request = {
+        let reader = collection.reader(meguri_storage::ReaderRole::Query).map_err(core)?;
+        let stored = find(&*reader, &args.notetype).map_err(core)?.map_err(unknown_ref)?;
+        let notes = reader.notetype_note_count(stored.id).map_err(core)?;
+        let mut cards = 0;
+        let mut after = None;
+        loop {
+            let page = reader.card_ordinals_of_notetype_page(stored.id, after).map_err(core)?;
+            let Some(last) = page.last() else { break };
+            after = Some(last.0);
+            cards += page.len() as u64;
+        }
+        RemoveNotetype {
+            notetype: stored.id,
+            confirmed_notes: notes,
+            confirmed_cards: cards,
+        }
+    };
+    remove(&collection, request, CancelToken::new(), ProgressSink::new()).map_err(core)?;
+    Ok(OpResult::Done)
+}
+
+/// M2: `restore_notetype`, with a `restore_summary` read at the step as the
+/// confirmed losses and its digest (T9).
+fn restore_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    let Step::RestoreNotetype(args) = step else {
+        return Err(invalid("expected restore_notetype"));
+    };
+    let collection = session.engine_collection()?;
+    let id = {
+        let reader = collection.reader(meguri_storage::ReaderRole::Query).map_err(core)?;
+        find(&*reader, &args.notetype).map_err(core)?.map_err(unknown_ref)?.id
+    };
+    let kind = args.kind.map(stock_kind);
+    let read = match restore_summary(&collection, id, kind, &CancelToken::new(), &ProgressSink::new()) {
+        Ok(read) => read,
+        Err(EngineError::NotetypeStructure(StructureRefusal::NeedsStockKind)) => {
+            return Ok(OpResult::Rejected("needs_stock_kind"));
+        }
+        Err(error) => return Err(core(error)),
+    };
+    let request = RestoreNotetype {
+        notetype: id,
+        kind,
+        confirmed: read.confirmed(),
+        digest: Some(read.digest),
+    };
+    match restore(&collection, request, CancelToken::new(), ProgressSink::new()) {
+        Ok(_) => Ok(OpResult::Done),
+        Err(EngineError::NotetypeStructure(StructureRefusal::NeedsStockKind)) => Ok(OpResult::Rejected("needs_stock_kind")),
+        Err(error) => Err(core(error)),
+    }
+}
+
+/// T3's stock kind names.
+fn stock_kind(kind: scenario::StockKind) -> StockKind {
+    match kind {
+        scenario::StockKind::Basic => StockKind::Basic,
+        scenario::StockKind::BasicAndReversed => StockKind::BasicAndReversed,
+        scenario::StockKind::BasicOptionalReversed => StockKind::BasicOptionalReversed,
+        scenario::StockKind::BasicTyping => StockKind::BasicTyping,
+        scenario::StockKind::Cloze => StockKind::Cloze,
+        scenario::StockKind::ImageOcclusion => StockKind::ImageOcclusion,
     }
 }
 

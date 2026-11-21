@@ -3,7 +3,7 @@ use crate::{CoreError, callback, mutations::MutationSummary, runtime};
 use meguri_engine::notetypes::{self, AggregateDigest, Draft, SaveOptions};
 use meguri_model::ids::NotetypeId;
 use meguri_storage::{ReadRows, ReaderRole};
-#[derive(Clone, Copy, Debug, uniffi::Enum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum StockNotetype {
     Basic,
     BasicAndReversed,
