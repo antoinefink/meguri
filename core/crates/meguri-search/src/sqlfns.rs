@@ -167,6 +167,21 @@ fn register_text(conn: &Connection, flags: FunctionFlags) -> rusqlite::Result<()
             _ => None,
         })
     })?;
+    // `browser/workspace` V4.2: a field column's sort key from the stored
+    // fields and the field's position (NULL: the note type has no such
+    // field). Fields that are not TEXT read as empty.
+    conn.create_scalar_function("meguri_field_sort_key", 2, flags, |ctx| {
+        let ord = match ctx.get_raw(1) {
+            ValueRef::Integer(ord) => Some(u32::try_from(ord).unwrap_or(u32::MAX)),
+            _ => None,
+        };
+        let fields = match ctx.get_raw(0) {
+            ValueRef::Text(bytes) => String::from_utf8_lossy(bytes),
+            _ => Cow::Borrowed(""),
+        };
+        let value = ord.map(|ord| crate::browser::fields::field_at(&fields, ord));
+        Ok(crate::browser::fields::sort_key(value))
+    })?;
     conn.create_scalar_function("meguri_first_field_stripped", 1, flags, |ctx| {
         Ok(text(ctx, 0).map(|flds| {
             let first = flds.split('\u{1f}').next().unwrap_or_default();
