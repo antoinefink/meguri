@@ -202,10 +202,10 @@ struct AppCommands: Commands {
         if let context, context.replacesUndo {
             CommandGroup(replacing: .undoRedo) {
                 let undo = context.undoRoute(redo: false), redo = context.undoRoute(redo: true)
-                Button(Self.title(undo.title, redo: false)) { context.performUndo(redo: false) }
+                Button(Self.title(undo, redo: false)) { context.performUndo(redo: false) }
                     .keyboardShortcut(undoKey("z", modifiers: .command, review: context.review != nil))
                     .disabled(!undo.enabled)
-                Button(Self.title(redo.title, redo: true)) { context.performUndo(redo: true) }
+                Button(Self.title(redo, redo: true)) { context.performUndo(redo: true) }
                     .keyboardShortcut(undoKey("z", modifiers: [.command, .shift], review: context.review != nil))
                     .disabled(!redo.enabled)
             }
@@ -292,12 +292,13 @@ struct AppCommands: Commands {
     }
 
     /// R173: "Undo <operation>" while one can be undone, plain "Undo" otherwise.
-    private static func title(_ title: EditUndoRouting.Title, redo: Bool) -> String {
-        switch title {
+    private static func title(_ route: EditUndoRouting.Route, redo: Bool) -> String {
+        switch route.title {
         case .text(let text): return text
         case .named(let step):
-            // S5: the review's steps by their display names ("Undo Bury Card").
-            let name = ReviewStepNames.display(step)
+            // S5: the review's own steps by their display names ("Undo Bury Card");
+            // the collection's steps keep their V4 names ("Undo Update Note").
+            let name = route.target == .review ? ReviewStepNames.display(step) : step
             return redo ? String(localized: "Redo \(name)") : String(localized: "Undo \(name)")
         case .plain: return redo ? String(localized: "Redo") : String(localized: "Undo")
         }
