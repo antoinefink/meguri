@@ -28,7 +28,8 @@ impl Service {
             let row:Option<(String,i64,Vec<u8>)>=c.query_row("SELECT account_id,generation,hash FROM credentials WHERE hash=?1 AND kind='hostkey' AND revoked=0",[hash.as_slice()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
             let (id,generation,stored)=row.ok_or(Error::new("authentication_failed"))?;
             if !crypto::same_digest(&stored,&hash) { return Err(Error::new("authentication_failed")); }
-            let a=NativeAuthority{id,generation}; barrier::check_native_generation(c,&a)?; Ok(a)
+            let data_epoch=crate::storage::reset::admitted_epoch(c,&id)?;
+            let a=NativeAuthority{id,generation,data_epoch}; barrier::check_native_generation(c,&a)?; Ok(a)
         }).await
     }
     pub async fn browser_login(
@@ -202,7 +203,8 @@ impl Service {
         metadata.files(|r| {
             r.upgrade_media()?;
             r.upgrade_deletions()?;
-            r.upgrade_oauth()
+            r.upgrade_oauth()?;
+            r.upgrade_resets()
         }).await?;
         let phc = HashPool::default()
             .run(move || crypto::hash(&password))

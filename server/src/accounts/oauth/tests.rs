@@ -425,3 +425,20 @@ fn oauth_migration_is_atomic_and_reentrant() {
     root.check_initialized().unwrap();
     root.upgrade_oauth().unwrap();root.upgrade_oauth().unwrap();root.check_initialized().unwrap();
 }
+
+#[tokio::test]
+async fn reset_data_preserves_oauth_grants_and_tokens_but_fences_captured_authority() {
+    let f=Fixture::new().await;
+    let (_,tokens)=f.tokens(true).await;
+    let token=tokens["access_token"].as_str().unwrap();
+    let original=f.s.mcp_authority(token,true).await.unwrap();
+    let grants=serde_json::to_value(f.s.oauth_grants(f.a.clone()).await.unwrap()).unwrap();
+    let reset=f.s.reset_data(f.a.clone(),f.a.identity().id.clone()).await.unwrap();
+    assert_eq!(reset.storage.unwrap().media_bytes,0);
+    assert_eq!(f.s.mcp_recheck(original,true).await.unwrap_err().code,"invalid_token");
+    let current=f.s.mcp_authority(token,true).await.unwrap();
+    f.s.mcp_recheck(current,true).await.unwrap();
+    assert_eq!(serde_json::to_value(f.s.oauth_grants(f.a.clone()).await.unwrap()).unwrap(),grants);
+    f.s.oauth_token(refresh_request(tokens["refresh_token"].as_str().unwrap())).await.unwrap();
+    assert_eq!(f.s.me(f.a.clone()).await.unwrap().id,f.a.identity().id);
+}

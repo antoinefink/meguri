@@ -3,7 +3,7 @@
 # prints TAP.
 #
 # usage: xcode_project_check.sh <work dir> [--phase builds|devices [--continue-from N]]
-#          [--iphone UDID] [--ipad UDID] [--no-ui] [--cloud-signing-matrix]
+#          [--iphone UDID] [--ipad UDID] [--no-ui] [--cloud-signing-matrix] [--settings-only]
 #          [--vm-ssh <wrapper> --vm-name <name> | --no-sims]
 #          [--mac-unit-only] (fixed MG devices routing only)
 #
@@ -16,6 +16,10 @@
 # app-hosted tests, TestHooksTests and the agent driver's DriveScriptTests
 # (into <work dir>/DerivedData-tests, or DerivedData-tests-profile for
 # Profile/Performance).
+#
+# --settings-only stops after the project structure, resolved build settings
+# and test plans: no product is built (no Release or AppStore Mac app gets
+# registered), no simulator or VM is used.
 #
 # Phases: `builds` is everything up to the Mac checks (no launch, no
 # simulator, no test run, no TAP plan line); `devices` is the rest: the
@@ -76,6 +80,7 @@ VM_SSH=""
 VM_NAME="the test VM"
 SIMS=true
 CLOUD_SIGNING_MATRIX=false
+SETTINGS_ONLY=false
 PHASE=all
 FIRST=0
 while [ "$#" -gt 0 ]; do
@@ -87,6 +92,7 @@ while [ "$#" -gt 0 ]; do
     --vm-name) VM_NAME="${2:?}" && shift ;;
     --no-sims) SIMS=false ;;
     --cloud-signing-matrix) CLOUD_SIGNING_MATRIX=true ;;
+    --settings-only) SETTINGS_ONLY=true ;;
     --mac-unit-only) ;;
     --phase)
       case "${2:-}" in builds | devices) PHASE="$2" ;; *) echo "xcode_project_check: --phase takes builds or devices" >&2 && exit 2 ;; esac
@@ -113,7 +119,9 @@ mkdir -p "$LOGS"
 # signed by this run (a test build into the same DerivedData would have
 # re-signed them with test entitlements). The devices phase uses the Debug
 # app the builds phase left.
-[ "$PHASE" = devices ] || rm -rf "$WORK"/settings-*.txt "$DD/Build/Products" "$WORK/mac-debug-built"
+# --settings-only keeps a previous run's products.
+[ "$PHASE" = devices ] || [ "$SETTINGS_ONLY" = true ] || rm -rf "$WORK"/settings-*.txt "$DD/Build/Products" "$WORK/mac-debug-built"
+[ "$SETTINGS_ONLY" != true ] || rm -f "$WORK"/settings-*.txt
 PROJECT="$REPO/app/Meguri.xcodeproj"
 STAMP="$REPO/app/Packages/MeguriCore/Binaries/.stamp"
 CONFIGS="Debug Profile Release AppStore"
@@ -350,7 +358,28 @@ if builds_phase; then
       and ((.schemes | index("Meguri-AppStore")) != null)' <<<"$list"
 
   check "project.pbxproj holds no build settings (they live in app/Config)" no_build_settings_in_pbxproj
+  check "AppIcon-Dev.icon is generated from the current AppIcon.icon (tools/mg dev-icon)" \
+    python3 "$REPO/tools/scripts/dev-icon/dev_icon.py" check --source "$REPO/app/Meguri/AppIcon.icon" \
+    --out "$REPO/app/Meguri/AppIcon-Dev.icon" --record "$REPO/tools/scripts/dev-icon/record.json"
 fi
+
+# The name and icon an identity shows (app/Config/Base.xcconfig): the
+# development id is "Meguri Dev" with the blue icon, the daily driver
+# "Meguri" with the red one, in settings and in built products.
+identity_of() { if [ "$1" = .dev ]; then echo dev; else echo daily; fi; }
+identity_settings() { # identity_settings <showBuildSettings json> <suffix>
+  python3 "$REPO/tools/tests/app_identity_check.py" settings "$1" --identity "$(identity_of "$2")"
+}
+# The scheme's settings list only the app: the widget is resolved on its own.
+identity_widget_settings() { # identity_widget_settings <config> <sdk> <suffix> <output>
+  printf 'MEGURI_BUNDLE_ID_SUFFIX = %s\n' "$3" >"$4.xcconfig" || return 1
+  xcodebuild -showBuildSettings -json -project "$PROJECT" -target MeguriWidget -configuration "$1" -sdk "$2" \
+    -xcconfig "$4.xcconfig" >"$4" 2>/dev/null || return 1
+  python3 "$REPO/tools/tests/app_identity_check.py" widget-settings "$4" --identity "$(identity_of "$3")"
+}
+identity_product() { # identity_product <app> <suffix>
+  python3 "$REPO/tools/tests/app_identity_check.py" product "$1" --identity "$(identity_of "$2")"
+}
 
 # routes_from_source: the test-hook routes, read from their registrations
 # (`register("area/screen")`), for the hidden-launch check below. Fails when a
@@ -397,11 +426,19 @@ if builds_phase; then
         case "$config" in Debug | Profile) suffix=.dev ;; *) suffix="" ;; esac
         check "$config $sdk $signing: CloudKit isolation and readiness settings" \
           cloud_settings "$config" "$sdk" "$signing" "$suffix" "$WORK/cloud-settings-$config-$sdk-$signing.json"
+        check "$config $sdk $signing: $(identity_of "$suffix") identity's app name and icon" \
+          identity_settings "$WORK/cloud-settings-$config-$sdk-$signing.json" "$suffix"
         if [ "$config/$sdk/$signing" = Release/macosx/team ]; then
           check "personal preview Release.dev: isolated development CloudKit settings" \
             cloud_settings Release macosx team .dev "$WORK/cloud-settings-personal-preview.json" personal-preview
+          check "personal preview Release.dev: dev identity's app name and icon" \
+            identity_settings "$WORK/cloud-settings-personal-preview.json" .dev
+          check "personal preview Release.dev: dev identity's widget name" \
+            identity_widget_settings Release macosx .dev "$WORK/widget-settings-personal-preview.json"
         fi
       done
+      check "$config $sdk: $(identity_of "$suffix") identity's widget name" \
+        identity_widget_settings "$config" "$sdk" "$suffix" "$WORK/widget-settings-$config-$sdk.json"
     done
     for sdk in macosx iphonesimulator; do
       check "$config $sdk: compilation conditions (hooks $hooks, AnkiWeb $ankiweb)" conditions_ok "$config" "$sdk" "$hooks" "$ankiweb"
@@ -446,6 +483,11 @@ if builds_phase; then
     [ "$(xmllint --xpath "string(//TestAction/@disableMainThreadChecker)" "$f")" = YES ] &&
     [ "$(xmllint --xpath "string(//LaunchAction/@disableMainThreadChecker)" "$f")" = YES ] &&
     [ "$(xmllint --xpath "string(//BuildActionEntry/@buildForArchiving)" "$f")" = NO ]' _ "$REPO"
+fi
+if [ "$SETTINGS_ONLY" = true ]; then
+  echo "1..$N"
+  [ "$FAILED" -eq 0 ]
+  exit
 fi
 
 # --- Builds -----------------------------------------------------------------
@@ -529,6 +571,7 @@ if builds_phase; then
       *) check "mac-$config is a regular app (LSUIElement false)" expect_info "$app" LSUIElement false ;;
     esac
     check "mac-$config built card inspection policy" expect_info "$app" MeguriCardInspectionBuild "\"$(card_inspection_build "$config")\""
+    check "mac-$config built $(identity_of "$cloud_suffix") identity's name and icon" identity_product "$app" "$cloud_suffix"
     # shellcheck disable=SC2046
     markers="$(hook_markers $(executables "$app/Contents/MacOS" Meguri))"
     case "$config" in
@@ -587,6 +630,8 @@ if builds_phase; then
         if build "cloud-$sdk-$config-team" "$config" "$cloud_dest" MEGURI_SIGNING=team; then
           check "$sdk-$config built CloudKit Info and team grants" cloud_artifacts "$config" "$sdk" team \
             "$DD/Build/Products/$cloud_product/Meguri.app" "$cloud_suffix"
+          check "$sdk-$config built $(identity_of "$cloud_suffix") identity's name and icon (team)" \
+            identity_product "$DD/Build/Products/$cloud_product/Meguri.app" "$cloud_suffix"
         fi
         [ "$sdk" != macosx ] || forget_mac_app "$config"
       done
@@ -1093,7 +1138,7 @@ if devices_phase; then
     check "iphone-Debug links the Debug core with the simulator slice" stamp_is Debug ankiweb,test-hooks sim
     check "iphone-Debug entitlements: the .dev App Group" expect_sim_entitlement "$DD/Build/Products/Debug-iphonesimulator/Meguri.app/Meguri" \
       com.apple.security.application-groups '["group.com.antoinefink.meguri.dev"]'
-
+    check "iphone-Debug built dev identity's name and icon" identity_product "$DD/Build/Products/Debug-iphonesimulator/Meguri.app" .dev
   fi
   [ -z "$IPAD" ] || build "ipad-Debug" Debug "$(sim_dest "$IPAD")"
 fi

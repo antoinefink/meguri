@@ -51,6 +51,14 @@ import Testing
         #expect(issues.hasIssues && SyncPanel.slot(issues, serviceSelected: true, offered: true) == .syncNow)
         let media = SyncKinds.meguri(.init(routine: .mediaBlocked))
         #expect(media.kind == .issues && SyncPanel.slot(media, serviceSelected: true, offered: true) == .syncNow)
+        // Resume fix: with no affected files known there is no list to open, so
+        // Try Again is the status row's action and the panel's.
+        let unlisted = SyncKinds.meguri(.init(routine: .mediaBlocked, mediaListKnown: false))
+        #expect(unlisted.kind == .waiting && !unlisted.hasIssues && unlisted.action == .meguriRetryMedia)
+        #expect(SyncPanel.slot(unlisted, serviceSelected: true, offered: true) == .action(.meguriRetryMedia))
+        let fixture = SyncCoordinator.renderFixture(.meguriMediaBlocked)
+        #expect(fixture.meguriAffectedFileCount == nil && fixture.mainStatus.action == .meguriRetryMedia)
+        #expect(!fixture.mainStatus.hasIssues)
     }
 
     @Test func barShowsWhileSomethingMovesAndNeverWhenTheStatusNeedsYou() {
@@ -89,8 +97,12 @@ import Testing
         // MP6.5: files done over done plus left, the same value as the Account row.
         #expect(sync.meguriProgressValue == .fraction(18_945.0 / 44_000.0))
         #expect(sync.panelProgress == .fraction(18_945.0 / 44_000.0))
-        #expect(sync.panelFilesLeft == 25_055)
-        #expect(sync.mainStatus.titleKey == "sync.meguri.status.transferringMedia.title")
+        // Resume fix: the count is in the status sentence, so no files line repeats it.
+        #expect(sync.panelFilesLeft == nil)
+        #expect(sync.mainStatus.titleKey == "sync.meguri.status.downloadingMedia.title")
+        #expect(sync.mainStatus.detailKey == "sync.meguri.media.left" && sync.mainStatus.detailCount == 25_055)
+        #expect(sync.serviceChangeBusyKey == "sync.switch.busy.mediaDownload")
+        #expect(SyncCoordinator.renderFixture(.meguriConnected).serviceChangeBusyKey == "sync.switch.busy")
         #expect(sync.mainStatus.symbol == SyncSymbol.moving)
         // A blocked provider stops the bar (MP6.5).
         let blocked = SyncCoordinator.renderFixture(.meguriBlocked)

@@ -8,8 +8,13 @@ public enum SyncText {
     public static func value(_ key: String) -> String {
         String(localized: String.LocalizationValue(key), table: "Sync", bundle: .module)
     }
+    /// Counts take the locale's own digits and grouping from the system's
+    /// formatting ("4,431", "4.431"), never from string building.
     public static func format(_ key: String, _ arguments: CVarArg...) -> String {
-        String(format: value(key), locale: .autoupdatingCurrent, arguments: arguments)
+        format(key, locale: .autoupdatingCurrent, arguments)
+    }
+    static func format(_ key: String, locale: Locale, _ arguments: [CVarArg]) -> String {
+        String(format: value(key), locale: locale, arguments: arguments)
     }
     public static func instant(_ milliseconds: Int64, now: Date) -> String {
         let date = Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
@@ -354,6 +359,11 @@ extension AppNavigation {
 // Display values carry no command or binding authority.
 public enum MeguriSetupStage: Sendable, Equatable {
     case required, preparing, preview, collection, media, mediaBlocked
+    /// The media step stopped before it finished (a quit, a lost connection, a
+    /// server error) and continues by itself (MP6.5, resume fix).
+    case mediaPaused
+    /// The media step failed again after its automatic attempts: the person retries it.
+    case mediaStopped
     case acceptanceUnknown, acceptedLocalIncomplete, failed
 }
 public enum MeguriRoutineState: Sendable, Equatable {
@@ -409,8 +419,8 @@ public struct MeguriSyncStatusPresentation {
         else if connection == .signedOut || connection == .cancelled { needsUser = true }
         else if let stage {
             needsUser = switch stage {
-            case .required, .preview, .mediaBlocked, .acceptanceUnknown, .acceptedLocalIncomplete, .failed: true
-            case .preparing, .collection, .media: false
+            case .required, .preview, .mediaBlocked, .mediaStopped, .acceptanceUnknown, .acceptedLocalIncomplete, .failed: true
+            case .preparing, .collection, .media, .mediaPaused: false
             }
         } else if let routine {
             needsUser = switch routine {
