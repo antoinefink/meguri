@@ -17,6 +17,18 @@ pub(crate) fn simple_fold(text: &str) -> String {
     text.chars().map(|c| mapper.simple_fold(c)).collect()
 }
 
+/// [`simple_fold`] into `out`, which is cleared first.
+pub(crate) fn fold_into(text: &str, out: &mut String) {
+    out.clear();
+    if text.is_ascii() {
+        out.push_str(text);
+        out.make_ascii_lowercase();
+        return;
+    }
+    let mapper = CaseMapper::new();
+    out.extend(text.chars().map(|c| mapper.simple_fold(c)));
+}
+
 #[cfg(test)]
 mod tests {
     use super::simple_fold;

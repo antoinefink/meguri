@@ -58,6 +58,8 @@ pub mod exclusive;
 pub mod executor_ordering;
 #[path = "external_change.rs"]
 pub mod external_change;
+#[path = "filter_counts.rs"]
+pub mod filter_counts;
 #[path = "flags.rs"]
 pub mod flags;
 #[path = "fsrs_policy.rs"]

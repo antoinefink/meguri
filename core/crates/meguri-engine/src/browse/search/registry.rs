@@ -67,7 +67,7 @@ impl SearchRegistry {
 
     /// The halt epoch a request queued now records, and whether a halt is
     /// in force (a request made during one is refused, H3).
-    pub(super) fn epoch(&self) -> (u64, bool) {
+    pub(crate) fn epoch(&self) -> (u64, bool) {
         let state = self.lock();
         (state.epoch, state.halts > 0)
     }
@@ -75,7 +75,7 @@ impl SearchRegistry {
     /// A request takes its worker: its token is listed for [`Self::halt`],
     /// and set at once while a halt is in force or when one began after the
     /// request was queued at `epoch`.
-    pub(super) fn run(&self, token: &Arc<CancelToken>, epoch: u64) -> Running<'_> {
+    pub(crate) fn run(&self, token: &Arc<CancelToken>, epoch: u64) -> Running<'_> {
         let mut state = self.lock();
         state.next_run += 1;
         let key = state.next_run;
@@ -88,7 +88,7 @@ impl SearchRegistry {
 
     /// A search reader for the request whose token is `token`: waits while
     /// every one is in use, and gives none once the token is set.
-    pub(super) fn reader(&self, token: &CancelToken) -> Option<ReaderSlot<'_>> {
+    pub(crate) fn reader(&self, token: &CancelToken) -> Option<ReaderSlot<'_>> {
         let mut state = self.lock();
         loop {
             if token.is_cancelled() {
@@ -149,7 +149,7 @@ impl SearchRegistry {
     }
 }
 
-pub(super) struct Running<'a> {
+pub(crate) struct Running<'a> {
     registry: &'a SearchRegistry,
     key: u64,
 }
@@ -160,9 +160,9 @@ impl Drop for Running<'_> {
     }
 }
 
-pub(super) struct ReaderSlot<'a> {
+pub(crate) struct ReaderSlot<'a> {
     registry: &'a SearchRegistry,
-    pub(super) index: usize,
+    pub(crate) index: usize,
 }
 
 impl Drop for ReaderSlot<'_> {
@@ -208,7 +208,7 @@ impl Wake for Bridge {
 }
 
 /// Links `caller` to `request`: once `caller` is cancelled, so is `request`.
-pub(super) fn bridge(caller: &CancelToken, request: &Arc<CancelToken>, registry: &Arc<SearchRegistry>) {
+pub(crate) fn bridge(caller: &CancelToken, request: &Arc<CancelToken>, registry: &Arc<SearchRegistry>) {
     use std::future::Future;
     let waker = std::task::Waker::from(Arc::new(Bridge {
         request: Arc::downgrade(request),

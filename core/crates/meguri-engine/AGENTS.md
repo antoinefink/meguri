@@ -56,3 +56,5 @@
 - `ReaderLease` is thread-bound; call `wait_wal_covered` after the snapshot.
 
 - Browse search sessions (`browse/search/`, `browser/result-sets`): a busy session has one worker thread (owner `search`); `SearchRegistry::halt` cancels running requests for replace, suspend and close. Events go through a per-request delivery thread joined before the next request, so the listener never runs under a lock or a reader. Lock order: session state, then a handle. A search's day is `worker::context` (pure `sched_day` on the snapshot), never a day query.
+
+- Filter counts (`browse/counts.rs`, `search/filter-tokens` T12.4): a blocking read on a search reader taken through `SearchRegistry` (halts cancel it), never the query reader that row pages use. The cache keeps a count with its snapshot's seq, the tables it read and its context reads; the observer only bumps per-table seqs. Call `wait_settled(snapshot.seq())` before trusting a cached count, and cache only while attached to the snapshot's generation (its open step), or an unobserved commit leaves a stale count.

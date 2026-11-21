@@ -124,6 +124,11 @@ harness = false
 name = "browse_session"
 harness = false
 
+# U263's suggestions (10,000 tags) and the sidebar's filter counts.
+[[bench]]
+name = "browse_filters"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]

@@ -9,10 +9,12 @@
 //!   whose stored names its expression matches (`names-and-ids` N3.3,
 //!   compared here as the expression does: anchored, each character by
 //!   simple case folding, then the end or a level separator), and one read
-//!   of the cards grouped by deck gives every deck item's count;
+//!   of every card's decks gives every deck item's count;
 //! - a tag item in normal mode without wildcards (`tag:` by name) is the
-//!   literal its expression matches (N2.2): one read of every note's tags
-//!   gives every tag item's count, with the cards of each note in Cards;
+//!   literal its expression matches (N2.2), and a note type item without
+//!   wildcards (`note:` by name, or `mid:`) the note types whose names equal
+//!   its own under `unicase` (N4.1): one read of every note's note type and
+//!   tags gives every such item's count, with each note's cards in Cards;
 //! - every other value shares one statement per row set (Q5) with one count
 //!   column per value, each column the value's own plan predicate;
 //! - a saved search or a whole query runs its run text as a count-only
@@ -22,7 +24,7 @@
 //! the mode (`search/query-model` Q4, Q5): the same predicate over the same
 //! rows, or the same expression over the same names.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use meguri_text::normalize::{nfc, remove_ascii_controls};
 
@@ -178,7 +180,11 @@ pub struct CountPlan {
 #[derive(Debug)]
 pub enum CountJob {
     Decks(DeckCounts),
-    Tags(TagCounts),
+    /// Tag and note type items: one read of every note.
+    Notes(NoteCounts),
+    /// Notes mode, card terms only: each card's note and one column per
+    /// text, gathered per note here.
+    NoteColumns(NoteColumns),
     /// One count column per text, in `texts` order.
     Columns {
         sql: String,
@@ -200,7 +206,7 @@ impl CountPlan {
     /// context and note types.
     pub fn new(mode: SearchMode, texts: &[CountText<'_>], ctx: &SearchContext, notetypes: &SearchNotetypes) -> CountPlan {
         let mut decks = DeckCounts::new(mode);
-        let mut tags = TagCounts::new(mode);
+        let mut notes = NoteCounts::new(mode);
         let mut shared: Vec<(usize, Query)> = Vec::new();
         let mut jobs = Vec::new();
         let mut uncounted = Vec::new();
@@ -212,7 +218,9 @@ impl CountPlan {
             if let Some(key) = deck_key(&query) {
                 decks.add(index, key);
             } else if let Some(literal) = tag_literal(&query) {
-                tags.add(index, &literal);
+                notes.add_tag(index, &literal);
+            } else if let Some(key) = notetype_key(&query) {
+                notes.add_notetype(index, key);
             } else if item.alone {
                 match search_job(index, &query, mode, ctx, notetypes) {
                     Some(job) => jobs.push(job),
@@ -223,17 +231,20 @@ impl CountPlan {
             }
         }
         // One statement per row set, at most COLUMNS columns each.
-        let mut by_rows: Vec<(Rows, Vec<(usize, Query)>)> = Vec::new();
+        let mut by_rows: Vec<((Rows, bool), Vec<(usize, Query)>)> = Vec::new();
         for (index, query) in shared {
-            let rows = Rows::for_query(mode, crate::plan::query_scope(&query));
-            match by_rows.iter_mut().find(|(kept, _)| *kept == rows) {
+            let scope = crate::plan::query_scope(&query);
+            // Notes mode with card terms only: the cards are read alone and
+            // matched to the notes read for the other items.
+            let key = (Rows::for_query(mode, scope), mode == SearchMode::Notes && scope == crate::ast::Scope::Card);
+            match by_rows.iter_mut().find(|(kept, _)| *kept == key) {
                 Some((_, list)) => list.push((index, query)),
-                None => by_rows.push((rows, vec![(index, query)])),
+                None => by_rows.push((key, vec![(index, query)])),
             }
         }
-        for (rows, list) in by_rows {
+        for ((rows, cards_of_notes), list) in by_rows {
             for chunk in list.chunks(COLUMNS) {
-                let (job, failed) = columns_job(mode, rows, chunk, ctx, notetypes);
+                let (job, failed) = columns_job(mode, rows, cards_of_notes, chunk, ctx, notetypes);
                 uncounted.extend(failed);
                 jobs.extend(job);
             }
@@ -241,8 +252,8 @@ impl CountPlan {
         if !decks.is_empty() {
             jobs.insert(0, CountJob::Decks(decks));
         }
-        if !tags.is_empty() {
-            jobs.insert(0, CountJob::Tags(tags));
+        if !notes.is_empty() {
+            jobs.insert(0, CountJob::Notes(notes));
         }
         CountPlan { mode, jobs, uncounted }
     }
@@ -273,6 +284,7 @@ fn search_job(
 fn columns_job(
     mode: SearchMode,
     rows: Rows,
+    cards_of_notes: bool,
     chunk: &[(usize, Query)],
     ctx: &SearchContext,
     notetypes: &SearchNotetypes,
@@ -298,6 +310,22 @@ fn columns_job(
     }
     if predicates.is_empty() {
         return (None, failed);
+    }
+    if cards_of_notes {
+        let columns: Vec<String> = predicates
+            .iter()
+            .map(|p| format!("CASE WHEN ({p}) THEN 1 ELSE 0 END"))
+            .collect();
+        return (
+            Some(CountJob::NoteColumns(NoteColumns {
+                sql: format!("SELECT c.nid, {} FROM cards c", columns.join(", ")),
+                params: params.into_vec(),
+                texts,
+                reads,
+                notes: HashMap::new(),
+            })),
+            failed,
+        );
     }
     let sql = match (mode, rows) {
         (SearchMode::Notes, Rows::Cards | Rows::CardsWithNotes) => {
@@ -369,10 +397,12 @@ fn deck_key(query: &Query) -> Option<DeckKey> {
             }
             Some(DeckKey::Name(simple_fold(&deck_levels_literal(&value)?)))
         }
+        // A digit other than ASCII fails the search's plan (E3): counted as
+        // the search is, by its own job.
         Term::Ids {
             kind: IdKind::Decks,
             list,
-        } => Some(DeckKey::Ids(
+        } if list.chars().all(|c| c == ',' || c.is_ascii_digit()) => Some(DeckKey::Ids(
             list.split(',').filter_map(|run| run.parse::<i64>().ok()).collect(),
         )),
         _ => None,
@@ -417,6 +447,31 @@ fn tag_literal(query: &Query) -> Option<String> {
     (!literal.is_empty()).then(|| simple_fold(&literal))
 }
 
+/// Which note types a note type item names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum NotetypeKey {
+    /// N4.1 without wildcards: names equal to this one under unicase.
+    Name(String),
+    /// `mid:`.
+    Id(i64),
+}
+
+/// A `note:` term with no wildcard (N4.1: unicase equality with its exact
+/// text, read in the statement), or a `mid:` term.
+fn notetype_key(query: &Query) -> Option<NotetypeKey> {
+    match single_term(query)? {
+        Term::Notetype(value) => {
+            let value = nfc(value);
+            if value.is_empty() || crate::pattern::has_wildcards(&value) {
+                return None;
+            }
+            Some(NotetypeKey::Name(crate::pattern::exact_text(&value).into_owned()))
+        }
+        Term::NotetypeId(id) => Some(NotetypeKey::Id(id.0)),
+        _ => None,
+    }
+}
+
 /// The deck items of a plan: the cards grouped by `did` and `odid` (Cards),
 /// or every card-and-note pair's note and decks (Notes).
 #[derive(Debug)]
@@ -425,13 +480,12 @@ pub struct DeckCounts {
     names: HashMap<String, Vec<usize>>,
     ids: HashMap<i64, Vec<usize>>,
     texts: Vec<usize>,
-    /// Per text index: its count so far.
-    counts: HashMap<usize, u64>,
     /// After [`DeckCounts::decks`]: the texts each deck id is in.
     members: HashMap<i64, Vec<usize>>,
-    /// Notes mode: the note being read and the texts it is in so far.
-    note: Option<i64>,
-    seen: Vec<usize>,
+    /// Each distinct (`did`, `odid`) pair read, with its cards.
+    pairs: HashMap<(i64, i64), (u32, u64)>,
+    /// Notes mode: the pairs of each note's cards.
+    notes: HashMap<i64, Vec<u32>>,
 }
 
 impl DeckCounts {
@@ -441,10 +495,9 @@ impl DeckCounts {
             names: HashMap::new(),
             ids: HashMap::new(),
             texts: Vec::new(),
-            counts: HashMap::new(),
             members: HashMap::new(),
-            note: None,
-            seen: Vec::new(),
+            pairs: HashMap::new(),
+            notes: HashMap::new(),
         }
     }
 
@@ -471,11 +524,13 @@ impl DeckCounts {
         &self.texts
     }
 
-    /// The decks of the snapshot, each its id and stored name: which items
-    /// each deck is in.
-    pub fn decks<'a>(&mut self, decks: impl IntoIterator<Item = (i64, &'a str)>) {
+    /// The decks of the snapshot, each its id and stored name (none when
+    /// it is not text, which no expression matches): which items each deck
+    /// is in.
+    pub fn decks<'a>(&mut self, decks: impl IntoIterator<Item = (i64, Option<&'a str>)>) {
         let mut members: HashMap<i64, Vec<usize>> = self.ids.clone();
         for (id, name) in decks {
+            let Some(name) = name else { continue };
             let folded = simple_fold(name);
             let mut ends: Vec<usize> = folded.match_indices('\u{1f}').map(|(at, _)| at).collect();
             ends.push(folded.len());
@@ -493,87 +548,127 @@ impl DeckCounts {
         self.members = members;
     }
 
-    /// The grouped statement.
+    /// The statement: every card's decks (Cards), or every card-and-note
+    /// pair's note and decks (Notes). Grouped here, not by SQLite's sorter.
     pub fn sql(&self) -> &'static str {
         match self.mode {
-            SearchMode::Cards => "SELECT c.did, c.odid, count(*) FROM cards c GROUP BY c.did, c.odid",
-            SearchMode::Notes => {
-                "SELECT c.nid, c.did, c.odid FROM cards c JOIN notes n ON n.id = c.nid \
-                 GROUP BY c.nid, c.did, c.odid ORDER BY c.nid"
-            }
+            SearchMode::Cards => "SELECT c.did, c.odid FROM cards c",
+            // Matched to the notes that exist in `finish`.
+            SearchMode::Notes => "SELECT c.nid, c.did, c.odid FROM cards c",
         }
     }
 
     /// One row of [`DeckCounts::sql`].
     pub fn row(&mut self, row: &[i64]) {
-        match self.mode {
-            SearchMode::Cards => {
-                let (did, odid, count) = (row[0], row[1], u64::try_from(row[2]).unwrap_or(0));
-                // N3.3: through `did`, or through `odid` in a filtered deck.
-                let mut found = self.members.get(&did).cloned().unwrap_or_default();
-                if odid != 0 {
-                    for text in self.members.get(&odid).into_iter().flatten() {
-                        if !found.contains(text) {
-                            found.push(*text);
-                        }
+        let (pair, note) = match self.mode {
+            SearchMode::Cards => ((row[0], row[1]), None),
+            SearchMode::Notes => ((row[1], row[2]), Some(row[0])),
+        };
+        let next = u32::try_from(self.pairs.len()).unwrap_or(u32::MAX);
+        let entry = self.pairs.entry(pair).or_insert((next, 0));
+        entry.1 += 1;
+        let id = entry.0;
+        if let Some(note) = note {
+            let pairs = self.notes.entry(note).or_default();
+            if !pairs.contains(&id) {
+                pairs.push(id);
+            }
+        }
+    }
+
+    /// Every item's count; in Notes mode `notes` are the notes that exist
+    /// (Q5: a card counts only with its note).
+    pub fn finish(self, notes: &HashSet<i64>) -> Vec<(usize, u64)> {
+        // N3.3: a card is in an item's decks through `did`, or through
+        // `odid` when it is in a filtered deck.
+        let mut texts_of: Vec<Vec<usize>> = vec![Vec::new(); self.pairs.len()];
+        let mut cards_of: Vec<u64> = vec![0; self.pairs.len()];
+        for ((did, odid), (id, cards)) in &self.pairs {
+            let found = &mut texts_of[*id as usize];
+            for deck in [Some(*did), (*odid != 0).then_some(*odid)].into_iter().flatten() {
+                for text in self.members.get(&deck).into_iter().flatten() {
+                    if !found.contains(text) {
+                        found.push(*text);
                     }
                 }
-                for text in found {
-                    *self.counts.entry(text).or_default() += count;
+            }
+            cards_of[*id as usize] = *cards;
+        }
+        let mut counts: HashMap<usize, u64> = HashMap::new();
+        match self.mode {
+            SearchMode::Cards => {
+                for (found, cards) in texts_of.iter().zip(&cards_of) {
+                    for text in found {
+                        *counts.entry(*text).or_default() += cards;
+                    }
                 }
             }
             SearchMode::Notes => {
-                let (nid, did, odid) = (row[0], row[1], row[2]);
-                if self.note != Some(nid) {
-                    self.end_note();
-                    self.note = Some(nid);
-                }
-                for deck in [Some(did), (odid != 0).then_some(odid)].into_iter().flatten() {
-                    for text in self.members.get(&deck).into_iter().flatten() {
-                        if !self.seen.contains(text) {
-                            self.seen.push(*text);
+                // A note counts once per item, whichever of its cards is in it.
+                let mut stamp: HashMap<usize, usize> = HashMap::new();
+                for (k, (nid, pairs)) in self.notes.iter().enumerate() {
+                    if !notes.contains(nid) {
+                        continue;
+                    }
+                    for pair in pairs {
+                        for text in &texts_of[*pair as usize] {
+                            if stamp.insert(*text, k) != Some(k) {
+                                *counts.entry(*text).or_default() += 1;
+                            }
                         }
                     }
                 }
             }
         }
-    }
-
-    fn end_note(&mut self) {
-        for text in self.seen.drain(..) {
-            *self.counts.entry(text).or_default() += 1;
-        }
-    }
-
-    /// Every item's count.
-    pub fn finish(mut self) -> Vec<(usize, u64)> {
-        self.end_note();
         self.texts
             .iter()
-            .map(|text| (*text, self.counts.get(text).copied().unwrap_or(0)))
+            .map(|text| (*text, counts.get(text).copied().unwrap_or(0)))
             .collect()
     }
 }
 
-/// The tag items of a plan: every note's tags (and in Cards its cards).
+/// The tag and note type items of a plan: one read of every note's note
+/// type and tags, with each note's cards in Cards (Q5: every card whose note
+/// exists, with it).
 #[derive(Debug)]
-pub struct TagCounts {
+pub struct NoteCounts {
     mode: SearchMode,
     literals: HashMap<String, Vec<usize>>,
+    names: Vec<(String, usize)>,
+    ids: Vec<(i64, usize)>,
     texts: Vec<usize>,
     counts: HashMap<usize, u64>,
+    /// After [`NoteCounts::notetypes`]: the items each note type id is in.
+    members: HashMap<i64, Vec<usize>>,
     /// Cards: each note's cards.
     cards: HashMap<i64, u64>,
+    /// Reused for each tag's folding.
+    buffer: String,
+    found: Vec<usize>,
+    /// The items each tag as stored matches, with a space after it and
+    /// without: the same tags recur on many notes.
+    pieces: HashMap<String, usize>,
+    matched: Vec<[Vec<usize>; 2]>,
+    /// Every note read.
+    read: HashSet<i64>,
 }
 
-impl TagCounts {
-    fn new(mode: SearchMode) -> TagCounts {
-        TagCounts {
+impl NoteCounts {
+    fn new(mode: SearchMode) -> NoteCounts {
+        NoteCounts {
             mode,
             literals: HashMap::new(),
+            names: Vec::new(),
+            ids: Vec::new(),
             texts: Vec::new(),
             counts: HashMap::new(),
+            members: HashMap::new(),
             cards: HashMap::new(),
+            buffer: String::new(),
+            found: Vec::new(),
+            pieces: HashMap::new(),
+            matched: Vec::new(),
+            read: HashSet::new(),
         }
     }
 
@@ -581,9 +676,17 @@ impl TagCounts {
         self.texts.is_empty()
     }
 
-    fn add(&mut self, index: usize, literal: &str) {
+    fn add_tag(&mut self, index: usize, literal: &str) {
         self.texts.push(index);
         self.literals.entry(literal.to_owned()).or_default().push(index);
+    }
+
+    fn add_notetype(&mut self, index: usize, key: NotetypeKey) {
+        self.texts.push(index);
+        match key {
+            NotetypeKey::Name(name) => self.names.push((name, index)),
+            NotetypeKey::Id(id) => self.ids.push((id, index)),
+        }
     }
 
     pub fn texts(&self) -> &[usize] {
@@ -594,8 +697,32 @@ impl TagCounts {
         self.mode
     }
 
-    /// Cards (Q5: every card whose note exists, with it): the statement
-    /// giving each note id's cards, read before the notes.
+    /// The note types of the snapshot, each its id and name (none when not
+    /// text): which items each note type id is in. Names compare as the
+    /// `unicase` collation does.
+    pub fn notetypes<'a>(&mut self, notetypes: impl IntoIterator<Item = (i64, Option<&'a str>)>) {
+        let mut members: HashMap<i64, Vec<usize>> = HashMap::new();
+        for (id, text) in &self.ids {
+            members.entry(*id).or_default().push(*text);
+        }
+        if !self.names.is_empty() {
+            for (id, name) in notetypes {
+                let Some(name) = name else { continue };
+                for (wanted, text) in &self.names {
+                    if meguri_text::fold::compare_folded(name, wanted).is_eq() {
+                        let entry = members.entry(id).or_default();
+                        if !entry.contains(text) {
+                            entry.push(*text);
+                        }
+                    }
+                }
+            }
+        }
+        self.members = members;
+    }
+
+    /// Cards: the statement giving each note id's cards, read before the
+    /// notes.
     pub fn cards_sql(&self) -> Option<&'static str> {
         match self.mode {
             SearchMode::Cards => Some("SELECT c.nid, count(*) FROM cards c GROUP BY c.nid"),
@@ -603,15 +730,16 @@ impl TagCounts {
         }
     }
 
-    /// One row of [`TagCounts::cards_sql`].
+    /// One row of [`NoteCounts::cards_sql`].
     pub fn cards_row(&mut self, row: &[i64]) {
         self.cards.insert(row[0], u64::try_from(row[1]).unwrap_or(0));
     }
 
-    /// One note: N2.2 step 4's expression `.* L(::| ).*` on its tags, for
-    /// each item's literal L: L after a space, then `::` or a space.
-    pub fn note(&mut self, nid: i64, tags: Option<&str>) {
-        let Some(tags) = tags else { return };
+    /// One note: its note type, and N2.2 step 4's expression `.* L(::| ).*`
+    /// on its tags for each tag item's literal L (L after a space, then
+    /// `::` or a space).
+    pub fn note(&mut self, nid: i64, mid: Option<i64>, tags: Option<&str>) {
+        self.read.insert(nid);
         let weight = match self.mode {
             SearchMode::Notes => 1,
             SearchMode::Cards => match self.cards.get(&nid) {
@@ -619,41 +747,68 @@ impl TagCounts {
                 None => return,
             },
         };
-        let mut found: Vec<usize> = Vec::new();
-        let mut pieces = tags.split(' ').peekable();
-        // The first piece has no space before it.
-        pieces.next();
-        while let Some(piece) = pieces.next() {
-            let closed = pieces.peek().is_some();
-            if piece.is_empty() {
-                continue;
-            }
-            let folded = simple_fold(piece);
-            // Every end of a run that `::` follows (overlapping), and the
-            // whole piece when a space follows it.
-            let mut ends: Vec<usize> = Vec::new();
-            let bytes = folded.as_bytes();
-            for at in 0..bytes.len().saturating_sub(1) {
-                if bytes[at] == b':' && bytes[at + 1] == b':' && at > 0 {
-                    ends.push(at);
+        let mut found = std::mem::take(&mut self.found);
+        found.clear();
+        if let Some(texts) = mid.and_then(|mid| self.members.get(&mid)) {
+            found.extend(texts.iter().copied());
+        }
+        if let Some(tags) = tags
+            && !self.literals.is_empty()
+        {
+            let mut pieces = tags.split(' ').peekable();
+            // The first piece has no space before it.
+            pieces.next();
+            while let Some(piece) = pieces.next() {
+                let closed = usize::from(pieces.peek().is_some());
+                if piece.is_empty() {
+                    continue;
                 }
-            }
-            if closed {
-                ends.push(folded.len());
-            }
-            for end in ends {
-                if let Some(texts) = self.literals.get(&folded[..end]) {
-                    for text in texts {
-                        if !found.contains(text) {
-                            found.push(*text);
-                        }
+                let at = match self.pieces.get(piece) {
+                    Some(at) => *at,
+                    None => {
+                        let matched = [self.matches(piece, false), self.matches(piece, true)];
+                        self.matched.push(matched);
+                        self.pieces.insert(piece.to_owned(), self.matched.len() - 1);
+                        self.matched.len() - 1
+                    }
+                };
+                for text in &self.matched[at][closed] {
+                    if !found.contains(text) {
+                        found.push(*text);
                     }
                 }
             }
         }
-        for text in found {
-            *self.counts.entry(text).or_default() += weight;
+        for text in &found {
+            *self.counts.entry(*text).or_default() += weight;
         }
+        self.found = found;
+    }
+
+    /// The notes read so far: every note, once the read is done.
+    pub fn take_notes(&mut self) -> HashSet<i64> {
+        std::mem::take(&mut self.read)
+    }
+
+    /// The tag items one tag as stored matches: each literal that it
+    /// equals before a `::` it holds (overlapping), or as a whole when a
+    /// space follows it (`closed`).
+    fn matches(&mut self, piece: &str, closed: bool) -> Vec<usize> {
+        crate::fold::fold_into(piece, &mut self.buffer);
+        let folded = self.buffer.as_str();
+        let bytes = folded.as_bytes();
+        let ends = (1..bytes.len().saturating_sub(1))
+            .filter(|&at| bytes[at] == b':' && bytes[at + 1] == b':')
+            .chain(closed.then_some(folded.len()));
+        let mut found = Vec::new();
+        for end in ends {
+            for text in self.literals.get(&folded[..end]).into_iter().flatten() {
+                if !found.contains(text) {
+                    found.push(*text);
+                }
+            }
+        }
+        found
     }
 
     /// Every item's count.
@@ -665,7 +820,62 @@ impl TagCounts {
     }
 }
 
+/// Notes mode, card terms only (Q4: a note counts when one of its cards
+/// makes the item true): each card's note and one 0-or-1 column per text,
+/// read from the cards alone; the notes that exist come from the caller.
+#[derive(Debug)]
+pub struct NoteColumns {
+    pub sql: String,
+    pub params: Vec<Param>,
+    texts: Vec<usize>,
+    reads: Vec<CountReads>,
+    /// Per note: the columns any of its cards set, as bits.
+    notes: HashMap<i64, Vec<u64>>,
+}
+
+impl NoteColumns {
+    pub fn texts(&self) -> &[usize] {
+        &self.texts
+    }
+
+    /// One row of [`NoteColumns::sql`]: the card's note, then the columns.
+    pub fn row(&mut self, row: &[i64]) {
+        let words = self.texts.len().div_ceil(64);
+        let bits = self.notes.entry(row[0]).or_insert_with(|| vec![0; words]);
+        for (k, value) in row[1..].iter().enumerate() {
+            if *value == 1 {
+                bits[k / 64] |= 1 << (k % 64);
+            }
+        }
+    }
+
+    /// Every item's count over the notes that exist.
+    pub fn finish(self, notes: &HashSet<i64>) -> Vec<(usize, u64)> {
+        let mut counts = vec![0u64; self.texts.len()];
+        for (nid, bits) in &self.notes {
+            if !notes.contains(nid) {
+                continue;
+            }
+            for (k, count) in counts.iter_mut().enumerate() {
+                if bits[k / 64] & (1 << (k % 64)) != 0 {
+                    *count += 1;
+                }
+            }
+        }
+        self.texts.iter().copied().zip(counts).collect()
+    }
+}
+
 impl CountJob {
+    /// Whether the job needs the set of notes that exist (Notes mode).
+    pub fn needs_notes(&self) -> bool {
+        match self {
+            CountJob::Decks(decks) => decks.mode == SearchMode::Notes,
+            CountJob::NoteColumns(_) => true,
+            _ => false,
+        }
+    }
+
     /// What each count of the job depends on, by text index.
     pub fn reads(&self) -> Vec<(usize, CountReads)> {
         match self {
@@ -689,14 +899,18 @@ impl CountJob {
                     })
                     .collect()
             }
-            CountJob::Tags(tags) => {
-                let tables = Tables::of_rows(match tags.mode {
+            CountJob::Notes(notes) => {
+                let rows = Tables::of_rows(match notes.mode {
                     SearchMode::Cards => Rows::CardsWithNotes,
                     SearchMode::Notes => Rows::Notes,
                 });
-                tags.texts
+                // A note type by name reads the note types' names too.
+                let by_name: std::collections::HashSet<usize> = notes.names.iter().map(|(_, text)| *text).collect();
+                notes
+                    .texts
                     .iter()
                     .map(|text| {
+                        let tables = if by_name.contains(text) { rows.union(Tables::NOTETYPES) } else { rows };
                         (
                             *text,
                             CountReads {
@@ -708,6 +922,7 @@ impl CountJob {
                     .collect()
             }
             CountJob::Columns { texts, reads, .. } => texts.iter().copied().zip(reads.iter().copied()).collect(),
+            CountJob::NoteColumns(columns) => columns.texts.iter().copied().zip(columns.reads.iter().copied()).collect(),
             CountJob::Search { text, reads, .. } => vec![(*text, *reads)],
         }
     }

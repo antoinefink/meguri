@@ -422,11 +422,20 @@ impl<'a> Lists<'a> {
     /// then Filter By; at most 50 rows (R1104).
     fn opening(&self) -> Vec<SuggestionRow> {
         let mut rows: Vec<SuggestionRow> = self.saved_rows();
+        // Every kind stays: the saved searches give way, ending with Show
+        // All when they are cut, 50 rows in all.
+        let room = MOST - Section::KINDS.len();
+        if rows.len() > room {
+            rows.truncate(room - 1);
+            rows.push(SuggestionRow {
+                section: Some(Section::SavedSearches),
+                row: Row::ShowAll(Section::SavedSearches),
+            });
+        }
         rows.extend(Section::KINDS.iter().map(|kind| SuggestionRow {
             section: Some(Section::FilterBy),
             row: Row::FilterBy(*kind),
         }));
-        rows.truncate(MOST);
         rows
     }
 
@@ -445,8 +454,13 @@ impl<'a> Lists<'a> {
             .collect()
     }
 
-    fn rank(&self, key: Option<String>) -> usize {
-        key.and_then(|key| self.recent.get(key.as_str()).copied())
+    /// A candidate's place among the recently accepted rows (newest
+    /// first); the key is made only when there are recent rows.
+    fn rank(&self, key: impl FnOnce() -> Option<String>) -> usize {
+        if self.recent.is_empty() {
+            return usize::MAX;
+        }
+        key().and_then(|key| self.recent.get(key.as_str()).copied())
             .unwrap_or(usize::MAX)
     }
 
@@ -456,65 +470,79 @@ impl<'a> Lists<'a> {
 
     /// Every candidate of `sections` matching `word` (every one when it is
     /// empty, all in the prefix class), each with its order in its section.
-    fn candidates(&self, sections: &[Section], word: &str) -> Vec<Pending> {
+    /// Names are matched before anything else is made of them. Current
+    /// Deck and Untagged are in a kind's value list only (`scoped`): the
+    /// word's list matches deck and tag names (T12.1).
+    fn candidates(&self, sections: &[Section], word: &str, scoped: bool) -> Vec<Pending> {
         let matcher = Matcher::new(word);
         let empty = word.is_empty();
         let class_of = |class: Option<Class>| if empty { Some(Class::Prefix) } else { class };
         let mut out = Vec::new();
-        let mut push = |class: Class, section: Section, order: usize, source: Source, key: Option<String>| {
-            let recent = if empty { usize::MAX } else { self.rank(key) };
+        let mut push = |class: Class, section: Section, order: usize, source: Source, recent: usize| {
             out.push(Pending {
                 class,
                 section,
-                recent,
+                recent: if empty { usize::MAX } else { recent },
                 order,
                 source,
             });
+        };
+        let fixed = |section: Section, push: &mut dyn FnMut(Class, Section, usize, Source, usize)| {
+            for (k, value) in fixed_values(section).into_iter().enumerate() {
+                if self.fixed_taken(&value) {
+                    continue;
+                }
+                let label = self.labels.fixed(&value, self.names);
+                if let Some(class) = class_of(matcher.substring(&label)) {
+                    let recent = self.rank(|| value_key(&value));
+                    push(class, section, k, Source::Fixed(value), recent);
+                }
+            }
         };
         for &section in sections {
             match section {
                 Section::SavedSearches => {
                     for (k, built_in) in BuiltIn::ALL.iter().enumerate() {
                         if let Some(class) = class_of(matcher.substring(self.labels.built_in(*built_in))) {
-                            push(class, section, k, Source::BuiltIn(*built_in), row_key(&Row::BuiltIn(*built_in)));
+                            let recent = self.rank(|| row_key(&Row::BuiltIn(*built_in)));
+                            push(class, section, k, Source::BuiltIn(*built_in), recent);
                         }
                     }
                     for (k, saved) in self.names.saved_searches().iter().enumerate() {
                         if let Some(class) = class_of(matcher.substring(&saved.name)) {
-                            push(class, section, 3 + k, Source::Saved(k), Some(format!("saved:{}", saved.name)));
+                            let recent = self.rank(|| Some(format!("saved:{}", saved.name)));
+                            push(class, section, 3 + k, Source::Saved(k), recent);
                         }
                     }
                 }
-                Section::Decks | Section::Tags => {
-                    for (k, value) in fixed_values(section).into_iter().enumerate() {
-                        if self.fixed_taken(&value) {
+                Section::Decks => {
+                    if scoped {
+                        fixed(section, &mut push);
+                    }
+                    for (k, deck) in self.names.decks().iter().enumerate() {
+                        let Some(class) = class_of(matcher.components(deck.native.split('\u{1f}'))) else {
+                            continue;
+                        };
+                        if self.taken.decks.contains(&deck.id.0) {
                             continue;
                         }
-                        let label = self.labels.fixed(&value, self.names);
-                        if let Some(class) = class_of(matcher.substring(&label)) {
-                            let key = value_key(&value);
-                            push(class, section, k, Source::Fixed(value), key);
-                        }
+                        let recent = self.rank(|| Some(format!("deck:{}", deck.id.0)));
+                        push(class, section, 1 + k, Source::Deck(k), recent);
                     }
-                    if section == Section::Decks {
-                        for (k, deck) in self.names.decks().iter().enumerate() {
-                            if self.taken.decks.contains(&deck.id.0) {
-                                continue;
-                            }
-                            if let Some(class) = class_of(matcher.components(deck.native.split('\u{1f}'))) {
-                                push(class, section, 1 + k, Source::Deck(k), Some(format!("deck:{}", deck.id.0)));
-                            }
+                }
+                Section::Tags => {
+                    if scoped {
+                        fixed(section, &mut push);
+                    }
+                    for (k, tag) in self.names.tags().iter().enumerate() {
+                        let Some(class) = class_of(matcher.components(tag.split("::"))) else {
+                            continue;
+                        };
+                        if !self.taken.tags.is_empty() && self.taken.tags.contains(&folded(tag)) {
+                            continue;
                         }
-                    } else {
-                        for (k, tag) in self.names.tags().iter().enumerate() {
-                            let key = folded(tag);
-                            if self.taken.tags.contains(&key) {
-                                continue;
-                            }
-                            if let Some(class) = class_of(matcher.components(tag.split("::"))) {
-                                push(class, section, 1 + k, Source::Tag(k), Some(format!("tag:{key}")));
-                            }
-                        }
+                        let recent = self.rank(|| Some(format!("tag:{}", folded(tag))));
+                        push(class, section, 1 + k, Source::Tag(k), recent);
                     }
                 }
                 Section::Notetypes => {
@@ -523,44 +551,34 @@ impl<'a> Lists<'a> {
                             continue;
                         }
                         if let Some(class) = class_of(matcher.substring(&notetype.name)) {
-                            push(class, section, k, Source::Notetype(k), Some(format!("notetype:{}", notetype.id.0)));
+                            let recent = self.rank(|| Some(format!("notetype:{}", notetype.id.0)));
+                            push(class, section, k, Source::Notetype(k), recent);
                         }
                     }
                 }
                 Section::CardTypes => {
                     let all: Vec<_> = self.names.notetypes().iter().collect();
                     for (k, (name, ids)) in template_names(&all).into_iter().enumerate() {
+                        let Some(class) = class_of(matcher.substring(&name)) else { continue };
                         let key = folded(&name);
                         if self.taken.card_types.contains(&key) {
                             continue;
                         }
-                        if let Some(class) = class_of(matcher.substring(&name)) {
-                            push(class, section, k, Source::CardType(name, ids), Some(format!("cardtype:{key}")));
-                        }
+                        let recent = self.rank(|| Some(format!("cardtype:{key}")));
+                        push(class, section, k, Source::CardType(name, ids), recent);
                     }
                 }
                 Section::Fields => {
                     let all: Vec<_> = self.names.notetypes().iter().collect();
                     for (k, (name, ids)) in field_names(&all).into_iter().enumerate() {
                         if let Some(class) = class_of(matcher.substring(&name)) {
-                            let key = format!("field:{}", folded(&name));
-                            push(class, section, k, Source::Field(name, ids), Some(key));
+                            let recent = self.rank(|| Some(format!("field:{}", folded(&name))));
+                            push(class, section, k, Source::Field(name, ids), recent);
                         }
                     }
                 }
                 Section::FilterBy => {}
-                fixed => {
-                    for (k, value) in fixed_values(fixed).into_iter().enumerate() {
-                        if self.fixed_taken(&value) {
-                            continue;
-                        }
-                        let label = self.labels.fixed(&value, self.names);
-                        if let Some(class) = class_of(matcher.substring(&label)) {
-                            let key = value_key(&value);
-                            push(class, section, k, Source::Fixed(value), key);
-                        }
-                    }
-                }
+                other => fixed(other, &mut push),
             }
         }
         out
@@ -625,7 +643,7 @@ impl<'a> Lists<'a> {
             Section::CardTypes,
             Section::Fields,
         ];
-        let mut candidates = self.candidates(&SECTIONS, word);
+        let mut candidates = self.candidates(&SECTIONS, word, false);
         // Step 2: the prefix class first, then by section, recently
         // accepted first, then each section's own order.
         candidates.sort_by_key(|c| (c.class, c.section, c.recent, c.order));
@@ -698,7 +716,7 @@ impl<'a> Lists<'a> {
                 })
                 .collect();
         }
-        let mut candidates = self.candidates(&[section], word);
+        let mut candidates = self.candidates(&[section], word, true);
         candidates.sort_by_key(|c| (c.class, c.recent, c.order));
         candidates
             .iter()
