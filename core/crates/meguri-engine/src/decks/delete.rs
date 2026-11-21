@@ -91,6 +91,15 @@ pub fn deletion_summary(rows: &impl ReadRows, ids: &[DeckId]) -> Result<Deletion
 
 /// No backup here: the caller owns the pre-op hook (conformance K5).
 pub fn delete_in(scope: &mut WriteScope<'_>, ids: &[DeckId]) -> Result<DeletionSummary, EngineError> {
+    delete_tracked(scope, ids, &mut BTreeSet::new())
+}
+
+/// [`delete_in`], adding each deck it processes to `processed`.
+fn delete_tracked(
+    scope: &mut WriteScope<'_>,
+    ids: &[DeckId],
+    processed: &mut BTreeSet<DeckId>,
+) -> Result<DeletionSummary, EngineError> {
     let mut result = DeletionSummary::default();
     for &id in ids {
         let Some(deck) = scope.deck(id)? else { continue };
@@ -102,6 +111,7 @@ pub fn delete_in(scope: &mut WriteScope<'_>, ids: &[DeckId]) -> Result<DeletionS
                 .filter(|d| names::descendant(&d.name, &deck.name)),
         );
         for deck in subtree {
+            processed.insert(deck.id);
             if is_filtered(&deck) {
                 filtered::return_home_in(scope, deck.id)?;
             } else {
@@ -198,6 +208,7 @@ pub fn delete_controlled(
                 // The second count, on this transaction's rows after the
                 // executor's preconditions and before the first write.
                 let live = deletion_summary(ctx.scope(), &apply)?;
+                let counted: BTreeSet<DeckId> = selected(ctx.scope(), &apply)?.iter().map(|d| d.id).collect();
                 if live.cards > 0 && !backed_up {
                     // Cards the plan did not see and no backup yet (D8 step 6,
                     // "Backup at commit"): plan again so step 4 backs up first.
@@ -207,17 +218,21 @@ pub fn delete_controlled(
                     });
                 }
                 check(confirmed, live)?;
-                let removed = delete_in(ctx.scope(), &apply)?;
-                // `delete_in` finds each listed deck's descendants when it
-                // reaches it, so in a damaged collection the default deck's
-                // rename can bring in an orphan subtree no count sees. Roll
-                // back: no read would ever confirm those cards, so neither a
+                let mut processed = BTreeSet::new();
+                let removed = delete_tracked(ctx.scope(), &apply, &mut processed)?;
+                // Step 1 finds each listed deck's descendants when it reaches
+                // it, so in a damaged collection the default deck's rename can
+                // bring in an orphan subtree no count sees, with or without
+                // cards. Roll back: no read would ever confirm it, so neither a
                 // replan nor `LossesChanged` could end the delete.
-                if removed.cards > live.cards {
+                if removed.cards > live.cards || !processed.is_subset(&counted) {
                     return Err(EngineError::Internal {
                         message: format!(
-                            "deck deletion would remove {} cards, {} counted",
-                            removed.cards, live.cards
+                            "deck deletion would remove {} cards and {} decks, {} and {} counted",
+                            removed.cards,
+                            processed.len(),
+                            live.cards,
+                            counted.len()
                         ),
                     });
                 }
