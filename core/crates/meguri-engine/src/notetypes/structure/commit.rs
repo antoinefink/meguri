@@ -1,6 +1,7 @@
 //! The write phase of a structure change (S3 step 5, S5 to S9, S10): in
-//! one transaction, after the safety backup, the base token and the notes'
-//! value counts are checked again on the live rows, then the notes are
+//! one transaction, after the safety backup, the base token, the notes'
+//! value counts and the confirmed losses are checked again on the live
+//! rows, then the notes are
 //! rewritten, cards removed and renumbered, the note type rows written and
 //! cards generated. Every check comes before the first write, so a refusal
 //! writes nothing; any later error rolls the whole transaction back.
@@ -36,17 +37,25 @@ pub(crate) fn commit(ctx: &mut OpContext<'_, '_>, planned: &Planned) -> Result<S
 }
 
 /// The checks of the write phase, on the rows of its own transaction and
-/// before its first write: the base token (S1.2 item 1, `engine/op-model`
-/// O7), then the notes' value counts (item 4: a note added since planning
-/// counts). A precondition on the live rows that must hold for the save to
-/// write anything goes after the base token check, here.
+/// before its first write: the staleness check (the base token, S1.2 item
+/// 1, `engine/op-model` O7; a vanished note type is `Stale` too), then one
+/// pass for item 4 (a note added since planning counts) and the confirmed
+/// losses counted again (S1.2 as changed 2026-11-20, D8). Staleness wins
+/// over `LossesChanged`, whose payload is read in this transaction.
 pub(crate) fn check_live(scope: &WriteScope<'_>, layout: &Layout) -> Result<(), EngineError> {
     let id = layout.base.id;
     let live = scope.notetype(id)?.ok_or_else(|| stale(id))?;
     if AggregateDigest::of(&live) != layout.digest {
         return Err(stale(id));
     }
-    plan::check_note_values(scope, layout, &CancelToken::new(), &ProgressSink::new())
+    let none = CancelToken::new();
+    let quiet = ProgressSink::new();
+    let counts = plan::count(scope, layout, &none, &quiet)?;
+    if counts.exceed(&layout.confirmed) {
+        let generation = plan::plan_generation(scope, layout, &none, &quiet)?;
+        return Err(plan::losses_changed(layout, &counts, generation.as_ref()));
+    }
+    Ok(())
 }
 
 pub(crate) fn commit_layout(ctx: &mut OpContext<'_, '_>, layout: &Layout) -> Result<StructureSaved, EngineError> {

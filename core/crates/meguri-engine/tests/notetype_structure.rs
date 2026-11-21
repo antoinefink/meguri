@@ -17,7 +17,8 @@ use std::sync::{Arc, Mutex};
 
 use common::{Harness, NOW_MS};
 use meguri_engine::notetypes::structure::{
-    self, DraftField, DraftTemplate, FieldOptions, StructureDraft, StructureRefusal, StructureSaved,
+    self, DraftChange, DraftField, DraftTemplate, FieldOptions, Losses, StructureDraft, StructureRefusal,
+    StructureSaved,
 };
 use meguri_engine::notetypes::{self, NewNotetype, NewTemplate, NotetypeKind, rename};
 use meguri_engine::ports::{BackupFailureCause, BackupProtection, BackupPublication, BackupReceipt, BackupService};
@@ -188,6 +189,26 @@ fn without(draft: &mut StructureDraft, field: &str) {
 
 fn without_template(draft: &mut StructureDraft, template: &str) {
     draft.templates.retain(|t| t.name != template);
+}
+
+/// The losses `draft` would cause on the rows as stored, as a caller with no
+/// question passes them (`notetypes/draft-save` D8).
+fn confirm(h: &Harness, draft: &mut StructureDraft) {
+    let nt = read(h, draft.notetype);
+    let kept_fields: Vec<u32> = draft.fields.iter().filter_map(|f| f.origin).collect();
+    let kept_templates: Vec<u32> = draft.templates.iter().filter_map(|t| t.origin).collect();
+    let removed: BTreeSet<u32> = (0..nt.templates.len() as u32).filter(|o| !kept_templates.contains(o)).collect();
+    draft.confirmed.templates = structure::preview_removal(&h.collection, nt.id, &removed).unwrap().cards;
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    for note in reader.notetype_notes_after(nt.id, None, 100_000).unwrap() {
+        let values: Vec<&str> = note.field_values().collect();
+        for field in (0..nt.fields.len() as u32).filter(|o| !kept_fields.contains(o)) {
+            let filled = values
+                .get(field as usize)
+                .is_some_and(|v| !meguri_text::field_empty::counts_as_empty(v));
+            *draft.confirmed.fields.entry(field).or_default() += u64::from(filled);
+        }
+    }
 }
 
 /// Everything a structure save may change, as stored: the note type, the
@@ -410,6 +431,7 @@ fn a_failure_in_the_write_phase_rolls_everything_back() {
     let mut draft = draft(&h, id);
     without(&mut draft, "Extra");
     without_template(&mut draft, "Reverse");
+    confirm(&h, &mut draft);
     meguri_model::faultpoint::arm(
         "notetypes.structure.write_phase",
         meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
@@ -437,6 +459,7 @@ fn a_template_removal_is_one_step_that_undo_and_redo_restore() {
     let before = state(&h, id);
     let mut draft = draft(&h, id);
     without_template(&mut draft, "Forward");
+    confirm(&h, &mut draft);
     let saved = run(&h, draft).unwrap().value;
     assert_eq!(saved.cards_removed, 1);
     assert_eq!(saved.cards_renumbered, 2, "Reverse cards move from 1 to 0");
@@ -549,6 +572,7 @@ fn the_sort_field_reason_follows_the_field() {
     assert_eq!(nt.fields[nt.config.sort_field_idx as usize].name, "Front");
     let mut removed = draft(&h, id);
     without(&mut removed, "Front");
+    confirm(&h, &mut removed);
     let saved = run(&h, removed).unwrap().value;
     assert_eq!(saved.reasons, [SchemaReason::FieldsChanged, SchemaReason::SortFieldChanged]);
 }
@@ -576,6 +600,7 @@ fn replacing_a_template_at_the_same_count_changes_the_templates() {
         browser_font_name: String::new(),
         browser_font_size: 0,
     });
+    confirm(&h, &mut draft);
     let saved = run(&h, draft).unwrap().value;
     assert_eq!(saved.reasons, [SchemaReason::TemplatesChanged]);
     assert_eq!((saved.cards_removed, saved.cards_added), (1, 1));
@@ -705,6 +730,7 @@ fn a_template_re_added_with_the_same_front_generates_its_cards() {
     let mut draft = draft(&h, id);
     without_template(&mut draft, "Reverse");
     draft.templates.push(template("Reverse again", "{{Back}}"));
+    confirm(&h, &mut draft);
     let saved = run(&h, draft).unwrap().value;
     assert_eq!((saved.cards_removed, saved.cards_added), (2, 2));
     let after = state(&h, id);
@@ -845,6 +871,7 @@ fn a_removed_card_id_is_never_given_to_a_generated_card() {
     let mut draft = draft(&h, id);
     without_template(&mut draft, "Reverse");
     draft.templates.push(template("Reverse again", "{{Back}}"));
+    confirm(&h, &mut draft);
     let saved = run(&h, draft).unwrap().value;
     assert_eq!((saved.cards_removed, saved.cards_added), (1, 1));
     let after = state(&h, id);
@@ -905,10 +932,233 @@ fn no_generated_card_takes_the_largest_removed_id() {
     let mut draft = draft(&h, id);
     without_template(&mut draft, "Reverse");
     draft.templates.push(template("Reverse again", "{{Back}}"));
+    confirm(&h, &mut draft);
     let error = run(&h, draft).unwrap_err();
     assert!(
         matches!(error, EngineError::Storage(meguri_storage::StorageError::IdsExhausted { .. })),
         "{error:?}"
     );
     assert_eq!(state(&h, id), before);
+}
+
+fn edit(c: &Collection, nid: NoteId, fields: &[&str]) {
+    notes::update::update(
+        c,
+        notes::update::UpdateNote {
+            id: nid,
+            fields: fields.iter().map(|s| (*s).to_owned()).collect(),
+            tags: Vec::new(),
+        },
+        OpSource::UserUndoable,
+    )
+    .unwrap();
+}
+
+fn losses(error: EngineError) -> meguri_engine::notetypes::structure::DraftSummary {
+    match error {
+        EngineError::NotetypeStructure(StructureRefusal::LossesChanged(losses)) => match *losses {
+            Losses::Draft(summary) => summary,
+            other => panic!("not a draft summary: {other:?}"),
+        },
+        other => panic!("not LossesChanged: {other:?}"),
+    }
+}
+
+/// A note that gains content in a removed field between the summary read
+/// and the commit: the write transaction counts again, writes nothing and
+/// returns `LossesChanged` with the new count. The safety backup taken
+/// before stays; the draft's step is not recorded.
+#[test]
+fn a_note_that_gains_content_in_a_removed_field_before_the_commit_is_losses_changed() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", "x"]);
+    let late = add(&h, id, &["c", "d", ""]);
+    let mut draft = draft(&h, id);
+    without(&mut draft, "Extra");
+    // The summary read: one note has content in Extra.
+    draft.confirmed.fields.insert(2, 1);
+    backups.then(move |c| edit(c, late, &["c", "d", "late"]));
+    let error = run(&h, draft.clone()).unwrap_err();
+    let summary = losses(error);
+    assert!(summary.loses_content);
+    assert!(summary.changes.contains(&DraftChange::FieldRemoved {
+        ord: 2,
+        name: "Extra".into(),
+        notes_with_content: 2,
+    }));
+    assert_eq!(summary.reasons, [SchemaReason::FieldsChanged]);
+    assert_eq!(backups.calls(), 1, "the backup ran before the write phase and stays");
+    let after = state(&h, id);
+    assert_eq!(read(&h, id).fields.len(), 3, "nothing of the draft was written");
+    assert!(after.notes.iter().any(|n| n.1 == "c\u{1f}d\u{1f}late"));
+    assert_eq!(undo_name(&h).as_deref(), Some("Update Note"), "no Update Note Type step");
+
+    // Confirmed with the new count, the same draft saves.
+    let mut draft = StructureDraft::of(&read(&h, id));
+    draft.skip_checks = true;
+    without(&mut draft, "Extra");
+    draft.confirmed.fields.insert(2, 2);
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!(saved.notes_rewritten, 2);
+    assert_eq!(saved.reasons, [SchemaReason::FieldsChanged]);
+    assert_eq!(read(&h, id).fields.len(), 2);
+    assert_eq!(undo_name(&h).as_deref(), Some("Update Note Type"));
+}
+
+/// A card that appears under a removed template between the summary read
+/// and the commit: `LossesChanged`, nothing written.
+#[test]
+fn a_card_that_appears_under_a_removed_template_before_the_commit_is_losses_changed() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    let mut draft = draft(&h, id);
+    without_template(&mut draft, "Reverse");
+    draft.confirmed.templates.insert(1, 1);
+    // A note added meanwhile gets a Reverse card.
+    backups.then(move |c| {
+        notes::add(
+            c,
+            notes::AddNote {
+                notetype_id: id,
+                fields: vec!["c".into(), "d".into(), String::new()],
+                tags: Vec::new(),
+                deck_id: DeckId(1),
+                guid: None,
+                update_add_defaults: false,
+            },
+            OpSource::UserUndoable,
+        )
+        .unwrap();
+    });
+    let before_templates = read(&h, id).templates.len();
+    let summary = losses(run(&h, draft).unwrap_err());
+    assert!(summary.changes.contains(&DraftChange::TemplateRemoved {
+        ord: 1,
+        name: "Reverse".into(),
+        cards_removed: 2,
+        notes_without_cards: 0,
+    }));
+    let after = state(&h, id);
+    assert_eq!(read(&h, id).templates.len(), before_templates);
+    assert_eq!(after.cards.len(), 4, "both notes keep both cards");
+    assert_eq!(after.graves, 0);
+    assert_eq!(undo_name(&h).as_deref(), Some("Add Note"));
+}
+
+/// Losses already larger on the planning snapshot: refused before the
+/// backup, which is never taken.
+#[test]
+fn losses_larger_on_the_planning_snapshot_take_no_backup() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", "x"]);
+    let before = state(&h, id);
+    let mut draft = draft(&h, id);
+    without(&mut draft, "Extra");
+    let summary = losses(run(&h, draft).unwrap_err());
+    assert!(summary.loses_content);
+    assert_eq!(backups.calls(), 0);
+    assert_eq!(state(&h, id), before);
+}
+
+/// Content that counts as empty (E1) is not a loss; a missing value is not
+/// either.
+#[test]
+fn empty_values_are_no_loss() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", "<br> "]);
+    add(&h, id, &["a2", "b2", ""]);
+    let mut draft = draft(&h, id);
+    without(&mut draft, "Extra");
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!(saved.notes_rewritten, 2);
+    assert_eq!(backups.calls(), 1);
+}
+
+/// D8: a field removed with no sheet (confirmed 0) that gains content
+/// between the read and the commit refuses too.
+#[test]
+fn a_field_confirmed_at_zero_that_gains_content_is_losses_changed() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    let nid = add(&h, id, &["a", "b", ""]);
+    let mut draft = draft(&h, id);
+    without(&mut draft, "Extra");
+    backups.then(move |c| edit(c, nid, &["a", "b", "now filled"]));
+    let before_fields = read(&h, id).fields.len();
+    let summary = losses(run(&h, draft).unwrap_err());
+    assert!(summary.changes.contains(&DraftChange::FieldRemoved {
+        ord: 2,
+        name: "Extra".into(),
+        notes_with_content: 1,
+    }));
+    assert_eq!(read(&h, id).fields.len(), before_fields);
+    assert_eq!(undo_name(&h).as_deref(), Some("Update Note"));
+}
+
+/// D8: the confirmation is by count: a count that shrinks (or stays equal
+/// while other notes hold the content) does not refuse.
+#[test]
+fn a_count_that_shrinks_still_commits() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    let first = add(&h, id, &["a", "b", "x"]);
+    add(&h, id, &["c", "d", "y"]);
+    let third = add(&h, id, &["e", "f", ""]);
+    let mut draft = draft(&h, id);
+    without(&mut draft, "Extra");
+    draft.confirmed.fields.insert(2, 2);
+    backups.then(move |c| {
+        edit(c, first, &["a", "b", ""]);
+        edit(c, third, &["e", "f", "moved here"]);
+    });
+    let saved = run(&h, draft).unwrap().value;
+    assert_eq!(saved.notes_rewritten, 3);
+    assert_eq!(read(&h, id).fields.len(), 2);
+}
+
+/// D8: when the base changed and a loss grew too, `Stale` wins; nothing is
+/// written, no step recorded, the backup stays.
+#[test]
+fn stale_wins_over_losses_changed() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    let nid = add(&h, id, &["a", "b", ""]);
+    let mut draft = draft(&h, id);
+    without(&mut draft, "Extra");
+    backups.then(move |c| {
+        edit(c, nid, &["a", "b", "content"]);
+        let reader = c.reader(ReaderRole::Query).unwrap();
+        let mut styled = notetypes::Draft::of(reader.notetype(id).unwrap().unwrap());
+        drop(reader);
+        styled.config.css = "changed".into();
+        notetypes::save(c, styled, notetypes::SaveOptions::default()).unwrap();
+    });
+    assert!(matches!(run(&h, draft).unwrap_err(), EngineError::Stale { .. }));
+    assert_eq!(backups.calls(), 1);
+    assert_eq!(read(&h, id).fields.len(), 3);
+    assert_eq!(undo_name(&h).as_deref(), Some("Update Note Type"), "the styling save's step, not ours");
+}
+
+/// S1.2 (round 9 review): a note type removed before the save is `Stale`.
+#[test]
+fn a_vanished_note_type_is_stale() {
+    let (h, _) = harness();
+    let id = trio(&h);
+    let draft = draft(&h, id);
+    meguri_engine::notetypes::remove::remove(
+        &h.collection,
+        meguri_engine::notetypes::remove::RemoveNotetype {
+            notetype: id,
+            confirmed_notes: 0,
+            confirmed_cards: 0,
+        },
+        CancelToken::new(),
+        ProgressSink::new(),
+    )
+    .unwrap();
+    assert!(matches!(run(&h, draft).unwrap_err(), EngineError::Stale { .. }));
 }
