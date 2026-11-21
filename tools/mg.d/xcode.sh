@@ -2,7 +2,7 @@
 # (xcodebuild, codesign), with the simulator pool in the macOS test VM (U8c).
 
 mg_job xcode-check host mg_xcode_check \
-  "Xcode project checks after lint-ui: build settings, zero-warning builds of every configuration (Mac, iPhone and iPad simulators), core stamp, entitlements, arm64, hook code, hidden Mac launches of every route, synced folders, test plans, DriveScriptTests, TestHooksTests (simulators in the macOS test VM, queued without it; on the Mac only with MEGURI_ALLOW_MAC_UI=1, from tools/mg mac-ui); all launches and test runs use the VM's lease; args go to tools/tests/xcode_project_check.sh (--iphone UDID, --ipad UDID, else leased from the simulator pool; --no-ui); --mac-unit-only alone focuses the whole Mac Unit Debug plan in the dedicated VM, without full matrix/gate coverage"
+  "Xcode project checks after lint-ui: build settings, zero-warning builds of every configuration (Mac, iPhone and iPad simulators), core stamp, entitlements, arm64, hook code, hidden Mac launches of every route, synced folders, test plans, DriveScriptTests, TestHooksTests (simulators in the macOS test VM, queued without it; on the Mac only with MEGURI_ALLOW_MAC_UI=1, from tools/mg mac-ui); all launches and test runs use the VM's lease; args go to tools/tests/xcode_project_check.sh (--iphone UDID, --ipad UDID, else leased from the simulator pool; --no-ui); --mac-unit-only alone focuses the whole Mac Unit Debug plan in the dedicated VM, without full matrix/gate coverage; --settings-only alone checks the project, resolved build settings of every configuration (app name and icon per identity included) and test plans; it builds only the core XCFramework, no app product, and uses no VM"
 
 # Reuse the real Swift producers, with source authority retained by this MG
 # run. This is ordinary Unit input routing, not signed-agent evidence.
@@ -47,10 +47,28 @@ mg_xcode_check() {
     mg_detail focusedMacUnit '{"scheme":"Meguri","plan":"Unit","configuration":"Debug","destination":"platform=macOS,arch=arm64","runner":"vm"}'
   fi
   for arg in "$@"; do [ "$arg" != --no-ui ] || unit_inputs=0; done
+  for arg in "$@"; do
+    [ "$arg" = --settings-only ] || continue
+    if [ "$#" -ne 1 ]; then
+      mg_failure arguments "--settings-only accepts no other arguments"
+      mg_status error
+      return 0
+    fi
+    mg_detail scope '"settingsOnly"'
+  done
   mg_lint_ui_first || return 0
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json"; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
     mg_status fail
+    return 0
+  fi
+  if [ "${1:-}" = --settings-only ]; then
+    # Settings resolution only: no product, no Release Mac app to register,
+    # no VM lease.
+    /bin/bash tools/tests/xcode_project_check.sh build/xcode-check --phase builds --settings-only | tee "$tap"
+    rc=${PIPESTATUS[0]}
+    mg_artifact tap "$tap"
+    mg_tap_report "$tap" "$rc" ""
     return 0
   fi
   MG_VM_PART="the devices phase (hidden Mac launches, simulators, test runs)"
