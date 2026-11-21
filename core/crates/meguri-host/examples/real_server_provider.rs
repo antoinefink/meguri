@@ -703,8 +703,9 @@ fn execute_daily(args: &Args, fixture: &Fixture, config: &HostConfig) -> Result<
         "checks":checks,"counts":{"notes":2,"cards":2,"media":2,"revlogs":1,"reps":1}}))
 }
 fn structure_time(fixture: &Fixture) -> Result<i64> {
-    // After every earlier phase's exchange, so that the save stamps `scm` past `ls`.
-    fixture.now_ms.checked_add(600_000).ok_or_else(|| failure("structure-clock", "overflow"))
+    // After every earlier phase's exchange, so that the save stamps `scm` past
+    // `ls`, and within the server's tolerance for a device clock.
+    fixture.now_ms.checked_add(120_000).ok_or_else(|| failure("structure-clock", "overflow"))
 }
 /// `sync/meguri-provider` MP7 against the packaged service: on a device whose
 /// binding is ready, one job runs the round, removes a field whose content
@@ -768,6 +769,9 @@ fn execute_structure(args: &Args, fixture: &Fixture, config: &HostConfig) -> Res
     // Category only: no payload of the outcome is printed.
     require(matches!(*outcome, MeguriStructureOutcome::Saved(MeguriStructureUploadOutcome::Uploaded { media_complete: true })),
         match &*outcome {
+            MeguriStructureOutcome::NotSaved(meguri_host::MeguriStructureStop::Refused(_)) => "structure-op-refused",
+            MeguriStructureOutcome::NotSaved(meguri_host::MeguriStructureStop::FullSyncRequired) => "structure-full-sync-required",
+            MeguriStructureOutcome::NotSaved(meguri_host::MeguriStructureStop::Round { .. }) => "structure-round-stopped",
             MeguriStructureOutcome::NotSaved(_) => "structure-not-saved",
             MeguriStructureOutcome::Saved(MeguriStructureUploadOutcome::ChooseCollection) => "structure-choose-collection",
             MeguriStructureOutcome::Saved(MeguriStructureUploadOutcome::Pending(_)) => "structure-upload-pending",
