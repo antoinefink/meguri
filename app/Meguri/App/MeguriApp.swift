@@ -204,6 +204,3 @@ struct MeguriApp: App {
         #endif
     }
 }
-
-// Throwaway: a raw colour for the hosted lint-ui failure demo.
-private let throwawayRawColour = Color(red: 1, green: 0, blue: 0)
