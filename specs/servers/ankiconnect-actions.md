@@ -211,7 +211,7 @@ When `deck` names no deck and every listed card is skipped, the op still creates
 `decks`: human names; `cardsToo`: boolean, default `false`.
 
 - When `cardsToo` is `false`, `null` or missing: error `Since Anki 2.1.28 it's not possible to delete decks without deleting cards as well`.
-- Otherwise each listed name that equals a deck's human name code point for code point (no `unicase` matching, no conversion; `default` does not name `Default`) selects that deck; other names are skipped. The selected decks are deleted in list order by one `decks/decks#D8` op, which skips a deck already deleted as the descendant of an earlier one and keeps the default deck (D8 step 1). The result is `null`; nothing selected writes nothing.
+- Otherwise each listed name that equals a deck's human name code point for code point (no `unicase` matching, no conversion; `default` does not name `Default`) selects that deck; other names are skipped. The selected decks are deleted in list order by one `decks/decks#D8` op, which skips a deck already deleted as the descendant of an earlier one and keeps the default deck (D8 step 1). The result is `null`; nothing selected writes nothing. Changed 2026-11-21 (confirmed losses; decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review, `docs/process/review-log/delete-deck-losses-20261121.md`): the op gets the confirmed losses `any` (`decks/decks#D8` step 6): `cardsToo` true already accepts every card the deletion finds, so the action never answers a losses refusal.
 
 ### A5.7 `deckNameFromId`
 

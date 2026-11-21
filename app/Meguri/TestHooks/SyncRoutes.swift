@@ -12,6 +12,10 @@ extension TestHooks {
             registry.register("settings/sync/off") { settings(.off, $0) }
             registry.register("settings/sync/meguri-connected") { settings(.meguriConnected, $0) }
             registry.register("settings/sync/meguri-sign-in") { settings(.meguriSignIn, $0) }
+            // MP6.5 (resume fix): setup's media step running, paused, and stopped after its automatic attempts.
+            registry.register("settings/sync/meguri-setup-media") { settings(.meguriSetupMedia, $0) }
+            registry.register("settings/sync/meguri-setup-media-paused") { settings(.meguriSetupMediaPaused, $0) }
+            registry.register("settings/sync/meguri-setup-media-stopped") { settings(.meguriSetupMediaStopped, $0) }
             registry.register("settings/sync/meguri-needs-you") { settings(.meguriNeedsYou, $0) }
             registry.register("settings/sync/icloud-selected") { settings(.iCloudSelected, $0) }
             registry.register("settings/sync/icloud-connected") { settings(.iCloudConnected, $0) }
@@ -43,6 +47,8 @@ extension TestHooks {
             registry.register("settings/sync/panel/meguri-up-to-date") { panel(.meguriConnected, $0) }
             registry.register("settings/sync/panel/meguri-syncing") { panel(.meguriSyncing, $0) }
             registry.register("settings/sync/panel/meguri-setup-media") { panel(.meguriSetupMedia, $0) }
+            registry.register("settings/sync/panel/meguri-setup-media-paused") { panel(.meguriSetupMediaPaused, $0) }
+            registry.register("settings/sync/panel/meguri-setup-media-stopped") { panel(.meguriSetupMediaStopped, $0) }
             registry.register("settings/sync/panel/meguri-preparing") { panel(.meguriPreparing, $0) }
             registry.register("settings/sync/panel/meguri-media-blocked") { panel(.meguriMediaBlocked, $0) }
             registry.register("settings/sync/panel/meguri-acceptance-unknown") { panel(.meguriAcceptanceUnknown, $0) }
@@ -67,7 +73,46 @@ extension TestHooks {
             registry.register("settings/sync/status/meguri-up-to-date") { context in
                 .screen { SyncSettingsPreview.screen(.meguriConnected, page: .statusPopover, configuration: context.configuration) }
             }
+            // Mac: the real Settings window (its scene, toolbar and split view) over a
+            // synthetic coordinator, for the pane and its pushed Troubleshooting page.
+            // Touch has no Settings window: the same state on the Settings page.
+            for (name, state) in [("meguri-setup-media", SyncCoordinator.RenderState.meguriSetupMedia),
+                                  ("meguri-setup-media-paused", .meguriSetupMediaPaused),
+                                  ("meguri-connected", .meguriConnected), ("icloud-connected", .iCloudConnected)] {
+                registry.register("settings/sync/window/\(name)") { context in
+                    #if os(macOS)
+                    .screen { SettingsWindowPreview.Opener(state: state, configuration: context.configuration) }
+                    #else
+                    settings(state, context)
+                    #endif
+                }
+            }
         }
+        #if os(macOS)
+        /// The Settings scene shows this collection in place of the app's while a
+        /// `settings/sync/window/…` route runs (`MeguriApp`'s Settings scene).
+        @MainActor @Observable final class SettingsWindowPreview {
+            static let shared = SettingsWindowPreview()
+            var collection: ReviewCollection?
+            struct Opener: View {
+                let state: SyncCoordinator.RenderState
+                let configuration: LaunchConfiguration
+                @Environment(\.openSettings) private var openSettings
+                var body: some View {
+                    Text(verbatim: "Settings window preview")
+                        .accessibilityIdentifier("settings.sync.windowPreview")
+                        .task {
+                            let preview = ReviewCollection(configuration: configuration,
+                                navigation: AppNavigation(), sync: .renderFixture(state, clock: configuration.clock))
+                            // Whatever section was last chosen, the window opens at Sync.
+                            preview.syncPresentation.settingsRequest = UUID()
+                            SettingsWindowPreview.shared.collection = preview
+                            openSettings()
+                        }
+                }
+            }
+        }
+        #endif
         private static func panel(_ state: SyncCoordinator.RenderState, _ context: RouteContext) -> InitialPresentation {
             .screen { SyncSettingsPreview.screen(state, page: .statusPanel, configuration: context.configuration) }
         }

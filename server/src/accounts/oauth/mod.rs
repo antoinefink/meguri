@@ -212,6 +212,7 @@ impl Service {
 pub(crate) struct Authority {
     id: String,
     generation: i64,
+    data_epoch: i64,
     grant: String,
     client: String,
     resource: String,
@@ -226,9 +227,11 @@ impl Authority {
     pub(crate) fn can_write(&self) -> bool { self.write }
 }
 fn resolve_authority(c: &Connection, hash: [u8;32]) -> Result<Authority> {
-    c.query_row("SELECT g.account_id,g.generation,g.id,g.client,g.resource,g.write_scope,t.expires_at FROM oauth_tokens t JOIN oauth_grants g ON g.id=t.grant_id JOIN accounts a ON a.id=g.account_id WHERE t.hash=?1 AND t.kind='access' AND t.consumed=0 AND t.expires_at>?2 AND g.expires_at>?2 AND g.revoked=0 AND a.enabled=1 AND a.provisioning_state='ready' AND a.generation=g.generation",
-        params![hash.as_slice(),now()],|r| Ok(Authority {id:r.get(0)?,generation:r.get(1)?,grant:r.get(2)?,client:r.get(3)?,resource:r.get(4)?,write:r.get(5)?,expires:r.get(6)?,hash}))
-        .optional()?.ok_or(Error::new("invalid_token"))
+    let mut authority = c.query_row("SELECT g.account_id,g.generation,g.id,g.client,g.resource,g.write_scope,t.expires_at FROM oauth_tokens t JOIN oauth_grants g ON g.id=t.grant_id JOIN accounts a ON a.id=g.account_id WHERE t.hash=?1 AND t.kind='access' AND t.consumed=0 AND t.expires_at>?2 AND g.expires_at>?2 AND g.revoked=0 AND a.enabled=1 AND a.provisioning_state='ready' AND a.generation=g.generation",
+        params![hash.as_slice(),now()],|r| Ok(Authority {data_epoch:0,id:r.get(0)?,generation:r.get(1)?,grant:r.get(2)?,client:r.get(3)?,resource:r.get(4)?,write:r.get(5)?,expires:r.get(6)?,hash}))
+        .optional()?.ok_or(Error::new("invalid_token"))?;
+    authority.data_epoch = crate::storage::reset::admitted_epoch(c, &authority.id)?;
+    Ok(authority)
 }
 /// Synchronous seam when a collection worker already has a metadata read. This
 /// does not acquire a publication barrier. Own that account's barrier before
@@ -236,7 +239,7 @@ fn resolve_authority(c: &Connection, hash: [u8;32]) -> Result<Authority> {
 pub(crate) fn check_authority(c: &Connection, original: &Authority, write: bool) -> Result<()> {
     admission(c)?;
     let a = resolve_authority(c,original.hash)?;
-    if a.id != original.id || a.generation != original.generation || a.grant != original.grant
+    if a.data_epoch != original.data_epoch || a.id != original.id || a.generation != original.generation || a.grant != original.grant
         || a.client != original.client || a.resource != original.resource || a.write != original.write || a.expires != original.expires
     { return Err(Error::new("invalid_token")); }
     if write && !a.write { return Err(Error::new("insufficient_scope")); }
