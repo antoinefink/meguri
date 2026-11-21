@@ -160,10 +160,14 @@ fn admitted(
         + 'static,
 ) -> Result<BulkActionJobStart, CoreError> {
     let host = runtime::host()?;
+    // The ids name rows of the collection open now: a job that starts after
+    // a replacement refuses with `StaleGeneration`.
+    let generation = host.collection()?.generation();
     let job = bulk::start(runtime::engine()?, move |context| {
         let (cancel, progress) = (Arc::clone(&context.cancel), context.progress.clone());
         host.review().admit_card_action(
             &context.cancel,
+            Some(generation),
             |collection| run(collection, cancel, progress),
             |outcome: &BulkOutcome| outcome.seq,
         )

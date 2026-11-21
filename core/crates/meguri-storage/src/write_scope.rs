@@ -355,6 +355,44 @@ impl<'c> WriteScope<'c> {
         self.put_cells(Table::Cards, image, false)
     }
 
+    /// Change Deck's write of a moved card (`browser/bulk-actions` B7.2 step
+    /// 3): `did` and `data` always, `left` when the steps were translated,
+    /// and what leaving a filtered deck restores (`due` when given, `queue`
+    /// when given, `odid` and `odue` 0 with `left_filtered`). Every other
+    /// stored column keeps its value as stored, imported oddities included;
+    /// the scope stamps a changed row.
+    #[allow(clippy::too_many_arguments)]
+    pub fn put_card_move(
+        &mut self,
+        id: CardId,
+        did: meguri_model::ids::DeckId,
+        left: Option<u32>,
+        data: &meguri_model::card_data::CardData,
+        due: Option<i32>,
+        queue: Option<meguri_model::card::CardQueue>,
+        left_filtered: bool,
+    ) -> Result<Written, StorageError> {
+        let Some(mut image) = rows::select_image(self.conn, Table::Cards, &RowKey::Id(id.0))? else {
+            return Ok(Written::Unchanged);
+        };
+        image[2] = Cell::Integer(did.0);
+        if let Some(left) = left {
+            image[13] = Cell::Integer(i64::from(left));
+        }
+        image[17] = Cell::text(data.to_text());
+        if let Some(due) = due {
+            image[8] = Cell::Integer(i64::from(due));
+        }
+        if let Some(queue) = queue {
+            image[7] = Cell::Integer(queue.stored());
+        }
+        if left_filtered {
+            image[14] = Cell::Integer(0);
+            image[15] = Cell::Integer(0);
+        }
+        self.put_cells(Table::Cards, image, false)
+    }
+
     /// Renumber a card (`notetypes/structure-changes` S6 step 2): only `ord`
     /// changes, with the scope's stamps; every other stored column keeps its
     /// value as stored, imported oddities included.

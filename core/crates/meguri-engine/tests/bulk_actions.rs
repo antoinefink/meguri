@@ -769,6 +769,112 @@ fn b7_2_a_typed_name_renamed_between_the_phases_replans() {
     assert_eq!(read(c, moved).deck_id, named.id);
 }
 
+/// B7.2 step 3: a moved card's columns the move does not own keep their
+/// stored values, an imported `due` beyond 32 bits included; a target whose
+/// stored desired retention is NaN still takes cards (its facts compare by
+/// their bits).
+#[test]
+fn b7_2_keeps_stored_columns_and_takes_a_nan_retention_target() {
+    let w = world();
+    let c = &w.h.collection;
+    let ids = w.cards(move |s, w| vec![add_card(s, "odd", w.home, |_| {})]);
+    raw_sql(&w.h, format!("UPDATE cards SET due = 1099511627776 WHERE id = {}", ids[0].0));
+    let nan = c
+        .run(OpSpec::named("nan retention", OpSource::Maintenance), |ctx| {
+            let mut deck = normal_deck("Nan", DeckConfigId(1));
+            if let DeckKind::Normal(normal) = &mut deck.kind.kind {
+                normal.desired_retention = Some(f32::NAN);
+            }
+            Ok(ctx.scope().add_deck(&deck)?)
+        })
+        .unwrap()
+        .value;
+    for fsrs in [false, true] {
+        set_fsrs(c, fsrs);
+        let target = if fsrs { w.target } else { nan };
+        let done = change(c, &ids, DeckTarget::Deck(target)).unwrap();
+        assert_eq!(done.value, counts(1, 1), "fsrs {fsrs}");
+        let rows = c
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .execute_raw(&format!("SELECT did, due FROM cards WHERE id = {}", ids[0].0), &[])
+            .unwrap()
+            .rows;
+        assert_eq!(
+            rows[0],
+            [SqlValue::Integer(target.0), SqlValue::Integer(1_099_511_627_776)],
+            "the stored due stays"
+        );
+    }
+}
+
+/// B7.2 step 1: a refusal writes nothing, a day check included: with the
+/// day changed since the last check, a refused Change Deck keeps both
+/// histories (no rollover op runs before the target is resolved).
+#[test]
+fn b7_2_a_refusal_runs_no_day_check() {
+    let w = world();
+    let c = &w.h.collection;
+    let ids = w.cards(move |s, w| vec![add_card(s, "a", w.home, |_| {})]);
+    set_fsrs(c, true);
+    change(c, &ids, DeckTarget::Deck(w.other)).unwrap();
+    w.h.clock.step_ms(2 * DAY_MS);
+    assert!(matches!(change(c, &ids, DeckTarget::Deck(DeckId(-9))), Err(EngineError::NotFound { .. })));
+    assert_eq!(undo_name(c).as_deref(), Some("Change Deck"));
+}
+
+/// K3: the compute phase reports progress through step 4's pass: the
+/// listed cards, then the set, and the last report is the whole.
+#[test]
+fn b7_2_progress_covers_the_memory_pass() {
+    struct Listener(Mutex<Vec<(u64, Option<u64>)>>);
+    impl ProgressListener for Listener {
+        fn on_progress(&self, progress: &Progress) {
+            if progress.phase == ProgressPhase::Planning {
+                self.0.lock().unwrap().push((progress.completed, progress.total));
+            }
+        }
+    }
+    let w = world();
+    let c = &w.h.collection;
+    let now = common::NOW_MS;
+    let ids = w.cards(move |s, w| {
+        let review = |card: &mut Card| {
+            card.card_type = CardType::Review;
+            card.queue = CardQueue::Review;
+            card.interval = 10;
+            card.due = 20;
+        };
+        (0..4)
+            .map(|i| {
+                let id = add_card(s, &format!("p{i}"), if i == 0 { w.home } else { w.target }, review);
+                graded(s, id, RevlogKind::Review, 10, now - 10 * DAY_MS);
+                id
+            })
+            .collect()
+    });
+    set_fsrs(c, true);
+    static NOW: AtomicU64 = AtomicU64::new(0);
+    let progress = ProgressSink::with_clock(|| Duration::from_secs(NOW.fetch_add(1, Ordering::SeqCst)));
+    let listener = Arc::new(Listener(Mutex::new(Vec::new())));
+    progress.set_listener(listener.clone());
+    let done = change_deck::run(
+        c,
+        &CardTarget::Cards(ids[..1].to_vec()),
+        &DeckTarget::Deck(w.target),
+        CancelToken::new(),
+        progress,
+    )
+    .unwrap();
+    assert_eq!(done.value, counts(1, 1));
+    let reports = listener.0.lock().unwrap().clone();
+    assert_eq!(reports.last(), Some(&(5, Some(5))), "one listed card and a set of four: {reports:?}");
+    assert!(
+        reports.windows(2).all(|pair| pair[0].0 <= pair[1].0),
+        "never backwards: {reports:?}"
+    );
+}
+
 /// K4: a cancel before the commit writes nothing and records no step.
 #[test]
 fn b7_2_a_cancel_before_the_commit_writes_nothing() {
@@ -996,6 +1102,7 @@ fn a_review_session_admits_the_scheduling_actions() {
         .review
         .admit_card_action(
             &cancel,
+            Some(h.collection.generation()),
             |c| {
                 cards::run_admitted(
                     c,
@@ -1012,6 +1119,25 @@ fn a_review_session_admits_the_scheduling_actions() {
     assert_eq!(read(&h.collection, target).queue, CardQueue::Suspended);
     assert!(!h.review.head(id, 3).unwrap().items.iter().any(|item| item.card_id == target));
     assert_eq!(act(&h.collection, &[target], CardAction::SetFlag(4)).unwrap().value, counts(1, 1));
+    // An action queued against another generation refuses before it reads.
+    let before = dump(&h.collection);
+    let other = meguri_engine::Generation(h.collection.generation().0 + 1);
+    let refused = h.review.admit_card_action(
+        &cancel,
+        Some(other),
+        |c| {
+            cards::run_admitted(
+                c,
+                &CardTarget::Cards(vec![target]),
+                &CardAction::Unsuspend,
+                Arc::clone(&cancel),
+                ProgressSink::new(),
+            )
+        },
+        |done| done.seq,
+    );
+    assert!(matches!(refused, Err(EngineError::StaleGeneration { .. })), "{refused:?}");
+    assert_eq!(dump(&h.collection), before);
     h.review.end(id).unwrap();
 }
 

@@ -86,14 +86,21 @@ enum Resolved {
 
 /// What step 4 computes with, read from the target deck and the config:
 /// the commit compares them with the live rows.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TargetFacts {
     /// The target's `config_id` (1 for a deck step 0 creates).
     config_id: i64,
-    /// Its desired retention in force (`sched/presets` V7).
-    retention: f32,
+    /// Its desired retention in force (`sched/presets` V7), as its bits: a
+    /// stored NaN still equals itself.
+    retention_bits: u32,
     /// The collection's `fsrs` key.
     fsrs: bool,
+}
+
+impl TargetFacts {
+    fn retention(&self) -> f32 {
+        f32::from_bits(self.retention_bits)
+    }
 }
 
 /// The memory values a processed card gets (M4.1).
@@ -157,7 +164,9 @@ fn facts_of(rows: &impl ReadRows, deck: &Deck) -> Result<TargetFacts, EngineErro
     };
     Ok(TargetFacts {
         config_id,
-        retention: DeckSched::new(normal, &deck.common).retention(preset.fields().desired_retention),
+        retention_bits: DeckSched::new(normal, &deck.common)
+            .retention(preset.fields().desired_retention)
+            .to_bits(),
         fsrs: SchedConfig::new(rows).fsrs()?,
     })
 }
@@ -197,11 +206,28 @@ fn resolve_target(decks: &[Deck], target: &DeckTarget) -> Result<Resolved, Engin
 }
 
 /// The compute phase (steps 0 to 4 on the snapshot).
+/// The start of the next day for step 4's memory states, from the clock and
+/// the snapshot: the pure day calculation (`sched/day-clock` D3, D4), so that
+/// no day check writes before a refusal.
+fn next_day_at(collection: &Collection, rows: &impl ReadRows) -> Result<i64, EngineError> {
+    let clock = collection.core.exec.clock.as_ref();
+    let at = clock.now_ms();
+    let config = SchedConfig::new(rows);
+    Ok(meguri_sched::timing::sched_day(&meguri_sched::timing::DayInputs {
+        crt: rows.col()?.created.0,
+        creation_offset: config.creation_offset()?,
+        rollover_hour: config.rollover_hour()?,
+        offset: clock.utc_offset_at(at),
+        now: at.div_euclid(1000),
+    })
+    .next_day_at)
+}
+
 fn plan(
     context: &PlanContext<'_>,
+    collection: &Collection,
     cards: &[CardId],
     target: &DeckTarget,
-    next_day_at: i64,
 ) -> Result<Plan<Planned>, EngineError> {
     let reader = &**context.snapshot();
     let decks = reader.deck_rows()?;
@@ -231,10 +257,8 @@ fn plan(
             }
         }
     }
-    if let Some(progress) = progress {
-        progress.report(total, Some(total));
-    }
-    // Step 4.
+    // Step 4. Its pass counts in the progress after the listed cards.
+    let mut reported = total;
     let mut set = None;
     let mut memory = HashMap::new();
     let mut histories = Vec::new();
@@ -245,6 +269,12 @@ fn plan(
             members.extend(reader.deck_cards_without_stability(id)?);
         }
         let members: Vec<CardId> = members.into_iter().collect();
+        let work = total + members.len() as u64;
+        if let Some(progress) = progress {
+            progress.report(total, Some(work));
+        }
+        reported = work;
+        let next_day_at = next_day_at(collection, reader)?;
         let preset = PresetView::new(&preset_of(reader, Some(&target_deck))?);
         let mut cache = FsrsCache::default();
         // R704: with parameters the model cannot take, the set's cards keep
@@ -260,6 +290,9 @@ fn plan(
                 visited += 1;
                 if visited.is_multiple_of(PAGE) {
                     context.check_cancel()?;
+                    if let Some(progress) = progress {
+                        progress.report(total + visited as u64, Some(work));
+                    }
                 }
                 let last = history.iter().map(|row| row.id.0).max().unwrap_or(0);
                 histories.push((card.id, (history.len() as u64, last)));
@@ -273,7 +306,7 @@ fn plan(
                     .map_err(crate::sched::memory::error)?;
                 let values = MemoryValues {
                     memory: state,
-                    retention: facts.retention,
+                    retention: facts.retention(),
                     decay,
                 };
                 if moving.contains(&card.id) || !card.data.same_memory_values(&values.data()) {
@@ -283,6 +316,9 @@ fn plan(
             })?;
         }
         set = Some(members);
+    }
+    if let Some(progress) = progress {
+        progress.report(reported, Some(reported));
     }
     // K3: answering writes cards and the review log, so each card the plan
     // read is guarded by its own row; presets are never written by it.
@@ -394,6 +430,11 @@ fn commit(context: &mut OpContext<'_, '_>, planned: Planned) -> Result<BulkCount
         if card.deck_id == target.id {
             return Err(drifted());
         }
+        // What leaving a filtered deck restores (K3), decided on the row as
+        // read: only those columns are written besides the move's own.
+        let filtered = card.original_deck_id.0 != 0;
+        let due_restored = filtered && card.original_due != 0;
+        let queue_restored = filtered && card.queue.stored() >= 0;
         // 3.1: the remaining steps, from the home deck's preset.
         let home = CardSched::new(&card).home_deck();
         let old = match home_presets.entry(home) {
@@ -403,9 +444,7 @@ fn commit(context: &mut OpContext<'_, '_>, planned: Planned) -> Result<BulkCount
                 entry.insert(preset_of(&*scope, deck)?.config.for_use())
             }
         };
-        if let Some(left) = remap::preset_change(card.card_type, card.remaining_steps, old, &target_config) {
-            card.remaining_steps = left;
-        }
+        let left = remap::preset_change(card.card_type, card.remaining_steps, old, &target_config);
         // 3.2: out of its filtered deck.
         return_from_filtered(&mut card);
         // 3.3, and step 4's values for a processed card.
@@ -417,9 +456,17 @@ fn commit(context: &mut OpContext<'_, '_>, planned: Planned) -> Result<BulkCount
             card.data.desired_retention = Some(values.retention);
             card.data.decay = Some(values.decay);
         }
-        // 3.4, 3.5: the scope stamps `mod` and `usn` and encodes `data` (C4).
-        card.deck_id = target.id;
-        scope.put(&card)?;
+        // 3.4, 3.5: the scope stamps `mod` and `usn` and encodes `data` (C4);
+        // `type`, `ivl` and the rest keep their stored values.
+        scope.put_card_move(
+            card.id,
+            target.id,
+            left,
+            &card.data,
+            due_restored.then_some(card.due),
+            queue_restored.then_some(card.queue),
+            filtered,
+        )?;
         affected += 1;
     }
     // Step 4: the set's other cards, each written only when it changes.
@@ -450,16 +497,14 @@ pub fn run(
     let cards = target.resolve(collection)?;
     // Step 1's first refusal.
     check_ids(&cards, "card")?;
-    // The day for step 4's memory states, before the op (`sched/day-clock`
-    // D8).
-    let next_day_at = collection.next_day_at()?;
     let deck = deck.clone();
+    let bound = collection.clone();
     let (cancel_plan, progress_plan) = (Arc::clone(&cancel), progress.clone());
     plan_and_commit_with(
         collection,
         ReaderRole::Maintenance,
         op_spec(OP_NAME, CHANGE_DECK, 0, &cancel, &progress),
-        move |context| plan(context, &cards, &deck, next_day_at),
+        move |context| plan(context, &bound, &cards, &deck),
         move |_, planned| op_spec(OP_NAME, CHANGE_DECK, planned.moved.len(), &cancel_plan, &progress_plan),
         commit,
     )

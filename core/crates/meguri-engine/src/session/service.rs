@@ -991,17 +991,30 @@ impl ReviewService {
     /// once the action committed the session's observer has seen it and the
     /// session's redo is gone. `run` is the action on the bound collection
     /// (`bulk::cards::run_admitted` for the scheduling ones), `seq_of` its
-    /// commit's seq; it is not a step of the session. A held answer whose card the action rewrote
+    /// commit's seq; it is not a step of the session. With `expected`, a
+    /// collection of another generation refuses with `StaleGeneration`
+    /// before anything is read. A held answer whose card the action rewrote
     /// would otherwise fail its row precondition and be dropped.
     pub fn admit_card_action<T>(
         &self,
         cancel: &Arc<crate::CancelToken>,
+        expected: Option<crate::Generation>,
         run: impl FnOnce(&Collection) -> Result<T, EngineError>,
         seq_of: impl Fn(&T) -> crate::Seq,
     ) -> Result<T, EngineError> {
         let _control = self.control.try_acquire()?;
         cancel.check()?;
         let (c, journal) = self.bound()?;
+        // The generation the action was queued against: its ids name rows
+        // of that collection, never of one that replaced it.
+        if let Some(planned) = expected
+            && c.generation() != planned
+        {
+            return Err(EngineError::StaleGeneration {
+                planned,
+                current: c.generation(),
+            });
+        }
         journal.check(c.generation())?;
         {
             let mut state = self.inner.state.lock().unwrap();
