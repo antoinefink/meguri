@@ -121,8 +121,14 @@ def cmd_scan(args):
         files = [scanner.scan_test_data(item["path"], item["text"]) for item in data_inputs]
         rule = cfg["scan"].get("oracle_goldens")
         pin = test_data.oracle_pin(args.root, rule.get("pin")) if isinstance(rule, dict) else None
+        scenarios = {os.path.splitext(item["path"][len(test_data.ROOTS[0]) + 1:])[0]: item
+                     for item in data_inputs if item["path"].startswith(test_data.ROOTS[0] + "/")}
         for f, item in zip(files, data_inputs):
-            if f.status == "flagged" and test_data.oracle_recorded(f.path, item["text"], pin):
+            if f.status != "flagged" or pin is None or not f.path.startswith(test_data.ROOTS[1] + "/"):
+                continue
+            scenario = scenarios.get(os.path.splitext(f.path[len(test_data.ROOTS[1]) + 1:])[0])
+            sha = test_data.scenario_sha256(scenario["path"], scenario["text"]) if scenario else None
+            if test_data.oracle_recorded(f.path, item["text"], pin, sha):
                 f.status = test_data.ORACLE_OUTPUT
                 oracle_output.append(f.path)
     scan_seconds = time.monotonic() - t_scan

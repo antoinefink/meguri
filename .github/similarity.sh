@@ -82,6 +82,8 @@ paired_areas() {
 # `scan:` sections) at a commit.
 scan_settings() {
   git show "$1:$CONFIG" 2>/dev/null | awk '/^[^ #]/ { keep = ($0 ~ /^(channels|scan):/) } keep'
+  # The oracle pin decides which goldens count as recorded oracle output.
+  git show "$1:conformance/oracle.json" 2>/dev/null
 }
 
 cmd_select() {
@@ -361,7 +363,7 @@ cmd_scan() {
     fi
     if [[ -n "$settings" ]]; then
       # shellcheck disable=SC2016 # the backticks are Markdown
-      printf '#### Scanner settings: **changed**\n\nThis change edits the `channels:` or `scan:` section of %s (thresholds, channels or exclusions), so it would be scanned with settings it chose. A human reviews the change and merges over this check.\n\n' "$CONFIG"
+      printf '#### Scanner settings: **changed**\n\nThis change edits the `channels:` or `scan:` section of %s (thresholds, channels, exclusions, the oracle-output rule) or the oracle pin `conformance/oracle.json`, so it would be scanned with settings it chose. A human reviews the change and merges over this check.\n\n' "$CONFIG"
       rc=1
     fi
     read -r -a areas <<<"${AREAS:-}"

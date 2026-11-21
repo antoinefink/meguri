@@ -6,7 +6,7 @@ import shutil
 import unittest
 
 from meguri_similarity.lexer import Lexer
-from meguri_similarity.test_data import lex
+from meguri_similarity.test_data import lex, scenario_sha256
 from support import file_entry, make_corpus, scan, synthetic_config, tmpdir, write_tree
 
 SCENARIOS = "conformance/scenarios/search"
@@ -238,32 +238,43 @@ class TestDataTests(unittest.TestCase):
         self.assertTrue(any(item[0][0] == "every" for item in decoded.texts))
         self.assertTrue(all(line == 1 for item in decoded.texts for line in item[1]))
 
-    # Oracle output (provenance.md "Test data"): only a golden with the
-    # recording header of the current pin for its own scenario is exempt.
+    # Oracle output (provenance.md "Similarity scan"): only a golden with
+    # exactly the recorder's shape, the current pin and its paired scenario's
+    # current hash is exempt.
     PIN = {"anki_version": "26.9.3", "lock_sha256": "a" * 64}
 
-    def recorded(self, body=STORY, **header):
-        golden = {"clock": {"mode": "frozen"}, "observations": {"steps": [{"text": body}]},
+    def recorded(self, scenario_text, scenario_path=SCENARIOS + "/one.yaml", golden_id="search/one",
+                 body=STORY, **header):
+        golden = {"clock": {"mode": "frozen", "start": "2030-01-15T10:00:00"},
+                  "observations": {"steps": [{"text": body}]},
                   "oracle": {"anki_version": "26.9.3", "driver_sha256": "b" * 64, "lock_sha256": "a" * 64},
-                  "scenario_id": "search/one", "scenario_sha256": "c" * 64, "tz": "UTC"}
+                  "scenario_id": golden_id, "scenario_sha256": scenario_sha256(scenario_path, scenario_text),
+                  "tz": "UTC"}
         for key, value in header.items():
-            if key in ("anki_version", "driver_sha256", "lock_sha256"):
-                golden["oracle"][key] = value
+            if key in ("anki_version", "driver_sha256", "lock_sha256", "oracle_extra"):
+                golden["oracle"][key.replace("oracle_", "")] = value
             elif value is None:
                 golden.pop(key)
             else:
                 golden[key] = value
         return json.dumps(golden)
 
-    def oracle_pair(self, golden, scenario=OWN, pin=PIN):
+    def oracle_pair(self, scenario=OWN, pin=PIN, **header):
         files = self.pair(scenario)
-        files[GOLDENS + "/one.json"] = golden
+        files[GOLDENS + "/one.json"] = self.recorded(files[SCENARIOS + "/one.yaml"], **header)
         if pin is not None:
             files["conformance/oracle.json"] = json.dumps(pin)
         return files
 
+    def test_d3_hash_of_yaml_follows_the_core_schema(self):
+        # yes, dates and 0o17 are core-schema strings and an octal; 1.0 and 1 hash alike.
+        a = scenario_sha256("x.yaml", "a: yes\nb: 2030-01-15\nc: 0o17\nd: 1.0\n")
+        b = scenario_sha256("x.json", '{"d": 1, "c": 15, "b": "2030-01-15", "a": "yes"}')
+        self.assertEqual(a, b)
+        self.assertIsNone(scenario_sha256("x.yaml", "a: &x 1\nb: *x\n"))
+
     def test_recorded_golden_with_corpus_text_is_reported_as_oracle_output(self):
-        code, summary, views, error = self.check(self.oracle_pair(self.recorded()))
+        code, summary, views, error = self.check(self.oracle_pair())
         self.assertEqual(code, 0, error)
         self.assertEqual((summary["counts"]["flagged"], summary["counts"]["oracle_output"]), (0, 1))
         self.assertEqual(summary["test_data"]["oracle_output"], [GOLDENS + "/one.json"])
@@ -271,36 +282,79 @@ class TestDataTests(unittest.TestCase):
             entry = file_entry(view, GOLDENS + "/one.json")
             self.assertEqual(entry["status"], "oracle-output")
             self.assertEqual([flag["channel"] for flag in entry["flags"]], ["text"])
+            self.assertTrue(entry["flags"][0]["action"].startswith("none"))
+
+    def test_nested_recorded_golden_is_oracle_output(self):
+        scenario = "description: " + json.dumps(OWN) + "\n"
+        files = {SCENARIOS + "/deep/two.yaml": scenario, "conformance/oracle.json": json.dumps(self.PIN),
+                 GOLDENS + "/deep/two.json": self.recorded(scenario, SCENARIOS + "/deep/two.yaml", "search/deep/two")}
+        code, summary, _views, error = self.check(files)
+        self.assertEqual(code, 0, error)
+        self.assertEqual(summary["counts"]["oracle_output"], 1)
 
     def test_hand_written_golden_with_corpus_text_still_flags(self):
+        scenario = self.pair(OWN)[SCENARIOS + "/one.yaml"]
         cases = {
-            "no header": json.dumps({"observations": {"steps": [{"text": STORY}]}}),
-            "another pin": self.recorded(lock_sha256="d" * 64),
-            "another version": self.recorded(anki_version="26.9.2"),
-            "another scenario": self.recorded(scenario_id="search/two"),
-            "no scenario digest": self.recorded(scenario_sha256=None),
-            "malformed driver digest": self.recorded(driver_sha256="not-a-digest"),
-            "observations not an object": self.recorded(observations=[STORY]),
+            "no header": {"golden": json.dumps({"observations": {"steps": [{"text": STORY}]}})},
+            "another pin": {"lock_sha256": "d" * 64},
+            "another version": {"anki_version": "26.9.2"},
+            "another scenario": {"scenario_id": "search/two"},
+            "stale or copied scenario digest": {"scenario_sha256": "c" * 64},
+            "no scenario digest": {"scenario_sha256": None},
+            "malformed driver digest": {"driver_sha256": "not-a-digest"},
+            "observations not an object": {"observations": [STORY]},
+            "extra top-level key": {"note": "x"},
+            "extra oracle key": {"oracle_extra": "x"},
+            "corpus text in tz": {"tz": STORY},
+            "corpus text in clock": {"clock": {"mode": STORY}},
         }
-        for name, golden in cases.items():
+        for name, change in cases.items():
             with self.subTest(name):
-                code, summary, _views, _error = self.check(self.oracle_pair(golden))
+                files = self.oracle_pair(**{k: v for k, v in change.items() if k != "golden"})
+                if "golden" in change:
+                    files[GOLDENS + "/one.json"] = change["golden"]
+                if name.startswith("corpus text"):
+                    files[GOLDENS + "/one.json"] = self.recorded(scenario, body=OWN, **change)
+                code, summary, _views, _error = self.check(files)
                 self.assertEqual(code, 1)
                 self.assertEqual((summary["counts"]["flagged"], summary["counts"]["oracle_output"]), (1, 0))
 
     def test_without_a_readable_pin_no_golden_is_exempt(self):
-        for name, pin in {"missing": None, "malformed": {"anki_version": "26.9.3", "lock_sha256": "short"}}.items():
+        pins = {"missing": None, "malformed": {"anki_version": "26.9.3", "lock_sha256": "short"}}
+        for name, pin in pins.items():
             with self.subTest(name):
                 shutil.rmtree(os.path.join(self.root, "conformance"), ignore_errors=True)
-                code, summary, _views, _error = self.check(self.oracle_pair(self.recorded(), pin=pin))
+                code, summary, _views, _error = self.check(self.oracle_pair(pin=pin))
+                self.assertEqual(code, 1)
+                self.assertEqual(summary["counts"]["oracle_output"], 0)
+        for name in ("symlink", "hardlink"):
+            with self.subTest(name):
+                shutil.rmtree(os.path.join(self.root, "conformance"), ignore_errors=True)
+                files = self.oracle_pair(pin=None)
+                write_tree(self.root, files)
+                real = os.path.join(self.root, "pin.json")
+                with open(real, "w") as f:
+                    json.dump(self.PIN, f)
+                link = os.path.join(self.root, "conformance", "oracle.json")
+                (os.symlink if name == "symlink" else os.link)(real, link)
+                code, summary, _views, _error = self.check({})
                 self.assertEqual(code, 1)
                 self.assertEqual(summary["counts"]["oracle_output"], 0)
 
     def test_scenario_inputs_are_never_exempt(self):
-        code, summary, views, _error = self.check(self.oracle_pair(self.recorded(), scenario=STORY))
+        files = self.oracle_pair(scenario=STORY)
+        code, summary, views, _error = self.check(files)
         self.assertEqual(code, 1)
         self.assertEqual(file_entry(views["implementer"], SCENARIOS + "/one.yaml")["status"], "flagged")
         self.assertEqual(summary["counts"]["oracle_output"], 1)
+        # A JSON scenario shaped like a recorded golden is still a scenario.
+        shutil.rmtree(os.path.join(self.root, "conformance"), ignore_errors=True)
+        golden = self.recorded("{}", SCENARIOS + "/one.json")
+        files = {SCENARIOS + "/one.json": golden, GOLDENS + "/one.json": json.dumps({"x": OWN}),
+                 "conformance/oracle.json": json.dumps(self.PIN)}
+        code, summary, views, _error = self.check(files)
+        self.assertEqual(code, 1)
+        self.assertEqual(file_entry(views["implementer"], SCENARIOS + "/one.json")["status"], "flagged")
 
 
 if __name__ == "__main__":

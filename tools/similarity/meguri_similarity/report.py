@@ -12,6 +12,7 @@ import json
 import os
 
 REWRITE = "rewrite this region from the spec"
+ORACLE = "none: recorded oracle output (never edit a golden); check the paired scenario's inputs"
 
 
 def _channel_dict(c):
@@ -52,7 +53,7 @@ def _file_entry(f, reviewer):
                     "channel": name,
                     "reasons": c.reasons,
                     "regions": [_region(r, reviewer) for r in c.regions[:20]],
-                    "action": REWRITE,
+                    "action": ORACLE if f.status == "oracle-output" else REWRITE,
                 }
             )
     if flags:
