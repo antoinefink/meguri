@@ -55,6 +55,10 @@ CodeRabbit, all answered on the pull request:
   fixed by type checks before the comparison, with a selftest.
 - `clock.start` and `tz` took any string: they must now have the D5 forms
   (date-time, zone name), with a selftest.
+- Follow-up on the same thread: two regression cases put eight corpus words,
+  under 64 characters, in the scenario's own `clock.start` and in a zone name
+  (`_` splits words); both still flag. Zone names must now start each part
+  with a capital and hold at most five words, as IANA names do.
 
 Round 2 on `1c0c6d728`: M1, M2 and L2 to L4 closed; the D3 hash found
 faithful to the YAML 1.2 core schema and RFC 8785 for the forms scenarios
@@ -72,9 +76,21 @@ use. New findings, all fixed in the next commit:
 
 ## Evidence
 
-- `similarity-selftest`: 107 passed, calibration included.
+- `similarity-selftest`: 108 passed, calibration included.
 - `selftest` (`hosted_similarity.bats`, `provenance.bats`): 63 passed.
 - All 1,264 goldens in the tree meet the full binding (shape, pin, scenario
   hash, zone and clock).
 - Whole tree: 2,528 files, 67 goldens reported as oracle output, 115 flagged,
   all scenarios.
+
+## Allowlist entries
+
+The coordinator, under Antoine's delegation of 2026-11-21, accepted the three
+`stats/browse-queries` scenarios that hold Anki's Card Counts search texts
+(`ae60-young`, `card-counts-labels`, `parse-all`): functional query strings
+that `specs/stats/browse-queries.md` lists word for word and a compatible app
+must accept. They are scenario inputs, so the oracle-output rule does not
+cover them. Three exact whole-file entries, `text` channel only, no pattern,
+each with the file's reviewed SHA-256 in its reason, are added to
+`tools/similarity/allowlist.yaml` here so they are on master before those
+scenarios are next touched. A stats-area scan reports them allowlisted.

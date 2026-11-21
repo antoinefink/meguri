@@ -250,7 +250,10 @@ ORACLE_OUTPUT = "oracle-output"
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 # dsl.md D5: clock.start and an IANA zone name, as the recorder copies them.
 _DATETIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})?")
-_ZONE = re.compile(r"[A-Za-z0-9_+-]{1,32}(/[A-Za-z0-9_+-]{1,32}){0,2}")
+_ZONE = re.compile(r"[A-Z][A-Za-z0-9_+-]{0,31}(/[A-Z][A-Za-z0-9_+-]{0,31}){0,2}")
+# The longest IANA names have five words (America/North_Dakota/New_Salem): a
+# zone can never hold a text-channel run.
+_ZONE_WORDS = 5
 _GOLDEN_KEYS = {"clock", "observations", "oracle", "scenario_id", "scenario_sha256", "tz"}
 _ORACLE_KEYS = {"anki_version", "driver_sha256", "lock_sha256"}
 _MAX_SAFE = 1 << 53
@@ -467,7 +470,8 @@ def oracle_recorded(path, text, pin, scenario_path, scenario_text):
         return False
     if not isinstance(oracle["driver_sha256"], str) or not _HEX64.fullmatch(oracle["driver_sha256"]):
         return False
-    if not isinstance(doc["tz"], str) or not _ZONE.fullmatch(doc["tz"]) or not isinstance(clock, dict) \
+    if not isinstance(doc["tz"], str) or not _ZONE.fullmatch(doc["tz"]) \
+            or len(TEXT_WORD.findall(doc["tz"].lower())) > _ZONE_WORDS or not isinstance(clock, dict) \
             or not isinstance(clock.get("start"), str) or not _DATETIME.fullmatch(clock["start"]) \
             or clock.get("mode") not in ("frozen", "step"):
         return False

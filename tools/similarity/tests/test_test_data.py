@@ -368,6 +368,26 @@ class TestDataTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertEqual(summary["counts"]["oracle_output"], 0)
 
+    def test_short_corpus_run_in_the_scenario_clock_does_not_exempt_the_golden(self):
+        # Eight corpus words, under 64 characters, carried by the scenario and
+        # the golden alike as clock.start or tz: equal, but not D5 values.
+        words = " ".join(STORY.split()[:8])
+        self.assertLessEqual(len(words), 64)
+        named = "_".join(w.capitalize() for w in STORY.split()[:4]) + "/" + "_".join(
+            w.capitalize() for w in STORY.split()[4:8])
+        self.assertLessEqual(len(named), 64)
+        for start, tz in ((words, "UTC"), ("2030-01-15T10:00:00", named)):
+            with self.subTest(start=start, tz=tz):
+                scenario = "clock: {tz: " + json.dumps(tz) + ", start: " + json.dumps(start) + "}\ndescription: x\n"
+                golden = json.loads(self.recorded(scenario, body=OWN))
+                golden["clock"]["start"], golden["tz"] = start, tz
+                files = {SCENARIOS + "/one.yaml": scenario, "conformance/oracle.json": json.dumps(self.PIN),
+                         GOLDENS + "/one.json": json.dumps(golden)}
+                code, summary, views, _error = self.check(files)
+                self.assertEqual(code, 1)
+                self.assertEqual(summary["counts"]["oracle_output"], 0)
+                self.assertEqual(file_entry(views["implementer"], GOLDENS + "/one.json")["status"], "flagged")
+
     def test_scenario_inputs_are_never_exempt(self):
         files = self.oracle_pair(scenario=STORY)
         code, summary, views, _error = self.check(files)
