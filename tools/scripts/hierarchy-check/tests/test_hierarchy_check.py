@@ -514,6 +514,30 @@ class NativeSheetGrabber(unittest.TestCase):
         p["boundary"] = boundary
         return tree, p
 
+    def panel_content_tree(self):
+        tree, p = self.tree()
+        boundary = el("other", "sync.status.popover", f=(80, 455, 480, 300), children=[
+            el("button", "sync.status.settings", "Sync Settings", f=(300, 700, 120, 44)),
+        ])
+        content = el("other", f=(80, 455, 480, 300), children=[boundary])
+        scroll = el("scrollView", f=(80, 450, 480, 420), children=[content])
+        p["inner"]["children"] = [scroll]
+        p.update(boundary=boundary, scroll=scroll, scrolled=content)
+        return tree, p
+
+    def test_panel_in_an_unmarked_scroll_view_is_supported(self):
+        tree, _ = self.panel_content_tree()
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_panel_scroll_view_requires_the_exact_boundary_and_unmarked_wrappers(self):
+        for target, key, value in [("boundary", "identifier", "sync.status.popoverExtra"), ("boundary", "label", "Panel"),
+                                   ("scroll", "identifier", "work.scroll"), ("scroll", "label", "Scroll"),
+                                   ("scrolled", "identifier", "work.content")]:
+            with self.subTest(target=target, key=key, value=value):
+                tree, p = self.panel_content_tree()
+                p[target][key] = value
+                self.assert_missing(tree)
+
     def test_exact_named_content_boundary_with_unlabeled_collection_is_supported(self):
         tree, p = self.current_content_tree()
         self.assertEqual(hierarchy_check.check(tree), [])
