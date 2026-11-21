@@ -287,6 +287,9 @@ mg_app_build_action() {
       mg_failure build "physical development build failed; diagnostics remain in the private build log"
     elif [ "$real" = true ] && grep -Eqi 'provisioning profile|No profiles for|requires a development team|No signing certificate' "$log"; then
       mg_failure real-copy-profile "$MG_APP_REAL_COPY_PROFILE_HELP" "tools/mg doctor"
+    elif [ "$real" = true ]; then
+      # No rerun hint: the route runs only at Antoine's request.
+      mg_failure build "xcodebuild build failed for the real copy: $(grep -E 'error:' "$log" | head -n 3 | tr '\n' ' ')"
     else
       mg_failure build "xcodebuild $action failed ($platform, $config): $(grep -E 'error:' "$log" | head -n 3 | tr '\n' ' ')" \
         "tools/mg build-app --platform $platform --config $config$standalone_arg$plan_arg"
@@ -604,7 +607,8 @@ PY_CLOUD
 # is packed as a zip, then unregistered and deleted, so the only registered
 # daily-driver app stays the one he installs (app/AGENTS.md).
 MG_APP_REAL_COPY_ZIP=build/app/real-copy/Meguri.zip
-MG_LSREGISTER="${MG_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
+# Not taken from the environment: unregistering must never be replaceable.
+MG_LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 MG_APP_REAL_COPY_PROFILE_HELP="no installed Mac development profile authorizes the real copy (com.antoinefink.meguri: App Group, Keychain group, CloudKit container iCloud.com.antoinefink.meguri in Production, production push); this route never requests provisioning updates. Antoine's one-time step daily-driver-account (docs/process/one-time-setup.md); tools/mg doctor shows what is missing"
 
 # Resolved settings of both targets before any app build: daily ids,
@@ -736,7 +740,7 @@ mg_app_real_copy_identity() {
 # Unregister and delete the built app (and the widget inside), then check
 # LaunchServices and PlugInKit no longer know it. Runs on every exit path.
 mg_app_real_copy_forget() {
-  local app="$1" products records
+  local app="$1" products records dump
   [ -n "$app" ] || return 0
   products="${app%/Meguri.app}"
   if [ -e "$app" ]; then
@@ -749,7 +753,9 @@ mg_app_real_copy_forget() {
     pluginkit -r "$products/MeguriWidget.appex" >/dev/null 2>&1
     rm -rf "$products/MeguriWidget.appex" || return 1
   fi
-  records="$("$MG_LSREGISTER" -dump 2>/dev/null | sed -n 's/^path: *\(.*\) (0x[0-9a-fA-F]*)$/\1/p'
+  # An unreadable LaunchServices database proves nothing: fail.
+  dump="$("$MG_LSREGISTER" -dump 2>/dev/null)" && grep -q '^path: ' <<<"$dump" || return 1
+  records="$(sed -n 's/^path: *\(.*\) (0x[0-9a-fA-F]*)$/\1/p' <<<"$dump"
     pluginkit -mADvvv -i com.antoinefink.meguri.widget 2>/dev/null | sed -n 's/^[[:space:]]*Path = //p')"
   # Nothing registered from this build's products directory.
   ! awk -v p="$products" '$0 == p || index($0, p "/") == 1 { found = 1 } END { exit !found }' <<<"$records"
@@ -758,13 +764,13 @@ mg_app_real_copy_forget() {
 # What Antoine runs, read-only, once he has installed the zip.
 mg_app_real_copy_cleanup_checks() {
   jq -nc --arg zip "$MG_APP_REAL_COPY_ZIP" --arg dd "$MG_APP_DD" --arg ls "$MG_LSREGISTER" '[
-    {step: "install (Antoine)", command: ("ditto -x -k " + $zip + " /Applications/")},
+    {step: "install (Antoine): quit Meguri and move or rename an existing /Applications/Meguri.app first, since ditto merges into an existing bundle", command: ("cd <the checkout> && ditto -x -k " + $zip + " /Applications/")},
     {step: "only the installed copies are registered", command: ($ls + " -dump | grep -E \"^path: .*Meguri.*\\.app\""),
      expect: "only /Applications/Meguri.app (daily driver) and /Applications/Meguri Dev.app, besides dev build products under build/"},
     {step: "only the installed widget is registered", command: "pluginkit -mAvvv -i com.antoinefink.meguri.widget",
      expect: "one path, inside /Applications/Meguri.app"},
     {step: "no daily-driver product left in derived data", command: ("ls " + $dd + "/Build/Products/Release"),
-     expect: "no Meguri.app"}]'
+     expect: "no Meguri.app and no MeguriWidget.appex"}]'
 }
 
 # Read signed facts, never repair or re-sign a product. These are the normal
@@ -1506,10 +1512,21 @@ mg_build_app__real_copy() {
   local MG_APP_DD=build/app/RealCopyDerivedData MG_APP_REAL_COPY_ALLOWED=true app input profiles hardware zip
   app="$(mg_app_products mac Release)/Meguri.app"
   mg_detail real_copy_cleanup_checks "$(mg_app_real_copy_cleanup_checks)"
+  # A killed earlier run may have left a registered build: forget it first.
+  if ! mg_app_real_copy_forget "$app"; then
+    mg_failure real-copy-forget "an earlier daily-driver build is still on disk or registered, or LaunchServices could not be read: $app"
+    mg_status fail
+    return 0
+  fi
   # Fail before building when no installed profile authorizes the app: the
   # route never asks Xcode to create, download or register one.
   hardware="$(system_profiler SPHardwareDataType -json 2>/dev/null | jq -r '.SPHardwareDataType[0] |
     (.provisioning_UDID // .platform_UUID) // empty')"
+  if [ -z "$hardware" ]; then
+    mg_failure real-copy-profile "this Mac's provisioning UDID could not be read, so profile coverage cannot be checked"
+    mg_status fail
+    return 0
+  fi
   if ! profiles="$(python3 "$MG_TOOLS/scripts/daily-driver-profiles.py" --require mac --device "$hardware")"; then
     local missing="the profile list could not be read"
     if [ -n "$profiles" ]; then
@@ -1523,7 +1540,7 @@ mg_build_app__real_copy() {
   fi
   mg_detail daily_driver_profiles "$profiles"
   # Whatever happens next, no built daily-driver app stays on disk or registered.
-  mg_on_exit "mg_app_real_copy_forget $(mvl_q "$app")"
+  mg_on_exit "mg_app_real_copy_forget $(mvl_q "$app") || mg_failure real-copy-forget $(mvl_q "the built daily-driver app is still on disk or registered: $app")"
   input="$(mg_app_input_digest)"
   mg_app_build_action real-copy mac Release || return 0
   if ! printf '%s\n' "$input" | grep -Eq '^[0-9a-f]{64}$' ||

@@ -64,6 +64,7 @@ echo "synthetic widget" >"$w/Contents/MacOS/MeguriWidget"
 cp "$FX/info.json" "$p/Contents/Info.plist"
 echo "{\"CFBundleIdentifier\":\"com.antoinefink.meguri.widget\",\"CFBundleExecutable\":\"MeguriWidget\"}" >"$w/Contents/Info.plist"
 cp "$FX/embedded.plist" "$p/Contents/embedded.provisionprofile"
+: >"$FX/built"
 if [ -n "${FX_BUILD_ERROR:-}" ]; then echo "error: $FX_BUILD_ERROR"; exit 65; fi
 exit 0'
   stub xcrun 'echo "xcrun $*" >>"$STUB_LOG"
@@ -90,10 +91,18 @@ esac'
 case "$5" in -) cat ;; *) cat "$5" ;; esac'
   stub lipo 'echo "lipo $*" >>"$STUB_LOG"; echo arm64'
   stub security 'echo "security $*" >>"$STUB_LOG"; [ "$1 $2 $3" = "cms -D -i" ] || exit 97; cat "$4"'
-  stub system_profiler 'echo "system_profiler $*" >>"$STUB_LOG"; echo "{\"SPHardwareDataType\":[{\"provisioning_UDID\":\"00000000-0000-4000-8000-000000000009\"}]}"'
+  stub system_profiler 'echo "system_profiler $*" >>"$STUB_LOG"
+if [ -n "${FX_NO_UDID:-}" ]; then echo "{\"SPHardwareDataType\":[{}]}"; exit 0; fi
+echo "{\"SPHardwareDataType\":[{\"provisioning_UDID\":\"00000000-0000-4000-8000-000000000009\"}]}"'
   stub pluginkit 'echo "pluginkit $*" >>"$STUB_LOG"'
+  # -dump lists one unrelated app; FX_LS_UNREADABLE empties it; once a build
+  # ran, FX_KEEP_REGISTERED keeps the built widget listed.
   stub lsregister 'echo "lsregister $*" >>"$STUB_LOG"
-if [ "$1" = -dump ] && [ -n "${FX_STILL_REGISTERED:-}" ]; then echo "path: $FX_STILL_REGISTERED (0x1)"; fi
+if [ "$1" = -dump ]; then
+  [ -z "${FX_LS_UNREADABLE:-}" ] || exit 1
+  echo "path: /Applications/Other.app (0x1)"
+  if [ -n "${FX_KEEP_REGISTERED:-}" ] && [ -f "$FX/built" ]; then echo "path: $FX_KEEP_REGISTERED (0x2)"; fi
+fi
 exit 0'
   stub ditto 'echo "ditto $*" >>"$STUB_LOG"; [ "$1 $2 $3" = "-c -k --keepParent" ] || exit 97; [ -d "$4" ] || exit 1; echo zip >"$5"'
   export PATH="$BIN:$PATH"
@@ -287,11 +296,36 @@ EOF
   [ ! -e "$(built)" ]
 }
 
-@test "the real copy fails when LaunchServices still holds the built app" {
-  FX_STILL_REGISTERED="$(built)/Contents/PlugIns/MeguriWidget.appex" real_copy
+@test "the real copy fails when LaunchServices still holds the built app or cannot be read" {
+  FX_KEEP_REGISTERED="$(built)/Contents/PlugIns/MeguriWidget.appex" real_copy
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-forget ]
+  [ "$(field '.details.real_copy.built_app_forgotten // false')" = false ]
   [ ! -e "$(built)" ]
+  rm -f "$FX/built"
+  : >"$STUB_LOG"
+  FX_LS_UNREADABLE=1 real_copy
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-forget ]
+  not_called '^(lint|xcframework|xcodebuild|ditto)'
+}
+
+@test "the real copy removes an earlier run's leftover build before anything else" {
+  mkdir -p "$(built)/Contents/PlugIns/MeguriWidget.appex"
+  installed_profile development
+  real_copy
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-profile ]
+  called "^lsregister -u $(built)$"
+  [ ! -e "$(built)" ]
+  not_called '^xcodebuild'
+}
+
+@test "the real copy needs this Mac's provisioning UDID to check profile coverage" {
+  FX_NO_UDID=1 real_copy
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-profile ]
+  not_called '^(lint|xcframework|xcodebuild|ditto)'
 }
 
 @test "the profile reader reports authorized, incomplete and missing without touching the account" {

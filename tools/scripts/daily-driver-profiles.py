@@ -2,7 +2,7 @@
 """Installed provisioning profiles for the daily-driver identity (the real copy).
 
 Read-only: it decodes the profiles Xcode installed (`security cms -D -i`,
-which reads no keychain) and reports, per platform, whether one authorizes
+which modifies no keychain) and reports, per platform, whether one authorizes
 the app's signed claims: the identity `<team>.com.antoinefink.meguri`, its
 App Group and Keychain group, the production CloudKit container
 `iCloud.com.antoinefink.meguri` in the Production environment, and production
@@ -73,7 +73,9 @@ def missing_grants(profile, platform, team):
         ("identity", authorizes(identity, team + "." + BUNDLE)),
         ("app-group", authorizes(grants.get("com.apple.security.application-groups"), group)),
         ("keychain", authorizes(grants.get("keychain-access-groups"), team + "." + BUNDLE)),
-        ("icloud-container", authorizes(grants.get("com.apple.developer.icloud-container-identifiers"), CONTAINER)),
+        # Exactly the production container: the signed claim lists only it,
+        # and the product check compares the two lists.
+        ("icloud-container", grants.get("com.apple.developer.icloud-container-identifiers") == [CONTAINER]),
         ("icloud-services", authorizes(grants.get("com.apple.developer.icloud-services"), "CloudKit")),
         ("icloud-production", authorizes(grants.get("com.apple.developer.icloud-container-environment"), "Production")),
         ("push-production", authorizes(grants.get(push), "production")),
@@ -97,7 +99,8 @@ def summary(platform, team, device):
         missing = missing_grants(profile, platform, team)
         if not isinstance(expires, datetime.datetime) or expires <= now:
             missing.append("not-expired")
-        if device and device not in profile.get("ProvisionedDevices", []) and not profile.get("ProvisionsAllDevices"):
+        # Development profiles list their devices (the product check requires it).
+        if device and device not in profile.get("ProvisionedDevices", []):
             missing.append("this-device")
         entry = {"state": "authorized" if not missing else "incomplete", "missing": missing,
                  "expires": expires.strftime("%Y-%m-%d") if isinstance(expires, datetime.datetime) else None,
