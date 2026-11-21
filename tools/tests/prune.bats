@@ -196,7 +196,7 @@ member() { # member <archive> <name>: its content
   [ ! -e "$MG/alpha/${ids[2]}" ]
 }
 
-@test "a Deleter keeps the build/mg it opened when build is swapped for a link to a copy" {
+@test "a Deleter refuses to delete once build is swapped for a link to a copy, in either tree" {
   local id outside="$BATS_TEST_TMPDIR/outside"
   id="$(old_run alpha 1)"
   mkdir -p "$outside/mg/alpha/$id"
@@ -212,10 +212,54 @@ d = p.Deleter(p.Checkout(root), ctx)
 os.rename(os.path.join(root, "build"), os.path.join(root, "build.real"))
 os.symlink(outside, os.path.join(root, "build"))
 run = p.Run(d.ck, "alpha", rid, os.path.join(root, "build", "mg", "alpha", rid))
-assert d.remove(run) is None, "the run in the opened build/mg was not deleted"
+try:
+    d.remove(run)
+except p.Refusal as e:
+    print("refused:", e)
+else:
+    raise SystemExit("a swapped build was not refused")
 PY
   [ -f "$outside/mg/alpha/$id/result.json" ]
-  [ ! -e "$SB/build.real/mg/alpha/$id" ]
+  [ -d "$SB/build.real/mg/alpha/$id" ]
+}
+
+@test "prune keeps runs named deep in build/ handoffs or by empty folders, and refuses --apply with a checkout missing" {
+  local ids=() n gone="$BATS_TEST_TMPDIR/gone"
+  for n in $(seq 1 24); do ids[$n]="$(old_run alpha "$n")"; done
+  mkdir -p "$SB/build/handoffs/2026-11/unit-a/round-2" "$MG/sim-pool/leases/${ids[2]}" "$SB/build/notes/${ids[3]}"
+  echo "build/mg/alpha/${ids[1]}" >"$SB/build/handoffs/2026-11/unit-a/round-2/checkpoint.md"
+  prune --apply
+  [ "$(jq -r .status "$result")" = pass ]
+  for n in 1 2 3; do [ -d "$MG/alpha/${ids[$n]}" ] || { echo "run $n was deleted"; false; }; done
+  [ ! -e "$MG/alpha/${ids[4]}" ]
+  git -C "$SB" worktree add -q --detach "$gone"
+  echo "${ids[1]}" >"$gone/HANDOFF.md"
+  mv "$gone" "$gone.moved"
+  prune --apply
+  [ "$(jq -r .status "$result")" = error ]
+  jq -e '.failures[] | select(.id == "refused")' "$result"
+  [ -d "$MG/alpha/${ids[1]}" ]
+}
+
+@test "a cleanroom folder that gained an entry since the plan is not deleted" {
+  local id
+  id="$(cleanroom_run 1 10)"
+  python3 - "$SB/tools/scripts/prune-run-output.py" "$(cd "$SB" && pwd -P)" "$id" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("prune", sys.argv[1])
+p = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(p)
+root, rid = sys.argv[2], sys.argv[3]
+d = p.Deleter(p.Checkout(root), p.Context(0, {}))
+d.ctx.checkouts = []
+run = p.Run(d.ck, "cleanroom", rid, os.path.join(root, "build", "mg", "cleanroom", rid))
+planned = set(os.listdir(run.path))
+open(os.path.join(run.path, "notes-from-review.md"), "w").close()
+os.utime(os.path.join(run.path, "notes-from-review.md"), (0, 0))
+assert d.remove(run, None, expect=planned) == "its folder changed since the plan"
+assert d.remove(run, "source", expect=planned) == "its folder changed since the plan"
+PY
+  [ -d "$MG/cleanroom/$id/source" ]
 }
 
 @test "prune keeps unfinished runs and runs whose tools/mg process still runs" {
@@ -244,23 +288,31 @@ PY
 }
 
 @test "prune --apply finishes a deletion an earlier --apply cut short, except one holding a tracked file, and the report leaves it" {
-  local n
+  local n p0 p1 p2
+  # Built at run time: an id written out here would be a tracked reference.
+  p0=".prune-deleting-$(printf '%sZ-%d' 20250101T000000 4190700)"
+  p1=".prune-deleting-$(printf '%sZ-%d' 20250101T000000 4190701)"
+  p2=".prune-deleting-$(printf '%sZ-%d' 20250101T000000 4190702)"
   for n in $(seq 1 21); do old_run alpha "$n" >/dev/null; done
-  mkdir -p "$MG/alpha/.prune-deleting-20250101T000000Z-4190700/sub" "$MG/alpha/.prune-deleting-20250101T000000Z-4190700/ro/empty"
-  echo partial >"$MG/alpha/.prune-deleting-20250101T000000Z-4190700/sub/file"
-  chmod 500 "$MG/alpha/.prune-deleting-20250101T000000Z-4190700/ro"
-  mkdir -p "$MG/alpha/.prune-deleting-20250101T000000Z-4190701"
-  echo staged >"$MG/alpha/.prune-deleting-20250101T000000Z-4190701/note.txt"
-  git -C "$SB" add -f "build/mg/alpha/.prune-deleting-20250101T000000Z-4190701/note.txt"
+  mkdir -p "$MG/alpha/$p0/sub" "$MG/alpha/$p0/ro/empty"
+  echo partial >"$MG/alpha/$p0/sub/file"
+  chmod 500 "$MG/alpha/$p0/ro"
+  mkdir -p "$MG/alpha/$p1"
+  echo staged >"$MG/alpha/$p1/note.txt"
+  git -C "$SB" add -f "build/mg/alpha/$p1/note.txt"
+  mkdir -p "$MG/alpha/$p2" "$MG/catch-up"
+  echo "{\"run\":\"${p2#.prune-deleting-}\"}" >"$MG/catch-up/queue.jsonl"
   prune
-  [ -d "$MG/alpha/.prune-deleting-20250101T000000Z-4190700" ]
-  jq -e '.details.pending == ["alpha/.prune-deleting-20250101T000000Z-4190700", "alpha/.prune-deleting-20250101T000000Z-4190701"]' "$result"
+  [ -d "$MG/alpha/$p0" ]
+  jq -e --arg a "alpha/$p0" --arg b "alpha/$p1" --arg c "alpha/$p2" '.details.pending == [$a, $b, $c]' "$result"
   prune --apply
   [ "$(jq -r .status "$result")" = fail ]
-  [ ! -e "$MG/alpha/.prune-deleting-20250101T000000Z-4190700" ]
+  [ ! -e "$MG/alpha/$p0" ]
   [ "$(jq -r .details.pending_finished "$result")" = 1 ]
-  [ -f "$MG/alpha/.prune-deleting-20250101T000000Z-4190701/note.txt" ]
-  jq -e '.failures[] | select(.id == "delete/alpha/.prune-deleting-20250101T000000Z-4190701")' "$result"
+  [ -f "$MG/alpha/$p1/note.txt" ]
+  jq -e --arg i "delete/alpha/$p1" '.failures[] | select(.id == $i)' "$result"
+  [ -d "$MG/alpha/$p2" ]
+  jq -e --arg i "delete/alpha/$p2" '.failures[] | select(.id == $i)' "$result"
   [ "$(find "$MG/alpha" -mindepth 1 -maxdepth 1 -type d -name '2025*' | wc -l)" -eq 20 ]
 }
 
@@ -370,7 +422,7 @@ archive_with() {
   python3 -c '
 import io, sys, tarfile
 with tarfile.open(sys.argv[1], "w:xz") as tf:
-    data = (sys.argv[3] + "\n").encode()
+    data = sys.argv[3].encode()
     info = tarfile.TarInfo(sys.argv[2])
     info.size = len(data)
     tf.addfile(info, io.BytesIO(data))
@@ -395,16 +447,28 @@ with tarfile.open(sys.argv[1], "w:xz") as tf:
   [ "$(members "$MG/cleanroom-archive/2025-10.tar.xz")" = README ]
 }
 
-@test "prune --cleanroom replaces a record archived earlier while the run's folder still holds it" {
+@test "prune --cleanroom replaces a record archived earlier only when the file grew from it" {
   local ids=() n a10="$MG/cleanroom-archive/2025-10.tar.xz"
   for n in $(seq 1 21); do ids[$n]="$(cleanroom_run "$n" 10)"; done
-  archive_with "$a10" "${ids[1]}/prompt.md" "an earlier prompt"
+  archive_with "$a10" "${ids[1]}/prompt.md" "prompt.md of"
   prune --cleanroom --apply
   [ "$(jq -r .status "$result")" = pass ]
   [ "$(member "$a10" "${ids[1]}/prompt.md")" = "prompt.md of ${ids[1]}" ]
   jq -e --arg m "${ids[1]}/prompt.md" '.details.applied.records_replaced == [$m]' "$result"
   [ ! -e "$MG/cleanroom/${ids[1]}" ]
   [ "$(members "$a10" | grep -c "^${ids[1]}/")" -eq 9 ]
+}
+
+@test "prune --cleanroom leaves a run whose archived record is not an earlier part of its file" {
+  local ids=() n a10="$MG/cleanroom-archive/2025-10.tar.xz"
+  for n in $(seq 1 21); do ids[$n]="$(cleanroom_run "$n" 10)"; done
+  archive_with "$a10" "${ids[1]}/changes.patch" "REAL WORK, longer than the file is now"
+  prune --cleanroom --apply
+  [ "$(jq -r .status "$result")" = fail ]
+  jq -e --arg id "${ids[1]}" '.failures[] | select(.id == "archive/" + $id)' "$result"
+  [ "$(member "$a10" "${ids[1]}/changes.patch")" = "REAL WORK, longer than the file is now" ]
+  [ -d "$MG/cleanroom/${ids[1]}/source" ]
+  [ -d "$MG/cleanroom/${ids[1]}/codex-home" ]
 }
 
 @test "prune --cleanroom keeps whole runs that failed, have unexpected files, an unreachable base, a bad receipt or a fresh write" {

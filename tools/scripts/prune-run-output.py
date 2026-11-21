@@ -61,13 +61,13 @@ TOKEN = re.compile(rb"\d{8}T\d{6}Z-\d+")
 JOB_DIR = re.compile(r"^[a-z][a-z0-9-]*$")
 RECEIPT_SUFFIXES = (".json", ".jsonl")
 MEMBER = re.compile(r"^(\d{8}T\d{6}Z-\d+)/([^/]+)$")
-STATE_DEPTH = 4
+STATE_DEPTH = 64  # folder levels read under a state folder; deeper is a read error
 # build/ outside build/mg holds handoffs that name runs (orchestration
-# checkpoints, prompts, saved logs): read for references, BUILD_DEPTH deep.
+# checkpoints, prompts, saved logs): read for references, all of it.
 # These folders hold only build products, caches and private data copies.
 BUILD_UNREAD = ("mg", "private", "docker-cargo", "app", "xcode-check", "swift-test",
                 "selftest-xcframework", "oracle-macos-venv")
-BUILD_DEPTH = 3
+BUILD_DEPTH = 64
 DU_BATCH = 400
 SMALL = 100 << 20  # build/ entries below this are summed in the printed report
 USAGE = "usage: tools/mg prune [--cleanroom] [--apply] [--root <checkout>] [--all-worktrees] [--no-docker]"
@@ -203,8 +203,11 @@ class Refs:
                 self.errors.append("cannot read %s: %s" % (e.path, err.strerror or err))
                 continue
             if stat.S_ISDIR(st.st_mode):
+                out.update(ids_in(os.fsencode(e.path)))  # an id in a folder name counts too
                 if depth > 1:
                     self.tree(e.path, depth - 1, out)
+                else:
+                    self.errors.append("%s is nested deeper than prune reads" % e.path)
             else:
                 self.file(e.path, out)
 
@@ -461,13 +464,16 @@ def worktree_list(repo):
             cur["bare"] = True
     if cur:
         wts.append(cur)
-    result = []
+    result, missing = [], []
     for w in wts:
-        if w.get("bare") or not os.path.isdir(w["path"]):
+        if w.get("bare"):
+            continue
+        if not os.path.isdir(w["path"]):
+            missing.append(w["path"])  # unmounted, or removed without `git worktree prune`
             continue
         w["path"] = os.path.realpath(w["path"])
         result.append(w)
-    return result
+    return result, missing
 
 
 def processes():
@@ -780,6 +786,7 @@ def size_bytes(s):
 
 O_DIR = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 PENDING = ".prune-deleting-"  # a checked run folder renamed for deletion; --apply finishes it
+REFUSED = ".prune-refused-"  # a folder swapped in while it was checked; prune never deletes it
 
 
 def remove_at(dfd, name, dev, inside=False):
@@ -898,8 +905,22 @@ class Deleter:
             self.index_seen = seen
         return self.tracked
 
-    def _check(self, jfd, run, part):
-        """(why not, folder identity) for run's folder in the open job folder jfd."""
+    def same_tree(self):
+        """Refuse when build/mg by path is no longer the folder opened at the
+        start: the plan and the archive checks read paths, deletion uses the
+        descriptor, and both must mean one tree."""
+        try:
+            st = os.stat(self.mg)
+        except OSError:
+            st = None
+        held = os.fstat(self.mg_fd)
+        if st is None or (st.st_dev, st.st_ino) != (held.st_dev, held.st_ino):
+            raise Refusal("%s is no longer the folder prune opened (build or mg was replaced); stopped" % self.mg)
+
+    def _check(self, jfd, run, part, expect=None):
+        """(why not, folder identity) for run's folder in the open job folder jfd.
+        expect: the folder's entries as planned; any other entry keeps it."""
+        self.same_tree()
         try:
             rfd = os.open(run.id, O_DIR, dir_fd=jfd)
         except FileNotFoundError:
@@ -912,6 +933,8 @@ class Deleter:
             if st.st_dev != self.dev:
                 return "on another file system", ident
             entries = {e.name: e for e in os.scandir(rfd)}
+            if expect is not None and not set(entries) <= set(expect):
+                return "its folder changed since the plan", ident
             res = entries.get("result.json")
             if res is None or not res.is_file(follow_symlinks=False) or ".mg" in entries:
                 return "unfinished", ident
@@ -952,23 +975,23 @@ class Deleter:
         except OSError:
             return None
 
-    def check(self, run, part=None):
+    def check(self, run, part=None, expect=None):
         """Why this path must not be deleted now, or None. Checked again just
         before each deletion: a job may have started or finished since the plan."""
         jfd = self._job(run)
         if jfd is None:
             return "its job folder is not a plain folder"
         try:
-            return self._check(jfd, run, part)[0]
+            return self._check(jfd, run, part, expect)[0]
         finally:
             os.close(jfd)
 
-    def remove(self, run, part=None):
+    def remove(self, run, part=None, expect=None):
         jfd = self._job(run)
         if jfd is None:
             return "its job folder is not a plain folder"
         try:
-            why, ident = self._check(jfd, run, part)
+            why, ident = self._check(jfd, run, part, expect)
             if why is not None:
                 return why
             if part is None:
@@ -977,7 +1000,12 @@ class Deleter:
                 os.rename(run.id, PENDING + run.id, src_dir_fd=jfd, dst_dir_fd=jfd)
                 st = os.stat(PENDING + run.id, dir_fd=jfd, follow_symlinks=False)
                 if (st.st_dev, st.st_ino) != ident:
-                    os.rename(PENDING + run.id, run.id, src_dir_fd=jfd, dst_dir_fd=jfd)
+                    # Never leave an unchecked folder under the pending name,
+                    # which the next --apply would finish without checks.
+                    try:
+                        os.rename(PENDING + run.id, run.id, src_dir_fd=jfd, dst_dir_fd=jfd)
+                    except OSError:
+                        os.rename(PENDING + run.id, REFUSED + run.id, src_dir_fd=jfd, dst_dir_fd=jfd)
                     return "changed while it was checked"
                 remove_at(jfd, PENDING + run.id, self.dev)
             else:
@@ -997,10 +1025,18 @@ class Deleter:
         """Delete what an earlier --apply renamed for deletion and could not
         finish, unless the index now tracks a file in it."""
         done = 0
+        self.same_tree()
+        named = self.ctx.external(self.ck)
+        for r in self.ck.runs:
+            named |= r.receipts
         for job, name in self.ck.pending:
             if (job, name) in self.tracked_now():
                 failures.append({"id": "delete/%s/%s" % (job, name),
                                  "message": "holds a tracked file; left for you to resolve"})
+                continue
+            if name[len(PENDING):] in named:
+                failures.append({"id": "delete/%s/%s" % (job, name),
+                                 "message": "a reference names this run again; left for you to resolve"})
                 continue
             try:
                 jfd = os.open(job, O_DIR, dir_fd=self.mg_fd)
@@ -1055,6 +1091,23 @@ def sha_file(path):
             h.update(b)
             size += len(b)
     return size, h.hexdigest()
+
+
+def grew(r, name, archived):
+    """True when the archived (size, sha256) is the start of the file on disk:
+    a log that grew after an earlier --apply archived it."""
+    size, digest = archived
+    h = hashlib.sha256()
+    left = size
+    fd = os.open(os.path.join(r.path, name), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as f:
+        while left > 0:
+            chunk = f.read(min(left, 1 << 20))
+            if not chunk:
+                return False
+            h.update(chunk)
+            left -= len(chunk)
+    return h.hexdigest() == digest
 
 
 def disk_records(r):
@@ -1182,16 +1235,10 @@ def eligible(deleter, r):
     """None when r may lose now what its action removes, else why not. Asked
     before its records are archived, and again (by remove) before each deletion."""
     if r.action == "remove":
-        try:
-            listed = set(os.listdir(r.path))
-        except FileNotFoundError:
-            return "gone"
-        if listed != set(r.entries):
-            return "its folder changed since the plan"  # a new file would go unarchived
-        return deleter.check(r)
-    whys = [deleter.check(r, part) for part in CLEANROOM_RUNTIME if part in r.entries]
+        return deleter.check(r, expect=set(r.entries))
+    whys = [deleter.check(r, part, expect=set(r.entries)) for part in CLEANROOM_RUNTIME if part in r.entries]
     if not whys:
-        whys = [deleter.check(r)]
+        whys = [deleter.check(r, expect=set(r.entries))]
     whys = [w for w in whys if w not in (None, "gone", "latest")]
     return whys[0] if whys else None
 
@@ -1233,6 +1280,11 @@ def archive_and_delete(ctx, ck, deleter, adfd, adir, cands, failures):
                     continue
                 have = old.get(r.id, {})
                 new = {n: v for n, v in recs.items() if have.get(n) != v}
+                shrunk = [n for n in new if n in have and not grew(r, n, have[n])]
+                if shrunk:
+                    failures.append({"id": "archive/%s" % r.id, "message": "%s holds other content for %s than the run's folder, not an earlier part of it; the run was left untouched" % (path, ", ".join(shrunk))})
+                    bad.add(r.id)
+                    continue
                 if new:
                     add[r.id] = new
                 # The folder still holds its records, so an older archived copy
@@ -1265,7 +1317,8 @@ def archive_and_delete(ctx, ck, deleter, adfd, adir, cands, failures):
             stripped = False
             for part in parts:
                 try:
-                    why = deleter.remove(r, part)
+                    # A file or folder that appeared since the plan was never archived.
+                    why = deleter.remove(r, part, expect=set(r.entries))
                 except (OSError, Refusal) as e:
                     failures.append({"id": "delete/cleanroom/%s" % r.id,
                                      "message": "could not delete %s: %s" % (part or "the folder", e)})
@@ -1384,7 +1437,8 @@ def main():
     if args.apply and args.root:
         return fail("--root only reports; run tools/mg prune --apply from the checkout you prune")
     root = os.path.realpath(args.root) if args.root else self_root
-    wts = worktree_list(self_root)
+    wts, missing = worktree_list(self_root)
+    args.missing = missing
     known = [w["path"] for w in wts]
     if root not in known:
         return fail("%s is not a checkout of this repository (git worktree list)" % root)
@@ -1411,6 +1465,9 @@ def collect(args, wts):
         raise Refusal("cannot tell which runs are live: %s" % e)
     refs = ctx.refs
     ctx.checkouts = [Checkout(w["path"]) for w in wts]
+    for path in getattr(args, "missing", []):
+        # Its files and receipts cannot be read, so they cannot protect a run.
+        refs.errors.append("checkout %s is listed by git worktree list but missing; mount it, or run `git worktree prune` if it is gone" % path)
     uncommitted, staged = set(), set()
 
     def changes(path):
