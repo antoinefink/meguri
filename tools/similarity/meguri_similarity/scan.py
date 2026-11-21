@@ -42,7 +42,7 @@ class ChannelResult:
 class FileResult:
     path: str
     language: str
-    status: str = "clean"  # clean | flagged | allowlisted | error
+    status: str = "clean"  # clean | flagged | allowlisted | oracle-output (test data) | error
     channels: dict = field(default_factory=dict)  # effective results (allowlist applied)
     allowlisted: list = field(default_factory=list)  # [(channel, [entry indexes])]
     error: str | None = None
