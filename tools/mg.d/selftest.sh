@@ -88,8 +88,22 @@ mg_selftest() {
         ;;
     esac
   done
-  bats --formatter tap ${defaults[0]+"${defaults[@]}"} ${1+"$@"} ${files[0]+"${files[@]}"} | tee "$tap"
+  # Bats keeps every test's temporary directory until the run ends: a full
+  # run holds more than 8 GB of sandboxes. /tmp is a tmpfs of half the
+  # machine's memory, so where it is under 16 GB (8 GB on a hosted runner)
+  # the run's scratch goes beside the Cargo target, on disk, and is removed.
+  local scratch="" size
+  size="$(df -Pm /tmp 2>/dev/null | awk 'NR == 2 { print $2 }')"
+  if [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -lt 16384 ] && [ -n "${CARGO_TARGET_DIR:-}" ] &&
+     mkdir -p "$CARGO_TARGET_DIR/selftest-scratch"; then
+    scratch="$(mktemp -d "$CARGO_TARGET_DIR/selftest-scratch/run.XXXXXX")" || scratch=""
+  fi
+  mg_detail scratch "$(jq -nc --arg tmp "${scratch:-${TMPDIR:-/tmp}}" --arg mb "$size" \
+    '{tmpdir: $tmp, tmp_tmpfs_mb: ($mb | tonumber? // null)}')"
+  TMPDIR="${scratch:-${TMPDIR:-/tmp}}" \
+    bats --formatter tap ${defaults[0]+"${defaults[@]}"} ${1+"$@"} ${files[0]+"${files[@]}"} | tee "$tap"
   rc=${PIPESTATUS[0]}
+  [ -z "$scratch" ] || rm -rf "$scratch"
   mg_artifact tap "$tap"
   mg_tap_report "$tap" "$rc" "tools/mg selftest --filter"
 }

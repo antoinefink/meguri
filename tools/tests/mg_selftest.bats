@@ -19,15 +19,7 @@ setup_file() {
   git -C "$t" init -q
   git -C "$t" add -A
   git -C "$t" -c user.name=selftest -c user.email=selftest@localhost commit -qm template
-  # copy_core's builds of the real workspace (clippy with all features, about
-  # 4 GB) go beside the container's own Cargo target, which is on disk. /tmp
-  # is a tmpfs of half the machine's memory: 8 GB on a hosted runner, where
-  # those builds filled it. A fresh directory each run, removed at the end.
-  export SELFTEST_CORE_TARGET="${CARGO_TARGET_DIR:-$BATS_FILE_TMPDIR}/selftest-core-$$"
-  rm -rf "$SELFTEST_CORE_TARGET"
 }
-
-teardown_file() { rm -rf "$SELFTEST_CORE_TARGET"; }
 
 setup() {
   SB="$BATS_TEST_TMPDIR/repo"
@@ -257,7 +249,7 @@ copy_core() {
   mkdir -p "$SB/specs/render"
   cp "$REPO_ROOT/specs/render/unicode10-marks.json" "$SB/specs/render/"
   CARGO_NET_OFFLINE=false cargo fetch --locked --manifest-path "$SB/core/Cargo.toml" >&2
-  export CARGO_TARGET_DIR="$SELFTEST_CORE_TARGET"
+  export CARGO_TARGET_DIR="$BATS_FILE_TMPDIR/core-target"
 }
 
 # vendor_crate <name> <license>: a stand-in for a crates.io crate, outside the workspace.
