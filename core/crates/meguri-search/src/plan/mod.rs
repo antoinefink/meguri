@@ -5,7 +5,7 @@
 
 mod history;
 pub mod ids;
-mod names;
+pub(crate) mod names;
 mod props;
 pub mod sort;
 pub mod sql;
