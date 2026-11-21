@@ -4,7 +4,6 @@ Spec: conformance/deck-ops
 Requirements: R1883, R55, R57, R60, R61, R62, R63, R65, R66, R68, R69, R322, R1465, R1474, R732, R733
 Anki: 26.09.3
 Scenarios: conformance/scenarios/decks/
-Status: The lines that carry the marker "Changed 2026-11-21 (confirmed losses)" are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/delete-deck-losses-20261121.md`). Every other section is in force and unchanged.
 
 The scenario ops (`dsl.md` D7.2) and observation kinds (`observations.md` O4) that the decks area needs. Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. The behavior they run is `specs/decks/decks.md` and `specs/decks/deck-presets.md`.
 
@@ -41,7 +40,7 @@ The scenario ops (`dsl.md` D7.2) and observation kinds (`observations.md` O4) th
 ## K5. `delete_decks`
 
 - **Argument** `{decks: [<name>, ...]}`: at least one deck, in order.
-- **Effect** `decks/decks#D8` (the backup of R2008 is not part of the op on either side). Changed 2026-11-21 (confirmed losses): Meguri's executor passes the confirmed losses `any` (D8 step 6): a scenario asks no question, so it observes no refusal for losses.
+- **Effect** `decks/decks#D8` (the backup of R2008 is not part of the op on either side). Changed 2026-11-21 (confirmed losses; decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review, `docs/process/review-log/delete-deck-losses-20261121.md`): Meguri's executor passes as confirmed losses the D8.5 summary it reads at the step itself, right before submitting (D8 step 6), as `notetype-ops` T9 does for the note type ops; with nothing written in between, a scenario observes no refusal for losses.
 - **Output** `{delete_decks: {count}}`: the number of cards removed.
 - Logical ids of removed cards and notes stay valid: `card` reports `null` for a removed card (`record-ops.md` W3).
 
