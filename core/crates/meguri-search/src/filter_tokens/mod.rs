@@ -174,7 +174,7 @@ impl DeckValue {
             .decks()
             .iter()
             .find(|deck| deck.id == id)
-            .map(|deck| deck_value(names, deck))
+            .and_then(|deck| deck_value(names, deck))
     }
 
     /// The name as shown: levels joined by `::`.
@@ -185,23 +185,23 @@ impl DeckValue {
 
 /// The tree is what the deck term finds by name (`names-and-ids` N3.3):
 /// every deck whose stored name is the deck's, or starts with it and a
-/// level separator, letter case folded.
-pub(crate) fn deck_value(names: &NameIndex, deck: &DeckName) -> DeckValue {
+/// level separator, letter case folded. `None` when that expression does
+/// not compile (a name past the size limit): the tree is never cut short
+/// (J3.5), so the deck is not offered.
+pub(crate) fn deck_value(names: &NameIndex, deck: &DeckName) -> Option<DeckValue> {
     let expression = format!("(?i)^{}($|{FIELD_SEPARATOR})", regex::escape(&deck.native));
-    let tree = match regex::Regex::new(&expression) {
-        Ok(below) => names
-            .decks()
-            .iter()
-            .filter(|other| below.is_match(&other.native))
-            .map(|other| other.id)
-            .collect(),
-        Err(_) => vec![deck.id],
-    };
-    DeckValue {
+    let below = regex::Regex::new(&expression).ok()?;
+    let tree = names
+        .decks()
+        .iter()
+        .filter(|other| below.is_match(&other.native))
+        .map(|other| other.id)
+        .collect();
+    Some(DeckValue {
         id: deck.id,
         native: deck.native.clone(),
         tree,
-    }
+    })
 }
 
 impl NotetypeValue {
@@ -413,19 +413,23 @@ impl FilterQuery {
     /// the empty text (T4 step 4).
     pub fn run_text(&self, names: &NameIndex) -> Result<String, RunTextError> {
         match classify_text(&self.text, names) {
-            TextReading::Syntax => self.commit(names).run_text_of(names),
-            _ => self.run_text_of(names),
+            TextReading::Syntax => {
+                let committed = self.commit(names);
+                let reading = classify_text(&committed.text, names);
+                committed.run_text_of(reading)
+            }
+            reading => self.run_text_of(reading),
         }
     }
 
-    /// T4 with T5's items of the text; text that still holds syntax (never,
-    /// after a commit) runs as literal words.
-    fn run_text_of(&self, names: &NameIndex) -> Result<String, RunTextError> {
+    /// T4 with T5's reading of the text; text that still holds syntax
+    /// (never, after a commit) runs as literal words.
+    fn run_text_of(&self, reading: TextReading) -> Result<String, RunTextError> {
         let mut items = Vec::with_capacity(self.tokens.len() + 1);
         for (k, token) in self.tokens.iter().enumerate() {
             items.push(token_item(k, token)?);
         }
-        match classify_text(&self.text, names) {
+        match reading {
             TextReading::Items(text_items) => items.extend(text_items),
             TextReading::Syntax => items.extend(read::literal_words(&self.text)),
         }
@@ -476,12 +480,13 @@ fn token_item(k: usize, token: &Token) -> Result<BuiltItem, RunTextError> {
             for (v, value) in value_token.values.iter().enumerate() {
                 items.push(value.item().ok_or(RunTextError::NotOffered { token: k, value: v })?);
             }
-            let item = match items.len() {
-                1 => items.pop().unwrap_or(BuiltItem::WholeCollection),
-                _ => BuiltItem::Group {
+            let item = if items.len() == 1 {
+                items.swap_remove(0)
+            } else {
+                BuiltItem::Group {
                     joiner: Joiner::Or,
                     items,
-                },
+                }
             };
             Ok(if value_token.negated {
                 BuiltItem::Negated(Box::new(item))

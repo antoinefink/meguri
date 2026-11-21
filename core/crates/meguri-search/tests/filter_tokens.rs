@@ -73,7 +73,16 @@ const DECKS: [(i64, &str, bool); 14] = [
 ];
 
 // Registered tags; `r` U+00A0 `s` is written by J3.2's regex form.
-const TAGS: [&str; 7] = ["alpha", "beta", "beta::child", "Gamma", "ünïcode", "leech", "r\u{a0}s"];
+const TAGS: [&str; 8] = [
+    "alpha",
+    "beta",
+    "beta::child",
+    "Gamma",
+    "ünïcode",
+    "leech",
+    "r\u{a0}s",
+    "q\"r\u{a0}s",
+];
 
 struct Type {
     id: i64,
@@ -535,7 +544,10 @@ fn field_tag_and_card_type_items_read_as_values() {
         ),
         ("\"tag:re:^r\\x{a0}s(::|$)\"", value(vec![tag("r\u{a0}s")])),
         ("\"card:Card 1\"", value(vec![Value::CardType(s("Card 1"))])),
-        ("card:varnex", value(vec![Value::CardType(s("varnex"))])),
+        // The stored spelling; a card type no note type has stays advanced.
+        ("card:varnex", value(vec![Value::CardType(s("Varnex"))])),
+        ("card:zarbo", Token::Advanced(s("card:zarbo"))),
+        ("\"tag:re:^q\\\"r\\x{a0}s(::|$)\"", value(vec![tag("q\"r\u{a0}s")])),
         // Other forms stay advanced: a test T3 has not, a pattern, a mode,
         // an ordinal, an id list.
         ("Back:x", Token::Advanced(s("Back:x"))),
@@ -553,6 +565,39 @@ fn field_tag_and_card_type_items_read_as_values() {
     }
     let query = read_text("10:45 -xyz", &names);
     assert_eq!(query, FilterQuery::new(vec![], "10:45 -xyz"));
+}
+
+// T7's pairs and groups at their edges, and items whose canonical text
+// would not read back (F7's shapes): their tokens hold them as written.
+#[test]
+fn pairs_repeats_and_unstable_items() {
+    let names = names();
+    let read = |text: &str| read_text(text, &names);
+    // Step 4 on a pair: the second Due item is one advanced token.
+    assert_eq!(
+        read("prop:due=0 is:due -prop:due=0").tokens,
+        vec![
+            value(vec![Value::Due(DueValue::Today)]),
+            Token::Advanced(s("is:due -prop:due=0"))
+        ]
+    );
+    // The pair as an unbracketed run of a top-level OR.
+    assert_eq!(
+        read("prop:due=0 OR is:due -prop:due=0").tokens,
+        vec![value(vec![Value::Due(DueValue::Today), Value::Due(DueValue::Overdue)])]
+    );
+    // A value twice in one group is no token T10 makes.
+    assert_eq!(
+        read("(tag:alpha OR tag:alpha) word"),
+        FilterQuery::new(vec![Token::Advanced(s("tag:alpha OR tag:alpha"))], "word")
+    );
+    // A negated operator word and an R-read value keep their written text.
+    assert_eq!(read("a -or b"), FilterQuery::new(vec![Token::Advanced(s("-or"))], "a b"));
+    assert_eq!(read("a -and b"), FilterQuery::new(vec![Token::Advanced(s("-and"))], "a b"));
+    assert_eq!(
+        read("preset:a\\\"b").tokens,
+        vec![Token::Advanced(s("preset:a\\\"b"))]
+    );
 }
 
 // T16: T5's items of single texts; `deck:` with nothing after it is
@@ -868,7 +913,7 @@ const CONTAINS: [&str; 7] = ["apple", "x", "日本", "a_b", "x y", "10:45", "ap*
 
 const FIELDS: [&str; 6] = ["Front", "Back", "Extra", "Word", "Notes Field", "Text"];
 
-const TEMPLATES: [&str; 5] = ["Card 1", "Card 2", "Plimbo", "Varnex", "Ünit Card"];
+const TEMPLATES: [&str; 4] = ["Card 1", "Card 2", "Plimbo", "Varnex"];
 
 /// The values of one generated kind.
 fn pool(names: &NameIndex, kind: usize, field_name: &str) -> Vec<Value> {

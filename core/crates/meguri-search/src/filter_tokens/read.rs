@@ -190,9 +190,9 @@ impl<'n> Reader<'n> {
         if let NodeKind::Or(runs) = &query.node(root).kind {
             let token = self
                 .group_or(&query, runs)
-                .map(|(values, _)| ValueToken::new(values, false));
+                .map(|values| ValueToken::new(values, false));
             out.tokens
-                .push(self.placed(token, &mut kinds, || query.canonical_text()));
+                .push(self.placed(token, &mut kinds, || advanced_text(&query, &[root], query.canonical_text())));
             return out;
         }
         let mut words = Vec::new();
@@ -255,7 +255,7 @@ impl<'n> Reader<'n> {
                 if let NodeKind::Group(inside) = query.node(*child).kind {
                     if let NodeKind::Or(runs) = &query.node(inside).kind {
                         return match self.group_or(query, runs) {
-                            Some((values, _)) => negated(ValueToken::new(values, false)),
+                            Some(values) => negated(ValueToken::new(values, false)),
                             None => Class::Advanced,
                         };
                     }
@@ -263,7 +263,7 @@ impl<'n> Reader<'n> {
             }
             NodeKind::Group(inside) => {
                 if let NodeKind::Or(runs) = &query.node(*inside).kind {
-                    if let Some((values, _)) = self.group_or(query, runs) {
+                    if let Some(values) = self.group_or(query, runs) {
                         return Class::Token(ValueToken::new(values, false));
                     }
                 }
@@ -278,8 +278,8 @@ impl<'n> Reader<'n> {
 
     /// Rows 3, 5 and 6: a group OR whose runs are all value items of one
     /// kind, `tag:leech` a tag among tags and a state among states. Each
-    /// value once; the kind is returned too.
-    fn group_or(&self, query: &Query, runs: &[NodeId]) -> Option<(Vec<Value>, Kind)> {
+    /// value once.
+    fn group_or(&self, query: &Query, runs: &[NodeId]) -> Option<Vec<Value>> {
         let mut singles = Vec::with_capacity(runs.len());
         for run in runs {
             let single = match &query.node(*run).kind {
@@ -308,7 +308,7 @@ impl<'n> Reader<'n> {
             }
             values.push(value);
         }
-        Some((values, kind))
+        Some(values)
     }
 
     /// Row 1: the value whose item this item is, or `tag:leech`.
@@ -337,9 +337,17 @@ impl<'n> Reader<'n> {
         if let Some((_, value)) = FIXED.iter().find(|(fixed, _)| *fixed == key) {
             return Some(Single::Value(value.clone()));
         }
-        let candidate = match &query.node(id).kind {
+        match &query.node(id).kind {
             NodeKind::Term(Term::Template(TemplateRef::Name(name))) if !pattern::has_wildcards(name) => {
-                Value::CardType(pattern::exact_text(&nfc(name)).into_owned())
+                let typed = pattern::exact_text(&nfc(name)).into_owned();
+                if item_key(&Value::CardType(typed.clone()).item()?)? != key {
+                    return None;
+                }
+                // A card type some note type has, in its stored spelling
+                // (N4.2 compares by unicase equality); one no note type has
+                // stays advanced (T7.1: renamed or deleted).
+                self.template_named(&typed)
+                    .map(|stored| Single::Value(Value::CardType(stored)))
             }
             NodeKind::Term(Term::Field {
                 name,
@@ -358,11 +366,10 @@ impl<'n> Reader<'n> {
                 if item_key(&typed_value.item()?)? != key {
                     return None;
                 }
-                return Some(Single::Value(Value::Field { field, test }));
+                Some(Single::Value(Value::Field { field, test }))
             }
-            _ => return None,
-        };
-        (item_key(&candidate.item()?)? == key).then_some(Single::Value(candidate))
+            _ => None,
+        }
     }
 
     /// A deck term naming exactly one deck (N3.3's equality: the value's
@@ -378,7 +385,7 @@ impl<'n> Reader<'n> {
         if found.next().is_some() {
             return None;
         }
-        Some(Value::Deck(super::deck_value(self.names, deck)))
+        Some(Value::Deck(super::deck_value(self.names, deck)?))
     }
 
     /// A tag term naming exactly one registered tag (N2.2's equality), or
@@ -431,6 +438,17 @@ impl<'n> Reader<'n> {
             .next()
             .is_none()
             .then(|| Value::Notetype(NotetypeValue::of(notetype)))
+    }
+
+    /// The stored spelling of a template named `name` (unicase equality),
+    /// the first in the index's note type order.
+    fn template_named(&self, name: &str) -> Option<String> {
+        self.names
+            .notetypes()
+            .iter()
+            .flat_map(|notetype| notetype.templates.iter())
+            .find(|template| compare_folded(template, name).is_eq())
+            .cloned()
     }
 
     /// The stored spelling of the field a field term's name names, when it
@@ -520,12 +538,49 @@ fn pair(query: &Query, a: NodeId, b: NodeId) -> Option<DueValue> {
 }
 
 /// An advanced token's text: its item's canonical text as a whole search
-/// (F2.2: a group loses its brackets).
+/// (F2.2: a group loses its brackets), or the item as written when that
+/// canonical text would not read back as the same item (`canonical-form`
+/// F7's shapes: a negated operator word, `preset:`, `prop:cds:`).
 fn whole_text(query: &Query, id: NodeId) -> String {
-    match query.node(id).kind {
+    let canonical = match query.node(id).kind {
         NodeKind::Group(inside) => query.canonical_text_of(inside),
         _ => query.canonical_text_of(id),
+    };
+    advanced_text(query, &[id], canonical)
+}
+
+/// `canonical`, the text of the items `ids`, when it reads back as itself
+/// and the items hold no negated operator word; else their written text.
+fn advanced_text(query: &Query, ids: &[NodeId], canonical: String) -> String {
+    let operator = ids.iter().any(|id| {
+        subtree(query, *id)
+            .into_iter()
+            .any(|node| matches!(query.node(node).kind, NodeKind::NegatedOperator(_)))
+    });
+    let stable = parse(&canonical).is_ok_and(|again| again.canonical_text() == canonical);
+    if stable && !operator {
+        return canonical;
     }
+    let (Some(first), Some(last)) = (ids.first(), ids.last()) else {
+        return canonical;
+    };
+    let span = query.node(*first).span.start..query.node(*last).span.end;
+    query.source_text(&span).unwrap_or(canonical)
+}
+
+/// The nodes below and at `id`, with an explicit stack (E6).
+fn subtree(query: &Query, id: NodeId) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut stack = vec![id];
+    while let Some(id) = stack.pop() {
+        out.push(id);
+        match &query.node(id).kind {
+            NodeKind::And(children) | NodeKind::Or(children) => stack.extend(children.iter().copied()),
+            NodeKind::Not(child) | NodeKind::Group(child) => stack.push(*child),
+            NodeKind::Term(_) | NodeKind::NegatedOperator(_) => {}
+        }
+    }
+    out
 }
 
 /// The test a Field token's item has: `f:` empty, `f:_*` content, and
