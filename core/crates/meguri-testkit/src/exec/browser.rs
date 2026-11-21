@@ -268,6 +268,117 @@ fn browser_rows(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
         .map(Value::Array)
 }
 
+/// The events of one search session, as the conformance adapter waits for
+/// them.
+struct Events(std::sync::Mutex<std::sync::mpsc::Sender<meguri_engine::browse::search::SearchEvent>>);
+
+impl meguri_engine::browse::search::SearchListener for Events {
+    fn event(&self, event: meguri_engine::browse::search::SearchEvent) {
+        let _ = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).send(event);
+    }
+}
+
+/// `browser/result-sets` H16: a browser scenario's `search` requests, through
+/// the core's entry points. An unsorted request is `search_ids` (H13). A
+/// sorted one is `start_search` (H3) in a session opened for the observation:
+/// on `Complete` its ids are `resolve_selection` (H12) over every index with
+/// the handle's mode, listed by B2's equal-key runs; on `Failed` the error is
+/// the event's, `unsortable_column` recorded as `unsortable` (browser-ops B1).
+pub(super) fn search(
+    session: &mut Session<'_>,
+    requests: &[crate::scenario::SearchRequest],
+) -> Result<Value, ExecError> {
+    use crate::scenario::SearchKind;
+    use meguri_engine::browse::search::{self, BrowseError, SearchEvent, SortDirection, SortSpec};
+    use std::time::Duration;
+    session.engine_collection()?;
+    let engine = session.storage.host()?.engine().clone();
+    // H16: a plan with slow terms streams with one candidate per chunk, so
+    // the streamed scenarios test Q10's path.
+    engine.set_search_stream_chunk_for_testing(1);
+    let (sender, events) = std::sync::mpsc::channel();
+    let browse = engine.open_search_session(std::sync::Arc::new(Events(std::sync::Mutex::new(sender))));
+    let failed = |error: BrowseError| -> Result<Value, ExecError> {
+        match error {
+            BrowseError::Search(error) => Ok(super::search::error_value(&error)),
+            BrowseError::UnsortableColumn => Ok(serde_json::json!({"error": "unsortable"})),
+            BrowseError::Engine(meguri_engine::EngineError::Unsupported { feature }) => {
+                Err(ExecError::new("unsupported_observation", feature))
+            }
+            other => Err(core(format!("{other:?}"))),
+        }
+    };
+    let mut outputs = Vec::with_capacity(requests.len());
+    for request in requests {
+        let mode = match request.kind {
+            SearchKind::Cards => SearchMode::Cards,
+            SearchKind::Notes => SearchMode::Notes,
+        };
+        let (named, prefix) = match mode {
+            SearchMode::Cards => (&session.cards, "#c"),
+            SearchMode::Notes => (&session.notes, "#n"),
+        };
+        let Some(order) = &request.order else {
+            outputs.push(match search::search_ids(&engine, &request.query, mode) {
+                Ok(ids) => super::search::ids_value(&ids, named, prefix),
+                Err(error) => failed(error)?,
+            });
+            continue;
+        };
+        let direction = if order.reverse == Some(true) {
+            SortDirection::Descending
+        } else {
+            SortDirection::Ascending
+        };
+        let seq = browse.start_search(&request.query, mode, SortSpec::new(order.column.clone(), direction), None);
+        let terminal = loop {
+            let event = events
+                .recv_timeout(Duration::from_secs(120))
+                .map_err(|_| core("no terminal search event within 120 s"))?;
+            if event.seq() == seq && event.is_terminal() {
+                break event;
+            }
+        };
+        let (handle, count, revision) = match terminal {
+            SearchEvent::Complete {
+                handle,
+                count,
+                revision,
+                ..
+            } => (handle, count, revision),
+            SearchEvent::Failed { error, .. } => {
+                outputs.push(failed(error)?);
+                continue;
+            }
+            other => return Err(core(format!("search ended with {other:?}"))),
+        };
+        let every = 0..count;
+        let ids = browse
+            .resolve_selection(handle, revision, std::slice::from_ref(&every), mode)
+            .map_err(|error| core(format!("{error:?}")))?;
+        let runs = browse
+            .equal_key_runs_for_testing(handle)
+            .map_err(|error| core(format!("{error:?}")))?;
+        if runs.iter().map(|(id, _)| *id).ne(ids.iter().copied()) {
+            return Err(core("the equal-key run statement lists another order than the handle"));
+        }
+        let mut listed = Vec::with_capacity(ids.len());
+        let mut run: Vec<i64> = Vec::new();
+        let mut run_key = None;
+        for (id, key) in runs {
+            if run_key != Some(key) {
+                listed.extend(super::search::run_value(&run, named, prefix));
+                run.clear();
+                run_key = Some(key);
+            }
+            run.push(id);
+        }
+        listed.extend(super::search::run_value(&run, named, prefix));
+        outputs.push(serde_json::json!({ "ids": listed }));
+    }
+    Ok(Value::Array(outputs))
+}
+
 /// B3's tint names.
 fn tint_name(tint: meguri_engine::browse::Tint) -> String {
     use meguri_engine::browse::Tint;
@@ -324,6 +435,12 @@ fn cell_value(cell: &meguri_engine::browse::Cell, clock: &super::clock::Scenario
             json!({"span": {"unit": unit.name(), "amount": span_amount_text(amount)}})
         }
         Cell::Empty => Value::Null,
+        Cell::Deferred => {
+            return Err(ExecError::new(
+                "core_error",
+                "a deferred cell outside a row page (browser/result-sets H7)",
+            ));
+        }
         Cell::Question(other) => {
             return Err(ExecError::new(
                 "unsupported_observation",

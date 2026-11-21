@@ -2,8 +2,8 @@
 //! of a request, its state, tint, font and the requested cells, or its row
 //! error. One read transaction on the query reader; nothing is written.
 //! Cell values come from meguri-search's `browser::cells`; this module reads
-//! the records and resolves names and templates. Sessions, paging, the
-//! deferred Question and Answer cells and the row cache are U85's.
+//! the records and resolves names and templates. Sessions, paging and the
+//! deferred Question and Answer cells are U85's (`browse::search`).
 
 use meguri_model::card::Card;
 use meguri_model::card_data::extractors::Fields;
@@ -72,15 +72,28 @@ pub type RowResult = Result<Row, RowFailure>;
 pub fn rows(collection: &Collection, request: &RowRequest<'_>) -> Result<Vec<RowResult>, EngineError> {
     let reader = collection.reader(ReaderRole::Query)?;
     let snapshot = reader.snapshot()?;
+    rows_in(collection, &*snapshot, request, &mut || Ok(()))
+}
+
+/// [`rows`] on a snapshot the caller holds; `between` runs before each row
+/// and stops the call with its error (`browser/result-sets` H7's
+/// cancellation between rows).
+pub(crate) fn rows_in<R: ReadRows + ?Sized>(
+    collection: &Collection,
+    rows: &R,
+    request: &RowRequest<'_>,
+    between: &mut dyn FnMut() -> Result<(), EngineError>,
+) -> Result<Vec<RowResult>, EngineError> {
     let reading = Reading {
         collection,
-        rows: &*snapshot,
+        rows,
         request,
     };
     request
         .ids
         .iter()
         .map(|&id| {
+            between()?;
             let row = match request.mode {
                 SearchMode::Cards => reading.card_row(CardId(id)),
                 SearchMode::Notes => reading.note_row(NoteId(id)),

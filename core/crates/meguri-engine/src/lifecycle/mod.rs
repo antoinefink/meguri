@@ -154,6 +154,8 @@ pub(crate) struct EngineInner {
     pub(crate) threads: ThreadRegistry,
     pub(crate) jobs: JobRegistry,
     pub(crate) maintenance: std::sync::OnceLock<Arc<crate::maintenance::Maintenance>>,
+    /// Browse search sessions' workers and readers (`browser/result-sets`).
+    pub(crate) searches: Arc<crate::browse::search::SearchRegistry>,
     generation: Arc<AtomicU64>,
     state: Mutex<LcState>,
     pub(crate) changed: Condvar,
@@ -203,6 +205,7 @@ impl Engine {
                 threads,
                 jobs,
                 maintenance: std::sync::OnceLock::new(),
+                searches: Arc::default(),
                 generation: Arc::new(AtomicU64::new(0)),
                 state: Mutex::new(LcState {
                     suspended: false,
@@ -782,6 +785,9 @@ impl Engine {
         if matches!(self.state(), LifecycleState::Opening | LifecycleState::Upgrading { .. }) {
             return Err(EngineError::unavailable("the collection is opening"));
         }
+        // `browser/result-sets` H3: searches stop so their readers return,
+        // once the close is allowed.
+        let _searches = self.inner.searches.halt();
         self.jobs().pause(true);
         for job in self.jobs().running() {
             job.cancel.interrupt();

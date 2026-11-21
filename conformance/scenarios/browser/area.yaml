@@ -2,7 +2,9 @@
 # question/deck excerpts use the read-only U85a engine path (columns C16).
 # T1 runs the live chain; new-collection starts from the U28 bootstrap.
 # U84: the browser_rows observation and sorted searches (browser-ops B1 to
-# B4). browser/modes/ is U85's (result-sets H16).
+# B4). browser/modes/ is U85's (result-sets H16): every search of a browser
+# scenario runs through the core's result sets, slow plans streamed with one
+# candidate per chunk.
 area: browser
 active:
   - "config/absent-defaults"
@@ -45,3 +47,14 @@ active:
   - "sort/subset"
   - "sort/tags"
   - "sort/unsortable"
+  - "modes/one-shot"
+  - "modes/rows-current"
+  - "modes/rows-excerpts"
+  - "modes/selection-sets"
+  - "modes/sorted-both-modes"
+  - "modes/sorted-damaged"
+  - "modes/streamed-damaged"
+  - "modes/streamed-sorted"
+  - "modes/toggle-context"
+  - "modes/toggle-damaged"
+  - "modes/toggle-sets"

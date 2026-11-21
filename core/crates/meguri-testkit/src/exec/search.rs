@@ -113,7 +113,7 @@ fn list(request: &ObservationRequest) -> Result<&[Value], ExecError> {
 
 /// S3: the kind, then `provided` and `context` for the kinds that carry
 /// them, backticks turned to apostrophes. Run errors carry neither.
-fn error_value(error: &SearchError) -> Value {
+pub(super) fn error_value(error: &SearchError) -> Value {
     let mut value = Map::new();
     value.insert("error".to_owned(), json!(error.code()));
     if error.kind().is_parse_error() {
@@ -321,6 +321,11 @@ fn notetypes(session: &Session<'_>) -> Result<SearchNotetypes, ExecError> {
 /// (browser-ops.md B1, B2).
 fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
     let requests = SearchRequest::from_list(list(request)?).map_err(|e| invalid(e.to_string()))?;
+    // `browser/result-sets` H16: a browser scenario's searches go through
+    // the core's result-set entry points.
+    if session.scenario.scenario.id.starts_with("browser/") {
+        return super::browser::search(session, &requests);
+    }
     let mut context = context(session)?;
     let notetypes = notetypes(session)?;
     let mut day_supplied = false;
@@ -487,7 +492,7 @@ fn run_sorted(session: &Session<'_>, sorted: &SortedQuery) -> Result<Value, Exec
 }
 
 /// One equal-key run in S1's order.
-fn run_value(run: &[i64], named: &[i64], prefix: &str) -> Vec<Value> {
+pub(super) fn run_value(run: &[i64], named: &[i64], prefix: &str) -> Vec<Value> {
     match ids_value(run, named, prefix) {
         Value::Object(mut map) => match map.remove("ids") {
             Some(Value::Array(ids)) => ids,
@@ -500,7 +505,7 @@ fn run_value(run: &[i64], named: &[i64], prefix: &str) -> Vec<Value> {
 /// S1's `{ids}`: the found ids that a logical reference names (`named[k]` is
 /// `<prefix><k + 1>`) as references sorted by number, then the others as
 /// integers, ascending. The order the search returned them in is dropped.
-fn ids_value(found: &[i64], named: &[i64], prefix: &str) -> Value {
+pub(super) fn ids_value(found: &[i64], named: &[i64], prefix: &str) -> Value {
     let mut refs = Vec::new();
     let mut unnamed = Vec::new();
     for id in found {

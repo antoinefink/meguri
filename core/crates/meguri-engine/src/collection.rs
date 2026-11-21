@@ -342,7 +342,9 @@ impl Collection {
         self.reader_at(role, 0)
     }
 
-    /// The reader of search worker `worker`.
+    /// The reader of search worker `worker`. Browse searches take these
+    /// through their sessions' registry (`browse::search`), which hands each
+    /// to one request at a time; other callers are tests.
     pub fn search_reader(&self, worker: usize) -> Result<ReaderLease<'_>, EngineError> {
         self.reader_at(ReaderRole::Search, worker)
     }
