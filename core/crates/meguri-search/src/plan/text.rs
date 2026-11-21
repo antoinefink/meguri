@@ -187,7 +187,8 @@ fn substring(
     // type matches none of these terms, so the types without excluded fields
     // are named (`IN`); without one, it is tested like any note, and `-sc:`
     // leaves out only the cloze types.
-    let plain = |kinds: Kinds| id_list(notetypes.types().iter().filter(|s| kinds.admits(s) && !s.has_excluded()));
+    let without_excluded =
+        |kinds: Kinds| id_list(notetypes.types().iter().filter(|s| kinds.admits(s) && !s.has_excluded()));
     match kinds {
         Kinds::All | Kinds::NotCloze if !excluding => {
             let cloze = id_list(notetypes.types().iter().filter(|s| s.cloze));
@@ -198,7 +199,7 @@ fn substring(
             }
         }
         _ => {
-            let types = plain(kinds);
+            let types = without_excluded(kinds);
             if !types.is_empty() {
                 clauses.push(format!("(n.mid IN ({types}) AND {})", whole(&mut wildcards)));
             }
@@ -324,10 +325,10 @@ fn expression_test(
         return Ok(whole);
     }
     // T7.1: a note whose `mid` names no note type matches nothing here.
-    let plain = id_list(notetypes.types().iter().filter(|s| !s.has_excluded()));
+    let without_excluded = id_list(notetypes.types().iter().filter(|s| !s.has_excluded()));
     let mut clauses = Vec::new();
-    if !plain.is_empty() {
-        clauses.push(format!("(n.mid IN ({plain}) AND {whole})"));
+    if !without_excluded.is_empty() {
+        clauses.push(format!("(n.mid IN ({without_excluded}) AND {whole})"));
     }
     let mut groups: BTreeMap<Vec<usize>, Vec<&NotetypeShape>> = BTreeMap::new();
     for shape in notetypes.types().iter().filter(|s| s.has_excluded()) {

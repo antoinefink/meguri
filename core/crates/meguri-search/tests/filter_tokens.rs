@@ -653,6 +653,10 @@ fn written_text_tokens_keep_their_meaning_in_the_run_text() {
     let spanish = || value(vec![deck(&names, 10)]);
     let cases = [
         (
+            "deck:Spanish preset:a\\\"b",
+            FilterQuery::new(vec![spanish(), Token::Advanced(s("preset:a\\\"b"))], ""),
+        ),
+        (
             "deck:Spanish -preset:a\\\"b",
             FilterQuery::new(vec![spanish(), Token::Advanced(s("-preset:a\\\"b"))], ""),
         ),

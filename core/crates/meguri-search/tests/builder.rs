@@ -204,6 +204,10 @@ fn the_written_text_item_keeps_its_text() {
         (not(written("-preset:a\\\"b")), "-(-preset:a\\\"b)"),
         (not(written("-and")), "-(-and)"),
         (not(written("a OR b")), "-(a OR b)"),
+        // Negated twice, J5 gives the item back, with no brackets left.
+        (and(vec![Deck(s("X")), not(not(written("-x")))]), "deck:X -x"),
+        (and(vec![Deck(s("X")), not(not(written("-and")))]), "deck:X -and"),
+        (and(vec![Deck(s("X")), not(not(written("a OR b")))]), "deck:X (a OR b)"),
     ];
     for (item, expected) in cases {
         assert_eq!(text(&item), expected, "{item:?}");

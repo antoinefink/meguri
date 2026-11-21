@@ -350,7 +350,18 @@ impl Writer {
             return self.push(NodeKind::Not(inner));
         }
         match self.builder.kind(item) {
-            NodeKind::Not(inner) => *inner,
+            // The brackets put around a negated written negation or
+            // operator word above go too; those of two or more items stay.
+            NodeKind::Not(inner) => match self.builder.kind(*inner) {
+                NodeKind::Group(child)
+                    if !self.builder.is_written(*inner)
+                        && self.builder.is_written(*child)
+                        && matches!(self.builder.kind(*child), NodeKind::Not(_) | NodeKind::NegatedOperator(_)) =>
+                {
+                    *child
+                }
+                _ => *inner,
+            },
             _ => self.push(NodeKind::Not(item)),
         }
     }
@@ -400,6 +411,8 @@ impl Writer {
     /// it there unchanged. Two or more items at its top level sit in a group,
     /// whose brackets are written inside a longer search.
     fn written(&mut self, text: &str, path: &[usize]) -> Result<NodeId, BuilderError> {
+        // T3.2 refuses only the empty text. White_Space alone reads as the
+        // whole collection and is written as it stands; T4 never makes it.
         if text.is_empty() {
             return Err(refused(InvalidItem::EmptyText, path));
         }
