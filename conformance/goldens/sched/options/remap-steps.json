@@ -1559,10 +1559,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "48152394c1eab5a880e64bd67d73dd55f553ab42c81108ae1cd15a20b4e59e35",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "sched/options/remap-steps",
-  "scenario_sha256": "b28546e3392fb8e734977445fd66c7d0f5806c14ce0581047a056cdeee351d57",
+  "scenario_sha256": "81267c1e8269e507cd37ba806a0cbd20f9e76e8ac7f4c9935d980e92f09739fb",
   "tz": "UTC"
 }
