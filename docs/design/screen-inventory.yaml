@@ -436,7 +436,7 @@ screens:
     variants: pairwise
     references: [list-counts, sheet-form, confirmation-dialog]
     purpose: >-
-      The Note Types section, round 9 (decided 2026-11-20; under review with its specs). Layout
+      The Note Types section, round 9 (decided and approved 2026-11-20). Layout
       N22.1; behaviour notetypes/workspace W2, W11, W12, W14. Mac and iPad: a sidebar row under
       Browse (⇧⌘T) and a list of note types with note counts, a filter and an Edited marker,
       then the selected type's detail with Fields and Cards tabs and Save. New Note Type… is a
@@ -453,7 +453,7 @@ screens:
     variants: pairwise
     references: [editor, inspector, sheet-form, confirmation-dialog, toast]
     purpose: >-
-      The Cards tab (round 9, under review): N22.3, N22.4; notetypes/workspace W5 to W10. The
+      The Cards tab (round 9): N22.3, N22.4; notetypes/workspace W5 to W10. The
       card types list with counts and issue dots over the Fields list; the code editor with
       Front, Back and Styling, colouring, completion and the Insert menu; live issues with
       one-click fixes and the count of notes with no card; the Card Text row above the CSS when
@@ -468,7 +468,7 @@ screens:
     variants: pairwise
     references: [grouped-form, sheet-form, confirmation-dialog]
     purpose: >-
-      The Fields tab (round 9, under review): N22.2; notetypes/workspace W3, W4. A table with
+      The Fields tab (round 9): N22.2; notetypes/workspace W3, W4. A table with
       Name, Sort, Used On and Notes, drag to reorder, + and −, a crossed-out row for a field
       deleted in the draft, and an inspector with Name, Collapsed in Editor, Right-to-Left and
       Placeholder. Save follows notetypes/draft-save (one sheet only when content is lost or
@@ -482,7 +482,7 @@ screens:
     variants: pairwise
     references: [inspector]
     purpose: >-
-      The live preview beside the code (round 9, under review): notetypes/workspace W9. A real
+      The live preview beside the code (round 9): notetypes/workspace W9. A real
       note with a note menu, Question or Answer, Light or Dark, a Cloze Number menu for cloze
       types; no device picker; updates about 300 ms after typing pauses.
   - id: noteTypes.changeNoteType
@@ -494,7 +494,7 @@ screens:
     variants: pairwise
     references: [sheet-form, toast]
     purpose: >-
-      Change Note Type… from Browse (round 9, under review): N22.8, notetypes/change-notetype M2
+      Change Note Type… from Browse (round 9): N22.8, notetypes/change-notetype M2
       to M6. From and To, field and card type maps, What Will Be Lost with counts, Save (Save
       and Upload with Meguri Sync, notetypes/draft-save D4). Identifiers
       noteTypes.changeNoteType.*.
@@ -518,8 +518,7 @@ screens:
     variants: full
     references: [table, search-tokens, sidebar, inspector, content-unavailable]
     purpose: >-
-      Browse, round 8 (decided 2026-11-20; under review with its specs until Antoine approves
-      them). Layout: docs/design/native-interface-contract.md N21; behaviour: browser/workspace
+      Browse, round 8 (decided and approved 2026-11-20). Layout: docs/design/native-interface-contract.md N21; behaviour: browser/workspace
       and search/filter-tokens. Mac and iPad: Today and Browse rows with system symbols at the
       top of the sidebar; with Browse selected the sidebar lists the filters (V6) and the detail
       is a native Table with the state column and the column set of V2, a status line under it
@@ -544,7 +543,7 @@ screens:
     variants: pairwise
     references: [sheet-form]
     purpose: >-
-      Find and Replace (round 8 option 8A; under review): browser/workspace V9 and N21.6. Find,
+      Find and Replace (round 8 option 8A): browser/workspace V9 and N21.6. Find,
       Replace With, In (All Fields, fields grouped by note type, Tags), Notes (Selected or All
       Found), Match Case, Whole Words, Regular Expression; a live preview counting the notes
       that will change and listing the first 100 changes with removed text crossed out; the
@@ -558,7 +557,7 @@ screens:
     variants: pairwise
     references: [sheet-form]
     purpose: >-
-      Find Duplicates (round 8, under review): browser/workspace V10 and N21.6. A Field menu and
+      Find Duplicates (round 8): browser/workspace V10 and N21.6. A Field menu and
       a Notes choice; Find shows the duplicate notes in the table as one Duplicates token,
       sorted by that field; with none the sheet says "No duplicates found.". Identifiers
       browse.findDuplicates.*.
@@ -581,7 +580,7 @@ screens:
     variants: pairwise
     references: [inspector, charts, table, content-unavailable, toast]
     purpose: >-
-      Changed 2026-11-20 (round 8, under review): in Browse's Info tab and every host, the Forgetting
+      Changed 2026-11-20 (round 8): in Browse's Info tab and every host, the Forgetting
       Curve section comes after Review History (browser/workspace V13). One card's properties, review history and forgetting curve (U222, stats/card-info), read only:
       opening or refreshing it never writes (C1, R1252). Hosts, never a separate window (R1247,
       R1422): the Card Info tab of Browse's inspector (Mac, iPad; ⌥⌘I), which follows the current
@@ -597,12 +596,12 @@ screens:
       after every answer is undone (C9). Layout, one scrolling grouped list: (1) the stats rows of
       C4.1 in the core's order, the label leading and the value trailing, values exactly as the core
       writes them and selectable; never an Ease row (R1250); labels from the String Catalog (C12).
-      (2) Forgetting Curve (C7), only when the snapshot has a curve (C7.1): a Swift Charts line, the
+      (3) Forgetting Curve (C7), drawn after Review History (round 8), only when the snapshot has a curve (C7.1): a Swift Charts line, the
       past solid and the future dashed, a today marker, and the dashed Desired Retention line when it
       is above the chart's lower bound (C7.5); a segmented range picker (First Week, First Month,
       First Year, All Time) only when more than one range is offered, starting on the last one
       (C7.3); the tooltip of C7.6 on hover (Mac) or touch. The section is a disclosure; collapsing it
-      is R1258's hide, saved on the device. (3) Review History (C6), newest first: on Mac and at
+      is R1258's hide, saved on the device. (2) Review History (C6), newest first: on Mac and at
       regular width, table-like rows of the same list, not a separate Table view, so there is one
       scroll area (N2): a header row naming the columns, then one row per entry with Grid-aligned
       columns (Date, with the time when wide; Type in its state colour; Rating, Again in the

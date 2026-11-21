@@ -183,10 +183,10 @@ fn term_of(text: &str) -> Term {
 }
 
 /// SplitMix64, so the generated cases are the same on every run.
-struct Seq(u64);
+pub struct Seq(pub u64);
 
 impl Seq {
-    fn next_u64(&mut self) -> u64 {
+    pub fn next_u64(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -194,11 +194,11 @@ impl Seq {
         z ^ (z >> 31)
     }
 
-    fn below(&mut self, n: usize) -> usize {
+    pub fn below(&mut self, n: usize) -> usize {
         (self.next_u64() % n as u64) as usize
     }
 
-    fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
+    pub fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
         items[self.below(items.len())]
     }
 
@@ -346,7 +346,7 @@ fn term(seq: &mut Seq) -> String {
 }
 
 /// A generated sequence of items, `depth` levels of groups at most.
-fn sequence(seq: &mut Seq, depth: u32) -> String {
+pub fn sequence(seq: &mut Seq, depth: u32) -> String {
     let items = 1 + seq.below(4);
     let mut out = String::new();
     for k in 0..items {
@@ -369,7 +369,7 @@ fn sequence(seq: &mut Seq, depth: u32) -> String {
 }
 
 /// F7's first three shapes, excluded from the round trip.
-fn is_exception(query: &Query) -> bool {
+pub fn is_exception(query: &Query) -> bool {
     query.nodes().iter().any(|node| match &node.kind {
         NodeKind::NegatedOperator(_) => true,
         NodeKind::Term(Term::Preset(text)) => text.contains("\\\""),
@@ -385,7 +385,7 @@ fn is_exception(query: &Query) -> bool {
 /// F7's fourth shape (`a_group_holding_a_group_loses_one_level_per_writing`):
 /// the whole search is a group whose only item is a group. Its canonical text
 /// means the same, but is not canonical again.
-fn is_group_of_group(query: &Query) -> bool {
+pub fn is_group_of_group(query: &Query) -> bool {
     match query.node(query.root()).kind {
         NodeKind::Group(inside) => matches!(query.node(inside).kind, NodeKind::Group(_)),
         _ => false,
@@ -394,7 +394,7 @@ fn is_group_of_group(query: &Query) -> bool {
 
 /// The node a meaning comparison starts from: one root group less (F2.2
 /// drops it, and a group is transparent, Q1).
-fn meaning_root(query: &Query) -> NodeId {
+pub fn meaning_root(query: &Query) -> NodeId {
     match query.node(query.root()).kind {
         NodeKind::Group(inside) => inside,
         _ => query.root(),
@@ -402,7 +402,7 @@ fn meaning_root(query: &Query) -> NodeId {
 }
 
 /// The same query, spans aside.
-fn same_meaning(a: &Query, a_root: NodeId, b: &Query, b_root: NodeId) -> bool {
+pub fn same_meaning(a: &Query, a_root: NodeId, b: &Query, b_root: NodeId) -> bool {
     let mut stack = vec![(a_root, b_root)];
     while let Some((x, y)) = stack.pop() {
         match (&a.node(x).kind, &b.node(y).kind) {
@@ -418,7 +418,7 @@ fn same_meaning(a: &Query, a_root: NodeId, b: &Query, b_root: NodeId) -> bool {
     true
 }
 
-fn context() -> SearchContext {
+pub fn context() -> SearchContext {
     SearchContext {
         now: 1_894_701_600,
         today: 100,
@@ -436,7 +436,7 @@ fn context() -> SearchContext {
 /// the ids its scope allows (Q3, Q5) and binds its text as a parameter, so
 /// the ids a search finds depend on the plan's rows, joins, operators and
 /// parameter numbers. The whole collection is the product's own SQL.
-fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermOutcome, ErrorKind> {
+pub fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermOutcome, ErrorKind> {
     if *term == Term::WholeCollection {
         return compile_term(term, env, params);
     }
@@ -458,7 +458,7 @@ fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermO
 /// The fixture collection: notes 1-8 with none to three cards each (note 8
 /// has none), and card 120, whose note 9 is gone (Q6). Only the columns the
 /// plan's statement and the stand-in read.
-fn collection() -> Connection {
+pub fn collection() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "CREATE TABLE notes (id INTEGER PRIMARY KEY);
@@ -484,7 +484,7 @@ fn summary(plan: &Plan) -> String {
 }
 
 /// The ids a plan finds in the fixture collection, ascending.
-fn ids(conn: &Connection, plan: &Plan) -> Vec<i64> {
+pub fn ids(conn: &Connection, plan: &Plan) -> Vec<i64> {
     let mut statement = conn
         .prepare_cached(plan.sql())
         .unwrap_or_else(|e| panic!("{}: {e}", plan.sql()));

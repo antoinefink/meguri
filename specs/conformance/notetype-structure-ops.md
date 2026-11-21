@@ -10,7 +10,7 @@ The scenario ops and the observation kind that U34's scenarios add to `notetype-
 ## M1. `remove_notetype` (op)
 
 - **Argument** `{notetype}`: the note type (T1).
-- **Effect.** Removes the note type as `notetypes/structure-changes` S12 says, as one undoable local change ("Remove Note Type"). Every executor reads the note type from the collection when the step runs, so rows a `db_exec` wrote are seen.
+- **Effect.** Removes the note type as `notetypes/structure-changes` S12 says, as one undoable local change ("Remove Note Type"). Every executor reads the note type from the collection when the step runs, so rows a `db_exec` wrote are seen. Changed 2026-11-20 (round 9 review): Meguri's executor passes as confirmed counts the note type's notes and cards it reads at the step itself (`notetype-ops.md` T9).
 - **Output** none (`{}`).
 - **Rejections** none. Every scenario collection holds the stock kinds, so the note type removed is never the last one: Meguri's `LastNotetype` and Anki's re-adding of a Basic note type cannot occur. Meguri's executor reports `LastNotetype` or `SafetyBackupFailed` as a run error.
 - **Errors.** An unknown name is `unknown_ref`.
@@ -18,7 +18,7 @@ The scenario ops and the observation kind that U34's scenarios add to `notetype-
 ## M2. `restore_notetype` (op)
 
 - **Argument** `{notetype, kind?}`: the note type (T1); `kind` one of `basic`, `basic_and_reversed`, `basic_optional_reversed`, `basic_typing`, `cloze`, `image_occlusion` (the names of `notetype-ops.md` T3), absent when the scenario lets the stored kind decide.
-- **Effect.** Restore to Default as `notetypes/restore-to-default` D1 to D6 say, with the executor's own stock kind (Anki's on the oracle, Meguri's on Meguri: their template text and CSS differ by design, R908), as one undoable local change ("Update Note Type"). The note type is read from the collection when the step runs.
+- **Effect.** Restore to Default as `notetypes/restore-to-default` D1 to D6 say, with the executor's own stock kind (Anki's on the oracle, Meguri's on Meguri: their template text and CSS differ by design, R908), as one undoable local change ("Update Note Type"). The note type is read from the collection when the step runs. Changed 2026-11-20 (round 9 review): Meguri's executor passes as confirmed losses a `restore_summary` (`notetypes/restore-to-default` D7.1) it reads at the step itself, with its digest (`notetype-ops.md` T9).
 - **Output** none (`{}`).
 - **Rejection** `needs_stock_kind`: no `kind` given and the stored `original_stock_kind` is not 1 to 6 (D2). Meguri also refuses with `needs_stock_kind` when the stored stock kind's K1 `kind` differs from the note type's stored `kind` (`notetypes/restore-to-default` D2, deviation `restore-kind-mismatch`); the oracle checks only the range 1 to 6, so no scenario uses such a mismatch. Nothing changes (`dsl.md` D7.3). The oracle checks the stored value before calling Anki, whose own refusal there is a generic invalid-input error. Meguri's executor reports `SafetyBackupFailed` as a run error.
 - **Observing.** Scenarios observe a restored note type with `notetype_structure`, never `notetype_templates` (M3) or a dump of `notetypes`, `fields` or `templates` (R1959).

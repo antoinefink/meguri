@@ -183,6 +183,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "revlog",
             "schema_objects",
             "search",
+            "search_build",
             "tag_tree",
             "template",
             "template.card",
@@ -197,7 +198,6 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     for kind in [
         "add_defaults",
         "notetype_last_deck",
-        "search_build",
         "search_join",
         "search_replace",
         "tag_complete",

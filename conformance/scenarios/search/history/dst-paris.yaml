@@ -27,10 +27,10 @@ steps:
   - set_clock: "2030-03-30T02:59:59"
   - add_note: {notetype: Memo, fields: [n6, "added 02:59:59 +01:00 on 03-30"]}
   - observe: [ids]
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1901068200000, 1901151000000, 0, 3, 1, 0, 2500, 1000, 1)"}
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1901066399000, 1901151000001, 0, 3, 1, 0, 2500, 1000, 1)"}
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1901066400000, 1901151000002, 0, 3, 1, 0, 2500, 1000, 1)"}
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1901151600000, 1901151000003, 0, 3, 1, 0, 2500, 1000, 1)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1901151000000, 1901068200000, 3, 1, 1000, 2500, 1, 0, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1901151000001, 1901066399000, 3, 1, 1000, 2500, 1, 0, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1901151000002, 1901066400000, 3, 1, 1000, 2500, 1, 0, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1901151000003, 1901151600000, 3, 1, 1000, 2500, 1, 0, 0)"}
   - db_exec: {sql: "UPDATE notes SET mod = 1901068200 WHERE id = 1901151000000"}
   - db_exec: {sql: "UPDATE notes SET mod = 1901066400 WHERE id = 1901151000001"}
   - db_exec: {sql: "UPDATE notes SET mod = 1901066401 WHERE id = 1901151000002"}
