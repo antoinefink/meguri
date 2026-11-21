@@ -8,6 +8,8 @@
 //!   outside the sample.
 //! - `browse.resort.<mode>.<key>`: from `resort` of a whole-collection
 //!   handle to its `FirstPage`.
+//! - `browse.toggle.<from>.<key>`: from `toggle` of a whole-collection
+//!   handle to its `FirstPage`, derived without a predicate run (H11).
 //! - `browse.reverse.cards`, `browse.rows.page`: a reverse in memory, and a
 //!   page of 400 rows (the visible rows and 200 each side, H7) with the
 //!   default cards-mode columns.
@@ -181,6 +183,29 @@ fn main() -> ExitCode {
                     measurement.run_timed(n, |_| {
                         let (_, source) = search(&session, &events, "", mode, from);
                         resort(source).0
+                    })
+                })
+            });
+            push(&mut suite, measurement);
+        }
+        // A toggle of `is:new` (card scope) is derived from the handle.
+        for (mode, from, to) in [(SearchMode::Cards, "noteFld", "noteFld"), (SearchMode::Notes, "noteFld", "cardDue")] {
+            let name = format!("browse.toggle.{}.{to}", mode_name(mode));
+            let toggle = |handle: HandleId| {
+                let watch = Stopwatch::start();
+                let seq = session
+                    .toggle(handle, SortSpec::new(to, SortDirection::Ascending), None)
+                    .expect("a complete handle");
+                first_page(&events, seq, watch)
+            };
+            let (_, source) = search(&session, &events, "is:new", mode, from);
+            black_box(toggle(source));
+            let mut measurement = Measurement::start(&name, Some(&size));
+            criterion.bench_function(&format!("{name}/{size}"), |b| {
+                b.iter_custom(|n| {
+                    measurement.run_timed(n, |_| {
+                        let (_, source) = search(&session, &events, "is:new", mode, from);
+                        toggle(source).0
                     })
                 })
             });
