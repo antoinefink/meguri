@@ -321,6 +321,11 @@ pub(super) fn observation(kind: ObservationKind, map: &Map<String, Value>) -> Re
                     kinds.len() == 1
                 })
         }
+        // bulk-ops.md X3.
+        ObservationKind::FindReplaceFields => {
+            keys(map, &["notes"], &[])?;
+            refs(&map["notes"], Some(RefKind::Note), true)
+        }
         ObservationKind::NotetypeTemplates => {
             keys(map, &["notetypes"], &[])?;
             names(map.get("notetypes"), None, false)

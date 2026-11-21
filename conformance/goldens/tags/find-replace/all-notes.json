@@ -1,0 +1,124 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "find_replace": {
+          "count": 2
+        }
+      },
+      {
+        "db_dump": {
+          "notes": {
+            "1894701600000": {
+              "csum": 4261788892,
+              "data": "",
+              "flags": 0,
+              "flds": "one",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "one",
+              "tags": " cedar ",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 2910334669,
+              "data": "",
+              "flags": 0,
+              "flds": "two",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "two",
+              "tags": " cedar::leaf ",
+              "usn": -1
+            },
+            "1894701600002": {
+              "csum": 3087201156,
+              "data": "",
+              "flags": 0,
+              "flds": "three",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "three",
+              "tags": " birch ",
+              "usn": 0
+            },
+            "1894701600003": {
+              "csum": 2676981484,
+              "data": "",
+              "flags": 0,
+              "flds": "four",
+              "guid": "#random",
+              "id": 1894701600003,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "four",
+              "tags": "",
+              "usn": 0
+            }
+          },
+          "tags": {
+            "birch": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "birch",
+              "usn": 0
+            },
+            "cedar": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "cedar",
+              "usn": -1
+            },
+            "cedar::leaf": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "cedar::leaf",
+              "usn": -1
+            },
+            "maple": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "maple",
+              "usn": 0
+            },
+            "maple::leaf": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "maple::leaf",
+              "usn": 0
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "tags/find-replace/all-notes",
+  "scenario_sha256": "83f425f3b464f813b0383e4573811b971b1e4c6256a0bdf1d5456c1e39339327",
+  "tz": "UTC"
+}

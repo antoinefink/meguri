@@ -400,9 +400,9 @@ fn new_observations() -> Vec<(&'static str, Value)> {
 fn new_observations_and_stats_are_language_only_with_pure_search_d8() {
     let executor = MeguriExecutor::default();
     let caps = executor.capabilities();
-    assert_eq!(ObservationKind::ALL.len(), 64);
-    assert_eq!(Step::NAMES.len(), 87);
-    assert_eq!(ObservationKind::ALL.iter().collect::<BTreeSet<_>>().len(), 64);
+    assert_eq!(ObservationKind::ALL.len(), 65);
+    assert_eq!(Step::NAMES.len(), 88);
+    assert_eq!(ObservationKind::ALL.iter().collect::<BTreeSet<_>>().len(), 65);
     for (kind, args) in new_observations().into_iter().chain([(
         "stats",
         json!([{"scope":"collection","history":"year","parts":["context"]}]),
