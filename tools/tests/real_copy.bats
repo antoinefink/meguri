@@ -93,6 +93,7 @@ case "$5" in -) cat ;; *) cat "$5" ;; esac'
   stub security 'echo "security $*" >>"$STUB_LOG"; [ "$1 $2 $3" = "cms -D -i" ] || exit 97; cat "$4"'
   stub system_profiler 'echo "system_profiler $*" >>"$STUB_LOG"
 if [ -n "${FX_NO_UDID:-}" ]; then echo "{\"SPHardwareDataType\":[{}]}"; exit 0; fi
+if [ -n "${FX_SP_FAILS:-}" ]; then echo "{\"SPHardwareDataType\":[{\"provisioning_UDID\":\"00000000-0000-4000-8000-000000000009\"}]}"; exit 1; fi
 echo "{\"SPHardwareDataType\":[{\"provisioning_UDID\":\"00000000-0000-4000-8000-000000000009\"}]}"'
   stub pluginkit 'echo "pluginkit $*" >>"$STUB_LOG"
 case "$1" in -m*) [ -z "${FX_PLUGINKIT_FAILS:-}" ] || exit 1 ;; esac'
@@ -352,6 +353,11 @@ EOF
 
 @test "the real copy needs this Mac's provisioning UDID to check profile coverage" {
   FX_NO_UDID=1 real_copy
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = real-copy-profile ]
+  not_called '^(lint|xcframework|xcodebuild|ditto)'
+  : >"$STUB_LOG"
+  FX_SP_FAILS=1 real_copy
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-profile ]
   not_called '^(lint|xcframework|xcodebuild|ditto)'

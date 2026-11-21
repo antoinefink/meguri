@@ -1527,8 +1527,12 @@ mg_build_app__real_copy() {
   fi
   # Fail before building when no installed profile authorizes the app: the
   # route never asks Xcode to create, download or register one.
-  hardware="$(system_profiler SPHardwareDataType -json 2>/dev/null | jq -r '.SPHardwareDataType[0] |
-    (.provisioning_UDID // .platform_UUID) // empty')"
+  hardware=""
+  if hardware="$(system_profiler SPHardwareDataType -json 2>/dev/null)"; then
+    hardware="$(jq -r '.SPHardwareDataType[0] | (.provisioning_UDID // .platform_UUID) // empty' <<<"$hardware" 2>/dev/null)"
+  else
+    hardware=""
+  fi
   if [ -z "$hardware" ]; then
     mg_failure real-copy-profile "this Mac's provisioning UDID could not be read, so profile coverage cannot be checked"
     mg_status fail
