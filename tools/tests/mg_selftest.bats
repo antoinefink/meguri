@@ -203,6 +203,7 @@ assert_read_only_calls() {
     -e '^xcodebuild -(version|license check)$' \
     -e '^xcrun simctl list runtimes --json$' \
     -e '^defaults read com\.apple\.dt\.Xcode [A-Za-z]+$' \
+    -e '^security cms -D -i .*\.(provisionprofile|mobileprovision)$' \
     -e '^docker info --format \{\{json \.\}\}$' \
     -e '^docker compose version --short$' \
     -e '^rustup (toolchain list|\+[0-9.]+ (target|component) list --installed)$' \

@@ -141,6 +141,32 @@ Optional: enable "Allow external agents to use Xcode tools" in Xcode's settings.
 
 Xcode 27.1 or later adds the iPhone Duo simulator (R1962). It runs on its own device-specific build of the pinned iOS version (iOS 27.2 since 2026-11-19, which needs Xcode 27.2), pinned under `foldable` in `tools/sim-devices.json`; `tools/vm/add-sim-runtime.sh --foldable` copies it into the VM. Doctor lists this step while Xcode is older than 27.1.
 
+### `daily-driver-account`
+
+Only for the real copy, "Meguri" with the daily-driver ids, which Antoine studies with beside the test copy "Meguri Dev" (root `AGENTS.md`). Only Antoine sets this up; agents never register identifiers or request profiles.
+
+1. In Certificates, Identifiers & Profiles, register the App IDs `com.antoinefink.meguri` and `com.antoinefink.meguri.widget`.
+2. Register the App Group `group.com.antoinefink.meguri` and assign it to both App IDs. On the Mac the group is the team-prefixed `DNQ34W43XX.com.antoinefink.meguri`.
+3. On `com.antoinefink.meguri`, enable iCloud (CloudKit) with the container `iCloud.com.antoinefink.meguri`, and Push Notifications. The container needs no schema: iCloud Sync stays off in the real copy while `MEGURI_CLOUD_SCHEMA_CONFIGURED_production` is `NO` (`app/Config/Cloud.xcconfig`).
+4. Let Xcode create the Mac (and, for the iPhone, iOS) development profiles for both App IDs, for example by building once in Xcode with automatic signing. `tools/mg build-app --real-copy` uses installed profiles only and never requests provisioning updates.
+
+Push needs a decision before the route can pass. Release signs `com.apple.developer.aps-environment` = `production` (KTD22), but Mac development profiles grant push `development` only. So a development-signed real copy is refused at signing even after the steps above. The two ways out:
+- a Developer ID certificate and profile (production push), with a signing variant;
+- development push for this personal Release.
+
+Either changes the signing policy and needs Antoine's choice. Until then the route stops at its profile check, which names `push-production`.
+
+Doctor's `daily-driver-profiles` line reads the installed profiles (`tools/scripts/daily-driver-profiles.py`). It reports whether one authorizes the real copy on the Mac (identity, App Group, Keychain group, the production container and environment, production push, expiry, this Mac), and the iOS state. It lists this step while the Mac profile is missing or incomplete. It cannot see the developer portal itself.
+
+Building and installing the real copy, at Antoine's request only:
+1. Run `MEGURI_APP_SIGNING=team tools/mg build-app --platform mac --real-copy --owner-requested`. It packs `build/app/real-copy/Meguri.zip`, unregisters and deletes the built app, and prints the read-only clean-up checks (`details.real_copy_cleanup_checks`).
+2. Antoine installs it: `ditto -x -k build/app/real-copy/Meguri.zip /Applications/`. Rename an earlier dev install at `/Applications/Meguri.app` to `Meguri Dev.app` first.
+
+**iPhone: a documented option, not built.** `run --physical-device --personal-preview` installs only the dev identity. A real copy on the phone would need:
+- the iOS profiles from step 4;
+- a `run --platform iphone --physical-device <id> --real-copy --owner-requested` route, mirroring the personal preview: Release with the daily ids, team signing from installed profiles only, a `devicectl` install and its sealed install witness;
+- the same push decision.
+
 ### `nightly-scheduler`
 
 Approve the scheduler entries for the nightly and weekly runs. `tools/mg nightly --print-schedule` (U19) writes them, `com.meguri.nightly.plist` and `com.meguri.nightly.weekly.plist`, under its run directory; copy them to `~/Library/LaunchAgents/` and load them with `launchctl load`. There is no git remote, so nightly runs happen on this Mac only. `tools/mg nightly` lists the step as missing while the nightly entry is not in `~/Library/LaunchAgents/`; doctor lists it as unverified.
