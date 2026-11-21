@@ -81,6 +81,27 @@ extension ComponentGallery {
             GalleryEntry("countColumns", "empty") { CountColumns(new: 0, learn: 0, due: 0) },
             GalleryEntry("countColumns", "overflow") { CountColumns(new: 12_345, learn: 678, due: 99_999) },
 
+            // N23.4: the cloud shapes beside the system's `icloud` ones, for comparison only.
+            GalleryEntry("cloudShapeSymbol", "typical") {
+                VStack(alignment: .leading, spacing: Spacing.small) {
+                    HStack(spacing: Spacing.small) {
+                        ForEach(CloudShapeSymbol.Badge.allCases, id: \.self) { CloudShapeSymbol($0) }
+                    }
+                    // The system's iCloud shapes they match, for comparison only.
+                    HStack(spacing: Spacing.small) {
+                        ForEach(["icloud", "checkmark.icloud", "arrow.trianglehead.2.clockwise.rotate.90.icloud",
+                                 "exclamationmark.icloud", "icloud.slash"], id: \.self) { Image(systemName: $0) }
+                    }
+                }
+                .font(.title2)
+            },
+            GalleryEntry("cloudShapeSymbol", "overflow") {
+                HStack(spacing: Spacing.small) {
+                    ForEach(CloudShapeSymbol.Badge.allCases, id: \.self) { CloudShapeSymbol($0) }
+                }
+                .font(.largeTitle)
+            },
+
             GalleryEntry("sectionHeader", "typical") {
                 SectionHeader(Text(verbatim: "Today"), subtitle: Text(verbatim: "Studied 42 cards in 12 minutes")) {
                     Button { } label: { Image(systemName: "ellipsis.circle") }
