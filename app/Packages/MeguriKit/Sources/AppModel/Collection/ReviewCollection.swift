@@ -1584,8 +1584,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         var retry = false
         let intent = navigation.intentRevision
         while true {
-            // A Study the person left while it waited is not started again (R22).
-            if retry, walk == nil, navigation.intentRevision != intent { return false }
+            // A Study the person left while it waited is not started again (R22): a
+            // deck's own, or a walk whose review has not shown yet (its first turn).
+            if retry, navigation.intentRevision != intent,
+               walk.map({ navigation.review?.session !== $0 }) ?? true { return false }
             switch await attemptStudy(deckID: deckID, entry: entry, walk: walk, retry: retry) {
             case .started: return true
             case .stopped: return false
