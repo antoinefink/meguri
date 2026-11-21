@@ -76,17 +76,11 @@ extension TestHooks {
             // Mac: the real Settings window (its scene, toolbar and split view) over a
             // synthetic coordinator, for the pane and its pushed Troubleshooting page.
             // Touch has no Settings window: the same state on the Settings page.
-            for (name, state) in [("meguri-setup-media", SyncCoordinator.RenderState.meguriSetupMedia),
-                                  ("meguri-setup-media-paused", .meguriSetupMediaPaused),
-                                  ("meguri-connected", .meguriConnected), ("icloud-connected", .iCloudConnected)] {
-                registry.register("settings/sync/window/\(name)") { context in
-                    #if os(macOS)
-                    .screen { SettingsWindowPreview.Opener(state: state, configuration: context.configuration) }
-                    #else
-                    settings(state, context)
-                    #endif
-                }
-            }
+            // Literal paths: xcode-check reads routes from the source (app/AGENTS.md).
+            registry.register("settings/sync/window/meguri-setup-media") { window(.meguriSetupMedia, $0) }
+            registry.register("settings/sync/window/meguri-setup-media-paused") { window(.meguriSetupMediaPaused, $0) }
+            registry.register("settings/sync/window/meguri-connected") { window(.meguriConnected, $0) }
+            registry.register("settings/sync/window/icloud-connected") { window(.iCloudConnected, $0) }
         }
         #if os(macOS)
         /// The Settings scene shows this collection in place of the app's while a
@@ -113,6 +107,13 @@ extension TestHooks {
             }
         }
         #endif
+        private static func window(_ state: SyncCoordinator.RenderState, _ context: RouteContext) -> InitialPresentation {
+            #if os(macOS)
+            .screen { SettingsWindowPreview.Opener(state: state, configuration: context.configuration) }
+            #else
+            settings(state, context)
+            #endif
+        }
         private static func panel(_ state: SyncCoordinator.RenderState, _ context: RouteContext) -> InitialPresentation {
             .screen { SyncSettingsPreview.screen(state, page: .statusPanel, configuration: context.configuration) }
         }
