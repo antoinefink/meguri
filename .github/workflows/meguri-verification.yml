@@ -494,7 +494,7 @@ jobs:
           (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
           && steps.pull.outputs.used == 'yes' && steps.rust-cache.outputs.cache-hit != 'true'
         shell: bash
-        run: .github/rust-cache.sh prune "Rust lint cache" 1024
+        run: .github/rust-cache.sh prune "Rust lint cache" 2048
 
       - name: Save the Rust lint cache
         if: steps.prune.outputs.save == 'yes'

@@ -9,12 +9,13 @@
 #                         (workspace and patched path crates) are rebuilt from
 #                         source, so their artifacts never enter a cache.
 #                         Writes save=yes, or save=no over the cap, to
-#                         $GITHUB_OUTPUT. The caps are chosen so that an old
-#                         and a new entry of every cache (after a Cargo.lock or
-#                         image change) fit in GitHub's 10 GB. They bound each
-#                         entry only: when the budget is full, GitHub evicts
-#                         the least recently used entries, which are then
-#                         normally the replaced ones.
+#                         $GITHUB_OUTPUT. The caps (on the uncompressed size;
+#                         saved entries compress to about a third) are chosen
+#                         so that an old and a new entry of every cache (after
+#                         a Cargo.lock or image change) fit in GitHub's 10 GB.
+#                         They bound each entry only: when the budget is
+#                         full, GitHub evicts the least recently used entries,
+#                         which are then normally the replaced ones.
 
 set -euo pipefail
 
