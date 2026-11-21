@@ -129,6 +129,12 @@ harness = false
 name = "browse_filters"
 harness = false
 
+# U267's Note Types reads: list counts, field contents, no-card notes, the
+# save summary and the delete counts.
+[[bench]]
+name = "notetype_reads"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]

@@ -774,6 +774,40 @@ fn asset_lifecycle_jobs_required_complete_rechecks_original_liveness_after_actua
     }
 }
 
+/// Starts an accepted submit (true enqueue) and pauses it at its accounting,
+/// after its Cloud reader moved into the lifetime pin. Dropping the returned
+/// guard resumes it.
+fn submit_paused_at_accounting(
+    fixture: &PublishedFixture,
+    pass: &Arc<CloudAssetReadPass>,
+    work: &Arc<CloudAssetReadWork>,
+) -> (CloudAssetReadSubmitJob, Release) {
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel();
+    let resume = Mutex::new(resume);
+    fixture.workflow.core.set_incoming_stage_hook_for_testing(move |stage| {
+        if stage == Stage::AssetReadSubmitAccounting {
+            entered.send(()).unwrap();
+            resume.lock().unwrap().recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+    });
+    let job = pass.clone().start_submit(work.clone(), Queue::new(true)).unwrap();
+    reached.recv_timeout(Duration::from_secs(5)).unwrap();
+    (job, Release(release))
+}
+
+fn wait_cancel_requested(job: &CloudAssetReadSubmitJob) -> bool {
+    let until = meguri_engine::monotonic::now() + Duration::from_secs(3);
+    while !job.handle.cancel.requested() && meguri_engine::monotonic::now() < until {
+        std::thread::yield_now();
+    }
+    job.handle.cancel.requested()
+}
+
+/// Close cancels the submit first, and accounting resumes before close suspends
+/// the Runtime. The fence holds close, so the close-not-returned checks here
+/// prove little; the next test covers the other order, where close waits for
+/// the submit itself.
 #[test]
 fn asset_lifecycle_jobs_actual_close_keeps_pin_and_accepted_result_through_accounting() {
     for first in [false, true] {
@@ -784,36 +818,28 @@ fn asset_lifecycle_jobs_actual_close_keeps_pin_and_accepted_result_through_accou
         let engine = fixture.workflow.host.engine();
         let generation = engine.generation();
         let events = engine.stream().subscribe();
-        let (entered, reached) = mpsc::channel();
-        let (release, resume) = mpsc::channel();
-        let resume = Mutex::new(resume);
-        fixture.workflow.core.set_incoming_stage_hook_for_testing(move |stage| {
-            if stage == Stage::AssetReadSubmitAccounting {
-                entered.send(()).unwrap();
-                resume.lock().unwrap().recv_timeout(Duration::from_secs(10)).unwrap();
-            }
-        });
-        let job = pass.clone().start_submit(work.clone(), Queue::new(true)).unwrap();
-        reached.recv_timeout(Duration::from_secs(5)).unwrap();
-        std::thread::scope(|scope| {
-            let release = Release(release);
+        let (job, release) = submit_paused_at_accounting(&fixture, &pass, &work);
+        let fence = hold_close_before_runtime_suspension(&fixture);
+        let (terminal, runtime_bound, close_waiting) = std::thread::scope(|scope| {
             let host = fixture.workflow.host.clone();
             let (done, returned) = mpsc::channel();
             let close = scope.spawn(move || done.send(host.close()).unwrap());
-            let until = meguri_engine::monotonic::now() + Duration::from_secs(3);
-            while !job.handle.cancel.requested() && meguri_engine::monotonic::now() < until {
-                std::thread::yield_now();
-            }
-            assert!(job.handle.cancel.requested());
+            assert!(wait_cancel_requested(&job));
             assert_eq!(collection.cloud_reader_slot_for_testing(), Some(true));
             assert_eq!(engine.generation(), generation);
             assert_eq!(job.result.result(), Ok(None));
             assert!(matches!(returned.try_recv(), Err(mpsc::TryRecvError::Empty)));
             drop(release);
+            let terminal = finished(&events, job.handle.id);
+            let runtime_bound = fixture.workflow.core.instance().is_ok();
+            let close_waiting = matches!(returned.try_recv(), Err(mpsc::TryRecvError::Empty));
+            drop(fence);
             returned.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
             close.join().unwrap();
+            (terminal, runtime_bound, close_waiting)
         });
-        assert_eq!(finished(&events, job.handle.id), JobOutcome::Succeeded);
+        assert!(runtime_bound && close_waiting);
+        assert_eq!(terminal, JobOutcome::Succeeded);
         assert_eq!(
             job.result.result(),
             Ok(Some(true)),
@@ -830,6 +856,71 @@ fn asset_lifecycle_jobs_actual_close_keeps_pin_and_accepted_result_through_accou
                 reason: "The result cannot be applied.".into()
             })
         );
+    }
+}
+
+/// S1 quiesces participants before it waits for cancelled ordinary jobs, so
+/// close may suspend the Runtime while an accepted submit is still accounting.
+/// J2.1.1 keeps that accounting failure as the submit's actual result and the
+/// accepted read owned, never an unstarted cancellation. Close does not return
+/// while the paused submit still holds the reader pin.
+#[test]
+fn asset_lifecycle_jobs_close_suspending_runtime_during_accounting_keeps_pin_and_accepted_read() {
+    for first in [false, true] {
+        let (fixture, _, port, _) = target(first);
+        let pass = port.begin().unwrap();
+        let work = pass.clone().next().unwrap().unwrap().handle;
+        let collection = fixture.workflow.host.collection().unwrap();
+        let engine = fixture.workflow.host.engine();
+        let generation = engine.generation();
+        let events = engine.stream().subscribe();
+        let runtime = fixture.workflow.core.clone();
+        let (job, release) = submit_paused_at_accounting(&fixture, &pass, &work);
+        let suspended = std::thread::scope(|scope| {
+            let host = fixture.workflow.host.clone();
+            let (done, returned) = mpsc::channel();
+            let close = scope.spawn(move || done.send(host.close()).unwrap());
+            assert!(wait_cancel_requested(&job));
+            // Runtime suspension unbinds the Runtime (no instance).
+            let until = meguri_engine::monotonic::now() + Duration::from_secs(4);
+            while runtime.instance().is_ok() && meguri_engine::monotonic::now() < until {
+                std::thread::yield_now();
+            }
+            let suspended = runtime.instance().is_err();
+            assert_eq!(collection.cloud_reader_slot_for_testing(), Some(true));
+            assert_eq!(engine.generation(), generation);
+            assert_eq!(job.result.result(), Ok(None));
+            assert!(matches!(returned.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            drop(release);
+            returned.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+            close.join().unwrap();
+            suspended
+        });
+        assert!(suspended, "close suspended the Runtime while accounting was paused");
+        let stale = "cloud runtime incarnation is stale";
+        assert_eq!(
+            finished(&events, job.handle.id),
+            JobOutcome::Failed {
+                error: meguri_engine::EngineError::CollectionUnavailable { reason: stale.into() }
+            }
+        );
+        assert_eq!(
+            job.result.result(),
+            Err(CoreError::Unavailable { reason: stale.into() })
+        );
+        assert!(runtime.asset_read_owned_for_testing(work.retained_for_test()));
+        let complete = pass.clone().start_complete(work.clone(), None).unwrap();
+        assert!(matches!(
+            finished(&events, complete.handle.id),
+            JobOutcome::Failed { .. }
+        ));
+        assert_eq!(
+            complete.result.result().err(),
+            Some(CoreError::Unavailable {
+                reason: "The result cannot be applied.".into()
+            })
+        );
+        assert!(!runtime.asset_read_owned_for_testing(work.retained_for_test()));
     }
 }
 
