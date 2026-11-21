@@ -646,6 +646,27 @@ EOF
   assert_read_only_calls
 }
 
+@test "doctor warns once when this checkout's run output passes its limit, and points to prune" {
+  make_stubs
+  mg doctor
+  jq -e '.details.checks[] | select(.id == "run-output" and .status == "pass")' "$result"
+  sed -i 's/^MG_DOCTOR_WARN_RUN_OUTPUT_GIB=.*/MG_DOCTOR_WARN_RUN_OUTPUT_GIB=0/' "$SB/tools/mg.d/doctor.sh"
+  mg doctor
+  [ "$(field '[.details.checks[] | select(.id == "run-output")] | length')" = 1 ]
+  jq -e '.details.checks[] | select(.id == "run-output" and .status == "warn"
+    and (.message | contains("over 0 GiB; tools/mg prune")))' "$result"
+  assert_read_only_calls
+  assert_doctor_result "$result" "$status"
+  # A du that outlasts the time limit is stopped, and the tree counts as too large.
+  printf '#!/bin/sh\necho $$ >"%s"\nexec sleep 30\n' "$BATS_TEST_TMPDIR/du.pid" >"$STUBS/du"
+  chmod +x "$STUBS/du"
+  sed -i 's/^MG_DOCTOR_RUN_OUTPUT_SECONDS=.*/MG_DOCTOR_RUN_OUTPUT_SECONDS=1/' "$SB/tools/mg.d/doctor.sh"
+  mg doctor
+  jq -e '.details.checks[] | select(.id == "run-output" and .status == "warn"
+    and (.message | startswith("build/mg is too large to measure in 1 s")))' "$result"
+  ! kill -0 "$(cat "$BATS_TEST_TMPDIR/du.pid")" 2>/dev/null
+}
+
 # --- doctor (host commands stubbed) ----------------------------------------
 
 @test "doctor with absent legacy team metadata warns, leaves the account unverified and only reads host state" {
