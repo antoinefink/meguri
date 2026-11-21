@@ -142,7 +142,10 @@ impl DeckDeletionJob {
     }
 }
 #[uniffi::export]
-pub fn start_delete_decks(ids: Vec<i64>) -> Result<DeckDeletionJobStart, CoreError> {
+/// `decks/decks` D8. `confirmed` is the last summary read before the delete
+/// (the question's counts, or the zero-card read's); a live count above it
+/// refuses with `DeckRefusal::LossesChanged` and writes nothing (D8 step 6).
+pub fn start_delete_decks(ids: Vec<i64>, confirmed: DeckDeletionSummary) -> Result<DeckDeletionJobStart, CoreError> {
     callback::enter("start_delete_decks");
     let host = runtime::host()?;
     let c = host.collection()?;
@@ -153,6 +156,10 @@ pub fn start_delete_decks(ids: Vec<i64>) -> Result<DeckDeletionJobStart, CoreErr
         let r = meguri_engine::decks::delete_controlled(
             &c,
             ids.into_iter().map(DeckId).collect(),
+            decks::ConfirmedLosses::Counts(decks::DeletionSummary {
+                decks: usize::try_from(confirmed.decks).unwrap_or(usize::MAX),
+                cards: usize::try_from(confirmed.cards).unwrap_or(usize::MAX),
+            }),
             host.backup(),
             j.cancel.clone(),
             j.progress.clone(),
