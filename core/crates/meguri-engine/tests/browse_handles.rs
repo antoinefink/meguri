@@ -273,9 +273,21 @@ fn a_session_keeps_the_two_newest_complete_handles_h6() {
     assert_eq!(fx.session.handle_state(a), Err(BrowseError::UnknownHandle));
     assert!(fx.session.handle_state(b).is_ok());
     assert!(fx.session.handle_state(c).is_ok());
-    // A handle of another session is unknown here.
-    let (other, _events) = session(&fx.h);
-    assert_eq!(other.handle_state(c), Err(BrowseError::UnknownHandle));
+    // A handle of another session is unknown here, also when that session
+    // holds handles of its own (H15).
+    let (other, events) = session(&fx.h);
+    let seq = other.start_search("", SearchMode::Notes, asc("noteFld"), None);
+    let own = loop {
+        match events.recv_timeout(WAIT).unwrap() {
+            SearchEvent::Complete { handle, seq: done, .. } if done == seq => break handle,
+            _ => {}
+        }
+    };
+    assert!(other.handle_state(own).is_ok());
+    for handle in [a, b, c] {
+        assert_eq!(other.handle_state(handle), Err(BrowseError::UnknownHandle));
+    }
+    assert_eq!(fx.session.handle_state(own), Err(BrowseError::UnknownHandle));
 }
 
 #[test]

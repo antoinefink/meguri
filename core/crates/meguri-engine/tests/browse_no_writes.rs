@@ -50,6 +50,18 @@ fn dump(h: &common::Harness) -> Vec<RawRows> {
     .collect()
 }
 
+/// A raw rollover barrier: settles queued day-check work (it commits no
+/// change set, and takes one seq).
+fn barrier(h: &common::Harness) {
+    h.collection
+        .run(
+            meguri_engine::OpSpec::named("browse_barrier", meguri_model::changes::OpSource::Rollover)
+                .stamp(meguri_storage::StampMode::Raw),
+            |_| Ok(()),
+        )
+        .unwrap();
+}
+
 #[test]
 fn a_session_and_the_one_shot_search_write_nothing_even_past_last_unburied() {
     let h = common::fresh();
@@ -70,6 +82,7 @@ fn a_session_and_the_one_shot_search_write_nothing_even_past_last_unburied() {
     .unwrap();
     // Three days on, with no day check meanwhile.
     h.clock.set_now_ms(common::NOW_MS + 3 * DAY_MS);
+    barrier(&h);
     let before = dump(&h);
     let seq_before = h.collection.last_seq();
 
@@ -123,7 +136,12 @@ fn a_session_and_the_one_shot_search_write_nothing_even_past_last_unburied() {
     assert_eq!(one_shot, buried_ids);
     drop(session);
 
-    assert_eq!(h.collection.last_seq(), seq_before, "no op committed");
+    barrier(&h);
+    assert_eq!(
+        h.collection.last_seq(),
+        meguri_engine::Seq(seq_before.0 + 1),
+        "no op committed but the barrier"
+    );
     assert_eq!(dump(&h), before);
 
     // A day query now would have unburied them (D7).

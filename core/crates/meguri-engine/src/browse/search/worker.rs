@@ -54,7 +54,7 @@ pub(super) struct Source {
     ids: Vec<i64>,
     set_aside: Vec<(i64, i64)>,
     match_seq: Seq,
-    match_data: Option<Vec<(i64, i64)>>,
+    match_data: Option<Vec<i64>>,
     generation: Generation,
 }
 
@@ -130,13 +130,28 @@ fn serve(shared: &Arc<SessionShared>, threads: &crate::threads::ThreadRegistry, 
         let delivery = threads.spawn_owned("meguri-search-events", Qos::UserInitiated, OWNER, move |activity| {
             for event in inbox {
                 let _busy = activity.busy();
-                listener.event(event);
+                // A panicking listener loses that event, not the next ones.
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener.event(event)));
             }
         });
         let seq = RequestSeq(job.seq);
         match delivery {
             Ok(delivery) => {
-                run(shared, job, &outbox);
+                let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(shared, job, &outbox)));
+                if ran.is_err() {
+                    // H4: the request still ends with one terminal event,
+                    // and its handle goes.
+                    let mut state = shared.lock();
+                    if let Some(handle) = state.current.as_ref().and_then(|current| current.handle) {
+                        state.handles.remove(&handle);
+                        state.complete.retain(|kept| *kept != handle);
+                    }
+                    drop(state);
+                    let _ = outbox.send(SearchEvent::Failed {
+                        seq,
+                        error: BrowseError::Engine(EngineError::internal("the search worker panicked")),
+                    });
+                }
                 drop(outbox);
                 let _ = delivery.join();
             }
@@ -311,8 +326,10 @@ impl Request<'_> {
         if !live || state.closed {
             return Err(Stop::Cancelled);
         }
-        state.next_handle += 1;
-        let id = HandleId(state.next_handle);
+        let id = match self.shared.registry.upgrade() {
+            Some(registry) => registry.next_handle(),
+            None => return Err(Stop::Cancelled),
+        };
         state.handles.insert(id, Arc::clone(&handle));
         if let Some(current) = state.current.as_mut() {
             current.handle = Some(id);
@@ -327,21 +344,29 @@ impl Request<'_> {
         Ok((id, handle))
     }
 
-    /// Appends the rest of the list after the first page, leaving out the
-    /// ids H10 recorded as removed meanwhile, completes the handle and
-    /// sends `Complete`, unless the request was superseded.
-    fn complete(&self, id: HandleId, handle: &Mutex<Handle>, rest: Listed) -> Result<(), Stop> {
+    /// Appends confirmed rows to a handle in progress, leaving out the ids
+    /// H10 recorded as removed meanwhile.
+    fn append(handle: &Mutex<Handle>, rows: Listed) {
+        let mut handle = lock(handle);
+        for (index, id) in rows.ids.iter().enumerate() {
+            if handle.removed_while_running.contains(id) {
+                continue;
+            }
+            handle.ids.push(*id);
+            if let Some(nid) = rows.nids.get(index) {
+                handle.nids.push(*nid);
+            }
+        }
+    }
+
+    /// Completes the handle and sends `Complete`, unless the request was
+    /// superseded. Set-aside cards H10 recorded as removed go too.
+    fn complete(&self, id: HandleId, handle: &Mutex<Handle>) -> Result<(), Stop> {
         let (count, revision) = {
             let mut handle = lock(handle);
             let removed = std::mem::take(&mut handle.removed_while_running);
-            for (index, id) in rest.ids.iter().enumerate() {
-                if removed.contains(id) {
-                    continue;
-                }
-                handle.ids.push(*id);
-                if let Some(nid) = rest.nids.get(index) {
-                    handle.nids.push(*nid);
-                }
+            if handle.mode == SearchMode::Cards {
+                handle.set_aside.retain(|(card, _)| !removed.contains(card));
             }
             handle.complete = true;
             (handle.count(), handle.revision)
@@ -371,16 +396,11 @@ impl Request<'_> {
         Ok(())
     }
 
-    /// Publishes a list read in one go: `FirstPage`, then `Complete`.
-    fn publish(&self, mut handle: Handle, listed: Listed) -> Result<(), Stop> {
-        let first = listed.ids.len().min(PAGE);
-        handle.ids = listed.ids[..first].to_vec();
-        handle.nids = listed.nids[..first.min(listed.nids.len())].to_vec();
-        let rest = Listed {
-            ids: listed.ids[first..].to_vec(),
-            nids: listed.nids.get(first..).map(<[i64]>::to_vec).unwrap_or_default(),
-        };
-        let (id, shared) = self.first_page(handle)?;
+    /// Publishes `handle` with `first` as its first page and prefix.
+    fn publish_first(&self, mut handle: Handle, first: Listed) -> Result<(HandleId, Arc<Mutex<Handle>>), Stop> {
+        handle.ids = first.ids;
+        handle.nids = first.nids;
+        let published = self.first_page(handle)?;
         #[cfg(feature = "test-hooks")]
         if let Some(hook) = self
             .shared
@@ -392,7 +412,12 @@ impl Request<'_> {
         {
             hook();
         }
-        self.complete(id, &shared, rest)
+        Ok(published)
+    }
+
+    /// One row of one integer: not 0 (`plan::ids::ANY_LONE_CARD`).
+    fn any(&self, rows: &impl ReadRows, sql: &str) -> Result<bool, Stop> {
+        Ok(self.list(rows, sql, &[])?.ids.first().is_some_and(|value| *value != 0))
     }
 
     /// H3: parse, check the sort, build the context and the plan, run the
@@ -414,32 +439,26 @@ impl Request<'_> {
             Stop::Failed(BrowseError::Search(error))
         })?;
         let sorted = SortedQuery::for_plan(&plan, &sort, &context).map_err(sort_error)?;
-        let mut listed = Listed::default();
-        self.visit_search(&*snapshot, text, sorted.pairs_sql(), sorted.params(), &mut |row| {
-            listed.ids.push(row[0]);
-            if let Some(nid) = row.get(1) {
-                listed.nids.push(*nid);
-            }
-            true
-        })?;
-        // H5: under S9's note-column sorts the matched cards without a note
-        // row are kept aside, not listed.
-        let set_aside = match (mode == SearchMode::Cards && !sorted.lists_lone_cards(), plan.lone_rows_sql()) {
-            (true, Some(sql)) => {
-                let lone = self.list(&*snapshot, &sql, plan.params())?;
-                lone.ids.into_iter().zip(lone.nids).collect()
-            }
-            _ => Vec::new(),
-        };
-        // H11's match data: the matching card-and-note pairs.
-        let match_data = match plan.pairs_sql() {
-            Some(sql) => {
-                let pairs = self.list(&*snapshot, &sql, plan.params())?;
-                Some(pairs.ids.into_iter().zip(pairs.nids).collect())
-            }
-            None => None,
-        };
-        let handle = Handle {
+        let rows = &*snapshot;
+        // The first page comes from the same statement with a LIMIT, which
+        // SQLite orders with a bounded heap rather than a full sort: equal
+        // rows, final, earlier (H3 budgets). The whole list then comes
+        // from the full statement in the same snapshot.
+        let mut first = Listed::default();
+        self.visit_search(
+            rows,
+            text,
+            &format!("{} LIMIT {PAGE}", sorted.pairs_sql()),
+            sorted.params(),
+            &mut |row| {
+                first.ids.push(row[0]);
+                if let Some(nid) = row.get(1) {
+                    first.nids.push(*nid);
+                }
+                true
+            },
+        )?;
+        let template = Handle {
             mode,
             sort,
             text: text.to_owned(),
@@ -448,19 +467,53 @@ impl Request<'_> {
             sort_clock: context,
             ids: Vec::new(),
             nids: Vec::new(),
-            set_aside,
+            set_aside: Vec::new(),
             match_seq: snapshot.seq(),
             applied_seq: snapshot.seq(),
             generation: snapshot.generation(),
             revision: 0,
-            match_data,
+            match_data: None,
             complete: false,
             removed_while_running: Default::default(),
         };
-        drop(snapshot);
-        drop(lease);
-        drop(slot);
-        self.publish(handle, listed)
+        let paged = first.ids.len();
+        let (id, handle) = self.publish_first(template, first)?;
+        if paged == PAGE {
+            let mut rest = Listed::default();
+            let mut index = 0usize;
+            self.visit(rows, sorted.pairs_sql(), sorted.params(), &mut |row| {
+                if index >= PAGE {
+                    rest.ids.push(row[0]);
+                    if let Some(nid) = row.get(1) {
+                        rest.nids.push(*nid);
+                    }
+                }
+                index += 1;
+                true
+            })
+            .map_err(|stop| refused(stop, text))?;
+            Self::append(&handle, rest);
+        }
+        // H5: under S9's note-column sorts the matched cards without a note
+        // row are kept aside, not listed; a sound collection has none.
+        let set_aside = match (mode == SearchMode::Cards && !sorted.lists_lone_cards(), plan.lone_rows_sql()) {
+            (true, Some(sql)) if self.any(rows, ids::ANY_LONE_CARD)? => {
+                let lone = self.list(rows, &sql, plan.params()).map_err(|stop| refused(stop, text))?;
+                lone.ids.into_iter().zip(lone.nids).collect()
+            }
+            _ => Vec::new(),
+        };
+        // H11's match data: the cards of the matching card-and-note pairs.
+        let match_data = match plan.pairs_sql() {
+            Some(sql) => Some(self.list(rows, &sql, plan.params()).map_err(|stop| refused(stop, text))?.ids),
+            None => None,
+        };
+        {
+            let mut handle = lock(&handle);
+            handle.set_aside = set_aside;
+            handle.match_data = match_data;
+        }
+        self.complete(id, &handle)
     }
 
     /// H8: the source's ids and set-aside cards sorted by `sort` in a new
@@ -485,14 +538,14 @@ impl Request<'_> {
         let mut all = source.ids;
         all.extend(source.set_aside.iter().map(|(card, _)| *card));
         let sorted = SortedQuery::for_ids(&all, &sort, &clock).map_err(sort_error)?;
-        let listed = self.list(&*snapshot, sorted.pairs_sql(), sorted.params())?;
+        let mut listed = self.list(&*snapshot, sorted.pairs_sql(), sorted.params())?;
         let set_aside = if source.mode == SearchMode::Cards && !sorted.lists_lone_cards() {
             let lone = self.list(&*snapshot, ids::LONE_CARDS_AMONG, &[id_list(&all)])?;
             lone.ids.into_iter().zip(lone.nids).collect()
         } else {
             Vec::new()
         };
-        let handle = Handle {
+        let template = Handle {
             mode: source.mode,
             sort,
             text: source.text,
@@ -510,10 +563,22 @@ impl Request<'_> {
             complete: false,
             removed_while_running: Default::default(),
         };
-        drop(snapshot);
-        drop(lease);
-        drop(slot);
-        self.publish(handle, listed)
+        let first = Listed {
+            ids: listed.ids.drain(..listed.ids.len().min(PAGE)).collect(),
+            nids: listed.nids.drain(..listed.nids.len().min(PAGE)).collect(),
+        };
+        let (id, handle) = self.publish_first(template, first)?;
+        Self::append(&handle, listed);
+        self.complete(id, &handle)
+    }
+}
+
+/// A database error of a search's own statement is `search_failed` over the
+/// whole text (`search/errors` E3, E5).
+fn refused(stop: Stop, text: &str) -> Stop {
+    match stop {
+        Stop::Failed(BrowseError::Engine(_)) => Stop::Failed(BrowseError::Search(refusal(text))),
+        other => other,
     }
 }
 

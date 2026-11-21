@@ -14,6 +14,10 @@ use super::{BrowseError, worker};
 pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i64>, BrowseError> {
     let query = meguri_search::parse(text).map_err(BrowseError::Search)?;
     let collection = engine.collection()?;
+    // Listed for halts (replace, suspend, close), so its reader comes back
+    // at once.
+    let token = crate::cancel::CancelToken::new();
+    let _running = engine.inner.searches.run(&token);
     let index = engine.inner.searches.server_reader();
     let lease = collection.server_reader(index)?;
     let snapshot = lease.snapshot()?;
@@ -22,11 +26,17 @@ pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i
     let plan = Plan::build(&query, mode, &context, &notetypes).map_err(|BuildError::Search(error)| BrowseError::Search(error))?;
     let mut ids = Vec::new();
     snapshot
-        .visit_id_rows(plan.sql(), &worker::cells(plan.params()), &|| false, &mut |row| {
+        .visit_id_rows(plan.sql(), &worker::cells(plan.params()), &|| token.is_cancelled(), &mut |row| {
             ids.push(row[0]);
             true
         })
-        .map_err(|_| BrowseError::Search(worker::refusal(text)))?;
+        .map_err(|_| {
+            if token.is_cancelled() {
+                BrowseError::Engine(crate::error::EngineError::Cancelled)
+            } else {
+                BrowseError::Search(worker::refusal(text))
+            }
+        })?;
     ids.sort_unstable();
     Ok(ids)
 }

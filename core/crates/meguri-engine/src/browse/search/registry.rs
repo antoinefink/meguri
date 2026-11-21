@@ -6,7 +6,7 @@
 //! generation change then releases every handle of the old generation
 //! before `CollectionReplaced` is delivered (H6).
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::task::Wake;
 
@@ -22,6 +22,9 @@ pub(crate) struct SearchRegistry {
     /// Notified when a reader comes back, a token is set or a halt ends.
     changed: Condvar,
     next_server_reader: AtomicUsize,
+    /// Handle ids are unique across the engine's sessions, so one session
+    /// never takes another's handle for its own (H15).
+    next_handle: AtomicU64,
 }
 
 #[derive(Default)]
@@ -83,6 +86,11 @@ impl SearchRegistry {
             }
             state = self.changed.wait(state).unwrap_or_else(PoisonError::into_inner);
         }
+    }
+
+    /// A handle id no session of this engine has used.
+    pub(super) fn next_handle(&self) -> super::HandleId {
+        super::HandleId(self.next_handle.fetch_add(1, Ordering::Relaxed) + 1)
     }
 
     /// The server reader the next one-shot search uses (H13).

@@ -37,9 +37,10 @@ pub(super) struct Handle {
     pub(super) applied_seq: Seq,
     pub(super) generation: Generation,
     pub(super) revision: u64,
-    /// H11: notes mode with card or card-and-note scope, the matching
-    /// card-and-note pairs, when the request kept them.
-    pub(super) match_data: Option<Vec<(i64, i64)>>,
+    /// H11: notes mode with card or card-and-note scope, the cards of the
+    /// matching card-and-note pairs (8 bytes each, H6), when the request
+    /// kept them.
+    pub(super) match_data: Option<Vec<i64>>,
     pub(super) complete: bool,
     /// H10: ids of the handle's mode listed `Removed` while the request
     /// runs; the worker leaves them out of the rows it confirms later.

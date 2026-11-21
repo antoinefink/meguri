@@ -185,7 +185,6 @@ pub(crate) struct SessionShared {
 struct SessionState {
     closed: bool,
     next_seq: u64,
-    next_handle: u64,
     queue: VecDeque<QueuedJob>,
     /// A worker thread serves the queue.
     worker: bool,
