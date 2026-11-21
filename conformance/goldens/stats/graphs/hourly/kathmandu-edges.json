@@ -292,10 +292,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/graphs/hourly/kathmandu-edges",
-  "scenario_sha256": "0a866343c85919f1c8c3cc53a45e8027e14dbc27d8e4c452a1f696738885e140",
+  "scenario_sha256": "21b99cce9f9f291e9960be006c49577fcdf4d3ed260506724dd4f2d7c4efd478",
   "tz": "Asia/Kathmandu"
 }

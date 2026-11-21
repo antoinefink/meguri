@@ -122,6 +122,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/card-info/zone-dst",
-  "scenario_sha256": "8c61ec1bc51b39b3b50c278d88ac4389050418e536f21381e62308d65fc7d352",
+  "scenario_sha256": "174d7ffa8081a18760ed6d41b56da981fd41f582f57cd3a353eb648eadddc783",
   "tz": "America/New_York"
 }

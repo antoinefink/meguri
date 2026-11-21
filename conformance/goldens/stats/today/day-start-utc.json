@@ -36,10 +36,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/today/day-start-utc",
-  "scenario_sha256": "da290562aba4404489b917a406b931a580be62bdf728332d67c3b13c18089a22",
+  "scenario_sha256": "d29713ece24b9de4557a25cffd96f2237362a931a00bfe6e1f1afd71ad79392f",
   "tz": "UTC"
 }

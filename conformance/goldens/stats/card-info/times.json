@@ -153,10 +153,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "9837e2a324d17b1b16e377e6dc25ef7bee0d3f896c50cfbef93f685234e439d0",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/card-info/times",
-  "scenario_sha256": "cf7dc3f67be42cb4a6fecfc4ad4be6f0489ffb92e222e2d5d389b78176a012fa",
+  "scenario_sha256": "05cd0a411528efb05c62d082d791d54da49ce780f0062276c93ed08d07bd8462",
   "tz": "Europe/Paris"
 }
