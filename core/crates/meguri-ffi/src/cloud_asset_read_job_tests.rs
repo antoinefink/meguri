@@ -67,6 +67,31 @@ fn outcome(job: &CloudPolicyAssetReadPassJob) -> Result<Option<()>, CoreError> {
     job.result.result().map(|pass| pass.map(|_| ()))
 }
 
+/// S1 quiesces participants, suspending the cloud Runtime, before it waits for
+/// cancelled ordinary jobs, so a close can change what such a job's remaining
+/// checks see. Close first drains already-registered Full original-resource
+/// work. This registers one and holds it, keeping a concurrent close before
+/// Host cleanup and Runtime suspension until the returned guard drops (or,
+/// if a test fails first, for at most 10 s).
+fn hold_close_before_runtime_suspension(fixture: &PublishedFixture) -> Release {
+    let host = &fixture.workflow.host;
+    let collection = host.collection().unwrap();
+    let (entered, reached) = mpsc::channel();
+    let (release, resume) = mpsc::channel::<()>();
+    host.engine().jobs().start_original_resource(
+        "close fence before Runtime suspension",
+        host.original_resource_authority(&collection),
+        move |_, mut authority| {
+            entered.send(authority.recheck()).unwrap();
+            let _ = resume.recv_timeout(Duration::from_secs(10));
+            Ok(())
+        },
+    );
+    let mode = reached.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(mode, meguri_engine::jobs::registry::ResourceMode::Full);
+    Release(release)
+}
+
 #[test]
 fn native_admission_jobs_asset_passes_queue_cancel_replace_and_close_without_rebinding() {
     for first in [false, true] {
@@ -788,59 +813,73 @@ fn native_admission_jobs_asset_pass_active_close_drains_worker_before_original_r
         let watch = Arc::new(Mutex::new((false, false)));
         let held = watch.clone();
         runtime.observe_state_contention_for_testing(contended);
-        let (entry, contention, admitted, requested, holder, starter, closing) = std::thread::scope(|scope| {
-            let release = Release(release);
-            let holder = scope.spawn(move || {
-                runtime.with_state_held_for_testing(|| {
-                    *held.lock().unwrap() = (true, false);
-                    let _ = entered.send(());
-                    let timed_out = resume.recv_timeout(Duration::from_secs(10)).is_err();
-                    *held.lock().unwrap() = (false, timed_out);
+        let (entry, contention, admitted, requested, terminal, close_waiting, holder, starter, closed, closing) =
+            std::thread::scope(|scope| {
+                let release = Release(release);
+                let holder = scope.spawn(move || {
+                    runtime.with_state_held_for_testing(|| {
+                        *held.lock().unwrap() = (true, false);
+                        let _ = entered.send(());
+                        let timed_out = resume.recv_timeout(Duration::from_secs(10)).is_err();
+                        *held.lock().unwrap() = (false, timed_out);
+                    });
                 });
+                let entry = reached.recv_timeout(Duration::from_secs(5));
+                let (sent, received) = mpsc::channel();
+                let starter = scope.spawn(move || {
+                    let _ = sent.send(port.start());
+                });
+                let admitted = received.recv_timeout(Duration::from_secs(5));
+                let contention = observed.recv_timeout(Duration::from_secs(5));
+                // Without this fence, close may suspend the Runtime while the
+                // worker still waits for it. The worker then reports that lost
+                // authority (a stale command, an unverified account) instead
+                // of the cancellation close requested first.
+                let fence = hold_close_before_runtime_suspension(&fixture);
+                let host = fixture.workflow.host.clone();
+                let (done, returned) = mpsc::channel();
+                let closing = scope.spawn(move || done.send(host.close()).unwrap());
+                let job = admitted.as_ref().ok().and_then(|job| job.as_ref().ok());
+                let requested = job.is_some_and(|job| {
+                    let deadline = meguri_engine::monotonic::now() + Duration::from_secs(3);
+                    while !job.handle.cancel.requested() && meguri_engine::monotonic::now() < deadline {
+                        std::thread::yield_now();
+                    }
+                    job.handle.cancel.requested()
+                });
+                drop(release);
+                // The worker resumes behind its Runtime wait and ends while
+                // close is still running.
+                let terminal = job.map(|job| finished(&events, job.handle.id));
+                let close_waiting = matches!(returned.try_recv(), Err(mpsc::TryRecvError::Empty));
+                drop(fence);
+                (
+                    entry,
+                    contention,
+                    admitted,
+                    requested,
+                    terminal,
+                    close_waiting,
+                    holder.join(),
+                    starter.join(),
+                    returned.recv_timeout(Duration::from_secs(5)),
+                    closing.join(),
+                )
             });
-            let entry = reached.recv_timeout(Duration::from_secs(5));
-            let (sent, received) = mpsc::channel();
-            let starter = scope.spawn(move || {
-                let _ = sent.send(port.start());
-            });
-            let admitted = received.recv_timeout(Duration::from_secs(5));
-            let contention = observed.recv_timeout(Duration::from_secs(5));
-            let host = fixture.workflow.host.clone();
-            let closing = scope.spawn(move || host.close());
-            let requested = if let Ok(Ok(job)) = &admitted {
-                let deadline = meguri_engine::monotonic::now() + Duration::from_secs(3);
-                while !job.handle.cancel.requested() && meguri_engine::monotonic::now() < deadline {
-                    std::thread::yield_now();
-                }
-                job.handle.cancel.requested()
-            } else {
-                false
-            };
-            drop(release);
-            (
-                entry,
-                contention,
-                admitted,
-                requested,
-                holder.join(),
-                starter.join(),
-                closing.join(),
-            )
-        });
         let job = admitted.expect("start did not wait for Runtime").unwrap();
-        let terminal = finished(&events, job.handle.id);
         let drained = engine.jobs().running().is_empty();
         let replacement = published().0;
         let retained = outcome(&job);
         replacement.workflow.host.close().unwrap();
         holder.unwrap();
         starter.unwrap();
-        closing.unwrap().unwrap();
+        closing.unwrap();
+        closed.expect("close returned after the fence").unwrap();
         entry.expect("real Runtime holder");
         contention.expect("worker reached Runtime before close");
-        assert!(requested && drained);
+        assert!(requested && close_waiting && drained);
         assert!(!watch.lock().unwrap().1);
-        assert_eq!(terminal, JobOutcome::Cancelled);
+        assert_eq!(terminal, Some(JobOutcome::Cancelled));
         assert_eq!(retained, Err(CoreError::Cancelled));
     }
 }
