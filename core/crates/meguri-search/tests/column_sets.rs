@@ -196,16 +196,16 @@ fn a_note_types_first_change_writes_a_copy_of_the_standard_set() {
         None,
         "a set of another shape is no own set"
     );
-    let own = read(r#"{"std":{"cards":["deck"]},"1700000000001":{"cards":["fld:Front"],"z":true}}"#);
+    let own = read(r#"{"std":{"cards":["deck"],"w":0},"1700000000001":{"cards":["fld:Front"],"z":true,"sort":{"y":1}}}"#);
     assert_eq!(
         own.use_standard(NT).map(|value| value.compact()).as_deref(),
         Some(
-            r#"{"1700000000001":{"cards":["deck"],"notes":["noteFld","note","template","noteTags","noteCrt"],"sort":{"cards":["noteFld",false],"notes":["noteFld",false]}},"std":{"cards":["deck"]}}"#
+            r#"{"1700000000001":{"cards":["deck"],"notes":["noteFld","note","template","noteTags","noteCrt"],"sort":{"cards":["noteFld",false],"notes":["noteFld",false],"y":1},"z":true},"std":{"cards":["deck"],"w":0}}"#
         )
     );
     assert_eq!(
         written(&own, SetId::Notetype(NT), Cards, Change::Show(col(Column::Deck))).as_deref(),
-        Some(r#"{"1700000000001":{"cards":["fld:Front","deck"],"z":true},"std":{"cards":["deck"]}}"#),
+        Some(r#"{"1700000000001":{"cards":["fld:Front","deck"],"sort":{"y":1},"z":true},"std":{"cards":["deck"],"w":0}}"#),
         "an own set's later change writes only its member, unknown members kept"
     );
 }
