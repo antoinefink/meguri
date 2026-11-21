@@ -15,7 +15,7 @@ setup:
     - {"notetype": "Pair", "deck": "Lang", "fields": ["n1", "x"]}
 steps:
   - {"db_exec": {"sql": "UPDATE cards SET type = 2, queue = 2, ivl = 20, due = 11, factor = 2500, reps = 4, data = '{}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}}
-  - {"db_exec": {"sql": "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1892970000000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, -600, 0, 0, 4000, 0), (1892970600000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, 3, -600, 2500, 3000, 0), (1893229200000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, 8, 3, 2500, 5000, 1), (1893920400000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, 20, 8, 2500, 6000, 1)"}}
+  - {"db_exec": {"sql": "INSERT INTO revlog VALUES (1892970000000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, -600, 0, 0, 4000, 0), (1892970600000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, 3, -600, 2500, 3000, 0), (1893229200000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, 8, 3, 2500, 5000, 1), (1893920400000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, 3, 20, 8, 2500, 6000, 1)"}}
   - {"observe": [{"card": ["#c1"]}]}
   - {"db_exec": {"sql": "SELECT mod FROM col"}}
   - {"observe": [{"card_stats": ["#c1"]}]}

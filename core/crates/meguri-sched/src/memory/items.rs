@@ -92,27 +92,47 @@ impl<'a> History<'a> {
             .collect()
     }
 
-    pub fn memory(&self, model: &FSRS, next_day_at: i64, retention: f32) -> Result<MemoryState, FSRSError> {
+    /// The number of rows from the history's start to the card's last row:
+    /// the selected history is always that suffix of the caller's rows.
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// I5: the item and its starting state (an incomplete history's first
+    /// kept row, converted and removed from the item).
+    fn item(
+        &self,
+        model: &FSRS,
+        next_day_at: i64,
+        retention: f32,
+    ) -> Result<(FSRSItem, Option<fsrs::MemoryState>), FSRSError> {
         let mut item = FSRSItem {
             reviews: self.reviews(next_day_at),
         };
-        let initial = if self.complete {
-            None
+        if self.complete {
+            return Ok((item, None));
+        }
+        let first = self.kept().next().expect("a selected history has a graded row");
+        let factor = if first.ease_factor == 0 {
+            2500
         } else {
-            let first = self.kept().next().expect("a selected history has a graded row");
-            let factor = if first.ease_factor == 0 {
-                2500
-            } else {
-                first.ease_factor
-            };
-            let ease = factor as f32 / 1000.0;
-            let mut initial = model.memory_state_from_sm2(ease, first.interval.max(1) as f32, retention)?;
-            if ease <= 1.1 {
-                initial.difficulty = (ease - 0.1) * 9.0 + 1.0;
-            }
-            item.reviews.remove(0);
-            Some(initial)
+            first.ease_factor
         };
+        let ease = factor as f32 / 1000.0;
+        let mut initial = model.memory_state_from_sm2(ease, first.interval.max(1) as f32, retention)?;
+        if ease <= 1.1 {
+            initial.difficulty = (ease - 0.1) * 9.0 + 1.0;
+        }
+        item.reviews.remove(0);
+        Ok((item, Some(initial)))
+    }
+
+    pub fn memory(&self, model: &FSRS, next_day_at: i64, retention: f32) -> Result<MemoryState, FSRSError> {
+        let (item, initial) = self.item(model, next_day_at, retention)?;
         let memory = if item.reviews.is_empty() {
             initial.expect("a complete history always has a review")
         } else {
@@ -122,6 +142,22 @@ impl<'a> History<'a> {
             stability: memory.stability,
             difficulty: memory.difficulty,
         })
+    }
+
+    /// `stats/card-info` C6.3: one replay with the crate's
+    /// `historical_memory_states`, which gives one state per kept row,
+    /// oldest first (the starting state stands for an incomplete history's
+    /// first kept row).
+    pub fn historical(&self, model: &FSRS, next_day_at: i64, retention: f32) -> Result<Vec<MemoryState>, FSRSError> {
+        let (item, initial) = self.item(model, next_day_at, retention)?;
+        Ok(model
+            .historical_memory_states(item, initial)?
+            .into_iter()
+            .map(|state| MemoryState {
+                stability: state.stability,
+                difficulty: state.difficulty,
+            })
+            .collect())
     }
 }
 

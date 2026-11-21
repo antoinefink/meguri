@@ -372,6 +372,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/card-info/params",
-  "scenario_sha256": "fa99bf7145f6515c410765cc03d3e757953993881b043a1a5752e2dd294fc120",
+  "scenario_sha256": "aac951a74dc3695f0285be2d0166fb96dbb9d804f920d85b7560e8eb4ba1b4d0",
   "tz": "Europe/Paris"
 }

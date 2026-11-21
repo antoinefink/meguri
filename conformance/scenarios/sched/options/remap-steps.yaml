@@ -80,22 +80,22 @@ steps:
   - advance: 1h
   # A. Lang's learning steps 1m 10m 1h -> 5m 2h, from the Words screen.
   - save_deck_options: {deck: Words, options: {learn_steps: [5m, 2h]}}
-  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9, #c10, #c11, #c12, #c13, #c14, #c15)"]
+  - observe: ["card(#c1, #c3, #c5, #c7, #c9, #c11, #c13, #c15, #c2, #c4, #c6, #c8, #c10, #c12, #c14)"]
   - advance: 1h
   # B. Lang's relearning steps 10m -> 5m 30m 2h: only relearning cards.
   - save_deck_options: {deck: Words, options: {relearn_steps: [5m, 30m, 2h]}}
-  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9, #c10, #c11, #c12, #c13, #c14, #c15)"]
+  - observe: ["card(#c1, #c3, #c5, #c7, #c9, #c11, #c13, #c15, #c2, #c4, #c6, #c8, #c10, #c12, #c14)"]
   - advance: 1h
   # C. Lang's learning steps 5m 2h -> none.
   - save_deck_options: {deck: Words, options: {learn_steps: []}}
-  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9, #c10, #c11, #c12, #c13, #c14, #c15)"]
+  - observe: ["card(#c1, #c3, #c5, #c7, #c9, #c11, #c13, #c15, #c2, #c4, #c6, #c8, #c10, #c12, #c14)"]
   - advance: 1h
   # D. Lang's learning steps none -> 1m 10m: no step was passed, nothing moves.
   - save_deck_options: {deck: Words, options: {learn_steps: [1m, 10m]}}
-  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9, #c10, #c11, #c12, #c13, #c14, #c15)"]
+  - observe: ["card(#c1, #c3, #c5, #c7, #c9, #c11, #c13, #c15, #c2, #c4, #c6, #c8, #c10, #c12, #c14)"]
   - advance: 1h
   # E. Phrases switches from Other (1m 10m) to Lang, whose learning steps
   # become 1m 5m 20m in the same save: Words' learning cards map from Lang's
   # old steps, Phrases' from Other's.
   - save_deck_options: {deck: Phrases, preset: Lang, options: {learn_steps: [1m, 5m, 20m]}}
-  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9, #c10, #c11, #c12, #c13, #c14, #c15)"]
+  - observe: ["card(#c1, #c3, #c5, #c7, #c9, #c11, #c13, #c15, #c2, #c4, #c6, #c8, #c10, #c12, #c14)"]

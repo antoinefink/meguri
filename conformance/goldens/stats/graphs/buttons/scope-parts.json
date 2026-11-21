@@ -399,10 +399,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/graphs/buttons/scope-parts",
-  "scenario_sha256": "2153f75f703fb497feff008f8aa69bdebd945cafd9fb5ec79041d318af940a8a",
+  "scenario_sha256": "258ced8ba2b7085a02942a695d83de3d398705e0448a732d0b68c0dd2c2a8618",
   "tz": "Europe/Paris"
 }

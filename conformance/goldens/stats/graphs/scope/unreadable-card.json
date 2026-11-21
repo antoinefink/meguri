@@ -122,6 +122,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/graphs/scope/unreadable-card",
-  "scenario_sha256": "8f7fa13e0f1f98e55403176681f3e9413ea001d67702da8ab2e5e073b3742198",
+  "scenario_sha256": "f38ea7a4773b586ba5c882d98d55241c3eb698f94dd631cc9f6cb403884a4514",
   "tz": "Europe/Paris"
 }

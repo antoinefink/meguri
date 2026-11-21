@@ -121,10 +121,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/today/deck-subtree",
-  "scenario_sha256": "37957b2dd5046872b5de0d3b20a40573d9fec70f3bdcc90632a770848db0aad5",
+  "scenario_sha256": "5750f650c5855d2461670511787c0bf18c1e674a2b5774965665d232a384f7f8",
   "tz": "Europe/Paris"
 }
