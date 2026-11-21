@@ -14,7 +14,7 @@
 use crate::config::{Column, Refusal, SortDirection};
 use crate::context::{ContextReads, ContextValue, SearchContext};
 
-use super::{Param, Plan, Rows, SearchMode, props};
+use super::{Param, Params, Plan, Rows, SearchMode, props};
 
 /// The prefix of a field column key (`browser/workspace` V3).
 pub const FIELD_COLUMN_PREFIX: &str = "fld:";
@@ -108,12 +108,15 @@ pub struct SortedQuery {
 
 impl SortedQuery {
     /// The search's matching rows sorted (S9: in cards mode a sort that reads
-    /// note columns tests only cards whose note exists).
+    /// note columns tests only cards whose note exists). The plan's
+    /// parameters come first; a key's own (a field column's name, U261)
+    /// follow them.
     pub fn for_plan(plan: &Plan, sort: &Sort, ctx: &SearchContext) -> Result<SortedQuery, SortError> {
         if plan.mode() != sort.mode {
             return Err(SortError::ModeMismatch);
         }
-        let keys = keys(sort, ctx)?;
+        let mut params = Params::from_vec(plan.params().to_vec());
+        let keys = keys(sort, ctx, &mut params)?;
         let filter = match (sort.mode, plan.rows()) {
             (SearchMode::Notes, Rows::CardsWithNotes | Rows::Cards) => format!(
                 "n.id IN (SELECT c.nid FROM cards c JOIN notes n ON n.id = c.nid WHERE {})",
@@ -127,45 +130,33 @@ impl SortedQuery {
             &keys,
             &filter,
             joined,
-            plan.params().to_vec(),
+            params.into_vec(),
             plan.reads().union(keys.reads),
             plan.is_slow() || keys.slow,
         ))
     }
 
-    /// The ids of parameter `?1`, [`SortedQuery::ids_param`], sorted without
-    /// running a predicate (a resort, `browser/result-sets` H8): ids that
-    /// name no row are left out, and in cards mode a sort that reads note
-    /// columns leaves out cards whose note is missing (S9).
-    pub fn for_ids(sort: &Sort, ctx: &SearchContext) -> Result<SortedQuery, SortError> {
-        let keys = keys(sort, ctx)?;
+    /// `ids` sorted without running a predicate (a resort,
+    /// `browser/result-sets` H8): ids that name no row are left out, and in
+    /// cards mode a sort that reads note columns leaves out cards whose note
+    /// is missing (S9). The ids are parameter `?1`, a JSON array.
+    pub fn for_ids(ids: &[i64], sort: &Sort, ctx: &SearchContext) -> Result<SortedQuery, SortError> {
+        let mut params = Params::default();
+        let list = params.bind(ids_param(ids));
+        let keys = keys(sort, ctx, &mut params)?;
         let filter = match sort.mode {
-            SearchMode::Cards => "c.id IN (SELECT value FROM json_each(?1))",
-            SearchMode::Notes => "n.id IN (SELECT value FROM json_each(?1))",
+            SearchMode::Cards => format!("c.id IN (SELECT value FROM json_each({list}))"),
+            SearchMode::Notes => format!("n.id IN (SELECT value FROM json_each({list}))"),
         };
         Ok(SortedQuery::new(
             sort,
             &keys,
-            filter,
+            &filter,
             keys.needs_note,
-            Vec::new(),
+            params.into_vec(),
             keys.reads,
             keys.slow,
         ))
-    }
-
-    /// The `?1` of [`SortedQuery::for_ids`]: the ids as a JSON array.
-    pub fn ids_param(ids: &[i64]) -> Param {
-        let mut text = String::with_capacity(ids.len() * 14 + 2);
-        text.push('[');
-        for (k, id) in ids.iter().enumerate() {
-            if k > 0 {
-                text.push(',');
-            }
-            text.push_str(&id.to_string());
-        }
-        text.push(']');
-        Param::Text(text)
     }
 
     fn new(
@@ -248,6 +239,20 @@ impl SortedQuery {
     }
 }
 
+/// The id list of [`SortedQuery::for_ids`] as one JSON array text.
+fn ids_param(ids: &[i64]) -> Param {
+    let mut text = String::with_capacity(ids.len() * 14 + 2);
+    text.push('[');
+    for (k, id) in ids.iter().enumerate() {
+        if k > 0 {
+            text.push(',');
+        }
+        text.push_str(&id.to_string());
+    }
+    text.push(']');
+    Param::Text(text)
+}
+
 /// The keys of one column in one mode, ascending, without the final key.
 #[derive(Default)]
 struct Keys {
@@ -290,9 +295,9 @@ fn over_cards(expr: &str, condition: &str) -> String {
     format!("(SELECT {expr} FROM cards k WHERE k.nid = n.id{condition})")
 }
 
-fn keys(sort: &Sort, ctx: &SearchContext) -> Result<Keys, SortError> {
+fn keys(sort: &Sort, ctx: &SearchContext, params: &mut Params) -> Result<Keys, SortError> {
     match &sort.column {
-        SortColumn::Field(name) => field_keys(name, sort.mode),
+        SortColumn::Field(name) => field_keys(name, sort.mode, params),
         SortColumn::Column(column) => Ok(match sort.mode {
             SearchMode::Cards => card_keys(*column, ctx),
             SearchMode::Notes => note_keys(*column, ctx),
@@ -300,8 +305,10 @@ fn keys(sort: &Sort, ctx: &SearchContext) -> Result<Keys, SortError> {
     }
 }
 
-/// `browser/workspace` V4.2, U261: the field column's key goes here.
-fn field_keys(name: &str, _mode: SearchMode) -> Result<Keys, SortError> {
+/// `browser/workspace` V4.2, U261: the field column's key goes here. The
+/// field name is user text: bind it with `params`, never write it into the
+/// statement.
+fn field_keys(name: &str, _mode: SearchMode, _params: &mut Params) -> Result<Keys, SortError> {
     Err(SortError::FieldColumnNotYetSupported { name: name.to_owned() })
 }
 

@@ -197,6 +197,18 @@ fn browser_rows(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
                 .ok_or_else(|| invalid(format!("{reference} is not a logical reference")))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    // B3: non-empty lists of distinct items.
+    let distinct = |items: &[String]| {
+        let mut sorted = items.to_vec();
+        sorted.sort();
+        sorted.dedup();
+        !items.is_empty() && sorted.len() == items.len()
+    };
+    if !distinct(&columns.iter().map(|c| c.key().to_owned()).collect::<Vec<_>>())
+        || !distinct(&refs.iter().map(ToString::to_string).collect::<Vec<_>>())
+    {
+        return Err(invalid("browser_rows takes non-empty lists of distinct columns and rows"));
+    }
     let notes_mode = BrowserConfig::read(&*collection(session)?.reader()?)
         .map_err(core)?
         .notes_mode();
@@ -219,7 +231,7 @@ fn browser_rows(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
         .collect::<Result<Vec<_>, _>>()?;
     let time = RowTime {
         now: session.clock.now_secs(),
-        today: today(session)?,
+        today: super::sched::day_without_writes(session)?.today,
     };
     let collection = session.engine_collection()?;
     let rows = browse::rows(
@@ -251,31 +263,6 @@ fn browser_rows(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
         })
         .collect::<Result<Vec<_>, _>>()
         .map(Value::Array)
-}
-
-/// B3: today from the scenario clock, computed as the day query computes it
-/// but with no write: Browse rows run no unbury and store no timing key
-/// (`sched/day-clock` D14.2; the oracle's rows read the day the same way).
-fn today(session: &Session<'_>) -> Result<u32, ExecError> {
-    use meguri_model::clock::Clock;
-    use meguri_sched::timing::{self, DayInputs};
-    use meguri_storage::ReadRows;
-    let reader = collection(session)?.reader()?;
-    let stored = |key: &str| -> Result<Option<i128>, ExecError> {
-        Ok(match reader.config_value(key).map_err(core)? {
-            Some(ConfigValue::Integer(value)) => Some(value),
-            _ => None,
-        })
-    };
-    let now = session.clock.now_secs();
-    let day = timing::sched_day(&DayInputs {
-        crt: reader.col().map_err(core)?.created.0,
-        creation_offset: timing::creation_offset(stored("creationOffset")?),
-        offset: session.clock.utc_offset_at(now * 1000),
-        rollover_hour: timing::rollover_hour(stored("rollover")?).unwrap_or(timing::DEFAULT_ROLLOVER_HOUR),
-        now,
-    });
-    Ok(day.today)
 }
 
 /// B3's tint names.
@@ -387,4 +374,33 @@ fn local(secs: i64, clock: &super::clock::ScenarioClock) -> (String, String) {
         format!("{year}-{month:02}-{day:02}"),
         format!("{:02}:{:02}", seconds / 3600, seconds % 3600 / 60),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::clock::ScenarioClock;
+    use super::local;
+
+    // browser/columns C12: four-digit years zero-padded, others signed, and
+    // `invalid date` outside -262143-01-01 to +262142-12-31.
+    #[test]
+    fn local_dates_write_years_and_invalid_instants_as_c12_says() {
+        let utc = ScenarioClock::new("UTC", "2030-01-15T10:00:00").unwrap();
+        assert_eq!(local(1_894_701_600, &utc), ("2030-01-15".into(), "10:00".into()));
+        assert_eq!(local(-60, &utc), ("1969-12-31".into(), "23:59".into()));
+        let day = 86_400i64;
+        // 1,894,701,600 + 3,000,000 days: the year 10243.
+        assert!(local(1_894_701_600 + 3_000_000 * day, &utc).0.starts_with("+10243-"));
+        // 0000-01-01 and the day before it.
+        let year_zero = -62_167_219_200;
+        assert_eq!(local(year_zero, &utc).0, "0000-01-01");
+        assert_eq!(local(year_zero - day, &utc).0, "-0001-12-31");
+        let invalid = ("invalid date".to_owned(), "invalid date".to_owned());
+        assert_eq!(local(1_894_701_600 + 100_000_000 * day, &utc), invalid);
+        assert_eq!(local(i64::MAX, &utc), invalid);
+        // The zone's offset at the instant: 2030-03-11 04:30 UTC is 00:30
+        // EDT, after the change to daylight-saving time.
+        let new_york = ScenarioClock::new("America/New_York", "2030-01-15T10:00:00").unwrap();
+        assert_eq!(local(1_899_433_800, &new_york), ("2030-03-11".into(), "00:30".into()));
+    }
 }

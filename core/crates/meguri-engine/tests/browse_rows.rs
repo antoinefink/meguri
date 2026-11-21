@@ -30,13 +30,17 @@ struct Fixture {
 
 /// A note type with two templates (the second reads Back) or a cloze one.
 fn fixture(cloze: bool, front: &str, back: &str, browser_front: &str) -> Fixture {
+    fixture_with(cloze, front, back, browser_front, "")
+}
+
+fn fixture_with(cloze: bool, front: &str, back: &str, browser_front: &str, browser_back: &str) -> Fixture {
     let h = common::fresh();
     let template = |name: &str, front: &str, back: &str| notetypes::NewTemplate {
         name: name.into(),
         front: front.into(),
         back: back.into(),
         browser_front: browser_front.into(),
-        browser_back: String::new(),
+        browser_back: browser_back.into(),
     };
     let templates = if cloze {
         vec![template("Cloze", front, back)]
@@ -377,4 +381,19 @@ fn a_row_request_writes_nothing() {
     f.rows(SearchMode::Cards, &[cards[0].0], &Column::ALL);
     f.rows(SearchMode::Notes, &[note.0], &Column::ALL);
     assert_eq!(stamps(&f), before);
+}
+
+#[test]
+fn a_browser_answer_format_is_used_for_the_answer_cell_c10() {
+    // The browser question repeats in the browser answer, so its beginning
+    // goes; the review answer format is not used.
+    let f = fixture_with(false, "{{Front}}", "{{Back}} review", "Q:{{Front}}", "Q:{{Front}} [sound:a.mp3]{{Back}}");
+    let (_, cards) = f.note(&["Baum", "tree"], &[]);
+    assert_eq!(
+        f.cells(SearchMode::Cards, cards[0].0, &[Column::Question, Column::Answer]),
+        vec![
+            Cell::Question(Question::Text("Q:Baum".into())),
+            Cell::Answer(Answer::Text("🔉a.mp3🔉tree".into())),
+        ]
+    );
 }

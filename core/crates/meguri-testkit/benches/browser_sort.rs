@@ -18,8 +18,8 @@ use meguri_model::clock::{FixedClock, UtcOffset};
 use meguri_model::ids::DeckId;
 use meguri_model::rng::SeededRandom;
 use meguri_search::config::SortDirection;
-use meguri_search::{FoldMode, Param, Plan, SearchContext, SearchMode, Sort, SortedQuery, parse};
-use meguri_storage::raw::{SqlValue, RawRows};
+use meguri_search::{FoldMode, Param, Plan, SearchContext, SearchMode, SearchNotetypes, Sort, SortedQuery, parse};
+use meguri_storage::raw::{RawRows, SqlValue};
 use meguri_storage::{Initializers, OpenOptions, ReaderRole, open_collection};
 use meguri_testkit::bench::fixtures;
 use meguri_testkit::bench::peak_alloc::PeakAlloc;
@@ -117,8 +117,23 @@ fn main() -> ExitCode {
         let db = open_collection(&copy.path, &OpenOptions::new(&clock, &random).initializers(initializers))
             .expect("the collection opens");
         let reader = db.open_reader(ReaderRole::Query).expect("a query reader");
+        let notetypes = SearchNotetypes::read(&reader).expect("the note types read");
+        // The baseline: every id unsorted, read the same way.
+        for (mode, mode_name) in [(SearchMode::Cards, "cards"), (SearchMode::Notes, "notes")] {
+            let plan = Plan::build(&query, mode, &ctx, &notetypes).expect("the plan builds");
+            let run = || reader.execute_raw(plan.sql(), &[]).expect("the search runs").rows.len();
+            let name = format!("browser.sort.unsorted.{mode_name}");
+            eprintln!("browser-sort {size} {name}: {} rows", black_box(run()));
+            let mut measurement = Measurement::start(&name, Some(&size));
+            criterion.bench_function(&format!("unsorted.{mode_name}/{size}"), |b| {
+                b.iter_custom(|n| measurement.run(n, |_| black_box(run())))
+            });
+            if measurement.samples().count() > 0 {
+                suite.push(measurement.finish());
+            }
+        }
         for (mode, key) in SORTS {
-            let plan = Plan::build(&query, mode, &ctx).expect("the plan builds");
+            let plan = Plan::build(&query, mode, &ctx, &notetypes).expect("the plan builds");
             let all = ids(&reader.execute_raw(plan.sql(), &[]).expect("the search runs"));
             let sort = Sort::new(mode, key, SortDirection::Descending).expect("a sortable key");
             let mode_name = match mode {
@@ -134,9 +149,9 @@ fn main() -> ExitCode {
                     .len()
             };
             let from_ids = || {
-                let sorted = SortedQuery::for_ids(&sort, &ctx).expect("the sort builds");
+                let sorted = SortedQuery::for_ids(&all, &sort, &ctx).expect("the sort builds");
                 reader
-                    .execute_raw(sorted.sql(), &values(&[SortedQuery::ids_param(&all)]))
+                    .execute_raw(sorted.sql(), &values(sorted.params()))
                     .expect("the resort runs")
                     .rows
                     .len()

@@ -237,11 +237,11 @@ impl<R: ReadRows + ?Sized> Reading<'_, R> {
             state,
             tint,
             font: Font::of(&template.config.browser_font_name, template.config.browser_font_size),
+            // C6: the field at index `sortf`, as the Sort Field cell reads it.
             sort_field_rtl: records
                 .kind
                 .fields
-                .iter()
-                .find(|field| field.ord == records.kind.config.sort_field_idx)
+                .get(records.kind.config.sort_field_idx as usize)
                 .is_some_and(|field| field.config.rtl),
             cells,
         })

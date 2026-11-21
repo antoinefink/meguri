@@ -13,9 +13,10 @@ use meguri_model::{
 };
 use meguri_search::config::{Column, Refusal, SortDirection};
 use meguri_search::{
-    ContextValue, FoldMode, Param, Plan, SearchContext, SearchMode, Sort, SortColumn, SortError, SortedQuery, parse,
+    ContextValue, FoldMode, Param, Plan, SearchContext, SearchMode, SearchNotetypes, Sort, SortColumn, SortError,
+    SortedQuery, parse,
 };
-use meguri_storage::{Initializers, OpenOptions, OpenedCollection, ReaderRole, open_collection, raw::SqlValue};
+use meguri_storage::{Initializers, OpenOptions, OpenedCollection, Reader, ReaderRole, open_collection, raw::SqlValue};
 
 const NOW: i64 = 1_894_701_600;
 
@@ -32,9 +33,13 @@ fn context() -> SearchContext {
     }
 }
 
+/// Fields drop in order: the reader, the collection, then the directory.
 struct Db {
-    _dir: tempfile::TempDir,
+    /// One `query_only` reader for every read, so that a TEMP object a
+    /// statement created would show in its `sqlite_temp_master`.
+    reader: Reader,
     db: OpenedCollection,
+    _dir: tempfile::TempDir,
 }
 
 fn values(params: &[Param]) -> Vec<SqlValue> {
@@ -102,7 +107,12 @@ impl Db {
         let mut initializers = Initializers::new();
         initializers.register(meguri_search::sqlfns::register);
         let db = open_collection(&path, &OpenOptions::new(&clock, &random).initializers(initializers)).unwrap();
-        let db = Db { _dir: dir, db };
+        let reader = db.open_reader(ReaderRole::Query).unwrap();
+        let db = Db {
+            reader,
+            db,
+            _dir: dir,
+        };
         for table in ["cards", "notes", "decks", "notetypes", "templates", "fields"] {
             db.exec(&format!("DELETE FROM {table}"), &[]);
         }
@@ -177,8 +187,7 @@ impl Db {
     }
 
     fn rows(&self, sql: &str, params: &[Param]) -> Vec<Vec<SqlValue>> {
-        let reader = self.db.open_reader(ReaderRole::Query).unwrap();
-        reader.execute_raw(sql, &values(params)).unwrap().rows
+        self.reader.execute_raw(sql, &values(params)).unwrap().rows
     }
 
     fn ids(&self, sql: &str, params: &[Param]) -> Vec<i64> {
@@ -192,7 +201,7 @@ impl Db {
     }
 
     fn plan(&self, text: &str, mode: SearchMode) -> Plan {
-        Plan::build(&parse(text).unwrap(), mode, &context()).unwrap()
+        Plan::build(&parse(text).unwrap(), mode, &context(), &SearchNotetypes::default()).unwrap()
     }
 
     fn sorted(&self, text: &str, mode: SearchMode, key: &str, direction: SortDirection) -> Vec<i64> {
@@ -211,8 +220,8 @@ impl Db {
 
     fn sorted_ids(&self, ids: &[i64], mode: SearchMode, key: &str, direction: SortDirection) -> Vec<i64> {
         let sort = Sort::new(mode, key, direction).unwrap();
-        let query = SortedQuery::for_ids(&sort, &context()).unwrap();
-        self.ids(query.sql(), &[SortedQuery::ids_param(ids)])
+        let query = SortedQuery::for_ids(ids, &sort, &context()).unwrap();
+        self.ids(query.sql(), query.params())
     }
 
     /// The sorted ids grouped into the runs of `runs_sql`.
@@ -282,7 +291,7 @@ fn reversing_an_ascending_sort_gives_the_descending_one_s8() {
 }
 
 #[test]
-fn every_order_is_total_and_keeps_the_result_set_s8_s9() {
+fn every_order_lists_each_id_once_keeps_the_result_set_and_ignores_input_order_s8_s9() {
     let db = mixed();
     let note_sorts = [
         Column::SortField,
@@ -525,7 +534,7 @@ fn unsortable_columns_and_unknown_keys_are_refused_but_field_columns_are_not_s1(
                 &SortColumn::Field(key.strip_prefix("fld:").unwrap().to_owned())
             );
             assert!(matches!(
-                SortedQuery::for_ids(&sort, &context()),
+                SortedQuery::for_ids(&[1], &sort, &context()),
                 Err(SortError::FieldColumnNotYetSupported { .. })
             ));
         }
@@ -561,4 +570,27 @@ fn memory_state_keys_read_card_data_on_their_own_s4_s7() {
     // One day elapsed: the lower stability has the lower retrievability;
     // no memory state is NULL.
     assert_eq!(db.asc(SearchMode::Cards, "retrievability"), [1, 2, 5, 3, 4]);
+}
+
+#[test]
+fn keys_read_stored_values_with_sqlite_storage_classes_s2_s4() {
+    let db = Db::new();
+    db.deck(1, "Default");
+    db.notetype(10, "N", &["T"]);
+    db.note(100, 10, SqlValue::Text("x".into()), "", 0);
+    for id in 1..=4 {
+        db.card(C { id, nid: 100, ctype: 2, queue: 2, ivl: 3, factor: 2500, ..CARD });
+    }
+    db.card(C { id: 5, nid: 100, ..CARD });
+    // A REAL interval sorts after the INTEGER 3 the cell would also show; a
+    // TEXT value sorts after every number.
+    db.exec("UPDATE cards SET ivl = 3.5 WHERE id = 1", &[]);
+    db.exec("UPDATE cards SET ivl = 'x' WHERE id = 2", &[]);
+    db.exec("UPDATE cards SET mod = 'later' WHERE id = 3", &[]);
+    db.exec("UPDATE cards SET mod = 2.5 WHERE id = 4", &[]);
+    assert_eq!(db.asc(SearchMode::Cards, "cardIvl"), [5, 3, 4, 1, 2]);
+    assert_eq!(db.asc(SearchMode::Cards, "cardMod"), [1, 2, 5, 4, 3]);
+    // New cards come last in ascending Ease, after a learning card's 0.
+    db.exec("UPDATE cards SET type = 1, factor = 0 WHERE id = 4", &[]);
+    assert_eq!(db.asc(SearchMode::Cards, "cardEase"), [4, 1, 2, 3, 5]);
 }
