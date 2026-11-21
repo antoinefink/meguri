@@ -4,7 +4,9 @@ name: Verify Meguri
 # Hosted Linux checks (docs/process/tiers.md, "Hosted checks"). Every pull
 # request and master push starts this workflow; "Select suites" decides what
 # runs, and a suite the change does not affect still reports, as a quick pass
-# that says it was not selected, so no check waits forever.
+# that says it was not selected, so no check waits forever. Linux · selftest
+# is the exception: it skips (a skipped check counts as passing), so a change
+# outside tools/ and .github/ takes no runner for it.
 #
 # - Linux · core: one result for the Core suite. It passes only when every
 #   shard ran and passed `tools/mg core-test --quick` and the lint job passed
@@ -729,8 +731,11 @@ jobs:
       packages: read
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
+    # Only a newer push to the same pull request cancels a run: on master,
+    # each push checks its own range, and a scheduled or manual run must not
+    # stop a push's checks.
     concurrency:
-      group: meguri-verification-${{ github.ref }}-checks
+      group: meguri-verification-${{ github.ref }}-checks-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
       cancel-in-progress: true
     steps:
       # Full history: the trailers and sessions checks read every commit of
@@ -815,7 +820,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     concurrency:
-      group: meguri-verification-${{ github.ref }}-selftest
+      group: meguri-verification-${{ github.ref }}-selftest-${{ needs.suites.outputs.selftest == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

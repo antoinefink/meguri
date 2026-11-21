@@ -42,8 +42,8 @@ if [[ ! -f "$artifact" ]]; then
 fi
 
 {
-  jq -r --arg title "$title" '"### \($title): \(.status)\n\n\(.message)\n"' "$artifact"
-  jq -r '.failures[:30][]? | "- `\(.id)`: \(.message | split("\n")[0] | .[0:300])"' "$artifact"
+  jq -r --arg title "$title" '"### \($title): \(.status)\n\n\(.message // "")\n"' "$artifact"
+  jq -r '.failures[:30][]? | "- `\(.id)`: \((.message // "") | split("\n")[0] | .[0:300])"' "$artifact"
   jq -r 'if (.failures | length) > 30 then "- and \((.failures | length) - 30) more (see the uploaded receipt)" else empty end' "$artifact"
   echo
 } >>"$GITHUB_STEP_SUMMARY"
@@ -53,6 +53,6 @@ want='[]'
 if ((rc != 0)) || ! jq -e --arg sha "$GITHUB_SHA" --arg job "$job" --argjson want "$want" '
     .status == "pass" and .commit.sha == $sha and .commit.dirty == false
     and .job == $job and .args == $want' "$artifact" >/dev/null; then
-  echo "::error::$title: $(jq -r '.message' "$artifact")"
+  echo "::error::$title: $(jq -r '.message // "failed"' "$artifact")"
   exit 1
 fi
