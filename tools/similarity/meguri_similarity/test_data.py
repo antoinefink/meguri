@@ -1,4 +1,9 @@
-"""Explicit, paired search-fixture inputs; never changes ordinary scan scope."""
+"""Explicit, paired conformance test data (R1881); never changes ordinary scan scope.
+
+Every conformance area pairs `conformance/scenarios/<area>` with
+`conformance/goldens/<area>`: a case is a scenario and the golden of the same
+name in the same area.
+"""
 
 from __future__ import annotations
 
@@ -13,23 +18,36 @@ import yaml
 
 from .lexer import Lexed, LineIndex, TEXT_WORD, _COMMENT_WORD
 
-ROOTS = ("conformance/scenarios/search", "conformance/goldens/search")
+ROOTS = ("conformance/scenarios", "conformance/goldens")
+# The characters PyYAML's reader refuses (yaml.reader.Reader.NON_PRINTABLE).
+_YAML_REFUSED = re.compile("[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD\U00010000-\U0010FFFF]")
 CHANNELS = ("lex", "com", "text")
+_AREA = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 
-class SearchDataError(ValueError):
-    """A search-data input cannot be checked safely or completely."""
+class TestDataError(ValueError):
+    """A test-data input cannot be checked safely or completely."""
 
 
 def _scope(path):
-    return next((i for i, root in enumerate(ROOTS) if path == root or path.startswith(root + "/")), None)
+    """(side, area) of a path in the two roots: side 0 for scenarios, 1 for
+    goldens; area None for a root itself. None outside them."""
+    for side, root in enumerate(ROOTS):
+        if path == root:
+            return side, None
+        if path.startswith(root + "/"):
+            area = path[len(root) + 1:].split("/", 1)[0]
+            return (side, area) if _AREA.fullmatch(area) else None
+    return None
 
 
 def inputs(root, paths, max_bytes):
-    """Expand only the two search roots and read regular, singly linked files.
+    """Expand only the scenario and golden roots and read regular, singly
+    linked files.
 
     Every path component is opened relative to a held directory descriptor,
     without following links. Read bytes are also the bytes hashed and scanned.
+    Returns the inputs and the number of (area, name) pairs.
     """
     selected = {}
     root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -47,8 +65,10 @@ def inputs(root, paths, max_bytes):
             os.close(current)
 
     def collect(path):
-        if _scope(path) is None:
-            raise SearchDataError("search-data input is outside the two search roots")
+        scope = _scope(path)
+        if scope is None:
+            raise TestDataError("test-data input is outside the conformance scenario and golden areas")
+        side, area = scope
         fd = open_relative(path)
         try:
             before = os.fstat(fd)
@@ -58,29 +78,30 @@ def inputs(root, paths, max_bytes):
                 for name in names:
                     collect(path + "/" + name)
                 return
-            side = _scope(path)
+            if area is None or path == ROOTS[side] + "/" + area:
+                raise TestDataError("test-data files must be inside an area directory")
             extension = os.path.splitext(path)[1]
             if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
-                raise SearchDataError("search-data requires regular files without links")
+                raise TestDataError("test-data requires regular files without links")
             # Top-level area manifests activate suites; they are not cases and
             # have no corresponding golden. Link checks still apply to them.
-            if path in (ROOTS[0] + "/area.yaml", ROOTS[0] + "/area.yml"):
+            if side == 0 and path in (f"{ROOTS[0]}/{area}/area.yaml", f"{ROOTS[0]}/{area}/area.yml"):
                 return
             if extension not in ((".yaml", ".yml", ".json") if side == 0 else (".json",)):
-                raise SearchDataError("unsupported search-data file type")
+                raise TestDataError("unsupported test-data file type")
             if before.st_size > max_bytes:
-                raise SearchDataError("search-data file exceeds the scanner size bound")
+                raise TestDataError("test-data file exceeds the scanner size bound")
             with os.fdopen(os.dup(fd), "rb") as stream:
                 raw = stream.read(max_bytes + 1)
             after = os.fstat(fd)
             if len(raw) > max_bytes or (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
                 after.st_size, after.st_mtime_ns, after.st_ctime_ns
             ):
-                raise SearchDataError("search-data changed while being read")
+                raise TestDataError("test-data changed while being read")
             try:
                 text = raw.decode("utf-8")
             except UnicodeError as error:
-                raise SearchDataError("search-data is not UTF-8") from error
+                raise TestDataError("test-data is not UTF-8") from error
             selected[path] = {"path": path, "sha256": hashlib.sha256(raw).hexdigest(), "text": text}
         finally:
             os.close(fd)
@@ -90,20 +111,20 @@ def inputs(root, paths, max_bytes):
             collect(path)
     except (OSError, RecursionError) as error:
         # Do not include OS diagnostics that can quote targets outside scope.
-        raise SearchDataError("search-data input is missing, linked or unreadable") from error
+        raise TestDataError("test-data input is missing, linked or unreadable") from error
     finally:
         os.close(root_fd)
     if not selected:
-        raise SearchDataError("search-data selection is empty")
+        raise TestDataError("test-data selection is empty")
     pairs = ({}, {})
     for path in sorted(selected):
-        side = _scope(path)
-        key = os.path.splitext(path[len(ROOTS[side]) + 1:])[0]
+        side, area = _scope(path)
+        key = (area, os.path.splitext(path[len(ROOTS[side]) + len(area) + 2:])[0])
         if key in pairs[side]:
-            raise SearchDataError("search-data has duplicate scenario or golden names")
+            raise TestDataError("test-data has duplicate scenario or golden names")
         pairs[side][key] = path
     if set(pairs[0]) != set(pairs[1]):
-        raise SearchDataError("search-data requires a scenario and golden for every selected name")
+        raise TestDataError("test-data requires a scenario and golden of the same area for every selected name")
     return [selected[path] for path in sorted(selected)], len(pairs[0])
 
 
@@ -130,12 +151,16 @@ def lex(text, path, lexer):
     try:
         if path.endswith(".json"):
             json.loads(text, object_pairs_hook=_strict_object, parse_constant=_nonfinite)
+            # JSON strings may hold characters the YAML reader refuses (DEL,
+            # C1 controls). No word contains one, so a space at the same
+            # offset keeps every word, position and line.
+            text = _YAML_REFUSED.sub(" ", text)
         if any(isinstance(token, (yaml.tokens.AliasToken, yaml.tokens.AnchorToken)) for token in yaml.scan(text)):
             raise ValueError("anchors and aliases are not supported")
         documents = list(yaml.compose_all(text, Loader=yaml.SafeLoader))
         if len(documents) != 1 or documents[0] is None:
             raise ValueError("one document required")
-        out = Lexed("search-data")
+        out = Lexed("test-data")
         lines = LineIndex(text)
         spans = []
 
@@ -210,4 +235,4 @@ def lex(text, path, lexer):
         return out
     except (ValueError, TypeError, yaml.YAMLError, RecursionError) as error:
         # Parser exceptions may embed fixture content; expose no raw payload.
-        raise SearchDataError("invalid or unsupported search-data document") from error
+        raise TestDataError("invalid or unsupported test-data document") from error

@@ -45,15 +45,19 @@ def make_corpus(root, tags):
     return root
 
 
-def synthetic_config(base, lo, hi, count):
+def synthetic_config(base, lo, hi, count, commits=None):
     """The scanner config with its pinned corpus (corpus.tags) set to a
-    synthetic corpus's release tags; returns its path."""
+    synthetic corpus's release tags, and its pinned commits to `commits`
+    (none by default); returns its path."""
     import yaml
 
     with open(CONFIG) as f:
         cfg = yaml.safe_load(f)
     cfg["corpus"]["tags"] = {"min": lo, "max": hi, "count": count}
-    path = os.path.join(base, f"config-{lo}-{hi}-{count}.yaml")
+    cfg["corpus"].pop("commits", None)
+    if commits is not None:
+        cfg["corpus"]["commits"] = commits
+    path = os.path.join(base, f"config-{lo}-{hi}-{count}{'-pinned' if commits is not None else ''}.yaml")
     with open(path, "w") as f:
         yaml.safe_dump(cfg, f)
     return path

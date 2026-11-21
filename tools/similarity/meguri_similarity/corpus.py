@@ -123,7 +123,15 @@ def plan_corpus(refs_dir: str, cfg: dict, vocab_digest: str, stopwords) -> Plan:
             f"the Anki corpus has {len(tags)} release tags from {lo_tag} to {hi_tag}, the config pinned {pinned}; "
             "recalibrate (tools/mg similarity-selftest) and update corpus.tags.count in tools/similarity/config.yaml"
         )
-    sources = [{"name": "anki", "kind": "git-tags", "path": anki_path, "tags": tags}]
+    pinned_commits = ccfg.get("commits")
+    if pinned_commits is not None:
+        differ = sorted((t for t, c in tags if pinned_commits.get(t) != c), key=version_tuple)
+        if differ:
+            raise CorpusError(
+                f"the Anki corpus differs from the pinned commits (corpus.commits) at {len(differ)} tags: {', '.join(differ)}; "
+                f"fetch those tags again into {ccfg['anki_repo']}, or recalibrate before changing the pin"
+            )
+    sources =[{"name": "anki", "kind": "git-tags", "path": anki_path, "tags": tags}]
     missing = []
     for extra in ccfg.get("extra_sources") or []:
         path = os.path.join(refs_dir, extra["path"])
