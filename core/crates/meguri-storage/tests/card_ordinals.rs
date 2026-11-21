@@ -72,3 +72,28 @@ fn notetype_card_ordinals_are_bounded_complete_strict_and_bound_to_the_scope() {
     assert!(writer.card_ordinals_of_notetype_page(target, None).unwrap().is_empty());
     collection.close().unwrap();
 }
+
+/// A type's notes page from the signed minimum id on: the first page has no
+/// id bound, so a note at `i64::MIN` is read and counted like any other.
+#[test]
+fn notetype_notes_pages_include_the_signed_minimum_id() {
+    let (_directory, path) = empty_collection();
+    let collection = open(&path).unwrap();
+    let clock = clock();
+    let writer = collection.writer();
+    let target = NotetypeId(10);
+    let mut scope = writer.begin_write(StampMode::CallerSupplied, &clock, None).unwrap();
+    for id in [i64::MIN, -5, 7, i64::MAX] {
+        let mut note = note(target.0, &["Paging fixture"]);
+        note.id = NoteId(id);
+        note.guid = format!("page{id}");
+        scope.restore(Table::Notes, &RowKey::Id(id), Some(&note.to_cells())).unwrap();
+    }
+    let ids = |page: Vec<meguri_model::note::Note>| page.into_iter().map(|n| n.id.0).collect::<Vec<_>>();
+    assert_eq!(scope.notetype_note_count(target).unwrap(), 4);
+    assert_eq!(ids(scope.notetype_notes_after(target, None, 2).unwrap()), [i64::MIN, -5]);
+    assert_eq!(ids(scope.notetype_notes_after(target, Some(NoteId(-5)), 10).unwrap()), [7, i64::MAX]);
+    assert!(scope.notetype_notes_after(target, Some(NoteId(i64::MAX)), 10).unwrap().is_empty());
+    scope.rollback().unwrap();
+    collection.close().unwrap();
+}
