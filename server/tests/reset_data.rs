@@ -36,6 +36,12 @@ async fn reset(h: &Harness, admin: &str, id: &str) -> Value {
     assert_eq!(response.status(),200);
     response.json::<Value>().await.unwrap()["data"].clone()
 }
+fn credentials(c: &rusqlite::Connection, id: &str) -> Vec<rusqlite::types::Value> {
+    c.query_row("SELECT username,role,enabled,password_phc,password_revision,generation FROM accounts WHERE id=?1",[id],|row| {
+        ["username","role","enabled","password_phc","password_revision","generation"]
+            .into_iter().map(|column|row.get(column)).collect()
+    }).unwrap()
+}
 #[tokio::test]
 async fn occupied_staging_budget_refuses_reset_without_retiring_live_data() {
     let h=Harness::new().await;
@@ -94,7 +100,7 @@ async fn resets_ready_members_disabled_members_and_sole_admin_without_replacing_
         assert!(std::fs::read_dir(account.join("generations")).unwrap().count()>1);
         let original={
             let c=rusqlite::Connection::open(h.database()).unwrap();
-            c.query_row("SELECT username,role,enabled,password_phc,password_revision,generation FROM accounts WHERE id=?1",[id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?,r.get::<_,i64>(5)?))).unwrap()
+            credentials(&c,id)
         };
         let result=reset(&h,&admin,id).await;
         assert_eq!(result["id"],id); assert_eq!(result["role"],target["role"]); assert_eq!(result["enabled"],true);
@@ -116,7 +122,7 @@ async fn resets_ready_members_disabled_members_and_sole_admin_without_replacing_
         assert_eq!(h.service.validate_hostkey(&key).await.unwrap().account_id(),id);
         assert_eq!(h.service.publish(stale,|_|Ok(())).await.unwrap_err().code,"authentication_failed");
         let c=rusqlite::Connection::open(h.database()).unwrap();
-        let current=c.query_row("SELECT username,role,enabled,password_phc,password_revision,generation FROM accounts WHERE id=?1",[id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,bool>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?,r.get::<_,i64>(5)?))).unwrap();
+        let current=credentials(&c,id);
         assert_eq!(current,original);
         assert_eq!(c.query_row("SELECT count(*) FROM account_resets",[],|r|r.get::<_,i64>(0)).unwrap(),0); drop(c);
         if !self_admin {
