@@ -1131,6 +1131,9 @@ class NativeSidebarDisclosureRowParts(unittest.TestCase):
     def test_a_chevron_away_from_the_trailing_end_still_needs_an_identifier(self):
         self.assertIn("missing-identifier", kinds(hierarchy_check.check(self.row(chevron=(40, 263, 10, 14)))))
 
+    def test_a_chevron_outside_the_row_vertically_still_needs_an_identifier(self):
+        self.assertIn("missing-identifier", kinds(hierarchy_check.check(self.row(chevron=(277, 320, 10, 14)))))
+
     def test_only_on_ios(self):
         tree = self.row()
         tree["platform"] = "mac"
@@ -1153,3 +1156,10 @@ class NativeMacToolbarTitlePair(unittest.TestCase):
     def test_other_overlapping_texts_still_overlap(self):
         self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(second_frame=(230, 40, 900, 40)))))
         self.assertIn("text-overlap", kinds(hierarchy_check.check(self.tree(label="Today"))))
+
+    def test_three_texts_at_one_frame_still_overlap(self):
+        tree = self.tree()
+        third = el("staticText", "", "", f=(224, 30, 952, 52))
+        third["value"] = "Another"
+        tree["root"]["children"][0]["children"].append(third)
+        self.assertIn("text-overlap", kinds(hierarchy_check.check(tree)))

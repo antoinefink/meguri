@@ -424,7 +424,8 @@ def native_disclosure_row_parts(document, root):
         labels.add(own[0])
         for c in e.children:
             if (c.type == "button" and not c.identifier and not c.label and 0 < c.w <= 24 and 0 < c.h <= 24
-                    and c.x + c.w <= e.x + e.w and c.x >= e.x + e.w * 0.75):
+                    and c.x + c.w <= e.x + e.w and c.x >= e.x + e.w * 0.75
+                    and c.y >= e.y and c.y + c.h <= e.y + e.h):
                 chevrons.add(c)
     return labels, chevrons
 
@@ -434,7 +435,8 @@ def native_toolbar_title_pairs(document, root):
     navigationSubtitle): two unidentified, unlabelled static texts directly in
     the window with the same frame, each with a value. AppKit reports both at
     the title area's frame; they are drawn one above the other, so they do not
-    overlap on screen. Returns the set of such pairs as frozensets.
+    overlap on screen. Exactly two at a frame: three or more are not this shape
+    and keep their overlaps. Returns the set of such pairs as frozensets.
     """
     pairs = set()
     if document.get("platform") != "mac":
@@ -444,10 +446,10 @@ def native_toolbar_title_pairs(document, root):
             continue
         texts = [c for c in window.children if c.type == "staticText" and not c.identifier and not c.label
                  and isinstance(c.raw.get("value"), str) and c.raw.get("value")]
-        for i, a in enumerate(texts):
-            for b in texts[i + 1:]:
-                if a.frame == b.frame:
-                    pairs.add(frozenset((a, b)))
+        by_frame = {}
+        for t in texts:
+            by_frame.setdefault(tuple(sorted(t.frame.items())), []).append(t)
+        pairs.update(frozenset(group) for group in by_frame.values() if len(group) == 2)
     return pairs
 
 
