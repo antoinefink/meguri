@@ -208,6 +208,17 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
         outbox,
         published: std::cell::Cell::new(None),
     };
+    // H3: made during a stop, it fails with the engine's refusal, whatever
+    // happens to its token afterwards.
+    if matches!(job.job, Job::Refused) {
+        let _ = outbox.send(SearchEvent::Failed {
+            seq: RequestSeq(job.seq),
+            error: BrowseError::Engine(EngineError::unavailable(
+                "the collection is changing generation, suspending or closing",
+            )),
+        });
+        return;
+    }
     // Listed for halts from the start, so a halt that begins while the
     // request parses, or began after it was queued, cancels it (H3).
     let registry = shared.registry.upgrade();
@@ -219,9 +230,7 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
             Job::Search { text, mode, sort } => request.search(&text, mode, &sort),
             Job::Resort { source, sort } => request.resort(source, &sort),
             Job::Superseded => Err(Stop::Cancelled),
-            Job::Refused => Err(Stop::Failed(BrowseError::Engine(EngineError::unavailable(
-                "the collection is changing generation, suspending or closing",
-            )))),
+            Job::Refused => unreachable!("answered above"),
         }
     };
     let Err(stop) = result else { return };
