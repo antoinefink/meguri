@@ -15,6 +15,10 @@ pub struct Query {
     /// The text it was read from, as the caller gave it; `None` for a built
     /// query.
     source: Option<String>,
+    /// A built query's written-text items (`search/filter-tokens` T3.2): the
+    /// node each one became, in node order, and the text the canonical
+    /// writer puts there unchanged. Empty for a parsed query.
+    written: Vec<(NodeId, String)>,
 }
 
 /// A node's index in its [`Query`].
@@ -359,6 +363,15 @@ impl Query {
         self.source.as_deref()
     }
 
+    /// The text a written-text item (T3.2) put at `id`, written unchanged in
+    /// place of the node's canonical text.
+    pub fn written_text(&self, id: NodeId) -> Option<&str> {
+        self.written
+            .binary_search_by_key(&id, |(node, _)| *node)
+            .ok()
+            .map(|k| self.written[k].1.as_str())
+    }
+
     /// The characters of the source a node spans; `None` for a built query.
     pub fn source_text(&self, span: &Range<usize>) -> Option<String> {
         let source = self.source.as_deref()?;
@@ -386,6 +399,7 @@ impl Query {
 #[derive(Debug, Default)]
 pub(crate) struct QueryBuilder {
     nodes: Vec<Node>,
+    written: Vec<(NodeId, String)>,
 }
 
 impl QueryBuilder {
@@ -408,11 +422,23 @@ impl QueryBuilder {
         self.nodes.len()
     }
 
+    /// Marks `id`, a node newer than any marked before, as a written-text
+    /// item's: the canonical writer puts `text` there unchanged.
+    pub(crate) fn mark_written(&mut self, id: NodeId, text: String) {
+        debug_assert!(self.written.last().is_none_or(|(last, _)| *last < id));
+        self.written.push((id, text));
+    }
+
+    pub(crate) fn is_written(&self, id: NodeId) -> bool {
+        self.written.binary_search_by_key(&id, |(node, _)| *node).is_ok()
+    }
+
     pub(crate) fn finish(self, root: NodeId, source: Option<String>) -> Query {
         Query {
             nodes: self.nodes,
             root,
             source,
+            written: self.written,
         }
     }
 }

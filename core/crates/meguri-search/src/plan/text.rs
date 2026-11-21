@@ -183,27 +183,25 @@ fn substring(
             wildcards.test(&field_string, pattern)
         )
     };
-    let excluded = id_list(notetypes.types().iter().filter(|s| s.has_excluded()));
-    let cloze = id_list(notetypes.types().iter().filter(|s| s.cloze));
-    let plain_cloze = id_list(notetypes.types().iter().filter(|s| s.cloze && !s.has_excluded()));
+    // T7.1: with an excluded field anywhere, a note whose `mid` names no note
+    // type matches none of these terms, so the types without excluded fields
+    // are named (`IN`); without one, it is tested like any note, and `-sc:`
+    // leaves out only the cloze types.
+    let without_excluded =
+        |kinds: Kinds| id_list(notetypes.types().iter().filter(|s| kinds.admits(s) && !s.has_excluded()));
     match kinds {
-        Kinds::All if excluded.is_empty() => clauses.push(whole(&mut wildcards)),
-        Kinds::All => clauses.push(format!("(n.mid NOT IN ({excluded}) AND {})", whole(&mut wildcards))),
-        Kinds::Cloze if plain_cloze.is_empty() => {}
-        Kinds::Cloze => clauses.push(format!("(n.mid IN ({plain_cloze}) AND {})", whole(&mut wildcards))),
-        Kinds::NotCloze => {
-            let left_out: Vec<&str> = [cloze.as_str(), excluded.as_str()]
-                .into_iter()
-                .filter(|list| !list.is_empty())
-                .collect();
-            if left_out.is_empty() {
+        Kinds::All | Kinds::NotCloze if !excluding => {
+            let cloze = id_list(notetypes.types().iter().filter(|s| s.cloze));
+            if kinds == Kinds::All || cloze.is_empty() {
                 clauses.push(whole(&mut wildcards));
             } else {
-                clauses.push(format!(
-                    "(n.mid NOT IN ({}) AND {})",
-                    left_out.join(","),
-                    whole(&mut wildcards)
-                ));
+                clauses.push(format!("(n.mid NOT IN ({cloze}) AND {})", whole(&mut wildcards)));
+            }
+        }
+        _ => {
+            let types = without_excluded(kinds);
+            if !types.is_empty() {
+                clauses.push(format!("(n.mid IN ({types}) AND {})", whole(&mut wildcards)));
             }
         }
     }
@@ -326,8 +324,12 @@ fn expression_test(
     if !excluding {
         return Ok(whole);
     }
-    let excluded = id_list(notetypes.types().iter().filter(|s| s.has_excluded()));
-    let mut clauses = vec![format!("(n.mid NOT IN ({excluded}) AND {whole})")];
+    // T7.1: a note whose `mid` names no note type matches nothing here.
+    let without_excluded = id_list(notetypes.types().iter().filter(|s| !s.has_excluded()));
+    let mut clauses = Vec::new();
+    if !without_excluded.is_empty() {
+        clauses.push(format!("(n.mid IN ({without_excluded}) AND {whole})"));
+    }
     let mut groups: BTreeMap<Vec<usize>, Vec<&NotetypeShape>> = BTreeMap::new();
     for shape in notetypes.types().iter().filter(|s| s.has_excluded()) {
         groups.entry(shape.included()).or_default().push(shape);
@@ -335,7 +337,7 @@ fn expression_test(
     for (positions, shapes) in &groups {
         clauses.push(fields_test(&placeholder, &field_string, positions, shapes));
     }
-    Ok(clauses.join(" OR "))
+    Ok(joined_or(clauses))
 }
 
 /// `meguri_regex_fields` on the listed positions of the note types.
