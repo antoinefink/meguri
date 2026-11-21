@@ -4,6 +4,17 @@ use meguri_template::{Form, ParsedTemplate};
 use std::collections::BTreeSet;
 
 pub fn required(nt: &Notetype, note: &Note) -> BTreeSet<u16> {
+    let fronts: Vec<ParsedTemplate> = nt
+        .templates
+        .iter()
+        .map(|template| ParsedTemplate::parse(&template.config.q_format))
+        .collect();
+    required_by(nt, &fronts, note)
+}
+
+/// [`required`] with the note type's fronts parsed once, in template order,
+/// for a pass over many notes.
+pub fn required_by(nt: &Notetype, fronts: &[ParsedTemplate], note: &Note) -> BTreeSet<u16> {
     let values: Vec<_> = note.field_values().collect();
     let nonempty = |name: &str| {
         if let Some(index) = nt.fields.iter().position(|field| field.name == name) {
@@ -17,11 +28,11 @@ pub fn required(nt: &Notetype, note: &Note) -> BTreeSet<u16> {
             _ => false,
         }
     };
-    nt.templates
+    fronts
         .iter()
         .enumerate()
-        .filter_map(|(ord, template)| {
-            ParsedTemplate::parse(&template.config.q_format)
+        .filter_map(|(ord, front)| {
+            front
                 .renders_something(nonempty, Form::Strict)
                 .then(|| u16::try_from(ord).ok())
                 .flatten()

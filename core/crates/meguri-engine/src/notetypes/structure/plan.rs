@@ -259,10 +259,7 @@ pub(crate) fn count(
                 return Err(StructureRefusal::NoteFieldCountMismatch { note: note.id }.into());
             }
             for &field in &layout.removed_fields {
-                let filled = values
-                    .get(field as usize)
-                    .is_some_and(|value| !meguri_text::field_empty::counts_as_empty(value));
-                if filled {
+                if has_content(&values, field) {
                     *counts.fields.entry(field).or_default() += 1;
                 }
             }
@@ -291,6 +288,16 @@ pub(crate) fn count(
         }
     }
     Ok(counts)
+}
+
+/// Whether a note's value at a stored field ordinal has content: present
+/// and not empty by `text/field-emptiness` E1 (so `<br>` alone is empty).
+/// The one test of "notes with content" (`notetypes/workspace` W1, W3.1;
+/// `notetypes/draft-save` D2; S1.2's confirmed losses).
+pub(crate) fn has_content(values: &[&str], ord: u32) -> bool {
+    values
+        .get(ord as usize)
+        .is_some_and(|value| !meguri_text::field_empty::counts_as_empty(value))
 }
 
 /// The op's own read of a set of rows (D8): D2's summary, or for a restore
@@ -623,7 +630,29 @@ pub(crate) fn plan_draft(
     progress: &ProgressSink,
 ) -> Result<Planned, EngineError> {
     cancel.check()?;
-    // S1.2's whole order, step 1: what the draft alone shows (S1.1).
+    let base = checked_base(reader, draft)?;
+    if let Some(request) = rename_only(&base, draft) {
+        let plan = rename::plan(reader, request, cancel, progress)?;
+        // The field rename op skips V3 (the field editor's mode); a checked
+        // draft runs it on the renamed note type (V1, S1.2 item 5).
+        if !draft.skip_checks
+            && let Some(failure) = validate::first_failure(plan.renamed())
+        {
+            return Err(failure.into());
+        }
+        return Ok(Planned::Rename(Box::new(plan)));
+    }
+    let mut layout = layout_of_draft(reader, base, draft)?;
+    check_protected(&layout)?;
+    finish(reader, &mut layout, !draft.skip_checks, cancel, progress)?;
+    Ok(Planned::Layout(Box::new(layout)))
+}
+
+/// S1.2's whole order, steps 1 to 3, on `reader`'s rows: the draft-only
+/// `InvalidArgument`, then `Stale`, then an origin outside the base. The
+/// base, which is then the stored note type.
+pub(crate) fn checked_base(reader: &impl ReadRows, draft: &StructureDraft) -> Result<Notetype, EngineError> {
+    // Step 1: what the draft alone shows (S1.1).
     check_unique(draft.fields.iter().map(|f| f.origin), "a field")?;
     check_unique(draft.templates.iter().map(|t| t.origin), "a template")?;
     if draft.sort_field.is_some_and(|sort| sort as usize >= draft.fields.len()) {
@@ -641,28 +670,45 @@ pub(crate) fn plan_draft(
     // field is `Stale` above, never `InvalidArgument`.
     check_range(draft.fields.iter().map(|f| f.origin), base.fields.len(), "a field")?;
     check_range(draft.templates.iter().map(|t| t.origin), base.templates.len(), "a template")?;
-    if let Some(request) = rename_only(&base, draft) {
-        let plan = rename::plan(reader, request, cancel, progress)?;
-        // The field rename op skips V3 (the field editor's mode); a checked
-        // draft runs it on the renamed note type (V1, S1.2 item 5).
-        if !draft.skip_checks
-            && let Some(failure) = validate::first_failure(plan.renamed())
-        {
-            return Err(failure.into());
-        }
-        return Ok(Planned::Rename(Box::new(plan)));
-    }
-    let mut layout = layout_of_draft(reader, base, draft)?;
-    // S1.2 item 3.
-    if let Some(&field) = layout
+    Ok(base)
+}
+
+/// S1.2 item 3: a removed field that its base protects.
+fn check_protected(layout: &Layout) -> Result<(), EngineError> {
+    match layout
         .removed_fields
         .iter()
         .find(|&&o| layout.base.fields[o as usize].config.prevent_deletion)
     {
-        return Err(StructureRefusal::ProtectedField { field }.into());
+        Some(&field) => Err(StructureRefusal::ProtectedField { field }.into()),
+        None => Ok(()),
     }
-    finish(reader, &mut layout, !draft.skip_checks, cancel, progress)?;
-    Ok(Planned::Layout(Box::new(layout)))
+}
+
+/// `notetypes/draft-save` D2's `draft_summary` on `reader`'s rows: the
+/// planner's own layout of the draft and its own counting pass ([`count`],
+/// [`plan_generation`]), so the numbers the sheet shows are the ones the
+/// save counts again (S1.2) and the summary `LossesChanged` would carry on
+/// the same rows. It refuses as planning does before its loss comparison
+/// (`InvalidArgument`, `Stale`, `invalid_notetype`, `ProtectedField`,
+/// `NoteFieldCountMismatch`, `Cancelled`), runs no template checks (those
+/// are the live issues, `notetypes/workspace` W7) and compares no
+/// confirmed loss. A rename-only draft, which the save hands to the field
+/// rename op, lists its renames.
+pub(crate) fn summarize_draft(
+    reader: &impl ReadRows,
+    draft: &StructureDraft,
+    cancel: &CancelToken,
+    progress: &ProgressSink,
+) -> Result<super::DraftSummary, EngineError> {
+    cancel.check()?;
+    let base = checked_base(reader, draft)?;
+    let layout = layout_of_draft(reader, base, draft)?;
+    check_protected(&layout)?;
+    let counts = count(reader, &layout, cancel, progress)?;
+    let generation = plan_generation(reader, &layout, cancel, progress)?;
+    cancel.check()?;
+    Ok(summary::of(&layout, &counts, generation.as_ref()))
 }
 
 /// S1.2 items 4 and 5, the generation plan and the confirmed losses, on
@@ -700,7 +746,11 @@ pub(crate) fn finish(
 
 /// S3 steps 1 to 4 for a draft: the saved note type built on the base,
 /// normalized (N4), rewritten (S4), with its sort field and requirements.
-fn layout_of_draft(reader: &impl ReadRows, base: Notetype, draft: &StructureDraft) -> Result<Layout, EngineError> {
+pub(crate) fn layout_of_draft(
+    reader: &impl ReadRows,
+    base: Notetype,
+    draft: &StructureDraft,
+) -> Result<Layout, EngineError> {
     let mut saved = base.clone();
     draft.name.clone_into(&mut saved.name);
     draft.css.clone_into(&mut saved.config.css);

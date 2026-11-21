@@ -318,6 +318,35 @@ pub trait ReadRows: sealed::Connected {
             })? as u64)
     }
 
+    /// The number of notes of each `mid` that has notes, by `mid`
+    /// (`notetypes/editor-actions` A2's note counts). A `mid` may name no
+    /// note type; the caller keeps only those that do.
+    fn note_counts_by_notetype(&self) -> Result<Vec<(NotetypeId, u64)>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT mid, count(*) FROM notes GROUP BY mid ORDER BY mid")?;
+        let rows = statement.query_map([], |row| Ok((NotetypeId(row.get(0)?), row.get::<_, i64>(1)?)))?;
+        rows.map(|row| {
+            let (id, count) = row?;
+            let count = u64::try_from(count).map_err(|_| StorageError::Io {
+                detail: "invalid note count".into(),
+            })?;
+            Ok((id, count))
+        })
+        .collect()
+    }
+
+    /// Every note type's id and stored name, by name under the `unicase`
+    /// collation of the `notetypes.name` column, ties by ascending id
+    /// (`notetypes/editor-actions` A2's ordered list).
+    fn notetype_names_by_name(&self) -> Result<Vec<(NotetypeId, String)>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT id, name FROM notetypes ORDER BY name COLLATE unicase, id")?;
+        let rows = statement.query_map([], |row| Ok((NotetypeId(row.get(0)?), row.get::<_, String>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Notes of one type, in id order, for cancellable regeneration.
     fn notetype_notes_after(
         &self,
