@@ -225,6 +225,26 @@ final class TestHooksTests: XCTestCase {
         let build = try BuildUnderTest.current()
         XCTAssertEqual(try build.bundleIdentifier, build.expectedBundleIdentifier)
         XCTAssertEqual(try build.appInfo["MeguriAppGroupIdentifier"] as? String, build.expectedAppGroup)
+        #if os(macOS)
+        // The Mac shows the localized name only while Info.plist's display
+        // name is the bundle's file name, Meguri.app.
+        XCTAssertEqual(try build.appInfo["CFBundleDisplayName"] as? String, "Meguri")
+        XCTAssertEqual(try build.appInfo["LSHasLocalizedDisplayName"] as? Bool, true)
+        #else
+        XCTAssertEqual(try build.appInfo["CFBundleDisplayName"] as? String, build.expectedDisplayName)
+        #endif
+        #if os(macOS) || targetEnvironment(simulator)
+        // The localized names (Meguri/Identity): the Mac's app menu and About
+        // panel read CFBundleName, which Info.plist keeps as PRODUCT_NAME.
+        #if os(macOS)
+        let strings = build.appBundle.appending(path: "Contents/Resources/en.lproj/InfoPlist.strings")
+        #else
+        let strings = build.appBundle.appending(path: "en.lproj/InfoPlist.strings")
+        #endif
+        let names = try XCTUnwrap(PropertyListSerialization.propertyList(
+            from: Data(contentsOf: strings), format: nil) as? [String: String])
+        XCTAssertEqual(names, ["CFBundleName": build.expectedDisplayName, "CFBundleDisplayName": build.expectedDisplayName])
+        #endif
     }
 
     // MARK: Helpers

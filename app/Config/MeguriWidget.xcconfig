@@ -9,7 +9,7 @@ SKIP_INSTALL = YES
 
 GENERATE_INFOPLIST_FILE = YES
 INFOPLIST_FILE = MeguriWidget/Info.plist
-INFOPLIST_KEY_CFBundleDisplayName = Meguri
+INFOPLIST_KEY_CFBundleDisplayName = $(MEGURI_APP_NAME)
 
 CODE_SIGN_ENTITLEMENTS[sdk=iphone*] = MeguriWidget/MeguriWidget-iOS.entitlements
 CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = MeguriWidget/MeguriWidget-macOS$(MEGURI_ENTITLEMENTS_SIGNING_SUFFIX).entitlements

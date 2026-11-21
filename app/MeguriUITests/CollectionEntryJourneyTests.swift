@@ -1001,7 +1001,7 @@ import notify
                 format: "label IN %@", ["On My iPhone", "On My iPad"])).firstMatch
             let root = app.descendants(matching: .any).matching(NSPredicate(
                 format: "label IN %@", ["RF2 Import Tests", "RF2 Import Tests, Folder"])).firstMatch
-            let meguri = app.cells.containing(NSPredicate(format: "label == %@", "Meguri")).firstMatch
+            let meguri = app.cells.containing(NSPredicate(format: "label == %@", BuildUnderTest.developmentDisplayName)).firstMatch
             try waitForState("Files must load the owned child or a known local folder location", {
                 self.nativeExportFolderIsOpen(stem, app) || self.nativeExportFolderIsOpen("RF2 Import Tests", app)
                     || actionable(root) || actionable(meguri) || actionable(local)
@@ -1324,7 +1324,7 @@ import notify
         var visited: Set<String> = []
         while actionableCancel() == nil, actionable(back), steps < 4 {
             let label = back.label
-            guard ["Meguri", "On My iPhone", "On My iPad", "Browse"].contains(label) else {
+            guard [BuildUnderTest.developmentDisplayName, "On My iPhone", "On My iPad", "Browse"].contains(label) else {
                 captureFailure("Unexpected native Back destination: \(label)")
                 XCTFail("Native export picker left the known local folder hierarchy")
                 return
@@ -1374,7 +1374,7 @@ import notify
             .matching(NSPredicate(format: "label == %@", "RF2 Import Tests, Actions Menu")).firstMatch
         let folder = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@ OR identifier == %@",
             ["RF2 Import Tests", "RF2 Import Tests, Folder"], "RF2 Import Tests, Folder")).firstMatch
-        let meguri = app.cells.containing(NSPredicate(format: "label == %@", "Meguri")).firstMatch
+        let meguri = app.cells.containing(NSPredicate(format: "label == %@", BuildUnderTest.developmentDisplayName)).firstMatch
         func actionable(_ target: XCUIElement) -> Bool {
             target.exists && target.isEnabled && target.isHittable
         }
@@ -1626,7 +1626,7 @@ import notify
         if !rememberedFile {
             let dedicated = app.descendants(matching: .any).matching(NSPredicate(
                 format: "identifier == %@ OR label == %@", "RF2 Import Tests, Folder", "RF2 Import Tests, Folder"))
-            let appFolder = app.cells.containing(NSPredicate(format: "label == %@", "Meguri"))
+            let appFolder = app.cells.containing(NSPredicate(format: "label == %@", BuildUnderTest.developmentDisplayName))
             if waitForHittable(dedicated) == nil {
                 let local = app.descendants(matching: .any).matching(NSPredicate(
                     format: "label IN %@", ["On My iPhone", "On My iPad"]))
@@ -1803,9 +1803,9 @@ import notify
         let targets = app.descendants(matching: .any).matching(NSPredicate(
             format: "identifier IN %@ OR label IN %@",
             ["RF2 Import Tests, Folder", "DOC.sidebar.item.On My iPad"],
-            ["On My iPhone", "On My iPad", "Meguri", "RF2 Import Tests", "RF2 Import Tests, Folder", "review", "review.colpkg"]))
+            ["On My iPhone", "On My iPad", BuildUnderTest.developmentDisplayName, "RF2 Import Tests", "RF2 Import Tests, Folder", "review", "review.colpkg"]))
         var rows = targets.allElementsBoundByIndex.prefix(12).map { attributes($0) }
-        let owners = app.cells.containing(NSPredicate(format: "label IN %@", ["Meguri", "review", "review.colpkg"]))
+        let owners = app.cells.containing(NSPredicate(format: "label IN %@", [BuildUnderTest.developmentDisplayName, "review", "review.colpkg"]))
         for owner in owners.allElementsBoundByIndex.prefix(6) {
             rows.append("owning cell: \(attributes(owner))")
             for image in owner.images.allElementsBoundByIndex.prefix(1) {

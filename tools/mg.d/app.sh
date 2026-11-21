@@ -1248,6 +1248,12 @@ mg_build_app() {
       mg_status fail
       return 0
     fi
+    # The test copy must never look like the daily driver: "Meguri Dev", blue icon.
+    if ! python3 tools/tests/app_identity_check.py product "$app" --identity dev >&2; then
+      mg_failure personal-preview-identity "personal preview does not show the dev identity (Meguri Dev, blue icon); see log.txt"
+      mg_status fail
+      return 0
+    fi
     mg_detail input "$(jq -nc --arg input "$input" '$input')"
   elif [ "$standalone" = true ]; then
     [ "$platform/$config" = mac/Debug ] || { mg_drive__usage "--standalone requires --platform mac --config Debug"; return 0; }
