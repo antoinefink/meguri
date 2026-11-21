@@ -44,11 +44,14 @@ pub struct Removed {
 }
 
 /// The note type's notes and cards on `reader`'s rows, and whether it is the
-/// collection's only note type; `None` when it does not exist.
-fn census(
+/// collection's only note type; `None` when it does not exist. Also W12's
+/// question (`counts::removal_counts`), so the question shows what the
+/// removal counts again. Progress counts cards, with no total.
+pub(crate) fn census(
     reader: &impl ReadRows,
     id: NotetypeId,
     cancel: &CancelToken,
+    progress: &ProgressSink,
 ) -> Result<Option<(u64, u64, bool)>, EngineError> {
     if reader.notetype(id)?.is_none() {
         return Ok(None);
@@ -63,6 +66,7 @@ fn census(
         let Some(last) = page.last() else { break };
         after = Some(last.0);
         cards += page.len() as u64;
+        progress.report(cards, None);
     }
     Ok(Some((notes, cards, only)))
 }
@@ -96,7 +100,7 @@ pub fn remove(
         ReaderRole::Maintenance,
         spec,
         |context| {
-            let found = census(&**context.snapshot(), request.notetype, &cancel)?;
+            let found = census(&**context.snapshot(), request.notetype, &cancel, &progress)?;
             if let Some((notes, cards, only)) = found {
                 // Refused on the snapshot already: no backup for a removal
                 // whose question has to show again.
@@ -123,7 +127,7 @@ pub fn remove(
             let scope = context.scope();
             // Again on the live rows of this transaction, before any write:
             // this count alone guarantees the commit.
-            let Some((notes, cards, only)) = census(scope, id, &CancelToken::new())? else {
+            let Some((notes, cards, only)) = census(scope, id, &CancelToken::new(), &ProgressSink::new())? else {
                 return Ok(removed);
             };
             check(&request, notes, cards, only)?;

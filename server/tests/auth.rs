@@ -3,6 +3,54 @@ mod support;
 use meguri_sync_server::{Config, crypto};
 use serde_json::{Value, json};
 use support::*;
+
+fn timestamp() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp()
+}
+
+fn session_expiry(db: &rusqlite::Connection) -> i64 {
+    db.query_row(
+        "SELECT expires_at FROM credentials WHERE kind='session'",
+        [],
+        |r| r.get(0),
+    ).unwrap()
+}
+
+fn session_cookie(r: &reqwest::Response) -> (String, i64) {
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["cache-control"], "no-store");
+    assert_eq!(r.headers().get_all("set-cookie").iter().count(), 1);
+    let value = r.headers()["set-cookie"].to_str().unwrap();
+    assert!(value.starts_with("__Host-meguri-session="));
+    let attributes: Vec<_> = value.split(';').map(str::trim).collect();
+    for attr in ["Secure", "HttpOnly", "SameSite=Strict", "Path=/"] {
+        assert!(attributes.contains(&attr));
+    }
+    assert!(!value.to_ascii_lowercase().contains("domain="));
+    let age = attributes.iter().find_map(|attr| attr.strip_prefix("Max-Age="))
+        .unwrap().parse().unwrap();
+    (attributes[0].to_owned(), age)
+}
+
+async fn identity_cookie(h: &Harness, cookie: &str, db: &rusqlite::Connection) -> i64 {
+    let before = timestamp();
+    let r = h.get("/api/me", Some(cookie)).await;
+    let after = timestamp();
+    let expires = session_expiry(db);
+    let (returned_cookie, age) = session_cookie(&r);
+    assert_eq!(returned_cookie, cookie);
+    assert!((expires - after..=expires - before).contains(&age));
+    assert_eq!(r.json::<Value>().await.unwrap()["data"]["server_url"], format!("{ORIGIN}/"));
+    expires
+}
+
+async fn rejected_identity(h: &Harness, cookie: &str) {
+    let r = h.get("/api/me", Some(cookie)).await;
+    assert_eq!(r.headers()["cache-control"], "no-store");
+    assert!(!r.headers().contains_key("set-cookie"));
+    error(r, 401, "authentication_failed").await;
+}
+
 #[test]
 fn validation_and_origin_are_exact() {
     assert_eq!(crypto::username(" \tA.B-c_1\r\n").unwrap(), "a.b-c_1");
@@ -166,9 +214,10 @@ async fn exact_json_mime_size_and_members_are_enforced() {
     .await;
 }
 #[tokio::test]
-async fn cookie_attributes_fixed_expiry_and_no_plaintext_bearers_in_sqlite() {
+async fn cookie_and_database_agree_on_year_lifetime_and_no_plaintext_bearers_in_sqlite() {
     let h = Harness::new().await;
     h.setup().await;
+    let before = timestamp();
     let r = h
         .post(
             "/api/login",
@@ -176,43 +225,25 @@ async fn cookie_attributes_fixed_expiry_and_no_plaintext_bearers_in_sqlite() {
             None,
         )
         .await;
-    let value = r.headers()["set-cookie"].to_str().unwrap().to_owned();
-    for attr in [
-        "__Host-meguri-session=",
-        "Secure",
-        "HttpOnly",
-        "SameSite=Strict",
-        "Path=/",
-        "Max-Age=86400",
-    ] {
-        assert!(value.contains(attr));
-    }
-    assert!(!value.contains("Domain="));
-    let cookie = value.split(';').next().unwrap().to_owned();
+    let after = timestamp();
+    let (cookie, age) = session_cookie(&r);
+    let db = rusqlite::Connection::open(h.database()).unwrap();
+    let expires = session_expiry(&db);
+    // Contract values are independent of the implementation's TTL constant.
+    assert!((before + 31_536_000..=after + 31_536_000).contains(&expires));
+    assert!((expires - after..=expires - before).contains(&age));
+    assert!(age > 0 && age <= 31_536_000);
     let host = h
         .service
         .native_login(IP, "root.admin", PASSWORD.into())
         .await
         .unwrap()
         .1;
-    let db = rusqlite::Connection::open(h.database()).unwrap();
-    let expires: i64 = db
-        .query_row(
-            "SELECT expires_at FROM credentials WHERE kind='session'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    h.get("/api/me", Some(&cookie)).await;
-    assert_eq!(
-        expires,
-        db.query_row(
-            "SELECT expires_at FROM credentials WHERE kind='session'",
-            [],
-            |r| r.get::<_, i64>(0)
-        )
-        .unwrap()
-    );
+    let host_expiry: Option<i64> = db.query_row(
+        "SELECT expires_at FROM credentials WHERE kind='hostkey'", [], |r| r.get(0),
+    ).unwrap();
+    assert_eq!(host_expiry, None);
+    assert_eq!(identity_cookie(&h, &cookie, &db).await, expires);
     let phc: String = db
         .query_row("SELECT password_phc FROM accounts", [], |r| r.get(0))
         .unwrap();
@@ -229,12 +260,85 @@ async fn cookie_attributes_fixed_expiry_and_no_plaintext_bearers_in_sqlite() {
         [],
     )
     .unwrap();
-    error(
-        h.get("/api/me", Some(&cookie)).await,
-        401,
-        "authentication_failed",
-    )
-    .await;
+    rejected_identity(&h, &cookie).await;
+    assert_eq!(session_expiry(&db), 0);
+    assert!(h.service.validate_hostkey(&host).await.is_ok());
+}
+
+#[tokio::test]
+async fn identity_before_daily_boundary_reads_without_a_writer_and_sets_remaining_cookie_age() {
+    let h = Harness::new().await;
+    h.setup().await;
+    let cookie = h.login("root.admin", PASSWORD).await;
+    let db = rusqlite::Connection::open(h.database()).unwrap();
+    let expires = timestamp() + 364 * 86400 + 3600;
+    db.execute("UPDATE credentials SET expires_at=?1 WHERE kind='session'", [expires]).unwrap();
+    let version: i64 = db.pragma_query_value(None, "data_version", |r| r.get(0)).unwrap();
+    // A normal identity read must succeed even while another connection holds
+    // the writer. This also catches an unnecessary no-op renewal transaction.
+    db.execute_batch("BEGIN IMMEDIATE").unwrap();
+    assert_eq!(identity_cookie(&h, &cookie, &db).await, expires);
+    db.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(db.pragma_query_value(None, "data_version", |r| r.get::<_, i64>(0)).unwrap(), version);
+}
+
+#[tokio::test]
+async fn identity_upgrades_legacy_and_rolls_daily_from_now_with_repeat_cookie_and_persistence() {
+    let h = Harness::new().await;
+    h.setup().await;
+    let cookie = h.login("root.admin", PASSWORD).await;
+    let db = rusqlite::Connection::open(h.database()).unwrap();
+    let mut renewed = 0;
+    for remaining in [86400, 364 * 86400] {
+        let old_expiry = timestamp() + remaining;
+        db.execute("UPDATE credentials SET expires_at=?1 WHERE kind='session'", [old_expiry]).unwrap();
+        // Other callers of Service::me must retain read-only semantics.
+        let authority = h.service.browser_authority(secret(&cookie)).await.unwrap();
+        assert_eq!(h.service.me(authority).await.unwrap().username, "root.admin");
+        assert_eq!(session_expiry(&db), old_expiry);
+        let before = timestamp();
+        renewed = identity_cookie(&h, &cookie, &db).await;
+        let after = timestamp();
+        assert!((before + 31_536_000..=after + 31_536_000).contains(&renewed));
+        assert!(renewed > old_expiry);
+        // Even if the renewal response was lost, the original cookie gets the
+        // authoritative remaining age again without a further extension.
+        assert_eq!(identity_cookie(&h, &cookie, &db).await, renewed);
+        assert_eq!(db.query_row("SELECT count(*) FROM credentials", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+    }
+    drop(db);
+    let h = Harness::reopen(h.stop().await).await;
+    let db = rusqlite::Connection::open(h.database()).unwrap();
+    assert_eq!(identity_cookie(&h, &cookie, &db).await, renewed);
+}
+
+#[tokio::test]
+async fn identity_never_renews_expired_revoked_disabled_or_stale_generation_sessions() {
+    let h = Harness::new().await;
+    h.setup().await;
+    let cookie = h.login("root.admin", PASSWORD).await;
+    let host = h.service.native_login(IP, "root.admin", PASSWORD.into()).await.unwrap().1;
+    let db = rusqlite::Connection::open(h.database()).unwrap();
+    for expires in [0, timestamp() - 1, timestamp()] {
+        db.execute("UPDATE credentials SET expires_at=?1 WHERE kind='session'", [expires]).unwrap();
+        rejected_identity(&h, &cookie).await;
+        assert_eq!(session_expiry(&db), expires);
+    }
+    let expires = timestamp() + 3600;
+    db.execute("UPDATE credentials SET expires_at=?1 WHERE kind='session'", [expires]).unwrap();
+    db.execute("UPDATE accounts SET enabled=0", []).unwrap();
+    rejected_identity(&h, &cookie).await;
+    assert_eq!(session_expiry(&db), expires);
+    db.execute("UPDATE accounts SET enabled=1", []).unwrap();
+    db.execute("UPDATE credentials SET generation=generation+1 WHERE kind='session'", []).unwrap();
+    rejected_identity(&h, &cookie).await;
+    assert_eq!(session_expiry(&db), expires);
+    db.execute("UPDATE credentials SET generation=generation-1 WHERE kind='session'", []).unwrap();
+    let r = h.post("/api/logout", json!({}), Some(&cookie)).await;
+    assert_eq!(r.status(), 200);
+    assert!(r.headers()["set-cookie"].to_str().unwrap().contains("Max-Age=0"));
+    rejected_identity(&h, &cookie).await;
+    assert_eq!(session_expiry(&db), expires);
     assert!(h.service.validate_hostkey(&host).await.is_ok());
 }
 #[tokio::test]

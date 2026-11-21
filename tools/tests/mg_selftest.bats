@@ -136,6 +136,8 @@ case "$name $*" in
       exit 1
     fi ;;
   "docker compose version --short") echo 5.5.0 ;;
+  "security cms -D -i "*) cat "$4" ;;
+  "system_profiler SPHardwareDataType -json") echo '{"SPHardwareDataType":[{"provisioning_UDID":"X"}]}' ;;
   "tart list --format json")
     echo "[{\"Source\": \"local\", \"Name\": \"meguri-mac\", \"Running\": true, \"State\": \"${STUB_VM_STATE:-running}\"}]" ;;
   "vm-ssh xcodebuild -version")
@@ -181,6 +183,9 @@ EOF
     ln -s _stub "$STUBS/$c"
   done
   export PATH="$STUBS:$PATH"
+  # Installed provisioning profiles: a fixture directory, never this Mac's.
+  export MEGURI_PROFILE_DIRS="$BATS_TEST_TMPDIR/profiles"
+  mkdir -p "$MEGURI_PROFILE_DIRS"
   # The Mac UI test VM (U8b): its drive's tart and SSH wrappers, and the
   # host's config naming them.
   mkdir -p "$BATS_TEST_TMPDIR/T9/bin"
@@ -198,11 +203,12 @@ assert_read_only_calls() {
     -e '^uname -[a-z]+$' \
     -e '^sw_vers -(productVersion|buildVersion)$' \
     -e '^ioreg -n Root -d1$' \
-    -e '^system_profiler SPDisplaysDataType -json$' \
+    -e '^system_profiler SP(Displays|Hardware)DataType -json$' \
     -e '^xcode-select -p$' \
     -e '^xcodebuild -(version|license check)$' \
     -e '^xcrun simctl list runtimes --json$' \
     -e '^defaults read com\.apple\.dt\.Xcode [A-Za-z]+$' \
+    -e '^security cms -D -i ([^ ]| [^-])*\.(provisionprofile|mobileprovision)$' \
     -e '^docker info --format \{\{json \.\}\}$' \
     -e '^docker compose version --short$' \
     -e '^rustup (toolchain list|\+[0-9.]+ (target|component) list --installed)$' \
@@ -691,6 +697,46 @@ EOF
   jq -e '.user_steps[] | select(.id == "xcode-27-1" and .state == "missing" and .required == false)' "$result"
   [ "$(field .summary.total)" = "$(field '.details.checks | length')" ]
   assert_read_only_calls
+  validate "$result"
+  assert_doctor_result "$result" "$status"
+}
+
+# daily_profile <push>: an installed Mac profile for the real copy.
+daily_profile() {
+  python3 - "$MEGURI_PROFILE_DIRS/daily.provisionprofile" "$1" <<'PY'
+import datetime, plistlib, sys
+grants = {"com.apple.application-identifier": "DNQ34W43XX.com.antoinefink.meguri",
+          "keychain-access-groups": ["DNQ34W43XX.*"], "com.apple.security.application-groups": ["DNQ34W43XX.*"],
+          "com.apple.developer.icloud-container-identifiers": ["iCloud.com.antoinefink.meguri"],
+          "com.apple.developer.icloud-services": "*",
+          "com.apple.developer.icloud-container-environment": ["Development", "Production"],
+          "com.apple.developer.aps-environment": sys.argv[2]}
+with open(sys.argv[1], "wb") as stream:
+    plistlib.dump({"Entitlements": grants, "TeamIdentifier": ["DNQ34W43XX"], "Platform": ["OSX"],
+                  "ExpirationDate": datetime.datetime(2099, 1, 1), "ProvisionedDevices": ["X"]}, stream)
+PY
+}
+
+@test "doctor's real-copy profile line is informational: missing, push-blocked and authorized never change its status" {
+  make_stubs
+  mg doctor
+  [ "$(field .status)" = pass ]
+  jq -e '.user_steps[] | select(.id == "daily-driver-account" and .state == "missing" and .required == false and (.title | contains("identifiers")))' "$result"
+  [ "$(field .details.daily_driver_profiles.mac.state)" = missing ]
+  [[ "$stderr" == *"info  daily-driver"*"no installed Mac profile authorizes the real copy"* ]]
+  [ "$(field '[.details.checks[] | select(.id | startswith("daily"))] | length')" = 0 ]
+  daily_profile development
+  mg doctor
+  [ "$(field .status)" = pass ]
+  jq -e '.user_steps[] | select(.id == "daily-driver-account" and .required == false and (.title | contains("push")))' "$result"
+  [[ "$stderr" == *"waiting on the push decision"* ]]
+  daily_profile production
+  mg doctor
+  [ "$(field .status)" = pass ]
+  [ "$(field '[.user_steps[] | select(.id == "daily-driver-account")] | length')" = 0 ]
+  [ "$(field .details.daily_driver_profiles.mac.state)" = authorized ]
+  assert_read_only_calls
+  grep -q '^security cms -D -i .*daily\.provisionprofile$' "$STUB_LOG"
   validate "$result"
   assert_doctor_result "$result" "$status"
 }

@@ -72,6 +72,9 @@ where
     let mut notes = Vec::new();
     let mut after = None;
     let mut done = 0;
+    let fronts = super::normal::fronts(nt);
+    // One snapshot: deck usability and the last deck do not change.
+    let memo = super::placement::Memo::default();
     let total = reader.notetype_note_count(nt.id)?;
     progress.report(0, Some(total));
     loop {
@@ -88,7 +91,7 @@ where
             if !siblings.is_empty() && (nt.config.kind == 1 || siblings.len() != nt.templates.len()) {
                 notes.push(NotePlan {
                     note: note.id,
-                    cards: super::plan_note(reader, nt, &note, &siblings, None, false)?,
+                    cards: super::plan_note_with(reader, &memo, nt, &fronts, &note, &siblings, None, false)?,
                     sibling_position: super::position::sibling_position(&siblings),
                     content: content(&note, &siblings),
                 });

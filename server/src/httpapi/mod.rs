@@ -64,10 +64,11 @@ fn data<T: Serialize>(value: T, created: bool) -> Response {
         .into_response()
 }
 const COOKIE: &str = "__Host-meguri-session";
-fn set_cookie(response: &mut Response, secret: Option<&str>) {
-    let cookie = match secret {
-        Some(value) => {
-            format!("{COOKIE}={value}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400")
+fn set_cookie(response: &mut Response, session: Option<(&str, i64)>) {
+    let cookie = match session {
+        Some((value, expires_at)) => {
+            let remaining = (expires_at - crate::accounts::now()).max(0);
+            format!("{COOKIE}={value}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age={remaining}")
         }
         None => format!("{COOKIE}=; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"),
     };
@@ -403,12 +404,15 @@ async fn dispatch(
                 false,
             )),
             "/api/me" => {
-                let a = authority(service, &parts.headers).await?;
-                let identity = service.me(a).await?;
-                Ok(data(
+                let secret = cookie(&parts.headers)?;
+                let a = service.browser_authority(&secret).await?;
+                let (identity, expires_at) = service.browser_me(a).await?;
+                let mut response = data(
                     serde_json::json!({"id":identity.id,"username":identity.username,"role":identity.role,"server_url":service.config.server_url()}),
                     false,
-                ))
+                );
+                set_cookie(&mut response, Some((&secret, expires_at)));
+                Ok(response)
             }
             "/api/me/storage" => {
                 let a = authority(service, &parts.headers).await?;
@@ -478,11 +482,11 @@ async fn dispatch(
         }
         "/api/login" => {
             let body: Login = parse(bytes)?;
-            let (identity, secret) = service
-                .browser_login(ip, &body.username, body.password)
+            let (identity, secret, expires_at) = service
+                .browser_login_session(ip, &body.username, body.password)
                 .await?;
             let mut response = data(identity, false);
-            set_cookie(&mut response, Some(&secret));
+            set_cookie(&mut response, Some((&secret, expires_at)));
             Ok(response)
         }
         "/api/logout" => {
