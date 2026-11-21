@@ -35,3 +35,5 @@ active:
   - "structure/operators"
   - "structure/whole-collection"
   - "tags/*"
+  # U84: sorted search, covered by the same search-data scan.
+  - "unsorted/configured-sort-ignored"
