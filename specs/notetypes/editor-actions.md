@@ -4,7 +4,7 @@ Spec: notetypes/editor-actions
 Requirements: R915, R916, R917, R918 (the selection after a delete), R920, R922, R925, R926, R932, R933, R934, R935, R936, R938 (the card type an editor opens at), R944, R945, R946, R947 (the pickers and the loss list)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/notetypes/manage/
-Status: Under review (R915; round 9, decided 2026-11-20) for the lines of A3, A6, A7, A10, A12 that begin "Changed 2026-11-20 (round 9)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R915) for the lines of A3, A6, A7, A10, A12 that begin "Changed 2026-11-20 (round 9)". Approved by Antoine in chat (round 9, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). Every other section is in force and unchanged.
 
 What the actions of the Note Types list, the card template editor, the field editor and the Change Note Type sheet do to their draft, where that must match Anki: list order and counts, the Add sheet's choices and names, the text Flip, Add Card Type, Insert Field and Copy Info produce, the values Browser Appearance and Deck Override store, and how Reposition moves an item. Each action here changes only the editor's draft (`notetypes/structure-changes` S1.1, `notetypes/records` N3) until Save, except where a section says otherwise. Layout, controls and wording are the screen contracts' (`docs/design/screen-inventory.yaml`: `noteTypes.list`, `noteTypes.templates`, `noteTypes.fields`, `noteTypes.changeNoteType`); Anki's own words are `editor/editing-strings`. Validation is `notetypes/validation`, saves `notetypes/records` and `notetypes/structure-changes`, the preview `render/preview`.
 

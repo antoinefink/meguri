@@ -4,7 +4,7 @@ Spec: browser/bulk-actions
 Requirements: R1117, R1181, R1182, R1184, R1187, R1188, R1189, R1190, R1191, R1192, R1193, R1194, R1195, R1196, R1197, R1198, R1199, R1212, R1213, R1214, R1215, R1268, AE45; supports R645, R1183, R1185, R1831
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/bulk/, conformance/scenarios/notes/change-deck/
-Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of B3, B5, B11, B16 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R1232) for the lines of B3, B5, B11, B16 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). Every other section is in force and unchanged.
 
 What each of Browse's card and note actions does: which cards or notes it acts on (B1), which item decides a toggle (B2), the toggles (B3 to B6), Change Deck (B7), and how the other actions hand their targets to the operations other specs define (B8 to B14), with filtered decks (B15), the results and undo steps (B16) and the scenarios (B17). Most actions are operations of other areas, which this file names instead of restating; Change Deck's operation is specified here (B7.2). How a bulk action runs (job, phases, cancellation, progress, change set, one undo entry, the result message) is the Meguri design doc `browser/bulk-framework` (U86). Find and Replace is `browser/find-replace`; Edit Field is the Meguri design doc `browser/batch-edit`. The scenario op Change Deck needs is `specs/conformance/bulk-ops.md` X2.
 

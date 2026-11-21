@@ -283,7 +283,7 @@ Decided 2026-10-27 (screen contract `deckOptions.options`):
 
 ### N11.10 Note types (U200, U201, U203)
 
-Replaced 2026-11-20 by N22 (round 9), under review until Antoine approves it: the Note Types section, one draft and one Save sheet. The text below stays until then.
+Replaced 2026-11-20 by N22 (round 9), approved by Antoine that day: the Note Types section, one draft and one Save sheet. The text below describes the screens until the N22 units replace them.
 
 Decided 2026-10-27 (screen contracts `noteTypes.list`, `noteTypes.templates`, `noteTypes.fields`, `noteTypes.changeNoteType`):
 
@@ -481,7 +481,7 @@ Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`: `set
 
 - Settings is one flat page: a grouped form whose sections are Sync, then Collection. The sections' rows are on the page itself; no row pushes a form that only repeats a section.
 - Mac, and the iPhone Duo's inner display held wide: the sections are a list beside the selected section, as in the system's Settings. Mac keeps N5's Settings scene and N11.4's search field; the list has Sync and Collection. The last selected section is restored (N5).
-- Changed 2026-11-20 (first-run fix; awaiting Antoine's approval). In the Mac Settings window the selected section's title bar names it, so its form shows no second Sync or Collection heading. The flat page and the Duo's wide layout keep each section's heading.
+- Changed 2026-11-20 (first-run fix; approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs). In the Mac Settings window the selected section's title bar names it, so its form shows no second Sync or Collection heading. The flat page and the Duo's wide layout keep each section's heading.
 - iPhone, the Duo folded or held tall, and iPad: the flat page, in the Settings tab or sidebar section (N11.4), with N14.8's title in the tab layout.
 - A Settings section that N11.4 lists and whose unit lands later joins as a further section after Collection, in N11.4's order. This section decides only Sync and Collection.
 - Collection keeps N5's and N12.4's file import and export. Import and export always carry cards and media; there is no media-scope choice (N5).
@@ -911,7 +911,7 @@ Decided 2026-11-20 (`decisions.md`, `deck.options`, option 6B). The scope, the s
 
 ## N21. Round 8: Browse (2026-11-20)
 
-Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `home.deckList`; round 8 answers 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A, with the forgetting curve in the first version, system symbols on the Today and Browse rows, every bulk action in the first version, a Note menu and ⇧⌘B). Where earlier text differs, this section wins. Behaviour is `browser/workspace` and `search/filter-tokens`; this section is the layout. Under review with those specs until Antoine approves them. Strings: `browser/workspace` V16 and `search/filter-tokens` T15.
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `browser` and `home.deckList`; round 8 answers 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A, with the forgetting curve in the first version, system symbols on the Today and Browse rows, every bulk action in the first version, a Note menu and ⇧⌘B). Where earlier text differs, this section wins. Behaviour is `browser/workspace` and `search/filter-tokens`; this section is the layout. Approved with those specs by Antoine on 2026-11-20. Strings: `browser/workspace` V16 and `search/filter-tokens` T15.
 
 ### N21.1 Where Browse lives (11A)
 
@@ -1007,7 +1007,7 @@ R1076, R1086, R1090, R1093 (canonical text, syntax mode and reference: dropped; 
 
 ## N22. Round 9: Note Types (2026-11-20)
 
-Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` rows; round 9 answers 1B 2B 3C 4B 5A 6B 7B 8B, with a preview that has a Light and Dark switch and no device picker, and ⇧⌘T). Behaviour is `notetypes/workspace` and `notetypes/draft-save`; this section is the layout. Under review with those specs until Antoine approves them.
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, the two `noteTypes` rows; round 9 answers 1B 2B 3C 4B 5A 6B 7B 8B, with a preview that has a Light and Dark switch and no device picker, and ⇧⌘T). Behaviour is `notetypes/workspace` and `notetypes/draft-save`; this section is the layout. Approved with those specs by Antoine on 2026-11-20.
 
 ### N22.1 Where Note Types lives (1B)
 

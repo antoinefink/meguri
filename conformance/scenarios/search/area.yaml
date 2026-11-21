@@ -10,12 +10,10 @@ active:
   # U82: decks, dupe, errors/ae42, history/added-edited, ids,
   # notetypes/names, props, regex/glob-size and state, after the R1881
   # search-data scan (similarity/20261120T222836Z-26053) flagged none of
-  # them. history/answers, dst-new-york, dst-paris and odd-ease stay inactive
-  # until their flagged regions have a disposition (R1881).
-  # tags/hierarchy and tags/regex-and-nc stay inactive: their setup note
-  # `Animal` is stored as `animal` beside `animal::mammal` (tags T3,
-  # deviation tags-implicit-parent-spelling), which changes their dumps and
-  # one search.
+  # them. The rest of history and tags followed once their scenarios were
+  # rewritten (2026-11-21): the history revlog inserts name their columns in
+  # Meguri's own order (R1881), and the tags scenarios write note three's tag
+  # with db_exec so that tags T3 spelling does not apply.
   - "decks/*"
   - "dupe/*"
   - "extractors/*"
@@ -25,7 +23,7 @@ active:
   - "errors/kinds"
   - "errors/order"
   - "errors/run"
-  - "history/added-edited"
+  - "history/*"
   - "ids/lists"
   - "notetypes/names"
   - "props/*"
@@ -36,3 +34,4 @@ active:
   - "structure/negation"
   - "structure/operators"
   - "structure/whole-collection"
+  - "tags/*"

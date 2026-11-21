@@ -4,6 +4,10 @@
 # note. tag:nc: compares combining-free forms. Letter case folds with simple
 # case folding in every mode; the value is converted to NFC first. Escaped
 # wildcards and regular-expression characters are literal in normal mode.
+# Note three's tag `Animal` is written with db_exec after the setup: added
+# beside `animal::mammal`, Meguri would store it as `animal` (specs/tags/
+# tags.md T3, deviation tags-implicit-parent-spelling), and only the search
+# over the stored text is under test here.
 id: search/tags/regex-and-nc
 tags: [needs-tag]
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
@@ -16,7 +20,7 @@ setup:
   notes:
     - {notetype: Memo, fields: [one, x], tags: ["animal::mammal"]}
     - {notetype: Memo, fields: [two, x], tags: [animals]}
-    - {notetype: Memo, fields: [three, x], tags: [Animal]}
+    - {notetype: Memo, fields: [three, x]}
     - {notetype: Memo, fields: [four, x]}
     - {notetype: Memo, fields: [five, x], tags: ["x::ani"]}
     - {notetype: Memo, fields: [six, x], tags: ["Übung"]}
@@ -26,6 +30,7 @@ setup:
     - {notetype: Memo, fields: [ten, x], tags: ["STRASSE"]}
     - {notetype: Memo, fields: [eleven, x], tags: ["ｆｕｌｌ"]}
 steps:
+  - db_exec: {sql: "UPDATE notes SET tags = ' Animal ' WHERE sfld = 'three'"}
   - db_exec: {sql: "SELECT tags FROM notes ORDER BY id"}
   - observe:
       - search:
