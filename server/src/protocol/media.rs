@@ -14,8 +14,9 @@ fn response(value:&impl Serialize)->Result<Response> {
 pub(crate) const METHODS:&[&str]=&["begin","mediaChanges","uploadChanges","downloadFiles","mediaSanity"];
 pub(crate) async fn handle(service:Arc<Service>,authority:NativeAuthority,method:&str,body:&mut Body)->Result<Response> {
     if method=="uploadChanges" {
-        let root=service.metadata.owner(); let id=authority.account_id().to_owned(); let budget=service.temp.clone();
-        let changes=framing::receive(service.clone(),body,move |reader,limit|archive::receive(reader,limit,&root,&id,budget)).await?;
+        let id=authority.account_id().to_owned(); let budget=service.temp.clone();
+        let directory=service.collection_staging(authority.clone(),move |root|root.media_directory(&id)).await?;
+        let changes=framing::receive(service.clone(),body,move |reader,limit|archive::receive_in(reader,limit,directory,budget)).await?;
         return response(&media::upload(service,authority,changes).await?);
     }
     // These small request schemas have their own bound. Upload ZIP bytes never

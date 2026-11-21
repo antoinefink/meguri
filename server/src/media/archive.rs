@@ -132,8 +132,10 @@ fn stage(reader:&mut dyn Read, declared:u64, maximum:u64, remaining:u64, mut fil
     Ok((Member {size:actual,file,sha1:blobs::hex(&sha1.finalize()),sha256:sha256.finalize().to_vec()},metadata))
 }
 
-pub(crate) fn receive(reader:Box<dyn Read+Send>,limit:u64,root:&DataRoot,id:&str,budget:TempBudget)->Result<Vec<(String,Option<Content>)>> {
-    let mut spool=Temporary::create(root,id,budget.clone())?;
+/// Bind once before streaming. A reset can unlink this directory, but no later
+/// member of this upload can resolve or write into the recreated account store.
+pub(crate) fn receive_in(reader:Box<dyn Read+Send>,limit:u64,media_directory:File,budget:TempBudget)->Result<Vec<(String,Option<Content>)>> {
+    let mut spool=Temporary::create_in(media_directory.try_clone()?,budget.clone())?;
     crate::protocol::framing::decode(reader,&mut spool,limit)?;
     spool.rewind()?;
     let length=spool.file.metadata()?.len();
@@ -193,7 +195,7 @@ pub(crate) fn receive(reader:Box<dyn Read+Send>,limit:u64,root:&DataRoot,id:&str
             return Err(invalid());
         }
         // The local header has been bounded and compared before any decoding.
-        let file=if key=="_meta" {None} else {Some(Temporary::create(root,id,budget.clone())?)};
+        let file=if key=="_meta" {None} else {Some(Temporary::create_in(media_directory.try_clone()?,budget.clone())?)};
         let mut compressed=entry.reader();
         let (member,metadata)=if method==rawzip::CompressionMethod::STORE {
             stage(&mut entry.verifying_reader(&mut compressed),declared,maximum,limit-expanded,file)?

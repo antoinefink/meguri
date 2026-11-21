@@ -32,8 +32,10 @@ pub(crate) struct Temporary {
 }
 impl Temporary {
     pub fn create(root: &DataRoot, id: &str, budget: TempBudget) -> Result<Self> {
+        Self::create_in(root.media_directory(id)?, budget)
+    }
+    pub(crate) fn create_in(directory: File, budget: TempBudget) -> Result<Self> {
         let metadata = budget.reserve(4096)?;
-        let directory = root.media_directory(id)?;
         let name = format!("stage-{}", crypto::random_token()?);
         let file = at::open(&directory, &name, false, true)?;
         Ok(Self { file, directory, name:Some(name), budget, holds:vec![metadata] })
