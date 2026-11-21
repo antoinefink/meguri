@@ -744,3 +744,23 @@ fn a_request_made_during_a_halt_fails_with_the_engines_refusal_h3() {
     // Afterwards searches run again.
     assert_eq!(fx.search("", SearchMode::Cards, asc("cardDue")).1, 4);
 }
+
+/// H4: a request no worker can run still ends with one terminal event. A
+/// session that outlives its engine cannot start a worker, so its request
+/// fails at once, and the next one does too.
+#[test]
+fn a_request_no_worker_can_run_fails_with_one_terminal_event_h4() {
+    let fx = fixture(1);
+    let Fx { h, session, events, .. } = fx;
+    let Harness { engine, .. } = h;
+    engine.close().unwrap();
+    drop(engine);
+    for _ in 0..2 {
+        let seq = session.start_search("", SearchMode::Cards, asc("cardDue"), None);
+        let event = events.recv_timeout(WAIT).unwrap();
+        assert!(
+            matches!(&event, SearchEvent::Failed { seq: failed, error: BrowseError::Engine(_) } if *failed == seq),
+            "{event:?}"
+        );
+    }
+}

@@ -162,16 +162,9 @@ fn serve(shared: &Arc<SessionShared>, threads: &crate::threads::ThreadRegistry, 
                 let _ = delivery.join();
             }
             Err(error) => {
-                shared.listener.event(if job.token.is_cancelled() {
-                    SearchEvent::Cancelled { seq }
-                } else {
-                    SearchEvent::Failed {
-                        seq,
-                        error: BrowseError::Engine(EngineError::internal(format!(
-                            "cannot start the search event thread: {error}"
-                        ))),
-                    }
-                });
+                let event = unstarted(&job, &format!("cannot start the search event thread: {error}"));
+                let listener = Arc::clone(&shared.listener);
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener.event(event)));
             }
         }
         let mut state = shared.lock();
@@ -199,6 +192,33 @@ impl From<meguri_storage::StorageError> for Stop {
     }
 }
 
+/// H3: the engine's refusal of a request made during a stop.
+fn refusal_event(seq: RequestSeq) -> SearchEvent {
+    SearchEvent::Failed {
+        seq,
+        error: BrowseError::Engine(EngineError::unavailable(
+            "the collection is changing generation, suspending or closing",
+        )),
+    }
+}
+
+/// The terminal event of a request no thread could run (H4): its refusal
+/// when it was made during a stop, `Cancelled` when it was cancelled,
+/// otherwise `Failed` with `why`.
+pub(super) fn unstarted(job: &QueuedJob, why: &str) -> SearchEvent {
+    let seq = RequestSeq(job.seq);
+    if matches!(job.job, Job::Refused) {
+        refusal_event(seq)
+    } else if job.token.is_cancelled() {
+        SearchEvent::Cancelled { seq }
+    } else {
+        SearchEvent::Failed {
+            seq,
+            error: BrowseError::Engine(EngineError::internal(why)),
+        }
+    }
+}
+
 /// One request: its events, then nothing more of it.
 fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<SearchEvent>) {
     let request = Request {
@@ -211,12 +231,7 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
     // H3: made during a stop, it fails with the engine's refusal, whatever
     // happens to its token afterwards.
     if matches!(job.job, Job::Refused) {
-        let _ = outbox.send(SearchEvent::Failed {
-            seq: RequestSeq(job.seq),
-            error: BrowseError::Engine(EngineError::unavailable(
-                "the collection is changing generation, suspending or closing",
-            )),
-        });
+        let _ = outbox.send(refusal_event(RequestSeq(job.seq)));
         return;
     }
     // Listed for halts from the start, so a halt that begins while the
