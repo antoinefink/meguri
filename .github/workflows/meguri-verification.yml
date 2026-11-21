@@ -835,9 +835,21 @@ jobs:
           TOKEN: ${{ github.token }}
         run: .github/dev-image.sh pull
 
+      # Some self-tests run git in /work inside the container, as root. The
+      # runner's checkout belongs to the runner user, so git would refuse it
+      # as a repository of another owner; root owns it for the run.
+      - name: Give the checkout to root for the container
+        shell: bash
+        run: sudo chown -R 0:0 "$GITHUB_WORKSPACE"
+
       - name: selftest
         shell: bash
         run: .github/mg-step.sh selftest selftest
+
+      - name: Give the checkout back to the runner user
+        if: always()
+        shell: bash
+        run: sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
