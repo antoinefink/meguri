@@ -25,3 +25,20 @@ The final reset logic passed all 34 selected server checks in
 `sync-server-test/20261121T110742Z-12507`. The previous browser run
 `sync-web-verify/20261121T110629Z-2571` passed 42 of 44 cases. The two Accounts
 assertions now check the section heading and its separate count status.
+
+## PR review
+
+Antoine approved the Accounts layout in the HTML preview. CodeRabbit noted
+that a reset between the metadata read and the collection measurement could
+mix old media usage with the new collection size. Both browser endpoints
+now measure each account under one publication barrier.
+
+Session `s-20261121T112925Z-7ec85b35` updated W3. Independent
+review `cleanroom/20261121T113040Z-49101` classified the complete spec and
+session record as public. The admitted W3 digest is
+`5b80364781b6b1eaa16529b666cfd1ca3e6a76098dcb8c2282e7406810640bea`.
+
+The code review `cleanroom/20261121T113325Z-70782` checked the exact storage
+fix from `cleanroom/20261121T113202Z-61008`. The real HTTPS Accounts and own
+storage regression passed with the other 31 cases in
+`sync-server-test/20261121T113406Z-72645`.

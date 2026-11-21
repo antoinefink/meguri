@@ -9,7 +9,7 @@ pub struct CapabilityLink {
 impl Service {
     pub async fn accounts(&self, authority: BrowserAuthority) -> Result<Vec<AccountSummary>> {
         let actor = authority.clone();
-        let rows = self.metadata.run(move |c| {
+        let mut accounts = self.metadata.run(move |c| {
             let tx = c.transaction()?;
             admission(&tx)?;
             check_admin(&tx, &actor, "authentication_failed")?;
@@ -18,19 +18,12 @@ impl Service {
                 identity: Identity { id: r.get(0)?, username: r.get(1)?, role: r.get(2)? },
                 enabled: r.get(3)?, provisioning_state: r.get(4)?, storage: None,
             }))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(accounts.into_iter().map(|account| {
-                let media = if account.provisioning_state == "ready" {
-                    crate::media::index::storage_bytes(&tx, &account.identity.id).ok()
-                } else { None };
-                (account, media)
-            }).collect::<Vec<_>>())
+            Ok(accounts)
         }).await?;
-        let mut accounts = Vec::with_capacity(rows.len());
-        for (mut account, media) in rows {
-            if let Some(media_bytes) = media {
-                account.storage = self.collection_storage(account.identity.id.clone(), media_bytes).await;
+        for account in &mut accounts {
+            if account.provisioning_state == "ready" {
+                account.storage = self.collection_storage(account.identity.id.clone()).await;
             }
-            accounts.push(account);
         }
         self.pause("accounts_before_return").await;
         // Slow filesystem reads must not return data under revoked authority.
@@ -43,34 +36,31 @@ impl Service {
     }
     pub async fn own_storage(&self, authority: BrowserAuthority) -> Result<Option<AccountStorage>> {
         let actor = authority.clone();
-        let (id, media) = self.metadata.run(move |c| {
+        let id = self.metadata.run(move |c| {
             let tx = c.transaction()?;
             admission(&tx)?;
             let account = check_browser(&tx, &actor, "authentication_failed")?;
-            let id = account.identity.id;
-            let media = crate::media::index::storage_bytes(&tx, &id).ok();
-            Ok((id, media))
+            Ok(account.identity.id)
         }).await?;
         // The metadata read is released before acquiring publication ownership.
-        let storage = match media {
-            Some(bytes) => self.collection_storage(id, bytes).await,
-            None => None,
-        };
+        let storage = self.collection_storage(id).await;
         self.pause("own_storage_before_return").await;
         // Revalidate the same session even when measurement was unavailable.
         self.me(authority).await?;
         Ok(storage)
     }
-    async fn collection_storage(&self, id: String, media_bytes: u64) -> Option<AccountStorage> {
+    async fn collection_storage(&self, id: String) -> Option<AccountStorage> {
         // No metadata writer or other account barrier is held here.
         // Move the guard into the blocking job so cancellation cannot
         // release publication ownership before the snapshot closes.
+        self.pause("account_storage_before_barrier").await;
         let gate = self.barriers.get(&id).ok()?;
         let guard = gate.enter().await;
         self.metadata.files(move |root| {
             let _publication = (gate, guard);
             let c = crate::storage::open(root.database(), false)?;
             crate::storage::reset::admitted_epoch(&c, &id)?;
+            let media_bytes = crate::media::index::storage_bytes(&c, &id)?;
             drop(c);
             crate::storage::collection::storage(root, &id, media_bytes)
         }).await.ok()

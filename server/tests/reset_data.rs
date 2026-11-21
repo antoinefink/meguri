@@ -154,6 +154,36 @@ async fn reset_requires_admin_exact_origin_and_strict_empty_json_without_target_
 }
 #[cfg(feature="test-hooks")]
 #[tokio::test]
+async fn storage_measurement_after_reset_uses_current_collection_and_media() {
+    for route in ["/api/admin/accounts","/api/me/storage"] {
+        let h=Harness::new().await; let account=h.setup().await;
+        let admin=h.login("root.admin",PASSWORD).await; let id=account["id"].as_str().unwrap();
+        let (_,key)=h.service.native_login(IP,"root.admin",PASSWORD.into()).await.unwrap();
+        let upload=collection(&h);
+        assert_eq!(decoded(native(&h,"sync","upload",&key,&upload).await).await,b"OK");
+        let result:Value=serde_json::from_slice(&decoded(native(&h,"msync","uploadChanges",&key,&media()).await).await).unwrap();
+        assert_eq!(result["data"],json!([1,1]));
+        let before=h.get("/api/me/storage",Some(&admin)).await.json::<Value>().await.unwrap();
+        assert!(before["data"]["media_bytes"].as_u64().unwrap()>0);
+        let pause=h.service.hooks.arm("account_storage_before_barrier");
+        let request=h.client.get(format!("{}{route}",h.base)).header("cookie",&admin);
+        let pending=tokio::spawn(async move {request.send().await.unwrap()});
+        within(pause.arrived()).await;
+        let result=within(reset(&h,&admin,id)).await;
+        assert_eq!(result["storage"]["media_bytes"],0);
+        assert!(before["data"]["collection_bytes"].as_u64().unwrap()>result["storage"]["collection_bytes"].as_u64().unwrap());
+        pause.resume();
+        let response=within(pending).await.unwrap(); assert_eq!(response.status(),200);
+        let body=response.json::<Value>().await.unwrap();
+        let storage=if route=="/api/admin/accounts" {
+            let row=body["data"]["accounts"].as_array().unwrap().iter().find(|row|row["id"]==id).unwrap();
+            &row["storage"]
+        } else { &body["data"] };
+        assert_eq!(storage,&result["storage"]);
+    }
+}
+#[cfg(feature="test-hooks")]
+#[tokio::test]
 async fn old_validated_collection_upload_cannot_publish_after_data_reset() {
     let h=Harness::new().await; let account=h.setup().await; let admin=h.login("root.admin",PASSWORD).await;
     let (_,key)=h.service.native_login(IP,"root.admin",PASSWORD.into()).await.unwrap();
