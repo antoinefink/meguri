@@ -25,6 +25,13 @@ pub struct DataRoot {
     directories: Mutex<BTreeMap<PathBuf, File>>,
     pub(super) collection_pins: Arc<Mutex<BTreeMap<PathBuf,usize>>>,
 }
+/// One account's blank-store staging budget. Private fields bind the permit to
+/// its account; consuming it in provision_reserved holds it through publication.
+pub(crate) struct ProvisionReservation {
+    id: String,
+    ownership: String,
+    _temporary: crate::limits::TempReservation,
+}
 #[derive(Clone, Debug)]
 pub struct AccountStores {
     pub account_id: String,
@@ -532,7 +539,7 @@ impl DataRoot {
             drop(db);
             return self.initialize_schema();
         }
-        if !matches!(version,1|2|3|4) {
+        if !matches!(version,1|2|3|4|5) {
             return Err(unavailable());
         }
         super::semantic::validate(self, &db, true)?;
@@ -592,7 +599,7 @@ impl DataRoot {
         let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
         let integrity: String = db.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
         let foreign: bool = db.prepare("PRAGMA foreign_key_check")?.exists([])?;
-        if !matches!(version,1|2|3|4) || integrity != "ok" || foreign {
+        if !matches!(version,1|2|3|4|5) || integrity != "ok" || foreign {
             return Err(unavailable());
         }
         let (phase, hash): (String, Vec<u8>) = db.query_row(
@@ -631,14 +638,25 @@ impl DataRoot {
         })
     }
     pub(crate) fn provision(&self, id: &str, budget: &TempBudget) -> Result<()> {
+        let reservation = self.reserve_provision(id, budget)?;
+        self.provision_reserved(reservation)
+    }
+    pub(crate) fn reserve_provision(&self, id: &str, budget: &TempBudget) -> Result<ProvisionReservation> {
         self.validate()?;
-        let s = self.stores(id)?;
+        self.stores(id)?;
         let ownership = format!("meguri-collection-staging-v1\naccount={id}\n");
         // Cover all service staging payload, including an existing prefix on
         // resume. Reserve before creating even an empty staging file. The guard
         // survives every write/sync/publication and releases on success or error;
         // errors retain the durable named intent for the next budgeted attempt.
-        let _temporary = budget.reserve((ownership.len() + INITIAL_MANIFEST.len()) as u64 + super::collection::INITIAL_TEMP_BYTES)?;
+        let temporary = budget.reserve((ownership.len() + INITIAL_MANIFEST.len()) as u64 + super::collection::INITIAL_TEMP_BYTES)?;
+        Ok(ProvisionReservation { id: id.into(), ownership, _temporary: temporary })
+    }
+    pub(crate) fn provision_reserved(&self, reservation: ProvisionReservation) -> Result<()> {
+        self.validate()?;
+        let id = reservation.id.as_str();
+        let s = self.stores(id)?;
+        let ownership = &reservation.ownership;
         let relative = PathBuf::from("state/accounts").join(id);
         let account = self.bound_dir(&relative, true)?;
         let generations = self.bound_dir(&relative.join("generations"), true)?;
