@@ -33,3 +33,9 @@ No approved text is missing or changed in meaning; the code of PRs #77, #78 and 
   - Not changed. `sched/presets` V6 gains no note; C11 states the Card Info side.
   - Not changed. The stats-ops intro says Meguri's executor has none of H9 to H14. It is corrected with the activation PR.
   - Not changed. The `change_deck_choices` harvest rows keep U87 as owner. Changing their owner is for the rows' owner, not this record.
+
+## Change Deck activation (after PR #77 merged)
+
+1. The five Change Deck scenarios land from `held/harvest-batch-2` and are active (`notes/area.yaml`; `search/state/*` was already active by glob). The test-data similarity lane flagged four on generic text: the review-log column list of an `INSERT` and card requests of eight or nine references. These were rewritten as an `INSERT` with no column list and two card requests (which `conformance/observations` merges). The goldens were re-recorded with `tools/mg oracle record`; only their scenario hashes changed. On the 10 files: similarity 0 flagged, `goldens-check` pass, and `tools/mg conformance --lane docker notes/ search/` 0 T0 failures, with the five passing.
+2. The twelve Change Deck rows of H7 are linked and `done`, after a check of each against its test at the pin (subagent; no Anki text here). h66f7a2aeee4f's test edits a preset's steps rather than moving a card, so it links `sched/options/remap-steps` as well, and its reason now says so.
+3. V8.3 and B16: the coordinator's note on PR #77 is written. The screen derives the title from the action it ran. A title read from the stored undo history alone needs a later core unit, which adds the command to the step through `StepInfo`, `UndoMeta` and the FFI.

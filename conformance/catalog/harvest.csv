@@ -371,27 +371,27 @@ hcf98d05f053c,python,tag,notes,in-scope,"Cards from an added template (U34), Emp
 hf90ff3b47fc0,python,tag,notes,not-applicable,The Python note object's in-memory tag string helpers; the stored tags follow tags/tags T4,,done
 h0bc924c8e05f,rust,tag,notes,in-scope,Change Deck recomputes memory states with the target preset (U87 with U49's hook),,deferred
 h0e7337c9f130,rust,tag,notes,in-scope,Updating notes stores their new fields and adds required cards,notes/save/untouched-fields cardgen/normal/edits-only-add,done
-h1145d1f031f2,rust,tag,notes,in-scope,Change Deck recomputes memory states (U87 with U49's hook),,deferred
+h1145d1f031f2,rust,tag,notes,in-scope,Change Deck recomputes memory states (U87 with U49's hook),notes/change-deck/memory-states,done
 h1ec2b2ea9c20,rust,tag,notes,in-scope,Deleting notes removes their cards,storage/graves/delete-note,done
 h28ba189d8c7e,rust,tag,notes,in-scope,"Transforming many notes with or without card generation and stamps (the bulk-operation framework, U86)",,deferred
-h29a2723c264d,rust,tag,notes,in-scope,Change Deck moves the cards to the target deck (U87),,deferred
-h2ed53ea93d68,rust,tag,notes,in-scope,Change Deck leaves scheduling alone (U87),,deferred
-h346f0091fba0,rust,tag,notes,in-scope,Change Deck to the same deck recomputes nothing (U87),,deferred
+h29a2723c264d,rust,tag,notes,in-scope,Change Deck moves the cards to the target deck (U87),notes/change-deck/memory-states notes/change-deck/remaining-steps notes/change-deck/target-state-kept,done
+h2ed53ea93d68,rust,tag,notes,in-scope,Change Deck leaves scheduling alone (U87),notes/change-deck/memory-states,done
+h346f0091fba0,rust,tag,notes,in-scope,Change Deck to the same deck recomputes nothing (U87),notes/change-deck/memory-states,done
 h3bc595fa00b0,rust,tag,notes,in-scope,The field names of the selected notes for Find and Replace (U86),browser/find-replace/field-names,done
 h4907663a10e2,rust,tag,notes,in-scope,"Undo and redo of adding and deleting notes: an add's undo removes its rows, tags and config writes with no grave (notes/note-records A5)",notes/records/undo-add undo/delete-notes,done
 h4ee2959fd8e8,rust,tag,notes,in-scope,Saving an unchanged note keeps its stamps; a change stamps it,storage/noop/identical-note-rewrite notes/save/untouched-fields,done
-h55e8477eea21,rust,tag,notes,in-scope,Change Deck gives new cards no memory state (U87 with U49's hook),,deferred
+h55e8477eea21,rust,tag,notes,in-scope,Change Deck gives new cards no memory state (U87 with U49's hook),notes/change-deck/memory-states,done
 h57651ff721da,rust,tag,notes,in-scope,A note type's default deck for the Add screen (U191),notes/add-defaults/after-add notes/add-defaults/last-deck,done
-h5a6b3bd92841,rust,tag,notes,in-scope,Change Deck remaps remaining learning steps to the new preset (U87 with U49's hook),,deferred
+h5a6b3bd92841,rust,tag,notes,in-scope,Change Deck remaps remaining learning steps to the new preset (U87 with U49's hook),notes/change-deck/remaining-steps,done
 h5eb1c8260e8c,rust,tag,notes,not-applicable,Reading a note through the protobuf interface; Meguri reads rows by model/row-records,,done
-h66f7a2aeee4f,rust,tag,notes,in-scope,Change Deck keeps remaining steps when the old preset had none (U87 with U49's hook),,deferred
+h66f7a2aeee4f,rust,tag,notes,in-scope,"A preset step edit keeps remaining steps when the old list is empty, and floors them at 1 when the new list is empty (U49); Change Deck follows the same rule",sched/options/remap-steps notes/change-deck/remaining-steps,done
 h6ce76081385b,rust,tag,notes,in-scope,Adding a note gives it an id; a request without a note is the protobuf interface's,notes/records/add,done
 h7acd0470902a,rust,tag,notes,not-applicable,Listing a note's card ids through the protobuf interface; no stored behavior,,done
 h7ba73914c295,rust,tag,notes,in-scope,"Add-screen defaults for deck and note type, current deck rules (U191)",editor/config-keys/add-defaults-by-notetype editor/config-keys/add-defaults-current-deck editor/config-keys/first-notetype-fallback notes/add-defaults/review-card,done
 h7f3ad7c57016,rust,tag,notes,in-scope,"GUID text encoding (text/guid G2, G4); checked by U20's Rust tests against G4's table, since GUIDs Anki creates are random",,deferred
 h83c15fb8bf40,rust,tag,notes,in-scope,"Regenerating cards and stamps after outside changes to notes (the bulk-operation framework, U86)",,deferred
-h87ed9c949919,rust,tag,notes,in-scope,Change Deck with FSRS off computes no memory state (U87),,deferred
-h8fb237008b4c,rust,tag,notes,in-scope,Change Deck recomputes memory states only for the moved cards (U87 with U49's hook),,deferred
+h87ed9c949919,rust,tag,notes,in-scope,Change Deck with FSRS off computes no memory state (U87),notes/change-deck/fsrs-off,done
+h8fb237008b4c,rust,tag,notes,in-scope,Change Deck recomputes memory states only for the moved cards (U87 with U49's hook),notes/change-deck/memory-states notes/change-deck/target-state-kept,done
 h97fb2906cd6a,rust,tag,notes,in-scope,Adding a note: a note requiring no card gets one; the refusals of a wrong field count or note type are Meguri tests,cardgen/normal/conditionals notes/records/add,done
 h9c660fb50a5e,rust,tag,notes,in-scope,Bulk add (notes/note-records A5); its scenarios come with the importers (U120),,deferred
 ha4fba0e6523a,rust,tag,notes,in-scope,"Updating several notes without an undo step, as the local servers do (U137)",,deferred
@@ -399,8 +399,8 @@ hab1f710886fe,rust,tag,notes,in-scope,Add-screen defaults for deck and note type
 hab3e195632ce,rust,tag,notes,in-scope,Deleting notes removes them with their cards and graves,storage/graves/delete-note,done
 haeb2e195c8b5,rust,tag,notes,in-scope,The field check through the protobuf interface,notes/fields-check/states,done
 hc981fbc25c3f,rust,tag,notes,in-scope,A note that requires no card gets ordinal 0; edits add the cards that become required; cloze numbers above 500 map to ordinal 499,cardgen/normal/conditionals cardgen/normal/edits-only-add cardgen/cloze/numbers cardgen/cloze/above-500,done
-hcc385fabbd1f,rust,tag,notes,in-scope,Change Deck skips cards already in the target deck (U87),,deferred
-he1455a2bccbd,rust,tag,notes,in-scope,Change Deck remaps remaining relearning steps to the new preset (U87 with U49's hook),,deferred
+hcc385fabbd1f,rust,tag,notes,in-scope,Change Deck skips cards already in the target deck (U87),notes/change-deck/target-state-kept,done
+he1455a2bccbd,rust,tag,notes,in-scope,Change Deck remaps remaining relearning steps to the new preset (U87 with U49's hook),notes/change-deck/remaining-steps,done
 he257a95c303c,rust,tag,notes,in-scope,"The field check states: empty, cloze in a standard note type, missing cloze, cloze outside a cloze field, duplicate",notes/fields-check/states notes/fields-check/duplicates,done
 he3c37320b8ea,rust,tag,notes,in-scope,"The cloze numbers of a note, seen through the ordinals of its cards",cardgen/cloze/numbers,done
 hf306bec628a4,rust,tag,notes,in-scope,First-field checksum,text/fields/checksum,done
@@ -942,7 +942,7 @@ hcd65bea8e67f,rust,tag,search,in-scope,a built due-on-day item gives an equality
 hcf4fefe3e9ef,rust,tag,search,in-scope,U88/U246: replacing a standalone filter with another of the same kind must discard the old value.,search/join-replace/replace,done
 hd007ebca9ed4,rust,tag,search,not-applicable,Combining adjacent integer ranges is an internal SQL-planning optimization; exact helper output is not a persisted or native-app interface (R1879).,,done
 hdff0242575ab,rust,tag,search,in-scope,the empty search returns every card,search/structure/whole-collection,done
-he244355f799a,rust,tag,search,in-scope,U82/U91: a memory-state predicate must find cards with stored FSRS stability and exclude new cards lacking it; SQL spelling is implementation-specific.,,deferred
+he244355f799a,rust,tag,search,in-scope,U82/U91: a memory-state predicate must find cards with stored FSRS stability and exclude new cards lacking it; SQL spelling is implementation-specific.,search/state/memory-state-moves,done
 he2a0ba83d1b8,rust,tag,search,in-scope,"U84/U85/U246: Browser row projection must return the requested card's sort field, deck and note type in the requested column order.",browser/columns/requested-order,done
 he56ed2a516b3,rust,tag,search,in-scope,U88/U246: a generated rated-history filter must retain both its time window and chosen answer button.,search/builder/items,done
 he8cfded7f1d7,rust,tag,search,not-applicable,Unknown flag-enum fallback in a foreign generated search RPC is not Meguri's typed filter contract (R1879).,,done
