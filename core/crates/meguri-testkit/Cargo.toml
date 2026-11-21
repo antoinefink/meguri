@@ -114,6 +114,11 @@ harness = false
 name = "search_terms"
 harness = false
 
+# U84's sorted statements for the expensive keys, from a search and an id list.
+[[bench]]
+name = "browser_sort"
+harness = false
+
 # Integration tests: one binary. A file gets its own target only when it
 # cannot share that binary, with the reason.
 [[test]]

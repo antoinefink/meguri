@@ -31,6 +31,11 @@ impl Params {
     pub(super) fn into_vec(self) -> Vec<Param> {
         self.0
     }
+
+    /// Parameters already bound (a plan's), so that more follow them.
+    pub(super) fn from_vec(params: Vec<Param>) -> Params {
+        Params(params)
+    }
 }
 
 /// What a term compiles against: the rows the statement tests (aliases `c`

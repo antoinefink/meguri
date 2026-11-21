@@ -287,6 +287,78 @@ impl Column {
             _ => Some(SortDirection::Descending),
         }
     }
+
+    /// The column's English label in `mode` (`browser/columns` C2,
+    /// R1118-R1130).
+    pub fn label(self, mode: SearchMode) -> &'static str {
+        let notes = mode == SearchMode::Notes;
+        match self {
+            Column::SortField => "Sort Field",
+            Column::Question => "Question",
+            Column::Answer => "Answer",
+            Column::CardType if notes => "Cards",
+            Column::CardType => "Card Type",
+            Column::Deck => "Deck",
+            Column::Due => "Due",
+            Column::Ease if notes => "Avg. Ease",
+            Column::Ease => "Ease",
+            Column::Interval if notes => "Avg. Interval",
+            Column::Interval => "Interval",
+            Column::Reviews => "Reviews",
+            Column::Lapses => "Lapses",
+            Column::Created => "Created",
+            Column::CardModified => "Card Modified",
+            Column::NoteModified => "Note Modified",
+            Column::Notetype => "Note Type",
+            Column::Tags => "Tags",
+            Column::Position => "Position",
+            Column::Stability => "Stability",
+            Column::Difficulty => "Difficulty",
+            Column::Retrievability => "Retrievability",
+        }
+    }
+
+    /// C2, R1131: text columns start-aligned, values centred.
+    pub fn alignment(self) -> Alignment {
+        match self {
+            Column::SortField
+            | Column::Question
+            | Column::Answer
+            | Column::CardType
+            | Column::Deck
+            | Column::Notetype
+            | Column::Tags => Alignment::Start,
+            _ => Alignment::Center,
+        }
+    }
+
+    /// C2: where a value too long for its cell is shortened.
+    pub fn elision(self) -> Elision {
+        match self {
+            Column::Deck => Elision::Middle,
+            _ => Elision::End,
+        }
+    }
+
+    /// C2, C6, R1150: the column's cells use the row's font.
+    pub fn uses_row_font(self) -> bool {
+        matches!(self, Column::SortField | Column::Question | Column::Answer)
+    }
+}
+
+/// A column's alignment (`browser/columns` C2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Alignment {
+    Start,
+    Center,
+}
+
+/// Where a cell's value is shortened (`browser/columns` C2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Elision {
+    /// Deck names: `Parent::…::Child`.
+    Middle,
+    End,
 }
 
 /// Why an action writes nothing (K4.2, K4.3, K5.2, K7.2).

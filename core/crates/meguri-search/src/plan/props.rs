@@ -11,6 +11,13 @@ use super::sql::{Param, Params, TermEnv, TermSql};
 /// X1, P4: the card's home due when it has one.
 const DUE: &str = "(CASE WHEN c.odue != 0 THEN c.odue ELSE c.due END)";
 
+/// X1, X5: card `c`'s retrievability, as `prop:r` compares it and the
+/// Retrievability sort key orders it (`browser/sorting` S7): NULL without a
+/// memory state and for a NaN result.
+pub(super) fn retrievability(today: u32, now: i64) -> String {
+    format!("meguri_retrievability(c.data, {DUE}, c.ivl, {today}, ({now}))")
+}
+
 fn column(sql: String) -> TermSql {
     TermSql {
         sql,
@@ -90,9 +97,8 @@ pub(super) fn property(
         // P8: false, not unknown, for a new card.
         Property::Retrievability(Float(x)) => {
             let value = literal(*x)?;
-            let (today, now) = (ctx.today, ctx.now);
             per_row(
-                format!("c.type != 0 AND meguri_retrievability(c.data, {DUE}, c.ivl, {today}, ({now})) {op} {value}"),
+                format!("c.type != 0 AND {} {op} {value}", retrievability(ctx.today, ctx.now)),
                 ContextReads::NONE.with(ContextValue::Today).with(ContextValue::Now),
             )
         }

@@ -151,6 +151,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "backup_settings",
             "blob_decode",
             "browser_config",
+            "browser_rows",
             "canonical_search",
             "card",
             "card_excerpts",

@@ -43,3 +43,5 @@ active:
   - "structure/*"
   - "tags/*"
   - "text/*"
+  # U84: sorted search, covered by the same search-data scan.
+  - "unsorted/configured-sort-ignored"
