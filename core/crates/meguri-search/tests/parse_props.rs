@@ -3,6 +3,7 @@
 //! and properties over generated text. Expected values come from the specs'
 //! rules and examples, never from the parser.
 
+use meguri_search::SearchNotetypes;
 use meguri_search::ast::{
     BoolOperator, CardState, Comparison, Float, IdKind, NodeId, NodeKind, Property, Query, TemplateRef, TextMode,
 };
@@ -583,7 +584,7 @@ fn plan_error(text: &str) -> SearchError {
         ignore_accents: false,
         fold: FoldMode::Unicode,
     };
-    match Plan::build(&parsed(text), SearchMode::Cards, &context) {
+    match Plan::build(&parsed(text), SearchMode::Cards, &context, &SearchNotetypes::default()) {
         Err(BuildError::Search(e)) => e,
         other => panic!("{text:?}: {other:?}"),
     }
