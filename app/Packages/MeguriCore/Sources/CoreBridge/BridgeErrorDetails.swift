@@ -194,6 +194,33 @@ public struct NotetypeRestoreSummary: Sendable, Hashable {
     }
 }
 
+/// Change Note Type's loss counts (`notetypes/change-notetype` M8): per
+/// discarded old field, per dropped old template, and the other cards.
+public struct NotetypeChangeLosses: Sendable, Hashable {
+    public let fields: [UInt32: UInt64]
+    public let templates: [UInt32: UInt64]
+    public let otherCards: UInt64
+    init(_ raw: MeguriCoreBindings.NotetypeChangeLosses) {
+        fields = Dictionary(raw.fields.map { ($0.ord, $0.count) }, uniquingKeysWith: { first, _ in first })
+        templates = Dictionary(raw.templates.map { ($0.ord, $0.count) }, uniquingKeysWith: { first, _ in first })
+        otherCards = raw.otherCards
+    }
+}
+
+/// Change Note Type's loss preview (`notetypes/change-notetype` M6).
+public struct NotetypeChangePreview: Sendable, Hashable {
+    public let discardedFields: [UInt32]
+    public let droppedTemplates: [UInt32]?
+    public let removedCards: UInt64
+    public let losses: NotetypeChangeLosses
+    init(_ raw: MeguriCoreBindings.NotetypeChangePreview) {
+        discardedFields = raw.discardedFields
+        droppedTemplates = raw.droppedTemplates
+        removedCards = raw.removedCards
+        losses = NotetypeChangeLosses(raw.losses)
+    }
+}
+
 /// Why a note type structure op wrote nothing
 /// (`notetypes/structure-changes` S1.2, S12; `restore-to-default` D7.2).
 public enum NotetypeStructureRefusal: Sendable, Hashable {
@@ -205,6 +232,12 @@ public enum NotetypeStructureRefusal: Sendable, Hashable {
     case restoreLossesChanged(summary: NotetypeRestoreSummary)
     case lastNotetype
     case needsStockKind
+    /// Change Note Type (`notetypes/change-notetype` M7, M8, M4).
+    case noChanges
+    case schemaChanged
+    case multipleNotetypes
+    /// Change Note Type's losses grew: show the sheet again with this preview.
+    case changeLossesChanged(preview: NotetypeChangePreview)
     init(_ raw: MeguriCoreBindings.NotetypeStructureRefusal) {
         switch raw {
         case .protectedField(let field): self = .protectedField(field: field)
@@ -214,6 +247,10 @@ public enum NotetypeStructureRefusal: Sendable, Hashable {
         case .restoreLossesChanged(let summary): self = .restoreLossesChanged(summary: NotetypeRestoreSummary(summary))
         case .lastNotetype: self = .lastNotetype
         case .needsStockKind: self = .needsStockKind
+        case .noChanges: self = .noChanges
+        case .schemaChanged: self = .schemaChanged
+        case .multipleNotetypes: self = .multipleNotetypes
+        case .changeLossesChanged(let preview): self = .changeLossesChanged(preview: NotetypeChangePreview(preview))
         }
     }
 }

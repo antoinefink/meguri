@@ -344,6 +344,17 @@ pub enum NotetypeStructureRefusal {
     RestoreLossesChanged { summary: NotetypeRestoreSummary },
     LastNotetype,
     NeedsStockKind,
+    /// Change Note Type M7: the change would change nothing.
+    NoChanges,
+    /// Change Note Type M8 check 3: another schema change since the info
+    /// query; open the screen again.
+    SchemaChanged,
+    /// Change Note Type M4, M8 check 4: the notes do not share one note type.
+    MultipleNotetypes,
+    /// Change Note Type's losses grew: show the sheet again with this preview.
+    ChangeLossesChanged {
+        preview: crate::notetype_change::NotetypeChangePreview,
+    },
 }
 
 impl From<StructureRefusal> for NotetypeStructureRefusal {
@@ -359,9 +370,15 @@ impl From<StructureRefusal> for NotetypeStructureRefusal {
                 Losses::Restore(summary) => Self::RestoreLossesChanged {
                     summary: summary.into(),
                 },
+                Losses::Change(preview) => Self::ChangeLossesChanged {
+                    preview: preview.into(),
+                },
             },
             StructureRefusal::LastNotetype => Self::LastNotetype,
             StructureRefusal::NeedsStockKind => Self::NeedsStockKind,
+            StructureRefusal::NoChanges => Self::NoChanges,
+            StructureRefusal::SchemaChanged => Self::SchemaChanged,
+            StructureRefusal::MultipleNotetypes => Self::MultipleNotetypes,
         }
     }
 }
@@ -377,6 +394,10 @@ impl From<NotetypeStructureRefusal> for StructureRefusal {
             R::RestoreLossesChanged { summary } => Self::LossesChanged(Box::new(Losses::Restore(summary.into()))),
             R::LastNotetype => Self::LastNotetype,
             R::NeedsStockKind => Self::NeedsStockKind,
+            R::NoChanges => Self::NoChanges,
+            R::SchemaChanged => Self::SchemaChanged,
+            R::MultipleNotetypes => Self::MultipleNotetypes,
+            R::ChangeLossesChanged { preview } => Self::LossesChanged(Box::new(Losses::Change(preview.into()))),
         }
     }
 }
@@ -637,6 +658,21 @@ mod tests {
             NotetypeStructureRefusal::RestoreLossesChanged { summary: restore },
             NotetypeStructureRefusal::LastNotetype,
             NotetypeStructureRefusal::NeedsStockKind,
+            NotetypeStructureRefusal::NoChanges,
+            NotetypeStructureRefusal::SchemaChanged,
+            NotetypeStructureRefusal::MultipleNotetypes,
+            NotetypeStructureRefusal::ChangeLossesChanged {
+                preview: crate::notetype_change::NotetypeChangePreview {
+                    discarded_fields: vec![1],
+                    dropped_templates: Some(vec![0]),
+                    removed_cards: 3,
+                    losses: crate::notetype_change::NotetypeChangeLosses {
+                        fields: vec![OrdinalCount { ord: 1, count: 2 }],
+                        templates: vec![OrdinalCount { ord: 0, count: 2 }],
+                        other_cards: 1,
+                    },
+                },
+            },
         ] {
             let error = CoreError::NotetypeStructureRefused { refusal };
             assert_eq!(CoreError::from(EngineError::from(error.clone())), error);
