@@ -236,7 +236,7 @@ Decided 2026-10-27, since many draft ops now have a driver op: an op's status sa
 | `change_notetype` | `{fields?, templates?}`: the change saved for the latest `change_notetype_info` step | `{notes}`; rejections `no_changes`, `schema_changed`, `not_found`, `multiple_notetypes` (Meguri's only) | stable (`change-notetype-ops.md` H2) |
 | `empty_cards` | `{}`: the Empty Cards scan | the list of `empty-cards-ops.md` Y1 | stable (`empty-cards-ops.md` Y1) |
 | `delete_empty_cards` | `{keep_notes}`: delete what the latest `empty_cards` step listed | `{deleted, kept_valid}` | stable (`empty-cards-ops.md` Y2) |
-| `find_replace` | `{notes?, find, replace, regex?, ignore_case?, in?: all \| tags \| {field}}`: Browse's Find and Replace on the listed notes, or on all notes when `notes` is missing | `{count}`; rejections `invalid_regex`, `space_in_replacement`, `field_count` | Meguri runs it (U86; `bulk-ops.md` X1). Changed 2026-11-21 (implementation review) |
+| `find_replace` | `{notes?, find, replace, regex?, ignore_case?, in?: all \| tags \| {field}}`: Browse's Find and Replace on the listed notes, or on all notes when `notes` is missing | `{count}`; rejections `invalid_regex`, `space_in_replacement`, `field_count` | draft: the oracle implements it; Meguri runs it (U86; `bulk-ops.md` X1). Changed 2026-11-21 (implementation review) |
 | `change_deck` | `{cards, deck}`: Browse's Change Deck to the deck of that stored name | `{count}`; rejection `filtered_deck` | draft: the oracle implements it; Meguri's executor and the typed model pending (`bulk-ops.md` X2) |
 
 An op with no output records `{}`; an op with output records `{<op>: <output>}`. An op's output never has a member named `error`.
