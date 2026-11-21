@@ -242,6 +242,76 @@ import Testing
         #expect(choose.route == .account("sync.decision.action"))
     }
 
+    // First-run report: a setup transfer is not a blocked provider (MP1, MP6.5).
+
+    @Test func setupMediaWithAReadableProviderShowsTheTransferNotAStop() {
+        // Core now reports the setup's own closed admission as setup required, not blocked.
+        let media = SyncKinds.meguri(.init(connection: .setupRequired, stage: .media))
+        #expect(!media.needsYou && media.detailKey == "sync.meguri.setup.collectionDone")
+        #expect(media.titleKey == "sync.meguri.status.transferringMedia.title")
+        let running = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: .media, routine: nil)
+        #expect(running.isBusy && !running.needsUser)
+        // Unreadable metadata is the one needs-you sentence, and Sync Now says it stopped.
+        let blocked = SyncKinds.meguri(.init(providerBlocked: true, connection: .setupRequired, stage: .media))
+        #expect(blocked.needsYou && blocked.detailKey == "sync.needsYou.blocked" && blocked.action == .copyDebugInfo)
+        let stopped = MeguriSyncStatusPresentation(stopped: true, connection: .setupRequired, stage: .media, routine: nil)
+        #expect(!stopped.isBusy && stopped.needsUser && stopped.route == .disabled("sync.meguri.now.unavailable.stopped.sync"))
+    }
+
+    @Test func aBlockedProviderShowsNoTransferProgress() {
+        #expect(MeguriSyncStatusPresentation.progress(busy: true, stopped: true, stage: .media,
+            completed: 3, total: 9, mediaDone: 3, mediaAwaiting: 6) == nil)
+        #expect(MeguriSyncStatusPresentation.progress(busy: false, stopped: false, stage: .media,
+            completed: nil, total: nil, mediaDone: 3, mediaAwaiting: 6) == nil)
+    }
+
+    @Test func blockingStopsRunningMediaAndRoundsButNotACollectionStep() {
+        typealias P = MeguriSyncStatusPresentation
+        #expect(P.stopsWorkOnBlock(was: .setupRequired, now: .blocked, stage: .media, roundRunning: false))
+        #expect(P.stopsWorkOnBlock(was: .setupRequired, now: .blocked, stage: nil, roundRunning: true))
+        #expect(!P.stopsWorkOnBlock(was: .setupRequired, now: .blocked, stage: nil, roundRunning: false))
+        for stage in [MeguriSetupStage.preparing, .collection, .preview, .required] {
+            #expect(!P.stopsWorkOnBlock(was: .setupRequired, now: .blocked, stage: stage, roundRunning: true))
+        }
+        // Only the transition stops: a phase already blocked, or one that is not, does nothing.
+        #expect(!P.stopsWorkOnBlock(was: .blocked, now: .blocked, stage: .media, roundRunning: true))
+        #expect(!P.stopsWorkOnBlock(was: .setupRequired, now: .setupRequired, stage: .media, roundRunning: true))
+        #expect(!P.stopsWorkOnBlock(was: .blocked, now: .setupRequired, stage: .media, roundRunning: true))
+    }
+
+    /// The media step's job reports each request's bytes with a total, and each
+    /// media step with none. The indicator follows the step's files only, so
+    /// those alternating reports never switch it between a bar and a spinner.
+    @Test func mediaProgressIsOneValueAcrossBatches() throws {
+        typealias P = MeguriSyncStatusPresentation
+        // Before the first media count the step is indeterminate, whatever the job reports.
+        #expect(P.progress(busy: true, stopped: false, stage: .media, completed: 10, total: 400,
+            mediaDone: nil, mediaAwaiting: nil) == .indeterminate)
+        let batches: [(completed: UInt64, total: UInt64?, done: UInt64, awaiting: UInt64)] = [
+            (120, 4_096, 100, 28_680), (40, nil, 100, 28_680), (2_000, 8_192, 1_200, 27_580),
+            (1_250, nil, 1_250, 27_530), (8_000, 8_000, 3_725, 25_055)]
+        var last = -1.0
+        for batch in batches {
+            let value = P.progress(busy: true, stopped: false, stage: .media, completed: batch.completed,
+                total: batch.total, mediaDone: batch.done, mediaAwaiting: batch.awaiting)
+            let fraction = try #require(value?.fraction)
+            #expect(fraction == Double(batch.done) / Double(batch.done + batch.awaiting))
+            #expect(fraction >= last)
+            last = fraction
+        }
+        // A step with no file to move stays indeterminate rather than dividing by zero.
+        #expect(P.progress(busy: true, stopped: false, stage: .media, completed: nil, total: nil,
+            mediaDone: 0, mediaAwaiting: 0) == .indeterminate)
+        // Other steps keep their job's own total.
+        #expect(P.progress(busy: true, stopped: false, stage: .collection, completed: 5, total: 10,
+            mediaDone: nil, mediaAwaiting: nil) == .fraction(0.5))
+        #expect(P.progress(busy: true, stopped: false, stage: .collection, completed: 5, total: nil,
+            mediaDone: nil, mediaAwaiting: nil) == .indeterminate)
+        #expect(P.progress(busy: true, stopped: false, stage: nil, completed: 12, total: 10,
+            mediaDone: nil, mediaAwaiting: nil) == .fraction(1))
+        #expect(MeguriProgressValue.indeterminate.fraction == nil)
+    }
+
     // Rows that T19.4 does not list, kept at the least claim.
 
     @Test func anAdoptionWaitingOnTransportOffersResumeOnlyWhileItIsOffered() {

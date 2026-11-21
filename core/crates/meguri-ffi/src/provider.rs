@@ -38,9 +38,19 @@ fn snapshot(value: Result<p::ProviderDocument, meguri_storage::StorageError>) ->
         Err(_) => ProviderSnapshot { selection: None, phase: ProviderPhase::Blocked, settings: None, revision: 0, removal_pending: false },
     }
 }
-fn owner_snapshot(authority: &p::Authority) -> ProviderSnapshot {
-    let mut state = snapshot(authority.snapshot());
-    if authority.network_blocked() && state.phase != ProviderPhase::HandoffRecovery { state.phase = ProviderPhase::Blocked; }
+/// Blocked is MP1's phase: metadata that cannot be read or published, or
+/// admission closed for any other reason. A Meguri setup transfer keeps
+/// admission closed until its media finishes; that is setup in progress,
+/// so its phase is the document's. Admission itself stays closed either way.
+fn owner_snapshot(host: &meguri_host::CoreHost) -> ProviderSnapshot {
+    let authority = host.provider_authority();
+    admitted_snapshot(authority.snapshot(), authority.network_blocked(), host.meguri_setup_transfer_holds_admission())
+}
+fn admitted_snapshot(value: Result<p::ProviderDocument, meguri_storage::StorageError>,
+    network_blocked: bool, setup_transfer_holds_admission: bool) -> ProviderSnapshot {
+    let mut state = snapshot(value);
+    if network_blocked && state.phase != ProviderPhase::HandoffRecovery
+        && !setup_transfer_holds_admission { state.phase = ProviderPhase::Blocked; }
     state
 }
 #[uniffi::export]
@@ -169,17 +179,17 @@ impl ProviderOwner {
     }
     pub fn snapshot(&self) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.snapshot"); self.validate()?;
-        Ok(owner_snapshot(self.host.provider_authority()))
+        Ok(owner_snapshot(&self.host))
     }
     pub fn refresh(&self) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.refresh"); self.validate()?;
         self.host.refresh_provider_admission();
-        Ok(owner_snapshot(self.host.provider_authority()))
+        Ok(owner_snapshot(&self.host))
     }
     pub fn save_settings(&self, settings: ProviderSettings) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.save_settings"); self.validate()?;
         self.host.save_provider_settings_for_generation(self.generation, settings.into())?;
-        Ok(owner_snapshot(self.host.provider_authority()))
+        Ok(owner_snapshot(&self.host))
     }
     pub fn begin_icloud_discovery(&self) -> Result<Arc<ProviderDiscovery>, CoreError> {
         callback::enter("ProviderOwner.begin_icloud_discovery"); self.validate()?;
@@ -193,7 +203,7 @@ impl ProviderOwner {
         self.host.cloud_runtime().ok_or_else(|| CoreError::Unavailable { reason: "iCloud unavailable".into() })?
             .provider_accept_icloud_connection().map_err(|_| CoreError::Unavailable { reason: "iCloud connection requires recovery".into() })?;
         self.host.refresh_provider_admission();
-        Ok(owner_snapshot(self.host.provider_authority()))
+        Ok(owner_snapshot(&self.host))
     }
     pub fn configure_meguri(self: Arc<Self>, endpoint: String) -> Result<Arc<ProviderConnection>, CoreError> {
         callback::enter("ProviderOwner.configure_meguri"); self.validate()?;
@@ -208,12 +218,12 @@ impl ProviderOwner {
     pub fn recover_handoff_to_local_only(&self) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.recover_handoff_to_local_only"); self.validate()?;
         self.host.recover_provider_handoff_to_local_only()?;
-        Ok(owner_snapshot(self.host.provider_authority()))
+        Ok(owner_snapshot(&self.host))
     }
     pub fn retry_failed_publication(&self) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.retry_failed_publication"); self.validate()?;
         self.host.retry_provider_publication_for_generation(self.generation)?;
-        Ok(owner_snapshot(self.host.provider_authority()))
+        Ok(owner_snapshot(&self.host))
     }
     pub fn finish_handoff(self: Arc<Self>, handoff: Arc<ProviderHandoff>) -> Result<ProviderSnapshot, CoreError> {
         callback::enter("ProviderOwner.finish_handoff"); self.validate()?;
@@ -221,6 +231,6 @@ impl ProviderOwner {
         let mut inner = handoff.inner.lock().unwrap_or_else(PoisonError::into_inner);
         self.host.finish_provider_handoff(inner.as_ref().ok_or_else(|| CoreError::Unavailable { reason: "provider handoff completed".into() })?)?;
         *inner = None;
-        Ok(owner_snapshot(self.host.provider_authority()))
+        Ok(owner_snapshot(&self.host))
     }
 }

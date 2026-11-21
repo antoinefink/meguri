@@ -144,6 +144,8 @@ public struct SettingsPageView: View {
 struct SettingsCollectionFilesSection: View {
     let collection: ReviewCollection?
     var present: ((SheetRoute) -> Void)? = nil
+    /// The Mac Settings pane already names the section in its title bar.
+    var showsHeading = true
     private var fileActionsAvailable: Bool {
         guard let collection else { return false }
         return collection.navigation.sheet == nil && !collection.manualTransfers.busy
@@ -192,8 +194,10 @@ struct SettingsCollectionFilesSection: View {
                 .accessibilityIdentifier("settings.root.exportCollection")
             #endif
         } header: {
-            Text("Collection", bundle: .module)
-                .accessibilityIdentifier("settings.root.collectionHeading")
+            if showsHeading {
+                Text("Collection", bundle: .module)
+                    .accessibilityIdentifier("settings.root.collectionHeading")
+            }
         }
         footer: {
             // N17.3: one line under the Export row says what the file holds.
@@ -247,12 +251,13 @@ public struct MacSettingsView: View {
         } detail: {
             if section == "accountSync" {
                 NavigationStack {
-                    AccountSyncView(collection: collection, host: .settings)
+                    // The pane's title bar names it; the touch page keeps its section headers.
+                    AccountSyncView(collection: collection, host: .settings, showsHeading: false)
                 }
             } else {
               Form {
                 if section == "collection" {
-                    SettingsCollectionFilesSection(collection: collection, present: present)
+                    SettingsCollectionFilesSection(collection: collection, present: present, showsHeading: false)
                     if SettingsPage.showsAnkiServer { serverActions }
                 } else {
                     ManualTransferSections(model: collection.manualTransfers, area: .connection)

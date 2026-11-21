@@ -32,4 +32,10 @@ public typealias FieldDiagnosticRecorder = @MainActor (FieldDiagnosticObservatio
         defer { exportInFlight = false }
         return try await readExport()
     }
+
+    /// Copy Debug Info's text: a summary, the safe export pretty-printed with
+    /// its timeline last, and the sync facts. Bounded like the export itself.
+    public func readableExport(sync: SyncDebugFacts?) async throws -> Data {
+        Data(try SyncDebugInfoText.compose(export: try await safeExport(), sync: sync).utf8)
+    }
 }
