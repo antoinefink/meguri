@@ -919,6 +919,15 @@ pub mod a;'
   [ "$status" -eq 1 ]
   [ ! -e "$SB/app/Tests/Fixtures/escape.html" ]
   git -C "$SB" checkout -q -- "$fx/golden-copies.json"
+  # A copy that is a symbolic link is refused too, and its target is untouched.
+  printf 'outside\n' >"$BATS_TEST_TMPDIR/target.html"
+  rm "$SB/$fx/three.html"
+  ln -s "$BATS_TEST_TMPDIR/target.html" "$SB/$fx/three.html"
+  run python3 -I -B "$SB/tools/gate/static-checks/golden-copies.py" --write "$SB"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/target.html")" = "outside" ]
+  rm "$SB/$fx/three.html"
+  git -C "$SB" checkout -q -- "$fx/three.html"
 
   # A missing copy, a pointer the golden lacks, or a pointer at a non-string.
   rm "$SB/$fx/three.html"

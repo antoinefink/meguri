@@ -147,7 +147,13 @@ def check(tree, write=False):
                 continue
             owner[path] = manifest_path
             if write:
-                with open(posixpath.join(tree.checkout, path), "wb") as f:
+                parts = path.split("/")
+                if any(os.path.islink(posixpath.join(tree.checkout, *parts[:i])) for i in range(1, len(parts) + 1)):
+                    finding(path, 0, "is or lies under a symbolic link; --write writes only regular files")
+                    continue
+                fd = os.open(posixpath.join(tree.checkout, path),
+                             os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o644)
+                with os.fdopen(fd, "wb") as f:
                     f.write(want)
                 continue
             if path not in present:
