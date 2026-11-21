@@ -32,3 +32,5 @@ pub mod props_and_history;
 pub mod sort_props;
 #[path = "state_and_flags.rs"]
 pub mod state_and_flags;
+#[path = "text_matching.rs"]
+pub mod text_matching;

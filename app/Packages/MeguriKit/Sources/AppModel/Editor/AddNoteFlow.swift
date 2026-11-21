@@ -10,14 +10,17 @@ import Observation
     func flush(hold: Bool) async throws
     func release() async throws
     func setFocus(_ ord: Int) async throws
-    func dispose()
+    func shutDown()
     /// N17.1: a runtime that can load the next draft into the page it already
     /// shows hands that page on, so the keyboard stays up after an add. The
-    /// receiver ends as `dispose()` ends it, except that the page lives on.
+    /// receiver ends as `shutDown()` ends it, except that the page lives on.
     func successor(for draft: NoteEditorDraft, isCurrent: @escaping @MainActor () -> Bool) -> (any AddNoteFieldRuntime)?
+    /// Edit mode: show again the fields the draft reloaded from the stored note.
+    func reload(fields: [Int]) async throws
 }
 extension AddNoteFieldRuntime {
     public func successor(for draft: NoteEditorDraft, isCurrent: @escaping @MainActor () -> Bool) -> (any AddNoteFieldRuntime)? { nil }
+    public func reload(fields: [Int]) async throws {}
 }
 
 /// Collection-owned A5/A7 action model. Production presentation remains gated
@@ -151,7 +154,7 @@ public final class AddNoteFlow {
             confirmation = nil
             // The new draft gets its own host.
             let host = page
-            host.dispose()
+            host.shutDown()
             epoch = UUID()
             preparation.replace(with: next)
             do { try await mount(next) }
@@ -313,7 +316,7 @@ public final class AddNoteFlow {
                 let repaired = try draft.replacingSelection(notetype: stored, deck: deck)
                 guard current(), draft.preparationRevision == revision else { break }
                 clearMissingNotetype()
-                host.dispose(); epoch = UUID(); preparation.replace(with: repaired)
+                host.shutDown(); epoch = UUID(); preparation.replace(with: repaired)
                 opening = true
                 do { try await mount(repaired) }
                 catch {
@@ -364,13 +367,13 @@ public final class AddNoteFlow {
             }
             // After an add the same page takes the next draft when it can.
             let adopted = continuesPage ? previous?.successor(for: draft, isCurrent: current) : nil
-            if adopted == nil { previous?.dispose() }
+            if adopted == nil { previous?.shutDown() }
             guard let factory else { throw BridgeError.unavailable(reason: "The field editor is unavailable.") }
             let host = try adopted ?? factory(draft, current)
             startingHost = host; runtime = host
             try await host.start()
             guard owns(draft, epoch: expected), runtime === host else {
-                host.dispose(); throw BridgeError.unavailable(reason: "The editor owner changed. Your draft has been kept.")
+                host.shutDown(); throw BridgeError.unavailable(reason: "The editor owner changed. Your draft has been kept.")
             }
             startedEpoch = expected
             failedStartupDraft = nil
@@ -378,7 +381,7 @@ public final class AddNoteFlow {
             // A revoked start can settle after another owner has taken over.
             // Only the exact original failure may retire presentation or report its error.
             if epoch == expected, preparation.draft === draft, runtime === startingHost {
-                epoch = UUID(); startingHost?.dispose(); runtime = nil; isPresented = false
+                epoch = UUID(); startingHost?.shutDown(); runtime = nil; isPresented = false
                 failedStartupDraft = draft
                 record(error)
             }
@@ -438,7 +441,7 @@ public final class AddNoteFlow {
             if stored.id != draft.notetype.id || deck.id != draft.deck.id {
                 let repaired = try draft.replacingSelection(notetype: stored, deck: deck)
                 guard exact() else { throw Self.ownerChanged }
-                host.dispose(); epoch = UUID(); preparation.replace(with: repaired)
+                host.shutDown(); epoch = UUID(); preparation.replace(with: repaired)
                 do {
                     try await mount(repaired)
                     error = "The Add selection changed. Check the selection and press Add again."
@@ -568,7 +571,7 @@ public final class AddNoteFlow {
                 guard decision?.cancelled != true else {
                     await release(host, draft: draft, epoch: expected); return false
                 }
-                epoch = UUID(); host.dispose(); runtime = nil; isPresented = false
+                epoch = UUID(); host.shutDown(); runtime = nil; isPresented = false
                 confirmation = nil
                 if discard { preparation.replace(with: nil) }
                 return true
@@ -663,7 +666,7 @@ public final class AddNoteFlow {
     func generationEnded() {
         selectionObservation = UUID(); pendingSelectionGeneration = nil
         closeDecision?.cancel()
-        epoch = UUID(); runtime?.dispose(); runtime = nil; isPresented = false
+        epoch = UUID(); runtime?.shutDown(); runtime = nil; isPresented = false
         cancelUnconfirmedAdd()
         if let confirmation = discardConfirmation { answerDiscard(confirmation, discard: false) }
         history.removeAll(); lastAdded = nil; confirmation = nil

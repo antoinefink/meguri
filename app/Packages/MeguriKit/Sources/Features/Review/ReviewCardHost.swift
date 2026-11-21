@@ -13,11 +13,15 @@ struct ReviewCardHost {
     let model: ReviewCoordinator
     let pair: CardPagePair
     let close: () -> Void
+    /// N20.8: Edit Note, Bury Card and Suspend Card, for their keys (E, -, @)
+    /// and the Mac card's context menu.
+    var actions = ReviewMoreActions()
 
     private func key(_ input: String, command: Bool, shift: Bool, repeated: Bool = false) -> Bool {
         guard let pages = model.surface as? ReviewPages, pages.presenter.isAvailable,
               ReviewInputOwnership.admits(cardFocused: ReviewInputOwnership.cardFocused(in: pair.current.webView),
-                  editing: model.surface.editing, paused: model.paused, repeated: repeated) else { return false }
+                  // An open Edit Note form owns the keys like a sheet (N11.1, E2).
+                  editing: model.surface.editing, paused: model.paused || model.editingNote, repeated: repeated) else { return false }
         if command {
             if input.lowercased() == "z" { model.restore(redo: shift); return true }
             return false
@@ -32,6 +36,10 @@ struct ReviewCardHost {
         case "3": model.rate(.good); return true
         case "4": model.rate(.easy); return true
         case "\u{1b}": close(); return true
+        // review/commands: E, - and @ on either side, as the More menu (N20.8).
+        case "e", "E": if actions.canEditNote { actions.editNote() }; return true
+        case "-": if actions.canActOnCard { actions.act(.bury) }; return true
+        case "@": if actions.canActOnCard { actions.act(.suspend) }; return true
         default: return false
         }
     }
@@ -96,7 +104,42 @@ extension ReviewCardHost: NSViewControllerRepresentable {
         }
         (model.surface as? ReviewPages)?.presenter.window = host.view.window
         (model.surface as? ReviewPages)?.establishInitialFocus()
+        // N20.8: the card's context menu starts with Edit Note | Bury Card, Suspend Card.
+        let actions = actions
+        for page in pair.pages {
+            page.webView.contextActions = { ReviewCardMenuItems.make(actions) }
+        }
     }
+}
+
+/// The Mac card's context menu items, with the Card menu's key equivalents shown.
+@MainActor enum ReviewCardMenuItems {
+    static func make(_ actions: ReviewMoreActions) -> [NSMenuItem] {
+        func item(_ title: String, _ symbol: String, _ key: String, _ modifiers: NSEvent.ModifierFlags,
+                  enabled: Bool, _ run: @escaping () -> Void) -> NSMenuItem {
+            let target = ClosureMenuTarget(run)
+            let item = NSMenuItem(title: title, action: #selector(ClosureMenuTarget.runAction), keyEquivalent: "")
+            item.target = target; item.representedObject = target
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            item.keyEquivalent = key; item.keyEquivalentModifierMask = modifiers
+            item.isEnabled = enabled
+            return item
+        }
+        return [
+            item(String(localized: "Edit Note", bundle: .module), "pencil", "e", .command, enabled: actions.canEditNote, actions.editNote),
+            .separator(),
+            item(String(localized: "Bury Card", bundle: .module), "moon", "j", .command, enabled: actions.canActOnCard) { actions.act(.bury) },
+            item(String(localized: "Suspend Card", bundle: .module), "pause.circle", "j", [.command, .shift],
+                 enabled: actions.canActOnCard) { actions.act(.suspend) },
+        ]
+    }
+}
+
+/// The target of a context menu item that runs a closure; the item retains it.
+final class ClosureMenuTarget: NSObject {
+    private let run: () -> Void
+    init(_ run: @escaping () -> Void) { self.run = run; super.init() }
+    @objc func runAction() { run() }
 }
 #else
 extension ReviewCardHost: UIViewControllerRepresentable {
@@ -116,7 +159,7 @@ extension ReviewCardHost: UIViewControllerRepresentable {
             focusChanged?()
         }
         override var keyCommands: [UIKeyCommand]? {
-            [" ", "\r", "1", "2", "3", "4", UIKeyCommand.inputEscape].map {
+            [" ", "\r", "1", "2", "3", "4", "e", "-", "@", UIKeyCommand.inputEscape].map {
                 let command = UIKeyCommand(input: $0, modifierFlags: [], action: #selector(pressed(_:)))
                 command.wantsPriorityOverSystemBehavior = false
                 return command
@@ -140,7 +183,7 @@ extension ReviewCardHost: UIViewControllerRepresentable {
         host.handle = { key($0, command: $1, shift: $2) }
         host.canHandle = { _ in
             ReviewInputOwnership.admits(cardFocused: ReviewInputOwnership.cardFocused(in: pair.current.webView),
-                editing: model.surface.editing, paused: model.paused, repeated: false)
+                editing: model.surface.editing, paused: model.paused || model.editingNote, repeated: false)
         }
         host.focusChanged = {
             (model.surface as? ReviewPages)?.establishInitialFocus()

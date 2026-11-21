@@ -8,6 +8,7 @@ use meguri_model::{
     ids::DeckId,
     rng::SeededRandom,
 };
+use meguri_search::SearchNotetypes;
 use meguri_search::{
     BuildError, ContextReads, ContextValue, ErrorKind, FoldMode, Param, Plan, SearchContext, SearchFailure,
     SearchMode, parse,
@@ -125,7 +126,7 @@ fn notetype(db: &OpenedCollection, id: i64, name: &str, templates: &[&str]) {
 }
 
 fn plan(text: &str, mode: SearchMode) -> Plan {
-    Plan::build(&parse(text).unwrap(), mode, &context()).unwrap_or_else(|e| panic!("{text}: {e:?}"))
+    Plan::build(&parse(text).unwrap(), mode, &context(), &SearchNotetypes::default()).unwrap_or_else(|e| panic!("{text}: {e:?}"))
 }
 
 fn ids(db: &OpenedCollection, text: &str, mode: SearchMode) -> Vec<i64> {
@@ -163,7 +164,7 @@ fn notes(db: &OpenedCollection, text: &str) -> Vec<i64> {
 }
 
 fn build_error(text: &str) -> ErrorKind {
-    match Plan::build(&parse(text).unwrap(), SearchMode::Cards, &context()) {
+    match Plan::build(&parse(text).unwrap(), SearchMode::Cards, &context(), &SearchNotetypes::default()) {
         Err(BuildError::Search(error)) => error.kind().clone(),
         other => panic!("{text}: {other:?}"),
     }
@@ -323,7 +324,7 @@ fn current_deck_reads_the_context_id_and_falls_back_to_the_name_default() {
     let run = |current: i64| {
         let mut ctx = context();
         ctx.current_deck = DeckId(current);
-        let plan = Plan::build(&parse("deck:current").unwrap(), SearchMode::Cards, &ctx).unwrap();
+        let plan = Plan::build(&parse("deck:current").unwrap(), SearchMode::Cards, &ctx, &SearchNotetypes::default()).unwrap();
         assert_eq!(plan.reads(), ContextReads::NONE.with(ContextValue::CurrentDeck));
         let params: Vec<SqlValue> = plan
             .params()
@@ -558,7 +559,7 @@ fn glob_expressions_over_the_size_limit_fail_at_plan_time_after_statement_checks
         ErrorKind::SearchFailed(SearchFailure::ExpressionTooLarge { .. })
     ));
     let query = format!("a -deck:{many} tag:re:[");
-    match Plan::build(&parse(&query).unwrap(), SearchMode::Cards, &context()) {
+    match Plan::build(&parse(&query).unwrap(), SearchMode::Cards, &context(), &SearchNotetypes::default()) {
         Err(BuildError::Search(error)) => assert_eq!(error.range(), 3..3 + 5 + 30_000),
         other => panic!("{other:?}"),
     }

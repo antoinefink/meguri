@@ -6,8 +6,8 @@
 
 use meguri_search::config::SortDirection;
 use meguri_search::{
-    BuildError, ContextReads, ContextValue, FoldMode, Param, Plan, SearchContext, SearchError, SearchMode, Sort,
-    SortError, SortedQuery, parse,
+    BuildError, ContextReads, ContextValue, FoldMode, Param, Plan, SearchContext, SearchError, SearchMode,
+    SearchNotetypes, Sort, SortError, SortedQuery, parse,
 };
 use meguri_storage::raw::SqlValue;
 use meguri_storage::{ConfigValue, ReadRows};
@@ -307,11 +307,24 @@ fn context(session: &Session<'_>) -> Result<SearchContext, ExecError> {
     Ok(context)
 }
 
+/// T15: the note types, read on the collection the searches run on; no step
+/// runs between this read and the searches of one observation.
+fn notetypes(session: &Session<'_>) -> Result<SearchNotetypes, ExecError> {
+    let collection = session
+        .storage
+        .collection()
+        .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
+    SearchNotetypes::read(&*collection.reader()?).map_err(|e| ExecError::new("core_error", e.to_string()))
+}
+
 /// S1: one output per request; a request with `order` is a sorted search
 /// (browser-ops.md B1, B2).
 fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
     let requests = SearchRequest::from_list(list(request)?).map_err(|e| invalid(e.to_string()))?;
     let mut context = context(session)?;
+    let notetypes = notetypes(session)?;
+    // The day computed so far: none, without writes, or by the day query.
+    let mut day_queried = false;
     let mut day_supplied = false;
     let mut outputs = Vec::with_capacity(requests.len());
     for request in &requests {
@@ -345,18 +358,9 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
             }
         };
         let build = |context: &SearchContext| -> Result<Result<Built, Value>, ExecError> {
-            let plan = match Plan::build(&query, mode, context) {
+            let plan = match Plan::build(&query, mode, context, &notetypes) {
                 Ok(plan) => plan,
                 Err(BuildError::Search(error)) => return Ok(Err(error_value(&error))),
-                Err(BuildError::NotYetSupported { term, .. }) => {
-                    return Err(ExecError::new(
-                        "unsupported_observation",
-                        format!(
-                            "search {:?}: Meguri cannot match the term {term:?} yet (U81, U82)",
-                            request.query
-                        ),
-                    ));
-                }
             };
             let sorted = match &sort {
                 None => None,
@@ -377,8 +381,17 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
                 continue;
             }
         };
-        if !day_supplied && built.reads_day() {
-            let day = super::sched::day_query_now(session)?.day;
+        let term_reads_day = reads_day(built.plan.reads());
+        if (!day_supplied && built.reads_day()) || (!day_queried && term_reads_day) {
+            // A term that reads the day runs the day query, as unsorted
+            // searches do; a sort key alone reads it without writes (B1:
+            // nothing in the collection changes).
+            let day = if term_reads_day {
+                day_queried = true;
+                super::sched::day_query_now(session)?.day
+            } else {
+                super::sched::day_without_writes(session)?
+            };
             context.today = day.today;
             context.next_day_at = day.next_day_at;
             day_supplied = true;
@@ -402,9 +415,12 @@ struct Built {
 
 impl Built {
     fn reads_day(&self) -> bool {
-        let day = |reads: ContextReads| reads.contains(ContextValue::Today) || reads.contains(ContextValue::NextDayAt);
-        day(self.plan.reads()) || self.sorted.as_ref().is_some_and(|sorted| day(sorted.reads()))
+        reads_day(self.plan.reads()) || self.sorted.as_ref().is_some_and(|sorted| reads_day(sorted.reads()))
     }
+}
+
+fn reads_day(reads: ContextReads) -> bool {
+    reads.contains(ContextValue::Today) || reads.contains(ContextValue::NextDayAt)
 }
 
 fn sql_params(params: &[Param]) -> Vec<SqlValue> {

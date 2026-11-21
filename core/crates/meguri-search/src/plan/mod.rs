@@ -9,14 +9,16 @@ mod props;
 pub mod sort;
 pub mod sql;
 mod state;
+mod text;
 
 use std::ops::Range;
 
 use crate::ast::{NodeId, NodeKind, Query, Scope, Term};
 use crate::context::{ContextReads, SearchContext};
 use crate::error::{ErrorKind, SearchError, SearchFailure};
+use crate::notetypes::SearchNotetypes;
 
-pub use sql::{Param, Params, TermEnv, TermOutcome, TermSql};
+pub use sql::{Param, Params, TermEnv, TermSql};
 
 /// What a search returns (Q4, R1080).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -68,10 +70,6 @@ pub struct Plan {
 pub enum BuildError {
     /// A run error of E3 found before anything runs.
     Search(SearchError),
-    /// The query holds a term whose matching unit (U81, U82) has not landed:
-    /// the first such term, as parsed, and its range. Removed with the last
-    /// stub.
-    NotYetSupported { term: Term, range: Range<usize> },
 }
 
 impl From<SearchError> for BuildError {
@@ -81,25 +79,33 @@ impl From<SearchError> for BuildError {
 }
 
 impl Plan {
-    /// Q9: compiles `query` for `mode`. Plan errors follow `errors.md` E4
-    /// step 3: the statement checks of every term (a negated operator word,
-    /// a digit other than ASCII `0`-`9` in an id list, ...) in reading
-    /// order, then the pattern checks (every expression compiled).
-    pub fn build(query: &Query, mode: SearchMode, ctx: &SearchContext) -> Result<Plan, BuildError> {
-        build_with(query, mode, ctx, &mut sql::compile_term)
+    /// Q9: compiles `query` for `mode` against the collection's note types
+    /// (`text-matching.md` T15: read on the transaction the statement runs
+    /// on, or build the plan again when they changed). Plan errors follow
+    /// `errors.md` E4 step 3: the statement checks of every term (a negated
+    /// operator word, a digit other than ASCII `0`-`9` in an id list, ...)
+    /// in reading order, then the pattern checks (every pattern checked and
+    /// every expression compiled).
+    pub fn build(
+        query: &Query,
+        mode: SearchMode,
+        ctx: &SearchContext,
+        notetypes: &SearchNotetypes,
+    ) -> Result<Plan, BuildError> {
+        build_with(query, mode, ctx, notetypes, &mut sql::compile_term)
     }
 
     /// Test-only (KTD18): [`Plan::build`] with `compile` in place of
-    /// [`sql::compile_term`], so that tests can run plans of terms whose
-    /// matching (U81, U82) is still a stub.
+    /// [`sql::compile_term`], so that tests can run plans on tables that
+    /// hold only the columns a stand-in compiler reads.
     #[cfg(feature = "test-hooks")]
     pub fn build_with(
         query: &Query,
         mode: SearchMode,
         ctx: &SearchContext,
-        compile: &mut dyn FnMut(&Term, &TermEnv<'_>, &mut Params) -> Result<TermOutcome, ErrorKind>,
+        compile: &mut dyn FnMut(&Term, &TermEnv<'_>, &mut Params) -> Result<TermSql, ErrorKind>,
     ) -> Result<Plan, BuildError> {
-        build_with(query, mode, ctx, compile)
+        build_with(query, mode, ctx, &SearchNotetypes::default(), compile)
     }
 
     pub fn mode(&self) -> SearchMode {
@@ -136,10 +142,12 @@ impl Plan {
 }
 
 /// The signature of a term compiler: [`sql::compile_term`] in the product.
-type Compile<'a> = dyn FnMut(&Term, &TermEnv<'_>, &mut Params) -> Result<TermOutcome, ErrorKind> + 'a;
+type Compile<'a> = dyn FnMut(&Term, &TermEnv<'_>, &mut Params) -> Result<TermSql, ErrorKind> + 'a;
 
 enum Piece {
     Node(NodeId),
+    /// A term that takes the `-` before it itself ([`sql::takes_negation`]).
+    Negated(NodeId),
     Text(&'static str),
 }
 
@@ -182,15 +190,20 @@ fn build_with(
     query: &Query,
     mode: SearchMode,
     ctx: &SearchContext,
+    notetypes: &SearchNotetypes,
     compile: &mut Compile<'_>,
 ) -> Result<Plan, BuildError> {
     let rows = Rows::for_query(mode, query_scope(query));
-    let env = TermEnv { rows, ctx };
+    let env = TermEnv {
+        rows,
+        ctx,
+        notetypes,
+        negated: false,
+    };
     let mut params = Params::default();
     let mut predicate = String::new();
     let mut slow = Vec::new();
     let mut reads = ContextReads::NONE;
-    let mut not_yet = None;
     // E4 step 3: the statement checks of every term in reading order, then
     // the pattern checks. A pattern error waits until every term passed its
     // statement checks.
@@ -198,22 +211,26 @@ fn build_with(
     // Left to right, so the first error the source names is the one raised.
     let mut stack = vec![Piece::Node(query.root())];
     while let Some(piece) = stack.pop() {
-        let id = match piece {
+        let (id, negated) = match piece {
             Piece::Text(text) => {
                 predicate.push_str(text);
                 continue;
             }
-            Piece::Node(id) => id,
+            Piece::Node(id) => (id, false),
+            Piece::Negated(id) => (id, true),
         };
         let node = query.node(id);
         match &node.kind {
             NodeKind::And(items) => joined(&mut stack, items, " AND "),
             NodeKind::Or(items) => joined(&mut stack, items, " OR "),
             NodeKind::Group(inside) => stack.push(Piece::Node(*inside)),
-            NodeKind::Not(item) => {
-                stack.push(Piece::Node(*item));
-                stack.push(Piece::Text("NOT "));
-            }
+            NodeKind::Not(item) => match &query.node(*item).kind {
+                NodeKind::Term(term) if sql::takes_negation(term) => stack.push(Piece::Negated(*item)),
+                _ => {
+                    stack.push(Piece::Node(*item));
+                    stack.push(Piece::Text("NOT "));
+                }
+            },
             NodeKind::NegatedOperator(_) => {
                 let kind = ErrorKind::SearchFailed(SearchFailure::NegatedOperator);
                 return Err(SearchError::new(kind, node.span.clone()).into());
@@ -226,15 +243,16 @@ fn build_with(
                     let kind = ErrorKind::SearchFailed(SearchFailure::IdList { context });
                     return Err(SearchError::new(kind, node.span.clone()).into());
                 }
-                let outcome = match compile(term, &env, &mut params) {
-                    Ok(outcome) => outcome,
+                let term_env = TermEnv { negated, ..env };
+                let term_sql = match compile(term, &term_env, &mut params) {
+                    Ok(term_sql) => term_sql,
                     Err(kind) if sql::is_pattern_error(&kind) => {
                         pattern_error.get_or_insert_with(|| SearchError::new(kind, node.span.clone()));
-                        TermOutcome::Sql(TermSql {
+                        TermSql {
                             sql: "0".to_owned(),
                             slow: false,
                             reads: ContextReads::NONE,
-                        })
+                        }
                     }
                     Err(ErrorKind::SearchFailed(SearchFailure::NumberOutOfRange { .. })) => {
                         let term = term_text(query, &node.span, term);
@@ -243,29 +261,18 @@ fn build_with(
                     }
                     Err(kind) => return Err(SearchError::new(kind, node.span.clone()).into()),
                 };
-                match outcome {
-                    TermOutcome::Sql(term_sql) => {
-                        predicate.push('(');
-                        predicate.push_str(&term_sql.sql);
-                        predicate.push(')');
-                        if term_sql.slow {
-                            slow.push(id);
-                        }
-                        reads = reads.union(term_sql.reads);
-                    }
-                    TermOutcome::NotYetSupported => {
-                        not_yet.get_or_insert_with(|| (term.clone(), node.span.clone()));
-                        predicate.push_str("(0)");
-                    }
+                predicate.push('(');
+                predicate.push_str(&term_sql.sql);
+                predicate.push(')');
+                if term_sql.slow {
+                    slow.push(id);
                 }
+                reads = reads.union(term_sql.reads);
             }
         }
     }
     if let Some(error) = pattern_error {
         return Err(error.into());
-    }
-    if let Some((term, range)) = not_yet {
-        return Err(BuildError::NotYetSupported { term, range });
     }
     Ok(Plan {
         mode,

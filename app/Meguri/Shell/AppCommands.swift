@@ -1,5 +1,6 @@
 import AppModel
 import CoreBridge
+import Editor
 import Home
 import SwiftUI
 #if os(macOS)
@@ -201,10 +202,10 @@ struct AppCommands: Commands {
         if let context, context.replacesUndo {
             CommandGroup(replacing: .undoRedo) {
                 let undo = context.undoRoute(redo: false), redo = context.undoRoute(redo: true)
-                Button(Self.title(undo.title, redo: false)) { context.performUndo(redo: false) }
+                Button(Self.title(undo, redo: false)) { context.performUndo(redo: false) }
                     .keyboardShortcut(undoKey("z", modifiers: .command, review: context.review != nil))
                     .disabled(!undo.enabled)
-                Button(Self.title(redo.title, redo: true)) { context.performUndo(redo: true) }
+                Button(Self.title(redo, redo: true)) { context.performUndo(redo: true) }
                     .keyboardShortcut(undoKey("z", modifiers: [.command, .shift], review: context.review != nil))
                     .disabled(!redo.enabled)
             }
@@ -261,6 +262,26 @@ struct AppCommands: Commands {
             rating("Good", .good, key: "3")
             rating("Easy", .easy, key: "4")
             Divider()
+            // N20.8: the review's card actions, with the More menu's keys.
+            Button("Edit Note") {
+                guard let context, context.reviewInputAvailable, context.collection.editNoteFlow.canOpen else { return }
+                Task { await context.collection.openEditNote() }
+            }
+            .keyboardShortcut("e", modifiers: .command)
+            .disabled(!cardEnabled(context?.collection.editNoteFlow.canOpen))
+            Button("Bury Card") {
+                guard context?.reviewInputAvailable == true else { return }
+                context?.review?.act(.bury)
+            }
+            .keyboardShortcut("j", modifiers: .command)
+            .disabled(!cardEnabled(context?.review?.canActOnCard))
+            Button("Suspend Card") {
+                guard context?.reviewInputAvailable == true else { return }
+                context?.review?.act(.suspend)
+            }
+            .keyboardShortcut("j", modifiers: [.command, .shift])
+            .disabled(!cardEnabled(context?.review?.canActOnCard))
+            Divider()
             Button("Back to Decks") {
                 guard let context, context.reviewInputAvailable, context.review?.canFinish == true else { return }
                 Task { await context.collection.finishReview() }
@@ -271,11 +292,15 @@ struct AppCommands: Commands {
     }
 
     /// R173: "Undo <operation>" while one can be undone, plain "Undo" otherwise.
-    private static func title(_ title: EditUndoRouting.Title, redo: Bool) -> String {
-        switch title {
-        case .text(let text): text
-        case .named(let name): redo ? String(localized: "Redo \(name)") : String(localized: "Undo \(name)")
-        case .plain: redo ? String(localized: "Redo") : String(localized: "Undo")
+    private static func title(_ route: EditUndoRouting.Route, redo: Bool) -> String {
+        switch route.title {
+        case .text(let text): return text
+        case .named(let step):
+            // S5: the review's own steps by their display names ("Undo Bury Card");
+            // the collection's steps keep their V4 names ("Undo Update Note").
+            let name = route.target == .review ? ReviewStepNames.display(step) : step
+            return redo ? String(localized: "Redo \(name)") : String(localized: "Undo \(name)")
+        case .plain: return redo ? String(localized: "Redo") : String(localized: "Undo")
         }
     }
 

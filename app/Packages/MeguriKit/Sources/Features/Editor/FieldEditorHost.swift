@@ -77,7 +77,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
     }
     public func successor(for draft: NoteEditorDraft, isCurrent: @escaping @MainActor () -> Bool) -> (any AddNoteFieldRuntime)? {
         guard editable, !closed, !processTerminated, loadID < Self.maximumID else { return nil }
-        // End this host as dispose() does, but leave the page and its handler alive.
+        // End this host as shutDown() does, but leave the page and its handler alive.
         closed = true
         if let expected = activeLoad { fail(EditorRuntimeError.unavailable, load: expected) }
         return FieldEditorHost(continuing: self, draft: draft, isCurrent: isCurrent)
@@ -216,7 +216,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         }
         let focus = draft.focusedField ?? draft.fields.indices.first(where: { !draft.fields[$0].collapsed })
         openedLoad = expected
-        _ = try await call(["type": "openNote", "protocol": 1, "loadId": expected, "mode": "add", "fields": fields,
+        _ = try await call(["type": "openNote", "protocol": 1, "loadId": expected, "mode": draft.noteID == nil ? "add" : "edit", "fields": fields,
             "focus": focus.map { $0 as Any } ?? NSNull(), "theme": [String: String](),
             "options": ["closeHTMLTags": false, "shrinkImages": false]], load: expected)
         try requireCurrent(expected)
@@ -247,6 +247,16 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
         guard editable, let expected = activeLoad else { throw EditorRuntimeError.unavailable }
         _ = try await call(["type": "release", "loadId": expected], load: expected)
         try requireCurrent(expected); held = false
+    }
+    /// Edit mode: the page loads again the fields the draft took from the
+    /// stored note after a change made elsewhere (B3 `setField`).
+    public func reload(fields ords: [Int]) async throws {
+        guard editable, let expected = activeLoad else { throw EditorRuntimeError.unavailable }
+        for ord in ords {
+            let html = try await draft.displayValue(ord)
+            try requireCurrent(expected)
+            _ = try await call(["type": "setField", "loadId": expected, "ord": ord, "html": html], load: expected)
+        }
     }
     public func setFocus(_ ord: Int) async throws {
         guard editable, !held, let expected = activeLoad, draft.fields.indices.contains(ord) else { throw EditorRuntimeError.unavailable }
@@ -415,7 +425,7 @@ public final class FieldEditorHost: NSObject, WKNavigationDelegate, AddNoteField
 
     /// Final disposal follows the containing owner's held flush/close guard.
     /// It never deletes targets or writes a note. Do not call on layout change.
-    public func dispose() {
+    public func shutDown() {
         guard !closed else { return }
         closed = true
         if let expected = activeLoad { fail(EditorRuntimeError.unavailable, load: expected) }
