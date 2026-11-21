@@ -126,8 +126,8 @@
         "sha256": "e978248b6b56da9e372975322a98dd9a51135d1b375e32ed6d5ca69f3aab792d"
       },
       "src/accounts.tsx": {
-        "bytes": 10593,
-        "sha256": "e885d0be7493201c62715620ba5a0de66762d9b35a8f414ba5943a0cfeb397c9"
+        "bytes": 13497,
+        "sha256": "1ed4afb68d79be9a0a6ea2ec5a4e1a836fe8d5c7728caf1d95ab1d3275d5c749"
       },
       "src/api.ts": {
         "bytes": 5274,
@@ -182,8 +182,8 @@
         "sha256": "e52593b7fc00da8d8354538999bf35e5c6db886bed06c7422823c446457c1d31"
       },
       "src/style.css": {
-        "bytes": 11930,
-        "sha256": "dabdbfbc45b2a0519ca88f674a4a3ef0288863ea3ca5bc6e965e5008fab2180c"
+        "bytes": 13065,
+        "sha256": "04f338be9525f8e0f3503e43d56b742dcd809cbaa18dc4b9d38bef7c9a33992b"
       },
       "src/ui.tsx": {
         "bytes": 4952,
@@ -193,9 +193,13 @@
         "bytes": 4776,
         "sha256": "9cefc3723cf52869ccaf3d2dbe1b775b0668c77570945ea3e448f971cf4ccad8"
       },
+      "tests/browser/account-actions.spec.ts": {
+        "bytes": 8640,
+        "sha256": "8c3de382b91ded4c5f1751c1718465625efd38b61b92fda0e2675d52d73c4a2e"
+      },
       "tests/browser/accounts.spec.ts": {
-        "bytes": 46075,
-        "sha256": "ca12f0a952651e7bbbf110916fc31759c4e43679e59d0da776523afd5f6fa06d"
+        "bytes": 48169,
+        "sha256": "e8f82051540e0cbf0fce3d430d5856e63e80a6b454247f81dabf89349b9b3c4f"
       },
       "tests/browser/mcp.spec.ts": {
         "bytes": 37427,
@@ -273,8 +277,8 @@
         "sha256": "303972069cba005453abe7939235e27b5622e986968adb0344836cb0475875d9"
       },
       "server/src/httpapi/mod.rs": {
-        "bytes": 20615,
-        "sha256": "ac8cf4d9882c28d64e17dd7f8f9f70521a85819734337af8e5015d21f9d11598"
+        "bytes": 20789,
+        "sha256": "f797937487d398fa2712641fd33915777ba33e26cc803b0e2de707ea5d248e45"
       },
       "server/src/webassets/mod.rs": {
         "bytes": 4512,
