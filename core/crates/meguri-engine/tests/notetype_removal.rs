@@ -649,8 +649,8 @@ impl meguri_engine::ProgressListener for DuringPlanning {
         // Never act in the write phase: it reports on the writer thread,
         // where an op would wait on itself.
         // A pass's first report, made on its snapshot: `completed` 0 with a
-        // known total. The phase change before it carries the previous
-        // pass's counts and comes before the snapshot is taken.
+        // known total. The phase change before it (`set_phase`) reports 0
+        // with no total, before the snapshot is taken, and is skipped.
         if progress.phase == meguri_engine::ProgressPhase::Planning && progress.completed == 0 && progress.total.is_some() {
             let pass = self.passes.fetch_add(1, Ordering::SeqCst);
             (self.change)(&self.collection, pass);
