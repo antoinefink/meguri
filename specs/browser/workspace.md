@@ -57,7 +57,7 @@ The first, narrow column of every row shows, in this order of precedence, one sy
 - Cells are computed by the core with the other row cells (`browser/result-sets` H7): H7's column set is extended to accept `fld:` keys (Changed 2026-11-20 note in H7). A field name holding `:` can occur only in a damaged collection (`notetypes/records` N4 removes it); its key is still `fld:` + the stored name.
 - The first column of the list stays in place while the table scrolls sideways.
 
-Changed 2026-11-21 (implementation review): the one-line text is `browser/columns` C7.1's (`text/strip-html` H6 with media names kept), which keeps inner runs of white space. A field holding both a sound tag and an image carries both file names, and the app chooses what the row shows. `<audio>`, `<video>` and other media tags are neither a sound reference nor an image: such a field shows its one-line text, with the file name as C7.1 keeps it.
+Changed 2026-11-21 (implementation review): the one-line text is `browser/columns` C7.1's (`text/strip-html` H6 with media names kept), which keeps inner runs of white space. A field holding both a sound tag and an image carries both file names, and the cell shows both: the image's thumbnail first, then the speaker symbol with the first sound's length. `<audio>`, `<video>` and other media tags are neither a sound reference nor an image: such a field shows its one-line text, with the file name as C7.1 keeps it.
 
 ## V4. Sorting
 
