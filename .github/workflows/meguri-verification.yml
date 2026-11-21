@@ -7,10 +7,13 @@ name: Verify Meguri
 # that says it was not selected, so no check waits forever.
 #
 # - Linux · core: one result for the Core suite. It passes only when every
-#   shard ran and passed `tools/mg core-test --quick` on this commit; a shard
-#   that failed, was cancelled or never started fails it.
+#   shard ran and passed `tools/mg core-test --quick` and the lint job passed
+#   `tools/mg core-lint`, on this commit; a job that failed, was cancelled or
+#   never started fails it.
 # - Linux · core · shard M/N: nextest partition M of N of the quick tests,
 #   without the tests in .github/core-timing-sensitive.txt.
+# - Linux · core · lint: `tools/mg core-lint` (clippy, layering-check, the
+#   AnkiWeb scan).
 # - Linux · core (timing-sensitive): advisory. Runs the listed tests alone,
 #   one at a time; its failures show in its summary and do not fail Core.
 # - Linux · server, conformance, package-smoke: unchanged suites.
@@ -61,10 +64,10 @@ jobs:
       # their inputs: app/, conformance/, core/, docker/, server/, specs/,
       # tools/, this workflow or the dev image script (the paths that started
       # this workflow before it ran on every change). Core runs when an input
-      # of `tools/mg core-test` changed: the Rust workspace, the conformance
-      # data and specs its tests read (servers/ specs excepted), its tools/mg
-      # job, the dev image (with .github/dev-image.sh) and the timing-sensitive
-      # list. A change to docs/ or to Markdown outside those directories runs
+      # of `tools/mg core-test` or `core-lint` changed: the Rust workspace, the
+      # conformance data and specs its tests read (servers/ specs excepted),
+      # their tools/mg jobs (with the AnkiWeb scanner), the dev image (with
+      # .github/dev-image.sh), the cache script and the timing-sensitive list. A change to docs/ or to Markdown outside those directories runs
       # neither. Manual runs, new branches and anything that cannot be compared
       # run every suite.
       - name: Select the suites this change affects
@@ -97,7 +100,7 @@ jobs:
               linux=no
             fi
             core_dirs='core|conformance|specs|tools/conformance'
-            core_files='\.github/workflows/meguri-verification\.yml|\.github/dev-image\.sh|\.github/core-timing-sensitive\.txt|tools/mg|tools/mg\.d/core\.sh|tools/mg-result\.schema\.json|docker/compose\.yml|docker/dev\.Dockerfile(\.dockerignore)?'
+            core_files='\.github/workflows/meguri-verification\.yml|\.github/dev-image\.sh|\.github/rust-cache\.sh|\.github/core-timing-sensitive\.txt|tools/mg|tools/mg\.d/core\.sh|tools/scripts/ankiweb-scan\.py|tools/mg-result\.schema\.json|docker/compose\.yml|docker/dev\.Dockerfile(\.dockerignore)?'
             # Filter before testing: under pipefail, `grep -q` exiting early
             # would fail its writer and skip Core on a large change.
             relevant="$(grep -v '^specs/servers/' <<<"$changed" || true)"
@@ -127,7 +130,7 @@ jobs:
           {
             echo "### Selected suites"
             echo
-            echo "- Core (4 shards and the timing-sensitive job): **$core**"
+            echo "- Core (4 shards, lint and the timing-sensitive job): **$core**"
             echo "- server, conformance, package-smoke: **$linux**"
             if [[ -n "$added" ]]; then
               echo
@@ -290,42 +293,7 @@ jobs:
           matrix.shard == 1 && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
           && steps.pull.outputs.used == 'yes' && steps.rust-cache.outputs.cache-hit != 'true'
         shell: bash
-        run: |
-          target="$RUNNER_TEMP/cargo-target"
-          echo "Cargo target before pruning: $(sudo du -sm "$target" | cut -f1) MB"
-          # Local packages (workspace and patched path crates) are rebuilt from
-          # source; their artifacts never enter the cache.
-          mapfile -t pkgs < <(find core -name Cargo.toml -not -path '*/target/*' -print0 |
-            xargs -0 awk 'FNR == 1 { p = 0 } /^\[package\]/ { p = 1; next } /^\[/ { p = 0 }
-              p && /^name[[:space:]]*=/ { gsub(/[" ]/, ""); sub(/^name=/, ""); print }' | sort -u)
-          ((${#pkgs[@]} > 0)) || { echo "::error::No local packages found"; exit 1; }
-          for dir in "$target"/*/; do
-            [[ -d "$dir/deps" ]] || continue
-            sudo rm -rf -- "$dir/incremental"
-            for p in "${pkgs[@]}"; do
-              u="${p//-/_}"
-              sudo rm -rf -- "$dir"deps/"$u"-* "$dir"deps/lib"$u"-* "$dir".fingerprint/"$p"-* "$dir"build/"$p"-*
-            done
-            # Test and other executables of local packages.
-            sudo find "$dir/deps" -maxdepth 1 -type f -perm -u+x ! -name '*.*' -delete
-          done
-          sudo rm -rf -- "$target/nextest" "$target/tmp"
-          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/cargo-home" "$target"
-          # Only the paths that exist: du fails on a missing one (no git
-          # dependencies, say), and that would fail the step.
-          paths=()
-          for p in "$RUNNER_TEMP/cargo-home/registry/index" "$RUNNER_TEMP/cargo-home/registry/cache" "$target"; do
-            [[ ! -e "$p" ]] || paths+=("$p")
-          done
-          size=0
-          ((${#paths[@]} == 0)) || size="$(du -smc -- "${paths[@]}" | tail -n 1 | cut -f1)"
-          echo "Rust dependency cache: $size MB"
-          if ((size > 4096)); then
-            echo "::warning::Rust dependency cache is $size MB, over 4 GB; not saving it."
-            echo "save=no" >>"$GITHUB_OUTPUT"
-          else
-            echo "save=yes" >>"$GITHUB_OUTPUT"
-          fi
+        run: .github/rust-cache.sh prune
 
       - name: Save the Rust dependency cache
         if: steps.prune.outputs.save == 'yes'
@@ -448,12 +416,109 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The Core result. always(): it must report even when a shard failed, was
-  # cancelled or never started, and then it fails. A skipped job would count
-  # as passing, so this job never skips itself.
+  # `tools/mg core-lint`, as agents run it locally. It does not check source
+  # formatting. Clippy checks every crate with all features, and the AnkiWeb
+  # scan builds meguri-sync without its features: neither reuses the shards'
+  # test builds, so lint keeps its own cache of third-party crates
+  # (core-lint-v1), saved like the shards' (master pushes and manual runs,
+  # once per key, after a pass) and never mixed with theirs.
+  core-lint:
+    name: Linux · core · lint
+    needs: [suites, image]
+    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.core == 'yes' }}
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    concurrency:
+      group: meguri-verification-${{ github.ref }}-core-lint-${{ needs.suites.outputs.core == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Pull the shared dev image
+        id: pull
+        if: needs.image.outputs.ref != ''
+        shell: bash
+        env:
+          REF: ${{ needs.image.outputs.ref }}
+          TOKEN: ${{ github.token }}
+        run: .github/dev-image.sh pull
+
+      - name: Restore the Rust lint cache
+        id: rust-cache
+        if: steps.pull.outputs.used == 'yes'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/cargo-home/registry/index
+            ${{ runner.temp }}/cargo-home/registry/cache
+            ${{ runner.temp }}/cargo-target
+          key: core-lint-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: core-lint-v1-${{ needs.image.outputs.hash }}-
+
+      - name: Run Core lint
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/cargo-target"
+          rc=0
+          receipt="$(sudo -n env MEGURI_CI_DEV_IMAGE="${MEGURI_CI_DEV_IMAGE:-}" \
+            MEGURI_DOCKER_CARGO_HOME="$RUNNER_TEMP/cargo-home" MEGURI_DOCKER_CARGO_TARGET="$RUNNER_TEMP/cargo-target" \
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory \
+            GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/tools/mg" core-lint)" || rc=$?
+          artifact="$RUNNER_TEMP/meguri-result.json"
+          receipt_prefix="$GITHUB_WORKSPACE/build/mg/core-lint/"
+          receipt_suffix="${receipt#"$receipt_prefix"}"
+          if [[ "$receipt" == "$receipt_prefix"* &&
+                "$receipt_suffix" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+/result\.json$ ]] &&
+             sudo -n test -f "$receipt"; then
+            sudo -n cat -- "$receipt" > "$artifact.tmp"
+            mv -- "$artifact.tmp" "$artifact"
+            {
+              jq -r '"### Linux · core · lint: \(.status)\n\n\(.message)\n"' "$artifact"
+              jq -r '.failures[]? | "- `\(.id)`"' "$artifact"
+            } >>"$GITHUB_STEP_SUMMARY"
+          fi
+          ((rc == 0))
+          jq -e --arg sha "$GITHUB_SHA" '
+            .status == "pass" and .commit.sha == $sha and .commit.dirty == false
+            and .job == "core-lint" and .args == [] and .summary.failed == 0' "$artifact"
+
+      - name: Keep only third-party crates in the Rust lint cache
+        id: prune
+        if: >-
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && steps.pull.outputs.used == 'yes' && steps.rust-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: .github/rust-cache.sh prune
+
+      - name: Save the Rust lint cache
+        if: steps.prune.outputs.save == 'yes'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/cargo-home/registry/index
+            ${{ runner.temp }}/cargo-home/registry/cache
+            ${{ runner.temp }}/cargo-target
+          key: core-lint-v1-${{ needs.image.outputs.hash }}-${{ hashFiles('core/Cargo.lock') }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: meguri-linux-core-lint-result
+          path: ${{ runner.temp }}/meguri-result.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The Core result. always(): it must report even when a shard or lint
+  # failed, was cancelled or never started, and then it fails. A skipped job
+  # would count as passing, so this job never skips itself.
   core:
     name: Linux · core
-    needs: [suites, core-shard]
+    needs: [suites, core-shard, core-lint]
     if: always()
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
@@ -466,12 +531,21 @@ jobs:
           pattern: meguri-linux-core-shard-*-result
           path: ${{ runner.temp }}/shards
 
-      - name: Require every Core shard to pass on this commit
+      - name: Download the lint receipt
+        if: needs.suites.outputs.core == 'yes'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: meguri-linux-core-lint-result
+          path: ${{ runner.temp }}/lint
+
+      - name: Require every Core shard and lint to pass on this commit
         shell: bash
         env:
           SUITES: ${{ needs.suites.result }}
           CORE: ${{ needs.suites.outputs.core }}
           SHARD_JOBS: ${{ needs.core-shard.result }}
+          LINT_JOB: ${{ needs.core-lint.result }}
           SHARDS: ${{ needs.suites.outputs.core_shards }}
         run: |
           fail() {
@@ -481,16 +555,25 @@ jobs:
           }
           [[ "$SUITES" == success ]] || fail "Select suites ended $SUITES, so the Core selection is unknown."
           if [[ "$CORE" == no ]]; then
-            printf '### Linux · core: not selected\n\nNo Core input changed, so no shard ran.\n' >>"$GITHUB_STEP_SUMMARY"
+            printf '### Linux · core: not selected\n\nNo Core input changed, so no shard or lint ran.\n' >>"$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           [[ "$CORE" == yes ]] || fail "Select suites gave no Core selection ('$CORE')."
+          [[ "$LINT_JOB" == success ]] || fail "Linux · core · lint ended $LINT_JOB (failed, cancelled or not started)."
+          lint="$RUNNER_TEMP/lint/meguri-result.json"
+          [[ -f "$lint" ]] || fail "Linux · core · lint left no receipt."
+          jq -e --arg sha "$GITHUB_SHA" '
+            .status == "pass" and .commit.sha == $sha and .commit.dirty == false
+            and .job == "core-lint" and .args == [] and .summary.failed == 0 and .summary.passed > 0' "$lint" >/dev/null ||
+            fail "The lint receipt is not a passing core-lint run on $GITHUB_SHA."
           [[ "$SHARD_JOBS" == success ]] || fail "The Core shards ended $SHARD_JOBS (failed, cancelled or not started)."
           count="$(jq length <<<"$SHARDS")"
           ((count > 0)) || fail "The shard list is empty."
           jq -e '. == [range(1; length + 1)]' <<<"$SHARDS" >/dev/null || fail "The shard list $SHARDS is not 1..N."
           {
-            echo "### Linux · core: $count shards"
+            echo "### Linux · core: $count shards and lint"
+            echo
+            echo "Lint: $(jq -r '.message' "$lint")"
             echo
             echo "| Shard | Passed | Failed | Skipped |"
             echo "| --- | --- | --- | --- |"
