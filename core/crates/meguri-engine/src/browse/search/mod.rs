@@ -137,9 +137,9 @@ pub enum SearchEvent {
         seq: RequestSeq,
         error: BrowseError,
         /// For a search error, the text of the request (its search, or the
-        /// toggled handle's): the error's range counts characters of it, and
-        /// the FFI converts them to UTF-16 against it (H15). `None` for
-        /// every other error.
+        /// text of the handle it toggles or resorts): the error's range
+        /// counts characters of it, and the FFI converts them to UTF-16
+        /// against it (H15). `None` for every other error.
         text: Option<String>,
     },
     Cancelled {
@@ -543,6 +543,18 @@ impl SearchSession {
     /// H2: cancels the running request and releases every handle. Dropping
     /// the session does the same.
     pub fn close(self) {}
+
+    /// [`SearchSession::close`] through a shared reference, for an owner
+    /// that cannot wait for every borrower to let go: requests made after
+    /// it end `Cancelled`, and every handle is released at once.
+    /// Idempotent.
+    pub fn shutdown(&self) {
+        let mut state = self.shared.lock();
+        state.closed = true;
+        self.shared.supersede(&mut state);
+        state.handles.clear();
+        state.complete.clear();
+    }
 }
 
 #[cfg(feature = "test-hooks")]
@@ -665,10 +677,6 @@ pub struct HandleState {
 
 impl Drop for SearchSession {
     fn drop(&mut self) {
-        let mut state = self.shared.lock();
-        state.closed = true;
-        self.shared.supersede(&mut state);
-        state.handles.clear();
-        state.complete.clear();
+        self.shutdown();
     }
 }

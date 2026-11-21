@@ -19,13 +19,19 @@ public enum ExcerptQuestion: Sendable, Hashable {
 
 extension CardBlankKind {
     init(_ kind: MeguriCoreBindings.RenderBlank) {
-        self = kind == .missingCloze ? .missingCloze : .emptyFront
+        switch kind {
+        case .missingCloze: self = .missingCloze
+        case .emptyFront: self = .emptyFront
+        }
     }
 }
 
 extension CardRenderSide {
     init(_ side: MeguriCoreBindings.RenderSide) {
-        self = side == .question ? .question : .answer
+        switch side {
+        case .question: self = .question
+        case .answer: self = .answer
+        }
     }
 }
 public enum CardExcerpt: Sendable, Hashable {
