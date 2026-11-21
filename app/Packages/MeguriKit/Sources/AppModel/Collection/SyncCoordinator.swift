@@ -799,6 +799,15 @@ public final class SyncCoordinator {
                 .flatMap { $0.overflow ? nil : $0.partialValue },
             mediaAwaiting: media?.awaiting)
     }
+    /// The files media blocked lists as not transferred (T19.5): from the
+    /// setup's accounting or the last round's report; nil when neither is known.
+    public var meguriAffectedFileCount: UInt64? {
+        if let accounting = meguriAccounting {
+            return UInt64(accounting.files.filter { $0.state != .transferred }.count)
+        }
+        if let result = meguriRoundReport?.media, case .media(let media) = result.outcome { return UInt64(media.affected.count) }
+        return nil
+    }
     /// The setup media step's files left to download: the running step's count,
     /// else the one the core last recorded for the operation; nil when none is
     /// recorded. Never a count Meguri works out itself.
@@ -810,11 +819,6 @@ public final class SyncCoordinator {
         let left = meguriMediaProgress?.awaiting ?? meguriReceipt?.media.awaiting ?? 0
         return left > 0 ? left : nil
     }
-    /// The setup's media files left, while its media step runs and nothing stopped it.
-    public var meguriMediaFilesLeft: UInt64? {
-        guard meguriStage == .media, !providerNeedsAttention else { return nil }
-        return meguriMediaProgress?.awaiting
-    }
     /// N23.1: the status panel's one bar, from the same status as the Sync section.
     public var panelProgress: SyncPanel.Progress? {
         let status = self.status
@@ -823,10 +827,11 @@ public final class SyncCoordinator {
             setupValue: meguriProgressValue,
             meguriMoving: meguriAuthenticating || (meguriStage == nil && meguriRoutine == .exchanging), cloudState: shown)
     }
-    /// N23.1: the files line under the bar, while media transfers and a count is known.
+    /// N23.1: the files line under the bar, while iCloud's media transfers and a
+    /// count is known. Meguri Sync's status sentence carries its count (resume fix).
     public var panelFilesLeft: UInt64? {
         guard panelProgress != nil else { return nil }
-        if providerState?.selection == .meguri { return meguriMediaFilesLeft }
+        if providerState?.selection == .meguri || providerNeedsAttention { return nil }
         let shown = status?.state == .needsAttention ? status?.stateWithoutAttention : status?.state
         guard shown == .syncingMedia, let media = status?.media,
               let upload = media.uploadFiles, let download = media.downloadFiles else { return nil }
@@ -890,7 +895,7 @@ public final class SyncCoordinator {
         .init(handoffRecovery: providerState?.phase == .handoffRecovery, providerBlocked: providerState?.phase == .blocked,
             connection: meguriAuthenticating ? .authenticating : meguriPhase, stage: meguriStage, routine: meguriRoutine,
             failureKey: meguriFailureKey, finishOffered: meguriCanFinish, automatic: settings.automatic && storedAutomatic,
-            mediaFilesLeft: meguriSetupMediaLeft)
+            mediaFilesLeft: meguriSetupMediaLeft, mediaListKnown: (meguriAffectedFileCount ?? 0) > 0)
     }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
     private var providerDiscovery: ProviderDiscoveryOwnership?
@@ -949,6 +954,13 @@ public final class SyncCoordinator {
     public private(set) var meguriCancelling = false
     var meguriCollectionWorkHeld: Bool {
         meguriPreview != nil || meguriSetupPreview != nil || meguriStage == .preparing || meguriStage == .collection
+    }
+    /// The reason under the Service control while a change must wait: the
+    /// setup media step names itself (resume fix), anything else keeps the
+    /// review-or-collection-change sentence.
+    public var serviceChangeBusyKey: String {
+        guard meguriStage == .media else { return "sync.switch.busy" }
+        return meguriSetupMediaLeft != nil ? "sync.switch.busy.mediaDownload" : "sync.switch.busy.media"
     }
     public var serviceChangeAvailable: Bool {
         providerChangeAllowed() && !providerActionInProgress && !meguriBusy && !suspended && !replacing
