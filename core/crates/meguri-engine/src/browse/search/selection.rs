@@ -36,17 +36,12 @@ pub(super) fn merged(ranges: &[Range<u64>]) -> Vec<Range<u64>> {
     out
 }
 
-/// Every card of each note in `notes`, ascending card id, from one read
-/// transaction on the query reader.
-pub(super) fn cards_of_notes(
-    collection: &crate::Collection,
-    notes: &[i64],
-) -> Result<HashMap<i64, Vec<i64>>, BrowseError> {
-    let reader = collection.reader(ReaderRole::Query)?;
-    let snapshot = reader.snapshot()?;
+/// Every card of each note in `notes`, ascending card id, in a read
+/// transaction the caller holds.
+fn cards_of_notes_in(rows: &impl ReadRows, notes: &[i64]) -> Result<HashMap<i64, Vec<i64>>, BrowseError> {
     let mut cards: HashMap<i64, Vec<i64>> = HashMap::new();
     let params = worker::cells(&[id_list(notes)]);
-    snapshot.visit_id_rows(ids::CARDS_OF_NOTES, &params, &|| false, &mut |row| {
+    rows.visit_id_rows(ids::CARDS_OF_NOTES, &params, &|| false, &mut |row| {
         cards.entry(row[1]).or_default().push(row[0]);
         true
     })?;
@@ -61,6 +56,10 @@ pub(super) fn resolve(
     target: SearchMode,
 ) -> Result<Vec<i64>, BrowseError> {
     let collection = shared.engine()?.collection()?;
+    // H6: the generation is compared while the query reader is held, and
+    // the notes' cards are read in the same transaction.
+    let reader = collection.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
     let (mode, selected, notes) = {
         let handle = shared.handle(handle)?;
         let handle = lock(&handle);
@@ -89,7 +88,7 @@ pub(super) fn resolve(
         // Every card of each selected note, ascending card id; a note
         // without cards adds none.
         (SearchMode::Notes, SearchMode::Cards) => {
-            let mut cards = cards_of_notes(&collection, &selected)?;
+            let mut cards = cards_of_notes_in(&*snapshot, &selected)?;
             selected
                 .iter()
                 .flat_map(|note| cards.remove(note).unwrap_or_default())
@@ -100,12 +99,10 @@ pub(super) fn resolve(
 
 /// The notes of `cards` that exist, from one read transaction on the query
 /// reader: card id to note id.
-fn notes_of_cards(collection: &crate::Collection, cards: &[i64]) -> Result<HashMap<i64, i64>, BrowseError> {
-    let reader = collection.reader(ReaderRole::Query)?;
-    let snapshot = reader.snapshot()?;
+fn notes_of_cards_in(rows: &impl ReadRows, cards: &[i64]) -> Result<HashMap<i64, i64>, BrowseError> {
     let mut notes = HashMap::new();
     let params = worker::cells(&[id_list(cards)]);
-    snapshot.visit_id_rows(ids::NOTES_OF_CARDS, &params, &|| false, &mut |row| {
+    rows.visit_id_rows(ids::NOTES_OF_CARDS, &params, &|| false, &mut |row| {
         notes.insert(row[0], row[1]);
         true
     })?;
@@ -122,13 +119,16 @@ pub(super) fn index_of(
     id: i64,
 ) -> Result<Option<u64>, BrowseError> {
     let collection = shared.engine()?.collection()?;
+    // H6: the generation is compared while the query reader is held.
+    let reader = collection.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
     let handle = shared.handle(handle)?;
     let mode = lock(&handle).mode;
     // A card id on a notes handle: its note, read now (none when the card
     // no longer exists); then the lookup, under the handle's lock, over the
     // announced prefix only.
     let (target, by_note) = match (mode, kind) {
-        (SearchMode::Notes, SearchMode::Cards) => match notes_of_cards(&collection, &[id])?.get(&id) {
+        (SearchMode::Notes, SearchMode::Cards) => match notes_of_cards_in(&*snapshot, &[id])?.get(&id) {
             Some(note) => (*note, false),
             None => return Ok(None),
         },
@@ -196,6 +196,10 @@ pub(super) fn map(
     to_revision: u64,
 ) -> Result<Mapped, BrowseError> {
     let collection = shared.engine()?.collection()?;
+    // H6: generations are compared while the query reader is held; the
+    // lookups read the same transaction.
+    let reader = collection.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
     // The selected ids of `from`'s mode, with their notes in cards mode.
     let (from_mode, selected, from_nids): (SearchMode, Vec<i64>, Option<HashMap<i64, i64>>) = match (&from, selection) {
         (MapFrom::Handle { handle, revision }, selection) => {
@@ -253,7 +257,7 @@ pub(super) fn map(
         (SearchMode::Cards, None) if to_mode == SearchMode::Notes => {
             let mut cards = selected.clone();
             cards.extend(current);
-            Some(notes_of_cards(&collection, &cards)?)
+            Some(notes_of_cards_in(&*snapshot, &cards)?)
         }
         (_, nids) => nids,
     };
@@ -289,7 +293,7 @@ pub(super) fn map(
             let current = match current {
                 None => None,
                 Some(note) => {
-                    let first = cards_of_notes(&collection, &[note])?
+                    let first = cards_of_notes_in(&*snapshot, &[note])?
                         .get(&note)
                         .and_then(|cards| cards.iter().min().copied());
                     match first.and_then(|card| index_of.get(&card).copied()) {

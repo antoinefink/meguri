@@ -251,8 +251,11 @@ impl SessionShared {
         for job in &mut state.queue {
             job.token.cancel();
             // Only its seq is needed now, for its `Cancelled`; a resort's
-            // copy of its ids goes at once.
-            job.job = Job::Superseded;
+            // copy of its ids goes at once. A request refused when it was
+            // made keeps its refusal (H3).
+            if !matches!(job.job, Job::Refused) {
+                job.job = Job::Superseded;
+            }
         }
         if let Some(registry) = self.registry.upgrade() {
             registry.wake();
