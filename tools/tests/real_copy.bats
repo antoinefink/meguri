@@ -135,7 +135,7 @@ facts() {
     CONFIGURATION:"Release", MEGURI_SIGNING:"team", MEGURI_APP_NAME:"Meguri", ASSETCATALOG_COMPILER_APPICON_NAME:"AppIcon",
     MEGURI_CLOUD_CONFIGURATION:"production", MEGURI_CLOUD_CONTAINER:"iCloud.example.daily",
     MEGURI_CLOUD_CONTAINER_development:"iCloud.example.isolated", MEGURI_CLOUD_CONTAINER_production:"iCloud.example.daily",
-    MEGURI_CLOUD_ENVIRONMENT:"production", MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT:"Production", MEGURI_CLOUD_PUSH_ENVIRONMENT:"production",
+    MEGURI_CLOUD_ENVIRONMENT:"production", MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT:"Production", MEGURI_CLOUD_PUSH_ENVIRONMENT:"development",
     INFOPLIST_KEY_MeguriCloudContainer:"iCloud.example.daily", INFOPLIST_KEY_MeguriCloudEnvironment:"production",
     MEGURI_CLOUD_SCHEMA_CONFIGURED_development:"YES", MEGURI_CLOUD_SCHEMA_CONFIGURED_production:"NO",
     MEGURI_CLOUD_SCHEMA_CONFIGURED:"NO", MEGURI_CLOUD_SCHEMA_BOOLEAN:"0",
@@ -150,11 +150,11 @@ facts() {
     "com.apple.developer.team-identifier":"TESTTEAM01", "com.apple.application-identifier":"TESTTEAM01.com.antoinefink.meguri",
     "keychain-access-groups":["TESTTEAM01.com.antoinefink.meguri"], "com.apple.security.application-groups":["TESTTEAM01.com.antoinefink.meguri"],
     "com.apple.developer.icloud-container-identifiers":["iCloud.example.daily"], "com.apple.developer.icloud-services":["CloudKit"],
-    "com.apple.developer.icloud-container-environment":"Production", "com.apple.developer.aps-environment":"production"}' >"$FX/app-ent.json"
+    "com.apple.developer.icloud-container-environment":"Production", "com.apple.developer.aps-environment":"development"}' >"$FX/app-ent.json"
   echo '{"com.apple.security.app-sandbox":true,"com.apple.security.application-groups":["TESTTEAM01.com.antoinefink.meguri"]}' >"$FX/widget-ent.json"
   echo '{"CFBundleIdentifier":"com.antoinefink.meguri","CFBundleExecutable":"Meguri","MeguriCardInspectionBuild":"personalRelease","LSUIElement":false,"MeguriCloudContainer":"iCloud.example.daily","MeguriCloudEnvironment":"production","MeguriCloudSchemaConfigured":false}' >"$FX/info.json"
   profile "$FX/embedded.plist" TESTTEAM01 "$(cat "$FX/app-ent.json")"
-  installed_profile production
+  installed_profile development
 }
 
 # profile <path> <team> <entitlements JSON>
@@ -207,11 +207,12 @@ EOF
 }
 
 @test "the real copy stops before building when no installed profile authorizes it, naming what is missing" {
-  installed_profile development
+  # A profile without the development push grant (here production only) cannot sign it.
+  installed_profile production
   real_copy
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-profile ]
-  [[ "$(field '.failures[0].message')" == *"push-production"* ]]
+  [[ "$(field '.failures[0].message')" == *"push-development"* ]]
   [[ "$(field '.failures[0].message')" == *"never requests provisioning updates"* ]]
   [ "$(field '.details.daily_driver_profiles.mac.state')" = incomplete ]
   not_called '^(lint|xcframework|xcodebuild|ditto)'
@@ -227,8 +228,8 @@ EOF
   real_copy
   [ "$status" -eq 0 ] || cat "$STUB_LOG"
   [ "$(field .status)" = pass ]
-  called '^xcodebuild -showBuildSettings -json .* -target Meguri -target MeguriWidget -configuration Release -sdk macosx -arch arm64 MEGURI_SIGNING=team$'
-  called '^xcodebuild build .* -configuration Release -destination platform=macOS,arch=arm64 -derivedDataPath build/app/RealCopyDerivedData .* MEGURI_SIGNING=team$'
+  called '^xcodebuild -showBuildSettings -json .* -target Meguri -target MeguriWidget -configuration Release -sdk macosx -arch arm64 MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development$'
+  called '^xcodebuild build .* -configuration Release -destination platform=macOS,arch=arm64 -derivedDataPath build/app/RealCopyDerivedData .* MEGURI_SIGNING=team MEGURI_CLOUD_PUSH_ENVIRONMENT=development$'
   not_called 'allowProvisioning|MEGURI_BUNDLE_ID_SUFFIX|build-for-testing|-testPlan|open '
   [ "$(grep -n '^xcodebuild -showBuildSettings' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n '^xcodebuild build ' "$STUB_LOG" | cut -d: -f1)" ]
   called "^identity $(built)$"
@@ -243,6 +244,7 @@ EOF
   [ "$(field .details.real_copy.zip)" = build/app/real-copy/Meguri.zip ]
   [ "$(field .details.real_copy_product.bundle_id)" = com.antoinefink.meguri ]
   [ "$(field .details.real_copy_product.cloud_environment)" = production ]
+  [ "$(field .details.real_copy_product.push_environment)" = development ]
   [ "$(field .details.build.real_copy)" = true ]
   [ "$(field '.details.real_copy_cleanup_checks | length')" = 4 ]
   [[ "$(field '.details.real_copy_cleanup_checks[2].command')" == "pluginkit -mAvvv -i com.antoinefink.meguri.widget" ]]
@@ -259,7 +261,9 @@ EOF
     '.[0].buildSettings.SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG ANKIWEB_ENABLED MEGURI_TEST_HOOKS"' \
     '.[0].buildSettings.MEGURI_APP_NAME = "Meguri Dev"' \
     '.[0].buildSettings.ASSETCATALOG_COMPILER_APPICON_NAME = "AppIcon-Dev"' \
-    '.[1].buildSettings.MEGURI_ENTITLEMENTS_SIGNING_SUFFIX = "-AdHoc"'; do
+    '.[1].buildSettings.MEGURI_ENTITLEMENTS_SIGNING_SUFFIX = "-AdHoc"' \
+    '.[0].buildSettings.MEGURI_CLOUD_PUSH_ENVIRONMENT = "production"' \
+    '.[1].buildSettings.MEGURI_CLOUD_PUSH_ENVIRONMENT = "production"'; do
     jq "$mutation" "$FX/good.json" >"$FX/settings.json"
     : >"$STUB_LOG"
     real_copy
@@ -276,7 +280,8 @@ EOF
     '.["com.apple.security.get-task-allow"] = true' \
     '.["com.apple.application-identifier"] = "TESTTEAM01.com.antoinefink.meguri.dev"' \
     '.["com.apple.developer.icloud-container-environment"] = "Development"' \
-    '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = ["/"]'; do
+    '.["com.apple.security.temporary-exception.files.absolute-path.read-only"] = ["/"]' \
+    '.["com.apple.developer.aps-environment"] = "production"'; do
     jq "$mutation" "$FX/good-ent.json" >"$FX/app-ent.json"
     : >"$STUB_LOG"
     real_copy
@@ -331,7 +336,7 @@ EOF
 
 @test "the real copy removes an earlier run's leftover build before anything else" {
   mkdir -p "$(built)/Contents/PlugIns/MeguriWidget.appex"
-  installed_profile development
+  installed_profile production
   real_copy
   [ "$status" -eq 1 ]
   [ "$(field '.failures[0].id')" = real-copy-profile ]
@@ -370,10 +375,10 @@ EOF
   run python3 "$SB/tools/scripts/daily-driver-profiles.py" --require mac --device 00000000-0000-4000-8000-00000000ffff
   [ "$status" -eq 1 ]
   [ "$(jq -r '.mac.missing | join(",")' <<<"$output")" = this-device ]
-  installed_profile development
+  installed_profile production
   run python3 "$SB/tools/scripts/daily-driver-profiles.py" --require mac
   [ "$status" -eq 1 ]
-  [ "$(jq -r '.mac.missing | join(",")' <<<"$output")" = push-production ]
+  [ "$(jq -r '.mac.missing | join(",")' <<<"$output")" = push-development ]
   [ "$(jq -r .ios.state <<<"$output")" = missing ]
   not_called '^security (add|delete|import|find|unlock|set)'
 }

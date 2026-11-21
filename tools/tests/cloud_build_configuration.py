@@ -25,7 +25,8 @@ def protected(key):
     )
 
 
-def check(settings, configuration, platform, signing, info=None, entitlements=None, widget=None, personal_preview=False):
+def check(settings, configuration, platform, signing, info=None, entitlements=None, widget=None, personal_preview=False,
+          real_copy=False):
     require(isinstance(settings, dict), "resolved settings must be a dictionary")
     for artifact in (info, entitlements, widget):
         require(artifact is None or isinstance(artifact, dict), "plist artifact must be a dictionary")
@@ -33,8 +34,14 @@ def check(settings, configuration, platform, signing, info=None, entitlements=No
     require(platform in ("mac", "ios") and signing in ("adhoc", "team"), "unknown platform/signing")
     require(not personal_preview or (configuration == "Release" and signing == "team"),
             "personal preview requires Release with team signing")
+    # The owner-requested Mac real copy (build-app --real-copy) keeps production
+    # CloudKit but signs development push, so an ordinary macOS development
+    # profile authorizes it (standing decision 2026-11-21, exception to KTD22).
+    require(not real_copy or (configuration == "Release" and signing == "team" and platform == "mac"
+                              and not personal_preview), "the real copy is the team-signed Mac Release")
     development = configuration in ("Debug", "Profile") or personal_preview
     environment = "development" if development else "production"
+    push = "development" if real_copy else environment
     suffix = ".dev" if development else ""
     require(settings.get("MEGURI_BUNDLE_ID_SUFFIX", "") == suffix, "unexpected bundle suffix for cloud policy")
     require(settings.get("PRODUCT_BUNDLE_IDENTIFIER") == "com.antoinefink.meguri" + suffix,
@@ -50,7 +57,7 @@ def check(settings, configuration, platform, signing, info=None, entitlements=No
         "MEGURI_CLOUD_CONTAINER": container,
         "MEGURI_CLOUD_ENVIRONMENT": environment,
         "MEGURI_CLOUD_ENTITLEMENT_ENVIRONMENT": environment.capitalize(),
-        "MEGURI_CLOUD_PUSH_ENVIRONMENT": environment,
+        "MEGURI_CLOUD_PUSH_ENVIRONMENT": push,
         "INFOPLIST_KEY_MeguriCloudContainer": container,
         "INFOPLIST_KEY_MeguriCloudEnvironment": environment,
     }
@@ -78,7 +85,7 @@ def check(settings, configuration, platform, signing, info=None, entitlements=No
                 "com.apple.developer.icloud-container-identifiers": [container],
                 "com.apple.developer.icloud-services": ["CloudKit"],
                 "com.apple.developer.icloud-container-environment": environment.capitalize(),
-                ("aps-environment" if platform == "ios" else "com.apple.developer.aps-environment"): environment,
+                ("aps-environment" if platform == "ios" else "com.apple.developer.aps-environment"): push,
             }
         require(actual == grants, f"built protected grants differ: expected {grants!r}, got {actual!r}")
     if widget is not None:
@@ -92,6 +99,7 @@ def main():
     parser.add_argument("--platform", choices=("mac", "ios"), required=True)
     parser.add_argument("--signing", choices=("adhoc", "team"), required=True)
     parser.add_argument("--personal-preview", action="store_true")
+    parser.add_argument("--real-copy", action="store_true")
     parser.add_argument("--info", type=Path)
     parser.add_argument("--entitlements", type=Path)
     parser.add_argument("--widget-entitlements", type=Path)
@@ -108,7 +116,8 @@ def main():
                 "artifact proof requires Info, app entitlements and widget entitlements together")
         for path in (args.info, args.entitlements, args.widget_entitlements):
             artifacts.append(plistlib.loads(path.read_bytes()) if path else None)
-        check(apps[0], args.configuration, args.platform, args.signing, *artifacts, personal_preview=args.personal_preview)
+        check(apps[0], args.configuration, args.platform, args.signing, *artifacts, personal_preview=args.personal_preview,
+              real_copy=args.real_copy)
     except (ValueError, KeyError, TypeError, OSError, plistlib.InvalidFileException) as error:
         print(f"CloudKit configuration: {error}", file=sys.stderr)
         return 1

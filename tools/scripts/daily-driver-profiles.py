@@ -5,8 +5,9 @@ Read-only: it decodes the profiles Xcode installed (`security cms -D -i`,
 which modifies no keychain) and reports, per platform, whether one authorizes
 the app's signed claims: the identity `<team>.com.antoinefink.meguri`, its
 App Group and Keychain group, the production CloudKit container
-`iCloud.com.antoinefink.meguri` in the Production environment, and production
-push. It never requests, downloads or registers anything (one-time step
+`iCloud.com.antoinefink.meguri` in the Production environment, and
+development push (the real copy signs development push: standing decision
+2026-11-21). It never requests, downloads or registers anything (one-time step
 `daily-driver-account`, docs/process/one-time-setup.md).
 
   daily-driver-profiles.py [--require mac|ios] [--team TEAM] [--device UDID]
@@ -78,7 +79,7 @@ def missing_grants(profile, platform, team):
         ("icloud-container", grants.get("com.apple.developer.icloud-container-identifiers") == [CONTAINER]),
         ("icloud-services", authorizes(grants.get("com.apple.developer.icloud-services"), "CloudKit")),
         ("icloud-production", authorizes(grants.get("com.apple.developer.icloud-container-environment"), "Production")),
-        ("push-production", authorizes(grants.get(push), "production")),
+        ("push-development", authorizes(grants.get(push), "development")),
     ]
     return [name for name, ok in checks if not ok]
 
