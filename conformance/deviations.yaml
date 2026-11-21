@@ -6,7 +6,7 @@
 # That register requires production test identities/evidence; it changes no transform.
 # stats graph register (no transform): specs/stats/graphs-revlog.md V9.
 # render display register (no transform): specs/render/display-transform.md D11
-# (the blank notices' wording; no scenario or golden holds display HTML).
+# (the blank notices' wording; no golden or recording holds a blank notice).
 deviations:
   - id: card-data-unknown-keys
     requirement: R1461
