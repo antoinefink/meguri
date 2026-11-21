@@ -280,6 +280,19 @@ fn superseding_after_first_page_releases_the_running_handle_h6_h12() {
 }
 
 #[test]
+fn a_selection_of_a_closed_session_stays_unknown_after_the_collection_closes_h6() {
+    let fx = fixture(2);
+    let (handle, _) = fx.search("", SearchMode::Cards, asc("cardDue"));
+    let kept = fx.session.selection(handle, 0, vec![0..1]);
+    fx.session.shutdown();
+    let Fx { h, session, .. } = fx;
+    let Harness { engine, .. } = h;
+    engine.close().unwrap();
+    assert_eq!(kept.resolve(SearchMode::Cards), Err(BrowseError::UnknownHandle));
+    drop(session);
+}
+
+#[test]
 fn a_shut_down_session_cancels_its_running_request_and_every_later_one_h2() {
     let fx = fixture(150);
     let (done, _) = fx.search("", SearchMode::Cards, asc("cardDue"));
