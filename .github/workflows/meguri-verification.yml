@@ -757,13 +757,19 @@ jobs:
           case "$EVENT" in
             pull_request) base="$(git rev-parse HEAD^1)" ;;
             push)
-              if [[ -n "$BEFORE" && ! "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              # A previous tip the checkout lacks (after a force push) is
+              # fetched; one that cannot be fetched fails the step rather
+              # than widen or narrow the range.
+              if [[ -n "$BEFORE" && ! "$BEFORE" =~ ^0+$ ]]; then
+                git cat-file -e "$BEFORE^{commit}" 2>/dev/null ||
+                  git fetch --no-tags origin "$BEFORE" ||
+                  { echo "::error::Cannot fetch the previous tip $BEFORE"; exit 1; }
                 base="$BEFORE"
               fi
               ;;
           esac
-          # Manual and scheduled runs, and a push without a usable previous
-          # tip: where the branch left master, or master's previous commit.
+          # Manual and scheduled runs, and a new branch's first push: where
+          # the branch left master, or master's previous commit.
           if [[ -z "$base" ]]; then
             base="$(git merge-base origin/master HEAD)"
             [[ "$base" != "$(git rev-parse HEAD)" ]] || base="$(git rev-parse HEAD^1)"
