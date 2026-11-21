@@ -222,10 +222,10 @@ Offered, and done by ⌫ (Anki: the Delete key) with the sidebar focused, when t
 | Kind | Operation | Confirmation and result |
 |---|---|---|
 | deck | `decks/decks` D8 with the selected decks' ids | D8.5's summary over the selection: a confirmation stating both counts when it removes at least one card (R67; Anki asks nothing), then the toast "Deleted <deck> (N cards)" with Undo (R66, `decks/decks`), <deck> the acted-on item's label |
-
-Changed 2026-11-21 (confirmed losses; decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review, `docs/process/review-log/delete-deck-losses-20261121.md`): the deck Delete passes as D8's confirmed losses the counts of the last summary read before it (`decks/decks` D8 step 6): the confirmation's, or the zero-card read's when it asked nothing. On `LossesChanged` it shows the confirmation again with the new counts, or deletes at once when the new `cards` is 0; that refusal shows no failure message.
 | tag | `tags/tags` T9 with the selected tags' full names | none; undoable (R1178); result message with the count |
 | saved search | `browser/config-keys` K7.2's Delete Saved Searches with the selected names | none; undoable "Delete Saved Search" |
+
+Changed 2026-11-21 (confirmed losses; decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review, `docs/process/review-log/delete-deck-losses-20261121.md`): the deck Delete passes as D8's confirmed losses the counts of the last summary read before it (`decks/decks` D8 step 6): the confirmation's, or the zero-card read's when it asked nothing. On `LossesChanged` it shows the confirmation again with the new counts, or deletes at once when the new `cards` is 0; that refusal shows no failure message.
 
 A mixed selection offers no Delete, and ⌫ does nothing.
 
