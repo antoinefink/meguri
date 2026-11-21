@@ -31,10 +31,27 @@ pub fn plan_note(
     chosen: Option<DeckId>,
     allow_fallback: bool,
 ) -> Result<Vec<MissingCard>, EngineError> {
+    plan_note_with(reader, nt, None, note, siblings, chosen, allow_fallback)
+}
+
+/// [`plan_note`] with the note type's fronts parsed once by the caller
+/// (`normal::Fronts`), for many notes of one note type.
+pub fn plan_note_with(
+    reader: &impl ReadRows,
+    nt: &Notetype,
+    fronts: Option<&normal::Fronts>,
+    note: &Note,
+    siblings: &[Card],
+    chosen: Option<DeckId>,
+    allow_fallback: bool,
+) -> Result<Vec<MissingCard>, EngineError> {
     let mut required = if nt.config.kind == 1 {
         cloze::required(note)
     } else {
-        normal::required(nt, note)
+        match fronts {
+            Some(fronts) => fronts.required(nt, note),
+            None => normal::required(nt, note),
+        }
     };
     let fallback = allow_fallback && siblings.is_empty() && required.is_empty();
     if fallback {

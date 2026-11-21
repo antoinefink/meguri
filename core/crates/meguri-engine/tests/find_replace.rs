@@ -395,7 +395,7 @@ fn every_kind_of_run_is_one_step_that_undo_restores_exactly() {
             2,
             "Find and Replace",
         ),
-        // Tags: a new tag spelled and registered, a duplicate merged.
+        // Tags: merged into the registered spelling, a duplicate merged.
         (request("plinth", "Zorb::quill", FindIn::Tags), 2, "Update Tag"),
         // Unicode in a regex class.
         (
@@ -643,6 +643,13 @@ fn f6_damaged_notes_refuse_in_step_one_order() {
     let e = run(&h, &[a, damaged], &request("cost", "fee", FindIn::AllFields)).unwrap_err();
     assert_eq!(refusal(&e), &Refusal::FieldCountMismatch { note: damaged });
     assert_eq!(rows(&h), before);
+    // Two damaged notes of one note type: the lower note id comes first,
+    // whatever the list's order.
+    let second = add(&h, vocab, &["plain", "x"], &[]);
+    raw_note(&h, second, |n| n.fields = "cost".into());
+    let e = run(&h, &[second, damaged], &request("cost", "fee", FindIn::AllFields)).unwrap_err();
+    assert_eq!(refusal(&e), &Refusal::FieldCountMismatch { note: damaged });
+    raw_note(&h, second, |n| n.fields = "plain\u{1f}x".into());
     // The damaged note does not match: the run goes on.
     assert_eq!(
         run(&h, &[a, damaged], &request("cost", "fee", field("Word"))).unwrap(),
@@ -739,9 +746,128 @@ fn a_cancel_before_the_commit_writes_nothing() {
     assert_eq!(e, EngineError::Cancelled);
     assert_eq!(rows(&h), before);
     assert_eq!(undo_name(&h), undo);
-    // The same run then commits, as the catalog's bulk op (2,500 notes).
+    // The same run then commits, as the catalog's bulk op with a declared
+    // write (2,500 notes); undo and redo give back each side exactly.
+    let subscription = h.engine.stream().subscribe();
     let done = run(&h, &ids, &request("cost", "fee", FindIn::AllFields)).unwrap();
     assert_eq!(done, counts(2_500, 2_500));
+    let delays: Vec<&'static str> = common::drain(&subscription, Duration::from_millis(200))
+        .iter()
+        .filter_map(|event| match &event.kind {
+            EventKind::WriteDelay { op, .. } => Some(*op),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(delays, ["bulk_op"]);
+    let after = rows(&h);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(rows(&h), before, "undo of the long write");
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(rows(&h).notes, after.notes, "redo writes the same rows");
+}
+
+/// O5: a cancel requested once the write phase started is ignored: the run
+/// commits and reports that it was past the cancel point.
+#[test]
+fn a_cancel_during_the_commit_is_ignored() {
+    static TOKEN: Mutex<Option<Arc<CancelToken>>> = Mutex::new(None);
+    fn cancel_now() {
+        if let Some(token) = TOKEN.lock().unwrap().as_ref() {
+            token.cancel();
+        }
+    }
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let a = add(&h, vocab, &["cost", "x"], &[]);
+    let token = CancelToken::new();
+    *TOKEN.lock().unwrap() = Some(Arc::clone(&token));
+    meguri_model::faultpoint::arm("bulk.find_replace.write_phase", meguri_model::faultpoint::Fault::Callback(cancel_now));
+    let result = find_replace::run(
+        &h.collection,
+        &NoteTarget::Notes(vec![a]),
+        &request("cost", "fee", FindIn::AllFields),
+        Arc::clone(&token),
+        ProgressSink::new(),
+    );
+    meguri_model::faultpoint::disarm_all();
+    let result = result.unwrap();
+    assert!(token.is_cancelled());
+    assert!(result.past_cancel_point);
+    assert_eq!(result.value, counts(1, 1));
+    assert_eq!(fields_of(&h, a), ["fee", "x"]);
+}
+
+/// F6 steps 1 and 5: a note that needs a new position takes the next
+/// counter value, one per note, in ascending note type id then note id,
+/// whatever the list's order and the notes' own ids.
+#[test]
+fn f6_new_cards_take_positions_in_step_one_order() {
+    let h = common::fresh();
+    let first = plain(&h);
+    let second = made(
+        &h,
+        "Plain2",
+        NotetypeKind::Standard,
+        &["Text", "Extra"],
+        &["{{Text}}", "{{#Extra}}{{Text}}{{/Extra}}"],
+    );
+    assert!(first < second);
+    // The note of the higher note type has the lower note id.
+    let late = add(&h, second, &["b", ""], &[]);
+    let early = add(&h, first, &["a", ""], &[]);
+    assert!(late < early);
+    // Their only cards are reviews: no new sibling lends a position (P2).
+    raw_sql(
+        &h,
+        format!("UPDATE cards SET type = 2, queue = 2 WHERE nid IN ({}, {})", late.0, early.0),
+    );
+    let counter = |h: &Harness| match h.collection.reader(ReaderRole::Query).unwrap().config_value("nextPos").unwrap() {
+        Some(value) => value.as_i64().unwrap(),
+        None => 0,
+    };
+    let next = counter(&h);
+    let done = run(
+        &h,
+        &[late, early],
+        &FindReplace {
+            regex: true,
+            ..request("^$", "filled", field("Extra"))
+        },
+    )
+    .unwrap();
+    assert_eq!(done, counts(2, 2));
+    let new_due = |note: NoteId| {
+        let cards = h.collection.reader(ReaderRole::Query).unwrap().cards_of_note(note).unwrap();
+        let card = cards.iter().find(|c| c.ord == 1).expect("the added card");
+        i64::from(card.due)
+    };
+    assert_eq!(new_due(early), next, "the lower note type first");
+    assert_eq!(new_due(late), next + 1);
+    assert_eq!(counter(&h), next + 2);
+}
+
+/// F7 steps 4 and 5, F9: a new tag row registered by a run goes with its
+/// undo; a stored tag no row registers, replaced by itself, comes out as
+/// stored: count 0, no step, no row registered.
+#[test]
+fn f7_registered_rows_go_with_undo_and_unchanged_notes_register_nothing() {
+    let h = common::fresh();
+    let vocab = vocab(&h);
+    let a = add(&h, vocab, &["one", "x"], &["keep"]);
+    let b = add(&h, vocab, &["two", "x"], &[]);
+    raw_note(&h, b, |n| n.tags = " loose ".into());
+    let before = rows(&h);
+    let undo = undo_name(&h);
+    assert_eq!(run(&h, &[b], &request("loose", "loose", FindIn::Tags)).unwrap(), counts(0, 1));
+    assert_eq!(rows(&h), before, "nothing registered or written");
+    assert_eq!(undo_name(&h), undo);
+    assert_eq!(run(&h, &[a], &request("keep", "Fresh::Leaf", FindIn::Tags)).unwrap(), counts(1, 1));
+    assert!(h.collection.reader(ReaderRole::Query).unwrap().tag("Fresh::Leaf").unwrap().is_some());
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(rows(&h), before, "the registered row goes with the undo");
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(note(&h, a).tags, " Fresh::Leaf ");
+    assert!(h.collection.reader(ReaderRole::Query).unwrap().tag("Fresh::Leaf").unwrap().is_some());
 }
 
 /// K4: a failure inside the write phase rolls the whole transaction back:
@@ -789,6 +915,8 @@ fn a_note_edited_between_the_compute_phase_and_the_commit_is_not_overwritten() {
     let (collection, flag, count) = (h.collection.clone(), Arc::clone(&edited), Arc::clone(&commits));
     progress.set_listener(Arc::new(Listener(move |p: &Progress| {
         if p.phase == ProgressPhase::Committing {
+            // K3: the phase change alone, no counts from the transaction.
+            assert_eq!((p.completed, p.total), (0, None));
             count.fetch_add(1, Ordering::SeqCst);
         }
         if p.phase == ProgressPhase::Planning && p.completed == 0 {
@@ -904,16 +1032,40 @@ fn a_handle_selection_resolves_to_its_notes() {
     let events = Arc::new(Events(Mutex::new(Vec::new())));
     let session = h.engine.open_search_session(events.clone());
     session.start_search("", SearchMode::Notes, SortSpec::new("noteFld", SortDirection::Ascending), None);
+    // At most 30 s of 5 ms waits.
+    let mut waits = 6_000;
     let (handle, revision) = loop {
-        if let Some(found) = events.0.lock().unwrap().iter().find_map(|event| match event {
-            SearchEvent::Complete { handle, revision, .. } => Some((*handle, *revision)),
+        let ended = events.0.lock().unwrap().iter().find_map(|event| match event {
+            SearchEvent::Complete { handle, revision, .. } => Some(Ok((*handle, *revision))),
+            SearchEvent::Failed { .. } | SearchEvent::Cancelled { .. } => Some(Err(format!("{event:?}"))),
             _ => None,
-        }) {
-            break found;
+        });
+        match ended {
+            Some(Ok(found)) => break found,
+            Some(Err(event)) => panic!("the search ended without a result: {event}"),
+            None => {
+                waits -= 1;
+                assert!(waits > 0, "the search did not end");
+            }
         }
         std::thread::sleep(Duration::from_millis(5));
     };
     let selection = session.selection(handle, revision, vec![0..1, 2..3]);
+    // A selection of this collection never acts on another one, even where
+    // its note ids name notes there too.
+    let other = common::fresh();
+    let elsewhere = self::vocab(&other);
+    let stranger = add(&other, elsewhere, &["cost q", "x"], &[]);
+    let other_before = rows(&other);
+    let e = run_on(
+        &other.collection,
+        NoteTarget::Selection(selection.clone()),
+        &request("cost", "fee", FindIn::AllFields),
+    )
+    .unwrap_err();
+    assert!(is_invalid_argument(&e), "{e:?}");
+    assert_eq!(rows(&other), other_before);
+    assert_eq!(fields_of(&other, stranger)[0], "cost q");
     let done = run_on(
         &h.collection,
         NoteTarget::Selection(selection.clone()),

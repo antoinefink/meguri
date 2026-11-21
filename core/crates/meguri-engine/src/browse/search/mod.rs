@@ -630,6 +630,21 @@ impl HandleSelection {
     pub fn resolve(&self, target: SearchMode) -> Result<Vec<i64>, BrowseError> {
         selection::resolve(&self.shared, self.handle, self.revision, &self.ranges, target)
     }
+
+    /// [`HandleSelection::resolve`] for an action on `collection`: the ids
+    /// only when the handle belongs to that collection and its generation
+    /// (H6), so a selection made on another collection never names rows of
+    /// this one. `UnknownHandle` otherwise.
+    pub fn resolve_for(&self, collection: &crate::Collection, target: SearchMode) -> Result<Vec<i64>, BrowseError> {
+        let ids = self.resolve(target)?;
+        // The handle was checked against its session's collection while it
+        // was read; that collection must be the action's.
+        let own = self.shared.engine()?.collection()?;
+        if own.generation() != collection.generation() || !Arc::ptr_eq(&own.core, &collection.core) {
+            return Err(BrowseError::UnknownHandle);
+        }
+        Ok(ids)
+    }
 }
 
 /// What [`SearchSession::handle_state`] reports.

@@ -29,6 +29,7 @@ use regex::{NoExpand, Regex};
 
 use super::{BulkCounts, BulkJob, BulkOutcome, NoteTarget, ResolvedNotes, check_ids, op_spec};
 use crate::cancel::CancelToken;
+use crate::cardgen::normal::Fronts;
 use crate::collection::Collection;
 use crate::error::EngineError;
 use crate::executor::op::{OpContext, OpResult};
@@ -354,10 +355,8 @@ fn each_note(
                 if let Some(progress) = progress {
                     progress.report((done * PAGE) as u64, Some(total));
                 }
-                for &id in chunk {
-                    if let Some(note) = reader.note(id)? {
-                        each(note)?;
-                    }
+                for note in reader.notes_with_ids(chunk)? {
+                    each(note)?;
                 }
             }
             if let Some(progress) = progress {
@@ -466,25 +465,30 @@ fn drifted(id: NoteId) -> EngineError {
 /// whether it was written.
 fn commit_fields_note(
     scope: &mut WriteScope<'_>,
-    notetypes: &mut HashMap<NotetypeId, Arc<Notetype>>,
-    (mid, id): (NotetypeId, NoteId),
+    notetypes: &mut HashMap<NotetypeId, Arc<(Notetype, Fronts)>>,
+    mut note: Note,
+    mid: NotetypeId,
+    siblings: Vec<meguri_model::card::Card>,
     request: &FindReplace,
     planned: &Planned,
 ) -> Result<bool, EngineError> {
-    let mut note = scope.note(id)?.ok_or_else(|| drifted(id))?;
+    let id = note.id;
     if note.notetype_id != mid {
         return Err(drifted(id));
     }
-    let notetype = match notetypes.get(&mid) {
-        Some(notetype) => Arc::clone(notetype),
+    let known = match notetypes.get(&mid) {
+        Some(known) => Arc::clone(known),
         None => {
-            let notetype = Arc::new(scope.notetype(mid)?.ok_or_else(|| drifted(id))?);
-            notetypes.insert(mid, Arc::clone(&notetype));
-            notetype
+            let notetype = scope.notetype(mid)?.ok_or_else(|| drifted(id))?;
+            let fronts = Fronts::of(&notetype);
+            let known = Arc::new((notetype, fronts));
+            notetypes.insert(mid, Arc::clone(&known));
+            known
         }
     };
+    let (notetype, fronts) = (&known.0, &known.1);
     let FieldsRewrite::Changed(fields) =
-        rewrite_fields(&note, &notetype, &request.within, &planned.pattern, planned.normalize)?
+        rewrite_fields(&note, notetype, &request.within, &planned.pattern, planned.normalize)?
     else {
         return Err(drifted(id));
     };
@@ -497,12 +501,12 @@ fn commit_fields_note(
     note.checksum = meguri_text::checksum::note_checksum(fields.first().map_or("", String::as_str));
     scope.put(&note)?;
     // Step 5: G7's missing cards, never a deletion. A standard note that
-    // already has a card of every template needs none.
-    let siblings = scope.cards_of_note(note.id)?;
+    // already has a card of every template needs none. `siblings` are its
+    // live cards: only this note's own generation adds to them.
     let complete = notetype.config.kind != 1
         && (0..notetype.templates.len()).all(|ord| siblings.iter().any(|card| usize::from(card.ord) == ord));
     if !complete {
-        let missing = crate::cardgen::plan_note(scope, &notetype, &note, &siblings, None, true)?;
+        let missing = crate::cardgen::plan_note_with(scope, notetype, Some(fronts), &note, &siblings, None, true)?;
         crate::cardgen::apply_in(scope, &note, &siblings, &missing)?;
     }
     Ok(true)
@@ -546,10 +550,10 @@ fn stored_tags(spelled: Vec<String>) -> String {
 fn commit_tags_note(
     scope: &mut WriteScope<'_>,
     registered: &mut HashMap<String, String>,
-    id: NoteId,
+    mut note: Note,
     planned: &Planned,
 ) -> Result<bool, EngineError> {
-    let mut note = scope.note(id)?.ok_or_else(|| drifted(id))?;
+    let id = note.id;
     let replaced = rewrite_tags(&note.tags, &planned.pattern).ok_or_else(|| drifted(id))?;
     // Step 4: empty results dropped, then T2 and T3 in list order.
     let replaced: Vec<String> = replaced.into_iter().filter(|tag| !tag.is_empty()).collect();
@@ -593,24 +597,40 @@ fn commit_tags_note(
 /// in the plan's order.
 fn commit(context: &mut OpContext<'_, '_>, request: &FindReplace, planned: &Planned) -> Result<BulkCounts, EngineError> {
     let scope = context.scope();
-    if crate::notes::fields::normalize_enabled(&*scope)? != planned.normalize {
+    // The key shapes the pattern and the saved fields; Tags reads neither.
+    if request.within != FindIn::Tags && crate::notes::fields::normalize_enabled(&*scope)? != planned.normalize {
         return Err(EngineError::Stale {
             table: Table::Config,
             key: "normalize_note_text".to_owned(),
         });
     }
     let mut affected = 0u64;
-    if request.within == FindIn::Tags {
-        let mut registered = HashMap::new();
-        for &(_, id) in &planned.notes {
-            if commit_tags_note(scope, &mut registered, id, planned)? {
-                affected += 1;
+    let mut registered = HashMap::new();
+    let mut notetypes = HashMap::new();
+    // A page of live rows at a time, each written in the plan's order before
+    // the next page is read.
+    for chunk in planned.notes.chunks(PAGE) {
+        let ids: Vec<NoteId> = chunk.iter().map(|(_, id)| *id).collect();
+        let mut live: HashMap<NoteId, Note> = scope
+            .notes_with_ids(&ids)?
+            .into_iter()
+            .map(|note| (note.id, note))
+            .collect();
+        let mut cards: HashMap<NoteId, Vec<meguri_model::card::Card>> = HashMap::new();
+        if request.within != FindIn::Tags {
+            for card in scope.cards_of_notes_with_ids(&ids)? {
+                cards.entry(card.note_id).or_default().push(card);
             }
         }
-    } else {
-        let mut notetypes = HashMap::new();
-        for &at in &planned.notes {
-            if commit_fields_note(scope, &mut notetypes, at, request, planned)? {
+        for &(mid, id) in chunk {
+            let note = live.remove(&id).ok_or_else(|| drifted(id))?;
+            let written = if request.within == FindIn::Tags {
+                commit_tags_note(scope, &mut registered, note, planned)?
+            } else {
+                let siblings = cards.remove(&id).unwrap_or_default();
+                commit_fields_note(scope, &mut notetypes, note, mid, siblings, request, planned)?
+            };
+            if written {
                 affected += 1;
             }
         }
@@ -634,7 +654,7 @@ pub fn run(
     progress: ProgressSink,
 ) -> Result<OpResult<BulkCounts>, EngineError> {
     cancel.check()?;
-    let target = target.resolve()?;
+    let target = target.resolve(collection)?;
     if let ResolvedNotes::Notes(ids) = &target {
         check_ids(ids, "note")?;
     }

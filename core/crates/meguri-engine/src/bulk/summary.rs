@@ -14,6 +14,9 @@ use super::{NoteTarget, ResolvedNotes};
 use crate::collection::Collection;
 use crate::error::EngineError;
 
+/// Notes read per statement.
+const PAGE: usize = 2_000;
+
 /// What a target holds, for the sheets' field lists and enablement.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SelectionSummary {
@@ -32,7 +35,7 @@ pub struct SelectionSummary {
 /// all-notes target the field names are those of every note type of the
 /// collection (Meguri's listing, F3, F13).
 pub fn selection_summary(collection: &Collection, target: &NoteTarget) -> Result<SelectionSummary, EngineError> {
-    let target = target.resolve()?;
+    let target = target.resolve(collection)?;
     let reader = collection.reader(ReaderRole::Query)?;
     let snapshot = reader.snapshot()?;
     Ok(summary_in(&*snapshot, &target)?)
@@ -46,14 +49,13 @@ pub fn summary_in(reader: &(impl ReadRows + ?Sized), target: &ResolvedNotes) -> 
             reader.row_count(Table::Notes)?,
         ),
         ResolvedNotes::Notes(listed) => {
+            let mut unique = listed.clone();
+            unique.sort_unstable();
+            unique.dedup();
             let mut ids = BTreeSet::new();
-            let mut seen = BTreeSet::new();
             let mut notes = 0;
-            for id in listed {
-                if !seen.insert(*id) {
-                    continue;
-                }
-                if let Some(note) = reader.note(*id)? {
+            for chunk in unique.chunks(PAGE) {
+                for note in reader.notes_with_ids(chunk)? {
                     notes += 1;
                     ids.insert(note.notetype_id);
                 }

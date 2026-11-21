@@ -10,7 +10,7 @@ How Browse's actions over many notes or cards run in the core (U86): what they a
 ## K1. Targets
 
 - A note action takes one of: a list of note ids; all notes; a selection of a search handle (`browser/result-sets` H12: the handle, its revision and index ranges). A card action takes a list of card ids or a selection.
-- A selection stays index ranges until the action's job runs; the job resolves it with H12's `resolve_selection` (target notes or target cards) in the core, so large selections never cross the FFI. A selection whose handle was released, whose session was closed or whose revision changed is refused with `InvalidArgument` and nothing is read further.
+- A selection stays index ranges until the action's job runs; the job resolves it with H12's `resolve_selection` (target notes or target cards) in the core, so large selections never cross the FFI. A selection whose handle was released, whose session was closed, whose revision changed, or whose handle belongs to another collection or generation than the one the action runs on is refused with `InvalidArgument` and nothing is read further.
 - A list (given or resolved) that is empty or names an id twice is refused with `InvalidArgument` before anything else is read (`browser/bulk-actions` B7.2, `browser/find-replace` F11).
 
 ## K2. The job
@@ -22,7 +22,7 @@ How Browse's actions over many notes or cards run in the core (U86): what they a
 ## K3. Phases
 
 1. **Compute.** On a snapshot of the maintenance reader, off the writer: the action reads its rows a page at a time, checks its refusals, and plans what it will write. It writes nothing. It checks the cancel token between pages and reports progress in the `Planning` phase with the rows read and the total (`engine/jobs` J5).
-2. **Commit.** One write transaction through the executor (`engine/op-model` O6): from the moment the writer takes it, progress is `Committing`, the UI stops offering Cancel and a cancel is ignored (O5). No progress counts are reported inside the transaction (the listener is never called from the writer). Every row it writes is re-derived from the live row or covered by a precondition (O7); a failed precondition makes the action plan again on a new snapshot, at most three times, then it is refused with `Stale`.
+2. **Commit.** One write transaction through the executor (`engine/op-model` O6): from the moment the writer takes it, progress is `Committing`, the UI stops offering Cancel and a cancel is ignored (O5). The phase change to `Committing` is delivered from the writer before the transaction begins, so a listener must return at once and never call the engine; no progress counts are reported inside the transaction. Every row it writes is re-derived from the live row or covered by a precondition (O7); a failed precondition makes the action plan again on a new snapshot, at most three times, then it is refused with `Stale`.
    - An action that plans to write more than 2,000 rows runs its commit as the catalog's `bulk_op` (O9) and declares its write (O8), so answers wait in the review overlay meanwhile; a smaller one is a plain op named after the action.
 
 ## K4. Cancellation and refusals
@@ -38,7 +38,7 @@ How Browse's actions over many notes or cards run in the core (U86): what they a
 
 ## K6. `selection_summary`
 
-`selection_summary(target)` reads, in one read transaction on the query reader and without writing:
+`selection_summary(target)` reads on the query reader, without writing (a selection is resolved first, in its own read transaction, then the summary is read in one):
 
 - `field_names`: `browser/find-replace` F3's field names for the target's notes; for the all-notes target, those of every note type of the collection;
 - `notetypes`: the note types of the target's notes that exist, ascending id; every note type for the all-notes target;

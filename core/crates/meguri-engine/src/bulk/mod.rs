@@ -38,6 +38,7 @@ use meguri_model::ids::{CardId, NoteId};
 use crate::browse::search::{BrowseError, HandleSelection, SearchMode};
 use crate::cancel::CancelToken;
 use crate::changes::stream::Seq;
+use crate::collection::Collection;
 use crate::error::EngineError;
 use crate::executor::catalog;
 use crate::executor::op::{OpResult, OpSpec, UndoMeta};
@@ -107,14 +108,15 @@ pub enum ResolvedNotes {
 }
 
 impl NoteTarget {
-    /// Resolves a selection to its note ids (H12), on the query reader.
-    pub fn resolve(&self) -> Result<ResolvedNotes, EngineError> {
+    /// Resolves a selection to its note ids (H12), on the query reader; a
+    /// selection of a handle of another collection is refused.
+    pub fn resolve(&self, collection: &Collection) -> Result<ResolvedNotes, EngineError> {
         Ok(match self {
             NoteTarget::Notes(ids) => ResolvedNotes::Notes(ids.clone()),
             NoteTarget::AllNotes => ResolvedNotes::AllNotes,
             NoteTarget::Selection(selection) => ResolvedNotes::Notes(
                 selection
-                    .resolve(SearchMode::Notes)
+                    .resolve_for(collection, SearchMode::Notes)
                     .map_err(selection_error)?
                     .into_iter()
                     .map(NoteId)
@@ -134,12 +136,13 @@ pub enum CardTarget {
 }
 
 impl CardTarget {
-    /// Resolves a selection to its card ids (H12), on the query reader.
-    pub fn resolve(&self) -> Result<Vec<CardId>, EngineError> {
+    /// Resolves a selection to its card ids (H12), on the query reader; a
+    /// selection of a handle of another collection is refused.
+    pub fn resolve(&self, collection: &Collection) -> Result<Vec<CardId>, EngineError> {
         Ok(match self {
             CardTarget::Cards(ids) => ids.clone(),
             CardTarget::Selection(selection) => selection
-                .resolve(SearchMode::Cards)
+                .resolve_for(collection, SearchMode::Cards)
                 .map_err(selection_error)?
                 .into_iter()
                 .map(CardId)
