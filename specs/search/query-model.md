@@ -111,6 +111,8 @@ Searching never calls scheduling or engine code (KTD2). Every outside value a qu
 
 `search/state-and-flags#S1–S3` defines the due and buried leaves, including their exact context dependencies. The U81 and U82 specs are the authority on what each term reads; this table is the union U80 must carry. The plan records, for each term, which of these values it read, so that caches (U90) key on exactly those. The whole collection, NOT, AND, OR and groups read none.
 
+Changed 2026-11-21 (implementation review): **A search never writes.** For every search, sorted or not, the engine fills today and next-day-at with the day calculation alone (`sched/day-clock` D8.1), and the conformance executor does the same: filling the context runs no day query, so a search unburies no card and writes no `rollover`, `localOffset` or `lastUnburied`. Deviation, recorded here because no scenario observes it: Anki's search reads its cached day and, when it has none (the first read after an open, or once the cached boundary has passed), computes the day afresh with `sched/day-clock` D5 step 2's writes: `rollover` 4 when that key is missing, `localOffset` when the offset changed (it never unburies). Meguri's search writes neither, because searching must never rewrite synced config keys (R1138): Browse is read-only.
+
 ## Q9. The plan
 
 Compiling a parsed query gives a plan for one mode:

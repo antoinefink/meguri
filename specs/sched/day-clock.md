@@ -197,6 +197,12 @@ Callers: the open-time step; the app on foreground, on its timer at `next_day_at
 
 The core runs no timer (R1854). In legacy timing `next_day_at` equals `now` for the whole first second of a day (D4), so a host timer armed at `next_day_at` must wait for an instant after `now`, at least the next whole second, or it fires in a loop during that second. The app's timer also fires at the zone's next UTC offset change when that comes first, because the boundary under the new offset can come earlier (D12.1, `sched/app-coordination#A2`).
 
+### D8.1 Searches read the day without a day query
+
+Changed 2026-11-21 (implementation review): new section, an exception to D8's second bullet ("Every core path that needs the day gets it through these or `checkRollover()`"). A search, sorted or not (`search/query-model` Q8, `browser/result-sets` H9), a resort, and the Browse rows read for a result (`browser/columns` C1) take today and `next_day_at` from the day calculation alone: D3, or D4 for a legacy collection, for the request's now, from the stored `crt` and creation offset, `rollover` read as D8's automatic checks read it (the effective default 4 when missing or unreadable) and the device's current offset. The calculation writes nothing: no D5 step 2 write, no unbury check (D7), no cached result, no `Rollover` op and no event. It does not read the day clock's cached result, so after the clock moves back before a cached boundary (D6) a search uses the earlier day. The conformance executor does the same for `search` and `browser_rows` (`conformance/browser-ops` B1, B3).
+
+The day query's writes and its unbury belong to `checkRollover()`'s callers above and to the reads that start study (a queue build, an answer) or read deck counts. A search is none of these, so a search that runs after a day boundary before any of them still finds the cards buried on the earlier day buried. How Anki's search differs is `search/query-model` Q8.
+
 ## D9. The rollover op
 
 When `checkRollover()` sees the day change, its writes under D8's automatic policy (D5, D7: the unbury of the new day among them) and these effects form one op with source `Rollover`:

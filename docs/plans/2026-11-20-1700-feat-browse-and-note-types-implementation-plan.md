@@ -160,3 +160,17 @@ Each carries a note in the parent plan ("Superseded 2026-11-20 …"), with the d
 ## 8. Spec lines approved 2026-11-20
 
 New files: `specs/search/filter-tokens.md`, `specs/browser/workspace.md`, `specs/notetypes/workspace.md`, `specs/notetypes/draft-save.md`. New sections: `sync/meguri-provider` MP7; `docs/design/native-interface-contract.md` N21, N22 and the note at the top of N11.10. Changed lines (each beginning "Changed 2026-11-20 (round 8)" or "(round 9)", each file's Status line naming them): `search/join-and-replace` J3, `search/editing-services` D2, D3, D6, `browser/sidebar` S2, S7, S9, `browser/bulk-actions` B3, B5, B11, B16, `browser/find-replace` F2, F8, F10, `browser/config-keys` K4, K6.2, `browser/columns` C5, C7.4, `browser/inspector` I8, `browser/entry-points` E2, E5, `browser/result-sets` H7, `browser/sorting` S1, `notetypes/editor-actions` A3, A6, A7, A10, A12, `notetypes/schema-changes` G4, `render/preview` V12, `stats/card-info` C7. The inventory entries `browse.*`, `cardInfo.card` and `noteTypes.*` point to these specs.
+
+## 9. Progress (changed 2026-11-21, implementation review)
+
+Merged into `master`: U82 (PR #25, names and ids; PR #26, state, flags, properties and history), U81 (PR #30), U88a (PR #23), U84 (PR #34) and U34 part 1 (PR #28: the structure draft apply op, S1 to S11 and S13). U34 part 2 (the confirmed-losses precondition, S12 and Restore to Default) is PR #31, open.
+
+Assigned to U260, in addition to its row in section 4: the builder follow-ups of PR #32 (`search/join-and-replace` J3.6's last bullet): refuse a negative note type id and a negative duplicates note type id (`negative_id`), rename `day_out_of_range` to `due_day_out_of_range`, add the refused item's path to `invalid_item`, and the matching builder tests and T16 row.
+
+Code changes that the 2026-11-21 spec follow-ups need, for the coordinator to assign:
+
+- U34 (PR #31, or a fixer after it): `notetypes/structure-changes` S1.2's whole order: an origin outside the base is checked after the planning snapshot's `Stale`, not before it; the test of a stale base with an out-of-range origin then expects `Stale`.
+- U81 follow-up: `search/text-matching` T7.1's line on a note whose note type is missing: when some note type has an excluded field, such a note matches no plain-text, `nc:`, `-sc:`, `re:` or `w:` term (today's plan tests it as a type without excluded fields).
+- U85: build the search context's today and next-day-at with the day calculation alone (`sched/day-clock` D8.1); the conformance executor already does.
+
+Tooling follow-up, queued: the copied-test-text check (`tools/mg similarity --search-data`) accepts only the two search roots; it should cover every conformance area.
