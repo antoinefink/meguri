@@ -71,7 +71,7 @@ fn check_map(map: &[i32], old: u32, new: u32, prefix: bool, origins: Origins) ->
     for n in map {
         // Cloze ordinals are not template positions. An explicit prefix may
         // refer beyond the number of stored cloze templates (K19.2).
-        let repeated = *n >= 0 && !seen.insert(*n) && origins == Origins::Unique;
+        let repeated = origins == Origins::Unique && *n >= 0 && !seen.insert(*n);
         if *n < -1 || (!prefix && *n >= old as i32) || repeated {
             return Err(invalid("map has an invalid or repeated origin"));
         }
@@ -92,7 +92,8 @@ fn validate(before: LayoutShape, after: LayoutShape, fields: &[i32], templates: 
     }
     Ok(())
 }
-// Retained compositions are partial injections on endpoint domains. A cloze
+// Retained compositions are partial injections on endpoint domains, except
+// a type change's field map, which may repeat an origin (K19.2). A cloze
 // source supplies an identity tail; a standard destination truncates that tail.
 fn validate_retained(before: LayoutShape, after: LayoutShape, fields: &[i32], templates: &[i32], pair: bool) -> Result<(), StorageError> {
     check_map(fields, before.fields, after.fields, false, field_origins(pair))?;
@@ -328,21 +329,34 @@ mod tests {
         report.validate_retained().unwrap();
     }
 
+    fn refused_as_repeated(result: Result<(), StorageError>) {
+        match result {
+            Err(StorageError::Mode { detail }) => assert!(detail.ends_with("map has an invalid or repeated origin"), "{detail}"),
+            other => panic!("not refused as a repeated origin: {other:?}"),
+        }
+    }
+
     #[test]
     fn layout_field_maps_and_template_maps_still_refuse_a_repeat() {
         let mut layouts = StructureReport::default();
         layouts.layouts.insert(1, layout(standard(2), &[0, 0]));
-        assert!(layouts.validate().is_err());
-        assert!(layouts.validate_retained().is_err());
+        refused_as_repeated(layouts.validate());
+        refused_as_repeated(layouts.validate_retained());
         let two = LayoutShape { fields: 1, templates: 2, cloze: false, sort_field: 0 };
         let mut templates = report_with_pair(1, 2, TypeChangeReport {
             before: two, after: two, field_map: vec![0], template_map: vec![1, 1] });
-        assert!(templates.validate().is_err());
-        assert!(templates.validate_retained().is_err());
+        refused_as_repeated(templates.validate());
+        refused_as_repeated(templates.validate_retained());
         templates.type_changes.clear();
         templates.layouts.insert(1, LayoutReport { before: two, after: two, field_map: vec![0], template_map: vec![0, 0] });
-        assert!(templates.validate().is_err());
-        assert!(templates.validate_retained().is_err());
+        refused_as_repeated(templates.validate());
+        refused_as_repeated(templates.validate_retained());
+        // A cloze layout's prefix template map takes the prefix path.
+        let cloze = LayoutShape { fields: 1, templates: 1, cloze: true, sort_field: 0 };
+        let mut prefix = StructureReport::default();
+        prefix.layouts.insert(1, LayoutReport { before: cloze, after: cloze, field_map: vec![0], template_map: vec![0, 0] });
+        refused_as_repeated(prefix.validate());
+        refused_as_repeated(prefix.validate_retained());
     }
 
     #[test]
@@ -371,8 +385,6 @@ mod tests {
         assert_eq!(undo.type_changes.keys().copied().collect::<Vec<_>>(), [(2, 1)]);
         assert_eq!(undo.type_changes[&(2, 1)].field_map, [0, 2]);
         undo.validate_retained().unwrap();
-        // Redo reports the step's own report again; it is admitted.
-        report.validate_retained().unwrap();
     }
 
     /// A's fields reordered, its notes moved to B with 0, 0, 1, then B's

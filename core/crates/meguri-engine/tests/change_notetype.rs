@@ -1114,12 +1114,30 @@ struct WholeRows {
 }
 
 fn whole(h: &Harness) -> WholeRows {
+    // `rows` takes the query reader itself: read it before leasing it here.
+    let rows = rows(h);
     let r = h.collection.reader(ReaderRole::Query).unwrap();
-    // One page holds them all here: these tests make a few graves.
+    // One page holds them all here: these tests make a few of each.
     let graves = r.row_page(Table::Graves, None).unwrap();
     assert_eq!(graves.len() as u64, r.row_count(Table::Graves).unwrap());
     let notetypes = r.row_page(Table::Notetypes, None).unwrap();
-    WholeRows { rows: rows(h), graves, notetypes }
+    assert_eq!(notetypes.len() as u64, r.row_count(Table::Notetypes).unwrap());
+    WholeRows { rows, graves, notetypes }
+}
+
+/// The report of a change between two note types: reason 6 and exactly one
+/// `type_changes` entry, `key`, with these maps.
+fn assert_one_pair(
+    report: &meguri_storage::journal::StructureReport,
+    key: (i64, i64),
+    fields: &[i32],
+    templates: &[i32],
+) {
+    assert_eq!(report.reasons, [StructureReason::NotesNotetypeChanged].into());
+    assert!(report.layouts.is_empty() && report.removed.is_empty());
+    assert_eq!(report.type_changes.keys().copied().collect::<Vec<_>>(), [key]);
+    let entry = &report.type_changes[&key];
+    assert_eq!((entry.field_map.as_slice(), entry.template_map.as_slice()), (fields, templates));
 }
 
 /// The ordinals of a note's cards, ascending.
@@ -1156,7 +1174,7 @@ fn undo_redo_twice(
 #[test]
 fn a_repeated_field_map_between_two_note_types_commits_and_undo_restores_every_value() {
     let (h, backups, capture) = harness_observed();
-    let src = made(&h, "Src", false, &["Word", "Gloss"], &["{{Word}}"]);
+    let src = made(&h, "Src", false, &["Word", "Gloss"], &["{{Word}}", "{{Gloss}}"]);
     let twin = made(&h, "Twin", false, &["Word", "Hint", "Gloss"], &["{{Word}}", "{{Hint}}?"]);
     let n1 = add(&h.collection, src, &["zorvu", "kelpa"]);
     let n2 = add(&h.collection, src, &["mivax", ""]);
@@ -1171,10 +1189,14 @@ fn a_repeated_field_map_between_two_note_types_commits_and_undo_restores_every_v
     let ids = [n1, n2, n3, n4, n5, n6];
     h.clock.step_ms(60_000);
     let read = info(&h, &ids, twin).unwrap();
-    assert_eq!(read.templates, Some(vec![Some(0), None]));
+    // Src's second template (`{{Gloss}}`) is dropped: its cards go with
+    // their graves, which the whole-row comparison then restores.
+    assert_eq!(read.templates, Some(vec![Some(0), Some(1)]));
+    let dropped = ids.iter().filter(|id| ords(&h, **id).contains(&1)).count();
+    assert!(dropped > 0);
     let before = whole(&h);
     let fields = vec![Some(0), Some(0), Some(1)];
-    run(&h, mapped(&read, &ids, fields, read.templates.clone())).unwrap();
+    run(&h, mapped(&read, &ids, fields, Some(vec![Some(0), None]))).unwrap();
     assert_eq!(backups.calls(), 1);
     let expected = [
         (n1, "zorvu\u{1f}zorvu\u{1f}kelpa", vec![0, 1]),
@@ -1190,17 +1212,13 @@ fn a_repeated_field_map_between_two_note_types_commits_and_undo_restores_every_v
         assert_eq!(&ords(&h, *id), cards, "{id:?}");
     }
     let after = whole(&h);
+    assert_eq!(after.graves.len() - before.graves.len(), dropped);
     let check = |report: &meguri_storage::journal::StructureReport, undo: bool| {
-        assert_eq!(report.reasons, [StructureReason::NotesNotetypeChanged].into());
-        assert!(report.layouts.is_empty() && report.removed.is_empty());
-        assert_eq!(report.type_changes.len(), 1);
-        let (key, fields, templates) = if undo {
-            ((twin.0, src.0), &[0, 2][..], &[0][..])
+        if undo {
+            assert_one_pair(report, (twin.0, src.0), &[0, 2], &[0, -1]);
         } else {
-            ((src.0, twin.0), &[0, 0, 1][..], &[0, -1][..])
-        };
-        let entry = &report.type_changes[&key];
-        assert_eq!((entry.field_map.as_slice(), entry.template_map.as_slice()), (fields, templates));
+            assert_one_pair(report, (src.0, twin.0), &[0, 0, 1], &[0, -1]);
+        }
     };
     check(&structure(&capture), false);
     undo_redo_twice(&h, &capture, &before, &after, check);
@@ -1227,14 +1245,13 @@ fn a_repeated_field_map_with_a_cloze_note_type_undoes_and_redoes_exactly() {
     assert_eq!(ords(&h, a), [0]);
     let after = whole(&h);
     let check = |report: &meguri_storage::journal::StructureReport, undo: bool| {
-        let (key, fields, templates) = if undo {
-            ((gaps.0, src.0), &[0, -1][..], &[][..])
+        if undo {
+            assert_one_pair(report, (gaps.0, src.0), &[0, -1], &[]);
         } else {
-            ((src.0, gaps.0), &[0, 0][..], &[0][..])
-        };
-        let entry = &report.type_changes[&key];
-        assert_eq!((entry.field_map.as_slice(), entry.template_map.as_slice()), (fields, templates));
+            assert_one_pair(report, (src.0, gaps.0), &[0, 0], &[0]);
+        }
     };
+    check(&structure(&capture), false);
     undo_redo_twice(&h, &capture, &before, &after, check);
     // Cloze to standard.
     let b = add(&h.collection, gaps, &["{{c1::p}} {{c2::q}}", "e"]);
@@ -1246,14 +1263,13 @@ fn a_repeated_field_map_with_a_cloze_note_type_undoes_and_redoes_exactly() {
     assert_eq!(ords(&h, b), [0, 1]);
     let after = whole(&h);
     let check = |report: &meguri_storage::journal::StructureReport, undo: bool| {
-        let (key, fields, templates) = if undo {
-            ((twin.0, gaps.0), &[0, 2][..], &[0, 1][..])
+        if undo {
+            assert_one_pair(report, (twin.0, gaps.0), &[0, 2], &[0, 1]);
         } else {
-            ((gaps.0, twin.0), &[0, 0, 1][..], &[][..])
-        };
-        let entry = &report.type_changes[&key];
-        assert_eq!((entry.field_map.as_slice(), entry.template_map.as_slice()), (fields, templates));
+            assert_one_pair(report, (gaps.0, twin.0), &[0, 0, 1], &[]);
+        }
     };
+    check(&structure(&capture), false);
     undo_redo_twice(&h, &capture, &before, &after, check);
 }
 
@@ -1274,8 +1290,9 @@ fn a_repeated_field_map_to_the_same_note_type_undoes_and_redoes_exactly() {
     let after = whole(&h);
     let check = |report: &meguri_storage::journal::StructureReport, _: bool| {
         assert_eq!(report.reasons, [StructureReason::NotesNotetypeChanged].into());
-        assert!(report.type_changes.is_empty());
+        assert!(report.type_changes.is_empty() && report.layouts.is_empty() && report.removed.is_empty());
     };
+    check(&structure(&capture), false);
     undo_redo_twice(&h, &capture, &before, &after, check);
 }
 
