@@ -254,228 +254,242 @@ fn run_inner(
         spec = spec.session(id);
     }
     let bound = collection.clone();
-    collection.run(spec, move |ctx| {
-        request.validate()?;
-        if require_idle && bound.core.exec.active_session.lock().unwrap().is_some() {
-            return Err(EngineError::SessionActive);
-        }
-        let ids = request.cards(ctx.scope())?;
-        let now = ctx.now();
-        // Missing normal-operation targets are skipped. Grade Now must refuse
-        // its complete selection, including every unsupported preset, first.
-        let mut cards = Vec::with_capacity(ids.len());
-        let mut unsupported = BTreeSet::new();
-        let mut models = FsrsCache::default();
-        let mut starting = BTreeMap::new();
-        for id in ids {
-            let Some(card) = ctx.scope().card(id)? else {
-                if matches!(request, Request::GradeNow { .. }) {
-                    return Err(missing(Table::Cards, id.0));
-                }
-                continue;
-            };
+    collection.run(spec, move |ctx| apply_in(ctx, &bound, &request, &day, require_idle))
+}
+/// The operation inside the caller's write transaction: the targets are
+/// read again from the live rows, then written. The caller ran the day
+/// check (`check_rollover`) before the op and passes its day in. With
+/// `require_idle`, an active review session refuses (`SessionActive`); a
+/// caller admitted by the review service passes false. The scope stamps in
+/// `CallerSupplied` mode.
+pub(crate) fn apply_in(
+    ctx: &mut crate::OpContext<'_, '_>,
+    bound: &Collection,
+    request: &Request,
+    day: &crate::DayReport,
+    require_idle: bool,
+) -> Result<ResultValue, EngineError> {
+    request.validate()?;
+    if require_idle && bound.core.exec.active_session.lock().unwrap().is_some() {
+        return Err(EngineError::SessionActive);
+    }
+    let ids = request.cards(ctx.scope())?;
+    let now = ctx.now();
+    // Missing normal-operation targets are skipped. Grade Now must refuse
+    // its complete selection, including every unsupported preset, first.
+    let mut cards = Vec::with_capacity(ids.len());
+    let mut unsupported = BTreeSet::new();
+    let mut models = FsrsCache::default();
+    let mut starting = BTreeMap::new();
+    for id in ids {
+        let Some(card) = ctx.scope().card(id)? else {
             if matches!(request, Request::GradeNow { .. }) {
-                if card.original_deck_id.0 != 0 {
-                    return Err(refused(Refusal::InFilteredDeck { card: id }));
-                }
-                let home = ctx
-                    .scope()
-                    .deck(card.deck_id)?
-                    .ok_or_else(|| missing(Table::Decks, card.deck_id.0))?;
-                let DeckKind::Normal(n) = &home.kind.kind else {
-                    return Err(refused(Refusal::InFilteredDeck { card: id }));
-                };
-                let preset = PresetView::for_config(ctx.scope(), DeckConfigId(n.config_id))?;
-                if models.model(&preset).is_err() {
-                    unsupported.insert(preset.source().id);
-                }
+                return Err(missing(Table::Cards, id.0));
             }
-            if matches!(request, Request::SetDue { .. }) {
-                let home_id = CardSched::new(&card).home_deck();
-                let home = ctx
-                    .scope()
-                    .deck(home_id)?
-                    .ok_or_else(|| missing(Table::Decks, home_id.0))?;
-                let DeckKind::Normal(n) = &home.kind.kind else {
-                    return Err(refused(Refusal::HomeDeckFiltered { deck: home_id }));
-                };
-                let config = match ctx.scope().deck_config(DeckConfigId(n.config_id))? {
-                    Some(c) => Some(c),
-                    None => ctx.scope().deck_config(DeckConfigId(1))?,
-                };
-                starting.insert(
-                    id,
-                    config
-                        .as_ref()
-                        .map(|c| PresetView::new(c).fields().initial_ease)
-                        .unwrap_or(2.5),
-                );
+            continue;
+        };
+        if matches!(request, Request::GradeNow { .. }) {
+            if card.original_deck_id.0 != 0 {
+                return Err(refused(Refusal::InFilteredDeck { card: id }));
             }
-            cards.push(card);
-        }
-        if !unsupported.is_empty() {
-            return Err(refused(Refusal::PresetUnsupported {
-                preset_ids: unsupported.into_iter().collect(),
-            }));
-        }
-        if cards.is_empty() {
-            return Ok(ResultValue {
-                count: 0,
-                head_diff: None,
-            });
-        }
-        let mut count = 0;
-        if let Request::GradeNow { rating, .. } = request {
-            let mut balance = grade_balance(ctx.scope(), day.today, day.next_day_at, bound.core.exec.clock.as_ref())?;
-            let enabled = SchedConfig::new(ctx.scope()).load_balancer_enabled()?;
-            for original in cards {
-                let card = ctx
-                    .scope()
-                    .card(original.id)?
-                    .ok_or_else(|| missing(Table::Cards, original.id.0))?;
-                let preset =
-                    PresetView::for_card(ctx.scope(), &card)?.ok_or_else(|| missing(Table::Decks, card.deck_id.0))?;
-                let mut chooser = balance.chooser(
-                    preset.source().id,
-                    preset.fields().bury_reviews.then_some(card.note_id),
-                    fuzz::seed(card.id.0 as u64, u64::from(card.reps)),
-                );
-                let prediction = answer::predict_in(
-                    ctx.scope(),
-                    card.id,
-                    &mut models,
-                    day.today,
-                    day.next_day_at,
-                    now,
-                    if enabled { Some(&mut chooser) } else { None },
-                )?;
-                let result = answer::apply_in(ctx, &bound, prediction.answer(rating, 0), None, None, false)?;
-                // Grade Now's private W10 chooser observes earlier answers; it
-                // never attaches AnswerMetadata or mutates a W8/W9 owner.
-                if enabled {
-                    let written = ctx
-                        .scope()
-                        .card(card.id)?
-                        .ok_or_else(|| missing(Table::Cards, card.id.0))?;
-                    if written.queue == CardQueue::Review {
-                        balance.append(
-                            preset.source().id,
-                            written.interval,
-                            Entry {
-                                card: written.id,
-                                note: written.note_id,
-                            },
-                        );
-                    }
-                }
-                drop(result);
-                count += 1;
-            }
-        } else {
-            let mut next = crate::cardgen::position::read_counter(ctx.scope())?;
-            let days = match &request {
-                Request::SetDue { days, .. } => Some(Days::parse(days).map_err(|e| refused(Refusal::InvalidDays(e)))?),
-                _ => None,
+            let home = ctx
+                .scope()
+                .deck(card.deck_id)?
+                .ok_or_else(|| missing(Table::Decks, card.deck_id.0))?;
+            let DeckKind::Normal(n) = &home.kind.kind else {
+                return Err(refused(Refusal::InFilteredDeck { card: id }));
             };
-            for mut card in cards {
-                let old_interval = card.interval;
-                let changed = match &request {
-                    Request::Bury(_) => values::bury::apply(&mut card),
-                    Request::Suspend(_) => values::suspend::apply(&mut card),
-                    Request::Unsuspend(_) | Request::UnburyDeck { .. } => values::suspend::restore(&mut card),
-                    Request::SetDue { .. } => {
-                        let d = days.expect("parsed days").draw(ctx.random());
-                        let ease = starting[&card.id];
-                        values::set_due::apply(&mut card, d, day.today, day.next_day_at, ease);
-                        true
-                    }
-                    Request::Reset {
-                        restore_position,
-                        reset_counts,
-                        ..
-                    } => {
-                        values::reset::apply(&mut card, &mut next, *restore_position, *reset_counts);
-                        true
-                    }
-                    Request::EmptyFiltered { .. } => {
-                        values::filtered_empty::apply(&mut card);
-                        true
-                    }
-                    Request::GradeNow { .. } => unreachable!(),
-                };
-                if !changed {
-                    continue;
-                }
-                if matches!(request, Request::Bury(_)) {
-                    put_config(
-                        ctx.scope(),
-                        "lastUnburied",
-                        &ConfigValue::from(u64::from(day.today)),
-                        now,
-                    )?;
-                }
-                card.mtime = now.whole_secs();
-                card.usn = Usn::PENDING;
-                ctx.scope().put_card_forced(&card)?;
-                if matches!(request, Request::SetDue { .. } | Request::Reset { .. }) {
-                    let reset = matches!(request, Request::Reset { .. });
-                    let log = RevlogEntry {
-                        id: RevlogId(0),
-                        card_id: card.id,
-                        usn: Usn::PENDING,
-                        button: 0,
-                        interval: if reset {
-                            0
-                        } else {
-                            card.interval.min(i32::MAX as u32) as i32
-                        },
-                        last_interval: old_interval.min(i32::MAX as u32) as i32,
-                        ease_factor: if reset { 0 } else { values::set_due::log_factor(&card) },
-                        answer_millis: 0,
-                        kind: RevlogKind::Manual,
-                    };
-                    ctx.scope().add_answer_revlog(&log, now)?;
-                }
-                count += 1;
-            }
-            if count > 0 {
-                match request {
-                    Request::SetDue {
-                        days,
-                        context: Some(context),
-                        ..
-                    } => put_config(
-                        ctx.scope(),
-                        match context {
-                            Context::Reviewer => "setDueReviewer",
-                            Context::Browser => "setDueBrowser",
-                        },
-                        &ConfigValue::from(days.as_str()),
-                        now,
-                    )?,
-                    Request::Reset {
-                        restore_position,
-                        reset_counts,
-                        context,
-                        ..
-                    } => {
-                        crate::cardgen::position::write_counter(ctx.scope(), next)?;
-                        if let Some(context) = context {
-                            let (restore, counts) = match context {
-                                Context::Reviewer => ("restorePositionReviewer", "resetCountsReviewer"),
-                                Context::Browser => ("restorePositionBrowser", "resetCountsBrowser"),
-                            };
-                            put_config(ctx.scope(), restore, &ConfigValue::from(restore_position), now)?;
-                            put_config(ctx.scope(), counts, &ConfigValue::from(reset_counts), now)?;
-                        }
-                    }
-                    _ => (),
-                }
-                ctx.scope().set_col_mod(now)?;
+            let preset = PresetView::for_config(ctx.scope(), DeckConfigId(n.config_id))?;
+            if models.model(&preset).is_err() {
+                unsupported.insert(preset.source().id);
             }
         }
-        Ok(ResultValue { count, head_diff: None })
-    })
+        if matches!(request, Request::SetDue { .. }) {
+            let home_id = CardSched::new(&card).home_deck();
+            let home = ctx
+                .scope()
+                .deck(home_id)?
+                .ok_or_else(|| missing(Table::Decks, home_id.0))?;
+            let DeckKind::Normal(n) = &home.kind.kind else {
+                return Err(refused(Refusal::HomeDeckFiltered { deck: home_id }));
+            };
+            let config = match ctx.scope().deck_config(DeckConfigId(n.config_id))? {
+                Some(c) => Some(c),
+                None => ctx.scope().deck_config(DeckConfigId(1))?,
+            };
+            starting.insert(
+                id,
+                config
+                    .as_ref()
+                    .map(|c| PresetView::new(c).fields().initial_ease)
+                    .unwrap_or(2.5),
+            );
+        }
+        cards.push(card);
+    }
+    if !unsupported.is_empty() {
+        return Err(refused(Refusal::PresetUnsupported {
+            preset_ids: unsupported.into_iter().collect(),
+        }));
+    }
+    if cards.is_empty() {
+        return Ok(ResultValue {
+            count: 0,
+            head_diff: None,
+        });
+    }
+    let mut count = 0;
+    if let Request::GradeNow { rating, .. } = request {
+        let rating = *rating;
+        let mut balance = grade_balance(ctx.scope(), day.today, day.next_day_at, bound.core.exec.clock.as_ref())?;
+        let enabled = SchedConfig::new(ctx.scope()).load_balancer_enabled()?;
+        for original in cards {
+            let card = ctx
+                .scope()
+                .card(original.id)?
+                .ok_or_else(|| missing(Table::Cards, original.id.0))?;
+            let preset =
+                PresetView::for_card(ctx.scope(), &card)?.ok_or_else(|| missing(Table::Decks, card.deck_id.0))?;
+            let mut chooser = balance.chooser(
+                preset.source().id,
+                preset.fields().bury_reviews.then_some(card.note_id),
+                fuzz::seed(card.id.0 as u64, u64::from(card.reps)),
+            );
+            let prediction = answer::predict_in(
+                ctx.scope(),
+                card.id,
+                &mut models,
+                day.today,
+                day.next_day_at,
+                now,
+                if enabled { Some(&mut chooser) } else { None },
+            )?;
+            let result = answer::apply_in(ctx, bound, prediction.answer(rating, 0), None, None, false)?;
+            // Grade Now's private W10 chooser observes earlier answers; it
+            // never attaches AnswerMetadata or mutates a W8/W9 owner.
+            if enabled {
+                let written = ctx
+                    .scope()
+                    .card(card.id)?
+                    .ok_or_else(|| missing(Table::Cards, card.id.0))?;
+                if written.queue == CardQueue::Review {
+                    balance.append(
+                        preset.source().id,
+                        written.interval,
+                        Entry {
+                            card: written.id,
+                            note: written.note_id,
+                        },
+                    );
+                }
+            }
+            drop(result);
+            count += 1;
+        }
+    } else {
+        let mut next = crate::cardgen::position::read_counter(ctx.scope())?;
+        let days = match &request {
+            Request::SetDue { days, .. } => Some(Days::parse(days).map_err(|e| refused(Refusal::InvalidDays(e)))?),
+            _ => None,
+        };
+        for mut card in cards {
+            let old_interval = card.interval;
+            let changed = match &request {
+                Request::Bury(_) => values::bury::apply(&mut card),
+                Request::Suspend(_) => values::suspend::apply(&mut card),
+                Request::Unsuspend(_) | Request::UnburyDeck { .. } => values::suspend::restore(&mut card),
+                Request::SetDue { .. } => {
+                    let d = days.expect("parsed days").draw(ctx.random());
+                    let ease = starting[&card.id];
+                    values::set_due::apply(&mut card, d, day.today, day.next_day_at, ease);
+                    true
+                }
+                Request::Reset {
+                    restore_position,
+                    reset_counts,
+                    ..
+                } => {
+                    values::reset::apply(&mut card, &mut next, *restore_position, *reset_counts);
+                    true
+                }
+                Request::EmptyFiltered { .. } => {
+                    values::filtered_empty::apply(&mut card);
+                    true
+                }
+                Request::GradeNow { .. } => unreachable!(),
+            };
+            if !changed {
+                continue;
+            }
+            if matches!(request, Request::Bury(_)) {
+                put_config(
+                    ctx.scope(),
+                    "lastUnburied",
+                    &ConfigValue::from(u64::from(day.today)),
+                    now,
+                )?;
+            }
+            card.mtime = now.whole_secs();
+            card.usn = Usn::PENDING;
+            ctx.scope().put_card_forced(&card)?;
+            if matches!(request, Request::SetDue { .. } | Request::Reset { .. }) {
+                let reset = matches!(request, Request::Reset { .. });
+                let log = RevlogEntry {
+                    id: RevlogId(0),
+                    card_id: card.id,
+                    usn: Usn::PENDING,
+                    button: 0,
+                    interval: if reset {
+                        0
+                    } else {
+                        card.interval.min(i32::MAX as u32) as i32
+                    },
+                    last_interval: old_interval.min(i32::MAX as u32) as i32,
+                    ease_factor: if reset { 0 } else { values::set_due::log_factor(&card) },
+                    answer_millis: 0,
+                    kind: RevlogKind::Manual,
+                };
+                ctx.scope().add_answer_revlog(&log, now)?;
+            }
+            count += 1;
+        }
+        if count > 0 {
+            match request {
+                Request::SetDue {
+                    days,
+                    context: Some(context),
+                    ..
+                } => put_config(
+                    ctx.scope(),
+                    match context {
+                        Context::Reviewer => "setDueReviewer",
+                        Context::Browser => "setDueBrowser",
+                    },
+                    &ConfigValue::from(days.as_str()),
+                    now,
+                )?,
+                Request::Reset {
+                    restore_position,
+                    reset_counts,
+                    context,
+                    ..
+                } => {
+                    crate::cardgen::position::write_counter(ctx.scope(), next)?;
+                    if let Some(context) = context {
+                        let (restore, counts) = match context {
+                            Context::Reviewer => ("restorePositionReviewer", "resetCountsReviewer"),
+                            Context::Browser => ("restorePositionBrowser", "resetCountsBrowser"),
+                        };
+                        put_config(ctx.scope(), restore, &ConfigValue::from(*restore_position), now)?;
+                        put_config(ctx.scope(), counts, &ConfigValue::from(*reset_counts), now)?;
+                    }
+                }
+                _ => (),
+            }
+            ctx.scope().set_col_mod(now)?;
+        }
+    }
+    Ok(ResultValue { count, head_diff: None })
 }
 fn put_config(scope: &mut WriteScope<'_>, key: &str, value: &ConfigValue, at: EpochMillis) -> Result<(), EngineError> {
     if scope.config_value(key)?.as_ref() != Some(value) {
