@@ -46,6 +46,15 @@ Confirmed by the reviewer:
 - The S1.2 order matches `check_live` and `finish` on master.
 - The PR numbers are right.
 - No Anki path or identifier appears in `specs/`.
+- The reviewer checked "no scenario reads timing keys after a search without an earlier `timing`" against the scenarios that mention `rollover` or `localOffset`, not against every scenario.
+
+Second pass on commit a63c842be: no P1 or P2 left. The fixes match the findings, nothing new conflicts, and the log above is a fair account. Both optional P3 notes were then taken: S7 of `search/state-and-flags` is limited to search requests, and the first row of the Q8 table names the exception for a context built inside an op.
+
+CodeRabbit (PR #37) found four Minor points, all answered on their threads and fixed:
+- B1's `fld:` line now says the sort waits for U261.
+- D6.1 names D8.1's exception.
+- T7.2: a note type with no included field matches nothing, whatever its sort index (as in Anki).
+- S16 says the stale-origin test changes with the code (plan section 9).
 
 ## Code and test changes required (for the coordinator to assign)
 

@@ -101,7 +101,7 @@ Searching never calls scheduling or engine code (KTD2). Every outside value a qu
 | Value | Source | Read by |
 |---|---|---|
 | now (epoch seconds) | the clock | `is:due`, `prop:r` |
-| today (days elapsed) | the day calculation of `sched/day-clock` D8.1 (U40; changed 2026-11-21, implementation review) | `is:due`, `prop:due`, `prop:r` |
+| today (days elapsed) | the day calculation of `sched/day-clock` D8.1 (U40; changed 2026-11-21, implementation review); inside an op or read that has already taken its day from the day clock, that day (below) | `is:due`, `prop:due`, `prop:r` |
 | next-day-at (epoch seconds of the next day boundary) | as today (changed 2026-11-21, implementation review) | `added:`, `edited:`, `introduced:`, `rated:`, `resched:`, `prop:due`, `prop:rated`, `prop:resched` |
 | learn-ahead seconds | config `collapseTime` when it reads as an unsigned 32-bit integer; 1200 when it is missing or reads otherwise (`"x"`, −1, 60.0; `state-and-flags.md` S3) | `is:due` |
 | current deck id | config `curDeck` | `deck:current` |
