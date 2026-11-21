@@ -1979,8 +1979,11 @@ public final class SyncCoordinator {
     /// read the settings Ready committed, and ask for the first round.
     @discardableResult private func adoptMeguriReady() async -> Bool {
         let expected = generation, revision = hostRevision, settingsRevision = providerSettingsRevision
+        // A service change owns the provider state while it runs: read after it.
+        guard !providerActionInProgress, !providerHandoffInProgress else { meguriReadyAdoptionPending = true; return false }
         guard let state = try? await provider?.refresh(), let committed = state.settings,
               generation == expected, hostRevision == revision, !closing, !replacing else { return false }
+        guard !providerActionInProgress, !providerHandoffInProgress else { meguriReadyAdoptionPending = true; return false }
         // A settings write made meanwhile is newer than this read: read again later.
         guard settingsRevision == providerSettingsRevision else { meguriReadyAdoptionPending = true; return false }
         adoptMeguriReadySettings(state, committed)
@@ -2007,7 +2010,8 @@ public final class SyncCoordinator {
     /// A provider action (a service change) refused a Meguri start while it ran:
     /// the trigger kept for it is tried when the action ends.
     private func replayMeguriMediaResume() {
-        guard let trigger = meguriMediaResumePending, !meguriBusy else { return }
+        guard meguriMediaResumePending != nil || meguriReadyAdoptionPending, !meguriBusy else { return }
+        let trigger = meguriMediaResumePending ?? .recovered
         meguriMediaResumePending = nil
         Task { self.resumeMeguriMediaIfNeeded(trigger) }
     }
