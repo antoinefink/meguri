@@ -235,6 +235,11 @@ impl FilterCounts {
             of_item.push(Some(at));
         }
         let counted = self.count_texts(engine, mode, &texts, &token)?;
+        // Superseded at the very end: the counts read stay cached, but the
+        // caller hears it was cancelled.
+        if token.is_cancelled() {
+            return Err(BrowseError::Engine(EngineError::Cancelled));
+        }
         Ok(of_item.into_iter().map(|at| at.and_then(|at| counted[at])).collect())
     }
 
@@ -298,14 +303,23 @@ impl FilterCounts {
         // Notes mode: the notes that exist, from the note read when there is
         // one (it comes first), or read for the jobs that need them.
         let mut notes: Option<NoteIndex> = None;
-        for job in plan.jobs {
+        let mut jobs: std::collections::VecDeque<CountJob> = plan.jobs.into();
+        while let Some(job) = jobs.pop_front() {
             if stop() {
                 return Err(cancelled());
             }
             let reads = job.reads();
+            let shared = job.is_shared();
             let found = match self.run_job(&*snapshot, job, &mut notes, &stop) {
                 Ok(found) => found,
                 Err(_) if stop() => return Err(cancelled()),
+                // A shared statement the database refuses: each of its texts
+                // is counted alone on the same snapshot.
+                Err(_) if shared => {
+                    let indexes: Vec<usize> = reads.iter().map(|(text, _)| *text).collect();
+                    jobs.extend(CountPlan::alone(mode, &wanted, &indexes, &ctx, &notetypes));
+                    continue;
+                }
                 // A statement the database refuses: its counts stay unknown.
                 Err(error) => {
                     tracing::warn!(%error, "a filter count statement failed");

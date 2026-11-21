@@ -46,7 +46,7 @@ fn names() -> NameIndex {
     let types: [(i64, &str, &[&str], &[&str]); 3] = [
         (100, "Basic", &["Front", "Back"], &["Card 1"]),
         (101, "Kaishi", &["Word", "Meaning", "Extra Info"], &["Recognition", "Recall"]),
-        (102, "Odd", &["my:field", "Deck"], &["7", "Card 1", "Card 2"]),
+        (102, "Odd", &["my:field", "Deck"], &["7", "Card 1", "Card 2", "65536"]),
     ];
     names.set_notetypes(
         types
@@ -176,6 +176,8 @@ fn templates_follow_the_scope() {
     let all = at_end("card:");
     assert_eq!(labels(&all)[..4], ["card:", "1", "2", "3"]);
     assert!(!labels(&all)[4..].contains(&"7".to_owned()));
+    // `card:65536` reads as a name, not an ordinal: it is offered.
+    assert_eq!(labels(&at_end("card:655")), ["card:655", "65536"]);
     // An OR between runs: the other run's note: term does not scope.
     let or = at_end("note:Basic or card:Rec");
     assert_eq!(labels(&or), ["card:Rec", "Recall", "Recognition"]);

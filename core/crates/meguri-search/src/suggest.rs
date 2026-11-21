@@ -13,7 +13,7 @@ use meguri_text::normalize::nfc;
 use crate::ast::{NodeKind, Term};
 use crate::builder::{BuiltItem, build, escape_name, search_field_text};
 use crate::canonical::{canonical_text, quoted};
-use crate::filter_tokens::{DeckValue, NotetypeValue, Value, card_type_text};
+use crate::filter_tokens::{DeckValue, NotetypeValue, Value};
 use crate::fold::simple_fold;
 use crate::lexer::{Form, Lexer};
 use crate::name_index::{NameIndex, NotetypeNames};
@@ -215,7 +215,10 @@ pub fn suggest(
         return Ok(Vec::new());
     }
     let text = search_field_text(text);
-    let mut out = Ranked::default();
+    let mut out = Ranked {
+        recent_names: recent_names(recent),
+        ..Ranked::default()
+    };
     if text.chars().all(crate::lexer::is_white_space) {
         // The empty field: every saved search, replacing the whole text.
         for saved in names.saved_searches() {
@@ -314,7 +317,7 @@ pub fn suggest(
             }
             for (name, _) in template_names(&scope) {
                 if let Some(class) = matcher.substring(&name)
-                    && let Some(insert) = card_type_text(&name)
+                    && let Some(insert) = template_text(&name)
                 {
                     out.name(class, 0, candidate(CandidateKind::Template, &name, None, range.clone(), insert, true));
                 }
@@ -447,6 +450,8 @@ struct Ranked<'n> {
     /// searches 1), in each source's name order; each made only when the
     /// list needs it (a deck or tag's insert text is built then).
     names: Vec<(Class, u8, Lazy<'n>)>,
+    /// What the recent texts name ([`recent_names`]).
+    recent_names: HashSet<String>,
 }
 
 /// A name candidate, or what makes it (a deck gives its `Name::*` too),
@@ -501,7 +506,7 @@ impl<'n> Ranked<'n> {
     /// class; recent ones first inside each group; cut at `limit`. A deck or
     /// tag past the limit is made only when a recent text names it.
     fn finish(self, recent: &[String], limit: usize) -> Vec<Candidate> {
-        let recent_names = recent_names(recent);
+        let recent_names = &self.recent_names;
         let rank = |candidate: &Candidate| {
             candidate
                 .insert
@@ -520,7 +525,7 @@ impl<'n> Ranked<'n> {
         for class in [Class::Prefix, Class::Inner] {
             let mut group: Vec<Candidate> = Vec::new();
             while let Some((_, _, lazy)) = names.next_if(|(c, _, _)| *c == class) {
-                if out.len() + group.len() >= limit && !lazy.may_be_recent(&recent_names) {
+                if out.len() + group.len() >= limit && !lazy.may_be_recent(recent_names) {
                     continue;
                 }
                 group.extend(lazy.make());
@@ -537,6 +542,9 @@ impl<'n> Ranked<'n> {
 /// that reads as one `deck:` or `tag:` term in normal mode gives its exact
 /// text; a `did:` list gives [`BY_IDS`], which every deck answers to.
 const BY_IDS: &str = "\u{0}did";
+/// What a `tag:re:` text gives: J3.2 writes a tag holding other White_Space
+/// that way.
+const BY_REGEX: &str = "\u{0}re";
 
 fn recent_names(recent: &[String]) -> HashSet<String> {
     let mut names = HashSet::new();
@@ -555,6 +563,13 @@ fn recent_names(recent: &[String]) -> HashSet<String> {
                 mode: crate::ast::TextMode::Normal,
                 text,
             }) => text,
+            NodeKind::Term(Term::Tag {
+                mode: crate::ast::TextMode::Regex,
+                ..
+            }) => {
+                names.insert(BY_REGEX.to_owned());
+                continue;
+            }
             _ => continue,
         };
         names.insert(simple_fold(&pattern::exact_text(value)));
@@ -677,6 +692,21 @@ fn starts_with_ascii_folded(word: &str, typed: &str) -> bool {
     word.len() >= typed.len() && word.is_char_boundary(typed.len()) && word[..typed.len()].eq_ignore_ascii_case(typed)
 }
 
+/// D6.6: a template name's insert text, Q(`card:` + E(s)), when it reads
+/// back as a template-name term holding that name (not a number).
+fn template_text(name: &str) -> Option<String> {
+    if name.is_empty() || name.chars().any(crate::builder::splits_a_term) {
+        return None;
+    }
+    let escaped = escape_name(name);
+    let text = crate::canonical::term_text(&Term::Template(crate::ast::TemplateRef::Name(escaped.clone())));
+    let query = parse(&text).ok()?;
+    match &query.node(query.root()).kind {
+        NodeKind::Term(Term::Template(crate::ast::TemplateRef::Name(read))) if *read == escaped => Some(text),
+        _ => None,
+    }
+}
+
 /// D6.6: a field key's insert text, Q(f′ + `:`); `None` for a field J3.3
 /// refuses.
 fn field_key_text(field: &str) -> Option<String> {
@@ -762,11 +792,14 @@ fn decks<'n>(out: &mut Ranked<'n>, names: &'n NameIndex, value: &str, matcher: &
             continue;
         };
         let range = range.clone();
-        let shown = vec![
-            simple_fold(&deck.name),
-            simple_fold(&format!("{}::*", deck.name)),
-            BY_IDS.to_owned(),
-        ];
+        let mut shown = vec![simple_fold(&deck.name), simple_fold(&format!("{}::*", deck.name))];
+        // Only a deck J3.5 writes by its ids answers to a recent `did:`.
+        if out.recent_names.contains(BY_IDS)
+            && (deck.native.split('\u{1f}').any(|level| level.contains("::"))
+                || crate::builder::build_query(&BuiltItem::Deck(deck.name.clone())).is_err())
+        {
+            shown.push(BY_IDS.to_owned());
+        }
         out.lazy(class, 0, shown, move || {
             let Some(value) = DeckValue::of(names, deck.id) else { return Vec::new() };
             let Some(item) = Value::Deck(value).item() else { return Vec::new() };
@@ -793,7 +826,11 @@ fn tags<'n>(out: &mut Ranked<'n>, names: &'n NameIndex, value: &str, matcher: &M
             continue;
         };
         let range = range.clone();
-        out.lazy(class, 0, vec![simple_fold(tag)], move || match build(&BuiltItem::Tag(tag.clone())) {
+        let mut shown = vec![simple_fold(tag)];
+        if tag.chars().any(crate::builder::splits_a_term) {
+            shown.push(BY_REGEX.to_owned());
+        }
+        out.lazy(class, 0, shown, move || match build(&BuiltItem::Tag(tag.clone())) {
             Ok(insert) => vec![candidate(CandidateKind::Tag, tag, None, range, insert, true)],
             Err(_) => Vec::new(),
         });
@@ -911,8 +948,11 @@ struct Frame {
 fn scan(text: &str, cursor: usize, names: Option<&NameIndex>) -> Scanned {
     let lexer = Lexer::new(text);
     let lead = lexer.input_range(0..0).start;
+    // An unclosed group is reported at its `(` once everything after it
+    // was read: every item counts then.
     let cutoff = match parse(text) {
         Ok(_) => usize::MAX,
+        Err(error) if matches!(error.kind(), crate::error::ErrorKind::UnclosedGroup) => usize::MAX,
         Err(error) => error.range().start,
     };
     let mut frames = vec![Frame {

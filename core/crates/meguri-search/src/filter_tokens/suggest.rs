@@ -267,7 +267,8 @@ pub struct SuggestRequest<'a> {
 /// T12: the rows for `request`, in display order.
 pub fn suggest(names: &NameIndex, labels: &Labels, request: &SuggestRequest<'_>) -> Result<Vec<SuggestionRow>, InvalidOffset> {
     let text = &request.query.text;
-    let chars: Vec<char> = text.chars().collect();
+    // J2: U+001C to U+001F are spaces here too (one character for one).
+    let chars: Vec<char> = crate::builder::search_field_text(text).chars().collect();
     if request.caret > chars.len() {
         return Err(InvalidOffset);
     }

@@ -282,6 +282,39 @@ impl CountPlan {
 /// alone for Notes mode (matched to the notes read for the other items).
 type Shape = (Rows, bool);
 
+impl CountPlan {
+    /// A count-only search for each of `indexes` of `texts`: the texts of a
+    /// shared statement the database refused, so one failing predicate
+    /// (a stored name making `deck:current`'s expression fail) hides no
+    /// other count. A text that does not plan is left out.
+    pub fn alone(
+        mode: SearchMode,
+        texts: &[CountText<'_>],
+        indexes: &[usize],
+        ctx: &SearchContext,
+        notetypes: &SearchNotetypes,
+    ) -> Vec<CountJob> {
+        indexes
+            .iter()
+            .filter_map(|index| {
+                let query = parse(texts.get(*index)?.text).ok()?;
+                search_job(*index, &query, mode, ctx, notetypes)
+            })
+            .collect()
+    }
+}
+
+impl CountJob {
+    /// Whether the job is one statement shared by several texts.
+    pub fn is_shared(&self) -> bool {
+        match self {
+            CountJob::Columns { texts, .. } => texts.len() > 1,
+            CountJob::NoteColumns(columns) => columns.texts.len() > 1,
+            _ => false,
+        }
+    }
+}
+
 /// The count-only search of one text (T12.4).
 fn search_job(
     index: usize,
@@ -341,7 +374,11 @@ fn columns_job(
             .collect();
         return (
             Some(CountJob::NoteColumns(NoteColumns {
-                sql: format!("SELECT c.nid, {} FROM cards c", columns.join(", ")),
+                // A card whose `nid` is not an integer has no note to join.
+                sql: format!(
+                    "SELECT c.nid, {} FROM cards c WHERE typeof(c.nid) = 'integer'",
+                    columns.join(", ")
+                ),
                 params: params.into_vec(),
                 texts,
                 reads,
@@ -622,9 +659,18 @@ impl DeckCounts {
     /// pair's note and decks (Notes). Grouped here, not by SQLite's sorter.
     pub fn sql(&self) -> &'static str {
         match self.mode {
-            SearchMode::Cards => "SELECT c.did, c.odid FROM cards c",
+            // A deck reference that is not an integer names no deck: it
+            // reads as i64::MIN, which no deck item holds.
+            SearchMode::Cards => {
+                "SELECT CASE WHEN typeof(c.did) = 'integer' THEN c.did ELSE -9223372036854775808 END, \
+                 CASE WHEN typeof(c.odid) = 'integer' THEN c.odid ELSE -9223372036854775808 END FROM cards c"
+            }
             // Matched to the notes that exist as it is read.
-            SearchMode::Notes => "SELECT c.nid, c.did, c.odid FROM cards c",
+            SearchMode::Notes => {
+                "SELECT c.nid, CASE WHEN typeof(c.did) = 'integer' THEN c.did ELSE -9223372036854775808 END, \
+                 CASE WHEN typeof(c.odid) = 'integer' THEN c.odid ELSE -9223372036854775808 END \
+                 FROM cards c WHERE typeof(c.nid) = 'integer'"
+            }
         }
     }
 
@@ -792,7 +838,9 @@ impl NoteCounts {
     /// notes.
     pub fn cards_sql(&self) -> Option<&'static str> {
         match self.mode {
-            SearchMode::Cards => Some("SELECT c.nid, count(*) FROM cards c GROUP BY c.nid"),
+            SearchMode::Cards => Some(
+                "SELECT c.nid, count(*) FROM cards c WHERE typeof(c.nid) = 'integer' GROUP BY c.nid",
+            ),
             SearchMode::Notes => None,
         }
     }
