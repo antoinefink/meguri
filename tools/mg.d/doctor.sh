@@ -179,11 +179,13 @@ mg__doctor_mac_input() {
 # own (mg_cargo_target_for in tools/mg), or one checkout's cargo run replays
 # another's build output: they all mount at /work.
 mg__doctor_cargo_targets() {
-  local want="${MG_CARGO_TARGET_REQUESTED:-}" here field checkout shared="" n=0 i j count first second note=""
+  local want="${MG_CARGO_TARGET_REQUESTED:-}" here field checkout shared="" n=0 i j count first second note="" listed=true
+  local list="$MG_RUN_DIR/worktrees.z"
   local targets=() checkouts=()
   here="$(mg_cargo_target_for "$MG_ROOT" "$want")"
   mg__doctor_env docker_cargo_target "$here"
   # NUL-separated records: a worktree path may hold any character.
+  git -C "$MG_ROOT" worktree list --porcelain -z >"$list" 2>/dev/null || listed=false
   while IFS= read -r -d '' field; do
     case "$field" in worktree\ *) checkout="${field#worktree }" ;; *) continue ;; esac
     [ -d "$checkout" ] || continue
@@ -191,7 +193,8 @@ mg__doctor_cargo_targets() {
     targets[$n]="$(mg_cargo_target_for "$checkout" "$want")"
     checkouts[$n]="$checkout"
     n=$((n + 1))
-  done < <(git -C "$MG_ROOT" worktree list --porcelain -z 2>/dev/null)
+  done <"$list"
+  rm -f "$list"
   # "<count> checkouts share <target> (<first>, <second>, ...)" per shared target.
   i=0
   while [ "$i" -lt "$n" ]; do
@@ -215,7 +218,9 @@ mg__doctor_cargo_targets() {
     [ "$note" = '?' ] && note="is not an absolute path" || note="belongs to $note"
     note=" (MEGURI_DOCKER_CARGO_TARGET $note; ignored here)"
   fi
-  if [ -n "$shared" ]; then
+  if [ "$listed" = false ] || [ "$n" -eq 0 ]; then
+    mg__doctor_check cargo-target warn "this checkout builds in ${here#*:}$note; git could not list this repository's worktrees, so shared targets were not checked"
+  elif [ -n "$shared" ]; then
     mg__doctor_check cargo-target warn "$shared: their Docker cargo runs can replay each other's builds; give each checkout its own MEGURI_DOCKER_CARGO_TARGET or unset it"
   else
     mg__doctor_check cargo-target pass "this checkout builds in ${here#*:}$note; $n checkouts, $n separate targets"
