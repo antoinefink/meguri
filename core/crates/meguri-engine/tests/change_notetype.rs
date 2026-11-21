@@ -1102,3 +1102,26 @@ fn a_change_to_the_same_note_type_reports_reason_six() {
     assert_eq!(report.reasons, [StructureReason::NotesNotetypeChanged].into());
     assert!(report.type_changes.is_empty());
 }
+
+/// M1 allows a field map that names one old field twice (R945). Between two
+/// note types, the storage structure report refuses a repeated origin in a
+/// `type_changes` field map, so such a change fails as an internal error
+/// and writes nothing (see the PR: a decision is needed). To the same note
+/// type it commits, since no `type_changes` entry is reported.
+#[test]
+fn a_repeated_field_map_between_two_note_types_writes_nothing() {
+    let (h, _) = harness();
+    let pair = pair(&h);
+    let duo = duo(&h);
+    let a = add(&h.collection, pair, &["a", "b"]);
+    let read = info(&h, &[a], duo).unwrap();
+    let before = rows(&h);
+    let undo = undo_name(&h);
+    let e = run(&h, mapped(&read, &[a], vec![Some(0), Some(0)], Some(vec![Some(0), None]))).unwrap_err();
+    assert!(matches!(e, EngineError::Storage(_)), "{e:?}");
+    assert_eq!(rows(&h), before);
+    assert_eq!(undo_name(&h), undo);
+    let read = info(&h, &[a], pair).unwrap();
+    run(&h, mapped(&read, &[a], vec![Some(0), Some(0)], Some(vec![Some(0)]))).unwrap();
+    assert_eq!(note(&h, a).fields, "a\u{1f}a");
+}
