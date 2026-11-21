@@ -3105,17 +3105,6 @@
         }
       }
     },
-    "sync.meguri.setup.collectionDone": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The collection transferred. Syncing starts when the media finishes."
-          }
-        }
-      }
-    },
     "sync.meguri.status.acceptedLocalIncomplete.title": {
       "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
       "localizations": {
@@ -3389,39 +3378,6 @@
                 }
               }
             }
-          }
-        }
-      }
-    },
-    "sync.meguri.media.unverified": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Meguri couldn’t confirm which media files transferred."
-          }
-        }
-      }
-    },
-    "sync.meguri.media.setupWaits": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Syncing starts after every media file transfers."
-          }
-        }
-      }
-    },
-    "sync.meguri.media.study": {
-      "comment": "Approved sync/status-strings T18; shown only for the corresponding local or typed Core fact.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "You can keep studying on this device."
           }
         }
       }
@@ -4922,6 +4878,50 @@
           "stringUnit": {
             "state": "translated",
             "value": "Transferring the media didn’t finish, so syncing hasn’t started."
+          }
+        }
+      }
+    },
+    "sync.meguri.status.downloadingMedia.title": {
+      "comment": "Approved sync/status-strings (changed 2026-11-21, resume fix); shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloading Media…"
+          }
+        }
+      }
+    },
+    "sync.switch.busy.media": {
+      "comment": "Approved sync/status-strings (changed 2026-11-21, resume fix); shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can change the sync service after the media finishes."
+          }
+        }
+      }
+    },
+    "sync.switch.busy.mediaDownload": {
+      "comment": "Approved sync/status-strings (changed 2026-11-21, resume fix); shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can change the sync service after the media download finishes."
+          }
+        }
+      }
+    },
+    "sync.meguri.now.unavailable.setup": {
+      "comment": "Approved sync/status-strings (changed 2026-11-21, resume fix); shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available when setup finishes."
           }
         }
       }

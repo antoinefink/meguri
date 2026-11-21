@@ -89,8 +89,12 @@ import Testing
         // MP6.5: files done over done plus left, the same value as the Account row.
         #expect(sync.meguriProgressValue == .fraction(18_945.0 / 44_000.0))
         #expect(sync.panelProgress == .fraction(18_945.0 / 44_000.0))
-        #expect(sync.panelFilesLeft == 25_055)
-        #expect(sync.mainStatus.titleKey == "sync.meguri.status.transferringMedia.title")
+        // Resume fix: the count is in the status sentence, so no files line repeats it.
+        #expect(sync.panelFilesLeft == nil)
+        #expect(sync.mainStatus.titleKey == "sync.meguri.status.downloadingMedia.title")
+        #expect(sync.mainStatus.detailKey == "sync.meguri.media.left" && sync.mainStatus.detailCount == 25_055)
+        #expect(sync.serviceChangeBusyKey == "sync.switch.busy.mediaDownload")
+        #expect(SyncCoordinator.renderFixture(.meguriConnected).serviceChangeBusyKey == "sync.switch.busy")
         #expect(sync.mainStatus.symbol == SyncSymbol.moving)
         // A blocked provider stops the bar (MP6.5).
         let blocked = SyncCoordinator.renderFixture(.meguriBlocked)

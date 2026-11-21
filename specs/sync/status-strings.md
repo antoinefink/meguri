@@ -871,6 +871,8 @@ Decided by Antoine on 2026-11-19 (`docs/design/decisions.md`: `settings.root`, `
 | `sync.service.settingUp` | Setting Up… | under the control from the choice until the first durable step of setup (V27.2) or the end of preparation (MP6.3); with `sync.service.cancel` |
 | `sync.service.opFirst` | Finish or cancel the collection replacement before you change the service. | under the control when V27.5 refuses the change |
 | `sync.switch.busy` (T18.2) | | under the control when MP3 step 1 refuses the change |
+| `sync.switch.busy.mediaDownload` | You can change the sync service after the media download finishes. | in place of `sync.switch.busy` while setup's media step runs and files are left to download (changed 2026-11-21 (resume fix)) |
+| `sync.switch.busy.media` | You can change the sync service after the media finishes. | the same, with no files left to download recorded |
 | `sync.recovery.error.sessionActive` (T13.6) | | under the control when iCloud is chosen during a review session (V27.2) |
 
 The values are in the order Off, Meguri Sync, iCloud. A choice made while the value is Off opens no confirmation (T18.1). Every other change opens the `sync.serviceSwitch` sheet once; its lines are T18.2's, in T18.2's order, with these keys added:
@@ -1073,6 +1075,7 @@ The same four rules make the main status. The first condition that applies decid
 | setup preparing | none | `sync.meguri.status.preparing.title`, `sync.meguri.setup.preparing` | `sync.meguri.cancel` |
 | setup preview | none; `sync.keepCollection` is open | | |
 | setup transferring the collection, transferring media | none | T18.5 | |
+| setup transferring media (changed 2026-11-21 (resume fix): in place of T18.5's row) | none | title `sync.meguri.status.downloadingMedia.title`: Downloading Media…, while files are left to download, otherwise `sync.meguri.status.transferringMedia.title`; detail `sync.meguri.media.left` with the files left, or `sync.meguri.media.left.unknown`, as for the paused row below. T18.5's `sync.meguri.setup.collectionDone` and its following `sync.meguri.media.filesLeft` line are not shown | |
 | setup acceptance unknown | waiting | `sync.meguri.setup.acceptanceUnknown` | `sync.recovery.tryAgain`: runs MP6.9's settling step (decided 2026-11-19 (review F4)) |
 | setup or round media blocked | issues | `sync.meguri.media.notTransferred` as the row that opens Affected Files (T18.6), in place of `sync.issues.row`; `sync.meguri.media.blocked` as the status detail | `sync.meguri.media.retry`, in the list |
 | setup media paused: the media step stopped before it finished and continues by itself (`sync/meguri-provider#MP6.5`; changed 2026-11-21 (resume fix)) | waiting | title `sync.meguri.status.downloadPaused.title`: Media Download Paused, while files are left to download as last recorded, otherwise `sync.meguri.status.transferPaused.title`: Media Transfer Paused; detail `sync.meguri.media.left`: `%lld media file is left. Syncing starts when it finishes.` / `%lld media files are left. Syncing starts when they finish.`, with the files left the core recorded, or `sync.meguri.media.left.unknown`: Syncing starts when the media finishes., when none is recorded | `sync.recovery.tryAgain`: runs the media step now |
@@ -1140,6 +1143,7 @@ The same four rules make the main status. The first condition that applies decid
 | Meguri Sync: Sign In Required | `sync.meguri.now.unavailable.signIn.sync` | Sign in to Meguri Sync in Sync settings to sync. |
 | Meguri Sync: handoff recovery, or provider or connection blocked | `sync.meguri.now.unavailable.stopped.sync` | Meguri Sync is stopped. Open Sync settings to see what to do. |
 
+- Changed 2026-11-21 (resume fix). While Meguri Sync's setup has not finished, Sync Now is disabled with no reason line; on the Mac its help tag is `sync.meguri.now.unavailable.setup`: Available when setup finishes., in the Sync section and the panel.
 - The reason `paused` no longer exists for either service (P25.2, MP6.2). During the update hold Sync Now is available, and choosing it ends the hold.
 - T18.7's rows that open Account & Sync open the Sync section. For "round failed, full sync required" the popover shows the status action `sync.decision.action` in place of `sync.meguri.now.chooseCollection`.
 - Every other row of T6 and T18.7 is unchanged.
@@ -1164,6 +1168,7 @@ The same four rules make the main status. The first condition that applies decid
 | T18.4 | `sync.meguri.status.connectionBlocked.detail`, `sync.meguri.status.paused.title`, `.paused.detail`, `sync.meguri.status.on.title`, `sync.meguri.lastExchange`, `sync.meguri.status.pending.title`, `.pending.detail`, `sync.meguri.status.syncingCollection.title`, `sync.meguri.status.syncingMedia.title`, `sync.meguri.status.signInRequired.detail`, `sync.meguri.round.fullSyncRequired`, `sync.meguri.round.cancelled` |
 | T18.5 | `sync.meguri.setup.choose`, `.useDevice`, `.useServer`, `.download.detail`, `.download`, `.review`, `sync.meguri.setup.error.cancelled`, `sync.meguri.preview.title.download`, `.direction.download`, `.confirm.download` |
 | T18.7 | `sync.meguri.now.unavailable.paused`, `.signIn`, `.stopped`, `sync.meguri.pause`, `sync.meguri.resume`, `sync.meguri.now.chooseCollection` |
+| T18.5, T18.6 (changed 2026-11-21 (resume fix): one explanation in the status row) | `sync.meguri.setup.collectionDone`, `sync.meguri.media.unverified`, `sync.meguri.media.setupWaits`, `sync.meguri.media.study` |
 
 - Every key of the table above is removed from the catalog when T19 ships, except the T13.4 and T13.6 row (decided 2026-11-19 (review F12)). `sync.service.blocked` (T18.2) is not on the list: it stays in use as the line under the picker, and only the needs-you sentence is `sync.needsYou.blocked` (decided 2026-11-19 (re-review R3)).
 - Still used, though their flow changed: `sync.connect.upload.*` and `sync.connect.useICloud.*` (T19.3, one direction only); `sync.service.iCloud` (the old service's name in the `sync.serviceSwitch` lines); `sync.decision.action`, `.action.label` and `.unsentInBackup`; the `useDevice` and `useServer` preview keys of T18.5 (Troubleshooting); `sync.status.needsAttention.title`; the T9.1 texts that T19.4 names.
@@ -1185,7 +1190,7 @@ Changed 2026-11-21 (round 10). Decided by Antoine on 2026-11-20 (`docs/design/de
 |---|---|---|
 | status line | the main status's title (T19.4 rule 1 or 2; T19.5) | always |
 | sentence | the Text column of T19.4 or T19.5 for the row that applies, or, where T19.4 rule 2 applies, the T3 detail of the state; for an up-to-date status `sync.status.upToDate.detail` with its instant (MP6.6) | when the status has a detail that differs from the title |
-| files left | `sync.meguri.media.filesLeft`: `%lld media file left` / `%lld media files left` | under the bar, while media transfers and a count is known: Meguri Sync's setup media step (its files left); iCloud's `syncingMedia` (its upload and download files) |
+| files left | `sync.meguri.media.filesLeft`: `%lld media file left` / `%lld media files left` | under the bar, while media transfers and a count is known: iCloud's `syncingMedia` (its upload and download files). Changed 2026-11-21 (resume fix): not for Meguri Sync, whose status sentence carries its files left (T19.5) |
 | issues | `sync.issues.row`, or `sync.meguri.media.notTransferred` for Meguri Sync's media-blocked row (T19.5) when the affected count is known, else `sync.issues.row` | while the status has issues; plain text, no link |
 | button | `sync.status.openSettings`: Sync Settings | always |
 | button | `sync.now.command`: Sync Now | in the action's place, as N23.3 says |

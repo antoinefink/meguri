@@ -247,8 +247,12 @@ import Testing
     @Test func setupMediaWithAReadableProviderShowsTheTransferNotAStop() {
         // Core now reports the setup's own closed admission as setup required, not blocked.
         let media = SyncKinds.meguri(.init(connection: .setupRequired, stage: .media))
-        #expect(!media.needsYou && media.detailKey == "sync.meguri.setup.collectionDone")
+        #expect(!media.needsYou && media.detailKey == "sync.meguri.media.left.unknown")
         #expect(media.titleKey == "sync.meguri.status.transferringMedia.title")
+        // Resume fix: files left to download name the direction, and the sentence carries the count.
+        let downloading = SyncKinds.meguri(.init(connection: .setupRequired, stage: .media, mediaFilesLeft: 4_431))
+        #expect(downloading.titleKey == "sync.meguri.status.downloadingMedia.title")
+        #expect(downloading.detailKey == "sync.meguri.media.left" && downloading.detailCount == 4_431)
         let running = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: .media, routine: nil)
         #expect(running.isBusy && !running.needsUser)
         // Unreadable metadata is the one needs-you sentence, and Sync Now says it stopped.

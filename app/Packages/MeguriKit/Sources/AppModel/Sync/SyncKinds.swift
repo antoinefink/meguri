@@ -305,7 +305,10 @@ public enum SyncKinds {
             case .preparing: return .init(nil, "sync.meguri.setup.preparing", .meguriCancel)
             case .preview: return .init(nil, nil)
             case .collection: return .init(nil, nil)
-            case .media: return .init(nil, "sync.meguri.setup.collectionDone")
+            // One sentence with the files left (resume fix), in place of "the collection transferred" and a files line.
+            case .media:
+                return facts.mediaFilesLeft.map { .init(nil, "sync.meguri.media.left", count: $0) }
+                    ?? .init(nil, "sync.meguri.media.left.unknown")
             case .acceptanceUnknown: return .init(.waiting, "sync.meguri.setup.acceptanceUnknown", .meguriTryAgain)
             case .mediaBlocked: return .init(.issues, "sync.meguri.media.blocked", .meguriRetryMedia)
             // Resume fix: it continues by itself; Try Again runs it now.
@@ -375,7 +378,8 @@ public enum SyncKinds {
             case .preparing: (busy, "sync.meguri.status.preparing.title")
             case .preview: (stopped, "sync.service.settingUp")
             case .collection: (busy, "sync.meguri.status.transferringCollection.title")
-            case .media: (busy, "sync.meguri.status.transferringMedia.title")
+            case .media:
+                (busy, facts.mediaDownloads ? "sync.meguri.status.downloadingMedia.title" : "sync.meguri.status.transferringMedia.title")
             case .mediaBlocked: (stopped, "sync.meguri.status.mediaBlocked.title")
             case .mediaPaused, .mediaStopped:
                 (stopped, facts.mediaDownloads ? "sync.meguri.status.downloadPaused.title" : "sync.meguri.status.transferPaused.title")

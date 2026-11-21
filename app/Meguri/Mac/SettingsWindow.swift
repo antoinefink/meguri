@@ -16,6 +16,24 @@ struct SettingsWindow: View {
             .modifier(PresentationHost(navigation: collection.navigation, features: features,
                 configuration: configuration, isActive: true, host: .settings))
             .modifier(LaunchEnvironment(configuration: configuration))
+            .background(SettingsToolbarStyle())
+    }
+}
+
+/// N15.5 (resume fix): SwiftUI gives the Settings scene's window the preference
+/// toolbar style, which centres the title, puts a pushed page's back button in
+/// a row under it and, once a page was pushed, moves the pane's title from the
+/// leading edge to the centre. The unified style is System Settings' own: the
+/// back control at the leading edge of the title bar, the page title beside it.
+private struct SettingsToolbarStyle: NSViewRepresentable {
+    func makeNSView(context: Context) -> WindowView { WindowView() }
+    func updateNSView(_ view: WindowView, context: Context) { view.apply() }
+    final class WindowView: NSView {
+        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); apply() }
+        func apply() {
+            guard let window, window.toolbarStyle != .unified else { return }
+            window.toolbarStyle = .unified
+        }
     }
 }
 #endif

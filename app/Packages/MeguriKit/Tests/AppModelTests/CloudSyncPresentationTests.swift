@@ -513,7 +513,6 @@ import Testing
     @Test func meguriT18CopyKeepsCollectionMediaAndUnknownEffectsDistinct() {
         #expect(SyncText.value("sync.service.none.footer") == "Choose a service to sync this collection.")
         #expect(SyncText.value("sync.meguri.signIn.footer.setup.manual") == "After you sign in, Meguri sets up syncing with this server. It asks before it replaces a collection with your cards.")
-        #expect(SyncText.value("sync.meguri.setup.collectionDone") == "The collection transferred. Syncing starts when the media finishes.")
         #expect(SyncText.value("sync.meguri.setup.finish") == "Finish Setup")
         #expect(SyncText.value("sync.keep.device") == "Keep This Device’s Collection")
         #expect(SyncText.value("sync.keep.service.meguri") == "Keep the Meguri Sync Collection")

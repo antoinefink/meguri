@@ -140,7 +140,7 @@ struct SyncStatusPanel: View {
         }
     }
     private func issuesLine(_ status: SyncMainStatus) -> String? {
-        guard status.hasIssues else { return nil }
+        guard SyncStatusCopy.showsIssues(sync) else { return nil }
         // As the Sync section's issues row reads (N15.4).
         if let key = status.issuesRowKey, let count = MeguriAffectedCount.value(sync) {
             return SyncText.format(key, Int64(clamping: count))

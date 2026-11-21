@@ -12,6 +12,16 @@ struct SyncNowButton: View {
     var disabledWhileMoving = false
     private var meguri: Bool { collection.sync.providerState?.selection == .meguri }
     private var reason: String? { SyncStatusCopy.unavailable(collection) }
+    /// T19.7 (resume fix): Mac only, a help tag says why Sync Now waits while
+    /// setup has not finished; touch shows no reason line for it.
+    private var setupHelp: String? {
+        #if os(macOS)
+        guard meguri, collection.sync.meguriStatus.route == .account("sync.meguri.setup.continue") else { return nil }
+        return SyncText.value("sync.meguri.now.unavailable.setup")
+        #else
+        nil
+        #endif
+    }
     private var available: Bool {
         // Meguri Sync runs a round only once its setup has completed (MP5).
         if meguri { return collection.sync.meguriStatus.route == .round }
@@ -22,7 +32,7 @@ struct SyncNowButton: View {
             .disabled(!SyncPanel.syncNowEnabled(available: available && collection.navigation.sheet == nil,
                 moving: disabledWhileMoving && collection.sync.panelProgress != nil))
             // N23.3: in the panel only a reason makes a help tag.
-            .help(reason ?? (disabledWhileMoving ? "" : SyncText.value("sync.now.command")))
+            .help(reason ?? setupHelp ?? (disabledWhileMoving ? "" : SyncText.value("sync.now.command")))
             .accessibilityIdentifier(identifier)
             #if DEBUG
             // Observe the actual coordinator; never query a transport from a view.
@@ -38,6 +48,14 @@ struct SyncNowButton: View {
 }
 
 enum SyncStatusCopy {
+    /// The issues row and the panel's issues line: an issue beside the state.
+    /// Meguri Sync's media-blocked row shows only with the files it lists.
+    @MainActor static func showsIssues(_ sync: SyncCoordinator) -> Bool {
+        let status = sync.mainStatus
+        guard status.hasIssues else { return false }
+        guard status.issuesRowKey != nil else { return true }
+        return (MeguriAffectedCount.value(sync) ?? 0) > 0
+    }
     /// The main status's detail as the Sync section's status row and the panel show it.
     @MainActor static func detail(_ sync: SyncCoordinator, now: Date) -> String? {
         let status = sync.mainStatus

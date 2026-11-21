@@ -806,11 +806,6 @@ public final class SyncCoordinator {
         let left = meguriMediaProgress?.awaiting ?? meguriReceipt?.media.awaiting ?? 0
         return left > 0 ? left : nil
     }
-    /// The setup's media files left, while its media step runs and nothing stopped it.
-    public var meguriMediaFilesLeft: UInt64? {
-        guard meguriStage == .media, !providerNeedsAttention else { return nil }
-        return meguriMediaProgress?.awaiting
-    }
     /// N23.1: the status panel's one bar, from the same status as the Sync section.
     public var panelProgress: SyncPanel.Progress? {
         let status = self.status
@@ -819,10 +814,11 @@ public final class SyncCoordinator {
             setupValue: meguriProgressValue,
             meguriMoving: meguriAuthenticating || (meguriStage == nil && meguriRoutine == .exchanging), cloudState: shown)
     }
-    /// N23.1: the files line under the bar, while media transfers and a count is known.
+    /// N23.1: the files line under the bar, while iCloud's media transfers and a
+    /// count is known. Meguri Sync's status sentence carries its count (resume fix).
     public var panelFilesLeft: UInt64? {
         guard panelProgress != nil else { return nil }
-        if providerState?.selection == .meguri { return meguriMediaFilesLeft }
+        if providerState?.selection == .meguri || providerNeedsAttention { return nil }
         let shown = status?.state == .needsAttention ? status?.stateWithoutAttention : status?.state
         guard shown == .syncingMedia, let media = status?.media,
               let upload = media.uploadFiles, let download = media.downloadFiles else { return nil }
@@ -945,6 +941,13 @@ public final class SyncCoordinator {
     public private(set) var meguriCancelling = false
     var meguriCollectionWorkHeld: Bool {
         meguriPreview != nil || meguriSetupPreview != nil || meguriStage == .preparing || meguriStage == .collection
+    }
+    /// The reason under the Service control while a change must wait: the
+    /// setup media step names itself (resume fix), anything else keeps the
+    /// review-or-collection-change sentence.
+    public var serviceChangeBusyKey: String {
+        guard meguriStage == .media else { return "sync.switch.busy" }
+        return meguriSetupMediaLeft != nil ? "sync.switch.busy.mediaDownload" : "sync.switch.busy.media"
     }
     public var serviceChangeAvailable: Bool {
         providerChangeAllowed() && !providerActionInProgress && !meguriBusy && !suspended && !replacing
