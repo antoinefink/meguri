@@ -184,7 +184,7 @@ extension EventTests {
             do {
                 capacity.bytes.withLock { $0 = 0 }
                 defer { capacity.bytes.withLock { $0 = .max } }
-                let refused = try await decks.startDeleteDecks(ids: [deck.id])
+                let refused = try await decks.startDeleteDecks(ids: [deck.id], confirmed: beforeDelete)
                 let outcome = await refused.job.outcome()
                 guard case .failed(.internal(let detail)) = outcome else {
                     Issue.record("Expected deletion to stop at the real safety backup: \(outcome)")
@@ -215,7 +215,7 @@ extension EventTests {
             #expect(cardBeforeDelete.cardId == note.cards[0] && cardBeforeDelete.noteId == note.id)
             #expect(cardBeforeDelete.flag == 5)
             let backupNamesBeforeDelete = Set(try FileManager.default.contentsOfDirectory(atPath: backups.path))
-            let deletingDeck = try await decks.startDeleteDecks(ids: [deck.id])
+            let deletingDeck = try await decks.startDeleteDecks(ids: [deck.id], confirmed: beforeDelete)
             let deletedDeck = try await deletingDeck.value()
             #expect(deletedDeck.deleted == beforeDelete)
             #expect(deletedDeck.summary.generation == generationBeforeDelete)

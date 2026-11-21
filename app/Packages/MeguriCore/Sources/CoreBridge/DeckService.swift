@@ -76,7 +76,10 @@ public protocol DeckService: Sendable {
     func collapseDecks(ids: [Int64], scope: DeckCollapseScope, collapsed: Bool) async throws(BridgeError) -> MutationSummary
     func selectDeck(id: Int64) async throws(BridgeError) -> MutationSummary
     func deckDeletionSummary(ids: [Int64]) async throws(BridgeError) -> DeckDeletionSummary
-    func startDeleteDecks(ids: [Int64]) async throws(BridgeError) -> CoreDeckDeletionJob
+    /// `decks/decks` D8. `confirmed` is the last summary read before the
+    /// delete; a live count above it refuses with `.deckRefused(.lossesChanged)`
+    /// and writes nothing (D8 step 6).
+    func startDeleteDecks(ids: [Int64], confirmed: DeckDeletionSummary) async throws(BridgeError) -> CoreDeckDeletionJob
     func treeWithCounts() async throws(BridgeError) -> CountedDeckTree
     func studyState(deckID: Int64) async throws(BridgeError) -> ReviewDeckStudyState
     func descriptionHTML(deckID: Int64) async throws(BridgeError) -> String
@@ -197,10 +200,11 @@ extension CoreDeckService {
     public func deckDeletionSummary(ids: [Int64]) async throws(BridgeError) -> DeckDeletionSummary {
         try await QueryLane.shared.call(.deckDeletionSummary) { DeckDeletionSummary(try MeguriCoreBindings.deckDeletionSummary(ids: ids)) }
     }
-    public func startDeleteDecks(ids: [Int64]) async throws(BridgeError) -> CoreDeckDeletionJob {
+    public func startDeleteDecks(ids: [Int64], confirmed: DeckDeletionSummary) async throws(BridgeError) -> CoreDeckDeletionJob {
         try await CoreEventStream.shared.start()
         return try await MaintenanceLane.shared.call(.startDeleteDecks) {
-            let raw = try MeguriCoreBindings.startDeleteDecks(ids: ids)
+            let raw = try MeguriCoreBindings.startDeleteDecks(
+                ids: ids, confirmed: MeguriCoreBindings.DeckDeletionSummary(decks: confirmed.decks, cards: confirmed.cards))
             return CoreDeckDeletionJob(job: try Jobs.track(raw.handle), raw: raw.result)
         }
     }

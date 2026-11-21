@@ -24,7 +24,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckDeletion
         var reads: [[Int64]] = [], deletes: [[Int64]] = []
         model.readSummary = { reads.append($0); return DeckDeletionSummary(decks: 1, cards: 0) }
-        model.deleteDecks = { deletes.append($0); return deletion(removed: [$0[0]]) }
+        model.deleteDecks = { ids, _ in deletes.append(ids); return deletion(removed: [ids[0]]) }
         model.delete(deckID: deck)
         #expect(model.busy)
         await model.waitForCompletion()
@@ -36,7 +36,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckDeletion
         var reads = 0, deletes: [[Int64]] = []
         model.readSummary = { _ in reads += 1; return DeckDeletionSummary(decks: 2, cards: 5) }
-        model.deleteDecks = { deletes.append($0); return deletion(removed: [1, 2]) }
+        model.deleteDecks = { ids, _ in deletes.append(ids); return deletion(removed: [1, 2]) }
         model.delete(deckID: 1)
         await model.waitForCompletion()
         let question = try #require(model.confirmation)
@@ -56,7 +56,7 @@ import Testing
         var summaries = [DeckDeletionSummary(decks: 1, cards: 1), .init(decks: 1, cards: 3), .init(decks: 1, cards: 3)]
         var deletes = 0
         model.readSummary = { _ in summaries.removeFirst() }
-        model.deleteDecks = { deletes += 1; return deletion(removed: $0) }
+        model.deleteDecks = { ids, _ in deletes += 1; return deletion(removed: ids) }
         model.delete(deckID: 2)
         await model.waitForCompletion()
         #expect(model.confirmation?.message == .oneCard && model.confirmation?.name == "Child")
@@ -72,7 +72,7 @@ import Testing
         var summaries = [DeckDeletionSummary(decks: 1, cards: 2), .init(decks: 1, cards: 0)]
         var deletes = 0
         model.readSummary = { _ in summaries.removeFirst() }
-        model.deleteDecks = { deletes += 1; return deletion(removed: $0) }
+        model.deleteDecks = { ids, _ in deletes += 1; return deletion(removed: ids) }
         model.delete(deckID: 2); await model.waitForCompletion()
         model.confirm(); await model.waitForCompletion()
         #expect(deletes == 1 && model.confirmation == nil)
@@ -82,7 +82,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckDeletion
         var deletes = 0
         model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 1) }
-        model.deleteDecks = { deletes += 1; return deletion(removed: $0) }
+        model.deleteDecks = { ids, _ in deletes += 1; return deletion(removed: ids) }
         owner.navigation.openDeckPage(DeckID(2))
         model.delete(deckID: 2); await model.waitForCompletion()
         model.cancel()
@@ -99,7 +99,7 @@ import Testing
     @Test func aReplacedCollectionDiscardsAnInFlightResult() async {
         let owner = await makeOwner(), model = owner.deckDeletion, gate = DeletionGate()
         model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 0) }
-        model.deleteDecks = { _ in await gate.hold(); throw BridgeError.internal("late") }
+        model.deleteDecks = { _, _ in await gate.hold(); throw BridgeError.internal("late") }
         owner.navigation.openDeckPage(DeckID(3))
         model.delete(deckID: 3); await gate.entered()
         owner.receiveLifecycle(.ready(generation: 12))
@@ -112,7 +112,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckDeletion
         model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 0) }
         // Only the deck's own row is reported removed; the subtree comes from the tree.
-        model.deleteDecks = { deletion(removed: [$0[0]]) }
+        model.deleteDecks = { ids, _ in deletion(removed: [ids[0]]) }
         owner.navigation.openDeckPage(DeckID(2))
         #expect(owner.navigation.sidebarSelection == .deck(DeckID(2)))
         model.delete(deckID: ancestor ? 1 : 2); await model.waitForCompletion()
@@ -124,7 +124,7 @@ import Testing
     @Test func otherDecksPagesStayAndTheEmptiedDefaultDeckLeavesItsPage() async {
         let owner = await makeOwner(), model = owner.deckDeletion
         model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 0) }
-        model.deleteDecks = { deletion(removed: $0 == [1] ? [] : $0) }
+        model.deleteDecks = { ids, _ in deletion(removed: ids == [1] ? [] : ids) }
         owner.navigation.openDeckPage(DeckID(2))
         model.delete(deckID: 3); await model.waitForCompletion()
         #expect(owner.navigation.homeDeckPage == DeckID(2))
@@ -142,7 +142,7 @@ import Testing
     func failureWritesNothingAndExplainsTheBackup(backup: Bool) async throws {
         let owner = await makeOwner(), model = owner.deckDeletion
         model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 1) }
-        model.deleteDecks = { _ in
+        model.deleteDecks = { _, _ in
             throw BridgeError.internal(backup ? "safety backup failed: SafetyBackupFailure { cause: InsufficientSpace }" : "disk I/O")
         }
         owner.navigation.openDeckPage(DeckID(2))
@@ -161,7 +161,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckDeletion
         var deletes = 0
         model.readSummary = { _ in DeckDeletionSummary(decks: 0, cards: 0) }
-        model.deleteDecks = { deletes += 1; return deletion(removed: $0) }
+        model.deleteDecks = { ids, _ in deletes += 1; return deletion(removed: ids) }
         model.delete(deckID: 2); await model.waitForCompletion()
         #expect(deletes == 0 && model.confirmation == nil && model.failure == nil)
     }
@@ -170,7 +170,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckDeletion, gate = DeletionGate()
         var deletes = 0
         model.readSummary = { _ in await gate.hold(); return DeckDeletionSummary(decks: 1, cards: 0) }
-        model.deleteDecks = { deletes += 1; return deletion(removed: $0) }
+        model.deleteDecks = { ids, _ in deletes += 1; return deletion(removed: ids) }
         model.delete(deckID: 2); await gate.entered()
         let drained = Task { await model.cancelAndDrain() }
         await Task.yield()
@@ -182,7 +182,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckDeletion
         var deletes = 0
         model.readSummary = { _ in throw BridgeError.notFound(table: .decks, key: "2") }
-        model.deleteDecks = { deletes += 1; return deletion(removed: $0) }
+        model.deleteDecks = { ids, _ in deletes += 1; return deletion(removed: ids) }
         model.delete(deckID: 2); await model.waitForCompletion()
         #expect(model.failure?.reason == .other && deletes == 0 && model.confirmation == nil)
     }
@@ -208,7 +208,7 @@ import Testing
 
         var reads = 0
         model.readSummary = { _ in reads += 1; await gate.hold(); return DeckDeletionSummary(decks: 1, cards: 0) }
-        model.deleteDecks = { deletion(removed: $0) }
+        model.deleteDecks = { ids, _ in deletion(removed: ids) }
         model.delete(deckID: 3); model.delete(deckID: 3)
         #expect(model.busy && !model.canDelete(deckID: 1))
         #expect(!owner.deckActions.canPresent(.create) && !owner.deckActions.canPresent(.rename(1)))
@@ -222,7 +222,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckDeletion
         var summaries = [DeckDeletionSummary(decks: 1, cards: 1), .init(decks: 1, cards: 2)]
         model.readSummary = { _ in summaries.removeFirst() }
-        model.deleteDecks = { deletion(removed: $0) }
+        model.deleteDecks = { ids, _ in deletion(removed: ids) }
         model.delete(deckID: 2, anchor: .row(place: "sidebar")); await model.waitForCompletion()
         #expect(model.confirmation?.anchor == .row(place: "sidebar"))
         model.confirm(); await model.waitForCompletion()
@@ -239,7 +239,7 @@ import Testing
         history.service = undo
         await history.waitForRefresh()
         model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 0) }
-        model.deleteDecks = { ids in
+        model.deleteDecks = { ids, _ in
             await gate.hold(); await undo.record("Delete Deck"); return deletion(removed: ids)
         }
         model.delete(deckID: 3); await gate.entered()
@@ -256,7 +256,7 @@ import Testing
         let owner = await makeOwner(), model = owner.deckDeletion, gate = DeletionGate()
         var deletes = 0
         model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 3) }
-        model.deleteDecks = { ids in deletes += 1; return deletion(removed: ids) }
+        model.deleteDecks = { ids, _ in deletes += 1; return deletion(removed: ids) }
         model.delete(deckID: 2); await model.waitForCompletion()
         #expect(model.confirmation != nil)
         // Another deck write starts while the question is up.
@@ -277,6 +277,66 @@ import Testing
         owner.navigation.dismissSheet()
         #expect(!owner.deckDeletion.canDelete(deckID: 3))
         gate.release(); await owner.deckActions.waitForCompletion()
+    }
+
+    /// `decks/decks` D8 step 6: the delete passes the read it acted on, and a
+    /// card that arrived after it shows the question again with the new counts.
+    @Test func lossesChangedShowsTheQuestionAgainWithTheNewCounts() async throws {
+        let owner = await makeOwner(), model = owner.deckDeletion
+        var confirmed: [DeckDeletionSummary] = []
+        model.readSummary = { _ in DeckDeletionSummary(decks: 2, cards: 5) }
+        model.deleteDecks = { ids, losses in
+            confirmed.append(losses)
+            if confirmed.count == 1 { throw BridgeError.deckRefused(.lossesChanged(decks: 2, cards: 6)) }
+            return deletion(removed: ids)
+        }
+        model.delete(deckID: 1); await model.waitForCompletion()
+        model.confirm(); await model.waitForCompletion()
+        #expect(confirmed == [DeckDeletionSummary(decks: 2, cards: 5)])
+        let again = try #require(model.confirmation)
+        #expect(again.subdecks == 1 && again.cards == 6 && again.message == .subdeckAndCards(6))
+        #expect(model.failure == nil && !model.busy)
+        // Confirming the new question rereads; a read that still differs asks.
+        model.readSummary = { _ in DeckDeletionSummary(decks: 2, cards: 6) }
+        model.confirm(); await model.waitForCompletion()
+        #expect(confirmed == [.init(decks: 2, cards: 5), .init(decks: 2, cards: 6)])
+        #expect(model.confirmation == nil && model.failure == nil)
+    }
+
+    /// A zero-card delete refused because a deck was added deletes at once with
+    /// the fresh counts; one refused with cards asks.
+    @Test(arguments: [UInt64(0), 1])
+    func aZeroCardDeleteRefusedForLossesFollowsTheNewCounts(cards: UInt64) async {
+        let owner = await makeOwner(), model = owner.deckDeletion
+        var confirmed: [DeckDeletionSummary] = []
+        model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 0) }
+        model.deleteDecks = { ids, losses in
+            confirmed.append(losses)
+            if confirmed.count == 1 { throw BridgeError.deckRefused(.lossesChanged(decks: 2, cards: cards)) }
+            return deletion(removed: ids)
+        }
+        model.delete(deckID: 2); await model.waitForCompletion()
+        #expect(model.failure == nil && !model.busy)
+        if cards == 0 {
+            #expect(confirmed == [.init(decks: 1, cards: 0), .init(decks: 2, cards: 0)])
+            #expect(model.confirmation == nil)
+        } else {
+            #expect(confirmed == [.init(decks: 1, cards: 0)])
+            #expect(model.confirmation?.message == .subdeckAndOneCard)
+        }
+    }
+
+    /// A question confirmed at 2 cards whose recheck finds none passes that
+    /// zero-card read as its confirmation (`decks/decks` D8 step 6).
+    @Test func aRecheckWithNoCardsIsWhatTheDeleteConfirms() async {
+        let owner = await makeOwner(), model = owner.deckDeletion
+        var summaries = [DeckDeletionSummary(decks: 1, cards: 2), .init(decks: 1, cards: 0)]
+        var confirmed: [DeckDeletionSummary] = []
+        model.readSummary = { _ in summaries.removeFirst() }
+        model.deleteDecks = { ids, losses in confirmed.append(losses); return deletion(removed: ids) }
+        model.delete(deckID: 2); await model.waitForCompletion()
+        model.confirm(); await model.waitForCompletion()
+        #expect(confirmed == [DeckDeletionSummary(decks: 1, cards: 0)])
     }
 
     private func makeOwner() async -> ReviewCollection {
