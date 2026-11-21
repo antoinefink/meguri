@@ -1087,7 +1087,10 @@ pub struct DiffSpan {
 /// Refuses as the run would (F11's refusals in its order), so an invalid
 /// pattern is F10's error. `cancel` is checked between pages: the sheet
 /// cancels a preview the next keystroke supersedes. `request.confirmed` is
-/// not read.
+/// not read. It reads the notes as they are now, not as a search session's
+/// snapshot saw them: the run's compute phase reads them now too, so the
+/// count it confirms is the one the run counts again (V17's "shares the
+/// session's snapshot" is met by [`preview_in`] where a caller wants it).
 pub fn preview(
     collection: &Collection,
     target: &NoteTarget,

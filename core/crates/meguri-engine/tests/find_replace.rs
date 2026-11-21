@@ -1278,11 +1278,11 @@ fn v9_the_preview_lists_the_first_hundred_notes() {
     let shown = preview_of(&h.collection, &NoteTarget::Notes(reversed.clone()), &replace).unwrap();
     assert_eq!((shown.changed, shown.considered), (150, 150));
     let listed: Vec<NoteId> = shown.entries.iter().map(|entry| entry.note).collect();
-    assert_eq!(listed, reversed[..find_replace::PREVIEW_NOTES], "the list's order");
+    assert_eq!(listed, reversed[..100], "V9: 100 notes, in the list's order");
     let all = preview_of(&h.collection, &NoteTarget::AllNotes, &replace).unwrap();
     assert_eq!(all.changed, 150);
     let listed: Vec<NoteId> = all.entries.iter().map(|entry| entry.note).collect();
-    assert_eq!(listed, ids[..find_replace::PREVIEW_NOTES], "ascending note id");
+    assert_eq!(listed, ids[..100], "ascending note id");
 }
 
 /// V9's Whole Words, in the preview and the run alike.
