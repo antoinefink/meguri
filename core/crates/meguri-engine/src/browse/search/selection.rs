@@ -55,6 +55,10 @@ pub(super) fn resolve(
     let (mode, selected, notes) = {
         let handle = shared.handle(handle)?;
         let handle = lock(&handle);
+        // H6: the handle's generation, against the collection's.
+        if handle.generation != collection.generation() {
+            return Err(BrowseError::UnknownHandle);
+        }
         check_revision(&handle, revision)?;
         let ranges = merged(ranges);
         if ranges.last().is_some_and(|range| range.end > handle.count()) {
