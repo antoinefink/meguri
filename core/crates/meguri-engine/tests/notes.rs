@@ -23,6 +23,7 @@ scenario!(normalize_off, "save/normalize-off");
 scenario!(same_after_normalizing, "save/same-after-normalizing");
 scenario!(field_states, "fields-check/states");
 scenario!(duplicates, "fields-check/duplicates");
+scenario!(entity_markup, "fields-check/entity-markup");
 scenario!(field_count_repair, "fields/count-repair");
 
 #[test]
@@ -402,20 +403,23 @@ fn log_readonly_probe() {
 }
 
 #[test]
-fn duplicate_check_applies_c4_to_comparison_text() {
+fn duplicate_check_strips_the_comparison_text_once() {
     let h = fresh();
     let nt = kind(&h, false, &["Front"], &["{{Front}}"]);
-    add(&h, input(nt, &["&lt;b&gt;literal&lt;/b&gt;"]));
-    add(&h, input(nt, &["&lt;div&gt;"]));
+    let literal = add(&h, input(nt, &["&lt;b&gt;literal&lt;/b&gt;"]));
+    let div = add(&h, input(nt, &["&lt;div&gt;"]));
     let reader = h.collection.reader(ReaderRole::Query).unwrap();
     let nt = reader.notetype(nt).unwrap().unwrap();
-    // K4/C5 apply C4 to the comparison text. Its second H5 pass removes
-    // markup decoded by the first pass, so the stored checksums differ.
-    for draft in ["<i>&lt;b&gt;literal&lt;/b&gt;</i>", "&lt;div&gt;"] {
+    // K4: the checksum is C4 steps 2-3 of the comparison text, with no
+    // second H5 pass, so entity-encoded markup finds its stored note.
+    for (draft, found) in [("<i>&lt;b&gt;literal&lt;/b&gt;</i>", literal.id), ("&lt;div&gt;", div.id)] {
         let checked = notes::check(&*reader, &nt, &[draft.to_owned()], None).unwrap();
-        assert_eq!(checked.state, notes::FieldState::Normal, "{draft}");
-        assert!(checked.duplicates.is_empty(), "{draft}");
+        assert_eq!(checked.state, notes::FieldState::Duplicate, "{draft}");
+        assert_eq!(checked.duplicates, vec![found], "{draft}");
     }
+    // A draft that strips to the text without the markup finds neither.
+    let checked = notes::check(&*reader, &nt, &["literal".to_owned()], None).unwrap();
+    assert_eq!(checked.state, notes::FieldState::Normal);
 }
 
 #[test]

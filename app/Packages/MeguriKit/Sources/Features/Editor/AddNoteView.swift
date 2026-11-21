@@ -34,63 +34,17 @@ public struct AddNoteView: View {
     }
 
     private var presentation: some View {
-        #if os(macOS)
-        VStack(spacing: 0) {
-            HStack {
-                Text("Add Note", bundle: .module).font(.headline)
-                if let added = confirmationText {
-                    Text(verbatim: added).foregroundStyle(.secondary)
-                        .accessibilityIdentifier("editor.add.result")
-                }
-                Spacer()
-                closeButton
-            }
-            .padding()
-            Divider()
+        NoteFormChrome(title: Text("Add Note", bundle: .module), subtitle: confirmationText,
+                       subtitleIdentifier: "editor.add.result", identifier: "editor.add",
+                       host: flow.runtime as? FieldEditorHost, decisions: AddNoteDecisions(flow: flow),
+                       attemptClose: close) {
+            closeButton
+        } confirm: {
+            addButton
+        } content: {
             editor
-            Divider()
-            HStack { modeToggle; Spacer(); addButton }.padding()
         }
-        // The page's own background, so the fields and their form read as one surface.
-        .background(Color(nsColor: .textBackgroundColor))
-        .modifier(AddNoteDecisions(flow: flow))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("editor.add")
-        #else
-        NavigationStack {
-            editor
-                // N17.1: over the whole screen the form keeps a readable column.
-                .frame(maxWidth: coversScreen ? ContentWidth.readable : .infinity)
-                .frame(maxWidth: .infinity)
-                .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
-                .navigationTitle(Text("Add Note", bundle: .module))
-                .navigationBarTitleDisplayMode(.inline)
-                // The confirmation is the bar's subtitle: it covers no field
-                // and moves nothing while the keyboard is up.
-                .navigationSubtitle(Text(verbatim: confirmationText ?? ""))
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { closeButton }
-                    ToolbarItem(placement: .confirmationAction) { addButton }
-                }
-        }
-        .presentationDetents([.large])
-        .presentationSizing(.page)
-        // Always hold the native gesture; an attempted swipe asks the same
-        // asynchronous held-flush guard as Close. It never authorizes discard.
-        .interactiveDismissDisabled()
-        .background(AddNoteSwipeGuard(attempt: close))
-        .modifier(AddNoteDecisions(flow: flow))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("editor.add")
-        #endif
     }
-
-    #if os(iOS)
-    @Environment(\.horizontalSizeClass) private var sizeClass
-    private var coversScreen: Bool {
-        AddNotePresentation.coversScreen(phone: UIDevice.current.userInterfaceIdiom == .phone, regularWidth: sizeClass == .regular)
-    }
-    #endif
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -184,21 +138,6 @@ public struct AddNoteView: View {
             .disabled(!flow.canAdd || (flow.runtime as? FieldEditorHost)?.editable != true)
             .accessibilityIdentifier("editor.add.save")
     }
-    #if os(macOS)
-    /// The one mode control, for the field that has focus (⇧⌘X does the same).
-    @ViewBuilder private var modeToggle: some View {
-        if let host = flow.runtime as? FieldEditorHost {
-            Toggle(isOn: Binding(get: { host.focusedMode == .html }, set: { _ in host.toggleFocusedMode() })) {
-                Label { Text("HTML Editor", bundle: .module) } icon: { Image(systemName: "chevron.left.forwardslash.chevron.right") }
-            }
-            .toggleStyle(.button)
-            .labelStyle(.iconOnly)
-            .disabled(host.focusedMode == nil)
-            .help(Text("HTML Editor", bundle: .module))
-            .accessibilityIdentifier(host.modeControlIdentifier)
-        }
-    }
-    #endif
     private var closeButton: some View {
         Button(role: .close, action: close) {
             Label { Text("Close", bundle: .module) } icon: { Image(systemName: "xmark") }
@@ -215,6 +154,96 @@ public struct AddNoteView: View {
         Task { await flow.save() }
     }
     private func close() { collection.navigation.dismissSheet() }
+}
+
+/// The frame Add Note and Edit Note share (N17.1, N20.8): the title and its
+/// subtitle, the cancellation and confirmation actions and, on the Mac, the
+/// bottom bar with the one mode control. Touch: a navigation bar in a sheet
+/// that holds the swipe down for the form's own close guard.
+struct NoteFormChrome<Cancel: View, Confirm: View, Content: View, Decisions: ViewModifier>: View {
+    let title: Text
+    let subtitle: String?
+    let subtitleIdentifier: String
+    let identifier: String
+    let host: FieldEditorHost?
+    let decisions: Decisions
+    let attemptClose: () -> Void
+    @ViewBuilder let cancel: () -> Cancel
+    @ViewBuilder let confirm: () -> Confirm
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        #if os(macOS)
+        VStack(spacing: 0) {
+            HStack {
+                title.font(.headline)
+                if let subtitle {
+                    Text(verbatim: subtitle).foregroundStyle(.secondary)
+                        .accessibilityIdentifier(subtitleIdentifier)
+                }
+                Spacer()
+                cancel()
+            }
+            .padding()
+            Divider()
+            content()
+            Divider()
+            HStack { modeToggle; Spacer(); confirm() }.padding()
+        }
+        // The page's own background, so the fields and their form read as one surface.
+        .background(Color(nsColor: .textBackgroundColor))
+        .modifier(decisions)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(identifier)
+        #else
+        NavigationStack {
+            content()
+                // N17.1: over the whole screen the form keeps a readable column.
+                .frame(maxWidth: coversScreen ? ContentWidth.readable : .infinity)
+                .frame(maxWidth: .infinity)
+                .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                // The subtitle covers no field and moves nothing while the keyboard is up.
+                .navigationSubtitle(Text(verbatim: subtitle ?? ""))
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { cancel() }
+                    ToolbarItem(placement: .confirmationAction) { confirm() }
+                }
+        }
+        .presentationDetents([.large])
+        .presentationSizing(.page)
+        // Always hold the native gesture; an attempted swipe asks the same
+        // asynchronous held-flush guard as Close. It never authorizes discard.
+        .interactiveDismissDisabled()
+        .background(AddNoteSwipeGuard(attempt: attemptClose))
+        .modifier(decisions)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(identifier)
+        #endif
+    }
+
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var coversScreen: Bool {
+        AddNotePresentation.coversScreen(phone: UIDevice.current.userInterfaceIdiom == .phone, regularWidth: sizeClass == .regular)
+    }
+    #endif
+    #if os(macOS)
+    /// The one mode control, for the field that has focus (⇧⌘X does the same).
+    @ViewBuilder private var modeToggle: some View {
+        if let host {
+            Toggle(isOn: Binding(get: { host.focusedMode == .html }, set: { _ in host.toggleFocusedMode() })) {
+                Label { Text("HTML Editor", bundle: .module) } icon: { Image(systemName: "chevron.left.forwardslash.chevron.right") }
+            }
+            .toggleStyle(.button)
+            .labelStyle(.iconOnly)
+            .disabled(host.focusedMode == nil)
+            .help(Text("HTML Editor", bundle: .module))
+            .accessibilityIdentifier(host.modeControlIdentifier)
+        }
+    }
+    #endif
 }
 
 /// The form's first group: Deck, then Type, each a menu on its current value.

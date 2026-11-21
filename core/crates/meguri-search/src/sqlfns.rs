@@ -16,6 +16,8 @@ use rusqlite::{
     types::ValueRef,
 };
 
+use crate::pattern::Like;
+
 /// Register on each writer and reader through storage's C5 initializers.
 pub fn register(conn: &Connection) -> rusqlite::Result<()> {
     let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC | FunctionFlags::SQLITE_INNOCUOUS;
@@ -80,16 +82,69 @@ fn register_text(conn: &Connection, flags: FunctionFlags) -> rusqlite::Result<()
         };
         Ok(Some(tags.split(' ').any(|piece| regex.is_match(piece))))
     })?;
+    let last = Mutex::new(None);
+    conn.create_scalar_function("meguri_regex_fields", -1, flags, move |ctx| {
+        if ctx.len() < 2 {
+            return Err(function_error("meguri_regex_fields takes a pattern and a field string"));
+        }
+        let (Some(regex), Some(flds)) = (expression(ctx, &last)?, text(ctx, 1)) else {
+            return Ok(None);
+        };
+        let fields: Vec<&str> = flds.split('\u{1f}').collect();
+        if ctx.len() == 2 {
+            return Ok(Some(fields.iter().any(|field| regex.is_match(field))));
+        }
+        for index in 2..ctx.len() {
+            let ord = integer(ctx, index).ok_or_else(|| function_error("field positions must be integers"))?;
+            if usize::try_from(ord)
+                .ok()
+                .and_then(|ord| fields.get(ord))
+                .is_some_and(|field| regex.is_match(field))
+            {
+                return Ok(Some(true));
+            }
+        }
+        Ok(Some(false))
+    })?;
+    conn.create_scalar_function("meguri_like", 3, flags, |ctx| {
+        let unicode = match ctx.get_raw(2) {
+            ValueRef::Integer(0) => false,
+            ValueRef::Integer(1) => true,
+            _ => return Err(function_error("meguri_like mode must be 0 or 1")),
+        };
+        let Some(text) = text(ctx, 0) else {
+            return Ok(None);
+        };
+        let like = match ctx.get_aux::<Like>(1)? {
+            Some(like) => like,
+            None => {
+                let pattern = match ctx.get_raw(1) {
+                    ValueRef::Null => return Ok(None),
+                    ValueRef::Text(bytes) => {
+                        std::str::from_utf8(bytes).map_err(|_| function_error("pattern is not UTF-8"))?
+                    }
+                    _ => return Err(function_error("pattern must be text")),
+                };
+                let like = Like::new(pattern, unicode).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
+                ctx.set_aux(1, like)?
+            }
+        };
+        Ok(Some(like.is_match(&text)))
+    })?;
     conn.create_scalar_function("meguri_transform", 2, flags, |ctx| {
         let ValueRef::Integer(flags) = ctx.get_raw(1) else {
             return Err(function_error("meguri_transform flags must be an integer"));
         };
-        // Bit 1, cloze markup removal (T9.2), lands with the `sc:` term (U81).
-        if flags & !TRANSFORM_COMBINING_FREE != 0 {
+        if flags & !(TRANSFORM_COMBINING_FREE | TRANSFORM_STRIP_CLOZE) != 0 {
             return Err(function_error("unsupported meguri_transform flags"));
         }
         let Some(text) = text(ctx, 0) else {
             return Ok(None);
+        };
+        let text = if flags & TRANSFORM_STRIP_CLOZE != 0 {
+            Cow::Owned(crate::pattern::strip_cloze(&text).into_owned())
+        } else {
+            text
         };
         Ok(Some(if flags & TRANSFORM_COMBINING_FREE != 0 {
             crate::pattern::combining_free(&text).into_owned()
@@ -123,20 +178,39 @@ fn register_text(conn: &Connection, flags: FunctionFlags) -> rusqlite::Result<()
 
 /// `meguri_transform`'s bit 0: the combining-free transform (T8.1).
 pub const TRANSFORM_COMBINING_FREE: i64 = 1;
+/// `meguri_transform`'s bit 1: cloze markup removal (T9.2), before bit 0.
+pub const TRANSFORM_STRIP_CLOZE: i64 = 2;
 
 fn function_error(message: &'static str) -> rusqlite::Error {
     rusqlite::Error::UserFunctionError(message.into())
 }
 
-/// A text argument (T14): TEXT as stored, INTEGER as its decimal text; NULL,
-/// REAL and BLOB give none, so the function gives NULL. No column the U82
-/// terms read holds a REAL; U81 adds SQLite's REAL text for `sfld` (T2).
+/// A text argument (T14): TEXT as stored, INTEGER and REAL as SQLite's text
+/// for them (T2: the text `CAST(x AS TEXT)` gives); NULL and BLOB give none,
+/// so the function gives NULL.
 fn text<'a>(ctx: &'a Context<'_>, index: usize) -> Option<Cow<'a, str>> {
     match ctx.get_raw(index) {
         ValueRef::Text(bytes) => Some(String::from_utf8_lossy(bytes)),
         ValueRef::Integer(value) => Some(Cow::Owned(value.to_string())),
-        ValueRef::Null | ValueRef::Real(_) | ValueRef::Blob(_) => None,
+        ValueRef::Real(value) => real_text(value).map(Cow::Owned),
+        ValueRef::Null | ValueRef::Blob(_) => None,
     }
+}
+
+/// SQLite's text for a REAL, exactly as `CAST(x AS TEXT)` gives it (T2),
+/// from the same library on a connection of this thread's own: its rendering
+/// (up to 17 significant digits, by its own decimal conversion) is not
+/// reproduced here. The plan's statements cast `sfld` themselves, so a REAL
+/// reaches a function only from other callers.
+fn real_text(value: f64) -> Option<String> {
+    thread_local! {
+        static CAST: Option<Connection> = Connection::open_in_memory().ok();
+    }
+    CAST.with(|conn| {
+        let conn = conn.as_ref()?;
+        let mut statement = conn.prepare_cached("SELECT CAST(?1 AS TEXT)").ok()?;
+        statement.query_row([value], |row| row.get::<_, String>(0)).ok()
+    })
 }
 
 /// The compiled expression of argument 0 (T14): SQLite's per-statement

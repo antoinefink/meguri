@@ -25,6 +25,7 @@ pub struct ProcessCore {
     engine: Engine,
     queues: Arc<meguri_engine::sched::queue::QueueProvider>,
     review: Arc<meguri_engine::session::ReviewService>,
+    names: Arc<meguri_engine::browse::NameIndexProvider>,
     job_workers: usize,
     opened: Arc<Mutex<bool>>,
 }
@@ -60,6 +61,7 @@ impl ProcessCore {
             engine,
             queues,
             review,
+            names: Arc::new(meguri_engine::browse::NameIndexProvider::new()),
             job_workers,
             opened: Arc::new(Mutex::new(false)),
         })
@@ -281,6 +283,7 @@ pub struct CoreHost {
     initial_open: OpenConfig,
     queues: Arc<meguri_engine::sched::queue::QueueProvider>,
     review: Arc<meguri_engine::session::ReviewService>,
+    names: Arc<meguri_engine::browse::NameIndexProvider>,
 }
 
 impl CoreHost {
@@ -550,6 +553,7 @@ impl CoreHost {
         let media = Arc::new(MediaPort::new(config.clock.clone()));
         let queues = process.queues.clone();
         let review = process.review.clone();
+        let names = process.names.clone();
         if let Some(cloud) = &cloud {
             cloud.attach_provider_authority(provider.clone());
             cloud.attach_sources(config.random.clone(), Arc::downgrade(&review));
@@ -567,7 +571,10 @@ impl CoreHost {
             .open_step(review.clone())
             .observer(review.clone())
             .generation_listener(review.clone())
-            .suspend_participant(review.clone());
+            .suspend_participant(review.clone())
+            .open_step(names.clone())
+            .observer(names.clone())
+            .generation_listener(names.clone());
         if let Some(cloud) = &cloud {
             ports = ports
                 .cloud_publication_authority(cloud.clone())
@@ -686,6 +693,7 @@ impl CoreHost {
             backup,
             queues,
             review,
+            names,
         };
         Ok((host, paths, options))
     }
@@ -759,6 +767,11 @@ impl CoreHost {
     }
     pub fn queues(&self) -> &meguri_engine::sched::queue::QueueProvider {
         &self.queues
+    }
+
+    /// The name index suggestions read (`search/editing-services` D6.7).
+    pub fn names(&self) -> &meguri_engine::browse::NameIndexProvider {
+        &self.names
     }
 
     pub fn review(&self) -> &meguri_engine::session::ReviewService {

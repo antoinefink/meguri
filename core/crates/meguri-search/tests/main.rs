@@ -10,12 +10,18 @@
 
 #[path = "browser_cells.rs"]
 pub mod browser_cells;
+#[path = "builder.rs"]
+pub mod builder;
 #[path = "canonical_roundtrip.rs"]
 pub mod canonical_roundtrip;
 #[path = "card_extractors.rs"]
 pub mod card_extractors;
 #[path = "config_keys.rs"]
 pub mod config_keys;
+#[path = "edit_services.rs"]
+pub mod edit_services;
+#[path = "name_index.rs"]
+pub mod name_index;
 #[path = "names_and_ids.rs"]
 pub mod names_and_ids;
 #[path = "parse_props.rs"]
@@ -24,3 +30,5 @@ pub mod parse_props;
 pub mod props_and_history;
 #[path = "state_and_flags.rs"]
 pub mod state_and_flags;
+#[path = "text_matching.rs"]
+pub mod text_matching;
