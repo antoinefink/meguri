@@ -116,6 +116,9 @@ impl Engine {
             self.jobs().pause(false);
             return Ok(SuspendOutcome::Deferred { job_id: job.id });
         }
+        // `browser/result-sets` H3: searches stop so their readers return,
+        // once the suspend goes on to quiesce (a deferred one leaves them).
+        let _searches = self.inner.searches.halt();
         self.quiesce_for_suspend(deadline)?;
         Ok(SuspendOutcome::Suspended)
     }
@@ -196,6 +199,8 @@ impl Engine {
                 owner == "writer"
                     || owner == "jobs"
                     || owner == "events"
+                    // Search threads: `suspend` stops their requests first.
+                    || owner == crate::browse::search::OWNER
                     || participants.iter().any(|p| p.name() == owner)
             });
             if !owned {

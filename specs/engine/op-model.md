@@ -131,6 +131,7 @@ The list of named engine ops with their undo class (`engine/undo` M11, R2020), t
 | `sync_incoming_merge` (a large `SyncIncoming` merge; manual Anki transfers, frozen) | U107 | not destructive | yes | yes |
 | `cloud_incoming_apply` (a `CloudIncoming` apply of a complete structural generation with more than 500 entries, which is applied in one op, O8; any other incoming apply is a series of plain `CloudIncoming` ops of at most 500 entries each, `sync/cloudkit-records#K13.2`; O1.1) | U114 | not destructive | yes | yes |
 | `notetype_structure_change` (on large note types) | U34 | undoable | yes | no |
+| `change_notetype` (Change Note Type, `notetypes/change-notetype` M10) | U35 | undoable | yes | no |
 | `memory_recompute` (`sched/memory-state` M4) | U46 | undoable | yes | yes |
 | `enable_fsrs` (`sched/fsrs-policy` E1-E4) | U50 | not destructive, not undoable | yes | yes |
 | `bulk_op` (bulk ops over large selections) | U86 | undoable | yes | no |

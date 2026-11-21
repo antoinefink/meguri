@@ -147,19 +147,15 @@ struct MeguriApp: App {
             CloudSyncCommands(collection: collection)
         }
         SwiftUI.Settings {
-            if let collection {
-                #if MEGURI_TEST_HOOKS
-                if let ownedProvider = hooks.ownedProvider {
-                    SettingsWindow(collection: collection, features: features, configuration: configuration)
-                        .defaultAppStorage(ownedProvider.defaults)
-                        .modifier(TestHooks.OwnedProviderTransportGate(transport: ownedProvider.transport))
-                } else {
-                    SettingsWindow(collection: collection, features: features, configuration: configuration)
-                }
-                #else
-                SettingsWindow(collection: collection, features: features, configuration: configuration)
-                #endif
+            #if MEGURI_TEST_HOOKS
+            if let preview = TestHooks.SyncRoutes.SettingsWindowPreview.shared.collection {
+                SettingsWindow(collection: preview, features: features, configuration: configuration)
+            } else if let collection {
+                settingsWindow(collection)
             }
+            #else
+            if let collection { settingsWindow(collection) }
+            #endif
         }
         #else
         WindowGroup {
@@ -173,6 +169,22 @@ struct MeguriApp: App {
         }
         #endif
     }
+
+    #if os(macOS)
+    @ViewBuilder private func settingsWindow(_ collection: ReviewCollection) -> some View {
+        #if MEGURI_TEST_HOOKS
+        if let ownedProvider = hooks.ownedProvider {
+            SettingsWindow(collection: collection, features: features, configuration: configuration)
+                .defaultAppStorage(ownedProvider.defaults)
+                .modifier(TestHooks.OwnedProviderTransportGate(transport: ownedProvider.transport))
+        } else {
+            SettingsWindow(collection: collection, features: features, configuration: configuration)
+        }
+        #else
+        SettingsWindow(collection: collection, features: features, configuration: configuration)
+        #endif
+    }
+    #endif
 
     @ViewBuilder private var root: some View {
         #if MEGURI_TEST_HOOKS

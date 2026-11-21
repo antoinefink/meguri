@@ -15,8 +15,22 @@
 # structure/* scenarios active (specs/notetypes/structure-changes.md S16,
 # specs/notetypes/restore-to-default.md D8), with remove_notetype and
 # restore_notetype (specs/conformance/notetype-structure-ops.md M1, M2).
+# U35's change_notetype_info and change_notetype made change/* active
+# (specs/conformance/change-notetype-ops.md H4).
 area: notetypes
 active:
+  - "change/cloze"
+  - "change/cloze-round-trip"
+  - "change/default-maps"
+  - "change/info-counts"
+  - "change/normalization"
+  - "change/placement"
+  - "change/refusals"
+  - "change/same-type-remap"
+  - "change/swap-fields"
+  - "change/template-map"
+  - "change/to-reversed"
+  - "change/undo"
   - "gate/after-sync"
   - "gate/structure"
   - "manage/list-order"

@@ -1248,6 +1248,7 @@ mod tests {
             held_queue: None,
             sync: Default::default(),
             review_session: None,
+            change_notetype: None,
         };
         let file = session.storage.dir().unwrap().join(COLLECTION);
         fs::copy(

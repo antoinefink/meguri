@@ -16,6 +16,10 @@ pub mod add_screen_writer;
 pub mod answer;
 #[path = "bootstrap.rs"]
 pub mod bootstrap;
+#[path = "browse_handles.rs"]
+pub mod browse_handles;
+#[path = "browse_no_writes.rs"]
+pub mod browse_no_writes;
 #[path = "browse_rows.rs"]
 pub mod browse_rows;
 #[path = "browser_config.rs"]
@@ -28,6 +32,8 @@ pub mod card_excerpts;
 pub mod card_extractors;
 #[path = "cardgen.rs"]
 pub mod cardgen;
+#[path = "change_notetype.rs"]
+pub mod change_notetype;
 #[path = "changeset.rs"]
 pub mod changeset;
 #[path = "cloud_op_sources.rs"]

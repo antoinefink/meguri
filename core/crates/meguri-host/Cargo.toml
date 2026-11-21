@@ -42,6 +42,13 @@ required-features = ["test-hooks"]
 name = "host_it"
 path = "tests/main.rs"
 
+# Re-runs this binary with `--exact <test>` (a process killed mid-media): it
+# needs unprefixed test names.
+[[test]]
+name = "provider_media_kill"
+path = "tests/provider_media_kill.rs"
+required-features = ["test-hooks"]
+
 # Re-runs this binary with `--exact <test>`: it needs unprefixed test names.
 [[test]]
 name = "cloud_adoption_guards"

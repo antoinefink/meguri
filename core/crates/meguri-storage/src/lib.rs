@@ -42,6 +42,7 @@ pub mod queries;
 pub mod raw;
 pub mod rows;
 pub mod schema;
+mod search_rows;
 pub mod sidecar;
 pub mod snapshot;
 pub mod space;

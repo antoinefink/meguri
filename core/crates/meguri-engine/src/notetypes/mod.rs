@@ -20,6 +20,7 @@
 //! templates added, removed, reordered or renamed, template text, the sort
 //! field) are [`structure`]'s draft apply op; [`save_in`] refuses them.
 
+pub mod change;
 pub mod clone;
 pub mod names;
 pub mod read;
