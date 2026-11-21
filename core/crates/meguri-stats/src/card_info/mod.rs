@@ -556,6 +556,9 @@ pub fn build(rows: &impl ReadRows, clock: &dyn Clock, input: &Input) -> Result<C
         .row_image(Table::Config, &RowKey::text("rollover"))?
         .and_then(|image| match image.get(3) {
             Some(Cell::Text(bytes) | Cell::Blob(bytes)) => Some(bytes.clone()),
+            // A number stored as INTEGER or REAL is that number's JSON text.
+            Some(Cell::Integer(value)) => Some(value.to_string().into_bytes()),
+            Some(Cell::Real(value)) if value.is_finite() => Some(format!("{value:?}").into_bytes()),
             _ => None,
         });
     Ok(CardInfo {

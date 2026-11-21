@@ -82,10 +82,14 @@ struct Reader<'a> {
     text: &'a str,
     at: usize,
     depth: usize,
+    /// Keep a too-deep value as a string (schema-11 objects, whose members
+    /// must stay filtered) rather than refusing the whole text.
+    opaque_deep: bool,
 }
 
-/// The nesting the dump reads (`model/json-numbers`' 128 levels); deeper
-/// text is written as a string, so neither walk recurses past it.
+/// The nesting the dump reads (`model/json-numbers`' 128 levels). A value
+/// nested deeper is kept as one string of its text, so neither walk
+/// recurses past it and the members around it stay filtered.
 const MAX_DEPTH: usize = 128;
 
 impl Reader<'_> {
@@ -108,12 +112,39 @@ impl Reader<'_> {
         None
     }
 
+    /// The array or object at `at`, unread: its text as a string, found by
+    /// an iterative scan of brackets outside strings.
+    fn opaque(&mut self) -> Option<Json> {
+        let start = self.at;
+        let bytes = self.text.as_bytes();
+        let mut open = 0usize;
+        while self.at < bytes.len() {
+            match bytes[self.at] {
+                b'"' => {
+                    self.at = self.string_end()?;
+                    continue;
+                }
+                b'{' | b'[' => open += 1,
+                b'}' | b']' => {
+                    open -= 1;
+                    if open == 0 {
+                        self.at += 1;
+                        return Some(string(&self.text[start..self.at]));
+                    }
+                }
+                _ => {}
+            }
+            self.at += 1;
+        }
+        None
+    }
+
     fn value(&mut self) -> Option<Json> {
         self.space();
         let first = self.text[self.at..].chars().next()?;
         if matches!(first, '{' | '[') {
             if self.depth == MAX_DEPTH {
-                return None;
+                return if self.opaque_deep { self.opaque() } else { None };
             }
             self.depth += 1;
         }
@@ -191,8 +222,13 @@ impl Reader<'_> {
     }
 }
 
-fn read(text: &str) -> Option<Json> {
-    let mut reader = Reader { text, at: 0, depth: 0 };
+fn read(text: &str, opaque_deep: bool) -> Option<Json> {
+    let mut reader = Reader {
+        text,
+        at: 0,
+        depth: 0,
+        opaque_deep,
+    };
     let value = reader.value()?;
     reader.space();
     (reader.at == text.len()).then_some(value)
@@ -200,15 +236,15 @@ fn read(text: &str) -> Option<Json> {
 
 /// A schema-11 object without the members named in `drop`.
 fn schema11(text: &str, drop: &[&str]) -> Json {
-    match read(text) {
+    match read(text, true) {
         Some(Json::Object(members)) => Json::Object(
             members
                 .into_iter()
                 .filter(|(name, _)| !drop.iter().any(|dropped| *name == key(dropped)))
                 .collect(),
         ),
-        Some(other) => other,
-        None => string(text),
+        // Never the unfiltered text: it holds the names C8 leaves out.
+        _ => null(),
     }
 }
 
@@ -310,7 +346,7 @@ pub(super) fn write(info: &CardInfo) -> String {
             Some(bytes) => {
                 let text = String::from_utf8_lossy(bytes);
                 meguri_model::json_text::parse(&text)
-                    .and_then(|_| read(&text))
+                    .and_then(|_| read(&text, false))
                     .unwrap_or_else(|| string(&text))
             }
         },

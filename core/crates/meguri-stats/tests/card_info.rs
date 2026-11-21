@@ -541,6 +541,9 @@ fn c7_5_reviews_after_now_and_span_zero() {
         stability: 2.0,
     };
     let built = curve(&[ahead], NOW, 0.5, 0.9).unwrap();
+    let first = &built.ranges[0].points;
+    assert_eq!((first[0].instant, first[0].retrievability), (ahead.instant as f64, 100.0));
+    assert!(first.len() > 2);
     assert!(built.ranges.iter().flat_map(|r| &r.points).all(|p| p.future));
     // Span 0: one learning answer with interval 0 in the same second.
     let now = CurveReview {
@@ -1229,4 +1232,43 @@ fn c8_dump_parses_back_to_the_records() {
         .map(|line| line.trim_start().split('"').nth(1).unwrap())
         .collect();
     assert_eq!(members, ["stats", "card", "revlog", "deck", "preset", "rollover"]);
+}
+
+// C8: a rollover stored as an INTEGER or a REAL is written as that number;
+// a preset whose stored extra JSON is nested past the reader's bound keeps
+// its name out of the dump.
+#[test]
+fn c8_dump_rollover_storage_classes_and_a_deep_preset() {
+    let db = Db::new();
+    db.card(2, 2, 105, 10, "{}");
+    for (sql, text) in [
+        ("UPDATE config SET val = 6 WHERE KEY = 'rollover'", "6"),
+        ("UPDATE config SET val = 2.5 WHERE KEY = 'rollover'", "2.5"),
+    ] {
+        db.exec(sql, &[]);
+        let dump = db.info().debug_json();
+        assert!(dump.ends_with(&format!("\n  \"rollover\": {text}\n}}")), "{dump}");
+    }
+    let reader = db.db.open_reader(ReaderRole::Query).unwrap();
+    let preset = reader.deck_config(DeckConfigId(1)).unwrap().unwrap();
+    let mut bytes = preset.config.to_bytes().into_owned();
+    let deep = format!("{{\"deep\":{}0{}}}", "[".repeat(200), "]".repeat(200));
+    // Field 255 (`other`), length-delimited.
+    bytes.extend([0xFA, 0x0F]);
+    let mut length = deep.len();
+    while length >= 0x80 {
+        bytes.push((length as u8 & 0x7F) | 0x80);
+        length >>= 7;
+    }
+    bytes.push(length as u8);
+    bytes.extend(deep.as_bytes());
+    db.exec(
+        "UPDATE deck_config SET config = ?1 WHERE id = 1",
+        &[SqlValue::Blob(bytes)],
+    );
+    let dump = db.info().debug_json();
+    assert!(!dump.contains("Default"), "{dump}");
+    // The deep member is kept as one string inside the filtered object.
+    assert!(dump.contains("\"deep\": "), "{dump}");
+    assert!(dump.contains("\n  \"preset\": {\n"));
 }
