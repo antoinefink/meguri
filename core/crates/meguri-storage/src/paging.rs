@@ -519,14 +519,15 @@ pub trait ReadRows: sealed::Connected {
         after: Option<CardId>,
         limit: usize,
     ) -> Result<Vec<CardId>, StorageError> {
-        let after = after.map_or(i64::MIN, |card| card.0);
+        // The first page has no lower bound: a card id of `i64::MIN` is read.
+        let after = after.map(|card| card.0);
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         Ok(self
             .connection()
             .prepare_cached(
                 // `odid != 0` lets SQLite use the partial `idx_cards_odid`.
                 "SELECT id FROM cards WHERE (did = ?1 OR (odid = ?1 AND odid != 0)) \
-                 AND meguri_card_f32(data, 's') IS NULL AND id > ?2 ORDER BY id LIMIT ?3",
+                 AND meguri_card_f32(data, 's') IS NULL AND (?2 IS NULL OR id > ?2) ORDER BY id LIMIT ?3",
             )?
             .query_map(rusqlite::params![id.0, after, limit], |row| row.get::<_, i64>(0).map(CardId))?
             .collect::<rusqlite::Result<Vec<_>>>()?)

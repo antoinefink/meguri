@@ -818,9 +818,32 @@ fn b7_2_a_refusal_runs_no_day_check() {
     let ids = w.cards(move |s, w| vec![add_card(s, "a", w.home, |_| {})]);
     set_fsrs(c, true);
     change(c, &ids, DeckTarget::Deck(w.other)).unwrap();
+    change(c, &ids, DeckTarget::Deck(w.target)).unwrap();
+    c.undo(UndoScope::Global).unwrap();
     w.h.clock.step_ms(2 * DAY_MS);
-    assert!(matches!(change(c, &ids, DeckTarget::Deck(DeckId(-9))), Err(EngineError::NotFound { .. })));
+    let before = dump(c);
+    for refused in [DeckTarget::Deck(DeckId(-9)), DeckTarget::Deck(w.cram), DeckTarget::NewDeck("Cram::In".into())] {
+        assert!(change(c, &ids, refused).is_err());
+    }
+    assert_eq!(dump(c), before, "no rollover op ran");
     assert_eq!(undo_name(c).as_deref(), Some("Change Deck"));
+    assert_eq!(redo_name(c).as_deref(), Some("Change Deck"), "the redo history is kept");
+}
+
+/// B7.2 step 4: the set's first page has no lower bound, so a target card
+/// whose id is `i64::MIN` (an imported row) is computed too.
+#[test]
+fn b7_2_the_set_reads_the_lowest_card_id() {
+    let w = world();
+    let c = &w.h.collection;
+    let (moved, stays) = two_with_states(&w);
+    raw_sql(&w.h, format!("UPDATE cards SET data = '' WHERE id = {}", stays.0));
+    raw_sql(&w.h, format!("UPDATE revlog SET cid = {} WHERE cid = {}", i64::MIN, stays.0));
+    raw_sql(&w.h, format!("UPDATE cards SET id = {} WHERE id = {}", i64::MIN, stays.0));
+    change(c, &[moved], DeckTarget::Deck(w.target)).unwrap();
+    let lowest = read(c, CardId(i64::MIN));
+    assert!(lowest.data.memory_state.is_some(), "computed from its history");
+    assert_eq!(lowest.data.desired_retention, Some(0.85));
 }
 
 /// K3: the compute phase reports progress through step 4's pass: the
