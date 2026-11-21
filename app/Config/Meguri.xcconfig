@@ -3,7 +3,7 @@
 
 PRODUCT_NAME = Meguri
 PRODUCT_BUNDLE_IDENTIFIER = $(MEGURI_BUNDLE_ID)
-ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+ASSETCATALOG_COMPILER_APPICON_NAME = $(MEGURI_APP_ICON)
 SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
 
 // Only tools/mg's explicit Mac or simulator Debug CloudAgent build enables this input.
@@ -15,7 +15,7 @@ MEGURI_CLOUD_AGENT_EMBED[config=Debug][sdk=macosx*] = $(MEGURI_CLOUD_AGENT_INJEC
 MEGURI_CLOUD_AGENT_EMBED[config=Debug][sdk=iphonesimulator*] = $(MEGURI_CLOUD_AGENT_INJECTION)
 MEGURI_CLOUD_AGENT_EXCLUDE_NO = libXCTestBundleInject.dylib
 MEGURI_CLOUD_AGENT_EXCLUDE_YES =
-EXCLUDED_SOURCE_FILE_NAMES = $(inherited) $(MEGURI_CLOUD_AGENT_EXCLUDE_$(MEGURI_CLOUD_AGENT_EMBED))
+EXCLUDED_SOURCE_FILE_NAMES = $(inherited) $(MEGURI_CLOUD_AGENT_EXCLUDE_$(MEGURI_CLOUD_AGENT_EMBED)) $(MEGURI_UNUSED_IDENTITY_FILES)
 // Declare the disabled cleanup's exact sandbox write. When CopyFiles owns
 // the library output, the cleanup phase does no writing and declares a marker.
 MEGURI_CLOUD_AGENT_CLEANUP_NO = libXCTestBundleInject.dylib
@@ -30,7 +30,7 @@ MEGURI_CLOUD_AGENT_CLEANUP = $(MEGURI_CLOUD_AGENT_CLEANUP_$(MEGURI_CLOUD_AGENT_E
 GENERATE_INFOPLIST_FILE = YES
 INFOPLIST_FILE[sdk=iphone*] = Meguri/Info-iOS.plist
 INFOPLIST_FILE[sdk=macosx*] = Meguri/Info-macOS.plist
-INFOPLIST_KEY_CFBundleDisplayName = Meguri
+INFOPLIST_KEY_CFBundleDisplayName = $(MEGURI_APP_NAME)
 // Explicit distribution policy, including personal Release without hooks.
 INFOPLIST_KEY_MeguriCardInspectionBuild = $(MEGURI_CARD_INSPECTION_BUILD)
 INFOPLIST_KEY_MeguriCloudContainer = $(MEGURI_CLOUD_CONTAINER)
