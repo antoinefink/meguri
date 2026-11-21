@@ -875,6 +875,45 @@ fn b7_2_progress_covers_the_memory_pass() {
     );
 }
 
+/// K3: with a set of exactly 1,000 cards (a page of histories), the whole
+/// work is reported once, after the history pass, never before its last
+/// card.
+#[test]
+fn b7_2_progress_reaches_the_whole_only_after_the_pass() {
+    struct Listener(Mutex<Vec<(u64, Option<u64>)>>);
+    impl ProgressListener for Listener {
+        fn on_progress(&self, progress: &Progress) {
+            if progress.phase == ProgressPhase::Planning {
+                self.0.lock().unwrap().push((progress.completed, progress.total));
+            }
+        }
+    }
+    let w = world();
+    let c = &w.h.collection;
+    let ids = w.cards(move |s, w| {
+        (0..1_000)
+            .map(|i| add_card(s, &format!("b{i}"), if i == 0 { w.home } else { w.target }, |_| {}))
+            .collect()
+    });
+    set_fsrs(c, true);
+    static NOW: AtomicU64 = AtomicU64::new(0);
+    let progress = ProgressSink::with_clock(|| Duration::from_secs(NOW.fetch_add(1, Ordering::SeqCst)));
+    let listener = Arc::new(Listener(Mutex::new(Vec::new())));
+    progress.set_listener(listener.clone());
+    change_deck::run(
+        c,
+        &CardTarget::Cards(ids[..1].to_vec()),
+        &DeckTarget::Deck(w.target),
+        CancelToken::new(),
+        progress,
+    )
+    .unwrap();
+    let reports = listener.0.lock().unwrap().clone();
+    let whole: Vec<_> = reports.iter().filter(|(done, _)| *done == 1_001).collect();
+    assert_eq!(whole, [&(1_001, Some(1_001))], "{reports:?}");
+    assert_eq!(reports.last(), Some(&(1_001, Some(1_001))));
+}
+
 /// K4: a cancel before the commit writes nothing and records no step.
 #[test]
 fn b7_2_a_cancel_before_the_commit_writes_nothing() {

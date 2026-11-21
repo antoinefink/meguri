@@ -206,28 +206,30 @@ fn resolve_target(decks: &[Deck], target: &DeckTarget) -> Result<Resolved, Engin
 }
 
 /// The compute phase (steps 0 to 4 on the snapshot).
-/// The start of the next day for step 4's memory states, from the clock and
-/// the snapshot: the pure day calculation (`sched/day-clock` D3, D4), so that
-/// no day check writes before a refusal.
-fn next_day_at(collection: &Collection, rows: &impl ReadRows) -> Result<i64, EngineError> {
-    let clock = collection.core.exec.clock.as_ref();
-    let at = clock.now_ms();
-    let config = SchedConfig::new(rows);
-    Ok(meguri_sched::timing::sched_day(&meguri_sched::timing::DayInputs {
-        crt: rows.col()?.created.0,
-        creation_offset: config.creation_offset()?,
-        rollover_hour: config.rollover_hour()?,
-        offset: clock.utc_offset_at(at),
-        now: at.div_euclid(1000),
-    })
-    .next_day_at)
+/// The target deck's cards whose stability reads as NULL (X4), a page at a
+/// time with `between` before each page (the plan's cancel check).
+fn stateless_cards(
+    rows: &impl ReadRows,
+    deck: DeckId,
+    between: impl Fn() -> Result<(), EngineError>,
+) -> Result<Vec<CardId>, EngineError> {
+    let mut found = Vec::new();
+    loop {
+        between()?;
+        let page = rows.deck_cards_without_stability(deck, found.last().copied(), PAGE)?;
+        let full = page.len() == PAGE;
+        found.extend(page);
+        if !full {
+            return Ok(found);
+        }
+    }
 }
 
 fn plan(
     context: &PlanContext<'_>,
-    collection: &Collection,
     cards: &[CardId],
     target: &DeckTarget,
+    next_day_at: i64,
 ) -> Result<Plan<Planned>, EngineError> {
     let reader = &**context.snapshot();
     let decks = reader.deck_rows()?;
@@ -266,7 +268,7 @@ fn plan(
         let moving: HashSet<CardId> = moved.iter().copied().collect();
         let mut members: BTreeSet<CardId> = moving.iter().copied().collect();
         if let Some(id) = target_id {
-            members.extend(reader.deck_cards_without_stability(id)?);
+            members.extend(stateless_cards(reader, id, || context.check_cancel())?);
         }
         let members: Vec<CardId> = members.into_iter().collect();
         let work = total + members.len() as u64;
@@ -274,7 +276,6 @@ fn plan(
             progress.report(total, Some(work));
         }
         reported = work;
-        let next_day_at = next_day_at(collection, reader)?;
         let preset = PresetView::new(&preset_of(reader, Some(&target_deck))?);
         let mut cache = FsrsCache::default();
         // R704: with parameters the model cannot take, the set's cards keep
@@ -285,15 +286,19 @@ fn plan(
             let cutoff = preset_cutoff(&preset).map_err(crate::sched::memory::error)?;
             let decay = preset.decay();
             let historical = preset.fields().historical_retention;
-            let mut visited = 0usize;
+            // `done` counts the histories already processed: the whole work
+            // is reported only once the pass has ended.
+            let mut done = 0usize;
+            context.check_cancel()?;
             reader.visit_fsrs_histories(&HistorySelection::Cards(members.clone()), |card, history| {
-                visited += 1;
-                if visited.is_multiple_of(PAGE) {
-                    context.check_cancel()?;
-                    if let Some(progress) = progress {
-                        progress.report(total + visited as u64, Some(work));
-                    }
+                context.check_cancel()?;
+                if done > 0
+                    && done.is_multiple_of(PAGE)
+                    && let Some(progress) = progress
+                {
+                    progress.report(total + done as u64, Some(work));
                 }
+                done += 1;
                 let last = history.iter().map(|row| row.id.0).max().unwrap_or(0);
                 histories.push((card.id, (history.len() as u64, last)));
                 if card.card_type == CardType::New || history.is_empty() {
@@ -394,7 +399,7 @@ fn commit(context: &mut OpContext<'_, '_>, planned: Planned) -> Result<BulkCount
     };
     if let (Some(set), Some(id)) = (&planned.set, existing) {
         let mut members: BTreeSet<CardId> = planned.moved.iter().copied().collect();
-        members.extend(scope.deck_cards_without_stability(id)?);
+        members.extend(stateless_cards(&*scope, id, || Ok(()))?);
         if !members.into_iter().eq(set.iter().copied()) {
             return Err(stale(Table::Cards, format!("memory-state set of deck {}", id.0)));
         }
@@ -497,14 +502,19 @@ pub fn run(
     let cards = target.resolve(collection)?;
     // Step 1's first refusal.
     check_ids(&cards, "card")?;
+    // Step 1's deck refusals on a read, before the day check: a refusal
+    // writes nothing, a rollover included. The plan checks them again.
+    resolve_target(&collection.reader(ReaderRole::Query)?.deck_rows()?, deck)?;
+    // The day for step 4's memory states, from the day clock
+    // (`sched/fsrs-items` I1.2), before the op (`sched/day-clock` D8).
+    let next_day_at = collection.next_day_at()?;
     let deck = deck.clone();
-    let bound = collection.clone();
     let (cancel_plan, progress_plan) = (Arc::clone(&cancel), progress.clone());
     plan_and_commit_with(
         collection,
         ReaderRole::Maintenance,
         op_spec(OP_NAME, CHANGE_DECK, 0, &cancel, &progress),
-        move |context| plan(context, &bound, &cards, &deck),
+        move |context| plan(context, &cards, &deck, next_day_at),
         move |_, planned| op_spec(OP_NAME, CHANGE_DECK, planned.moved.len(), &cancel_plan, &progress_plan),
         commit,
     )

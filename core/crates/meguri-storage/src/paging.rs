@@ -507,21 +507,28 @@ pub trait ReadRows: sealed::Connected {
         .collect()
     }
 
-    /// The ids of the deck's cards (`did` or `odid`, so its cards held in a
-    /// filtered deck too) whose stability reads as NULL the way
-    /// `search/card-extractors` X4 reads `s`, ascending: Change Deck's
-    /// memory-state set (`browser/bulk-actions` B7.2 step 4). It needs the
-    /// search crate's `meguri_card_f32`, which every engine connection
-    /// registers (C5).
-    fn deck_cards_without_stability(&self, id: DeckId) -> Result<Vec<CardId>, StorageError> {
+    /// A page of the ids of the deck's cards (`did` or `odid`, so its cards
+    /// held in a filtered deck too) whose stability reads as NULL the way
+    /// `search/card-extractors` X4 reads `s`, ascending from after `after`,
+    /// at most `limit`: Change Deck's memory-state set (`browser/bulk-actions`
+    /// B7.2 step 4). It needs the search crate's `meguri_card_f32`, which
+    /// every engine connection registers (C5).
+    fn deck_cards_without_stability(
+        &self,
+        id: DeckId,
+        after: Option<CardId>,
+        limit: usize,
+    ) -> Result<Vec<CardId>, StorageError> {
+        let after = after.map_or(i64::MIN, |card| card.0);
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         Ok(self
             .connection()
             .prepare_cached(
                 // `odid != 0` lets SQLite use the partial `idx_cards_odid`.
                 "SELECT id FROM cards WHERE (did = ?1 OR (odid = ?1 AND odid != 0)) \
-                 AND meguri_card_f32(data, 's') IS NULL ORDER BY id",
+                 AND meguri_card_f32(data, 's') IS NULL AND id > ?2 ORDER BY id LIMIT ?3",
             )?
-            .query_map([id.0], |row| row.get::<_, i64>(0).map(CardId))?
+            .query_map(rusqlite::params![id.0, after, limit], |row| row.get::<_, i64>(0).map(CardId))?
             .collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
