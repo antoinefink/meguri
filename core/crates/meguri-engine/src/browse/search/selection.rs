@@ -55,6 +55,8 @@ pub(super) fn resolve(
     ranges: &[Range<u64>],
     target: SearchMode,
 ) -> Result<Vec<i64>, BrowseError> {
+    // A released handle is unknown, whatever else is unavailable (H6).
+    shared.handle(handle)?;
     let collection = shared.engine()?.collection()?;
     // H6: the generation is compared while the query reader is held, and
     // the notes' cards are read in the same transaction.

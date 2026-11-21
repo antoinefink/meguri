@@ -280,6 +280,44 @@ fn superseding_after_first_page_releases_the_running_handle_h6_h12() {
 }
 
 #[test]
+fn a_selection_of_a_closed_session_stays_unknown_after_the_collection_closes_h6() {
+    let fx = fixture(2);
+    let (handle, _) = fx.search("", SearchMode::Cards, asc("cardDue"));
+    let kept = fx.session.selection(handle, 0, vec![0..1]);
+    fx.session.shutdown();
+    let Fx { h, session, .. } = fx;
+    let Harness { engine, .. } = h;
+    engine.close().unwrap();
+    assert_eq!(kept.resolve(SearchMode::Cards), Err(BrowseError::UnknownHandle));
+    drop(session);
+}
+
+#[test]
+fn a_shut_down_session_cancels_its_running_request_and_every_later_one_h2() {
+    let fx = fixture(150);
+    let (done, _) = fx.search("", SearchMode::Cards, asc("cardDue"));
+    let (go, wait) = mpsc::channel::<()>();
+    fx.session.after_first_page_for_testing(move || {
+        let _ = wait.recv_timeout(WAIT);
+    });
+    let running = fx.session.start_search("", SearchMode::Cards, asc("noteFld"), None);
+    let handle = match fx.events.recv_timeout(WAIT).unwrap() {
+        SearchEvent::FirstPage { handle, seq, .. } if seq == running => handle,
+        other => panic!("{other:?}"),
+    };
+    // Through a shared reference, while the session itself stays alive.
+    fx.session.shutdown();
+    go.send(()).unwrap();
+    assert!(matches!(fx.until(running).as_slice(), [SearchEvent::Cancelled { seq }] if *seq == running));
+    for released in [done, handle] {
+        assert_eq!(fx.session.handle_state(released), Err(BrowseError::UnknownHandle));
+    }
+    let later = fx.session.start_search("", SearchMode::Cards, asc("noteFld"), None);
+    assert!(matches!(fx.until(later).as_slice(), [SearchEvent::Cancelled { seq }] if *seq == later));
+    fx.session.shutdown();
+}
+
+#[test]
 fn a_session_keeps_the_two_newest_complete_handles_h6() {
     let fx = fixture(3);
     let (a, _) = fx.search("", SearchMode::Cards, asc("cardDue"));
@@ -585,8 +623,12 @@ fn the_one_shot_search_lists_ids_ascending_with_failed_s_errors_h13() {
     match fx.until(seq).as_slice() {
         [SearchEvent::Failed {
             error: BrowseError::Search(failed),
+            text,
             ..
         }] => {
+            // H15: the range counts in the request's text, which the event
+            // gives with it.
+            assert_eq!(text.as_deref(), Some("deck:x ("));
             let BrowseError::Search(one_shot) = one_shot else {
                 panic!("{one_shot:?}")
             };
@@ -1047,7 +1089,7 @@ fn a_request_no_worker_can_run_fails_with_one_terminal_event_h4() {
         let seq = session.start_search("", SearchMode::Cards, asc("cardDue"), None);
         let event = events.recv_timeout(WAIT).unwrap();
         assert!(
-            matches!(&event, SearchEvent::Failed { seq: failed, error: BrowseError::Engine(_) } if *failed == seq),
+            matches!(&event, SearchEvent::Failed { seq: failed, error: BrowseError::Engine(_), text: None } if *failed == seq),
             "{event:?}"
         );
     }

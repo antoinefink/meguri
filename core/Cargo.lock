@@ -1777,6 +1777,7 @@ dependencies = [
  "meguri-model",
  "meguri-package",
  "meguri-sched",
+ "meguri-search",
  "meguri-stats",
  "meguri-storage",
  "meguri-sync",

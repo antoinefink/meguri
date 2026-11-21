@@ -2260,6 +2260,7 @@ enum OpenFailureDiagnostic {
         case .internal: return "internal"
         case .mediaCommitPending: return "mediaCommitPending"
         case .commitCompleted: return "commitCompleted"
+        case .browse: return "browse"
         }
     }
 
