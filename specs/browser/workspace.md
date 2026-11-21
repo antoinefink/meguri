@@ -4,7 +4,7 @@ Spec: browser/workspace
 Requirements: R1080, R1111, R1115 to R1117, R1132 to R1136, R1139 to R1145, R1152 to R1156, R1181 to R1187, R1190, R1193 to R1198, R1200 to R1207, R1212, R1221 to R1224, R1232, R1233, R1235 to R1240, R1241 to R1247, R1825 to R1832; supersedes in part R1131, R1134, R1135, R1157, R1184, R1193, R1212, R1222, R1226 to R1228, R1234 (the Browse and Note Types plan §5 lists the notes)
 Anki: none (Meguri design, decided by Antoine 2026-11-20, round 8: 1A 2A 3A 4B 5D 6A 7A 8A 9A 10A 11A); the operations it calls keep their own specs and Anki behaviour
 Scenarios: none; tests named in V18
-Status: Approved 2026-11-20 (R1232). Approved by Antoine in chat (round 8, decided 2026-11-20, `docs/design/decisions.md` rows `browser` and `home.deckList`), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`).
+Status: Approved 2026-11-20 (R1232). Approved by Antoine in chat (round 8, decided 2026-11-20, `docs/design/decisions.md` rows `browser` and `home.deckList`), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). The lines that begin "Changed 2026-11-21 (implementation review)" in V2.4 and V3 are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs; they record what PRs #41 and #45 built and their independent reviews accepted.
 
 The behaviour of Browse as round 8 decided it: columns and column sets, field columns, the deck and date cells, selection, the commands and when they ask, Find and Replace's preview and scope, Find Duplicates, the status line, the inspector's two tabs, the touch layouts' list, Select mode and swipes, the entry points, and the speed budgets. Layout and presentation are `docs/design/native-interface-contract.md` N21; the search field and the sidebar's meaning are `search/filter-tokens`. Where an older `browser/*` section differs, this file wins and that section carries a "Changed 2026-11-20" note.
 
@@ -47,6 +47,8 @@ Example: `{"std":{"cards":["noteFld","template","deck","cardDue","cardMod"],"sor
 
 The first, narrow column of every row shows, in this order of precedence, one symbol: suspended `pause.circle`, buried `moon`, flagged (the flag's `flag.fill` in its colour, `tags/flags-and-marked` F1), else nothing. A suspended or buried row's text is secondary (grey). No row is tinted (R1147's tints are superseded; R1149's glyphs stand, without the marked glyph: marking is not offered, V8). The symbol's accessibility label is the state ("Suspended", "Buried", "Red Flag").
 
+Changed 2026-11-21 (implementation review): a list reads as its known column keys in order, each at its first occurrence: an entry that names no column of V2.3 (for example one a newer Meguri wrote) is skipped, and a list with no known key, or a member that is not an array, reads as missing. A write to a set stores each of that set's lists as it reads, so their unknown and repeated keys are dropped then and only then; other sets keep theirs.
+
 ## V3. Field columns
 
 - A field column `fld:f` shows, for a row whose note's note type has a field named f (exact name), that field's value as one line: HTML removed and white space collapsed as the Sort Field cell does (`browser/columns` C7.1), except media: a field whose value holds a `[sound:…]` reference shows a speaker symbol and the first sound's length (from the media file; blank until read), a click plays it; a field holding an image shows the first image as a thumbnail the row's height; never the reference text or HTML.
@@ -54,6 +56,8 @@ The first, narrow column of every row shows, in this order of precedence, one sy
 - In Cards mode a note's cards repeat its values.
 - Cells are computed by the core with the other row cells (`browser/result-sets` H7): H7's column set is extended to accept `fld:` keys (Changed 2026-11-20 note in H7). A field name holding `:` can occur only in a damaged collection (`notetypes/records` N4 removes it); its key is still `fld:` + the stored name.
 - The first column of the list stays in place while the table scrolls sideways.
+
+Changed 2026-11-21 (implementation review): the one-line text is `browser/columns` C7.1's (`text/strip-html` H6 with media names kept), which keeps inner runs of white space. A field holding both a sound tag and an image carries both file names, and the app chooses what the row shows. `<audio>`, `<video>` and other media tags are neither a sound reference nor an image: such a field shows its one-line text, with the file name as C7.1 keeps it.
 
 ## V4. Sorting
 
