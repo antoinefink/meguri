@@ -24,9 +24,15 @@
 //!   ids the action was given.
 //!
 //! Find and Replace (`browser/find-replace`) is [`find_replace`]; the field
-//! names and note types of a target are [`summary`].
+//! names and note types of a target are [`summary`]. U87's actions
+//! (`browser/bulk-actions`, `browser/workspace` V8.1): Change Deck is
+//! [`change_deck`], the other card actions [`cards`], the note actions
+//! [`notes`].
 
+pub mod cards;
+pub mod change_deck;
 pub mod find_replace;
+pub mod notes;
 pub mod summary;
 
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
@@ -43,7 +49,7 @@ use crate::error::EngineError;
 use crate::executor::catalog;
 use crate::executor::op::{OpResult, OpSpec, UndoMeta};
 use crate::jobs::{JobContext, JobHandle, JobId, JobKind};
-use crate::lifecycle::Engine;
+use crate::lifecycle::{Engine, Generation};
 use crate::progress::ProgressSink;
 use crate::undo::entry::StepKind;
 
@@ -72,6 +78,8 @@ pub struct BulkOutcome {
     pub counts: BulkCounts,
     /// The commit's seq: the step's id when one was recorded.
     pub seq: Seq,
+    /// The collection generation the commit ran on.
+    pub generation: Generation,
     /// What the commit changed, for the table's refresh (R1185).
     pub changes: Arc<ChangeSet>,
     /// The undo step, `None` when the action wrote nothing.
@@ -79,16 +87,28 @@ pub struct BulkOutcome {
     /// A cancel came after the write phase started; the action completed
     /// anyway (O5).
     pub past_cancel_point: bool,
+    /// Delete Notes' second count, the cards removed (`browser/bulk-actions`
+    /// B11, K5); `None` for every other action.
+    pub cards_removed: Option<u64>,
 }
 
 impl BulkOutcome {
     pub fn of(result: OpResult<BulkCounts>) -> BulkOutcome {
+        BulkOutcome::split(result, |counts| (counts, None))
+    }
+
+    /// The result of an action whose value `split` gives as its counts and
+    /// its second count (K5).
+    pub fn split<T>(result: OpResult<T>, split: impl FnOnce(T) -> (BulkCounts, Option<u64>)) -> BulkOutcome {
+        let (counts, cards_removed) = split(result.value);
         BulkOutcome {
-            counts: result.value,
+            counts,
             seq: result.seq,
+            generation: result.generation,
             changes: result.changes,
             undo: result.undo,
             past_cancel_point: result.past_cancel_point,
+            cards_removed,
         }
     }
 }

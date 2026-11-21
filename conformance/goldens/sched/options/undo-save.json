@@ -452,10 +452,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "aabc587cc0b6ccce58e9f6300529db3aeefbbf6658620e9c69e990a666393009",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "sched/options/undo-save",
-  "scenario_sha256": "b8dd90c94ca12e9637dce29ddb1e74e818e3edf6a28cd19656b2bd6f3cd989fb",
+  "scenario_sha256": "d3f4e175b9114daaab650537f188ad5b26f827d1313853941a785bd7ab5c9445",
   "tz": "UTC"
 }
