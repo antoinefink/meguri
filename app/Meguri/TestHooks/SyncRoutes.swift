@@ -1,4 +1,7 @@
 #if MEGURI_TEST_HOOKS
+#if os(macOS)
+import AppKit
+#endif
 import AppModel
 import Settings
 import SwiftUI
@@ -96,6 +99,10 @@ extension TestHooks {
                     Text(verbatim: "Settings window preview")
                         .accessibilityIdentifier("settings.sync.windowPreview")
                         .task {
+                            // A hidden launch (xcode-check's probe, -MeguriBackgroundLaunch)
+                            // stays accessory and must never come to the front: it
+                            // checks the route launches and stays up, without the window.
+                            guard NSApp.activationPolicy() == .regular else { return }
                             let preview = ReviewCollection(configuration: configuration,
                                 navigation: AppNavigation(), sync: .renderFixture(state, clock: configuration.clock))
                             // Whatever section was last chosen, the window opens at Sync.
