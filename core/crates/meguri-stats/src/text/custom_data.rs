@@ -3,6 +3,8 @@
 //! `<key>=<value>` parts. Strings are UTF-16 code units throughout, as in a
 //! JavaScript page; an unpaired surrogate is written as U+FFFD (rule 5).
 
+use std::collections::HashMap;
+
 /// The nesting Meguri reads; deeper text is written unchanged (rule 1).
 const MAX_DEPTH: usize = 128;
 
@@ -81,6 +83,7 @@ impl Parser<'_> {
 
     fn object(&mut self, depth: usize) -> Option<Value> {
         let mut members: Vec<(Vec<u16>, Value)> = Vec::new();
+        let mut places: HashMap<Vec<u16>, usize> = HashMap::new();
         self.skip_space();
         if !self.eat(b'}') {
             loop {
@@ -94,9 +97,12 @@ impl Parser<'_> {
                     return None;
                 }
                 let value = self.value(depth)?;
-                match members.iter_mut().find(|(existing, _)| *existing == key) {
-                    Some(member) => member.1 = value,
-                    None => members.push((key, value)),
+                match places.get(&key) {
+                    Some(&place) => members[place].1 = value,
+                    None => {
+                        places.insert(key.clone(), members.len());
+                        members.push((key, value));
+                    }
                 }
                 if self.eat(b'}') {
                     break;

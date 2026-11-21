@@ -81,7 +81,12 @@ fn row(table: Table, image: &[Cell]) -> Json {
 struct Reader<'a> {
     text: &'a str,
     at: usize,
+    depth: usize,
 }
+
+/// The nesting the dump reads (`model/json-numbers`' 128 levels); deeper
+/// text is written as a string, so neither walk recurses past it.
+const MAX_DEPTH: usize = 128;
 
 impl Reader<'_> {
     fn space(&mut self) {
@@ -105,7 +110,14 @@ impl Reader<'_> {
 
     fn value(&mut self) -> Option<Json> {
         self.space();
-        let value = match self.text[self.at..].chars().next()? {
+        let first = self.text[self.at..].chars().next()?;
+        if matches!(first, '{' | '[') {
+            if self.depth == MAX_DEPTH {
+                return None;
+            }
+            self.depth += 1;
+        }
+        let value = match first {
             '{' => {
                 self.at += 1;
                 let mut members = Vec::new();
@@ -132,6 +144,7 @@ impl Reader<'_> {
                         }
                     }
                 }
+                self.depth -= 1;
                 Json::Object(members)
             }
             '[' => {
@@ -153,6 +166,7 @@ impl Reader<'_> {
                         }
                     }
                 }
+                self.depth -= 1;
                 Json::Array(items)
             }
             '"' => {
@@ -178,7 +192,7 @@ impl Reader<'_> {
 }
 
 fn read(text: &str) -> Option<Json> {
-    let mut reader = Reader { text, at: 0 };
+    let mut reader = Reader { text, at: 0, depth: 0 };
     let value = reader.value()?;
     reader.space();
     (reader.at == text.len()).then_some(value)

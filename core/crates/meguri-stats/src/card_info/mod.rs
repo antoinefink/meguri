@@ -262,7 +262,8 @@ fn data_text(image: &RowImage) -> String {
         .position(|column| *column == "data")
         .expect("cards has a data column");
     match image.get(index) {
-        Some(Cell::Text(bytes) | Cell::Blob(bytes)) => String::from_utf8_lossy(bytes).into_owned(),
+        // `model/row-records` R4: `data` that is not TEXT reads as empty.
+        Some(Cell::Text(bytes)) => String::from_utf8_lossy(bytes).into_owned(),
         _ => String::new(),
     }
 }
@@ -545,7 +546,13 @@ pub fn build(rows: &impl ReadRows, clock: &dyn Clock, input: &Input) -> Result<C
         due_from_day_number,
         generation: 0,
     };
-    let rollover = rows.config_entry("rollover")?.map(|stored| stored.entry.value);
+    // Only the stored value: a damaged row stamp must not fail the snapshot.
+    let rollover = rows
+        .row_image(Table::Config, &RowKey::text("rollover"))?
+        .and_then(|image| match image.get(3) {
+            Some(Cell::Text(bytes) | Cell::Blob(bytes)) => Some(bytes.clone()),
+            _ => None,
+        });
     Ok(CardInfo {
         raw,
         rows: rows_out,

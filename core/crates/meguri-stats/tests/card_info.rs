@@ -402,6 +402,8 @@ fn c5_1_early_years_and_the_javascript_date_range() {
     assert_eq!(date(-8_640_000_000_000, &clock), "-271821-04-20");
     assert_eq!(date(8_640_000_000_001, &clock), "NaN-aN-aN");
     assert_eq!(date_time(-8_640_000_000_001, &clock), "NaN-aN-aN @ aN:aN");
+    assert_eq!(date(i64::MIN, &clock), "NaN-aN-aN");
+    assert_eq!(date_time(i64::MAX, &clock), "NaN-aN-aN @ aN:aN");
     // C5.1's example instant, with seconds dropped, not rounded.
     let paris = ScenarioClock::new("Europe/Paris", "2030-01-15T10:00:00").unwrap();
     assert_eq!(date_time(1_894_748_400, &paris), "2030-01-16 @ 00:00");
@@ -746,6 +748,15 @@ fn c1_a_cd_that_is_not_a_string_reads_as_no_keys() {
         assert_eq!(info.raw.memory_state_source, Some(MemorySource::Computed));
         assert_eq!(row(&info, StatsKey::CustomData), None);
     }
+    // `data` that is not TEXT reads as empty (`model/row-records` R4).
+    let db = Db::new();
+    db.card(0, 0, 7, 0, "{}");
+    db.exec(
+        "UPDATE cards SET data = CAST(?1 AS BLOB) WHERE id = ?2",
+        &[SqlValue::Text(r#"{"pos":42,"cd":"{}"}"#.into()), SqlValue::Integer(CARD)],
+    );
+    let info = db.info();
+    assert_eq!((info.raw.due_position, info.raw.custom_data.as_str()), (Some(7), ""));
     // A stored `{}` is kept and shows an empty Custom Data row.
     let db = Db::new();
     db.card(2, 2, 105, 10, r#"{"cd":"{}"}"#);
@@ -1097,4 +1108,12 @@ fn c8_debug_dump_bytes() {
     let dump = db.info().debug_json();
     assert!(dump.contains("\n  \"homeDeck\": {\n"));
     assert!(dump.contains("deck:Lang"));
+    // A rollover nested past 128 levels is written as a string, not walked.
+    let deep = format!("{}4{}", "[".repeat(200), "]".repeat(200));
+    db.exec(
+        "UPDATE config SET val = CAST(?1 AS BLOB) WHERE KEY = 'rollover'",
+        &[SqlValue::Text(deep.clone())],
+    );
+    let dump = db.info().debug_json();
+    assert!(dump.ends_with(&format!("\n  \"rollover\": \"{deep}\"\n}}")), "{dump}");
 }

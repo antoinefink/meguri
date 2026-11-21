@@ -291,7 +291,7 @@ fn local(instant: i64, clock: &dyn Clock) -> (i64, u32, u32, i64) {
 
 /// `YYYY-MM-DD` of the local date of `instant` (C5.1).
 pub fn date(instant: i64, clock: &dyn Clock) -> String {
-    if instant.abs() > JS_DATE_LIMIT {
+    if !(-JS_DATE_LIMIT..=JS_DATE_LIMIT).contains(&instant) {
         return "NaN-aN-aN".into();
     }
     let (year, month, day, _) = local(instant, clock);
@@ -300,7 +300,7 @@ pub fn date(instant: i64, clock: &dyn Clock) -> String {
 
 /// `<date> @ HH:MM` of `instant` (C5.1), seconds dropped.
 pub fn date_time(instant: i64, clock: &dyn Clock) -> String {
-    if instant.abs() > JS_DATE_LIMIT {
+    if !(-JS_DATE_LIMIT..=JS_DATE_LIMIT).contains(&instant) {
         return "NaN-aN-aN @ aN:aN".into();
     }
     let (year, month, day, minute) = local(instant, clock);
