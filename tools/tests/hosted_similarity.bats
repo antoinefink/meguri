@@ -278,9 +278,19 @@ out() { sed -n "s/^$1=//p" "$GITHUB_OUTPUT"; }
   run ! grep -vE '^[0-9]+(\.[0-9]+)+ [0-9a-f]{40}$' <<<"$pins"
 }
 
-@test "the corpus may not be fetched into the checkout" {
-  run --separate-stderr bash -c 'cd "$1" && bash .github/similarity.sh corpus "$1/build/refs"' _ "$REPO_ROOT"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"outside the checkout"* ]]
-  [ ! -e "$REPO_ROOT/build/refs" ]
+@test "the corpus may not be fetched into, above or onto the checkout, nor over existing files" {
+  local r="$BATS_TEST_TMPDIR/work/meguri" d
+  mkdir -p "$r/.github" "$r/tools/similarity" "$BATS_TEST_TMPDIR/full"
+  cp "$SCRIPT" "$r/.github/"
+  cp "$REPO_ROOT/tools/similarity/config.yaml" "$r/tools/similarity/"
+  git -C "$r" init -q
+  echo keep >"$r/keep" && echo keep >"$BATS_TEST_TMPDIR/full/keep"
+  ln -s "$BATS_TEST_TMPDIR/work" "$BATS_TEST_TMPDIR/link"
+  for d in "$r/build/refs" "$r" "$BATS_TEST_TMPDIR/work" "$BATS_TEST_TMPDIR/link" "$r/../.." "$BATS_TEST_TMPDIR/full"; do
+    run --separate-stderr bash -c 'cd "$1" && bash .github/similarity.sh corpus "$2"' _ "$r" "$d"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"::error::"* ]]
+  done
+  [ -f "$r/keep" ] && [ -f "$BATS_TEST_TMPDIR/full/keep" ]
+  [ ! -e "$r/build/refs" ]
 }

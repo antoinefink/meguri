@@ -172,11 +172,23 @@ cmd_corpus() {
     tags+=("$tag") commits+=("$commit") refspecs+=("+refs/tags/$tag:refs/tags/$tag")
   done < <(pin)
   ((${#tags[@]} > 0)) || { echo "::error::$CONFIG pins no commits (corpus.commits)"; exit 1; }
-  case "$(realpath -m "$dir")/" in
-    "$(realpath "$PWD")"/*) echo "::error::The corpus must stay outside the checkout"; exit 1 ;;
+  # Resolved real paths: the corpus directory may not be, contain or sit
+  # inside the checkout. It must be absent or empty; nothing is deleted.
+  local target root
+  target="$(realpath -m -- "$dir")"
+  root="$(realpath -- "$(git rev-parse --show-toplevel)")"
+  case "$target/" in
+    "$root"/* ) echo "::error::The corpus must stay outside the checkout"; exit 1 ;;
   esac
-  rm -rf "$dir"
-  mkdir -p "$dir"
+  case "$root/" in
+    "$target"/* ) echo "::error::The corpus directory may not contain the checkout"; exit 1 ;;
+  esac
+  if [[ -e "$target" || -L "$dir" ]]; then
+    [[ -d "$target" && ! -L "$dir" && -z "$(ls -A -- "$target")" ]] ||
+      { echo "::error::The corpus directory must be absent or empty"; exit 1; }
+  fi
+  mkdir -p -- "$target"
+  dir="$target" repo="$target/anki"
   # A fresh repository with no credentials: no global or system git config
   # (so no token header), no prompt, the tags only, at depth 1.
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
