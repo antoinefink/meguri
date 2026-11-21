@@ -323,15 +323,17 @@ mg_doctor() {
   # the developer portal, only what Xcode installed.
   local daily=""
   daily="$(python3 "$MG_TOOLS/scripts/daily-driver-profiles.py" 2>/dev/null)" || daily=""
+  # Informational: the real copy is optional, so this never changes doctor's
+  # status; the line, details.daily_driver_profiles and the optional step say it.
   if [ -n "$daily" ] && jq -e '.mac.state == "authorized"' >/dev/null 2>&1 <<<"$daily"; then
-    mg__doctor_check daily-driver-profiles pass "an installed Mac profile authorizes the real copy (com.antoinefink.meguri); iOS: $(jq -r '.ios.state' <<<"$daily")"
+    printf '  %-4s  %-16s %s\n' info daily-driver-profiles "an installed Mac profile authorizes the real copy (com.antoinefink.meguri); iOS: $(jq -r '.ios.state' <<<"$daily")"
   else
     local daily_missing="the installed profiles could not be read" daily_ios=unknown
     if [ -n "$daily" ]; then
       daily_missing="$(jq -r '.mac.missing | join(", ")' <<<"$daily")"
       daily_ios="$(jq -r '.ios.state' <<<"$daily")"
     fi
-    mg__doctor_check daily-driver-profiles warn "optional: no installed Mac profile authorizes the real copy (com.antoinefink.meguri); missing: $daily_missing; iOS: $daily_ios"
+    printf '  %-4s  %-16s %s\n' info daily-driver-profiles "optional: no installed Mac profile authorizes the real copy (com.antoinefink.meguri); missing: $daily_missing; iOS: $daily_ios"
     mg_user_step daily-driver-account missing false "Set up the real copy's identifiers and profiles (daily driver)" \
       "In Certificates, Identifiers & Profiles: register com.antoinefink.meguri and com.antoinefink.meguri.widget, the App Group group.com.antoinefink.meguri on both, and iCloud (iCloud.com.antoinefink.meguri) and Push on the app; then let Xcode create the profiles. See the push note in the doc."
   fi

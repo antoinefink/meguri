@@ -156,7 +156,7 @@ Push needs a decision before the route can pass. Release signs `com.apple.develo
 
 Either changes the signing policy and needs Antoine's choice. Until then the route stops at its profile check, which names `push-production`.
 
-Doctor's `daily-driver-profiles` line reads the installed profiles (`tools/scripts/daily-driver-profiles.py`). It reports whether one authorizes the real copy on the Mac (identity, App Group, Keychain group, the production container and environment, production push, expiry, this Mac), and the iOS state. It lists this step while the Mac profile is missing or incomplete. It cannot see the developer portal itself.
+Doctor's informational `daily-driver-profiles` line (it never changes doctor's status) reads the installed profiles (`tools/scripts/daily-driver-profiles.py`). It reports whether one authorizes the real copy on the Mac (identity, App Group, Keychain group, the production container and environment, production push, expiry, this Mac), and the iOS state. It lists this step while the Mac profile is missing or incomplete. It cannot see the developer portal itself.
 
 Building and installing the real copy, at Antoine's request only:
 1. Run `MEGURI_APP_SIGNING=team tools/mg build-app --platform mac --real-copy --owner-requested`. It packs `build/app/real-copy/Meguri.zip`, unregisters and deletes the built app, and prints the read-only clean-up checks (`details.real_copy_cleanup_checks`).
