@@ -554,7 +554,9 @@ impl Request<'_> {
         let mut all = source.ids;
         all.extend(source.set_aside.iter().map(|(card, _)| *card));
         let sorted = SortedQuery::for_ids(&all, &sort, &clock).map_err(sort_error)?;
-        let mut listed = self.list(&*snapshot, sorted.pairs_sql(), sorted.params())?;
+        // The first page from the statement with a LIMIT, as a search's
+        // (H8's budget); the rest after it is published.
+        let first = self.list(&*snapshot, &format!("{} LIMIT {PAGE}", sorted.pairs_sql()), sorted.params())?;
         let set_aside = if source.mode == SearchMode::Cards && !sorted.lists_lone_cards() {
             let lone = self.list(&*snapshot, ids::LONE_CARDS_AMONG, &[id_list(&all)])?;
             lone.ids.into_iter().zip(lone.nids).collect()
@@ -580,12 +582,23 @@ impl Request<'_> {
             removed_while_running: Default::default(),
             prefix: 0,
         };
-        let first = Listed {
-            ids: listed.ids.drain(..listed.ids.len().min(PAGE)).collect(),
-            nids: listed.nids.drain(..listed.nids.len().min(PAGE)).collect(),
-        };
+        let paged = first.ids.len();
         let (id, handle) = self.publish_first(template, first)?;
-        Self::append(&handle, listed);
+        if paged == PAGE {
+            let mut rest = Listed::default();
+            let mut index = 0usize;
+            self.visit(&*snapshot, sorted.pairs_sql(), sorted.params(), &mut |row| {
+                if index >= PAGE {
+                    rest.ids.push(row[0]);
+                    if let Some(nid) = row.get(1) {
+                        rest.nids.push(*nid);
+                    }
+                }
+                index += 1;
+                true
+            })?;
+            Self::append(&handle, rest);
+        }
         self.complete(id, &handle)
     }
 }
