@@ -171,13 +171,13 @@ Changed 2026-11-20 (round 8): Browse no longer offers all notes: "All Found" pas
 
 ## F10. Live preview (Meguri, R1206)
 
-Changed 2026-11-20 (round 8): the preview counts notes that would change and lists the first 100 changes (`browser/workspace` V9); F10's error rules stay.
+Changed 2026-11-20 (round 8): the preview counts notes that would change and lists the first 100 changes (`browser/workspace` V9; changed 2026-11-21, implementation review: the first 100 notes that change, each with all its entries); F10's error rules stay.
 
 Anki shows neither a count nor an error before Apply. Meguri's sheet shows, while the user types (U86's `find_replace_preview`, run as `browser/bulk-framework` says):
 
 - **Matching notes**: the number of F8's notes that match (F6 step 3 for fields, F7 step 3 for tags) with the current inputs. It counts matches, so a note whose replacement would leave it as stored (F6 step 6) is counted here although Apply leaves it alone.
 - **Invalid pattern**: F4 step 5's refusal as an inline error: the message of the pattern Apply would build (F4 steps 1 to 4). Apply is disabled while it shows. With Tags, a Replace With text holding a separator shows F7 step 1's refusal the same way.
-  - Changed 2026-11-21 (implementation review): the error has no range. `InvalidRegex{message}` carries the message only, and the core parses the pattern once, with no second parse to find a span; `regex-syntax` stays a `via` pin that no workspace crate uses (`core/AGENTS.md`, `pins.toml`). The sheet shows the message and marks no part of the find text.
+  - Changed 2026-11-21 (implementation review): the error has no range. `InvalidRegex{message}` carries the message only, and the core parses the pattern once, with no second parse to find a span; `regex-syntax` stays a `via` pin that no workspace crate uses (`core/AGENTS.md`, `core/pins.toml`). The sheet shows the message and marks no part of the find text.
 
 ## F11. The operation (engine)
 
@@ -234,6 +234,7 @@ Meguri's tests (U86, `core/crates/meguri-engine/tests/find_replace.rs`) cover wh
 | In choice remembered across app launches | R1201 | F2 |
 | All-notes field list from every note type | U86 design | F3 |
 | Live matching count and inline pattern error | R1206 | F10 |
+| Whole Words (changed 2026-11-21, implementation review) | round 8 design (`browser/workspace` V9) | F11 |
 | A count larger than the preview's is refused (changed 2026-11-21, implementation review) | coordinator decision | F11 |
 | A target naming a note twice, an empty target list or an empty field name is refused | engine invariant | F11 |
 | A refusal keeps the undo and redo histories (Anki empties both for an invalid pattern, a field-count mismatch and a missing note type) | `engine/undo` M2 | F9 |

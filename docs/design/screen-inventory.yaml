@@ -566,7 +566,7 @@ screens:
       Find and Replace (round 8 option 8A): browser/workspace V9 and N21.6. Find,
       Replace With, In (All Fields, fields grouped by note type, Tags), Notes (Selected or All
       Found), Match Case, Whole Words, Regular Expression; a live preview counting the notes
-      that will change and listing the first 100 changes with removed text crossed out; the
+      that will change and listing the first 100 notes that change with removed text crossed out; the
       button names the count; Undo restores every note. Identifiers browse.findReplace.*.
   - id: browse.findDuplicates
     title: Find Duplicates

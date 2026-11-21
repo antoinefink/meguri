@@ -209,7 +209,7 @@ Model: `core/crates/meguri-testkit/src/scenario/{model,prepared,intake}.rs`. Meg
   - After `invalid_regex` or `field_count`, Anki empties its histories and Meguri keeps them. Observe undo only when the history was already empty, otherwise add a deviation (`conformance/bulk-ops#X1`, `browser/find-replace#F9`).
 - **Stamping.** Find and Replace and Edit Field write only changed notes; Anki stamps unchanged matches (deviation `find-replace-unchanged-match`, only on `unchanged-match`) (`browser/find-replace#F6`, X4).
 - **Engine refusals.** `InvalidArgument` for an empty or repeated id list and an empty field name. These are Meguri-only (`browser/find-replace#F11`, `browser/bulk-actions#B7.2`).
-- **Preview error range.** It comes from a second `regex-syntax` parse of the typed text, without `(?i)` and without NFC (`browser/find-replace#F10`). The plan's "`re:(`" wording means a regex find text, not search syntax.
+- **Preview error range.** Changed 2026-11-21 (implementation review): there is none. The preview's error is `InvalidRegex{message}`, the message only, with no second parse (`browser/find-replace#F10`). The plan's "`re:(`" wording means a regex find text, not search syntax.
 - **Change Deck.**
   - An inline new deck is part of the one "Change Deck" step.
   - Memory states are computed inside the op, not through the `memory_recompute` catalog entry.
