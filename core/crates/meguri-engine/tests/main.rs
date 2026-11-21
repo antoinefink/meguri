@@ -24,6 +24,8 @@ pub mod browse_no_writes;
 pub mod browse_rows;
 #[path = "browser_config.rs"]
 pub mod browser_config;
+#[path = "bulk_actions.rs"]
+pub mod bulk_actions;
 #[path = "cancel.rs"]
 pub mod cancel;
 #[path = "card_excerpts.rs"]

@@ -367,12 +367,13 @@ fn commit(context: &mut OpContext<'_, '_>, planned: Planned) -> Result<BulkCount
         }
         // 3.1: the remaining steps, from the home deck's preset.
         let home = CardSched::new(&card).home_deck();
-        if !home_presets.contains_key(&home) {
-            let deck = live.iter().find(|deck| deck.id == home);
-            let config = preset_of(&*scope, deck)?.config.for_use();
-            home_presets.insert(home, config);
-        }
-        let old = &home_presets[&home];
+        let old = match home_presets.entry(home) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let deck = live.iter().find(|deck| deck.id == home);
+                entry.insert(preset_of(&*scope, deck)?.config.for_use())
+            }
+        };
         if let Some(left) = remap::preset_change(card.card_type, card.remaining_steps, old, &target_config) {
             card.remaining_steps = left;
         }

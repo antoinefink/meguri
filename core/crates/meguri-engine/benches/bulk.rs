@@ -14,6 +14,12 @@
 //!   as Browse's All Found passes the result's ids (`browser/workspace` V9).
 //! - `engine.find_replace_scan_all_notes`: the all-notes target with a
 //!   find text no note holds: the compute phase alone (nothing written).
+//! - U87's actions on the same 10,000 notes (R1831), each sample one
+//!   undoable op: `engine.bulk_change_deck_10k` moves their cards between
+//!   two decks (step 4's memory states included when the collection has
+//!   FSRS on), `engine.bulk_suspend_10k` suspends and unsuspends their
+//!   cards, `engine.bulk_set_flag_10k` sets and clears a flag on them,
+//!   `engine.bulk_add_tags_10k` adds and removes a tag on the notes.
 //!
 //! Each sample is timed alone after a WAL checkpoint, as the app
 //! checkpoints when idle (U109); back to back, the log grows and every
@@ -22,7 +28,7 @@
 //! Sizes come from `$MEGURI_BENCH_SIZES` (comma-separated, default
 //! `10k,150k`); sizes count cards. The result goes to
 //! `$MEGURI_BENCH_RESULTS/bulk.json`. On Apple hosts (`tools/mg bench-mac`)
-//! the bench exits with status 1 after writing its result when the 10k
+//! the bench exits with status 1 after writing its result when a 10k
 //! p95 is 2 s or more, or the all-notes p95 is 5 s or more on a collection
 //! of at least 150,000 notes.
 
@@ -31,11 +37,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::Criterion;
-use meguri_engine::bulk::NoteTarget;
+use meguri_engine::bulk::cards::{self, CardAction};
+use meguri_engine::bulk::change_deck::{self, DeckTarget};
 use meguri_engine::bulk::find_replace::{self, FindIn, FindReplace};
+use meguri_engine::bulk::notes::{self as note_actions, NoteAction};
+use meguri_engine::bulk::{CardTarget, NoteTarget};
 use meguri_engine::{CancelToken, Collection, Engine, EngineConfig, OpenConfig, ProgressSink};
 use meguri_model::clock::{FixedClock, UtcOffset};
-use meguri_model::ids::NoteId;
+use meguri_model::ids::{CardId, DeckId, NoteId};
 use meguri_model::rng::SeededRandom;
 use meguri_storage::{ReadRows, ReaderRole, Table};
 use meguri_testkit::bench::fixtures;
@@ -51,6 +60,10 @@ const BULK: &str = "engine.bulk_find_replace_10k";
 const ALL: &str = "engine.find_replace_all_notes";
 const SCAN: &str = "engine.find_replace_scan_all_notes";
 const LISTED: &str = "engine.find_replace_listed_all";
+const CHANGE_DECK: &str = "engine.bulk_change_deck_10k";
+const SUSPEND: &str = "engine.bulk_suspend_10k";
+const FLAG: &str = "engine.bulk_set_flag_10k";
+const TAGS: &str = "engine.bulk_add_tags_10k";
 const NOTES: usize = 10_000;
 const BULK_BUDGET: Duration = Duration::from_secs(2);
 const ALL_BUDGET: Duration = Duration::from_secs(5);
@@ -118,6 +131,96 @@ fn toggle(collection: &Collection, target: &NoteTarget, marked: bool) -> u64 {
     let done = find_replace::run(collection, target, &request, CancelToken::new(), ProgressSink::new())
         .expect("Find and Replace commits");
     done.value.affected
+}
+
+/// One sample: the action (`true`) or its inverse; the rows written.
+type Sample<'a> = Box<dyn Fn(bool) -> u64 + 'a>;
+
+/// U87's actions on the cards of `notes` or on `notes`, each sample one op:
+/// the `on` step and its inverse alternate.
+fn u87_actions(
+    collection: &Collection,
+    notes: &[NoteId],
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    size: &str,
+    suite: &mut Suite,
+) {
+    let cards: Vec<CardId> = collection
+        .reader(ReaderRole::Query)
+        .expect("a reader")
+        .cards_of_notes_with_ids(notes)
+        .expect("the notes' cards")
+        .into_iter()
+        .map(|card| card.id)
+        .collect();
+    let target = CardTarget::Cards(cards.clone());
+    let home = meguri_engine::decks::add(collection, "U87 Bench A".to_owned())
+        .expect("a deck")
+        .value
+        .id;
+    let away = meguri_engine::decks::add(collection, "U87 Bench B".to_owned())
+        .expect("a deck")
+        .value
+        .id;
+    let deck = |id: DeckId| {
+        change_deck::run(collection, &target, &DeckTarget::Deck(id), CancelToken::new(), ProgressSink::new())
+            .expect("Change Deck commits")
+            .value
+            .affected
+    };
+    // Every card starts in the first deck.
+    deck(home);
+    let card_action = |action: CardAction| {
+        cards::run(collection, &target, &action, CancelToken::new(), ProgressSink::new())
+            .expect("the action commits")
+            .value
+            .affected
+    };
+    let listed = NoteTarget::Notes(notes.to_vec());
+    let note_action = |action: NoteAction| {
+        note_actions::run(collection, &listed, &action, CancelToken::new(), ProgressSink::new())
+            .expect("the action commits")
+            .value
+            .counts
+            .affected
+    };
+    let rows: [(&str, Sample<'_>); 4] = [
+        (
+            CHANGE_DECK,
+            Box::new(|on| deck(if on { away } else { home })),
+        ),
+        (
+            SUSPEND,
+            Box::new(|on| card_action(if on { CardAction::Suspend } else { CardAction::Unsuspend })),
+        ),
+        (FLAG, Box::new(|on| card_action(CardAction::SetFlag(if on { 1 } else { 0 })))),
+        (
+            TAGS,
+            Box::new(|on| {
+                let text = "u87-bench".to_owned();
+                note_action(if on { NoteAction::AddTags(text) } else { NoteAction::RemoveTags(text) })
+            }),
+        ),
+    ];
+    for (name, run) in rows {
+        let mut measurement = Measurement::start(name, Some(size));
+        let mut on = true;
+        group.bench_function(format!("{}/{size}", name.trim_start_matches("engine.")), |b| {
+            b.iter_custom(|iters| {
+                measurement.run_timed(iters, |_| {
+                    let took = timed(collection, || {
+                        assert!(run(on) > 0, "{name} writes");
+                    });
+                    on = !on;
+                    took
+                })
+            })
+        });
+        suite.push(measurement.finish());
+        if !on {
+            run(false);
+        }
+    }
 }
 
 fn main() -> ExitCode {
@@ -231,6 +334,7 @@ fn main() -> ExitCode {
             })
         });
         suite.push(scan.finish());
+        u87_actions(&collection, &notes, &mut group, &size, &mut suite);
         engine.close().expect("the collection closes");
     }
     group.finish();
@@ -254,7 +358,7 @@ fn main() -> ExitCode {
             .find(|(size, _)| size == fixture)
             .map_or(0, |(_, count)| *count);
         let budget = match record.name.as_str() {
-            BULK => Some(BULK_BUDGET),
+            BULK | CHANGE_DECK | SUSPEND | FLAG | TAGS => Some(BULK_BUDGET),
             ALL | LISTED if notes >= ALL_BUDGET_NOTES => Some(ALL_BUDGET),
             _ => None,
         };
