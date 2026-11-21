@@ -443,14 +443,17 @@ impl ColumnSets {
     /// kept). `None` when the note type has no own set.
     pub fn use_standard(&self, notetype: NotetypeId) -> Option<ConfigValue> {
         let stored = self.stored_set(SetId::Notetype(notetype))?;
-        // The own set's unknown members are kept (V2.4, C6).
-        let copy = self
-            .standard()
-            .value()
-            .members()
-            .into_iter()
-            .fold(stored.clone(), |set, (name, value)| set.with_member(name, value.clone()));
-        Some(self.with_set(SetId::Notetype(notetype), copy))
+        // The own set's unknown members are kept, in the set and in its
+        // `sort` (V2.4, C6); the standard set's are not copied.
+        let standard = self.standard();
+        let empty = ConfigValue::Object(Vec::new());
+        let mut sort = object(stored.get(SORT)).unwrap_or(&empty).clone();
+        let mut copy = stored.clone();
+        for mode in MODES {
+            sort = sort.with_member(mode_member(mode), standard.sort(mode).value());
+            copy = copy.with_member(mode_member(mode), standard.columns_value(mode));
+        }
+        Some(self.with_set(SetId::Notetype(notetype), copy.with_member(SORT, sort)))
     }
 
     /// The key's value with `set`'s member replaced; a stored value that is
