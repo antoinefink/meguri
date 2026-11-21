@@ -51,6 +51,8 @@ fn checked_regular(found: std::io::Result<fs::Metadata>, required: bool) -> Resu
         // SQLite unlinks -wal and -shm when the last connection closes. An
         // unlink between the path lookup and the attribute read reports a
         // file with no links: it is already gone, as an optional file may be.
+        // No name refers to it, so this is NotFound and its type, mode and
+        // owner do not matter; a required file never takes this arm.
         Ok(m) if m.nlink() == 0 && !required => Ok(()),
         Ok(m) if m.is_file() && m.nlink() == 1 && m.mode() & 0o777 == 0o600 => owned(&m),
         Ok(_) => Err(unavailable()),
@@ -736,7 +738,12 @@ mod regular_tests {
     fn unlinked_optional_file_counts_as_absent_and_other_checks_stay() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("accounts.sqlite-wal");
-        let file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).unwrap();
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap();
         regular(&path, false).unwrap();
         let second = temp.path().join("second");
         fs::hard_link(&path, &second).unwrap();
@@ -744,7 +751,7 @@ mod regular_tests {
         fs::remove_file(&second).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
         assert!(regular(&path, false).is_err(), "a file others can read is refused");
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        // Once unlinked, even a file with a refused mode counts as absent.
         fs::remove_file(&path).unwrap();
         let unlinked = file.metadata().unwrap();
         assert_eq!(unlinked.nlink(), 0);
