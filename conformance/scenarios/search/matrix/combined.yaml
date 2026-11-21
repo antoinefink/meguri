@@ -14,10 +14,14 @@
 # results sorted by several columns (browser/sorting). Pair has two
 # templates; its note with an empty first field has only the second card.
 # Ids come from the frozen clock: 1930395600000 + note (card) number - 1.
+# FSRS is on and the load balancer off, as in every scenario that answers
+# cards (specs/sched/answering.md "FSRS" and A9): Meguri answers only with
+# FSRS on, so a golden recorded with FSRS off cannot match its card rows.
 id: search/matrix/combined
 tags: [needs-text, needs-tag, needs-deck, needs-notetype, needs-template, needs-ids, needs-state, needs-prop, needs-history]
 clock: {tz: UTC, start: "2031-03-04T13:00:00"}
 setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
   decks: [Lang, "Lang::Verbs", "Lang::Verbs::Past", Sums]
   notetypes:
     - name: Pair
@@ -130,11 +134,12 @@ steps:
           # invalid state and flag values
           - {query: 'is:learned'}
           - {query: 'flag:blue'}
-          # properties
+          # properties; under FSRS #c1 has interval 7 and #c5 interval 8,
+          # so ivl>=8 takes only #c5 at its bound and due=7 only #c1
           - {query: 'prop:ivl=0'}
           - {query: 'prop:ivl>0'}
-          - {query: 'prop:ivl>=4'}
-          - {query: 'prop:due=3'}
+          - {query: 'prop:ivl>=8'}
+          - {query: 'prop:due=7'}
           - {query: 'prop:due>0'}
           - {query: 'prop:due=0'}
           - {query: 'prop:reps=1'}
@@ -207,7 +212,8 @@ steps:
           - {query: 'added:0'}
           - {query: 'added:2'}
           - {query: 'is:buried'}
-          - {query: 'prop:due=2'}
+          # #c1 is now due in 6 days, one less than before the day
+          - {query: 'prop:due=6'}
           - {query: 'rated:1'}
           - {query: 'rated:2'}
           - {query: 'rated:2:4'}
