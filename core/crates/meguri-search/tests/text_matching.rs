@@ -488,6 +488,72 @@ fn excluding_every_field_fails_the_terms_that_need_one() {
     );
 }
 
+// T7.1 (changed 2026-11-21, implementation review): a note whose `mid`
+// names no note type. With an excluded field anywhere it fails every plain,
+// `nc:`, `sc:`, `-sc:`, `re:` and `w:` test, and their negations match it;
+// with none, it is tested like any note, except by `sc:`. The query-wide
+// refusals come first.
+#[test]
+fn a_note_whose_note_type_is_missing() {
+    let f = excluded_fields();
+    // Note type 99 has no row: its notes hold `dog` and `secret`.
+    f.note(20, 99, &["dog", "secret"]);
+    f.note(21, 99, &["{{c1::dog}} secret"]);
+    f.table(
+        UNICODE,
+        &[
+            ("dog", &[1, 2, 4, 5, 6]),
+            ("nc:dog", &[1, 2, 4, 5, 6]),
+            ("re:dog", &[1, 2, 4, 5, 6]),
+            ("w:dog", &[1, 2, 4, 5, 6]),
+            ("sc:dog", &[]),
+            ("-sc:dog", &[1, 2, 4, 5, 6]),
+            ("secret", &[3]),
+            ("-dog", &[3, 7, 8, 9, 20, 21]),
+            ("-re:dog", &[3, 7, 8, 9, 20, 21]),
+            ("-nc:dog", &[3, 7, 8, 9, 20, 21]),
+            ("-w:dog", &[3, 7, 8, 9, 20, 21]),
+            ("-(sc:dog)", &[1, 2, 3, 4, 5, 6, 7, 8, 9, 20, 21]),
+        ],
+    );
+
+    // No excluded field: such a note is tested like any note, except by
+    // `sc:`, whose note types its `mid` is not one of.
+    let f = cloze_fixture();
+    f.note(20, 99, &["capital", ""]);
+    f.table(
+        UNICODE,
+        &[
+            ("capital", &[1, 2, 20]),
+            ("nc:capital", &[1, 2, 20]),
+            ("re:capital", &[1, 2, 20]),
+            ("w:capital", &[1, 2, 20]),
+            ("sc:capital", &[1]),
+            ("-sc:capital", &[2, 20]),
+        ],
+    );
+
+    // The query-wide refusals of T7.2 and T7.3 come first.
+    let mut f = fixture();
+    f.notetype(
+        1,
+        "Hidden",
+        Kind {
+            excluded: &[0],
+            ..standard(&["Only"])
+        },
+    );
+    f.note(1, 99, &["secret"]);
+    assert_eq!(f.failure("secret"), failed(SearchFailure::NoSearchableField));
+    assert_eq!(f.failure("-nc:secret"), failed(SearchFailure::NoSearchableField));
+    assert_eq!(
+        f.failure("-re:secret"),
+        failed(SearchFailure::AllFieldsExcluded {
+            notetype: "Hidden".to_owned()
+        })
+    );
+}
+
 // T8.3's table and the transform of the whole pattern.
 #[test]
 fn nc_matches_the_combining_free_texts() {

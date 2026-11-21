@@ -16,10 +16,14 @@ pub mod builder;
 pub mod canonical_roundtrip;
 #[path = "card_extractors.rs"]
 pub mod card_extractors;
+#[path = "column_sets.rs"]
+pub mod column_sets;
 #[path = "config_keys.rs"]
 pub mod config_keys;
 #[path = "edit_services.rs"]
 pub mod edit_services;
+#[path = "field_columns.rs"]
+pub mod field_columns;
 #[path = "filter_tokens.rs"]
 pub mod filter_tokens;
 #[path = "name_index.rs"]

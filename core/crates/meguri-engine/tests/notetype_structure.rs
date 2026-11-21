@@ -327,7 +327,9 @@ fn stale_before_planning_and_during_the_backup() {
     assert_eq!(nt.config.css, "y");
 }
 
-/// S1.1: repeated origins are `InvalidArgument`, before `Stale`.
+/// S1.2's whole order, step 1: repeated origins and a sort field outside the
+/// draft are `InvalidArgument` before `Stale`; step 3: an origin outside the
+/// base comes after `Stale` (changed 2026-11-21, implementation review).
 #[test]
 fn repeated_origins_are_invalid_before_stale() {
     let (h, _) = harness();
@@ -338,12 +340,67 @@ fn repeated_origins_are_invalid_before_stale() {
     assert!(matches!(run(&h, draft.clone()).unwrap_err(), EngineError::InvalidArgument { .. }));
     draft.fields[1].origin = Some(1);
     assert!(matches!(run(&h, draft.clone()).unwrap_err(), EngineError::Stale { .. }));
+    draft.sort_field = Some(3);
+    assert!(matches!(run(&h, draft.clone()).unwrap_err(), EngineError::InvalidArgument { .. }));
     let mut out_of_range = StructureDraft::of(&read(&h, id));
     out_of_range.fields[2].origin = Some(9);
     assert!(matches!(run(&h, out_of_range.clone()).unwrap_err(), EngineError::InvalidArgument { .. }));
-    // Before `Stale` too (S1.2: "before them all").
+    // A stale base: `Stale`, even for an origin outside its own base (S1.2's
+    // whole order, step 3; this expected `InvalidArgument` before the spec
+    // moved the range check after `Stale`).
     out_of_range.base = notetypes::AggregateDigest([0; 32]);
-    assert!(matches!(run(&h, out_of_range).unwrap_err(), EngineError::InvalidArgument { .. }));
+    assert!(matches!(run(&h, out_of_range).unwrap_err(), EngineError::Stale { .. }));
+}
+
+/// S1.2's whole order (changed 2026-11-21, implementation review): a draft
+/// is checked against the base it was loaded from. Loaded from a 3-field
+/// note type with origin 2, and saved after another write removed a field,
+/// it is `Stale` (reload), never `InvalidArgument`: nothing written, no
+/// backup. A fresh draft with an origin outside the base is still
+/// `InvalidArgument`, and a draft whose note type was removed and whose sort
+/// field lies past its field list is `InvalidArgument` (step 1), not `Stale`.
+#[test]
+fn an_origin_outside_the_base_is_checked_after_stale() {
+    let (h, backups) = harness();
+    let id = trio(&h);
+    add(&h, id, &["a", "b", ""]);
+    let loaded = draft(&h, id);
+    assert_eq!(loaded.fields[2].origin, Some(2));
+    let mut removing = draft(&h, id);
+    without(&mut removing, "Extra");
+    run(&h, removing).unwrap();
+    assert_eq!(read(&h, id).fields.len(), 2);
+    let calls = backups.calls();
+    let before = state(&h, id);
+    let undo = undo_name(&h);
+    assert!(matches!(run(&h, loaded).unwrap_err(), EngineError::Stale { .. }));
+    assert_eq!(backups.calls(), calls, "no backup");
+    assert_eq!(state(&h, id), before, "nothing written");
+    assert_eq!(undo_name(&h), undo, "no undo step");
+
+    let mut fresh = draft(&h, id);
+    fresh.fields[1].origin = Some(2);
+    let error = run(&h, fresh).unwrap_err();
+    assert!(matches!(error, EngineError::InvalidArgument { .. }), "{error:?}");
+    assert_eq!(backups.calls(), calls);
+
+    let mut sorted_past = draft(&h, id);
+    sorted_past.sort_field = Some(2);
+    meguri_engine::notetypes::remove::remove(
+        &h.collection,
+        meguri_engine::notetypes::remove::RemoveNotetype {
+            notetype: id,
+            confirmed_notes: 1,
+            confirmed_cards: 2,
+        },
+        CancelToken::new(),
+        ProgressSink::new(),
+    )
+    .unwrap();
+    let error = run(&h, sorted_past.clone()).unwrap_err();
+    assert!(matches!(error, EngineError::InvalidArgument { .. }), "{error:?}");
+    sorted_past.sort_field = Some(1);
+    assert!(matches!(run(&h, sorted_past).unwrap_err(), EngineError::Stale { .. }));
 }
 
 /// S1.2 items 2 and 3: the last field or template, and a protected field.
