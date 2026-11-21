@@ -88,12 +88,12 @@ With `hidePlayButtons` on, every marker that D5 does not claim is removed (repla
 
 ## D7. Blank-card notices (R531, R976)
 
-Shown with Anki's English wording (D10), as Anki shows them:
+Meguri's wording (D10) in Anki's layout:
 
-- **empty front** (standard note type, K4 step 2): `<div>` + `The front of this card is blank.` + `<br><a href='https://docs.ankiweb.net/templates/errors.html#front-of-card-is-blank'>More information</a></div>`
-- **missing cloze** (cloze note type): `<div>` + `No cloze N found on card.` + U+000A + `Please either add a cloze deletion, or use the Empty Cards tool.` + `<br><a href='https://docs.ankiweb.net/templates/errors.html#no-cloze-filter-on-cloze-note-type'>More information</a></div>`, N being the card's ordinal + 1 in decimal.
+- **empty front** (standard note type, K4 step 2): `<div>` + `blank.front` + `<br><a href='https://docs.ankiweb.net/templates/errors.html#front-of-card-is-blank'>More information</a></div>`
+- **missing cloze** (cloze note type): `<div>` + `blank.cloze` + `<br><a href='https://docs.ankiweb.net/templates/errors.html#no-cloze-filter-on-cloze-note-type'>More information</a></div>`, with N in `blank.cloze` being the card's ordinal + 1 in decimal.
 
-The link opens like any card link (R568).
+Each notice is one line of text: no U+000A or other line break before the `<br>`. The text is inserted as written, with no HTML escaping (it holds no `&`, `<`, `>`, `"` or `'`). The link opens like any card link (R568). The wording differs from Anki's by decision (D11).
 
 ## D8. Template-error notice (R531, R959)
 
@@ -123,16 +123,18 @@ Anki's wording, used exactly (R531):
 
 | Id | Text |
 |---|---|
-| `blank.front` | `The front of this card is blank.` |
-| `blank.cloze` | `No cloze {N} found on card.` U+000A `Please either add a cloze deletion, or use the Empty Cards tool.` |
 | `notice.more` | `More information` |
 
-Meguri's wording (R959):
+Meguri's wording (R959; for the blank notices, D11):
 
 | Id | Text |
 |---|---|
+| `blank.front` | `This card’s front is empty.` |
+| `blank.cloze` | `This card’s note has no cloze {N}.` |
 | `error.header.question` | `The front template has an error:` |
 | `error.header.answer` | `The back template has an error:` |
+
+The apostrophe in `blank.front` and `blank.cloze` is U+2019 RIGHT SINGLE QUOTATION MARK, as in Meguri's other copy, never U+0027. `{N}` is replaced by the decimal number of D7, with no padding or grouping.
 
 Links (exact): `https://docs.ankiweb.net/templates/errors.html#front-of-card-is-blank`, `…#no-cloze-filter-on-cloze-note-type`, `…#template-syntax-error` (same page, three anchors).
 
@@ -140,11 +142,15 @@ Links (exact): `https://docs.ankiweb.net/templates/errors.html#front-of-card-is-
 
 - Anki turns more text into buttons than D3: a marker with any single character other than U+000A in place of `q`/`a`, or with non-ASCII decimal digits (any Unicode decimal digit), becomes a button, or is removed when buttons are hidden. Most of these buttons work in Anki's review and preview screens. A side other than exactly `q` selects the answer list, on either side of the card, so `[anki:play:x:0]` plays answer entry 0. A side of `\` also plays from the answer list, because the button's script reads it as an empty side. Non-ASCII digits count by their numeric value, so `[anki:play:q:١]` plays question entry 1. Some buttons fail when clicked: an index past the end of the list raises an error, a side of `:` makes the command unreadable, and a side of `'`, `"` or U+000D breaks the button's markup or script, so the click does nothing. The pipeline never writes such markers; they appear only when note text contains them literally. Meguri leaves all of them as text, in both `hidePlayButtons` states, which keeps the markup free of quotes and backticks it does not control. This loses Anki behavior in two ways. A question field with the literal text `[anki:play:x:0]`, on a card whose answer has `[sound:a.mp3]`, shows a button in Anki that plays a.mp3 from the question, while Meguri shows the text. With buttons hidden, Anki removes that text and Meguri still shows it.
 - R526 leaves the iOS action open (a post to Meguri's native message handler), and the render coverage note proposed a play message to AnkiMobile's `cb` handler. D4 uses a handler of Meguri's own, `meguri`, instead: `cb` keeps exactly AnkiMobile's protocol, under which every message other than its taps is ignored (R511), and a plain command string needs no JSON quoted inside the `onclick` attribute. A handler name is a member of `window.webkit.messageHandlers`, not a page-world global, so R516 holds.
-- R531 asks for Anki's wording for template errors too, while R959 makes it Meguri's; this file follows R959 for template errors (as `template-syntax.md` T9 does) and R531 for the two blank notices.
+- R531 asks for Anki's wording for template errors too, while R959 makes it Meguri's; this file follows R959 for template errors (as `template-syntax.md` T9 does).
+- **The two blank notices use Meguri's wording** (D10 `blank.front`, `blank.cloze`), not Anki's, though R531 asks for Anki's. Decided 2026-11-21 by the coordinator under Antoine's delegation: these are user-facing sentences, and compatibility does not depend on them. The notice is display output only: it is never stored in the collection, never synced, and never part of the comparable render outputs that the oracle and Meguri both produce (`conformance/render-ops` Q5 reports the blank kind, `empty_front` or `missing_cloze`, and a blank card's question without any notice). The layout, the `More information` text and the three links stay as D7 and D10 give them. Meguri's sentence does not name a feature: Meguri has no Empty Cards tool in its interface yet (`docs/design/screens.md` `settings.maintenance` is a sketch), so the missing-cloze notice says only what is missing.
+  - Register entry `render-blank-notice-wording` (R1889, `conformance/dsl` D13; the `conformance/deviations.yaml` header links this register). No scenario or golden holds display HTML, so the entry authorizes no transform and no comparison changes. Its proof is D12's display snapshot test `display_outcomes_on_every_host_and_button_setting` (`core/crates/meguri-template/tests/display_snapshots.rs`), cases `blank_front` and `missing_cloze`, together with `blank_notices_use_meguri_wording` (D12).
 
 ## D12. Tests
 
 Snapshot tests (insta, `core/crates/meguri-template/tests/snapshots/`) pin the D9 output for both platforms and both `hidePlayButtons` values on at least: a question with two sounds and its answer with FrontSide plus one sound (the FrontSide buttons carry `play:q:0` and `play:q:1`, the answer's own button `play:a:0`); a TTS directive followed by a sound (TTS content shown, the sound's command `play:q:1`); hidden buttons with the AV lists unchanged; a literal `[anki:play:x:1]` and `[anki:play:q:١]` left as text; an empty-front card, a missing-cloze card and a template error on each side. Tests assert that the markup the transform adds never contains a backtick or `${`. These snapshots are Meguri-produced and never serve as goldens.
+
+- `blank_notices_use_meguri_wording`: the empty-front notice is exactly D7's markup with `This card’s front is empty.`, and the missing-cloze notice for ordinals 0 and 9 is D7's markup with `This card’s note has no cloze 1.` and `This card’s note has no cloze 10.`, each apostrophe U+2019 and no line break in the text, on both platforms and both `hidePlayButtons` values. The test compares whole strings with D7 and D10; it holds no other wording.
 
 
 Focused generated-control checks:
