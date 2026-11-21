@@ -33,6 +33,8 @@ pub mod browser_config_conformance;
 pub mod card_excerpts;
 #[path = "card_extractors.rs"]
 pub mod card_extractors;
+#[path = "card_stats_conformance.rs"]
+pub mod card_stats_conformance;
 #[path = "catalog.rs"]
 pub mod catalog;
 #[path = "clock.rs"]
