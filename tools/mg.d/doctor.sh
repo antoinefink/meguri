@@ -196,7 +196,9 @@ EOF
     { n[$1]++; if (n[$1] <= 2) who[$1] = who[$1] (n[$1] == 1 ? "" : ", ") $2 }
     END { for (t in n) if (n[t] > 1) { printf "%s%d checkouts share %s (%s%s)", sep, n[t], substr(t, index(t, ":") + 1), who[t], (n[t] > 2 ? ", ..." : ""); sep = "; " } }')"
   if [ -n "$want" ] && [ "${here%%:*}" = volume ]; then
-    note=" (MEGURI_DOCKER_CARGO_TARGET belongs to $(mg_cargo_target_owner "$want"); ignored here)"
+    note="$(mg_cargo_target_owner "$want")"
+    [ "$note" = '?' ] && note="is not an absolute path" || note="belongs to $note"
+    note=" (MEGURI_DOCKER_CARGO_TARGET $note; ignored here)"
   fi
   if [ -n "$shared" ]; then
     mg__doctor_check cargo-target warn "$shared: their Docker cargo runs can replay each other's builds; give each checkout its own MEGURI_DOCKER_CARGO_TARGET or unset it"

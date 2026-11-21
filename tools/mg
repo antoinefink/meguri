@@ -137,18 +137,21 @@ mg_compose_project_for() {
 
 # Every checkout mounts at /work, so two checkouts sharing one Cargo target
 # replay each other's fingerprints and test binaries. An explicit
-# MEGURI_DOCKER_CARGO_TARGET is honoured only for the checkout that owns it:
-# the checkout the directory lies in, else the one named in its
-# .meguri-checkout marker (written by the first run that uses an unmarked
-# directory outside every checkout). Any other checkout falls back to its own
-# volume <project>_cargo-target, and so do the jobs it nests.
+# MEGURI_DOCKER_CARGO_TARGET (an absolute path) is honoured only for the
+# checkout that owns it: the checkout it lies in (or would lie in, for a
+# directory not made yet), else the one named in its .meguri-checkout marker,
+# which the first real run on an unmarked directory outside every checkout
+# writes. Any other checkout falls back to its own volume
+# <project>_cargo-target, and so do the jobs it nests.
 
-# mg_cargo_target_owner <dir>: the owning checkout, or nothing when unowned.
+# mg_cargo_target_owner <dir>: the owning checkout, `?` for a relative path
+# (nobody's), or nothing when unowned.
 mg_cargo_target_owner() {
-  local p
-  [ -d "$1" ] || return 0
-  p="$(cd "$1" && pwd -P)" || return 0
-  if [ -f "$p/.meguri-checkout" ]; then
+  local p="$1"
+  case "$p" in /*) ;; *) echo '?'; return 0 ;; esac
+  while [ ! -d "$p" ]; do p="$(dirname "$p")"; done
+  p="$(cd "$p" && pwd -P)" || return 0
+  if [ -d "$1" ] && [ -f "$p/.meguri-checkout" ]; then
     head -n 1 "$p/.meguri-checkout"
     return 0
   fi
@@ -178,18 +181,22 @@ mg_cargo_target_for() {
 # mg__resolve_cargo_target <claim: true|false> <log>: host only, before a job
 # runs; dry runs and doctor pass false and write nothing.
 mg__resolve_cargo_target() {
-  local want="${MEGURI_DOCKER_CARGO_TARGET:-}" owner
+  local want="${MEGURI_DOCKER_CARGO_TARGET:-}" owner why
   MG_CARGO_TARGET_REQUESTED="$want"
   [ -n "$want" ] && [ -z "${MG_CONTAINER:-}" ] || return 0
   owner="$(mg_cargo_target_owner "$want")"
   if [ -z "$owner" ]; then
-    if [ "$1" = true ] && [ -d "$want" ]; then
-      printf '%s\n' "$MG_ROOT" >"$want/.meguri-checkout"
-    fi
+    [ "$1" = true ] || return 0
+    { mkdir -p "$want" && printf '%s\n' "$MG_ROOT" >"$want/.meguri-checkout"; } 2>/dev/null && return 0
+    why="cannot be claimed for this checkout (no writable $want/.meguri-checkout)"
+  elif [ "$owner" = '?' ]; then
+    why="is not an absolute path"
+  elif [ "$owner" != "$MG_ROOT" ]; then
+    why="belongs to checkout $owner"
+  else
     return 0
   fi
-  [ "$owner" != "$MG_ROOT" ] || return 0
-  echo "tools/mg: MEGURI_DOCKER_CARGO_TARGET=$want belongs to checkout $owner; this checkout uses its own volume $(mg_compose_project)_cargo-target" |
+  echo "tools/mg: MEGURI_DOCKER_CARGO_TARGET=$want $why; this checkout uses its own volume $(mg_compose_project)_cargo-target" |
     tee -a "$2" >&2
   unset MEGURI_DOCKER_CARGO_TARGET
 }

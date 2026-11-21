@@ -609,6 +609,13 @@ EOF
   [[ "$stderr" == *"belongs to checkout $(cd "$other" && pwd -P); this checkout uses its own volume meguri-repo-"*_cargo-target* ]]
   grep -q 'belongs to checkout' "$(dirname "$result")/log.txt"
   [ ! -e "$other/build/target/.meguri-checkout" ]
+  MEGURI_DOCKER_CARGO_TARGET="$other/build/not-made-yet" MG_CONTAINER='' mg no-such-job
+  [[ "$stderr" == *"belongs to checkout $(cd "$other" && pwd -P);"* ]]
+  [ ! -e "$other/build/not-made-yet" ]
+  MEGURI_DOCKER_CARGO_TARGET=relative/target MG_CONTAINER='' mg no-such-job
+  [[ "$stderr" == *"relative/target is not an absolute path; this checkout uses its own volume"* ]]
+  MEGURI_DOCKER_CARGO_TARGET="$outside/new" MG_CONTAINER='' mg no-such-job
+  [ "$(cat "$outside/new/.meguri-checkout")" = "$root" ]
   MEGURI_DOCKER_CARGO_TARGET="$outside" MG_CONTAINER='' mg no-such-job --dry-run
   [ ! -e "$outside/.meguri-checkout" ]
   MEGURI_DOCKER_CARGO_TARGET="$outside" MG_CONTAINER='' mg no-such-job
