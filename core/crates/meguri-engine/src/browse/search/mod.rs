@@ -303,7 +303,13 @@ impl SessionShared {
             };
             for job in jobs {
                 let seq = RequestSeq(job.seq);
-                self.listener.event(if job.token.is_cancelled() {
+                let listener = &self.listener;
+                // A panicking listener loses that event, not the others,
+                // and the worker flag still clears.
+                let deliver = |event| {
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener.event(event)));
+                };
+                deliver(if job.token.is_cancelled() {
                     SearchEvent::Cancelled { seq }
                 } else {
                     SearchEvent::Failed {

@@ -171,7 +171,7 @@ fn serve(shared: &Arc<SessionShared>, threads: &crate::threads::ThreadRegistry, 
                 let _ = delivery.join();
             }
             Err(error) => {
-                shared.listener.event(if job.token.is_cancelled() {
+                let event = if job.token.is_cancelled() {
                     SearchEvent::Cancelled { seq }
                 } else {
                     SearchEvent::Failed {
@@ -180,7 +180,9 @@ fn serve(shared: &Arc<SessionShared>, threads: &crate::threads::ThreadRegistry, 
                             "cannot start the search event thread: {error}"
                         ))),
                     }
-                });
+                };
+                let listener = Arc::clone(&shared.listener);
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener.event(event)));
             }
         }
         let mut state = shared.lock();
@@ -217,6 +219,17 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
         outbox,
         published: std::cell::Cell::new(None),
     };
+    // H3: made during a stop, it fails with the engine's refusal, whatever
+    // happens to its token afterwards.
+    if matches!(job.job, Job::Refused) {
+        let _ = outbox.send(SearchEvent::Failed {
+            seq: RequestSeq(job.seq),
+            error: BrowseError::Engine(EngineError::unavailable(
+                "the collection is changing generation, suspending or closing",
+            )),
+        });
+        return;
+    }
     // Listed for halts from the start, so a halt that begins while the
     // request parses, or began after it was queued, cancels it (H3).
     let registry = shared.registry.upgrade();
@@ -229,9 +242,7 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
             Job::Resort { source, sort } => request.resort(source, &sort),
             Job::Toggle { source, sort } => request.toggle(source, &sort),
             Job::Superseded => Err(Stop::Cancelled),
-            Job::Refused => Err(Stop::Failed(BrowseError::Engine(EngineError::unavailable(
-                "the collection is changing generation, suspending or closing",
-            )))),
+            Job::Refused => unreachable!("answered above"),
         }
     };
     let Err(stop) = result else { return };
@@ -553,11 +564,8 @@ impl Request<'_> {
         let candidates = self
             .list(rows, candidates.pairs_sql(), candidates.params())
             .map_err(|stop| refused(stop, text))?;
-        let chunk = self
-            .shared
-            .registry
-            .upgrade()
-            .map_or(DEFAULT_CHUNK, |registry| registry.stream_chunk(DEFAULT_CHUNK));
+        let fixed = self.shared.registry.upgrade().and_then(|registry| registry.stream_chunk());
+        let chunk = fixed.unwrap_or(DEFAULT_CHUNK);
         let list = format!("?{}", plan.params().len() + 1);
         let pairs_sql = plan.restricted_pairs_sql(&list);
         let sql = plan.restricted_sql(&list);
@@ -573,7 +581,7 @@ impl Request<'_> {
         // result does not pay one statement per few hundred candidates,
         // while a dense one fills its first page from the first chunks. A
         // chunk size a test sets stays fixed (H16).
-        let grows = chunk == DEFAULT_CHUNK;
+        let grows = fixed.is_none();
         let mut windows = Vec::new();
         let mut start = 0usize;
         let mut size = chunk;

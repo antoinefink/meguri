@@ -67,7 +67,16 @@ fn a_cancel_interrupts_a_running_statement_and_leaves_the_next_one_alone() {
     .unwrap_err();
     assert!(matches!(err, StorageError::Sqlite { code: 9, .. }), "{err:?}");
     assert_eq!(calls.get(), 3, "the handler ran inside the statement");
-    // The handler went with the statement: the next one runs whole.
+    // The handler went with the statement: a long statement that installs
+    // none (well past the handler's interval) runs whole, then the next
+    // visit does too.
+    let plain = reader
+        .search_card_ids(
+            "WITH RECURSIVE r(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM r WHERE x < 200000) SELECT x FROM r",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(plain.len(), 200_000);
     assert_eq!(visit(&reader, COUNT, &[Cell::Integer(2)], &|| false).unwrap().len(), 2);
     assert_eq!(reader.row_count(meguri_storage::Table::Cards).unwrap(), 0);
     drop(reader);

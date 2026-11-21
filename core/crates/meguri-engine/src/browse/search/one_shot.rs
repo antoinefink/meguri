@@ -27,6 +27,10 @@ pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i
     let _running = engine.inner.searches.run(&token, epoch);
     let index = engine.inner.searches.server_reader();
     let lease = collection.server_reader(index)?;
+    // A stop that came while the reader was busy ends the call here.
+    if token.is_cancelled() {
+        return Err(BrowseError::Engine(crate::error::EngineError::Cancelled));
+    }
     let snapshot = lease.snapshot()?;
     let context = worker::context(&collection, &*snapshot)?;
     let notetypes = SearchNotetypes::read(&*snapshot)?;
@@ -60,7 +64,8 @@ pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i
         Plan::build_relaxed(&query, mode, &context, &notetypes).map_err(|BuildError::Search(error)| BrowseError::Search(error))?;
     let mut candidates = read(relaxed.sql(), relaxed.params())?;
     candidates.sort_unstable();
-    let chunk = engine.inner.searches.stream_chunk(worker::DEFAULT_CHUNK);
+    let fixed = engine.inner.searches.stream_chunk();
+    let chunk = fixed.unwrap_or(worker::DEFAULT_CHUNK);
     let sql = plan.restricted_sql(&format!("?{}", plan.params().len() + 1));
     let mut params = plan.params().to_vec();
     params.push(meguri_search::Param::Integer(0));
@@ -71,7 +76,7 @@ pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i
         let end = (start + size).min(candidates.len());
         let window = &candidates[start..end];
         start = end;
-        if chunk == worker::DEFAULT_CHUNK {
+        if fixed.is_none() {
             size = (size * 2).min(worker::MAX_CHUNK);
         }
         *params.last_mut().expect("the list parameter") = meguri_search::plan::sql::id_list(window);

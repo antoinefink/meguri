@@ -102,11 +102,12 @@ impl SearchRegistry {
         }
     }
 
-    /// Q10 step 4's chunk size: `default`, or what a test set.
-    pub(super) fn stream_chunk(&self, default: usize) -> usize {
+    /// Q10 step 4's chunk size a test set (fixed), or none (the default
+    /// chunks, which grow).
+    pub(super) fn stream_chunk(&self) -> Option<usize> {
         match self.stream_chunk.load(Ordering::Relaxed) {
-            0 => default,
-            chunk => chunk,
+            0 => None,
+            chunk => Some(chunk),
         }
     }
 
