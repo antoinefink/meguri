@@ -225,7 +225,7 @@ Offered, and done by ⌫ (Anki: the Delete key) with the sidebar focused, when t
 | tag | `tags/tags` T9 with the selected tags' full names | none; undoable (R1178); result message with the count |
 | saved search | `browser/config-keys` K7.2's Delete Saved Searches with the selected names | none; undoable "Delete Saved Search" |
 
-Changed 2026-11-21 (confirmed losses; decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review, `docs/process/review-log/delete-deck-losses-20261121.md`): the deck Delete passes as D8's confirmed losses the counts of the last summary read before it (`decks/decks` D8 step 6): the confirmation's, or the zero-card read's when it asked nothing. On `LossesChanged` it shows the confirmation again with the new counts, or deletes at once when the new `cards` is 0; that refusal shows no failure message.
+Changed 2026-11-21 (confirmed losses; decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review, `docs/process/review-log/delete-deck-losses-20261121.md`): the deck Delete passes as D8's confirmed losses the counts of the last summary read before it (`decks/decks` D8 step 6): the confirmation's, or the zero-card read's when it asked nothing. On `LossesChanged` it shows the confirmation again with the new counts, or deletes at once when the new `cards` is 0 (an empty deck added after a zero-card read is then deleted without a question, as N20.7 says); that refusal shows no failure message.
 
 A mixed selection offers no Delete, and ⌫ does nothing.
 
