@@ -396,6 +396,7 @@ no_private_text() { # <file>...: none holds a string of the made-up collection
     git -C "$1" add "harmless-$n.txt"
     run --separate-stderr git -C "$1" commit -qm "harmless $n"
   }
+  [ -z "$(git -C "$SB" config --get meguri.privateTokenSet)" ]
   # A machine without the collection: nothing to check against.
   for where in "$SB" "$BATS_TEST_TMPDIR/wt"; do
     try_commit "$where"
@@ -444,6 +445,12 @@ no_private_text() { # <file>...: none holds a string of the made-up collection
   git -C "$SB" reset -q
   rm "$set"
   mv "$set.real" "$set"
+  # Installing the hooks where a set exists records that one is expected,
+  # and a worktree's status reports the main checkout's set.
+  mg hooks install
+  [ "$(git -C "$SB" config --get meguri.privateTokenSet)" = required ]
+  run --separate-stderr "$BATS_TEST_TMPDIR/wt/tools/mg" private status
+  [ "$(jq -c '.details.token_set_now | [.path, .present, .readable, .tokens, .required]' "${lines[${#lines[@]} - 1]}")" = "[\"$set\",true,true,1,true]" ]
   # Readable again: both checkouts commit, and both are scanned.
   for where in "$SB" "$BATS_TEST_TMPDIR/wt"; do
     try_commit "$where"

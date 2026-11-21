@@ -297,7 +297,7 @@ mg__doctor_private_scan() {
     return 0
   fi
   note="$(jq -r '"\(.tokens) tokens, sha256 \(.sha256[0:12]), changed \(.modified), read by every worktree"' <<<"$facts")"
-  if [ "$(jq -r .baseline_current <<<"$facts")" != true ]; then
+  if [ "$(jq -r '.baseline_current and ((.baseline.head // "") != "")' <<<"$facts")" != true ]; then
     mg__doctor_check private-scan warn "$note; its public baseline is unknown (no $MG_PRIVATE_BASELINE for these bytes): tools/mg private refresh-public --head <full-oid> records one (docs/process/provenance.md#one-answer-in-every-checkout)"
     return 0
   fi

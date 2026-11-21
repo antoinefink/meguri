@@ -298,7 +298,8 @@ mg__private_set_facts() {
       modified="$(date -u -r "$set" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
     fi
   fi
-  [ ! -f "$base" ] || baseline="$(jq -c 'select(type == "object") | {head, by, at, sha256, tokens}' "$base" 2>/dev/null)"
+  # Anything but one object with a commit id and a hash is no baseline.
+  [ ! -f "$base" ] || baseline="$(jq -cs 'if length == 1 and (.[0] | type == "object" and (.head | type == "string" and length > 0) and (.sha256 | type == "string")) then .[0] | {head, by, at, sha256, tokens} else null end' "$base" 2>/dev/null)"
   [ -n "$baseline" ] || baseline=null
   jq -nc --arg path "$set" --argjson present "$present" --argjson readable "$readable" --argjson tokens "${tokens:-0}" \
     --arg sha "$sha" --arg modified "$modified" --argjson baseline "$baseline" \
@@ -337,7 +338,8 @@ mg__private_status() {
     tokens="$(jq -c --arg p "$MG_PRIVATE_TOKENS" '{path: $p} + .' "$MG_ROOT/$(dirname "$MG_PRIVATE_TOKENS")/meta.json" 2>/dev/null ||
       jq -nc --arg p "$MG_PRIVATE_TOKENS" '{path: $p}')"
   fi
-  mg_detail token_set_now "$(mg__private_set_facts "$MG_ROOT" | jq -c --argjson required "$(mg__private_required && echo true || echo false)" '. + {required: $required}')"
+  # The set the hooks read here: the main checkout's, in a worktree too.
+  mg_detail token_set_now "$(mg__private_set_facts "$(mg__private_main)" | jq -c --argjson required "$(mg__private_required && echo true || echo false)" '. + {required: $required}')"
   mg_detail source "$(jq -nc --arg p "$MG_PRIVATE_SOURCE" --argjson present "$present" --argjson bytes "${bytes:-0}" \
     --argjson wal "$wal" --argjson media "$media" \
     '{path: $p, present: $present, collection_bytes: $bytes, wal: $wal, media_folder: $media}')"
@@ -549,7 +551,9 @@ mg__private_refresh_public() {
   fi
   local target="$MG_ROOT"
   [ "$#" -ne 3 ] || target="$(mg__private_main)"
-  if ! mg__private_baseline_write "$target" "$2" refresh-public; then
+  # A set built before the key existed: from now on its absence is refused.
+  if ! git -C "$MG_ROOT" config "$MG_PRIVATE_REQUIRED_KEY" required ||
+     ! mg__private_baseline_write "$target" "$2" refresh-public; then
     mg_failure baseline "the token set was refreshed, but $MG_PRIVATE_BASELINE could not be written; tools/mg doctor will report the baseline as unknown"
     mg_status error
     return 0
@@ -578,14 +582,14 @@ mg__private_pins() {
     return 0
   fi
   mg_artifact report "$out" "pinned public files whose bytes changed since their review (paths only)"
-  mg_detail pins "$(jq -c '{commit, pinned, stale: (.stale | length), absent: (.absent | length)}' "$out")"
+  mg_detail pins "$(jq -c '{commit, pinned, stale: (.stale | length), absent: ((.absent | length) + .absent_vendor)}' "$out")"
   mg_count total "$(jq .pinned "$out")"
-  mg_count warned "$(jq '(.stale | length) + (.absent | length)' "$out")"
-  if [ "$(jq '(.stale | length) + (.absent | length)' "$out")" -eq 0 ]; then
+  mg_count warned "$(jq '(.stale | length) + (.absent | length) + .absent_vendor' "$out")"
+  if [ "$(jq '(.stale | length) + (.absent | length) + .absent_vendor' "$out")" -eq 0 ]; then
     mg_message "private: all $(jq .pinned "$out") reviewed public files still have their reviewed bytes"
     mg_status pass
   else
-    mg_message "private: $(jq '.stale | length' "$out") of $(jq .pinned "$out") reviewed public files changed since their review, $(jq '.absent | length' "$out") are gone; their reviewed lines are scanned like new ones (docs/process/provenance.md#one-answer-in-every-checkout)"
+    mg_message "private: $(jq '.stale | length' "$out") of $(jq .pinned "$out") reviewed public files changed since their review, $(jq '(.absent | length) + .absent_vendor' "$out") are gone; their reviewed lines are scanned like new ones (docs/process/provenance.md#one-answer-in-every-checkout)"
     mg_status warn
   fi
 }

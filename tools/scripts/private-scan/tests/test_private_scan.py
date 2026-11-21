@@ -1617,7 +1617,8 @@ class StalePublicArtifactTests(unittest.TestCase):
     def test_reviewed_bytes_pass_and_an_edit_elsewhere_makes_the_reviewed_line_count_again(self):
         self.assertEqual(private_scan.scan_paths(self.matcher, [self.full], self.repo)[0], [])
         self.assertEqual(private_scan.pins(self.repo),
-                         {"commit": self.head(), "pinned": 1, "stale": [], "absent": ["gone.md"]})
+                         {"commit": self.head(), "pinned": 1, "stale": [], "absent": ["gone.md"],
+                          "absent_vendor": len(private_scan.PUBLIC_VENDOR_ARTIFACTS)})
         # An ordinary edit to another line: the commit that adds it is clean.
         write(self.full, self.REVIEWED + b"third line\n", "wb")
         git(self.repo, "add", "-A")
@@ -1646,13 +1647,15 @@ class StalePublicArtifactTests(unittest.TestCase):
     def test_pins_reads_no_token_set_and_needs_a_full_commit_id(self):
         r = run("pins", "--repo", self.repo)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(sorted(json.loads(r.stdout)), ["absent", "commit", "pinned", "stale"])
+        self.assertEqual(sorted(json.loads(r.stdout)), ["absent", "absent_vendor", "commit", "pinned", "stale"])
         self.assertEqual(run("pins", "--repo", self.repo, "--commit", "HEAD").returncode, 2)
 
     def test_an_empty_token_set_is_an_error_not_a_clean_scan(self):
         empty = os.path.join(self.tmp.name, "tokens.txt")
         write(empty, "\n")
-        for mode in (["--staged", "--repo", self.repo], [self.full]):
+        full = os.path.join(self.tmp.name, "full.txt")
+        write(full, "sentinelprivate\n")
+        for mode in (["--staged", "--repo", self.repo], [self.full], ["--tokens", full, self.full]):
             r = run("scan", "--tokens", empty, *mode)
             self.assertEqual(r.returncode, 2, r.stdout)
             self.assertEqual(r.stdout, "")

@@ -82,6 +82,16 @@ mg_hooks_install() {
   for name in $MG_HOOK_NAMES; do
     mg__hook_install_one "$MG_HOOKS_DIR" "$name" || return 1
   done
+  # A token set seen here (stat only) is expected from now on: the hooks
+  # then refuse a commit from a session that cannot see it, instead of
+  # passing unscanned (tools/hooks/pre-commit). `worktree new` runs this, so
+  # a set built before the key existed gets it.
+  if [ -f "$(dirname "$common")/build/private/tokens/tokens.txt" ] &&
+     ! git -C "$MG_ROOT" config meguri.privateTokenSet required; then
+    MG_HOOKS_FAILURE=token-set-key
+    MG_HOOKS_MESSAGE="a private token set exists but meguri.privateTokenSet could not be set in the repository config"
+    return 1
+  fi
 }
 
 # mg_hooks_check: whether every shim is installed as mg_hooks_install would

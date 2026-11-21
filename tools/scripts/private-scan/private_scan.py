@@ -1488,7 +1488,11 @@ def pins(repo, commit=None):
                 hashlib.sha256(git(repo, "cat-file", "blob", sha.decode("ascii"))).hexdigest() != expected:
             stale.append(path)
     absent = sorted(set(PUBLIC_ARTIFACTS) - seen)
-    return {"commit": commit, "pinned": pinned, "stale": sorted(stale), "absent": absent}
+    # Vendor pins are keyed by a hash of their path, so only a count of the
+    # ones this commit lacks can be given.
+    held = {hashlib.sha256(path.encode("utf-8")).hexdigest() for path in seen}
+    return {"commit": commit, "pinned": pinned, "stale": sorted(stale), "absent": absent,
+            "absent_vendor": len(set(PUBLIC_VENDOR_ARTIFACTS) - held)}
 
 
 def source_lines(data):
@@ -1686,11 +1690,11 @@ def main(argv):
             return 0
         if args.staged == bool(args.paths) or (args.staged and not args.repo):
             parser.error("give --staged with --repo, or paths")
+        # An empty set would pass everything: a truncated or unreadable
+        # file must not look like a clean scan, even beside a full one.
+        if not all(load_tokens([path]).count for path in args.tokens):
+            raise ValueError("a token set is empty")
         matcher = load_tokens(args.tokens)
-        if not matcher.count:
-            # An empty set would pass everything: a truncated or unreadable
-            # file must not look like a clean scan.
-            raise ValueError("the token set is empty")
         if args.staged:
             found, scanned = scan_staged(matcher, args.repo)
         else:
