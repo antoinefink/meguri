@@ -21,16 +21,19 @@ enum Piece {
 impl Query {
     /// F2-F6.
     pub fn canonical_text(&self) -> String {
-        // F2.2: a search that is one group loses one level of brackets.
+        // F2.2: a search that is one group loses one level of brackets; a
+        // written-text item (`search/filter-tokens` T3.2) is written as it
+        // stands.
         let start = match self.node(self.root()).kind {
-            NodeKind::Group(inside) => inside,
+            NodeKind::Group(inside) if self.written_text(self.root()).is_none() => inside,
             _ => self.root(),
         };
         self.canonical_text_of(start)
     }
 
     /// F3-F6 for the item at `id` as it stands inside a longer search: a
-    /// group keeps its brackets.
+    /// group keeps its brackets. A built query's written-text items (T3.2)
+    /// are written unchanged.
     pub fn canonical_text_of(&self, id: crate::ast::NodeId) -> String {
         let mut out = String::new();
         let mut stack = vec![Piece::Node(id)];
@@ -42,6 +45,10 @@ impl Query {
                 }
                 Piece::Node(id) => id,
             };
+            if let Some(written) = self.written_text(id) {
+                out.push_str(written);
+                continue;
+            }
             match &self.node(id).kind {
                 NodeKind::And(items) => joined(&mut stack, items, " "),
                 NodeKind::Or(runs) => joined(&mut stack, runs, " OR "),

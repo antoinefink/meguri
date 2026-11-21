@@ -4,7 +4,7 @@ Spec: search/join-and-replace
 Requirements: R1078, R1079; supports R1076, R1077, R1109, R1114, R1153, R1322 (AE43, core part; AE60 only for J11's test that its text parses and that its canonical form equals a golden)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/search/builder/, conformance/scenarios/search/join-replace/
-Status: Approved 2026-11-20 (R1232) for the lines of J3 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). The lines that carry the marker "changed 2026-11-21" with "U88a review", in any letter case or punctuation, are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/builder-spec-gaps-20261121.md`). Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R1232) for the lines of J3 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). The lines that carry the marker "changed 2026-11-21" with "U88a review", in any letter case or punctuation, are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/builder-spec-gaps-20261121.md`). The lines that carry the marker "changed 2026-11-21" with "implementation review", in any letter case or punctuation, are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/spec-followups-20261121.md`). Every other section is in force and unchanged.
 
 The search text Meguri writes for UI actions: searches built from structured items (a deck, a tag, a flag, ids), a built item joined to the current search with AND or OR, and a built item put in place of the current search's terms of the same kind. Every Meguri-generated search except Stats' joined text goes through these services (U88): sidebar and chips, Home "Browse", editor duplicates, Select Notes, AnkiConnect GUI actions. Which entry point hands Browse which built item is `browser/entry-points` E3; Select Notes is E8. Stats "Show in Browser" is not a caller: its text is the literal join of `stats/browse-queries` Q3, which is not J6's canonical join, and its Deck scope text (`deck:"..."`, `stats/browse-queries` Q2.2) is not the form J3 builds for a deck. U88 tests only that AE60's text parses and that its canonical form equals a golden (J11). The text is written by `canonical-form.md`; what it means is `query-model.md`. The token spans, incomplete-tail classification and suggestions of U88 are Meguri's own and live in `search/editing-services` (not this file).
 
@@ -28,7 +28,7 @@ Text taken from the search field (typed, pasted, picked from history) has every 
 
 ## J3. Built items
 
-Changed 2026-11-20 (round 8): two more items, "field contains" and "field empty", are added for Browse's Field tokens; their rows are `search/filter-tokens` T3.1.
+Changed 2026-11-20 (round 8): two more items, "field contains" and "field empty", are added for Browse's Field tokens; their rows are `search/filter-tokens` T3.1. Changed 2026-11-21 (implementation review): one more, the written-text item, which J4 writes unchanged, is `search/filter-tokens` T3.2.
 
 Each built item makes one query item (`query-model.md` Q1, Q3). "E(s)" below is the name escape:
 
@@ -105,7 +105,7 @@ These callers are the sidebar (`browser/sidebar` S3.4, S3.5; a dragged id list s
 
 ### J3.6 Refusal reasons
 
-Changed 2026-11-21 (U88a review): new section. Every refusal of J3 and `search/filter-tokens` T3.1 is `invalid_item` with one of these reasons. The names are an interface: errors, the FFI and tests carry them exactly as written.
+Changed 2026-11-21 (U88a review): new section. Every refusal of J3 and `search/filter-tokens` T3.1 (and T3.2; changed 2026-11-21, implementation review) is `invalid_item` with one of these reasons. The names are an interface: errors, the FFI and tests carry them exactly as written.
 
 | Reason | Items | Refused when |
 |---|---|---|
@@ -113,7 +113,7 @@ Changed 2026-11-21 (U88a review): new section. Every refusal of J3 and `search/f
 | `empty_name` | deck, tag and note type by name; field present, field text, field contains, field empty | the name, or the field name, is empty |
 | `unrepresentable_name` | deck and note type by name | J3.5 lists the name |
 | `reserved_field_name` | field present, field text, field contains, field empty | the field name is a reserved key (J3.3) |
-| `empty_text` | literal text; field contains | the text is empty |
+| `empty_text` | literal text; field contains; written text (`search/filter-tokens` T3.2; changed 2026-11-21, implementation review) | the text is empty |
 | `unrepresentable_text` | duplicates | the text holds White_Space other than U+0020, or U+001C–U+001F (J3.4) |
 | `ordinal_out_of_range` | template by ordinal | k is above 65534 |
 | `flag_out_of_range` | flag n | n is outside 1–7 |
@@ -126,6 +126,7 @@ Changed 2026-11-21 (U88a review): new section. Every refusal of J3 and `search/f
 - Order within one item: the name or field name before the text (`empty_name`, then `unrepresentable_name` or `reserved_field_name`, then `empty_text`); the days before the button; `empty_id_list` before `negative_id`; the duplicates' note type id before its text. So "field contains" with an empty field name and an empty text gives `empty_name`.
 - A parsed-text item is never refused: its problems are parse errors (J1). The parse error `empty_group` (`errors.md` E1) only shares its name with the refusal (J3).
 - The due-day reason is `due_day_out_of_range`, so that it does not read like `days_out_of_range`.
+- Changed 2026-11-21 (implementation review): the builder code and tests that the U88a review lines need (the two new `negative_id` checks, the rename to `due_day_out_of_range`, the refused item's path in `invalid_item`, and `search/filter-tokens` T16's new row) are U260's (`docs/plans/2026-11-20-1700-feat-browse-and-note-types-implementation-plan.md` section 9). Until U260 lands, Meguri's builder still gives the earlier results there.
 
 ## J4. Writing a built item
 
@@ -186,6 +187,7 @@ Negated operator words are not terms and are never replaced. Consequences, all A
 
 ## J8. Round trips
 
+- Changed 2026-11-21 (implementation review): **The written-text item** (`search/filter-tokens` T3.2) can hold F7's first three shapes and is written unchanged, so it is an exception to the next bullet; the property tests exclude it.
 - **Built items other than parsed text** hold none of F7's four shapes (`canonical-form.md` F7): J3 makes no negated operator word, no `preset:` or `prop:cds:` item, no field term for a field named `has-cd` (J3.3), and a group of one item is no group. Every output made only of such items, and of an `existing` free of those shapes, is canonical text: writing its canonical text again gives it back.
 - **Parsed text** (J3), wherever it stands in an item, and `existing` in `join` and `replace`, can hold any of F7's shapes. The output keeps the first three shapes' text as F7 writes them, and reading it again gives what F7's table says: `a -and b` joined with `c` gives `(a -  b) c`; `replace` with a parsed-text item `has\-cd:x` puts `has-cd:x` in place of every field term.
 - **The fourth shape.** When the item `build` writes, or the query `replace` writes, is one group whose only item is again a group, the output loses one level of brackets (F2.2) and its canonical text loses the next one, as F7's fourth row says: `build` of parsed text `((a b))` and `replace(((a b)), deck X)` both give `(a b)`, whose canonical text is `a b`. `join` never gives this shape: its result has three items (J6 step 4).

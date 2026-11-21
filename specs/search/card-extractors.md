@@ -17,7 +17,7 @@ Notation: w(x) is the integer x reduced to unsigned 32 bits (two's complement wr
   - `data`: the card's `data` column;
   - `due`: D, the card's `odue` when it is not 0 and its `due` otherwise, so a card in a filtered deck is evaluated on its home due;
   - `ivl`: the card's `ivl` column;
-  - `today`: the scheduler's day number (days elapsed, `sched/day-clock`), and `now`: the instant in epoch seconds, both from one reading of the day clock for the whole operation: the search context for searches (`search/query-model` Q8), the queue build's values for U41.
+  - `today`: the scheduler's day number (days elapsed, `sched/day-clock`), and `now`: the instant in epoch seconds, both read once for the whole operation: the search context for searches (`search/query-model` Q8: the day calculation, `sched/day-clock` D8.1; changed 2026-11-21, implementation review), the queue build's values for U41.
 - No function reads a clock, the collection's config or any other row, so frozen clocks and the callers' day values reach them unchanged.
 - Anki's functions of this kind also receive the next day boundary and never read it. Meguri's functions do not take it.
 

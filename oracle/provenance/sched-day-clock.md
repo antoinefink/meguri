@@ -18,6 +18,7 @@ the spec relies on.
 | D11 | `rslib/src/storage/sqlite.rs`, `rslib/src/config/schema11.rs`, `rslib/src/scheduler/timing.rs` | crt at creation, creationOffset at the crt instant, keys a new collection holds |
 | D12.3 | `pylib/anki/collection.py`, `rslib/src/preferences.rs`, `rslib/src/scheduler/upgrade.rs` | the desktop layer adding creationOffset on open |
 | D14.2 | `pylib/anki/scheduler/base.py`, `pylib/anki/scheduler/v3.py` | which Python calls reach the day query with its unbury |
+| D8.1 (changed 2026-11-21, implementation review) | `rslib/src/scheduler/mod.rs` | that the cached-day read used by search writes `rollover` and `localOffset` when it computes afresh and runs no unbury check (the difference is recorded in `search/query-model` Q8) |
 
 Probe findings (oracle 26.9.3, Europe/Paris unless noted):
 
