@@ -195,6 +195,13 @@ cmd_corpus() {
     "$(du -sm "$repo/.git" | cut -f1) MB, outside the checkout."
 }
 
+# one_json <file>: the file's one JSON document, compact; `null` when it is
+# missing, unreadable or holds anything else. -s parses it whole before
+# printing, so a valid document followed by garbage prints nothing.
+one_json() {
+  jq -c -s 'if length == 1 then .[0] else error("not one document") end' "$1" 2>/dev/null || echo null
+}
+
 # The output filter. Everything printed comes from typed fields: numbers,
 # checked tag names and index keys, fixed text, and paths that are tracked
 # in this commit and spelled plainly.
@@ -206,9 +213,9 @@ cmd_summary() {
   out="$(mktemp)"
   jq -n -r \
     --arg kind "$kind" \
-    --slurpfile result <(jq -c . "$result" 2>/dev/null || echo null) \
-    --slurpfile summary <(jq -c . "$summary" 2>/dev/null || echo null) \
-    --slurpfile view <(jq -c . "$implementer" 2>/dev/null || echo null) \
+    --slurpfile result <(one_json "$result") \
+    --slurpfile summary <(one_json "$summary") \
+    --slurpfile view <(one_json "$implementer") \
     --rawfile tracked "$tracked" --rawfile changed "$changed" '
     def set: split("\u0000") | map(select(length > 0)) | map({key: ., value: true}) | from_entries;
     ($tracked | set) as $known | ($changed | set) as $mine |

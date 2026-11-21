@@ -140,6 +140,15 @@ clean_reports() {
     summary code "$(changed core/a.rs)"
     [ "$status" -eq 1 ]
   done
+  # A valid document followed by garbage is not one report.
+  clean_reports
+  printf '{"files": []}\nnot json\n' >"$RUN/scan/implementer.json"
+  summary code "$(changed core/a.rs)"
+  [ "$status" -eq 1 ]
+  clean_reports
+  printf '{"files": []}\n{"files": []}\n' >"$RUN/scan/implementer.json"
+  summary code "$(changed core/a.rs)"
+  [ "$status" -eq 1 ]
   clean_reports
   echo '{"files": {}}' >"$RUN/scan/implementer.json"
   summary code "$(changed core/a.rs)"
