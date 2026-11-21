@@ -799,6 +799,15 @@ public final class SyncCoordinator {
                 .flatMap { $0.overflow ? nil : $0.partialValue },
             mediaAwaiting: media?.awaiting)
     }
+    /// The files media blocked lists as not transferred (T19.5): from the
+    /// setup's accounting or the last round's report; nil when neither is known.
+    public var meguriAffectedFileCount: UInt64? {
+        if let accounting = meguriAccounting {
+            return UInt64(accounting.files.filter { $0.state != .transferred }.count)
+        }
+        if let result = meguriRoundReport?.media, case .media(let media) = result.outcome { return UInt64(media.affected.count) }
+        return nil
+    }
     /// The setup media step's files left to download: the running step's count,
     /// else the one the core last recorded for the operation; nil when none is
     /// recorded. Never a count Meguri works out itself.
@@ -886,7 +895,7 @@ public final class SyncCoordinator {
         .init(handoffRecovery: providerState?.phase == .handoffRecovery, providerBlocked: providerState?.phase == .blocked,
             connection: meguriAuthenticating ? .authenticating : meguriPhase, stage: meguriStage, routine: meguriRoutine,
             failureKey: meguriFailureKey, finishOffered: meguriCanFinish, automatic: settings.automatic && storedAutomatic,
-            mediaFilesLeft: meguriSetupMediaLeft)
+            mediaFilesLeft: meguriSetupMediaLeft, mediaListKnown: (meguriAffectedFileCount ?? 0) > 0)
     }
     public var providerHandoffInProgress: Bool { providerHandoff != nil || providerState?.phase == .handoffRecovery }
     private var providerDiscovery: ProviderDiscoveryOwnership?

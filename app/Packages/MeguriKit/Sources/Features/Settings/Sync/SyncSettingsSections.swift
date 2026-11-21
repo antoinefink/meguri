@@ -555,6 +555,14 @@ struct SyncMainStatusRows: View {
             VStack(alignment: .leading) {
                 Text(SyncText.value(status.titleKey))
                 if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
+                if let progress = sync.panelProgress {
+                    // N15.2 row 3 (resume fix): the status's own bar, under its text, with the
+                    // panel's value. One indicator: a value that becomes unknown stays in place.
+                    // Inside the combined status element: the title is already read; the bar adds its value.
+                    ProgressView(value: progress.fraction, total: 1)
+                        .progressViewStyle(.linear)
+                        .accessibilityIdentifier("settings.sync.status.progress")
+                }
                 if !meguri, let cloud = sync.status {
                     ForEach(Array(SyncStatusCopy.lines(cloud, now: clock.now()).enumerated()), id: \.offset) { _, line in
                         Text(line).font(.footnote).foregroundStyle(.secondary)
@@ -571,14 +579,6 @@ struct SyncMainStatusRows: View {
                         }
                     }
                     .font(.footnote).foregroundStyle(.secondary)
-                }
-                if let progress = sync.panelProgress {
-                    // N15.2 row 3 (resume fix): the status's own bar, under its text, with the
-                    // panel's value. One indicator: a value that becomes unknown stays in place.
-                    ProgressView(value: progress.fraction, total: 1)
-                        .progressViewStyle(.linear)
-                        .accessibilityLabel(SyncText.value(status.titleKey))
-                        .accessibilityIdentifier("settings.sync.status.progress")
                 }
             }
         } icon: {

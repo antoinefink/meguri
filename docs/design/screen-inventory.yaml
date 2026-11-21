@@ -988,14 +988,13 @@ screens:
       condition: Replace This Device’s Collection… and Replace the iCloud Collection… or Replace
       the Meguri Sync Collection…, each opening its preview (sync.replaceLocal, sync.replaceCloud,
       sync.meguriSetup) and changing nothing, disabled with its reason while it cannot run; Cancel
-      Replacement… while an op can be cancelled and that is not the status action; Retry for
-      Meguri Sync's blocked media; Sync Log, a page of real recorded attempts (N7); Copy Debug
+      Replacement… while an op can be cancelled and that is not the status action; Sync Log, a page of real recorded attempts (N7); Copy Debug
       Info; for iCloud, one plain line with the number of saved conflict copies while there are
       any (V27.7). Not built yet, for want of a core call: Restore Previous iCloud Collection from
       <date>… and Show Replaced Media. Opening the page starts no Meguri Sync request. Typical: a
       connected service. Error: iCloud with conflict copies and a disabled entry. Identifiers
       sync.trouble.content, sync.trouble.replaceDevice, sync.trouble.replaceService,
-      sync.trouble.cancelOp, sync.trouble.retryMedia, sync.trouble.log, sync.trouble.copyDebugInfo,
+      sync.trouble.cancelOp, sync.trouble.log, sync.trouble.copyDebugInfo,
       sync.trouble.conflictCopies. Test routes settings/sync/troubleshooting-icloud and
       troubleshooting-meguri.
   - id: settings.sync

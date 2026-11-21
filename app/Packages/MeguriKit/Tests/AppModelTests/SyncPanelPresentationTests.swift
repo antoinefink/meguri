@@ -51,6 +51,14 @@ import Testing
         #expect(issues.hasIssues && SyncPanel.slot(issues, serviceSelected: true, offered: true) == .syncNow)
         let media = SyncKinds.meguri(.init(routine: .mediaBlocked))
         #expect(media.kind == .issues && SyncPanel.slot(media, serviceSelected: true, offered: true) == .syncNow)
+        // Resume fix: with no affected files known there is no list to open, so
+        // Try Again is the status row's action and the panel's.
+        let unlisted = SyncKinds.meguri(.init(routine: .mediaBlocked, mediaListKnown: false))
+        #expect(unlisted.kind == .waiting && !unlisted.hasIssues && unlisted.action == .meguriRetryMedia)
+        #expect(SyncPanel.slot(unlisted, serviceSelected: true, offered: true) == .action(.meguriRetryMedia))
+        let fixture = SyncCoordinator.renderFixture(.meguriMediaBlocked)
+        #expect(fixture.meguriAffectedFileCount == nil && fixture.mainStatus.action == .meguriRetryMedia)
+        #expect(!fixture.mainStatus.hasIssues)
     }
 
     @Test func barShowsWhileSomethingMovesAndNeverWhenTheStatusNeedsYou() {

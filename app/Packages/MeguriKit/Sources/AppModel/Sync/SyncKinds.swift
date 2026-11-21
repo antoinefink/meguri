@@ -96,14 +96,24 @@ public struct MeguriKindFacts: Sendable, Equatable {
     /// The setup media step's files left to download, as last recorded; nil
     /// when none is recorded. Files left are downloads, so a count names the direction.
     public var mediaFilesLeft: UInt64?
+    /// Media blocked has a list of affected files to open (resume fix: no issues
+    /// row without one; its Try Again is then on the status row).
+    public var mediaListKnown: Bool
     public init(handoffRecovery: Bool = false, providerBlocked: Bool = false,
                 connection: MeguriProviderConnectionPhase = .setupRequired, stage: MeguriSetupStage? = nil,
                 routine: MeguriRoutineState? = nil, failureKey: String? = nil, finishOffered: Bool = false,
-                automatic: Bool = true, mediaFilesLeft: UInt64? = nil) {
+                automatic: Bool = true, mediaFilesLeft: UInt64? = nil, mediaListKnown: Bool = true) {
         self.handoffRecovery = handoffRecovery; self.providerBlocked = providerBlocked; self.connection = connection
         self.stage = stage; self.routine = routine; self.failureKey = failureKey
         self.finishOffered = finishOffered; self.automatic = automatic
         self.mediaFilesLeft = mediaFilesLeft.flatMap { $0 > 0 ? $0 : nil }
+        self.mediaListKnown = mediaListKnown
+    }
+    /// Media blocked: an issues row that opens its list, or, with no list known,
+    /// a waiting row whose Try Again is on the status row (resume fix).
+    var mediaBlockedRow: SyncKindRow {
+        mediaListKnown ? .init(.issues, "sync.meguri.media.blocked", .meguriRetryMedia)
+            : .init(.waiting, "sync.meguri.media.blocked", .meguriRetryMedia)
     }
     /// The media step downloads: files are left to come from the server.
     var mediaDownloads: Bool { mediaFilesLeft != nil }
@@ -310,7 +320,7 @@ public enum SyncKinds {
                 return facts.mediaFilesLeft.map { .init(nil, "sync.meguri.media.left", count: $0) }
                     ?? .init(nil, "sync.meguri.media.left.unknown")
             case .acceptanceUnknown: return .init(.waiting, "sync.meguri.setup.acceptanceUnknown", .meguriTryAgain)
-            case .mediaBlocked: return .init(.issues, "sync.meguri.media.blocked", .meguriRetryMedia)
+            case .mediaBlocked: return facts.mediaBlockedRow
             // Resume fix: it continues by itself; Try Again runs it now.
             case .mediaPaused:
                 return facts.mediaFilesLeft.map { .init(.waiting, "sync.meguri.media.left", .meguriRetryMedia, count: $0) }
@@ -356,7 +366,7 @@ public enum SyncKinds {
         case .idle: return .init(nil, facts.automatic ? nil : "sync.status.automaticOff.detail")
         case .pending, .waiting, .cancelled: return .init(nil, "sync.status.pending.detail")
         case .exchanging: return .init(nil, nil)
-        case .mediaBlocked: return .init(.issues, "sync.meguri.media.blocked", .meguriRetryMedia)
+        case .mediaBlocked: return facts.mediaBlockedRow
         case .authentication: return .init(.needsYou, "sync.needsYou.meguri.signIn", .meguriSignIn)
         case .acceptanceUnknown: return .init(.waiting, "sync.meguri.round.acceptanceUnknown", .meguriTryAgain)
         case .fullSyncRequired: return .init(.needsYou, "sync.needsYou.meguri.chooseCollection", .chooseCollection)

@@ -16,7 +16,8 @@ struct SyncNowButton: View {
     /// setup has not finished; touch shows no reason line for it.
     private var setupHelp: String? {
         #if os(macOS)
-        guard meguri, collection.sync.meguriStatus.route == .account("sync.meguri.setup.continue") else { return nil }
+        guard meguri, collection.sync.meguriStage != nil,
+              collection.sync.meguriStatus.route == .account("sync.meguri.setup.continue") else { return nil }
         return SyncText.value("sync.meguri.now.unavailable.setup")
         #else
         nil
