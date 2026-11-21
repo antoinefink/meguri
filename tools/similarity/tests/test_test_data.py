@@ -312,6 +312,7 @@ class TestDataTests(unittest.TestCase):
             "corpus text in clock": {"clock": {"mode": STORY}},
             "words in a zone-shaped tz": {"tz": "the/implementer/view/names/only/meguri/files/regions"},
             "another start": {"clock": {"mode": "frozen", "start": "2030-01-16T10:00:00"}},
+            "another mode": {"clock": {"mode": "step", "start": "2030-01-15T10:00:00"}},
         }
         for name, change in cases.items():
             with self.subTest(name):
@@ -345,6 +346,15 @@ class TestDataTests(unittest.TestCase):
                 code, summary, _views, _error = self.check({})
                 self.assertEqual(code, 1)
                 self.assertEqual(summary["counts"]["oracle_output"], 0)
+
+    def test_null_clock_values_are_not_a_recorder_shape(self):
+        scenario = "clock: {}\ndescription: " + json.dumps(OWN) + "\n"
+        files = {SCENARIOS + "/one.yaml": scenario, "conformance/oracle.json": json.dumps(self.PIN),
+                 GOLDENS + "/one.json": self.recorded(scenario, tz=None, clock={"mode": "frozen", "start": None})}
+        files[GOLDENS + "/one.json"] = files[GOLDENS + "/one.json"].replace('"clock"', '"tz": null, "clock"', 1)
+        code, summary, _views, _error = self.check(files)
+        self.assertEqual(code, 1)
+        self.assertEqual(summary["counts"]["oracle_output"], 0)
 
     def test_scenario_inputs_are_never_exempt(self):
         files = self.oracle_pair(scenario=STORY)

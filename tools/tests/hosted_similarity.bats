@@ -268,6 +268,12 @@ out() { sed -n "s/^$1=//p" "$GITHUB_OUTPUT"; }
   [ "$(out run)" = yes ]
   [ "$(out code)" = yes ]
   [ "$(out areas)" = sched ]
+  git -C "$r" rm -q conformance/oracle.json
+  git -C "$r" -c user.name=t -c user.email=t@t commit -qm unpin
+  : >"$GITHUB_OUTPUT"
+  (cd "$r" && EVENT=push BEFORE="$(git rev-parse HEAD~1)" bash "$SCRIPT" select >/dev/null)
+  [ "$(out code)" = yes ]
+  [ "$(out areas)" = sched ]
   # A scanner change keeps the touched unpaired area beside every paired one.
   select_after "$r" tools/similarity/AGENTS.md conformance/scenarios/lonely/two.yaml
   [ "$(out areas)" = "lonely sched" ]

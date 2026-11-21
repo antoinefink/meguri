@@ -45,8 +45,14 @@ Round 1 on `98af44e29`: wiring sound, findings:
   scenario shaped like a golden. Not added: a bats case for an oracle-output
   file in the hosted table (the hosted job still blocks only on `flagged`).
 
-CodeRabbit: one thread (pin read could drop a malformed suffix), fixed by the
-size bound and answered.
+CodeRabbit, all answered on the pull request:
+
+- The pin read could drop a malformed suffix: fixed by the size bound.
+- `clock` could carry free text (on `98af44e29`): fixed by the scenario
+  binding.
+- Deleting `conformance/oracle.json` was not selected: fixed, with a bats case.
+- A scenario with `clock: {}` let a golden with null `tz` and `start` pass:
+  fixed by type checks before the comparison, with a selftest.
 
 Round 2 on `1c0c6d728`: M1, M2 and L2 to L4 closed; the D3 hash found
 faithful to the YAML 1.2 core schema and RFC 8785 for the forms scenarios
@@ -64,7 +70,7 @@ use. New findings, all fixed in the next commit:
 
 ## Evidence
 
-- `similarity-selftest`: 105 passed, calibration included.
+- `similarity-selftest`: 106 passed, calibration included.
 - `selftest` (`hosted_similarity.bats`, `provenance.bats`): 63 passed.
 - All 1,264 goldens in the tree meet the full binding (shape, pin, scenario
   hash, zone and clock).

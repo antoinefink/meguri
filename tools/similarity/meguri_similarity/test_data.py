@@ -464,6 +464,9 @@ def oracle_recorded(path, text, pin, scenario_path, scenario_text):
         return False
     if not isinstance(oracle["driver_sha256"], str) or not _HEX64.fullmatch(oracle["driver_sha256"]):
         return False
+    if not isinstance(doc["tz"], str) or not doc["tz"] or not isinstance(clock, dict) \
+            or not isinstance(clock.get("start"), str) or clock.get("mode") not in ("frozen", "step"):
+        return False
     if clock != expected_clock or doc["tz"] != clock_in.get("tz"):
         return False
     return (doc["scenario_sha256"] == scenario_sha

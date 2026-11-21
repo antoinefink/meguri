@@ -138,7 +138,9 @@ cmd_select() {
       done
     done < <(git diff -z --no-renames --name-only --diff-filter=d "$base" HEAD)
     # Deletions count for the areas: removing a golden unpairs its scenario.
+    # Removing the oracle pin changes which goldens are oracle output.
     while IFS= read -r -d '' p; do
+      [[ "$p" != conformance/oracle.json ]] || { code=yes all_areas=yes; }
       if [[ "$p" =~ ^conformance/(scenarios|goldens)/([^/]+)/ ]]; then
         area="${BASH_REMATCH[2]}"
         [[ "$area" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || { echo "::error::Unexpected conformance area name"; exit 1; }
