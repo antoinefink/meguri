@@ -110,7 +110,7 @@ Changed 2026-11-20 (round 8): `rows` also accepts field column keys `fld:<field 
 
 ## H9. Search context
 
-The engine builds each request's context (`search/query-model` Q8) when the request starts: now from the clock, today and next-day-at from the day clock (`sched/day-clock`, U40), and the config values Q8 lists, read in the request's snapshot (`deck:current` reads `curDeck`, `search/names-and-ids` N3.4). Swift never builds a context. The context is fixed for the request and kept by its handle. Changed 2026-11-21 (implementation review): today and next-day-at come from the day calculation alone (`sched/day-clock` D8.1), never from a day query: no search, sorted or not, and no resort unburies a card or writes a timing key (`search/query-model` Q8).
+The engine builds each request's context (`search/query-model` Q8) when the request starts: now from the clock, today and next-day-at from the day calculation (`sched/day-clock` D8.1, U40; changed 2026-11-21, implementation review), and the config values Q8 lists, read in the request's snapshot (`deck:current` reads `curDeck`, `search/names-and-ids` N3.4). Swift never builds a context. The context is fixed for the request and kept by its handle. Changed 2026-11-21 (implementation review): that calculation is never a day query: no search, sorted or not, and no resort unburies a card or writes a timing key (`search/query-model` Q8).
 
 ## H10. Change sets and invalidation
 
