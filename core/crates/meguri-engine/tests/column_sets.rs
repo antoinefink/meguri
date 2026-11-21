@@ -176,6 +176,34 @@ fn members_of_another_shape_read_as_missing() {
     }
 }
 
+/// C3: bytes that are not JSON, and a value of the TEXT storage class, read
+/// as missing; the next change stores a BLOB in compact form (C4).
+#[test]
+fn an_unreadable_value_reads_as_missing_and_is_replaced_as_a_blob() {
+    let insert = |c: &Collection, text: &str, cast: &str| {
+        raw(
+            c,
+            &format!("INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES (?, 0, 1700000000, {cast})"),
+            &[SqlValue::Text(KEY.to_owned()), SqlValue::Text(text.to_owned())],
+        );
+    };
+    for (text, cast) in [
+        (r#"{"std":"#, "CAST(? AS BLOB)"),
+        (r#"{"std":{"cards":["deck"]}}"#, "?"),
+    ] {
+        let h = with_anki_keys();
+        let c = &h.collection;
+        insert(c, text, cast);
+        let list = shown(c, None).columns;
+        assert_eq!(list.columns(Cards), default_columns(Cards).as_slice(), "{text} {cast}");
+        assert!(change(c, SetId::Standard, Cards, Change::Hide(col(Column::Deck))));
+        let row = row(&config_rows(c), KEY).unwrap();
+        assert_eq!(row[1], SqlValue::Integer(-1), "{text} {cast}");
+        assert_eq!(row[3], SqlValue::Blob(br#"{"std":{"cards":["noteFld","template","cardDue","cardMod"]}}"#.to_vec()));
+        assert_eq!(row[4], SqlValue::Text("blob".to_owned()));
+    }
+}
+
 #[test]
 fn a_stored_sort_outside_the_list_still_sorts() {
     let h = with_anki_keys();
@@ -216,6 +244,7 @@ fn a_change_writes_only_its_set_and_keeps_anki_keys_and_unknown_members() {
         ANKI_KEYS.iter().map(|(key, _)| row(rows, key)).collect()
     };
     let first = config_rows(c);
+    h.clock.step_ms(3_600_000);
     let changes: Vec<(SetId, SearchMode, Change)> = vec![
         (SetId::Standard, Cards, Change::Show(field("Front"))),
         (SetId::Standard, Cards, Change::Hide(col(Column::Deck))),
@@ -264,7 +293,15 @@ fn a_change_writes_only_its_set_and_keeps_anki_keys_and_unknown_members() {
     );
     let row = row(&config_rows(c), KEY).unwrap();
     assert_eq!(row[1], SqlValue::Integer(-1), "usn");
+    assert_eq!(row[2], SqlValue::Integer(common::NOW_MS / 1000 + 3600), "mtime_secs");
     assert_eq!(row[4], SqlValue::Text("blob".to_owned()));
+    assert_eq!(common::col_mod(c), common::NOW_MS + 3_600_000);
+
+    // A change of nothing keeps the row and `col.mod`.
+    h.clock.step_ms(3_600_000);
+    let before = (config_rows(c), common::col_mod(c));
+    assert!(!change(c, SetId::Standard, Cards, Change::Show(col(Column::SortField))));
+    assert_eq!((config_rows(c), common::col_mod(c)), before);
 }
 
 #[test]
@@ -353,6 +390,17 @@ fn refusals_write_nothing() {
     let h = with_anki_keys();
     let c = &h.collection;
     put(c, KEY, r#"{"std":{"cards":["deck"]}}"#);
+    let (_, card) = common::add_note_with_card(c, OpSource::UserUndoable, &["front", "back"]).value;
+    ops::run(c, Request::Suspend(Targets::Cards(vec![card])), &Default::default()).unwrap();
+    c.undo(UndoScope::Global).unwrap();
+    let histories = |c: &Collection| {
+        (
+            c.peek_undo(UndoScope::Global).unwrap().name(),
+            c.peek_redo(UndoScope::Global).unwrap().name(),
+        )
+    };
+    let kept = histories(c);
+    assert!(kept.0.is_some() && kept.1.is_some());
     let before = config_rows(c);
     let kind = |result: Result<meguri_engine::OpResult<bool>, EngineError>| match result {
         Err(EngineError::InvalidArgument { message }) => message.split(':').next().unwrap().to_owned(),
@@ -385,6 +433,7 @@ fn refusals_write_nothing() {
         "unsortable_column"
     );
     assert_eq!(config_rows(c), before);
+    assert_eq!(histories(c), kept, "a refusal leaves both histories");
 }
 
 /// V2.4: the current-deck selection's skip-undo class. A column change
@@ -413,6 +462,10 @@ fn a_column_change_records_no_step_and_keeps_undo_suspend() {
     let result = column_sets::change(c, SetId::Notetype(nt), Cards, Change::SortBy(col(Column::Due))).unwrap();
     assert!(result.value);
     assert_eq!(top(c), suspend);
+    let result = column_sets::use_standard(c, nt).unwrap();
+    assert!(result.value, "the own set becomes the standard set's copy");
+    assert_eq!(result.undo, None);
+    assert_eq!(top(c), suspend, "Use Standard Columns keeps it too");
 
     // The undo still restores the card, and the column sets stay.
     let sets = stored(c);

@@ -439,10 +439,18 @@ impl ColumnSets {
     }
 
     /// Use Standard Columns (V2.2): the note type's own set becomes a copy
-    /// of the standard set. `None` when the note type has no own set.
+    /// of the standard set (its columns and sorts; its unknown members
+    /// kept). `None` when the note type has no own set.
     pub fn use_standard(&self, notetype: NotetypeId) -> Option<ConfigValue> {
-        self.has_own(notetype)
-            .then(|| self.with_set(SetId::Notetype(notetype), self.standard().value()))
+        let stored = self.stored_set(SetId::Notetype(notetype))?;
+        // The own set's unknown members are kept (V2.4, C6).
+        let copy = self
+            .standard()
+            .value()
+            .members()
+            .into_iter()
+            .fold(stored.clone(), |set, (name, value)| set.with_member(name, value.clone()));
+        Some(self.with_set(SetId::Notetype(notetype), copy))
     }
 
     /// The key's value with `set`'s member replaced; a stored value that is

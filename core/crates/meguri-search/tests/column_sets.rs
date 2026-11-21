@@ -200,7 +200,7 @@ fn a_note_types_first_change_writes_a_copy_of_the_standard_set() {
     assert_eq!(
         own.use_standard(NT).map(|value| value.compact()).as_deref(),
         Some(
-            r#"{"1700000000001":{"cards":["deck"],"notes":["noteFld","note","template","noteTags","noteCrt"],"sort":{"cards":["noteFld",false],"notes":["noteFld",false]}},"std":{"cards":["deck"]}}"#
+            r#"{"1700000000001":{"cards":["deck"],"notes":["noteFld","note","template","noteTags","noteCrt"],"sort":{"cards":["noteFld",false],"notes":["noteFld",false]},"z":true},"std":{"cards":["deck"]}}"#
         )
     );
     assert_eq!(

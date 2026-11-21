@@ -164,7 +164,8 @@ impl OpSpec {
         self
     }
 
-    /// Neither recorded nor clearing the history (`engine/undo` M2): only for
+    /// Never recorded; keeps the undo steps and empties redo, changed or not
+    /// (`engine/undo` M2, A2): only for
     /// `UserNonUndoable` ops such as selecting a deck (R42). Other sources are
     /// refused with `InvalidArgument` at submit.
     pub fn skip_undo(mut self) -> OpSpec {
