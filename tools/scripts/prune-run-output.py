@@ -1310,7 +1310,7 @@ def main():
         return fail("cannot tell which runs are live: %s" % e, "processes")
     mode = "all-worktrees" if args.all_worktrees else ("cleanroom" if args.cleanroom else "runs")
     log("prune: %s, %s" % (mode, "applying" if args.apply else "report only (--apply deletes)"))
-    log("rule: keep the newest %d runs of each job, every run started or finished in the last %d days, "
+    log("rule: keep the newest %d runs of each job, every run started, finished or written to in the last %d days, "
         "and every latest, referenced, unfinished, live or tracked run (tools/AGENTS.md)" % (KEEP_NEWEST, KEEP_DAYS))
 
     try:
