@@ -38,6 +38,21 @@ impl Params {
     }
 }
 
+/// An id list as one JSON array text, for statements that read it through
+/// `json_each` (a resort's ids, a chunk of candidates).
+pub fn id_list(ids: &[i64]) -> Param {
+    let mut text = String::with_capacity(ids.len() * 14 + 2);
+    text.push('[');
+    for (k, id) in ids.iter().enumerate() {
+        if k > 0 {
+            text.push(',');
+        }
+        text.push_str(&id.to_string());
+    }
+    text.push(']');
+    Param::Text(text)
+}
+
 /// What a term compiles against: the rows the statement tests (aliases `c`
 /// for `cards` and `n` for `notes`), the outside values and the note types.
 #[derive(Clone, Copy, Debug)]

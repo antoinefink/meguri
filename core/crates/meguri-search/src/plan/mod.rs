@@ -4,6 +4,7 @@
 //! and the run errors that need no database (`errors.md` E3).
 
 mod history;
+pub mod ids;
 mod names;
 mod props;
 pub mod sort;
@@ -138,6 +139,55 @@ impl Plan {
     /// The context values the plan read (Q8).
     pub fn reads(&self) -> ContextReads {
         self.reads
+    }
+
+    /// The plan's statement over its rows, restricted to the ids of the
+    /// JSON array bound as parameter `list` (`?n`, after the plan's own):
+    /// Q10 step 4's final test of a chunk of candidates. The ids are the
+    /// mode's (card ids in cards mode, note ids in notes mode); the result
+    /// is the matching ones, each once, in no order.
+    pub fn restricted_sql(&self, list: &str) -> String {
+        let id = match self.mode {
+            SearchMode::Cards => "c.id",
+            SearchMode::Notes => "n.id",
+        };
+        sql::statement(
+            self.mode,
+            self.rows,
+            &format!("{id} IN (SELECT value FROM json_each({list})) AND ({})", self.predicate),
+        )
+    }
+
+    /// `browser/result-sets` H5, H11: the lone rows (Q6) the query matches,
+    /// tested on those rows alone. Cards mode with card scope: each card
+    /// without a note row, with its `nid` (two columns). Notes mode with note
+    /// or either scope: each note without a card (one column). `None` for the
+    /// other plans, whose rows hold no lone row.
+    pub fn lone_rows_sql(&self) -> Option<String> {
+        match (self.mode, self.rows) {
+            (SearchMode::Cards, Rows::Cards) => Some(format!(
+                "SELECT c.id, c.nid FROM cards c WHERE NOT EXISTS (SELECT 1 FROM notes k WHERE k.id = c.nid) AND ({})",
+                self.predicate
+            )),
+            (SearchMode::Notes, Rows::Notes) => Some(format!(
+                "SELECT n.id FROM notes n WHERE NOT EXISTS (SELECT 1 FROM cards k WHERE k.nid = n.id) AND ({})",
+                self.predicate
+            )),
+            _ => None,
+        }
+    }
+
+    /// `browser/result-sets` H11's match data: in notes mode with card or
+    /// card-and-note scope, every card-and-note pair that makes the query
+    /// true, as card id and note id. `None` for the other plans.
+    pub fn pairs_sql(&self) -> Option<String> {
+        match (self.mode, self.rows) {
+            (SearchMode::Notes, Rows::Cards | Rows::CardsWithNotes) => Some(format!(
+                "SELECT c.id, c.nid FROM cards c JOIN notes n ON n.id = c.nid WHERE {}",
+                self.predicate
+            )),
+            _ => None,
+        }
     }
 }
 

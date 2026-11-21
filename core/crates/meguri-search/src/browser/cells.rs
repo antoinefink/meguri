@@ -40,6 +40,10 @@ pub enum Cell {
     Empty,
     Question(Question),
     Answer(Answer),
+    /// Question or Answer in a row page: not computed yet; `qa_cells` gives
+    /// it (`browser/result-sets` H7). Distinct from empty and from a row
+    /// error.
+    Deferred,
 }
 
 /// A percent value (C9): an integer for Ease, an `f32` shown rounded for

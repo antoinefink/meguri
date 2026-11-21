@@ -231,6 +231,22 @@ pub trait ReadRows: sealed::Connected {
             .query_map(params_from_iter(params), |row| row.get::<_, i64>(0).map(CardId))?
             .collect::<rusqlite::Result<Vec<_>>>()?)
     }
+
+    /// Runs one read-only statement compiled by the search crate whose one
+    /// or two columns are integers (a result's ids, with their note ids),
+    /// each row handed to `visit` as SQLite returns it (result-sets H3).
+    /// `cancel` is polled while SQLite works: once it returns true the
+    /// statement stops with SQLite's interrupt (code 9). `visit` returns
+    /// false to stop reading early.
+    fn visit_id_rows(
+        &self,
+        sql: &str,
+        params: &[Cell],
+        cancel: &dyn Fn() -> bool,
+        visit: &mut dyn FnMut(&[i64]) -> bool,
+    ) -> Result<(), StorageError> {
+        crate::search_rows::visit(self.connection(), sql, params, cancel, visit)
+    }
     /// M3's indexed fallback; Reset does not truncate this lookup.
     fn fsrs_last_review_time(&self, card: CardId) -> Result<Option<i64>, StorageError> {
         crate::queries::revlog_fsrs::last_review_time(self.connection(), card)
