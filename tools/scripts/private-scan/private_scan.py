@@ -1169,7 +1169,7 @@ PUBLIC_ARTIFACTS = {
     "specs/sync/server-media.md":
         "32f9eff487e305d1d17bad276c3797de4e7664dae22662e4b72a61bd2c3166cb",
     "specs/servers/meguri-sync-web.md":
-        'db50da0c732146e4d5b3fa4d629502d8d7c3f5114c09b0c5fcea122630b6eb9b',
+        '22460e317bad8bd0767d96f242bafe2b82882bacf0bd263195af84a8a57e7585',
     "specs/servers/meguri-collection-mcp.md":
         "013e3aa719a920b3d97e4a0792071b5f9d19b9a710e36f6082c1b399fe954fc8",
     "specs/conformance/meguri-sync-server.md":
@@ -1244,7 +1244,7 @@ PUBLIC_ARTIFACTS = {
     'server/src/storage/semantic.rs':
         'f5a3cc2e74103e01b6c38f407152892f38ef87f69b21b8a908fc7b2dc9de65b2',
     'server/src/storage/tests.rs':
-        '2fca66030368d01fbdf61c1bf5596834c2a0fb570c9df1b18855055c7ae54084',
+        '4f31caea298b452a0e4071926355d60cf6856bb40075c78dcffbe19f04d29297',
     'server/tests/accounts.rs':
         '7dcfbdcd68c04fb9b2976ca6c5adbab58cc8b3829f90714c67dc5343f812b404',
     'server/tests/http_contract.rs':

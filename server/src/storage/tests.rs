@@ -863,3 +863,54 @@ fn activation_reports_uncertainty_only_at_pointer_replacement() {
         // A fault after rename is never returned as an acknowledged success.
     }
 }
+
+async fn signed_in_admin() -> (tempfile::TempDir, std::sync::Arc<crate::Service>, String) {
+    let (temp, root) = initialized();
+    let token = fs::read_to_string(root.setup_file()).unwrap();
+    let service = crate::Service::open(root, config()).await.unwrap();
+    let ip = "127.0.0.1".parse().unwrap();
+    service.claim(ip, "setup", token.trim().into(), "admin", PASSWORD.into()).await.unwrap();
+    let (_, session) = service.browser_login(ip, "admin", PASSWORD.into()).await.unwrap();
+    (temp, service, session)
+}
+
+// Two browser pages can have about a dozen reads in flight. Before reads
+// waited for a slot, eight of every sixteen answered storage_unavailable.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn burst_of_concurrent_reads_waits_for_metadata_slots() {
+    let (_temp, service, session) = signed_in_admin().await;
+    for _ in 0..20 {
+        let mut tasks = Vec::new();
+        for kind in 0..16 {
+            let service = service.clone();
+            let session = session.clone();
+            tasks.push(tokio::spawn(async move {
+                let a = service.browser_authority(&session).await?;
+                if kind % 2 == 0 { service.me(a).await.map(|_| ()) } else { service.own_storage(a).await.map(|_| ()) }
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn read_waits_for_a_slot_freed_within_the_bound_and_overload_still_refuses() {
+    let (_temp, service, session) = signed_in_admin().await;
+    let a = service.browser_authority(&session).await.unwrap();
+    let held = service.metadata.test_hold_capacity();
+    let waiting = tokio::spawn({
+        let service = service.clone();
+        let a = a.clone();
+        async move { service.me(a).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!waiting.is_finished(), "a read must wait for a slot, not refuse at once");
+    drop(held);
+    assert_eq!(waiting.await.unwrap().unwrap().username, "admin");
+    let _held = service.metadata.test_hold_capacity();
+    let started = std::time::Instant::now();
+    assert_eq!(service.me(a).await.unwrap_err().code, "storage_unavailable");
+    assert!(started.elapsed() >= super::SLOT_WAIT, "overload answers only after the bounded wait");
+}

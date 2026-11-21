@@ -9,7 +9,12 @@ use crate::{Error, Result};
 pub use root::{AccountStores, DataRoot};
 use rusqlite::{Connection, OpenFlags};
 use std::{path::PathBuf, sync::Arc, time::Duration};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+
+/// A storage job waits this long for one of the eight metadata slots. A burst
+/// of ordinary requests queues briefly; only a pool still full after the wait
+/// is overload and answers storage_unavailable (503).
+const SLOT_WAIT: Duration = Duration::from_secs(5);
 
 pub(crate) fn private_collection_file(path: &std::path::Path) -> Result<()> {
     root::regular(path, true)?;
@@ -37,15 +42,17 @@ impl Metadata {
     pub(crate) fn test_hold_capacity(&self) -> Vec<tokio::sync::OwnedSemaphorePermit> {
         (0..8).map(|_| self.capacity.clone().try_acquire_owned().unwrap()).collect()
     }
+    async fn slot(&self) -> Result<OwnedSemaphorePermit> {
+        tokio::time::timeout(SLOT_WAIT, self.capacity.clone().acquire_owned())
+            .await
+            .map_err(|_| Error::new("storage_unavailable"))?
+            .map_err(|_| Error::new("storage_unavailable"))
+    }
     pub async fn run<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        let permit = self
-            .capacity
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| Error::new("storage_unavailable"))?;
+        let permit = self.slot().await?;
         let root = self.root.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -60,11 +67,7 @@ impl Metadata {
         &self,
         f: impl FnOnce(&DataRoot) -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        let permit = self
-            .capacity
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| Error::new("storage_unavailable"))?;
+        let permit = self.slot().await?;
         let root = self.root.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
