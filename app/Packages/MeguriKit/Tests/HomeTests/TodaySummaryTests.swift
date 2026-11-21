@@ -116,7 +116,19 @@ import Testing
         // The calendar day before, in the device's zone: the system's "Yesterday" and the time.
         let lateYesterday = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 20, hour: 23, minute: 50)))
         let yesterday = try #require(summary(["Languages"], ended: lateYesterday).previousValue(now: now, calendar: calendar, locale: locale))
+        let lateTime = lateYesterday.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale,
+                                                                calendar: calendar, timeZone: calendar.timeZone))
         #expect(yesterday.hasPrefix("46 cards · Yesterday"))
+        // The time of that day follows the word, and no date: never the day before it in another zone.
+        #expect(yesterday.hasSuffix(lateTime))
+        #expect(!yesterday.contains("2026") && !yesterday.contains("20"))
+        // The last minute before midnight is still the day before; midnight is today.
+        let lastMinute = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 20, hour: 23, minute: 59)))
+        let midnight = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 21, hour: 0, minute: 0)))
+        #expect(summary(["Languages"], ended: lastMinute).previousValue(now: now, calendar: calendar, locale: locale)?
+            .hasPrefix("46 cards · Yesterday") == true)
+        #expect(summary(["Languages"], ended: midnight).previousValue(now: now, calendar: calendar, locale: locale)?
+            .contains("Yesterday") == false)
         // Earlier: the date.
         let older = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9)))
         #expect(summary(["Languages"], ended: older).previousValue(now: now, calendar: calendar, locale: locale) == "46 cards · Nov 18, 2026")
@@ -144,6 +156,10 @@ import Testing
         #expect(value("Next learning card at %@") == "Next learning card at %@")
         #expect(value("home.today.studied.spoken") == "%1$@, %2$@")
         #expect(value("home.today.previous.deck") == "%1$@ in %2$@")
+        // The two first lines are separate keys, so a translation can word each its own way.
+        #expect(value("home.today.study.cardsInDecks") == "%1$@ in %2$@")
+        #expect(value("home.today.study.cardsInDeck") == "%1$@ in %2$@")
+        #expect(strings["%@ in %@"] == nil)
         #expect(plural("%lld cards", "one") == "%lld card" && plural("%lld cards", "other") == "%lld cards")
         #expect(plural("%lld decks", "one") == "%lld deck" && plural("%lld decks", "other") == "%lld decks")
     }

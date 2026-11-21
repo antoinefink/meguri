@@ -50,8 +50,11 @@ public nonisolated struct TodaySummary: Equatable, Sendable {
     /// "492 cards in 4 decks · about 35 min"; one deck: "40 cards in Languages · about 3 min".
     public func studyLine(locale: Locale) -> String {
         let cards = Self.cards(waiting, locale: locale)
-        let place = decks.count == 1 ? Self.title(decks[0].name) : Self.decksText(decks.count, locale: locale)
-        let total = String(localized: "\(cards) in \(place)", bundle: .module)
+        let total = decks.count == 1
+            ? String(localized: "home.today.study.cardsInDeck", defaultValue: "\(cards) in \(Self.title(decks[0].name))",
+                     bundle: .module, comment: "Study's first line with one deck: the cards waiting, then the deck's name.")
+            : String(localized: "home.today.study.cardsInDecks", defaultValue: "\(cards) in \(Self.decksText(decks.count, locale: locale))",
+                     bundle: .module, comment: "Study's first line: the cards waiting, then how many decks they are in.")
         guard let minutes = estimateMinutes else { return total }
         let time = Self.shortDuration(seconds: Int64(minutes) * 60, units: [.hour, .minute], locale: locale)
         return total + " · " + String(localized: "about \(time)", bundle: .module)

@@ -75,9 +75,12 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
     /// AH9: a month's name leading-aligned with its column.
     public nonisolated struct MonthLabel: Sendable, Equatable {
         public let column: Int
-        /// 1 January to 12 December.
+        /// The calendar's month number, 1 to 12.
         public let month: Int
-        public init(column: Int, month: Int) { self.column = column; self.month = month }
+        /// Where the label's left edge is drawn: its column's leading edge, mirrored under
+        /// right-to-left layout, or pulled back so the newest label ends at the grid's edge.
+        public let x: CGFloat
+        public init(column: Int, month: Int, x: CGFloat) { self.column = column; self.month = month; self.x = x }
     }
 
     public let weeks: Int
@@ -121,13 +124,15 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
     /// Gregorian date). A column is labelled when one of its drawn days is a 1st, with that
     /// 1st's month; the first column is also labelled with its own month when at least
     /// three columns of that month are shown. Labels are placed from the newest column
-    /// back; one that would overlap a label already placed, or run past the grid's
-    /// trailing edge, is left out.
+    /// back; one that would overlap a label already placed is left out. The newest label,
+    /// when it would run past the grid's trailing edge, is pulled back to end there if it
+    /// still clears the label before it, and is left out otherwise.
     /// - Parameters:
     ///   - pitch: where each column starts (`Geometry.pitch`).
     ///   - width: the grid's width.
+    ///   - rightToLeft: the layout's direction; columns then run from the right, the newest leftmost.
     ///   - labelWidth: the drawn width of a month's label.
-    public func monthLabels(year: Int, month: Int, day: Int, pitch: CGFloat, width: CGFloat,
+    public func monthLabels(year: Int, month: Int, day: Int, pitch: CGFloat, width: CGFloat, rightToLeft: Bool = false,
                             labelWidth: (Int) -> CGFloat) -> [MonthLabel] {
         guard weeks > 0 else { return [] }
         var calendar = Calendar(identifier: .gregorian)
@@ -148,15 +153,25 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
             if columns >= 3 { candidates[0] = first }
         }
 
-        var placed: [MonthLabel] = []
+        // Leading-edge positions first, as if left to right; mirrored at the end.
+        let labelled = (0..<weeks).reversed().compactMap { column in candidates[column].map { (column: column, month: $0) } }
+        var placed: [(column: Int, month: Int, x: CGFloat, width: CGFloat)] = []
         var limit = width
-        for column in (0..<weeks).reversed() {
-            guard let month = candidates[column] else { continue }
-            let x = CGFloat(column) * pitch
-            guard x + labelWidth(month) <= limit else { continue }
-            placed.append(MonthLabel(column: column, month: month))
+        for (index, label) in labelled.enumerated() {
+            let size = labelWidth(label.month)
+            var x = CGFloat(label.column) * pitch
+            if placed.isEmpty, x + size > width {
+                x = width - size
+                let previous = labelled.dropFirst(index + 1).first
+                let clears = previous.map { CGFloat($0.column) * pitch + labelWidth($0.month) <= x } ?? true
+                guard x >= 0, clears else { continue }
+            }
+            guard x + size <= limit else { continue }
+            placed.append((label.column, label.month, x, size))
             limit = x
         }
-        return placed.reversed()
+        return placed.reversed().map {
+            MonthLabel(column: $0.column, month: $0.month, x: rightToLeft ? width - $0.x - $0.width : $0.x)
+        }
     }
 }

@@ -36,6 +36,19 @@ public enum HomeDeckListPreview: PreviewStates {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("home.collection.screen")
     }
+    /// The typical tree with the collection's heatmap after its rows, as the tab layout shows
+    /// it (N14.11, N24.6), over a year of sample days (route `home/deck-list/typical`). The
+    /// snapshot matrix keeps `preview(.typical)`, whose baselines carry no heatmap.
+    public static func typicalWithActivity() -> some View {
+        PreviewActivityHost { activity, navigation in
+            HomeDeckTree(nodes: nodes(overflow: false), navigation: navigation, activity: activity,
+                         activityActive: true, select: { _ in })
+        }
+        .background(.token(.backgroundPrimary))
+        .navigationTitle(Text("Decks", bundle: .module))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.collection.screen")
+    }
     /// Every state view is centred, as in `HomeView` (N2).
     private static func scrollContent(state: PreviewState, availableHeight: CGFloat) -> some View {
         ScrollView {
@@ -115,34 +128,47 @@ public enum HomeTodayPreview {
 
 private struct TodayPreviewHost: View {
     let state: HomeTodayPreview.State
-    @State private var navigation = AppNavigation()
-    @State private var activity: ActivityHeatmapStore?
     @Environment(\.appClock) private var clock
-    @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
 
     var body: some View {
         let now = clock.now()
         let totals = TodayDecks(nodes: HomeTodayPreview.nodes(state)).totals
-        Group {
-            if let activity {
-                TodaySummaryContent(summary: HomeTodayPreview.summary(state, now: now),
-                    nextLearningReadyAt: state == .nothingWaiting ? now.addingTimeInterval(2 * 3_600) : nil,
-                    totals: totals, error: nil, canStudy: true, study: {},
-                    activity: activity, widths: navigation.activityRowWidths)
-                    .activityLoading(activity, scope: .collection, active: true,
-                                     widths: navigation.activityRowWidths, page: .today)
-            }
-        }
-        .onAppear {
-            guard activity == nil else { return }
-            activity = ActivityHeatmapStore(service: PreviewActivity(today: Self.day(now, calendar: calendar)))
+        PreviewActivityHost { activity, navigation in
+            TodaySummaryContent(summary: HomeTodayPreview.summary(state, now: now),
+                nextLearningReadyAt: state == .nothingWaiting ? now.addingTimeInterval(2 * 3_600) : nil,
+                totals: totals, error: nil, canStudy: true, study: {},
+                activity: activity, widths: navigation.activityRowWidths)
+                .activityLoading(activity, scope: .collection, active: true,
+                                 widths: navigation.activityRowWidths, page: .today)
         }
         .navigationTitle(Text("Today", bundle: .module))
         #if os(macOS)
         .navigationSubtitle(Text(verbatim: HomeHeading.todaySubtitle(totals, locale: locale)))
         #endif
         .accessibilityIdentifier("home.collection.screen")
+    }
+}
+
+/// Holds a preview's heatmap store and navigation. The store is made on the first frame,
+/// from the environment's clock and calendar: a clear view fills the host meanwhile, so
+/// it always has something on screen to appear with (an empty container never appears).
+struct PreviewActivityHost<Content: View>: View {
+    @ViewBuilder let content: (ActivityHeatmapStore, AppNavigation) -> Content
+    @State private var navigation = AppNavigation()
+    @State private var activity: ActivityHeatmapStore?
+    @Environment(\.appClock) private var clock
+    @Environment(\.calendar) private var calendar
+
+    var body: some View {
+        ZStack {
+            Color.clear
+            if let activity { content(activity, navigation) }
+        }
+        .onAppear {
+            guard activity == nil else { return }
+            activity = ActivityHeatmapStore(service: PreviewActivity(today: Self.day(clock.now(), calendar: calendar)))
+        }
     }
 
     private static func day(_ date: Date, calendar: Calendar) -> ActivityDays.Day {

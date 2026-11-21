@@ -25,12 +25,14 @@ public final class ReviewCoordinator {
     public let surface: any ReviewCardSurface
     public var onPolicyRefusal: (() -> Void)?
     /// Called, synchronously, when the session comes to a terminal state (waiting or
-    /// finished) from a card or from its start: Study's walk (N24.3) moves on from here.
-    /// A refresh that stays terminal does not call it again; Keep Going re-arms it.
+    /// finished) from any other state (a card, its start, an error's retry): Study's walk
+    /// (N24.3) moves on from here. A refresh that stays terminal does not call it again.
     public var onTerminal: (() -> Void)?
     /// N24.3: a walk's later decks reach only their own answers. Undo stays unavailable
     /// until this session's first answer, Redo until one of its answers is undone.
     public var sessionScopedUndo = false
+    /// True while Undo and Redo must wait: Study's walk holds them between decks (N24.3).
+    public var undoHeld: () -> Bool = { false }
     // Named attachments for U154/U177; no fake summary/sync/backup providers.
     public var onRecordChanged: ((ReviewRecord) -> Void)?
     /// Collection-owned routing; pages retain only render metadata, never sync ownership.
@@ -125,8 +127,8 @@ public final class ReviewCoordinator {
     public var canRefresh: Bool { !busy && !paused && !closingAdmission && sessionID != nil && phase != .ended }
     public var canReveal: Bool { phase == .question && !busy && !paused && !editingNote }
     public var canRate: Bool { phase == .answer && !busy && !paused && !editingNote }
-    public var canUndo: Bool { if case .available = undoStatus { return !busy && !paused && !editingNote && phase != .ended }; return false }
-    public var canRedo: Bool { if case .available = redoStatus { return !busy && !paused && !editingNote && phase != .ended }; return false }
+    public var canUndo: Bool { if case .available = undoStatus { return !busy && !paused && !editingNote && phase != .ended && !undoHeld() }; return false }
+    public var canRedo: Bool { if case .available = redoStatus { return !busy && !paused && !editingNote && phase != .ended && !undoHeld() }; return false }
     /// N20.8: Edit Note acts on a presented card, on either side, and never
     /// while a transition, a pause or another open form owns the screen.
     public var canEditNote: Bool {
@@ -639,10 +641,11 @@ public final class ReviewCoordinator {
             preload?.cancel(); await preload?.value; preload = nil
             timer.pause(at: uptime()); activeTime.pause(at: uptime()); surface.pair?.pauseAudio()
             studyState = nil
+            // From cards, a start, or an error's retry: any way into the end state counts.
+            let entering = phase != .waiting && phase != .finished
             if case .waitingUntil(let instant) = head.terminalState {
                 waitingUntil = Date(timeIntervalSince1970: Double(instant)); phase = .waiting
             } else { waitingUntil = nil; phase = .finished }
-            let entering = terminalPresentation == nil
             terminalPresentation = phase
             if entering { onTerminal?() }
             // An empty head settles the restoration it belongs to.

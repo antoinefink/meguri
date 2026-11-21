@@ -34,11 +34,42 @@ extension TestHooks {
             registry.register("home/deck-list/beside-deck") { _ in .screen { HomeDeckListPreview.besideDetail(deck: 2) } }
             registry.register("home/deck-list/beside-today") { _ in .screen { HomeDeckListPreview.besideDetail(deck: nil) } }
             registry.register("home/deck-list/empty") { _ in .screen { HomeDeckListPreview.preview(.empty) } }
-            registry.register("home/deck-list/typical") { _ in .screen { HomeDeckListPreview.preview(.typical) } }
+            // N14.11, N24.6: the tab layout's list with its heatmap after the rows.
+            registry.register("home/deck-list/typical") { _ in .screen { HomeDeckListPreview.typicalWithActivity() } }
+            // N24.4: the production sidebar's rows over sample decks, Today's summary beside them.
+            registry.register("home/sidebar/typical") { _ in .screen { SidebarPreview() } }
             // N24.2: Today's summary beside the deck list (Mac, iPad, the Duo held wide), over sample values.
             registry.register("home/today/summary") { _ in .screen { HomeTodayPreview.preview(.summary) } }
             registry.register("home/today/nothing-waiting") { _ in .screen { HomeTodayPreview.preview(.nothingWaiting) } }
             registry.register("home/today/after-walk") { _ in .screen { HomeTodayPreview.preview(.afterWalk) } }
+        }
+    }
+
+    /// The shell's own sidebar list (`SidebarView`) with Home's deck rows over sample decks
+    /// (`HomeSidebarPreview`) and Today's summary beside it: the badges, help tags and the
+    /// quieter nothing-waiting names, with no collection.
+    struct SidebarPreview: View {
+        @State private var navigation = AppNavigation()
+
+        var body: some View {
+            NavigationSplitView {
+                SidebarView(navigation: navigation, features: features)
+            } detail: {
+                HomeTodayPreview.preview(.summary)
+            }
+        }
+
+        private var features: ShellFeatures {
+            var features = ShellFeatures.standard
+            features.todayRoot = true
+            #if os(macOS)
+            features.nativeMacWorkspace = true
+            features.availableSections = [.home]
+            #else
+            features.availableSections = [.home, .settings]
+            #endif
+            features.sidebarDecks = { navigation in AnyView(HomeSidebarPreview.decks(selection: navigation.sidebarSelection)) }
+            return features
         }
     }
 

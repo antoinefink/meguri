@@ -1485,14 +1485,15 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// that fails, study is refused with Try Again and nothing else changes (F5.3).
     private func startStudy(deckID: Int64, entry: StudyPreparation.Entry, walk: StudyWalk? = nil) async -> Bool {
         var entry = entry
+        var retry = false
         while true {
-            switch await attemptStudy(deckID: deckID, entry: entry, walk: walk) {
+            switch await attemptStudy(deckID: deckID, entry: entry, walk: walk, retry: retry) {
             case .started: return true
             case .stopped: return false
             case .refusedByCore where entry != .refusedByCore:
                 // The core found the switch off after our last read: read
                 // again, run the step and go on (F1 item 5).
-                entry = .refusedByCore
+                entry = .refusedByCore; retry = true
             case .notReady, .refusedByCore:
                 studyRefusal = .init(deckID: deckID, studyAll: walk != nil)
                 return false
@@ -1500,7 +1501,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
     }
 
-    private func attemptStudy(deckID: Int64, entry: StudyPreparation.Entry, walk: StudyWalk? = nil) async -> StudyAttempt {
+    /// `retry`: the same start again after the core refused it; for a walk, the same turn.
+    private func attemptStudy(deckID: Int64, entry: StudyPreparation.Entry, walk: StudyWalk? = nil,
+                              retry: Bool = false) async -> StudyAttempt {
         // A walk's turn starts while its own review shows, never after it stopped.
         let walkCurrent: @MainActor @Sendable () -> Bool = { walk.map { self.walk === $0 && !$0.stopped } ?? true }
         let admitted = walk.map { _ in studyAdmissible && walkCurrent() && (review == nil || review === self.walk?.current) } ?? canStudy
@@ -1522,6 +1525,8 @@ public final class ReviewCollection: ChangeFanoutSink {
             guard await selectDeck(deckID: deckID, intent: intent, admission: current).value,
                   current(), let resolver = await mediaResolverForReview(), current() else { return .stopped }
             previousRecord = nil
+            // A deck's own session replaces the walk on Today's Previous Session (N24.2).
+            if walk == nil { previousWalk = nil }
             let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
                 store: records, clock: configuration.clock, client: reviewSessionClient,
                 nativeInput: configuration.nativeReviewInput, nativeGeneration: expected,
@@ -1535,14 +1540,16 @@ public final class ReviewCollection: ChangeFanoutSink {
             var refusedByCore = false
             model.onPolicyRefusal = { refusedByCore = true }
             if let walk {
-                // Undo reaches the open deck's answers only, from the walk's second deck on.
-                model.sessionScopedUndo = walk.turns > 0
+                // Undo reaches the open deck's answers only (N24.3), and waits while the walk
+                // moves between decks.
+                model.sessionScopedUndo = true
+                model.undoHeld = { [weak walk] in walk?.advancing ?? false }
                 model.onTerminal = { [weak self, weak walk, weak model] in
                     guard let self, let walk, let model, walk.current === model else { return }
                     self.requestAdvance(walk)
                 }
             }
-            presentReview(model, walk: walk)
+            presentReview(model, walk: walk, retry: retry)
             // The session's own loading state shows while the collection is
             // prepared. No session is open yet, so the step may run.
             let prepared = await studyPreparation.prepare(for: entry)
@@ -1597,7 +1604,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         logger.debug("\(stage, privacy: .public) currentOwner=\(currentOwner, privacy: .public) reviewIsActive=\(self.reviewIsActive, privacy: .public) paused=\(model.paused, privacy: .public) foreground=\(self.foreground, privacy: .public) sceneActive=\(self.sceneActive, privacy: .public) applicationActive=\(self.applicationActive, privacy: .public) windowVisible=\(self.windowVisible, privacy: .public) reviewWindowActive=\(self.reviewWindowActive, privacy: .public) reviewVisible=\(self.reviewVisible, privacy: .public) hostCountZero=\(self.visibleReviewHosts == 0, privacy: .public) presentationAllowsInput=\(self.reviewPresentationAllowsInput, privacy: .public)")
     }
     #endif
-    func presentReview(_ model: ReviewCoordinator, walk: StudyWalk? = nil) {
+    func presentReview(_ model: ReviewCoordinator, walk: StudyWalk? = nil, retry: Bool = false) {
         reviewVisible = true
         review = model
         let expected = generation
@@ -1612,7 +1619,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         sync.visibleMedia(model.visibleMediaNames, generation: expected)
         if let walk {
             // The walk is the presentation: its next deck keeps the same review on screen.
-            walk.present(model)
+            walk.present(model, retry: retry)
             if navigation.review?.session !== walk {
                 navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: model.record.deckID), session: walk))
             }
@@ -1635,8 +1642,10 @@ public final class ReviewCollection: ChangeFanoutSink {
         // Back to Decks, Esc and Done stop the walk: no other deck starts (N24.3).
         walk?.stop()
         guard await review.end() else { return }
-        // A deck page shows a previous session only for a single-deck session (N24.2).
+        // A deck page shows a previous session only for a single-deck session (N24.2),
+        // and a single-deck session replaces an earlier walk on Today.
         previousRecord = walk == nil ? review.record : nil
+        if walk == nil { previousWalk = nil }
         self.review = nil; navigation.endReview()
         await studyPreparation.sessionEnded()
         refreshCounts()
@@ -1676,18 +1685,28 @@ public final class ReviewCollection: ChangeFanoutSink {
     private func advance(_ walk: StudyWalk, entry: StudyPreparation.Entry = .study) async {
         guard self.walk === walk, !walk.stopped else { return }
         let open = walk.current
-        // Keep Going may have taken the open deck back to its cards meanwhile.
-        if let open, open.phase != .waiting, open.phase != .finished { walk.settle(); return }
+        // Keep Going (or an error) can take the open deck away from its end at any await.
+        func openStillEnded() -> Bool {
+            guard let open else { return true }
+            return open.phase == .waiting || open.phase == .finished
+        }
+        guard openStillEnded() else { walk.settle(); return }
         walk.beginAdvance()
         while let deck = walk.nextDeck() {
             // The open deck's own Keep Going covers it.
             if open?.record.deckID == deck.id { continue }
             let readiness = await readiness(of: deck.id)
             guard self.walk === walk, !walk.stopped else { return }
+            guard openStillEnded() else { walk.settle(); return }
             guard readiness.ready else { walk.skip(deck, learningLater: readiness.learningLater); continue }
             if let open {
                 walk.close(open, leftForEnd: open.phase == .waiting)
-                guard await open.end() else { endWalkAtToday(walk); return }
+                guard await open.end() else {
+                    // The session did not end: it stays on screen with its error, as after
+                    // Back to Decks, which tries again; no other deck starts.
+                    walk.stop()
+                    return
+                }
                 await studyPreparation.sessionEnded()
                 guard self.walk === walk, !walk.stopped else { return }
             }
@@ -1733,6 +1752,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// Another collection: no walk and no record of one applies.
     private func dropWalk() {
         walk?.stop(); walk = nil; previousWalk = nil
+        // Today's numbers were the other collection's.
+        studiedToday = nil; nextLearningReadyAt = nil
     }
 
     // MARK: Today's numbers (T12, N24.2)

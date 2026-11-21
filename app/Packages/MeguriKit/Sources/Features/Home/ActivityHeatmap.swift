@@ -5,6 +5,7 @@ import HeatmapKit
 import SwiftUI
 #if os(macOS)
 import AppKit
+import Combine
 #endif
 
 /// The heatmap rows' content widths, kept above the views (`AppNavigation.featureState`):
@@ -155,6 +156,8 @@ private struct ActivityGridView: View {
     let geometry: ActivityGrid.Geometry
     let today: ActivityDays.Day
     @Environment(\.colorSchemeContrast) private var contrast
+    /// The Mac's accent, read again when the system's colours change (System Settings).
+    @State private var graphite = Self.currentGraphite
     #if os(macOS)
     @Environment(\.locale) private var locale
     #endif
@@ -181,6 +184,11 @@ private struct ActivityGridView: View {
                 }
             }
         }
+        #if os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: NSColor.systemColorsDidChangeNotification)) { _ in
+            graphite = Self.currentGraphite
+        }
+        #endif
     }
 
     private func square(_ daysAgo: Int) -> some View {
@@ -188,7 +196,7 @@ private struct ActivityGridView: View {
         let level = grid.level(daysAgo: daysAgo)
         let increased = contrast == .increased
         return shape
-            .fill(Self.style(level: level, increasedContrast: increased, graphite: Self.graphite))
+            .fill(Self.style(level: level, increasedContrast: increased, graphite: graphite))
             // N24.6: with Increase Contrast the steps lie over the empty day's own fill.
             .background { if increased && level > 0 { shape.fill(.fill.secondary) } }
             .overlay {
@@ -207,7 +215,7 @@ private struct ActivityGridView: View {
         return graphite ? AnyShapeStyle(Color.blue.opacity(opacity)) : AnyShapeStyle(TintShapeStyle().opacity(opacity))
     }
 
-    private static var graphite: Bool {
+    private static var currentGraphite: Bool {
         #if os(macOS)
         NSColor.currentControlTint == .graphiteControlTint
         #else
@@ -224,6 +232,7 @@ private struct MonthLabelsView: View {
     let geometry: ActivityGrid.Geometry
     let today: ActivityDays.Day
     @Environment(\.locale) private var locale
+    @Environment(\.layoutDirection) private var layoutDirection
 
     var body: some View {
         Canvas { context, size in
@@ -237,10 +246,11 @@ private struct MonthLabelsView: View {
             let resolved = names.map { context.resolve(Text(verbatim: $0).font(.caption).foregroundStyle(.token(.textSecondary))) }
             #endif
             let labels = grid.monthLabels(year: today.year, month: today.month, day: today.day,
-                                          pitch: geometry.pitch, width: size.width) { resolved[$0 - 1].measure(in: size).width }
+                                          pitch: geometry.pitch, width: size.width,
+                                          rightToLeft: layoutDirection == .rightToLeft) { resolved[$0 - 1].measure(in: size).width }
+            // The canvas does not mirror itself; the label positions already are.
             for label in labels {
-                context.draw(resolved[label.month - 1], at: CGPoint(x: CGFloat(label.column) * geometry.pitch, y: 0),
-                             anchor: .topLeading)
+                context.draw(resolved[label.month - 1], at: CGPoint(x: label.x, y: 0), anchor: .topLeading)
             }
         }
     }

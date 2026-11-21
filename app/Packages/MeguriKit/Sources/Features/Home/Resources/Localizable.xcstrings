@@ -1222,16 +1222,6 @@
         }
       }
     },
-    "%@ in %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ in %2$@"
-          }
-        }
-      }
-    },
     "about %@": {
       "localizations": {
         "en": {
@@ -1293,6 +1283,28 @@
       }
     },
     "home.today.previous.deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ in %2$@"
+          }
+        }
+      }
+    },
+    "home.today.study.cardsInDeck": {
+      "comment": "Study's first line with one deck: the cards waiting, then the deck's name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ in %2$@"
+          }
+        }
+      }
+    },
+    "home.today.study.cardsInDecks": {
+      "comment": "Study's first line: the cards waiting, then how many decks they are in.",
       "localizations": {
         "en": {
           "stringUnit": {

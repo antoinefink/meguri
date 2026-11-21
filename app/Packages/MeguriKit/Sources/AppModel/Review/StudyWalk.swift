@@ -84,6 +84,8 @@ public final class StudyWalk {
     private var endedMilliseconds: UInt64 = 0
     /// The decks answered in, in the order of their first answer.
     private var answeredDecks: [Int64] = []
+    /// Cards a studied deck left when its session closed, for the progress bar.
+    private var leftCards: [Int64: Int] = [:]
     /// The records of sessions already counted (a record's id is its session's: an object's
     /// address can come back for the next deck's).
     @ObservationIgnored private var closedSessions: Set<UUID> = []
@@ -111,11 +113,12 @@ public final class StudyWalk {
     }
 
     /// N16.1 over the walk: its answers, against those plus the open deck's queue and the
-    /// cards waiting, as the list counted them at the start, of the decks still to come.
+    /// cards still to come in the other decks: a deck not studied yet at its waiting count
+    /// from the start, a deck already studied and left for the end at what its session left.
     public var progress: ReviewSessionProgress {
         let openDeck = open?.record.deckID
         let toCome = decks.reduce(0) { sum, deck in
-            deck.id != openDeck && standing[deck.id] != .done ? sum + deck.waiting : sum
+            deck.id != openDeck && standing[deck.id] != .done ? sum + (leftCards[deck.id] ?? deck.waiting) : sum
         }
         let queue = open.map { Int($0.counts.new) + Int($0.counts.learning) + Int($0.counts.review) } ?? 0
         return ReviewSessionProgress(answered: answers, remaining: queue + toCome)
@@ -137,9 +140,11 @@ public final class StudyWalk {
 
     // MARK: Turns, as `ReviewCollection` takes them
 
-    func present(_ model: ReviewCoordinator) {
+    /// A new turn's session, or (`retry`) the same turn's after the core refused its start
+    /// and the step ran again: that one is not another turn.
+    func present(_ model: ReviewCoordinator, retry: Bool = false) {
         current = model
-        turns += 1
+        if !retry { turns += 1 }
         standing[model.record.deckID] = .done
     }
 
@@ -170,6 +175,9 @@ public final class StudyWalk {
         endedMilliseconds += model.activeMilliseconds
         if !record.answers.isEmpty, !answeredDecks.contains(record.deckID) { answeredDecks.append(record.deckID) }
         standing[record.deckID] = leftForEnd ? .leftForEnd : .done
+        // What it leaves for the end: its queue, or its learning cards due later today.
+        let queue = Int(model.counts.new) + Int(model.counts.learning) + Int(model.counts.review)
+        leftCards[record.deckID] = max(queue, Int(model.studyState?.learningRemainingToday ?? 0))
     }
 
     /// The open deck has a card again (a start that found one, Keep Going): no progress

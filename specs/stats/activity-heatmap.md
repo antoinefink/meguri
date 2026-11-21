@@ -112,6 +112,6 @@ Changed 2026-11-21 (round 10; `docs/design/native-interface-contract.md` N24.6).
 - A week column's days are dated `T0 − k` (AH3, AH6). A column's month is the month of its top drawn day (the oldest drawn day of that week).
 - A column is labelled when its drawn days include the first day of a month (a 1st after today, in the current week, is not drawn and labels nothing): that month's short standalone name in the app's locale, leading-aligned with the column. No year.
 - The first column shown is also labelled with its month, even with no 1st in it, but only when at least three columns of that month are shown.
-- Labels are placed from the newest column back; a label that would overlap one already placed is left out.
+- Labels are placed from the newest column back. A label that would run past the grid's trailing edge ends at that edge instead; a label that would overlap one already placed is left out. Under right-to-left layout the labels mirror with the columns.
 - The labels change only with the days shown (a new day, a width change), never with a new query.
 - `ActivityGridTests` checks: a 1st in each of a few columns; a partial current week whose 1st is after today; the first-column rule with two and with three columns of its month; and an overlap.
