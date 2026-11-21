@@ -94,9 +94,10 @@ import AppKit
         #expect(claims == ["Note Types"], "\(claims)")
         let titles = menuItems(NSApp.mainMenu).map(\.title)
         #expect(!titles.contains("Show Tab Bar") && !titles.contains("Show All Tabs"), "\(titles)")
-        // The one main window never joins a tab group (R6).
-        #expect(!NSWindow.allowsAutomaticWindowTabbing || NSApp.windows.allSatisfy { $0.tabbingMode == .disallowed },
-                "\(NSApp.windows.map { "\($0.identifier?.rawValue ?? "-"): \($0.tabbingMode.rawValue)" })")
+        // The one main window never joins a tab group (R6); fixture windows of other suites are not it.
+        let main = NSApp.windows.filter { $0.identifier?.rawValue.hasPrefix(WindowMetrics.mainWindowID) == true }
+        #expect(!NSWindow.allowsAutomaticWindowTabbing || main.allSatisfy { $0.tabbingMode == .disallowed },
+                "\(main.map { "\($0.identifier?.rawValue ?? "-"): \($0.tabbingMode.rawValue)" })")
     }
 
     @Test func theWindowMenuShowsTheMainWindow() throws {

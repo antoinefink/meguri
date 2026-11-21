@@ -109,7 +109,10 @@ public final class NoteTypesModel {
     @ObservationIgnored public var meguriSyncSave: (@MainActor (NotetypeStructureDraft, NotetypeDraftSummary) async throws -> Void)?
     /// Text a view holds but has not committed (a rename field, the
     /// inspector's Name or Placeholder), committed before Save reads the draft.
-    @ObservationIgnored public var pendingEdits: [String: @MainActor () async -> Void] = [:]
+    /// Each returns false when the text was refused (V5), and Save stops.
+    public var pendingEdits: [String: @MainActor () async -> Bool] = [:]
+    /// A Save is between its first commit and its end: a second one waits.
+    @ObservationIgnored private var saveRunning = false
     /// Raised when the collection goes: work started before must not land.
     private var epoch: UInt64 = 0
     /// How long a summary read waits after the last change (W7's pause).
@@ -280,7 +283,7 @@ public final class NoteTypesModel {
 
     /// Return in a rename field, or the inspector's Name: V5 on the typed
     /// text. A refusal keeps the old name and is shown under the row.
-    public func commitRename(_ id: Int64, row: Int, typed: String) async {
+    @discardableResult public func commitRename(_ id: Int64, row: Int, typed: String) async -> Bool {
         // A crossed-out field's name is free (S4.2): it is left out of V5's comparison.
         func names() -> (names: [String], at: Int)? {
             guard let draft = draft(id), let at = draft.rows.firstIndex(where: { $0.id == row }) else { return nil }
@@ -290,11 +293,11 @@ public final class NoteTypesModel {
         // The answer counts only for the names it checked: another rename that
         // landed meanwhile is checked against again.
         for _ in 0..<3 {
-            guard let before = names() else { return }
-            guard let answer = try? await backend.checkFieldName(typed, fields: before.names, renaming: UInt32(before.at)) else { return }
+            guard let before = names() else { return true }
+            guard let answer = try? await backend.checkFieldName(typed, fields: before.names, renaming: UInt32(before.at)) else { return false }
             if let after = names(), after.names == before.names, after.at == before.at { check = answer; break }
         }
-        guard let check else { return }
+        guard let check else { return false }
         switch check {
         case .ignored:
             renameRefusal = nil
@@ -305,7 +308,9 @@ public final class NoteTypesModel {
             edit(id) { $0.rename(row, to: name) }
         case .refused(let refusal):
             renameRefusal = RenameRefusal(row: row, refusal: refusal)
+            return false
         }
+        return true
     }
 
     public func cancelRename() {
@@ -390,7 +395,8 @@ public final class NoteTypesModel {
     }
 
     public func canSave(_ id: Int64) -> Bool {
-        isEdited(id) && editable(id) && progress == nil && preparing == nil && question == nil && writable()
+        (isEdited(id) || !pendingEdits.isEmpty) && editable(id) && progress == nil && preparing == nil && question == nil
+            && !saveRunning && writable()
     }
 
     /// Save (⌘S): D2's summary of the draft as it is, then D3; the sheet
@@ -398,10 +404,14 @@ public final class NoteTypesModel {
     public func save() {
         guard let id = selection, canSave(id) else { return }
         let epoch = epoch
+        saveRunning = true
         saveTask = Task {
-            // Typed text that is not committed yet goes into the draft first.
-            for commit in pendingEdits.values { await commit() }
-            guard self.epoch == epoch, canSave(id), let draft = drafts[id] else { return }
+            defer { saveRunning = false }
+            // Typed text that is not committed yet goes into the draft first; a refused name stops Save.
+            for commit in pendingEdits.values { guard await commit() else { return } }
+            saveRunning = false
+            guard self.epoch == epoch, canSave(id), isEdited(id), let draft = drafts[id] else { return }
+            saveRunning = true
             renaming = nil; renameRefusal = nil
             preparing = id
             let revision = revisions[id]

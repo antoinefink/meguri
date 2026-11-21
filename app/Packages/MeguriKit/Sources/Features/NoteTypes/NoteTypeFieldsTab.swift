@@ -308,6 +308,7 @@ private struct FieldNameCell: View {
     /// Save commits what the field holds first.
     private func pending() {
         let typed = text, row = line.id, id = id, model = model
+        guard typed != line.name else { model.pendingEdits["rename"] = nil; return }
         model.pendingEdits["rename"] = { await model.commitRename(id, row: row, typed: typed) }
     }
 }

@@ -30,7 +30,8 @@ PopoverDismissRegion, the Mac back button's chevron.backward in a toolbar, a
 window's SwiftUI scene id, a navigation bar named after its title, an SF
 Symbol's name on its image, and on the Mac a SwiftUI List's ListColumn, a SwiftUI Table's generated column
 ids (UUIDs) and its column header buttons (no identifier or label; one at
-each column's x and width, in a group directly in the table's outline), and a
+each column's x and width, in a group directly in the table's outline, above
+the columns' body), and a
 NavigationSplitView's '<scene id>, SidebarNavigationSplitView', and AppKit's
 exact NSOutlineViewDisclosureButtonKey on a disclosure triangle directly in
 a cell under an outline row in an outline; on iOS a sidebar disclosure row's
@@ -206,15 +207,17 @@ def native_table_headers(root):
     for table in root.walk():
         if table.type not in ("outline", "table"):
             continue
-        columns = {(c.x, c.w) for c in table.children
-                   if c.type == "tableColumn" and TABLE_COLUMN_UUID.match(c.identifier)}
-        if not columns:
+        generated = [c for c in table.children if c.type == "tableColumn" and TABLE_COLUMN_UUID.match(c.identifier)]
+        if not generated:
             continue
+        columns = {(c.x, c.w) for c in generated}
+        # The header row sits above the columns' body, which starts at its bottom.
+        body_top = min(c.y for c in generated)
         for group in table.children:
             buttons = group.children
-            if (group.type == "group" and buttons
+            if (group.type == "group" and buttons and group.y + group.h <= body_top + 0.5
                     and all(b.type == "button" and not b.identifier and not b.label and (b.x, b.w) in columns
-                            for b in buttons)):
+                            and b.y + b.h <= body_top + 0.5 for b in buttons)):
                 headers.update(buttons)
     return headers
 

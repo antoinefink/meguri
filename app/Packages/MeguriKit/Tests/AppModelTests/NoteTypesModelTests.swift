@@ -327,6 +327,20 @@ extension NoteTypesModelTests {
         #expect(backend.saved.last?.fields.last?.name == "Typed")
     }
 
+    @Test func aRefusedPendingNameStopsSaveAndPendingTextAloneEnablesIt() async {
+        let (model, backend) = await open()
+        model.pendingEdits["inspector"] = { await model.commitRename(7, row: 0, typed: "Prompt") }
+        #expect(model.canSave(7), "text not yet committed enables Save")
+        model.pendingEdits["inspector"] = { await model.commitRename(7, row: 0, typed: "back") }
+        model.save()
+        await model.settle()
+        #expect(backend.saved.isEmpty && model.renameRefusal == .init(row: 0, refusal: .duplicate))
+        model.pendingEdits["inspector"] = { await model.commitRename(7, row: 0, typed: "Prompt") }
+        model.save()
+        await model.settle()
+        #expect(backend.saved.last?.fields.first?.name == "Prompt")
+    }
+
     @Test func aCrossedOutNameIsFreeForAnotherField() async {
         let (model, _) = await open()
         model.deleteField(7, row: 2)
