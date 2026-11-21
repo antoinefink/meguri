@@ -1,5 +1,5 @@
 //! Built searches (`specs/search/join-and-replace.md` J3 to J5, J8 to J11;
-//! `specs/search/filter-tokens.md` T3.1): J9's `build` examples, every
+//! `specs/search/filter-tokens.md` T3.1, T3.2): J9's `build` examples, every
 //! refusal of J3, J10's differences from Anki, the items with no oracle
 //! scenario (J11), AE60's canonical text, nesting without recursion, and
 //! J8's round-trip property test. The oracle goldens of
@@ -174,6 +174,54 @@ fn the_two_field_token_items_build_their_text() {
         let o = text(&item);
         assert_eq!(canonical_text(&o).unwrap(), o);
     }
+}
+
+// T3.2: the written-text item is written unchanged, never as its canonical
+// text, in brackets inside a longer search unless it is one item at its
+// top level; negated, `-` goes before brackets unless it is one term or one
+// bracketed group. An empty text is refused; a text that does not parse is
+// a parse error at its path.
+#[test]
+fn the_written_text_item_keeps_its_text() {
+    let written = |t: &str| Written(s(t));
+    let and = |items| group(Joiner::And, items);
+    let cases = [
+        (written("preset:a\\\"b"), "preset:a\\\"b"),
+        (written("has\\-cd:x"), "has\\-cd:x"),
+        (written("-and"), "-and"),
+        (written("preset:a\\\"b OR is:new"), "preset:a\\\"b OR is:new"),
+        (written("(a  b)"), "(a  b)"),
+        (
+            and(vec![Deck(s("X")), written("preset:a\\\"b OR is:new")]),
+            "deck:X (preset:a\\\"b OR is:new)",
+        ),
+        (and(vec![Deck(s("X")), written("-preset:a\\\"b")]), "deck:X -preset:a\\\"b"),
+        (and(vec![Deck(s("X")), written("(a  b)")]), "deck:X (a  b)"),
+        (and(vec![written("-and"), parsed("a"), parsed("b")]), "-and a b"),
+        (and(vec![Deck(s("X")), written("a  b")]), "deck:X (a  b)"),
+        (not(written("preset:a\\\"b")), "-preset:a\\\"b"),
+        (not(written("(a  b)")), "-(a  b)"),
+        (not(written("-preset:a\\\"b")), "-(-preset:a\\\"b)"),
+        (not(written("-and")), "-(-and)"),
+        (not(written("a OR b")), "-(a OR b)"),
+    ];
+    for (item, expected) in cases {
+        assert_eq!(text(&item), expected, "{item:?}");
+    }
+    // The canonical writer would change these into other searches (F7).
+    assert_eq!(text(&parsed("preset:a\\\"b")), "preset:a\\\\\"b");
+    assert_eq!(text(&parsed("has\\-cd:x")), "has-cd:x");
+    assert_eq!(refused_at(&and(vec![Deck(s("X")), written("")])), (InvalidItem::EmptyText, vec![1]));
+    assert!(matches!(
+        build(&and(vec![Deck(s("X")), written("(a")])),
+        Err(BuilderError::Parse { source: ErrorSource::Item(path), .. }) if path == [1]
+    ));
+    // The built query holds the text's items: it runs what it reads as.
+    let query = build_query(&written("has\\-cd:x")).unwrap();
+    assert!(matches!(
+        &query.node(query.root()).kind,
+        NodeKind::Term(meguri_search::Term::Field { name, .. }) if name == "has-cd"
+    ));
 }
 
 // J10: where Meguri writes another text than Anki, by design.

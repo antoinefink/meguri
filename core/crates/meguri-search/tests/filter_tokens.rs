@@ -17,7 +17,8 @@ use meguri_search::filter_tokens::{
 use meguri_search::name_index::{DeckRow, NameIndex, NotetypeNames};
 use meguri_search::tail::{Incomplete, Tail, classify_tail};
 use meguri_search::{
-    FieldShape, FoldMode, NotetypeShape, Param, Plan, SearchContext, SearchMode, SearchNotetypes, parse,
+    BuildError, ErrorKind, FieldShape, FoldMode, NotetypeShape, Param, Plan, SearchContext, SearchFailure, SearchMode,
+    SearchNotetypes, parse,
 };
 use meguri_storage::{Initializers, OpenOptions, OpenedCollection, open_collection, raw::SqlValue};
 
@@ -594,17 +595,11 @@ fn pairs_repeats_and_unstable_items() {
     // A negated operator word and an R-read value keep their written text.
     assert_eq!(read("a -or b"), FilterQuery::new(vec![Token::Advanced(s("-or"))], "a b"));
     assert_eq!(read("a -and b"), FilterQuery::new(vec![Token::Advanced(s("-and"))], "a b"));
-    // E3: they never run, so the query has no run text.
-    for text in ["a -or b", "a -and b"] {
-        assert_eq!(
-            read(text).run_text(&names),
-            Err(RunTextError::NegatedOperator { token: 0 }),
-            "{text:?}"
-        );
-        assert_eq!(
-            FilterQuery::new(vec![], text).run_text(&names),
-            Err(RunTextError::NegatedOperator { token: 0 })
-        );
+    // T4 step 2 (changed 2026-11-21): they give T3.2's written-text item, so
+    // the query has a run text, which fails as E3 says when it runs.
+    for (text, run) in [("a -or b", "-or a b"), ("a -and b", "-and a b")] {
+        assert_eq!(read(text).run_text(&names).unwrap(), run, "{text:?}");
+        assert_eq!(FilterQuery::new(vec![], text).run_text(&names).unwrap(), run);
     }
     // A field term naming no field is the literal of its written text:
     // backslashes kept, outer quotes dropped.
@@ -616,20 +611,17 @@ fn pairs_repeats_and_unstable_items() {
         read("preset:a\\\"b").tokens,
         vec![Token::Advanced(s("preset:a\\\"b"))]
     );
-    // A field named like a key, its `-` escaped, keeps its escape; the
-    // builder would write it as `has-cd:x`, another search, so the query
-    // has no run text.
+    // A field named like a key, its `-` escaped, keeps its escape: its
+    // canonical text `has-cd:x` would be another search, so the run text
+    // writes the token unchanged (T3.2), as it does an R-read value.
     let mut keyed = names.clone();
     let mut types = keyed.notetypes().to_vec();
     types[0].fields.push(s("has-cd"));
     keyed.set_notetypes(types);
     let query = read_text("has\\-cd:x", &keyed);
     assert_eq!(query.tokens, vec![Token::Advanced(s("has\\-cd:x"))]);
-    assert_eq!(query.run_text(&keyed), Err(RunTextError::Unwritable { token: 0 }));
-    assert_eq!(
-        read("preset:a\\\"b").run_text(&names),
-        Err(RunTextError::Unwritable { token: 0 })
-    );
+    assert_eq!(query.run_text(&keyed).unwrap(), "has\\-cd:x");
+    assert_eq!(read("preset:a\\\"b").run_text(&names).unwrap(), "preset:a\\\"b");
     // A stored card type spelling must build: the Kelvin sign folds like
     // `k` but is not in NFC, so `card:kx` stays advanced.
     let mut kelvin = names.clone();
@@ -639,6 +631,178 @@ fn pairs_repeats_and_unstable_items() {
     assert_eq!(read_text("card:kx", &kelvin).tokens, vec![Token::Advanced(s("card:kx"))]);
     // Stable advanced items keep their canonical text and run.
     assert_eq!(read("prop:ivl>30 (a OR b)").run_text(&names).unwrap(), "prop:ivl>30 (a OR b)");
+}
+
+/// T4's run text, which then reads back (T7) as the same query and gives the
+/// same run text again (T3.2).
+fn run_back(query: &FilterQuery, names: &NameIndex) -> String {
+    let run = query.run_text(names).unwrap_or_else(|e| panic!("{query:?}: {e:?}"));
+    let back = read_text(&run, names);
+    assert_eq!(&back, query, "{run:?}");
+    assert_eq!(back.run_text(names).unwrap(), run, "{query:?}");
+    run
+}
+
+// T16 (changed 2026-11-21, implementation review): an advanced token that
+// keeps its written text (T6) gives T3.2's written-text item, written
+// unchanged, in brackets only when it is not one item; the run text of a
+// run text is the same text.
+#[test]
+fn written_text_tokens_keep_their_meaning_in_the_run_text() {
+    let names = names();
+    let spanish = || value(vec![deck(&names, 10)]);
+    let cases = [
+        (
+            "deck:Spanish -preset:a\\\"b",
+            FilterQuery::new(vec![spanish(), Token::Advanced(s("-preset:a\\\"b"))], ""),
+        ),
+        (
+            "deck:Spanish (preset:a\\\"b OR is:new)",
+            FilterQuery::new(vec![spanish(), Token::Advanced(s("preset:a\\\"b OR is:new"))], ""),
+        ),
+        (
+            "preset:a\\\"b OR is:new",
+            FilterQuery::new(vec![Token::Advanced(s("preset:a\\\"b OR is:new"))], ""),
+        ),
+        (
+            "prop:cds:k=a\\\"b deck:Spanish",
+            FilterQuery::new(vec![Token::Advanced(s("prop:cds:k=a\\\"b")), spanish()], ""),
+        ),
+    ];
+    for (text, expected) in cases {
+        let query = read_text(text, &names);
+        assert_eq!(query, expected, "{text:?}");
+        assert_eq!(run_back(&query, &names), text);
+    }
+    // Never `deck:Spanish preset:a\"b OR is:new`, which reads as another
+    // search; the canonical text `preset:a\\"b` would not parse.
+    let or_token = FilterQuery::new(vec![spanish(), Token::Advanced(s("preset:a\\\"b OR is:new"))], "");
+    assert_eq!(read_text(&or_token.run_text(&names).unwrap(), &names), or_token);
+}
+
+// T6: whether a token keeps its written text depends on the item read back.
+// `has\-cd:x` is a field term; written `has-cd:x` it would read back as a
+// custom-data term. With no field `has-cd` it names no field: text (T5).
+#[test]
+fn an_escaped_key_is_compared_by_the_item_read_back() {
+    let names = names();
+    assert_eq!(
+        read_text("has\\-cd:x", &names),
+        FilterQuery::new(vec![], "has\\-cd:x")
+    );
+    assert_eq!(
+        classify_text("has\\-cd:x", &names),
+        TextReading::Items(vec![BuiltItem::Literal(s("has\\-cd:x"))])
+    );
+    let mut keyed = names.clone();
+    let mut types = keyed.notetypes().to_vec();
+    types[0].fields.push(s("has-cd"));
+    keyed.set_notetypes(types);
+    let query = read_text("has\\-cd:x", &keyed);
+    assert_eq!(query.tokens, vec![Token::Advanced(s("has\\-cd:x"))]);
+    let run = run_back(&query, &keyed);
+    assert_eq!(run, "has\\-cd:x");
+    let parsed = parse(&run).unwrap();
+    assert!(
+        matches!(
+            &parsed.node(parsed.root()).kind,
+            meguri_search::NodeKind::Term(meguri_search::Term::Field { .. })
+        ),
+        "{parsed:?}"
+    );
+    // The custom-data term itself is stable: its canonical text runs.
+    let custom = read_text("has-cd:x", &keyed);
+    assert_eq!(custom.tokens, vec![Token::Advanced(s("has-cd:x"))]);
+    assert_eq!(run_back(&custom, &keyed), "has-cd:x");
+}
+
+// T4 step 2 (changed 2026-11-21): a negated operator word gives a run text,
+// and that run text fails with E3's `search_failed (negated operator word)`.
+#[test]
+fn a_negated_operator_word_runs_and_fails() {
+    let names = names();
+    for text in ["a -and b", "a -OR b"] {
+        let query = read_text(text, &names);
+        let run = query.run_text(&names).unwrap();
+        assert_eq!(FilterQuery::new(vec![], text).run_text(&names).unwrap(), run);
+        let parsed = parse(&run).unwrap_or_else(|e| panic!("{run:?}: {e:?}"));
+        match Plan::build(&parsed, SearchMode::Cards, &context(), &notetypes()) {
+            Err(BuildError::Search(error)) => assert_eq!(
+                error.kind(),
+                &ErrorKind::SearchFailed(SearchFailure::NegatedOperator),
+                "{run:?}"
+            ),
+            Ok(_) => panic!("{run:?} ran"),
+        }
+    }
+}
+
+// T5 (changed 2026-11-21): the negation of a field term naming no field
+// stays text, the negation of its literal: `-10:45` leaves out the notes
+// holding `10:45`, which `10:45` finds.
+#[test]
+fn a_negated_field_term_naming_no_field_stays_text() {
+    let names = names();
+    assert_eq!(
+        classify_text("-10:45", &names),
+        TextReading::Items(vec![BuiltItem::Negated(Box::new(BuiltItem::Literal(s("10:45"))))])
+    );
+    assert_eq!(
+        classify_text("-\"10:4 5\"", &names),
+        TextReading::Items(vec![BuiltItem::Negated(Box::new(BuiltItem::Literal(s("10:4 5"))))])
+    );
+    let query = read_text("-10:45 word", &names);
+    assert_eq!(query, FilterQuery::new(vec![], "-10:45 word"));
+    let alone = FilterQuery::new(vec![], "-10:45");
+    assert_eq!(alone.run_text(&names).unwrap(), "-10\\:45");
+    assert_eq!(alone.commit(&names), alone);
+    // With a field `10`, it is a field term's negation: an advanced token.
+    let mut keyed = names.clone();
+    let mut types = keyed.notetypes().to_vec();
+    types[0].fields.push(s("10"));
+    keyed.set_notetypes(types);
+    assert_eq!(read_text("-10:45", &keyed).tokens, vec![Token::Advanced(s("-10:45"))]);
+    // Note 1 holds `10:45`.
+    let f = fixture();
+    let all = f.ids("", SearchMode::Notes);
+    let holding = f.ids("10\\:45", SearchMode::Notes);
+    assert_eq!(holding, BTreeSet::from([1]));
+    let without: BTreeSet<i64> = all.difference(&holding).copied().collect();
+    assert_eq!(f.ids("-10\\:45", SearchMode::Notes), without);
+}
+
+// T7 (changed 2026-11-21): when note types spell a field or card type
+// differently, the token takes the spelling of the note type with the
+// lowest id, whatever the index's order.
+#[test]
+fn the_lowest_note_type_id_gives_the_stored_spelling() {
+    let mut names = NameIndex::default();
+    let make = |id: i64, name: &str, field: &str, template: &str| NotetypeNames {
+        id: NotetypeId(id),
+        name: s(name),
+        templates: vec![s(template)],
+        fields: vec![s(field)],
+    };
+    // The index orders note types by name: `Alpha` (id 9) first.
+    names.set_notetypes(vec![make(9, "Alpha", "Back", "Card"), make(5, "Zeta", "BACK", "CARD")]);
+    assert_eq!(names.notetypes()[0].id, NotetypeId(9));
+    assert_eq!(
+        read_text("back:_*", &names).tokens,
+        vec![value(vec![field("BACK", FieldTest::HasContent)])]
+    );
+    assert_eq!(
+        read_text("card:card", &names).tokens,
+        vec![value(vec![Value::CardType(s("CARD"))])]
+    );
+    names.set_notetypes(vec![make(3, "Alpha", "Back", "Card"), make(5, "Zeta", "BACK", "CARD")]);
+    assert_eq!(
+        read_text("BACK:_*", &names).tokens,
+        vec![value(vec![field("Back", FieldTest::HasContent)])]
+    );
+    assert_eq!(
+        read_text("card:CARD", &names).tokens,
+        vec![value(vec![Value::CardType(s("Card"))])]
+    );
 }
 
 // T16: T5's items of single texts; `deck:` with nothing after it is
