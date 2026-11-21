@@ -4,7 +4,7 @@ Spec: browser/entry-points
 Requirements: R1112, R1113, R1114; supports R48, R98, R216, R300, R319, R807, R815, R1092, R1102, R1106, R1109, R1110, R1116, R1153, R1322, R1417, R1615, R1728, R1733, R1782, R1786, R1792
 Anki: 26.09.3 for the Anki rows of E2 to E9 (what Anki's desktop browser does when it opens, when it is handed a card or a search, when a search is committed, what it remembers and how long its field text can be); none for the rest (Meguri design)
 Scenarios: conformance/scenarios/browser/entry/ (recorded, inactive: E11)
-Status: Under review (R1232; round 8, decided 2026-11-20) for the lines of E2, E3, E4, E5, E6 that begin "Changed 2026-11-20 (round 8)": do not implement them until approved. Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R1232) for the lines of E2, E3, E4, E5, E6 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). The lines that begin "Changed 2026-11-20 (round 8 review)", or that carry that marker inline, are in force: written and decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after the second independent review and its re-review (`docs/process/review-log/browse-note-types-specs-20261120.md`). Every other section is in force and unchanged.
 
 Which search Browse runs when it opens, what each entry point hands it, what a commit does to the field text and which text it runs, which searches the recent-search list records, and what Clear, Select All, Invert Selection and Select Notes do. The field-text rule is `search/join-and-replace` J2, the canonical text `search/canonical-form` (through `search/editing-services` D2), the built items `search/join-and-replace` J3 and J4, the runs, handles and selection mapping `browser/result-sets` H3, H11 and H12, the stored keys `browser/config-keys` K5, K6.1 and K6.4. The query pipeline, debounce and layout are U210's; the field, tokens and inline errors U214's; the suggestions U215's.
 
@@ -114,6 +114,8 @@ Changed 2026-11-20 (round 8): for Browse, rules 1 to 6 are replaced. Browse keep
 
 ## E7. Clear and the empty state's action (R1092, R1110)
 
+Changed 2026-11-20 (round 8 review): for Browse, the first two bullets are replaced: the clear button, the second Esc (`search/filter-tokens` T10) and the empty state's Clear Search empty the query and run it, which is the whole collection (`search/query-model` Q2); `defaultSearchText` is not read and `deck:current` is not run. Nothing is recorded (E6). The first bullet and the second bullet's first sentence are replaced; its case question stands, and so do the mode, the selection mapping and the third bullet.
+
 - The field's clear button, and Esc in the search field when no suggestion list is open (Esc first dismisses an open list), empty the field and run the default search as E2 rule 2 does (rule 1 never applies): with `defaultSearchText` set the field then shows the stored text, otherwise it stays empty with its placeholder and `deck:current` runs. Nothing is recorded. The mode is kept; the selection and current row are mapped from the earlier result (R1154).
 - The empty state's action (R1110) does the same. R1110 quotes its text as "Clear search" and the screen contract writes "Clear Search"; which case stands is the open title-case question of `browser/browse-strings` W7, and until it is settled R1110's text stands (W6).
 - Anki's field has no clear button, and Esc closes its browser window (R1092 deviation).
@@ -145,7 +147,7 @@ Anki's search field holds at most 2,000,000 UTF-16 code units: typing stops ther
 | Stats' joined text is recorded in canonical form; Anki does not record it | Decided 2026-10-27 (U210) | E3 rule 5, E6 |
 | A failed parse or run of the default search, or of a commit, shows inline, with the earlier result dimmed; Anki shows a modal warning | R1108 | E2 rule 6, E5 |
 | A handed search that does not parse shows inline in the field; Anki's callers never hand one, and one would raise its error dialog with the field unchanged | R1108, R1114 | E3 rule 4 |
-| Clear and the empty state's action run the default search; Esc never leaves Browse | R1092, R1110 | E7 |
+| Clear, the second Esc and the empty state's action empty the query and run the whole collection (E7's round 8 review line); Esc never leaves Browse (changed 2026-11-20, round 8 review) | R1092, R1110 | E7 |
 | The recent-search list is per device and survives a change of collection; Anki's history belongs to its profile | KTD12, R1102 | E6 |
 | A text Meguri writes into the field is never cut at the length limit; Anki cuts what it shows, and then runs either the whole text or the cut one | The field and the run never differ | E9 |
 
