@@ -250,7 +250,10 @@ async function landOnCollection(page: Page, navigate: () => Promise<unknown>) {
   page.on("response", record);
   try {
     await navigate();
-    await expect.poll(() => paths.filter(path => answers.some(response => new URL(response.url()).pathname === path))).toEqual(paths);
+    // Wait for the paths still unanswered. A failed answer ends the wait: a
+    // 401 leaves Collection before the other answer arrives.
+    await expect.poll(() => answers.some(response => !response.ok()) ? []
+      : paths.filter(path => !answers.some(response => new URL(response.url()).pathname === path))).toEqual([]);
     for (const response of answers) {
       expect(response.ok(), `${response.request().method()} ${new URL(response.url()).pathname} answered ${response.status()}`).toBe(true);
     }

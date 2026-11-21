@@ -1084,7 +1084,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/app.tsx':
         '7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63',
     'server/web/tests/browser/accounts.spec.ts':
-        'f3aaba404af78627828c3bf706314c87f6d5a7e016889446934401e319bb9493',
+        'c54edd895ad46474b03411778575aeebe1a68c0383e6fca807307e2a05c288a4',
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
