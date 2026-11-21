@@ -999,6 +999,34 @@ pub fn use_standard_browser_columns(notetype: i64) -> Result<BoolMutation, CoreE
     Ok(column_sets::use_standard(&collection, NotetypeId(notetype))?.into())
 }
 
+// --------------------------------------------------------------- opening
+
+/// What Browse opens with (`search/filter-tokens` T14): the default search
+/// of a first open and the mode the Cards / Notes control shows.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct BrowseOpening {
+    /// `defaultSearchText` as stored, untrimmed, when it is set
+    /// (`browser/config-keys` K6.4); none opens the whole collection.
+    pub default_search: Option<String>,
+    /// `browserTableShowNotesMode` (K6.1): Browse shows notes.
+    pub notes_mode: bool,
+}
+
+/// T14 and K6.1: the two keys a first open of Browse reads, in one
+/// snapshot of the query reader. It writes nothing.
+#[uniffi::export]
+pub fn browse_opening() -> Result<BrowseOpening, CoreError> {
+    callback::enter("browse_opening");
+    let collection = runtime::host()?.collection()?;
+    let reader = collection.reader(meguri_storage::ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
+    let config = meguri_search::config::BrowserConfig::read(&*snapshot)?;
+    Ok(BrowseOpening {
+        default_search: config.default_search(),
+        notes_mode: config.notes_mode(),
+    })
+}
+
 // ------------------------------------------------------ selection counts
 
 /// What the inspector's summary line and the commands' "shown when" read

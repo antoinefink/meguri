@@ -720,4 +720,26 @@ public enum CoreBrowseQuery {
             }
         }
     }
+
+    /// T14: what a first open of Browse reads, the default search and the
+    /// mode. It writes nothing.
+    public static func opening() async throws(BridgeError) -> BrowseOpening {
+        try await QueryLane.shared.call(.browseOpening) {
+            let opening = try MeguriCoreBindings.browseOpening()
+            return BrowseOpening(defaultSearch: opening.defaultSearch, notesMode: opening.notesMode)
+        }
+    }
+}
+
+/// What Browse opens with (`search/filter-tokens` T14).
+public struct BrowseOpening: Sendable, Hashable {
+    /// `defaultSearchText` as stored when it is set (`browser/config-keys`
+    /// K6.4); nil opens the whole collection.
+    public let defaultSearch: String?
+    /// `browserTableShowNotesMode` (K6.1).
+    public let notesMode: Bool
+    public init(defaultSearch: String?, notesMode: Bool) {
+        self.defaultSearch = defaultSearch
+        self.notesMode = notesMode
+    }
 }
