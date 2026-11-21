@@ -185,7 +185,8 @@ impl Collection {
     }
 
     /// Starts recording the writer's WAL sync attempts and op write phases
-    /// (storage C9.2). Nothing is recorded before this call.
+    /// (storage C9.2). Only attempts and phases that start after this call
+    /// are recorded: a sync already running when it is made is left out.
     #[cfg(feature = "test-hooks")]
     pub fn record_durability_events(&self) {
         self.core.exec.start_durability_recording();
