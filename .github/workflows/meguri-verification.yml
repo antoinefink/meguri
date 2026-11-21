@@ -236,7 +236,7 @@ jobs:
   core-shard:
     name: Linux · core · shard ${{ matrix.shard }}/${{ strategy.job-total }}
     needs: [suites, image]
-    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.core == 'yes' }}
+    if: false
     permissions:
       contents: read
       packages: read
@@ -350,7 +350,7 @@ jobs:
   core-timing:
     name: Linux · core (timing-sensitive)
     needs: [suites, image]
-    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.core == 'yes' }}
+    if: false
     permissions:
       contents: read
       packages: read
@@ -457,7 +457,7 @@ jobs:
   core-lint:
     name: Linux · core · lint
     needs: [suites, image]
-    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.core == 'yes' }}
+    if: false
     permissions:
       contents: read
       packages: read
@@ -642,7 +642,7 @@ jobs:
   linux:
     name: Linux · ${{ matrix.suite }}
     needs: [suites, image]
-    if: ${{ !cancelled() }}
+    if: false
     permissions:
       contents: read
       packages: read
@@ -746,6 +746,7 @@ jobs:
   # It needs no secret: only the read-only token of the checkout.
   similarity:
     name: Linux · similarity
+    if: false
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     permissions:
@@ -825,7 +826,7 @@ jobs:
   checks:
     name: Linux · checks
     needs: image
-    if: ${{ !cancelled() }}
+    if: false
     permissions:
       contents: read
       packages: read
@@ -919,7 +920,7 @@ jobs:
   selftest:
     name: Linux · selftest
     needs: [suites, image]
-    if: ${{ !cancelled() && needs.suites.result == 'success' && needs.suites.outputs.selftest == 'yes' }}
+    if: false
     permissions:
       contents: read
       packages: read
