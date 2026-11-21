@@ -12,7 +12,7 @@ use meguri_storage::ReadRows;
 use meguri_storage::journal::{LayoutShape, StructureReason, StructureReport, TypeChangeReport};
 
 use super::{
-    ChangeNotetype, CardEffect, PartLayout, NotetypeChanged, Planned, Rules, Shape, census, card_effect, losses_changed, note_not_found,
+    ChangeNotetype, CardEffect, LayoutToken, NotetypeChanged, Planned, Rules, Shape, census, card_effect, losses_changed, note_not_found,
     notetype_not_found, preview,
 };
 use crate::executor::op::OpContext;
@@ -43,15 +43,16 @@ fn check_live(ctx: &mut OpContext<'_, '_>, planned: &Planned) -> Result<(Notetyp
     // `scm` is the clock's millisecond, so two schema changes in one
     // millisecond leave it equal: the note types are compared as planned
     // too, and any difference is the same refusal.
-    if Shape::of(&old, &new) != planned.shape
-        || (PartLayout::of(&old), PartLayout::of(&new)) != planned.layouts
-    {
+    if LayoutToken::of(&old, &new) != request.layout || Shape::of(&old, &new) != planned.shape {
         return Err(StructureRefusal::SchemaChanged.into());
     }
     let (_, census) = census(
         scope,
         &request.notes,
-        Rules::Change { old: old.id },
+        Rules::Change {
+            old: old.id,
+            fields: planned.shape.old_fields,
+        },
         &CancelToken::new(),
         &ProgressSink::new(),
     )?;

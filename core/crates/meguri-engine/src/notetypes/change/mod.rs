@@ -3,13 +3,17 @@
 //! the change itself (M8, M9) as one transaction and one "Change Note Type"
 //! undo step.
 //!
-//! The change plans on a reader snapshot: checks 1 to 4 of M8 and the
-//! confirmed losses counted on that snapshot, so a stale screen or an
+//! With the schema stamp, the change carries the `LayoutToken` that the
+//! info step returned. A change made on another layout is
+//! `schema_changed`, and its maps are checked against the layout shown.
+//! It plans on a reader snapshot: checks 1 to 4 of M8 and the confirmed
+//! losses counted on that snapshot, so a stale screen or an
 //! out-of-date confirmation costs no safety backup. The safety backup of a
 //! structural edit (`package/backup-triggers` T6.1, T6.2) is taken between
 //! planning and the write phase (`commit.rs`), whose checks on the live rows
 //! of its own transaction all come before its first write: the schema stamp
-//! (check 3), the selection (check 4), then the confirmed losses counted
+//! and the layout (check 3), the selection (check 4, a note storing more
+//! values than the old note type has fields included), then the confirmed losses counted
 //! again (M8 as changed 2026-11-20, `notetypes/draft-save` D8). A larger
 //! live count refuses with `LossesChanged` and a fresh M6 preview; the
 //! staleness refusals come first and win.
@@ -123,6 +127,9 @@ pub struct ChangeInfo {
     pub card_counts: BTreeMap<u16, u64>,
     /// `col.scm` as read: M8 check 3's stamp.
     pub schema: i64,
+    /// The two note types' layouts as read, which the change takes back with
+    /// the stamp: a change made on another layout is `schema_changed`.
+    pub layout: LayoutToken,
 }
 
 impl ChangeInfo {
@@ -172,6 +179,8 @@ pub struct ChangeNotetype {
     pub templates: Option<Vec<Option<u32>>>,
     /// The info query's `col.scm` (M8 check 3).
     pub schema: i64,
+    /// The info query's `layout`: the maps are checked against it.
+    pub layout: LayoutToken,
     /// What the M6 preview showed and the user accepted; a caller with no
     /// sheet passes the counts it reads at the call (M8, D8).
     pub confirmed: ChangeLosses,
@@ -344,8 +353,11 @@ pub(crate) enum Rules {
     /// must exist and share its note type (`multiple_notetypes`).
     Info,
     /// M8 check 4: every listed note exists (`not_found`, wherever it is
-    /// listed), then every one uses `old` (`multiple_notetypes`).
-    Change { old: NotetypeId },
+    /// listed), then every one uses `old` (`multiple_notetypes`), then none
+    /// stores more values than `old` has fields (`fields`): the change would
+    /// drop those values uncounted (`NoteFieldCountMismatch`, as the draft
+    /// save's S1.2 item 4).
+    Change { old: NotetypeId, fields: usize },
 }
 
 pub(crate) fn note_not_found(id: NoteId) -> EngineError {
@@ -374,6 +386,7 @@ pub(crate) fn census(
     let mut census = Census::default();
     let mut first = None;
     let mut other_notetype = false;
+    let mut too_many_values = None;
     let total = notes.len() as u64;
     progress.report(0, Some(total));
     for (at, &id) in notes.iter().enumerate() {
@@ -388,11 +401,18 @@ pub(crate) fn census(
         };
         let expected = match rules {
             Rules::Info => *first.get_or_insert(note.notetype_id),
-            Rules::Change { old } => {
+            Rules::Change { old, .. } => {
                 first.get_or_insert(note.notetype_id);
                 old
             }
         };
+        if let Rules::Change { fields, .. } = rules
+            && note.notetype_id == expected
+            && too_many_values.is_none()
+            && note.field_values().count() > fields
+        {
+            too_many_values = Some(note.id);
+        }
         if note.notetype_id != expected {
             match rules {
                 Rules::Info => return Err(StructureRefusal::MultipleNotetypes.into()),
@@ -415,6 +435,9 @@ pub(crate) fn census(
     }
     if other_notetype {
         return Err(StructureRefusal::MultipleNotetypes.into());
+    }
+    if let Some(note) = too_many_values {
+        return Err(StructureRefusal::NoteFieldCountMismatch { note }.into());
     }
     let first = first.ok_or_else(|| invalid("the selection is empty"))?;
     Ok((first, census))
@@ -481,6 +504,7 @@ pub fn info_on(
         field_content: census.field_content,
         card_counts: census.card_counts,
         schema,
+        layout: LayoutToken::of(&old, &new),
     })
 }
 
@@ -541,35 +565,44 @@ pub(crate) fn losses_changed(preview: ChangePreview) -> EngineError {
 pub(crate) struct Planned {
     pub request: Arc<ChangeNotetype>,
     pub shape: Shape,
-    /// The two note types' part layouts as planned: the write phase refuses
-    /// with `schema_changed` when either differs, also when a schema change
-    /// in the same millisecond left `col.scm` equal.
-    pub layouts: (PartLayout, PartLayout),
 }
 
-/// A note type's parts by position: each field's and template's id (its
-/// name for a legacy part without one). Plain saves (CSS, options) leave it
-/// alone; a reorder, add or remove changes it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PartLayout {
-    fields: Vec<Result<i64, String>>,
-    templates: Vec<Result<i64, String>>,
-}
+/// The two note types' layouts as one token: their kinds, sort fields and
+/// parts by position (each field's and template's id, or its name for a
+/// legacy part without one). Plain saves (CSS, options, renames of parts
+/// with ids) leave it alone; a reorder, add or remove changes it. Compared
+/// with the stamp because `col.scm` is the clock's millisecond: a second
+/// schema change in the same millisecond leaves the stamp equal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LayoutToken(pub [u8; 32]);
 
-impl PartLayout {
-    pub(crate) fn of(notetype: &Notetype) -> PartLayout {
-        PartLayout {
-            fields: notetype
-                .fields
-                .iter()
-                .map(|f| f.config.id.ok_or_else(|| f.name.clone()))
-                .collect(),
-            templates: notetype
-                .templates
-                .iter()
-                .map(|t| t.config.id.ok_or_else(|| t.name.clone()))
-                .collect(),
+impl LayoutToken {
+    pub fn of(old: &Notetype, new: &Notetype) -> LayoutToken {
+        use meguri_storage::Cell;
+        let mut cells = Vec::new();
+        for notetype in [old, new] {
+            cells.push(Cell::Integer(notetype.id.0));
+            cells.push(Cell::Integer(i64::from(notetype.config.kind)));
+            cells.push(Cell::Integer(i64::from(notetype.config.sort_field_idx)));
+            for parts in [
+                notetype
+                    .fields
+                    .iter()
+                    .map(|f| (f.config.id, f.name.as_str()))
+                    .collect::<Vec<_>>(),
+                notetype
+                    .templates
+                    .iter()
+                    .map(|t| (t.config.id, t.name.as_str()))
+                    .collect(),
+            ] {
+                cells.push(Cell::Integer(i64::try_from(parts.len()).unwrap_or(i64::MAX)));
+                for (id, name) in parts {
+                    cells.push(id.map_or_else(|| Cell::text(name.to_owned()), Cell::Integer));
+                }
+            }
         }
+        LayoutToken(meguri_storage::journal::digest(&cells))
     }
 }
 
@@ -580,7 +613,7 @@ fn plan(
     request: &ChangeNotetype,
     cancel: &CancelToken,
     progress: &ProgressSink,
-) -> Result<(Shape, (PartLayout, PartLayout)), EngineError> {
+) -> Result<Shape, EngineError> {
     cancel.check()?;
     // Check 1.
     let old = reader
@@ -589,8 +622,25 @@ fn plan(
     let new = reader
         .notetype(request.new_notetype)?
         .ok_or_else(|| notetype_not_found(request.new_notetype))?;
+    // The maps are the user's on the layout the info query read: a layout
+    // that changed since is `schema_changed`, never a caller error (as
+    // `notetypes/structure-changes` S1.2 orders `Stale` before the ranges).
+    if LayoutToken::of(&old, &new) != request.layout {
+        return Err(StructureRefusal::SchemaChanged.into());
+    }
     let shape = Shape::of(&old, &new);
     check_maps(&shape, request)?;
+    // R945's repeated field map between two note types is not built: the
+    // structure report refuses a repeated origin in a `type_changes` map.
+    // Refused here, before any backup or write.
+    if request.old_notetype != request.new_notetype {
+        let mut seen = std::collections::HashSet::new();
+        if request.fields.iter().flatten().any(|o| !seen.insert(*o)) {
+            return Err(EngineError::Unsupported {
+                feature: "change_notetype.repeated_field_between_note_types".into(),
+            });
+        }
+    }
     // Check 2.
     if changes_nothing(request) {
         return Err(StructureRefusal::NoChanges.into());
@@ -599,14 +649,18 @@ fn plan(
     if reader.col()?.schema_modified.0 != request.schema {
         return Err(StructureRefusal::SchemaChanged.into());
     }
-    let (_, census) = census(reader, &request.notes, Rules::Change { old: old.id }, cancel, progress)?;
+    let rules = Rules::Change {
+        old: old.id,
+        fields: shape.old_fields,
+    };
+    let (_, census) = census(reader, &request.notes, rules, cancel, progress)?;
     // The confirmed losses, first count: an out-of-date confirmation costs
     // no backup either (D8).
     let preview = preview(&shape, &census, &request.fields, request.templates.as_deref());
     if preview.losses.exceeds(&request.confirmed) {
         return Err(losses_changed(preview));
     }
-    Ok((shape, (PartLayout::of(&old), PartLayout::of(&new))))
+    Ok(shape)
 }
 
 /// The change (M8, M9): plans on a maintenance snapshot, takes the safety
@@ -636,12 +690,11 @@ pub fn change(
         spec,
         0,
         |context| {
-            let (shape, layouts) = plan(&**context.snapshot(), &request, &cancel, &progress)?;
+            let shape = plan(&**context.snapshot(), &request, &cancel, &progress)?;
             Ok(Plan {
                 value: Planned {
                     request: request.clone(),
                     shape,
-                    layouts,
                 },
                 // Checks 3 and 4 run again on the live rows inside the write
                 // transaction, and only that run decides.

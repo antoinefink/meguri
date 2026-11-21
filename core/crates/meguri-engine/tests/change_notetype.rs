@@ -232,6 +232,7 @@ fn request(info: &ChangeInfo, notes: &[NoteId]) -> ChangeNotetype {
         fields: info.fields.clone(),
         templates: info.templates.clone(),
         schema: info.schema,
+        layout: info.layout,
         confirmed: info.preview.losses.clone(),
     }
 }
@@ -1104,13 +1105,13 @@ fn a_change_to_the_same_note_type_reports_reason_six() {
 }
 
 /// M1 allows a field map that names one old field twice (R945). Between two
-/// note types, the storage structure report refuses a repeated origin in a
-/// `type_changes` field map, so such a change fails as an internal error
-/// and writes nothing (see the PR: a decision is needed). To the same note
+/// note types that is not built yet (the structure report refuses a
+/// repeated `type_changes` origin): the change refuses it at planning as
+/// `Unsupported`, before any backup, and writes nothing. To the same note
 /// type it commits, since no `type_changes` entry is reported.
 #[test]
-fn a_repeated_field_map_between_two_note_types_writes_nothing() {
-    let (h, _) = harness();
+fn a_repeated_field_map_between_two_note_types_is_refused_before_the_backup() {
+    let (h, backups) = harness();
     let pair = pair(&h);
     let duo = duo(&h);
     let a = add(&h.collection, pair, &["a", "b"]);
@@ -1118,12 +1119,94 @@ fn a_repeated_field_map_between_two_note_types_writes_nothing() {
     let before = rows(&h);
     let undo = undo_name(&h);
     let e = run(&h, mapped(&read, &[a], vec![Some(0), Some(0)], Some(vec![Some(0), None]))).unwrap_err();
-    assert!(matches!(e, EngineError::Storage(_)), "{e:?}");
+    assert!(matches!(e, EngineError::Unsupported { .. }), "{e:?}");
+    assert_eq!(backups.calls(), 0);
     assert_eq!(rows(&h), before);
     assert_eq!(undo_name(&h), undo);
     let read = info(&h, &[a], pair).unwrap();
     run(&h, mapped(&read, &[a], vec![Some(0), Some(0)], Some(vec![Some(0)]))).unwrap();
     assert_eq!(note(&h, a).fields, "a\u{1f}a");
+}
+
+/// Stores `fields` raw as `note`'s values (a damaged note).
+fn raw_fields(c: &Collection, note: NoteId, fields: &'static str) {
+    c.run(OpSpec::named("raw_fields", OpSource::UserUndoable), move |ctx| {
+        let mut n = ctx.scope().note(note)?.unwrap();
+        n.fields = fields.into();
+        ctx.scope().put(&n)?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+/// A selected note that stores more values than its note type has fields
+/// would lose the extra values uncounted: refused at planning (no backup)
+/// and, for a note damaged while the backup ran, inside the transaction;
+/// nothing written either time.
+#[test]
+fn a_note_with_more_values_than_fields_is_refused_at_planning_and_in_the_transaction() {
+    let (h, backups) = harness();
+    let pair = pair(&h);
+    let duo = duo(&h);
+    let a = add(&h.collection, pair, &["a", "b"]);
+    let b = add(&h.collection, pair, &["c", "d"]);
+    raw_fields(&h.collection, b, "c\u{1f}d\u{1f}extra");
+    let read = info(&h, &[a, b], duo).unwrap();
+    let before = rows(&h);
+    let e = run(&h, request(&read, &[a, b])).unwrap_err();
+    assert_eq!(refusal(&e), Some(&StructureRefusal::NoteFieldCountMismatch { note: b }));
+    assert_eq!(backups.calls(), 0);
+    assert_eq!(rows(&h), before);
+    raw_fields(&h.collection, b, "c\u{1f}d");
+    let read = info(&h, &[a, b], duo).unwrap();
+    backups.then(move |c| raw_fields(c, a, "a\u{1f}b\u{1f}late"));
+    let e = run(&h, request(&read, &[a, b])).unwrap_err();
+    assert_eq!(refusal(&e), Some(&StructureRefusal::NoteFieldCountMismatch { note: a }));
+    assert_eq!(backups.calls(), 1);
+    assert_eq!(note(&h, a).notetype_id, pair);
+    assert_eq!(note(&h, a).fields, "a\u{1f}b\u{1f}late");
+}
+
+/// Removes the old note type's last field with no `scm` change, as an
+/// incoming apply can (a schema change in the info query's millisecond).
+fn drop_last_field(c: &Collection, id: NotetypeId) {
+    c.run(
+        OpSpec::named("incoming_field_removal", OpSource::CloudIncoming).stamp(meguri_storage::StampMode::Raw),
+        move |ctx| {
+            let mut nt = ctx.scope().notetype(id)?.unwrap();
+            nt.fields.pop();
+            ctx.scope().put_notetype(&nt)?;
+            Ok(())
+        },
+    )
+    .unwrap();
+}
+
+/// M8 as ruled 2026-11-21: the maps are checked against the layout the
+/// info query read. A screen whose layout changed since, here the old note
+/// type losing the field the map names while `col.scm` stays equal, is
+/// `schema_changed` at planning, before any backup, not an invalid
+/// argument; an ordinal bad for the layout the user saw stays
+/// `InvalidArgument`.
+#[test]
+fn a_stale_layout_is_schema_changed_and_a_bad_ordinal_on_a_fresh_one_is_invalid() {
+    let (h, backups) = harness();
+    let trio = made(&h, "Trio", false, &["Front", "Back", "Extra"], &["{{Front}}"]);
+    let target = made(&h, "Target", false, &["Front", "Back", "Extra"], &["{{Front}}"]);
+    let a = add(&h.collection, trio, &["a", "b", ""]);
+    let read = info(&h, &[a], target).unwrap();
+    assert_eq!(read.fields, [Some(0), Some(1), Some(2)]);
+    let before_scm = scm(&h);
+    drop_last_field(&h.collection, trio);
+    assert_eq!(scm(&h), before_scm);
+    let e = run(&h, request(&read, &[a])).unwrap_err();
+    assert_eq!(refusal(&e), Some(&StructureRefusal::SchemaChanged));
+    assert_eq!(backups.calls(), 0);
+    let fresh = info(&h, &[a], target).unwrap();
+    let bad = mapped(&fresh, &[a], vec![Some(0), Some(1), Some(2)], Some(vec![Some(0)]));
+    assert!(matches!(run(&h, bad), Err(EngineError::InvalidArgument { .. })));
+    assert_eq!(backups.calls(), 0);
+    assert_eq!(note(&h, a).notetype_id, trio);
 }
 
 /// A reorder of the new note type's fields committed while the backup ran,

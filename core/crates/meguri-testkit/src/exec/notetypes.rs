@@ -515,6 +515,7 @@ fn change_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, E
         fields,
         templates,
         schema: info.schema,
+        layout: info.layout,
         confirmed,
     };
     match change::change(&collection, request, CancelToken::new(), ProgressSink::new()) {

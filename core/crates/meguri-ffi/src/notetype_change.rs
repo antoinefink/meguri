@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use meguri_engine::notetypes::NotetypeKind;
 use meguri_engine::notetypes::change::{
-    self, ChangeInfo, ChangeLosses, ChangeNotetype, ChangePreview, NotetypeSide,
+    self, ChangeInfo, ChangeLosses, ChangeNotetype, ChangePreview, LayoutToken, NotetypeSide,
 };
 use meguri_model::ids::{NoteId, NotetypeId};
 
@@ -170,6 +170,16 @@ pub struct NotetypeChangeInfo {
     pub card_counts: Vec<OrdinalCount>,
     /// `col.scm` as read, which the change takes back.
     pub schema: i64,
+    /// The two note types' layouts as read (32 bytes), which the change
+    /// takes back with the stamp.
+    pub layout: Vec<u8>,
+}
+
+fn layout(bytes: Vec<u8>) -> Result<LayoutToken, CoreError> {
+    let bytes: [u8; 32] = bytes.try_into().map_err(|_| CoreError::InvalidArgument {
+        message: "a note type layout token must be 32 bytes".into(),
+    })?;
+    Ok(LayoutToken(bytes))
 }
 
 impl From<ChangeInfo> for NotetypeChangeInfo {
@@ -190,6 +200,7 @@ impl From<ChangeInfo> for NotetypeChangeInfo {
                 })
                 .collect(),
             schema: i.schema,
+            layout: i.layout.0.to_vec(),
         }
     }
 }
@@ -214,6 +225,7 @@ impl TryFrom<NotetypeChangeInfo> for ChangeInfo {
             field_content: i.field_content,
             card_counts,
             schema: i.schema,
+            layout: layout(i.layout)?,
         })
     }
 }
@@ -284,6 +296,8 @@ pub struct NotetypeChangeRequest {
     pub templates: Option<Vec<Option<u32>>>,
     /// `NotetypeChangeInfo.schema`.
     pub schema: i64,
+    /// `NotetypeChangeInfo.layout`.
+    pub layout: Vec<u8>,
     /// `NotetypeChangePreview.losses` of the preview the sheet showed.
     pub confirmed: NotetypeChangeLosses,
 }
@@ -299,6 +313,7 @@ impl TryFrom<NotetypeChangeRequest> for ChangeNotetype {
             fields: c.fields,
             templates: c.templates,
             schema: c.schema,
+            layout: layout(c.layout)?,
             confirmed: c.confirmed.try_into()?,
         })
     }
@@ -382,6 +397,7 @@ mod tests {
             field_content: vec![3, 2],
             card_counts: vec![OrdinalCount { ord: 0, count: 3 }, OrdinalCount { ord: 1, count: 2 }],
             schema: 7,
+            layout: vec![3; 32],
         }
     }
 
@@ -410,6 +426,7 @@ mod tests {
             fields: vec![Some(0)],
             templates: None,
             schema: 0,
+            layout: vec![0; 32],
             confirmed: NotetypeChangeLosses {
                 fields: vec![OrdinalCount { ord: 1, count: 1 }, OrdinalCount { ord: 1, count: 2 }],
                 ..Default::default()
