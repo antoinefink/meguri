@@ -73,6 +73,12 @@ cleanroom_run() {
   echo "$id"
 }
 
+set_commit() { # set_commit <cleanroom run> <sha>: the base commit its result names
+  jq --arg c "$2" '.details.source_commit = $c' "$MG/cleanroom/$1/result.json" >"$BATS_TEST_TMPDIR/r.json"
+  mv "$BATS_TEST_TMPDIR/r.json" "$MG/cleanroom/$1/result.json"
+  age "$MG/cleanroom/$1"
+}
+
 members() { # members <archive>: one member name per line
   python3 -c 'import sys, tarfile; [print(m.name) for m in tarfile.open(sys.argv[1], "r:xz")]' "$1"
 }
@@ -176,6 +182,42 @@ member() { # member <archive> <name>: its content
   jq -e --arg id "${ids[5]}" '.[] | select(.run == $id and .reasons == ["recent"])' "$(plan)"
 }
 
+@test "prune keeps a run named only in a staged file's name, even with GIT_INDEX_FILE exported" {
+  local ids=() n
+  for n in $(seq 1 22); do ids[$n]="$(old_run alpha "$n")"; done
+  mkdir -p "$SB/docs"
+  : >"$SB/docs/${ids[1]}.md"
+  git -C "$SB" add "docs/${ids[1]}.md"
+  export GIT_INDEX_FILE="$BATS_TEST_TMPDIR/another-index"
+  prune --apply
+  unset GIT_INDEX_FILE
+  [ "$(jq -r .status "$result")" = pass ]
+  [ -d "$MG/alpha/${ids[1]}" ]
+  [ ! -e "$MG/alpha/${ids[2]}" ]
+}
+
+@test "a Deleter keeps the build/mg it opened when build is swapped for a link to a copy" {
+  local id outside="$BATS_TEST_TMPDIR/outside"
+  id="$(old_run alpha 1)"
+  mkdir -p "$outside/mg/alpha/$id"
+  echo keep >"$outside/mg/alpha/$id/result.json"
+  python3 - "$SB/tools/scripts/prune-run-output.py" "$(cd "$SB" && pwd -P)" "$id" "$outside" <<'PY'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("prune", sys.argv[1])
+p = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(p)
+root, rid, outside = sys.argv[2], sys.argv[3], sys.argv[4]
+ctx = p.Context(0, {})
+d = p.Deleter(p.Checkout(root), ctx)
+os.rename(os.path.join(root, "build"), os.path.join(root, "build.real"))
+os.symlink(outside, os.path.join(root, "build"))
+run = p.Run(d.ck, "alpha", rid, os.path.join(root, "build", "mg", "alpha", rid))
+assert d.remove(run) is None, "the run in the opened build/mg was not deleted"
+PY
+  [ -f "$outside/mg/alpha/$id/result.json" ]
+  [ ! -e "$SB/build.real/mg/alpha/$id" ]
+}
+
 @test "prune keeps unfinished runs and runs whose tools/mg process still runs" {
   local ids=() n live
   for n in $(seq 1 24); do ids[$n]="$(old_run delta "$n")"; done
@@ -201,20 +243,25 @@ member() { # member <archive> <name>: its content
   jq -e --arg id "${ids[2]}" '.[] | select(.run == $id and (.reasons | index("unfinished")))' "$(plan)"
 }
 
-@test "prune --apply finishes a deletion an earlier --apply cut short, and the report leaves it" {
+@test "prune --apply finishes a deletion an earlier --apply cut short, except one holding a tracked file, and the report leaves it" {
   local n
   for n in $(seq 1 21); do old_run alpha "$n" >/dev/null; done
-  mkdir -p "$MG/alpha/.prune-deleting-20250101T000000Z-4190700/sub"
+  mkdir -p "$MG/alpha/.prune-deleting-20250101T000000Z-4190700/sub" "$MG/alpha/.prune-deleting-20250101T000000Z-4190700/ro/empty"
   echo partial >"$MG/alpha/.prune-deleting-20250101T000000Z-4190700/sub/file"
+  chmod 500 "$MG/alpha/.prune-deleting-20250101T000000Z-4190700/ro"
+  mkdir -p "$MG/alpha/.prune-deleting-20250101T000000Z-4190701"
+  echo staged >"$MG/alpha/.prune-deleting-20250101T000000Z-4190701/note.txt"
+  git -C "$SB" add -f "build/mg/alpha/.prune-deleting-20250101T000000Z-4190701/note.txt"
   prune
   [ -d "$MG/alpha/.prune-deleting-20250101T000000Z-4190700" ]
-  jq -e '.details.pending == ["alpha/.prune-deleting-20250101T000000Z-4190700"]' "$result"
+  jq -e '.details.pending == ["alpha/.prune-deleting-20250101T000000Z-4190700", "alpha/.prune-deleting-20250101T000000Z-4190701"]' "$result"
   prune --apply
-  [ "$(jq -r .status "$result")" = pass ]
+  [ "$(jq -r .status "$result")" = fail ]
   [ ! -e "$MG/alpha/.prune-deleting-20250101T000000Z-4190700" ]
   [ "$(jq -r .details.pending_finished "$result")" = 1 ]
-  [ -z "$(find "$MG/alpha" -maxdepth 1 -name '.prune-deleting-*')" ]
-  [ "$(find "$MG/alpha" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 20 ]
+  [ -f "$MG/alpha/.prune-deleting-20250101T000000Z-4190701/note.txt" ]
+  jq -e '.failures[] | select(.id == "delete/alpha/.prune-deleting-20250101T000000Z-4190701")' "$result"
+  [ "$(find "$MG/alpha" -mindepth 1 -maxdepth 1 -type d -name '2025*' | wc -l)" -eq 20 ]
 }
 
 @test "prune keeps a run folder that holds a tracked file" {
@@ -317,46 +364,71 @@ member() { # member <archive> <name>: its content
   [ "$(members "$a" | sort | uniq -d)" = "" ]
 }
 
-@test "prune --cleanroom leaves every part of a run whose records are not verified in an archive" {
-  local ids=() n a10="$MG/cleanroom-archive/2025-10.tar.xz"
-  for n in $(seq 1 13); do ids[$n]="$(cleanroom_run "$n" 10)"; done
-  for n in $(seq 14 25); do ids[$n]="$(cleanroom_run "$n" 11)"; done
-  mkdir -p "$MG/cleanroom-archive"
-  python3 - "$a10" "${ids[1]}" <<'EOF'
+# archive_with <archive> <member> <content>: a one-member xz archive.
+archive_with() {
+  mkdir -p "$(dirname "$1")"
+  python3 -c '
 import io, sys, tarfile
 with tarfile.open(sys.argv[1], "w:xz") as tf:
-    data = b"another prompt\n"
-    info = tarfile.TarInfo(sys.argv[2] + "/prompt.md")
+    data = (sys.argv[3] + "\n").encode()
+    info = tarfile.TarInfo(sys.argv[2])
     info.size = len(data)
     tf.addfile(info, io.BytesIO(data))
-EOF
+' "$1" "$2" "$3"
+}
+
+@test "prune --cleanroom leaves every part of a month's runs when its archive cannot be read or holds anything but records" {
+  local ids=() n
+  for n in $(seq 1 13); do ids[$n]="$(cleanroom_run "$n" 10)"; done
+  for n in $(seq 14 25); do ids[$n]="$(cleanroom_run "$n" 11)"; done
+  archive_with "$MG/cleanroom-archive/2025-10.tar.xz" README "not a record"
   echo "not an archive" >"$MG/cleanroom-archive/2025-11.tar.xz"
   prune --cleanroom --apply
   [ "$(jq -r .status "$result")" = fail ]
-  jq -e --arg id "${ids[1]}" '.failures[] | select(.id == "archive/" + $id)' "$result"
+  jq -e '.failures[] | select(.id == "archive/2025-10")' "$result"
   jq -e '.failures[] | select(.id == "archive/2025-11")' "$result"
-  [ -d "$MG/cleanroom/${ids[1]}/source" ]
-  [ -d "$MG/cleanroom/${ids[1]}/codex-home" ]
-  [ "$(member "$a10" "${ids[1]}/prompt.md")" = "another prompt" ]
-  [ ! -e "$MG/cleanroom/${ids[2]}" ]
-  for n in $(seq 14 25); do
+  for n in $(seq 1 25); do
     [ -d "$MG/cleanroom/${ids[$n]}/source" ]
     [ -d "$MG/cleanroom/${ids[$n]}/codex-home" ]
   done
   [ "$(cat "$MG/cleanroom-archive/2025-11.tar.xz")" = "not an archive" ]
+  [ "$(members "$MG/cleanroom-archive/2025-10.tar.xz")" = README ]
 }
 
-@test "prune --cleanroom keeps whole a run that did not pass and a run with unexpected files" {
-  local ok failed odd stray
+@test "prune --cleanroom replaces a record archived earlier while the run's folder still holds it" {
+  local ids=() n a10="$MG/cleanroom-archive/2025-10.tar.xz"
+  for n in $(seq 1 21); do ids[$n]="$(cleanroom_run "$n" 10)"; done
+  archive_with "$a10" "${ids[1]}/prompt.md" "an earlier prompt"
+  prune --cleanroom --apply
+  [ "$(jq -r .status "$result")" = pass ]
+  [ "$(member "$a10" "${ids[1]}/prompt.md")" = "prompt.md of ${ids[1]}" ]
+  jq -e --arg m "${ids[1]}/prompt.md" '.details.applied.records_replaced == [$m]' "$result"
+  [ ! -e "$MG/cleanroom/${ids[1]}" ]
+  [ "$(members "$a10" | grep -c "^${ids[1]}/")" -eq 9 ]
+}
+
+@test "prune --cleanroom keeps whole runs that failed, have unexpected files, an unreachable base, a bad receipt or a fresh write" {
+  local ok failed odd stray stashed sourceless fresh shapeless id
   ok="$(cleanroom_run 1 10)"
   failed="$(cleanroom_run 2 10 error)"
   odd="$(cleanroom_run 3 10)"
   echo '{}' >"$MG/cleanroom/$odd/smoke-evidence.json"
   age "$MG/cleanroom/$odd"
-  stray="$(cleanroom_run 4 10)" # passed, but no ref reaches its base commit
-  jq '.details.source_commit = "1111111111111111111111111111111111111111"' "$MG/cleanroom/$stray/result.json" >"$BATS_TEST_TMPDIR/r.json"
-  mv "$BATS_TEST_TMPDIR/r.json" "$MG/cleanroom/$stray/result.json"
-  age "$MG/cleanroom/$stray"
+  # Passed, but its base commit exists only as an object no ref reaches,
+  # or only through a stash entry.
+  stray="$(cleanroom_run 4 10)"
+  set_commit "$stray" "$(git -C "$SB" -c user.name=selftest -c user.email=selftest@localhost commit-tree "HEAD^{tree}" -m stray)"
+  stashed="$(cleanroom_run 5 10)"
+  echo change >>"$SB/.gitignore"
+  git -C "$SB" -c user.name=selftest -c user.email=selftest@localhost stash -q
+  set_commit "$stashed" "$(git -C "$SB" rev-parse refs/stash)"
+  sourceless="$(cleanroom_run 6 10 error)" # failed, its source copy already gone
+  rm -rf "$MG/cleanroom/$sourceless/source"
+  fresh="$(cleanroom_run 7 10)" # a top-level file written just now
+  touch "$MG/cleanroom/$fresh/log.txt"
+  shapeless="$(cleanroom_run 8 10)"
+  echo '["incomplete"]' >"$MG/cleanroom/$shapeless/result.json"
+  age "$MG/cleanroom/$shapeless"
   prune --cleanroom --apply
   [ "$(jq -r .status "$result")" = pass ]
   [ ! -e "$MG/cleanroom/$ok/source" ]
@@ -367,11 +439,35 @@ EOF
   [ -d "$MG/cleanroom/$odd/codex-home" ]
   [ -d "$MG/cleanroom/$stray/source" ]
   [ -d "$MG/cleanroom/$stray/codex-home" ]
-  jq -e --arg id "$stray" '.[] | select(.run == $id and .action == "untouched"
-    and (.reasons | index("source kept: no branch, tag or HEAD reaches its base commit")))' "$(plan)"
+  for id in "$stray" "$stashed"; do
+    [ -d "$MG/cleanroom/$id/source" ]
+    jq -e --arg id "$id" '.[] | select(.run == $id and .action == "untouched"
+      and (.reasons | index("kept whole: no branch, tag or HEAD reaches its base commit")))' "$(plan)"
+  done
+  [ -d "$MG/cleanroom/$sourceless/codex-home" ]
+  jq -e --arg id "$sourceless" '.[] | select(.run == $id and (.reasons | index("kept whole: did not pass")))' "$(plan)"
+  [ -d "$MG/cleanroom/$fresh/source" ]
+  jq -e --arg id "$fresh" '.[] | select(.run == $id and (.reasons | index("written to in the last hour")))' "$(plan)"
+  [ -d "$MG/cleanroom/$shapeless/source" ]
+  jq -e --arg id "$shapeless" '.[] | select(.run == $id and (.reasons | index("kept whole: result.json is not a valid receipt")))' "$(plan)"
   [ -z "$(members "$MG/cleanroom-archive/2025-10.tar.xz" | grep "^$odd/" || true)" ]
   jq -e --arg id "$odd" '.[] | select(.run == $id and .action == "untouched"
     and (.reasons | any(startswith("unexpected entries: smoke-evidence.json"))))' "$(plan)"
+}
+
+@test "prune --cleanroom counts the receipts of runs it keeps whole" {
+  local ids=() n
+  for n in $(seq 1 22); do ids[$n]="$(cleanroom_run "$n" 10)"; done
+  jq --arg id "${ids[2]}" '.status = "error" | .details.retry_of = $id' "$MG/cleanroom/${ids[1]}/result.json" >"$BATS_TEST_TMPDIR/r.json"
+  mv "$BATS_TEST_TMPDIR/r.json" "$MG/cleanroom/${ids[1]}/result.json"
+  rm -rf "$MG/cleanroom/${ids[1]}/source"
+  age "$MG/cleanroom/${ids[1]}"
+  prune --cleanroom --apply
+  [ "$(jq -r .status "$result")" = pass ]
+  [ -d "$MG/cleanroom/${ids[1]}/codex-home" ]
+  [ -f "$MG/cleanroom/${ids[2]}/prompt.md" ]
+  [ ! -e "$MG/cleanroom/${ids[2]}/source" ]
+  jq -e --arg id "${ids[2]}" '.[] | select(.run == $id and .action == "strip" and .reasons == ["referenced"])' "$(plan)"
 }
 
 @test "prune --root and --all-worktrees only report, and --root must be a checkout of this repository" {
@@ -386,6 +482,8 @@ EOF
   [ ! -e "$second/build/mg/prune" ]
   prune --root "$second" --apply
   [ "$(jq -r .status "$result")" = error ]
+  prune --root "$SB" --apply
+  [ "$(jq -r .status "$result")" = error ]
   prune --all-worktrees --apply
   [ "$(jq -r .status "$result")" = error ]
   prune --root "$BATS_TEST_TMPDIR"
@@ -393,6 +491,7 @@ EOF
   prune --all-worktrees
   [ "$(jq -r .status "$result")" = pass ]
   [ "$(jq '.details.checkouts | length' "$result")" = 2 ]
+  jq -e --arg p "$(cd "$second" && pwd -P)" '[.[] | select(.checkout == $p and .job == "alpha" and .action == "delete")] | length == 5' "$(plan)"
   jq -e --arg p "$(cd "$second" && pwd -P)" '.details.checkouts[] | select(.checkout == $p and .delete == 5)' "$result"
   prune --bogus
   [ "$(jq -r .status "$result")" = error ]

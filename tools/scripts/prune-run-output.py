@@ -26,18 +26,23 @@ import time
 # The retention rule. This block is the only place it is stated.
 
 KEEP_NEWEST = 20  # the newest run folders of every job folder
-KEEP_DAYS = 7  # every run started or finished less than 7 days ago
+KEEP_DAYS = 7  # every run started, finished or written to (a file at its top) less than 7 days ago
 # Always kept as well, whatever their age:
 # - the run a job's `latest` link names;
-# - a run whose id appears in a tracked or uncommitted file of any checkout,
-#   in any local or remote branch tip, in a build/mg state file (the catch-up
-#   queue, lease holders) or in a .json/.jsonl file at the top of a kept run
-#   (gate and merge receipts name their child runs), in any checkout;
+# - a run whose id appears in a file name or content of: any branch, tag or
+#   stash entry; a tracked, staged or uncommitted file of any checkout;
+#   build/ outside build/mg (handoffs; not BUILD_UNREAD); a build/mg state
+#   file (catch-up queue, leases); a top-level .json/.jsonl of a kept run
+#   (gate and merge receipts) or of any run in another checkout. --apply reads
+#   them all again after planning and keeps whatever either reading keeps;
 # - a run without result.json or with .mg/ (running, or killed while it ran),
 #   and a run whose tools/mg process (the pid in its id) still runs;
-# - a run folder holding a tracked file.
+# - a run folder holding a tracked file or a checkout.
 # Cleanroom runs (--cleanroom) follow the same rule for their folders, but
-# lose source/ and codex-home/ once their records are verified in an archive.
+# lose source/ and codex-home/ once their records are verified in an archive,
+# unless they must stay whole (cleanroom_whole: not passed, no patch, a base
+# no branch, tag or worktree HEAD reaches, a bad receipt, unexpected files, or
+# a write in the last CLEANROOM_QUIET seconds).
 
 CLEANROOM = "cleanroom"
 PRUNE = "prune"
@@ -94,9 +99,16 @@ def human(n):
     return "%.1f TiB" % n
 
 
-def git(args, cwd, stdin=None):
-    p = subprocess.run(["git", "-C", cwd] + args, stdin=stdin, stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE)
+# An exported GIT_DIR or GIT_INDEX_FILE would make every checkout read one
+# repository's index; each git child gets the environment without them.
+GIT_LOCATION_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE")
+GIT_ENV = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION_VARS}
+
+
+def git(args, cwd, stdin=None, input=None):
+    p = subprocess.run(["git", "-C", cwd] + args, stdin=stdin, input=input, stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE, env=GIT_ENV)
     if p.returncode != 0:
         raise OSError("git %s failed in %s: %s" % (" ".join(args[:3]), cwd,
                                                    p.stderr.decode(errors="replace").strip()))
@@ -225,7 +237,7 @@ def git_refs(repo, heads, staged, refs, scratch):
             commits.add(parts[2])
     # Every stash entry (shared by all worktrees): its work tree, index and untracked commits.
     if subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "-q", "refs/stash"],
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=GIT_ENV).returncode == 0:
         commits.update(git(["log", "-g", "--format=%H %P", "refs/stash"], repo).decode().split())
     listing = os.path.join(scratch, "objects.txt")
     with open(listing, "wb") as f:
@@ -238,7 +250,7 @@ def git_refs(repo, heads, staged, refs, scratch):
         f.write("".join(o + "\n" for o in sorted(wanted)).encode())
     with open(listing, "rb") as f, open(listing + ".err", "wb") as err:
         p = subprocess.Popen(["git", "-C", repo, "cat-file", "--batch"], stdin=f,
-                             stdout=subprocess.PIPE, stderr=err)
+                             stdout=subprocess.PIPE, stderr=err, env=GIT_ENV)
         while True:
             header = p.stdout.readline()
             if not header:
@@ -263,9 +275,11 @@ def worktree_changes(checkout, refs, out_ids, staged):
         if rel:
             refs.file(os.path.join(checkout, os.fsdecode(rel)), out_ids)
     for entry in git(["ls-files", "-z", "-s"], checkout).split(b"\0"):
-        meta = entry.split(b"\t", 1)[0].split()
-        if len(meta) == 3 and not meta[0].startswith(b"160"):  # not a submodule
-            with refs.lock:
+        meta, _, name = entry.partition(b"\t")
+        meta = meta.split()
+        with refs.lock:
+            out_ids.update(ids_in(name))  # an id in a staged file's name
+            if len(meta) == 3 and not meta[0].startswith(b"160"):  # not a submodule
                 staged.add(meta[1].decode())
 
 
@@ -325,9 +339,21 @@ class Run:
         if self.job == CLEANROOM and self.result_mtime is not None:
             try:
                 with open(os.path.join(self.path, "result.json"), "rb") as f:
-                    self.result = json.load(f)
+                    self.result = valid_receipt(json.load(f))
             except (OSError, ValueError):
                 self.result = None
+
+
+def valid_receipt(res):
+    """A cleanroom result.json with the fields prune reads, or None."""
+    if not isinstance(res, dict) or not isinstance(res.get("status"), str):
+        return None
+    if not isinstance(res.get("args", []), list) or not isinstance(res.get("details", {}), dict):
+        return None
+    commit = (res.get("details") or {}).get("source_commit")
+    if commit is not None and not (isinstance(commit, str) and re.match(r"^[0-9a-f]{40}$", commit)):
+        return None
+    return res
 
 
 class Checkout:
@@ -413,7 +439,7 @@ class Checkout:
         held = set()
         for rel in out.split(b"\0"):
             parts = os.fsdecode(rel).split("/")
-            if len(parts) >= 4 and RUN_ID.match(parts[3]):
+            if len(parts) >= 4 and RUN_ID.match(parts[3][len(PENDING):] if parts[3].startswith(PENDING) else parts[3]):
                 held.add((parts[2], parts[3]))
         return held
 
@@ -520,8 +546,9 @@ class Context:
         return cmd is not None and runs_mg(cmd)
 
 
-def protect(ctx, ck, cands, others, tracked):
-    """Give each candidate run its keep reasons (empty: it may go)."""
+def protect(ctx, ck, cands, others, tracked, whole=None):
+    """Give each candidate run its keep reasons (empty: it may go). whole(r)
+    gives reasons a run stays whole; they count before the receipt closure."""
     refs = ctx.external(ck)
     for r in others:
         refs |= r.receipts
@@ -547,6 +574,8 @@ def protect(ctx, ck, cands, others, tracked):
             r.reasons.append("newest")
         if max(r.started, r.written) > horizon:
             r.reasons.append("recent")
+        if whole is not None:
+            r.reasons.extend(whole(r))
     for r in cands:
         if r.reasons:
             refs |= r.receipts
@@ -572,43 +601,46 @@ def plan_runs(ctx, ck, tracked):
     return cands
 
 
-def source_kept_because(ctx, run):
-    """Why a cleanroom run's source copy must stay, or None when it may go."""
-    res = run.result or {}
-    if res.get("status") != "pass" or res.get("dry_run") is True:
-        return "did not pass"
-    if "--check" in (res.get("args") or []):
-        return None
-    if not stat.S_ISREG(run.entries.get("changes.patch", 0)):
-        return "exported no changes.patch"
-    if (res.get("details") or {}).get("source_commit") not in ctx.reachable:
-        return "no branch, tag or HEAD reaches its base commit"
-    return None
+CLEANROOM_QUIET = 3600  # s without a write before a cleanroom run loses source/ and codex-home/
+KEPT_WHOLE = "kept whole: "
+
+
+def cleanroom_whole(ctx, r):
+    """Why a cleanroom run must stay whole (records, source/ and codex-home/), if it must."""
+    why = []
+    unknown = sorted(n for n in r.entries if n not in CLEANROOM_RECORDS + CLEANROOM_RUNTIME + (".mg",))
+    if unknown:
+        why.append("unexpected entries: " + ", ".join(unknown))
+    bad = sorted(n for n in CLEANROOM_RECORDS if n in r.entries and not stat.S_ISREG(r.entries[n]))
+    bad += sorted(n for n in CLEANROOM_RUNTIME if n in r.entries and not stat.S_ISDIR(r.entries[n]))
+    if bad:
+        why.append("not a plain file or folder: " + ", ".join(bad))
+    if not r.finished:
+        return why
+    res = r.result
+    if res is None:
+        why.append(KEPT_WHOLE + "result.json is not a valid receipt")
+    elif res.get("status") != "pass":
+        why.append(KEPT_WHOLE + "did not pass")
+    elif "source" in r.entries and res.get("dry_run") is not True and "--check" not in (res.get("args") or []):
+        if not stat.S_ISREG(r.entries.get("changes.patch", 0)):
+            why.append(KEPT_WHOLE + "exported no changes.patch")
+        elif (res.get("details") or {}).get("source_commit") not in ctx.reachable:
+            why.append(KEPT_WHOLE + "no branch, tag or HEAD reaches its base commit")
+    if any(n in r.entries for n in CLEANROOM_RUNTIME) and r.written > ctx.now - CLEANROOM_QUIET:
+        why.append("written to in the last hour")
+    return why
 
 
 def plan_cleanroom(ctx, ck, tracked):
     cands = [r for r in ck.runs if r.job == CLEANROOM]
     others = [r for r in ck.runs if r.job != CLEANROOM]
-    protect(ctx, ck, cands, others, tracked)
+    whole = {r.key: cleanroom_whole(ctx, r) for r in cands}
+    protect(ctx, ck, cands, others, tracked, lambda r: whole[r.key])
     for r in cands:
-        unknown = sorted(n for n in r.entries if n not in CLEANROOM_RECORDS + CLEANROOM_RUNTIME)
-        bad = sorted(n for n in CLEANROOM_RECORDS if n in r.entries and not stat.S_ISREG(r.entries[n]))
-        bad += sorted(n for n in CLEANROOM_RUNTIME if n in r.entries and not stat.S_ISDIR(r.entries[n]))
         hold = [x for x in r.reasons if x in ("unfinished", "live", "tracked")]
-        if hold or unknown or bad:
-            r.action = "untouched"
-            if unknown and ".mg" not in unknown:
-                r.reasons.append("unexpected entries: " + ", ".join(unknown))
-            if bad:
-                r.reasons.append("not a plain file or folder: " + ", ".join(bad))
-            continue
-        why = source_kept_because(ctx, r) if "source" in r.entries else None
-        r.source_ok = why is None
-        if why:
-            r.action = "untouched"
-            r.reasons.append("source kept: " + why)
-            continue
-        r.action = "strip" if r.reasons else "remove"
+        r.source_ok = not any(x.startswith(KEPT_WHOLE) for x in whole[r.key])
+        r.action = "untouched" if hold or whole[r.key] else ("strip" if r.reasons else "remove")
     return cands
 
 
@@ -650,10 +682,10 @@ def summarize_cleanroom(cands):
     for r in cands:
         s[r.action] += 1
         if r.action == "untouched":
-            if getattr(r, "source_ok", True) is False:
+            if not r.source_ok:
                 s["source_kept"] += 1
                 s["bytes_source_kept"] += r.bytes
-                why = r.reasons[-1]
+                why = next(x for x in r.reasons if x.startswith(KEPT_WHOLE))[len(KEPT_WHOLE):]
                 s["source_kept_because"][why] = s["source_kept_because"].get(why, 0) + 1
                 continue
             s["untouched_runs"].append({"run": r.id, "why": [x for x in r.reasons if x not in ("newest", "recent", "latest", "referenced")] or r.reasons,
@@ -746,18 +778,16 @@ def size_bytes(s):
 # ---------------------------------------------------------------------------
 # Deleting
 
-def under(path, root):
-    return os.path.realpath(path).startswith(root + os.sep)
-
-
 O_DIR = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 PENDING = ".prune-deleting-"  # a checked run folder renamed for deletion; --apply finishes it
 
 
-def remove_at(dfd, name, dev):
+def remove_at(dfd, name, dev, inside=False):
     """Delete entry name of the open folder dfd with all it holds. Every step goes
     through an open descriptor (O_NOFOLLOW), so a folder swapped for a link while
-    this runs is never followed, and another file system is never entered."""
+    this runs is never followed, and another file system is never entered.
+    inside: dfd is itself part of the tree being deleted, so its permissions
+    may be widened to remove name; a job folder's never are."""
     try:
         fd = os.open(name, O_DIR, dir_fd=dfd)
     except PermissionError:
@@ -779,7 +809,7 @@ def remove_at(dfd, name, dev):
             entries = [(e.name, e.is_dir(follow_symlinks=False)) for e in os.scandir(fd)]
         for n, is_dir in entries:
             if is_dir:
-                remove_at(fd, n, dev)
+                remove_at(fd, n, dev, inside=True)
                 continue
             try:
                 os.unlink(n, dir_fd=fd)
@@ -790,43 +820,48 @@ def remove_at(dfd, name, dev):
                 os.unlink(n, dir_fd=fd)
     finally:
         os.close(fd)
-    os.rmdir(name, dir_fd=dfd)
+    try:
+        os.rmdir(name, dir_fd=dfd)
+    except PermissionError:
+        if not inside:
+            raise
+        os.fchmod(dfd, stat.S_IRWXU)  # a read-only folder of the tree being deleted
+        os.rmdir(name, dir_fd=dfd)
 
 
-def newest_write(path):
-    """Newest mtime of the plain files at the top of a folder (Run.written)."""
-    newest = 0
-    for e in os.scandir(path):
-        try:
-            if e.is_file(follow_symlinks=False):
-                newest = max(newest, e.stat(follow_symlinks=False).st_mtime)
-        except FileNotFoundError:
-            pass
-    return newest
+def open_dir_at(dfd, name, what):
+    try:
+        return os.open(name, O_DIR, dir_fd=dfd)
+    except FileNotFoundError:
+        raise Refusal("%s does not exist; nothing deleted" % what)
+    except OSError:
+        raise Refusal("%s is not a plain folder; nothing deleted" % what)
 
 
 class Deleter:
     """Deletes only run folders (or a cleanroom run's runtime parts) below one
-    checkout's build/mg, through descriptors opened from a checked build/mg."""
+    checkout's build/mg. build and mg are opened one component at a time from
+    the checkout's descriptor without following links, and every later check
+    and deletion goes through descriptors opened from that build/mg, so
+    swapping build or a folder for a link after the check changes nothing."""
 
     def __init__(self, ck, ctx):
         self.ck = ck
         self.ctx = ctx
         root = os.path.realpath(ck.path)
-        mg_real = os.path.realpath(ck.mg)
-        if mg_real != os.path.join(root, "build", "mg"):
-            raise Refusal("%s resolves to %s, outside this checkout's build/mg; nothing deleted" % (ck.mg, mg_real))
-        for p in (os.path.join(root, "build"), ck.mg):
-            st = os.lstat(p)
-            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-                raise Refusal("%s is not a plain folder; nothing deleted" % p)
-        self.mg = mg_real
-        self.mg_fd = os.open(self.mg, O_DIR)
-        st = os.fstat(self.mg_fd)
-        lst = os.lstat(self.mg)
-        if (st.st_dev, st.st_ino) != (lst.st_dev, lst.st_ino):
-            raise Refusal("%s changed while it was opened; nothing deleted" % self.mg)
-        self.dev = st.st_dev
+        if root != ck.path:
+            raise Refusal("%s is not a resolved checkout path; nothing deleted" % ck.path)
+        root_fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            build_fd = open_dir_at(root_fd, "build", os.path.join(root, "build"))
+            try:
+                self.mg_fd = open_dir_at(build_fd, "mg", os.path.join(root, "build", "mg"))
+            finally:
+                os.close(build_fd)
+        finally:
+            os.close(root_fd)
+        self.mg = os.path.join(root, "build", "mg")
+        self.dev = os.fstat(self.mg_fd).st_dev
         self.lock_fd = None
         self.index = os.path.join(ck.path, os.fsdecode(git(["rev-parse", "--git-path", "index"], ck.path).strip()))
         self.index_seen = None
@@ -851,7 +886,8 @@ class Deleter:
         return True
 
     def tracked_now(self):
-        """(job, id) of run folders holding a tracked file, read again whenever the index changed."""
+        """(job, folder name) of run folders, pending ones included, holding a
+        tracked file; read again whenever the index changed."""
         try:
             st = os.stat(self.index)
             seen = (st.st_ino, st.st_size, st.st_mtime_ns)
@@ -862,65 +898,94 @@ class Deleter:
             self.index_seen = seen
         return self.tracked
 
+    def _check(self, jfd, run, part):
+        """(why not, folder identity) for run's folder in the open job folder jfd."""
+        try:
+            rfd = os.open(run.id, O_DIR, dir_fd=jfd)
+        except FileNotFoundError:
+            return "gone", None
+        except OSError:
+            return "not a plain folder", None
+        try:
+            st = os.fstat(rfd)
+            ident = (st.st_dev, st.st_ino)
+            if st.st_dev != self.dev:
+                return "on another file system", ident
+            entries = {e.name: e for e in os.scandir(rfd)}
+            res = entries.get("result.json")
+            if res is None or not res.is_file(follow_symlinks=False) or ".mg" in entries:
+                return "unfinished", ident
+            if self.ctx.live(run):
+                return "its tools/mg process runs", ident
+            if run.key in self.tracked_now():
+                return "holds a tracked file", ident
+            if any(c.path == run.path or c.path.startswith(run.path + os.sep) for c in self.ctx.checkouts):
+                return "holds a checkout", ident
+            # A detached writer (a VM's console log, a container's output) can
+            # outlive its job: a file written in that time keeps the folder.
+            quiet = CLEANROOM_QUIET if part is not None else KEEP_DAYS * 86400
+            newest = max([e.stat(follow_symlinks=False).st_mtime for e in entries.values()
+                          if e.is_file(follow_symlinks=False)] or [0])
+            if newest > time.time() - quiet:
+                return "written to in the last %d s" % quiet, ident
+            if part is not None:
+                # Only a cleanroom run's source/ or codex-home/; its folder stays.
+                if part not in CLEANROOM_RUNTIME or run.job != CLEANROOM:
+                    return "%s is not runtime state" % part, ident
+                if part not in entries:
+                    return "gone", ident
+                if not entries[part].is_dir(follow_symlinks=False):
+                    return "%s is not a plain folder" % part, ident
+                return None, ident
+        finally:
+            os.close(rfd)
+        try:
+            if os.path.basename(os.readlink("latest", dir_fd=jfd)) == run.id:
+                return "latest", ident
+        except OSError:
+            pass
+        return None, ident
+
+    def _job(self, run):
+        try:
+            return os.open(run.job, O_DIR, dir_fd=self.mg_fd)
+        except OSError:
+            return None
+
     def check(self, run, part=None):
         """Why this path must not be deleted now, or None. Checked again just
         before each deletion: a job may have started or finished since the plan."""
-        job_dir = os.path.join(self.mg, run.job)
-        expect = os.path.join(job_dir, run.id)
-        st = lstat(job_dir)
-        if st is None or stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        jfd = self._job(run)
+        if jfd is None:
             return "its job folder is not a plain folder"
-        st = lstat(run.path)
-        if st is None:
-            return "gone"
-        if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-            return "not a plain folder"
-        if run.path != expect or os.path.realpath(run.path) != expect or not under(run.path, self.mg):
-            return "resolves outside build/mg"
-        if st.st_dev != self.dev:
-            return "on another file system"
-        if not os.path.isfile(os.path.join(run.path, "result.json")) or os.path.lexists(os.path.join(run.path, ".mg")):
-            return "unfinished"
-        if self.ctx.live(run):
-            return "its tools/mg process runs"
-        if run.key in self.tracked_now():
-            return "holds a tracked file"
-        if any(c.path == run.path or c.path.startswith(run.path + os.sep) for c in self.ctx.checkouts):
-            return "holds a checkout"
-        # A detached writer (a VM's console log, a container's output) can
-        # outlive its job: a file written in that time keeps the folder.
-        quiet = 3600 if part is not None else KEEP_DAYS * 86400
-        if newest_write(run.path) > time.time() - quiet:
-            return "written to in the last %d s" % quiet
-        if part is not None:
-            # Only a cleanroom run's source/ or codex-home/; its folder stays.
-            if part not in CLEANROOM_RUNTIME or run.job != CLEANROOM:
-                return "%s is not runtime state" % part
-            pst = lstat(os.path.join(run.path, part))
-            if pst is None:
-                return "gone"
-            if stat.S_ISLNK(pst.st_mode) or not stat.S_ISDIR(pst.st_mode):
-                return "%s is not a plain folder" % part
-            return None
-        link = os.path.join(job_dir, "latest")
-        if os.path.islink(link) and os.path.basename(os.readlink(link)) == run.id:
-            return "latest"
-        return None
+        try:
+            return self._check(jfd, run, part)[0]
+        finally:
+            os.close(jfd)
 
     def remove(self, run, part=None):
-        why = self.check(run, part)
-        if why is not None:
-            return why
-        jfd = os.open(run.job, O_DIR, dir_fd=self.mg_fd)
+        jfd = self._job(run)
+        if jfd is None:
+            return "its job folder is not a plain folder"
         try:
+            why, ident = self._check(jfd, run, part)
+            if why is not None:
+                return why
             if part is None:
                 # Renamed first, so a deletion cut short is finished by the next
                 # --apply rather than left as an "unfinished" run.
                 os.rename(run.id, PENDING + run.id, src_dir_fd=jfd, dst_dir_fd=jfd)
+                st = os.stat(PENDING + run.id, dir_fd=jfd, follow_symlinks=False)
+                if (st.st_dev, st.st_ino) != ident:
+                    os.rename(PENDING + run.id, run.id, src_dir_fd=jfd, dst_dir_fd=jfd)
+                    return "changed while it was checked"
                 remove_at(jfd, PENDING + run.id, self.dev)
             else:
                 rfd = os.open(run.id, O_DIR, dir_fd=jfd)
                 try:
+                    st = os.fstat(rfd)
+                    if (st.st_dev, st.st_ino) != ident:
+                        return "changed while it was checked"
                     remove_at(rfd, part, self.dev)
                 finally:
                     os.close(rfd)
@@ -929,9 +994,14 @@ class Deleter:
         return None
 
     def finish_pending(self, failures):
-        """Delete what an earlier --apply renamed for deletion and could not finish."""
+        """Delete what an earlier --apply renamed for deletion and could not
+        finish, unless the index now tracks a file in it."""
         done = 0
         for job, name in self.ck.pending:
+            if (job, name) in self.tracked_now():
+                failures.append({"id": "delete/%s/%s" % (job, name),
+                                 "message": "holds a tracked file; left for you to resolve"})
+                continue
             try:
                 jfd = os.open(job, O_DIR, dir_fd=self.mg_fd)
                 try:
@@ -1051,7 +1121,8 @@ def existing_archives(ck):
 
 def write_archive(dfd, name, old, add, runs_by_id):
     """Write old's members plus add's records to name.partial (created anew, never
-    through a link), read it back and compare, then move it over name."""
+    through a link), read it back and compare, then move it over name. A record
+    in add that old holds replaces it (a run whose folder still holds it)."""
     tmp = name + ".partial"
     try:
         os.unlink(tmp, dir_fd=dfd)
@@ -1063,7 +1134,9 @@ def write_archive(dfd, name, old, add, runs_by_id):
                 with os.fdopen(open_in(dfd, name), "rb") as src_raw:
                     with tarfile.open(fileobj=src_raw, mode="r:xz") as src:
                         for m in src:
-                            out.addfile(m, src.extractfile(m))
+                            rid, _, rec = m.name.partition("/")
+                            if rec not in add.get(rid, {}):
+                                out.addfile(m, src.extractfile(m))
             for rid in sorted(add):
                 r = runs_by_id[rid]
                 for rec in sorted(add[rid]):
@@ -1105,17 +1178,43 @@ def apply_cleanroom(ctx, ck, deleter, cands, failures):
         os.close(adfd)
 
 
+def eligible(deleter, r):
+    """None when r may lose now what its action removes, else why not. Asked
+    before its records are archived, and again (by remove) before each deletion."""
+    if r.action == "remove":
+        try:
+            listed = set(os.listdir(r.path))
+        except FileNotFoundError:
+            return "gone"
+        if listed != set(r.entries):
+            return "its folder changed since the plan"  # a new file would go unarchived
+        return deleter.check(r)
+    whys = [deleter.check(r, part) for part in CLEANROOM_RUNTIME if part in r.entries]
+    if not whys:
+        whys = [deleter.check(r)]
+    whys = [w for w in whys if w not in (None, "gone", "latest")]
+    return whys[0] if whys else None
+
+
 def archive_and_delete(ctx, ck, deleter, adfd, adir, cands, failures):
     work = [r for r in cands if r.action in ("strip", "remove")]
     months = {}
     for r in work:
         months.setdefault("%s-%s" % (r.id[0:4], r.id[4:6]), []).append(r)
     report = {"archived_runs": 0, "removed_runs": 0, "stripped_runs": 0, "bytes_freed": 0,
-              "archives": {}, "skipped": []}
+              "archives": {}, "skipped": [], "records_replaced": []}
     for month in sorted(months):
-        runs = months[month]
         name = month + ".tar.xz"
         path = os.path.join(adir, name)
+        runs = []
+        for r in months[month]:
+            why = eligible(deleter, r)
+            if why is None:
+                runs.append(r)
+            elif why != "gone":
+                report["skipped"].append({"run": r.id, "why": why})
+        if not runs:
+            continue
         try:
             try:
                 pst = os.stat(name, dir_fd=adfd, follow_symlinks=False)
@@ -1133,14 +1232,12 @@ def archive_and_delete(ctx, ck, deleter, adfd, adir, cands, failures):
                     bad.add(r.id)
                     continue
                 have = old.get(r.id, {})
-                clash = [n for n in recs if n in have and have[n] != recs[n]]
-                if clash:
-                    failures.append({"id": "archive/%s" % r.id, "message": "%s holds other content for %s; the run was left untouched" % (path, ", ".join(clash))})
-                    bad.add(r.id)
-                    continue
-                new = {n: v for n, v in recs.items() if n not in have}
+                new = {n: v for n, v in recs.items() if have.get(n) != v}
                 if new:
                     add[r.id] = new
+                # The folder still holds its records, so an older archived copy
+                # (a run that grew after an earlier --apply archived it) is replaced.
+                report["records_replaced"] += ["%s/%s" % (r.id, n) for n in new if n in have]
             if add:
                 write_archive(adfd, name, old, add, {r.id: r for r in runs})
             # Read back from the file itself before any run of this month goes.
@@ -1164,34 +1261,26 @@ def archive_and_delete(ctx, ck, deleter, adfd, adir, cands, failures):
                 failures.append({"id": "archive/%s" % r.id, "message": "its records are not verified in %s; the run was left untouched" % path})
                 continue
             report["archived_runs"] += 1
-            try:
-                freed = 0
-                if r.action == "remove":
-                    try:
-                        listed = set(os.listdir(r.path))
-                    except FileNotFoundError:
-                        listed = set(r.entries)
-                    # A file added since the plan would go unarchived.
-                    why = deleter.remove(r) if listed == set(r.entries) else "its folder changed since the plan"
-                    if why is None:
+            parts = [None] if r.action == "remove" else [p for p in CLEANROOM_RUNTIME if p in r.entries]
+            stripped = False
+            for part in parts:
+                try:
+                    why = deleter.remove(r, part)
+                except (OSError, Refusal) as e:
+                    failures.append({"id": "delete/cleanroom/%s" % r.id,
+                                     "message": "could not delete %s: %s" % (part or "the folder", e)})
+                    break
+                if why is None:
+                    # Counted as each part goes, so a later failure keeps what was freed.
+                    report["bytes_freed"] += r.bytes if part is None else r.parts.get(part, 0)
+                    if part is None:
                         report["removed_runs"] += 1
-                        freed = r.bytes
-                    elif why != "gone":
-                        report["skipped"].append({"run": r.id, "why": why})
-                    report["bytes_freed"] += freed
-                    continue
-                for part in CLEANROOM_RUNTIME:
-                    if part in r.entries:
-                        why = deleter.remove(r, part)
-                        if why is None:
-                            freed += r.parts.get(part, 0)
-                        elif why != "gone":
-                            report["skipped"].append({"run": r.id, "why": "%s: %s" % (part, why)})
-                if freed:
-                    report["stripped_runs"] += 1
-                report["bytes_freed"] += freed
-            except (OSError, Refusal) as e:
-                failures.append({"id": "delete/cleanroom/%s" % r.id, "message": "could not delete in %s: %s" % (r.path, e)})
+                    else:
+                        stripped = True
+                elif why != "gone":
+                    report["skipped"].append({"run": r.id, "why": "%s: %s" % (part or "folder", why)})
+            if stripped:
+                report["stripped_runs"] += 1
     return report
 
 
@@ -1221,7 +1310,7 @@ def print_cleanroom(ck, s):
     if s["kept_because"]:
         log("  folders kept because: " + ", ".join("%s %d" % kv for kv in sorted(s["kept_because"].items(), key=lambda kv: -kv[1])))
     if s["source_kept"]:
-        log("  %d runs kept whole (%s), their source copy possibly the only copy of their work: %s"
+        log("  %d runs kept whole (%s), their source copy or Codex state possibly the only copy of their work: %s"
             % (s["source_kept"], human(s["bytes_source_kept"]),
                ", ".join("%s %d" % kv for kv in sorted(s["source_kept_because"].items(), key=lambda kv: -kv[1]))))
     for u in s["untouched_runs"]:
@@ -1292,11 +1381,9 @@ def main():
 
     if args.apply and args.all_worktrees:
         return fail("--all-worktrees only reports; --apply works on one checkout, the one the job runs in")
-    root = self_root
-    if args.root:
-        root = os.path.realpath(args.root)
-        if args.apply and root != self_root:
-            return fail("--root only reports; run tools/mg prune --apply from the checkout you prune")
+    if args.apply and args.root:
+        return fail("--root only reports; run tools/mg prune --apply from the checkout you prune")
+    root = os.path.realpath(args.root) if args.root else self_root
     wts = worktree_list(self_root)
     known = [w["path"] for w in wts]
     if root not in known:
@@ -1304,32 +1391,26 @@ def main():
     if args.apply and os.environ.get("CI"):
         return fail("--apply does not run in CI", "ci")
 
-    try:
-        ctx = Context(time.time(), processes())
-    except OSError as e:
-        return fail("cannot tell which runs are live: %s" % e, "processes")
     mode = "all-worktrees" if args.all_worktrees else ("cleanroom" if args.cleanroom else "runs")
     log("prune: %s, %s" % (mode, "applying" if args.apply else "report only (--apply deletes)"))
     log("rule: keep the newest %d runs of each job, every run started, finished or written to in the last %d days, "
         "and every latest, referenced, unfinished, live or tracked run (tools/AGENTS.md)" % (KEEP_NEWEST, KEEP_DAYS))
 
     try:
-        return run(args, ctx, wts, root, targets, out_path, mode)
+        return run(args, wts, root, targets, out_path, mode)
     except Refusal as e:
         return fail(str(e), "refused")
 
 
-def run(args, ctx, wts, root, targets, out_path, mode):
+def collect(args, wts):
+    """Every checkout's runs and every reference source, read once."""
     t0 = time.time()
+    try:
+        ctx = Context(time.time(), processes())
+    except OSError as e:
+        raise Refusal("cannot tell which runs are live: %s" % e)
     refs = ctx.refs
     ctx.checkouts = [Checkout(w["path"]) for w in wts]
-    deleter = None
-    if args.apply:
-        # Checked and locked before anything is read: the plan is made under the lock.
-        deleter = Deleter(next(ck for ck in ctx.checkouts if ck.path == root), ctx)
-        if not deleter.lock():
-            raise Refusal("another tools/mg prune --apply runs in this checkout; nothing deleted")
-
     uncommitted, staged = set(), set()
 
     def changes(path):
@@ -1363,15 +1444,22 @@ def run(args, ctx, wts, root, targets, out_path, mode):
             if isinstance(c, str) and re.match(r"^[0-9a-f]{40}$", c):
                 commits.add(c)
     if commits:
-        # A source copy goes only when a ref (a branch, tag or worktree HEAD)
-        # still reaches its base, so gc never takes the commit its patch needs.
-        heads = "".join(w["head"] + "\n" for w in wts if w.get("head"))
-        p = subprocess.run(["git", "-C", args.self_root, "rev-list", "--all", "--stdin"],
-                           input=heads.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if p.returncode != 0:
-            refs.errors.append("git rev-list --all failed: %s" % p.stderr.decode(errors="replace").strip())
-        else:
-            ctx.reachable = commits & set(p.stdout.decode().split())
+        # A source copy goes only when a branch, tag or worktree HEAD still
+        # reaches its base, so gc never takes the commit its patch needs. A
+        # stash is not such a root: dropping it would orphan the base.
+        try:
+            roots = set(w["head"] for w in wts if w.get("head"))
+            for line in git(["for-each-ref", "--format=%(objectname) %(objecttype) %(*objectname)",
+                             "refs/heads", "refs/remotes", "refs/tags"], args.self_root).decode().splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] == "commit":
+                    roots.add(parts[0])
+                elif len(parts) == 3 and parts[1] == "tag":
+                    roots.add(parts[2])
+            reach = git(["rev-list", "--stdin"], args.self_root, input="".join(r + "\n" for r in sorted(roots)).encode())
+            ctx.reachable = commits & set(reach.decode().split())
+        except OSError as e:
+            refs.errors.append(str(e))
     ctx.ref_stats = {"branch_commits": ncommits, "objects": nblobs, "run_ids": len(refs.ids),
                      "run_ids_in_branches": in_git, "run_ids_uncommitted": len(uncommitted),
                      "run_ids_in_state_files": len(set().union(*[ck.state for ck in ctx.checkouts])),
@@ -1380,6 +1468,50 @@ def run(args, ctx, wts, root, targets, out_path, mode):
         % (len(refs.ids), ncommits, len(wts), time.time() - t0))
     for e in refs.errors[:20]:
         log("  could not read: %s" % e)
+    return ctx
+
+
+RANK = {"delete": 0, "keep": 1, "remove": 0, "strip": 1, "untouched": 2}
+
+
+def second_scan(args, wts, root, mode, deleter, cands):
+    """Read every reference source again after planning and measuring, and keep
+    whatever the new plan keeps: a job may have written a checkpoint or a
+    receipt naming an old run since the first scan."""
+    log("second scan of references before deleting:")
+    ctx = collect(args, wts)
+    if ctx.refs.errors:
+        raise Refusal("some reference sources could not be read at the second scan; nothing deleted")
+    ck = next(c for c in ctx.checkouts if c.path == root)
+    plan = (plan_runs if mode == "runs" else plan_cleanroom)(ctx, ck, deleter.tracked_now())
+    again = {r.key: r for r in plan}
+    held = 0
+    for r in cands:
+        r2 = again.get(r.key)
+        if r2 is None:
+            r.action, held = ("keep" if mode == "runs" else "untouched"), held + 1
+            r.reasons.append("gone at the second scan")
+        elif RANK[r2.action] > RANK[r.action]:
+            r.action, r.reasons, held = r2.action, r2.reasons + ["second scan"], held + 1
+        if mode != "runs" and r2 is not None:
+            r.source_ok = r.source_ok and r2.source_ok
+    deleter.ctx, deleter.ck = ctx, ck
+    log("  %d runs kept that the first scan would have let go" % held)
+    return held
+
+
+def run(args, wts, root, targets, out_path, mode):
+    deleter = None
+    if args.apply:
+        # Checked and locked before anything is read: the plan is made under the lock.
+        deleter = Deleter(Checkout(root), None)
+        if not deleter.lock():
+            raise Refusal("another tools/mg prune --apply runs in this checkout; nothing deleted")
+    ctx = collect(args, wts)
+    refs = ctx.refs
+    if deleter:
+        deleter.ctx = ctx
+        deleter.ck = next(c for c in ctx.checkouts if c.path == root)
     if args.apply and refs.errors:
         raise Refusal("some reference sources could not be read, so a referenced run could be missed; nothing deleted")
 
@@ -1404,6 +1536,7 @@ def run(args, ctx, wts, root, targets, out_path, mode):
             cr = plan_cleanroom(ctx, ck, tracked)
             measure([r for r in cr if r.action != "untouched"], True)
             cs = summarize_cleanroom(cr)
+            plan_rows += cands + cr
             target = targets.get(ck.path, {}).get("target") or ""
             vol = next((v for v in volumes.get("list", []) if "volume:" + v["name"] == target), None)
             row = {"checkout": ck.path, "runs": total["runs"], "delete": total["delete"],
@@ -1426,6 +1559,7 @@ def run(args, ctx, wts, root, targets, out_path, mode):
         details.update({"checkouts": rows, "totals": tot, "volumes": volumes})
         counts = {"checkouts": len(rows), "delete": tot["runs_delete"], "bytes_freed": tot["runs_bytes_freed"],
                   "cleanroom_bytes_freed": tot["cleanroom_bytes_freed"], "orphan_volumes": len(orphans)}
+        write_plan(args, plan_rows)
         message = "prune: %d checkouts; would free %s of run folders and %s of cleanroom runtime state" % (
             len(rows), human(tot["runs_bytes_freed"]), human(tot["cleanroom_bytes_freed"]))
         return finish(out_path, "warn" if refs.errors else "pass", message, counts, [], details)
@@ -1446,6 +1580,7 @@ def run(args, ctx, wts, root, targets, out_path, mode):
                   "bytes_freed": total["bytes_freed"]}
         message = "prune: %d of %d runs would go, freeing %s" % (total["delete"], total["runs"], human(total["bytes_freed"]))
         if args.apply:
+            details["second_scan_kept"] = second_scan(args, wts, root, mode, deleter, cands)
             done = apply_runs(ctx, ck, deleter, cands, failures)
             details["applied"] = done
             counts.update({"deleted": done["deleted"], "bytes_freed": done["bytes_freed"]})
@@ -1467,6 +1602,7 @@ def run(args, ctx, wts, root, targets, out_path, mode):
         message = "prune --cleanroom: %d runs; would archive %d and free %s" % (
             s["runs"], s["remove"] + s["strip"], human(s["bytes_freed"]))
         if args.apply:
+            details["second_scan_kept"] = second_scan(args, wts, root, mode, deleter, cands)
             done = apply_cleanroom(ctx, ck, deleter, cands, failures)
             details["applied"] = done
             counts.update({"archived": done["archived_runs"], "removed": done["removed_runs"],
@@ -1482,16 +1618,20 @@ def run(args, ctx, wts, root, targets, out_path, mode):
         print_unmanaged(items, volumes)
         details["unmanaged"] = items
         details["volumes"] = volumes
-    for r in cands:
-        plan_rows.append({"job": r.job, "run": r.id, "action": r.action, "reasons": r.reasons, "bytes": r.bytes})
-    with open(os.path.join(args.run_dir, "plan.json"), "w") as f:
-        json.dump(plan_rows, f)
+    write_plan(args, cands)
     for f in failures:
         log("  failed: %s: %s" % (f["id"], f["message"]))
     status = "fail" if failures else ("warn" if refs.errors else "pass")
     if refs.errors and not failures:
         message += "; some reference sources could not be read (details.references.errors), so --apply refuses"
     return finish(out_path, status, message, counts, failures, details)
+
+
+def write_plan(args, runs):
+    """plan.json: every run considered, with its checkout, action and keep reasons."""
+    with open(os.path.join(args.run_dir, "plan.json"), "w") as f:
+        json.dump([{"checkout": r.checkout.path, "job": r.job, "run": r.id, "action": r.action,
+                    "reasons": r.reasons, "bytes": r.bytes} for r in runs], f)
 
 
 def finish(out_path, status, message, counts=None, failures=None, details=None):
