@@ -126,32 +126,32 @@ public struct SyncStatusPresentation {
         let values: (String, String, String?)
         switch state {
         case .localOnly:
-            values = ("icloud.slash", "sync.status.off.title", "sync.status.localOnly.detail")
+            values = (SyncSymbol.off, "sync.status.off.title", "sync.status.localOnly.detail")
         case .iCloudUnavailable(let reason):
-            values = ("person.icloud", "sync.status.unavailable.title", Self.unavailableKey(reason))
+            values = (SyncSymbol.waiting, "sync.status.unavailable.title", Self.unavailableKey(reason))
         case .paused(.decisionRequired):
             // The fence's reason is not exposed by this projection.
-            values = ("pause.circle", "sync.status.paused.title", "sync.needsYou.fence.none")
+            values = (SyncSymbol.waiting, "sync.status.paused.title", "sync.needsYou.fence.none")
         case .paused(.automaticOff), .paused(.userPaused):
             // P25.2: `userPaused` is never reported; the update hold reads as auto off.
-            values = ("pause.circle", "sync.status.automaticOff.title", "sync.status.automaticOff.detail")
+            values = (SyncSymbol.waiting, "sync.status.automaticOff.title", "sync.status.automaticOff.detail")
         case .needsAttention:
-            values = ("exclamationmark.icloud", "sync.status.needsAttention.title", nil)
+            values = (SyncSymbol.needsYou, "sync.status.needsAttention.title", nil)
         case .offline:
-            values = ("wifi.slash", "sync.status.offline.title", "sync.status.offline.detail")
+            values = (SyncSymbol.waiting, "sync.status.offline.title", "sync.status.offline.detail")
         case .syncingCollection:
-            values = ("arrow.triangle.2.circlepath.icloud", "sync.status.syncing.title", "sync.status.syncing.detail")
+            values = (SyncSymbol.moving, "sync.status.syncing.title", "sync.status.syncing.detail")
         case .syncingMedia:
-            values = ("photo.badge.arrow.down", "sync.status.syncingMedia.title", nil)
+            values = (SyncSymbol.moving, "sync.status.syncingMedia.title", nil)
         case .changesPending:
-            values = ("icloud.and.arrow.up", "sync.status.pending.title", "sync.status.pending.detail")
+            values = (SyncSymbol.waiting, "sync.status.pending.title", "sync.status.pending.detail")
         case .upToDate:
-            values = ("checkmark.icloud", "sync.status.upToDate.title", nil)
+            values = (SyncSymbol.upToDate, "sync.status.upToDate.title", nil)
         case .awaitingEvidence, nil:
             if setup == .configurationUnavailable {
-                values = ("person.icloud", "sync.status.unavailable.title", "sync.status.unavailable.setupNeeded")
+                values = (SyncSymbol.waiting, "sync.status.unavailable.title", "sync.status.unavailable.setupNeeded")
             } else {
-                values = ("icloud", "sync.button.label", "sync.counts.unknown")
+                values = (SyncSymbol.waiting, "sync.button.label", "sync.counts.unknown")
             }
         }
         symbol = values.0; titleKey = values.1; detailKey = values.2

@@ -1,5 +1,6 @@
 import AppModel
 import CoreBridge
+import DesignSystem
 import SwiftUI
 
 /// Synthetic Sync section examples for routes and previews: the production
@@ -7,6 +8,9 @@ import SwiftUI
 public enum SyncSettingsPreview {
     public enum Page: Equatable, Sendable {
         case settings, troubleshooting, issues, keepCollection, statusPopover
+        /// N23's panel drawn in the window, as the popover shows it: a window
+        /// capture on Mac does not include the popover's own window.
+        case statusPanel
         /// Settings as the tab layout shows it; held wide, the sections are a list beside the section (N15.1).
         case settingsInTabLayout
     }
@@ -38,6 +42,16 @@ private struct SyncSettingsPreviewScreen: View {
                 .sheet(isPresented: .constant(true)) {
                     MeguriKeepCollectionSheet(collection: collection, facts: Self.keepCollectionFacts(collection))
                 }
+        case .statusPanel:
+            NavigationStack {
+                SyncStatusPanel(collection: collection, openEntry: { _, _ in }, showSettings: { _ in })
+                    .padding()
+                    .frame(width: ContentWidth.primaryAction)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("sync.status.popover")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .toolbar { ToolbarItem(placement: .primaryAction) { CloudSyncStatusButton(collection: collection) } }
+            }
         case .statusPopover:
             NavigationStack {
                 Form {}

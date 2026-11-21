@@ -135,6 +135,8 @@ struct MeguriSetupPreviewSheet: View {
 /// Actual media facts shared by Settings and the status popover; contains no actions.
 struct MeguriMediaFactRows: View {
     let collection: ReviewCollection
+    /// The Sync section's issues row already gives the count (T19.5).
+    var showsNotTransferred = true
     private var sync: SyncCoordinator { collection.sync }
     static func isVisible(_ sync: SyncCoordinator) -> Bool {
         if sync.meguriStage == .mediaBlocked || sync.meguriRoutine == .mediaBlocked { return true }
@@ -145,10 +147,11 @@ struct MeguriMediaFactRows: View {
     var body: some View {
         if let accounting = sync.meguriAccounting {
             let affected = accounting.files.filter { $0.state != .transferred }
-            if !affected.isEmpty { Text(SyncText.format("sync.meguri.media.notTransferred", Int64(affected.count))) }
+            if showsNotTransferred, !affected.isEmpty { Text(SyncText.format("sync.meguri.media.notTransferred", Int64(affected.count))) }
             if accounting.remotePending > 0 { Text(SyncText.format("sync.meguri.media.remotePending", Int64(clamping: accounting.remotePending))) }
         } else if let result = sync.meguriRoundReport?.media, case .media(let media) = result.outcome {
-            if let pending = media.pending, let excluded = media.excluded, let count = SyncStatusCopy.sum(pending, excluded), count > 0 {
+            if showsNotTransferred, let pending = media.pending, let excluded = media.excluded,
+               let count = SyncStatusCopy.sum(pending, excluded), count > 0 {
                 Text(SyncText.format("sync.meguri.media.notTransferred", Int64(clamping: count)))
             }
             if let awaiting = media.awaiting, awaiting > 0 { Text(SyncText.format("sync.meguri.media.remotePending", Int64(clamping: awaiting))) }

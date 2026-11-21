@@ -124,12 +124,12 @@ import Testing
 
     @Test func waitingOrIssuesAloneKeepTheStateUnderneath() {
         let underneath: [(CloudPolicyStatusState, String, String)] = [
-            (.paused(.automaticOff), "sync.status.automaticOff.title", "pause.circle"),
-            (.offline, "sync.status.offline.title", "wifi.slash"),
-            (.syncingCollection, "sync.status.syncing.title", "arrow.triangle.2.circlepath.icloud"),
-            (.syncingMedia, "sync.status.syncingMedia.title", "photo.badge.arrow.down"),
-            (.changesPending, "sync.status.pending.title", "icloud.and.arrow.up"),
-            (.upToDate(asOfMilliseconds: 5), "sync.status.upToDate.title", "checkmark.icloud")
+            (.paused(.automaticOff), "sync.status.automaticOff.title", SyncSymbol.waiting),
+            (.offline, "sync.status.offline.title", SyncSymbol.waiting),
+            (.syncingCollection, "sync.status.syncing.title", SyncSymbol.moving),
+            (.syncingMedia, "sync.status.syncingMedia.title", SyncSymbol.moving),
+            (.changesPending, "sync.status.pending.title", SyncSymbol.waiting),
+            (.upToDate(asOfMilliseconds: 5), "sync.status.upToDate.title", SyncSymbol.upToDate)
         ]
         for (state, title, symbol) in underneath {
             let issues = SyncKinds.cloud(state: .needsAttention, stateWithoutAttention: state, attention: [.oversize: 4])

@@ -25,6 +25,13 @@ struct SyncSettingsSections: View {
             if selection != nil || sync.providerNeedsAttention {
                 SyncMainStatusRows(collection: collection, host: host)
             }
+            // N23.1: the media facts the status panel leaves out stay in the Sync section.
+            if selection == .meguri, MeguriMediaFactRows.isVisible(sync) {
+                VStack(alignment: .leading) { MeguriMediaFactRows(collection: collection, showsNotTransferred: false) }
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("settings.sync.meguri.mediaFacts")
+            }
             if selection != nil {
                 Toggle(SyncText.value("sync.settings.automatic"), isOn: Binding(
                     get: { sync.automaticSwitchValue }, set: { sync.setAutomatic($0) }))
@@ -540,28 +547,10 @@ struct SyncMainStatusRows: View {
     /// the Sync section, so its actions open that section, asking for N15.3's sheet or not.
     var showInSettings: ((_ keepCollection: Bool) -> Void)? = nil
     @Environment(\.appClock) private var clock
-    @State private var recovering = false
     private var sync: SyncCoordinator { collection.sync }
     private var status: SyncMainStatus { sync.mainStatus }
     private var meguri: Bool { sync.providerState?.selection == .meguri }
-    private var detail: String? {
-        let status = status
-        if let key = status.detailKey {
-            if let count = status.detailCount { return SyncText.format(key, Int64(clamping: count)) }
-            return SyncText.value(key)
-        }
-        // Both services use "Last synced" for a completed exchange (MP6.6).
-        if status.titleKey == "sync.status.upToDate.title" {
-            let instant: Int64? = meguri ? sync.meguriLastExchange : {
-                if case .upToDate(let at) = sync.status?.state { return at }
-                // T19.4: with only issues present the row shows the state underneath, detail included.
-                if case .upToDate(let at) = sync.status?.stateWithoutAttention { return at }
-                return nil
-            }()
-            if let instant { return SyncText.format("sync.status.upToDate.detail", SyncText.instant(instant, now: clock.now())) }
-        }
-        return nil
-    }
+    private var detail: String? { SyncStatusCopy.detail(sync, now: clock.now()) }
     var body: some View {
         let status = status
         // The detail lines sit under the title, beside the symbol, as a system row's subtitle does.
@@ -592,7 +581,7 @@ struct SyncMainStatusRows: View {
                 }
             }
         } icon: {
-            Image(systemName: status.symbol)
+            SyncStatusSymbol(status: status, iCloud: sync.symbolsAreICloud, secondary: true)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("settings.sync.status")
@@ -604,13 +593,16 @@ struct SyncMainStatusRows: View {
             Text(SyncText.value(SyncStatusPresentation.connectionErrorKey(failure))).foregroundStyle(.secondary)
                 .accessibilityIdentifier("settings.sync.connectionError")
         }
-        if let action = status.action { actionButton(action) }
+        if let action = status.action {
+            SyncStatusActionButton(collection: collection, action: action, host: host,
+                openEntry: openEntry, showInSettings: showInSettings, identifier: "settings.sync.statusAction")
+        }
         if status.hasIssues {
             NavigationLink {
                 if meguri { MeguriAffectedFilesPage(collection: collection) }
                 else { SyncIssuesPage(collection: collection) }
             } label: {
-                if let key = status.issuesRowKey, let count = meguriAffectedCount {
+                if let key = status.issuesRowKey, let count = MeguriAffectedCount.value(sync) {
                     Text(SyncText.format(key, Int64(clamping: count)))
                 } else {
                     Text(SyncText.format("sync.issues.row", Int64(status.issues.count)))
@@ -618,107 +610,6 @@ struct SyncMainStatusRows: View {
             }
             .accessibilityIdentifier("settings.sync.issues")
         }
-    }
-    private var meguriAffectedCount: UInt64? {
-        if let accounting = sync.meguriAccounting {
-            return UInt64(accounting.files.filter { $0.state != .transferred }.count)
-        }
-        if let result = sync.meguriRoundReport?.media, case .media(let media) = result.outcome { return UInt64(media.affected.count) }
-        return nil
-    }
-    /// One button, only for an action that can run now (N15.2).
-    @ViewBuilder private func actionButton(_ action: SyncStatusAction) -> some View {
-        let title = SyncText.value(action.titleKey)
-        let id = "settings.sync.statusAction"
-        switch action {
-        case .chooseCollection:
-            if meguri {
-                if sync.meguriCanChoose, !sync.meguriBusy {
-                    Button(title) { askKeepCollection() }
-                        .accessibilityIdentifier(id)
-                }
-            } else {
-                Button(title) {
-                    open(sync.status?.controls.decisionRequired == true ? .publicationChoice : .connect)
-                }
-                .accessibilityLabel(SyncText.value("sync.decision.action.label"))
-                .disabled(collection.cloudPreviewEntryUnavailableReason(.connect) != nil)
-                .accessibilityIdentifier(id)
-            }
-        case .setUpAgain, .resume:
-            Button(title) { open(.connect) }
-                .disabled(collection.cloudPreviewEntryUnavailableReason(.connect) != nil)
-                .accessibilityIdentifier(id)
-        case .tryAgain:
-            Button(title) { collection.requestSyncNow() }
-                .disabled(collection.syncNowAvailability() != .available || collection.navigation.sheet != nil)
-                .accessibilityIdentifier(id)
-        case .cancelOp:
-            if let recovery = sync.recovery {
-                CloudRecoveryCancelButton(collection: collection, recovery: recovery, label: title, identifier: id)
-            }
-        case .resumeOp:
-            if let recovery = sync.recovery {
-                // `resume_recovery_op` clears the update hold first (P25.2).
-                Button(title) { Task { await sync.resumeRecoveryOperation() } }
-                    .disabled(recovery.switchConflict || recovery.step == .cancelling)
-                    .accessibilityIdentifier(id)
-            }
-        case .copyDebugInfo, .repair:
-            // The damaged-collection screen (V19) is not built: Copy Debug Info
-            // is the one action that can run for that row.
-            if let callbacks = collection.configuration.fieldDiagnostics {
-                SyncCopyDebugInfoButton(callbacks: callbacks, sync: sync, identifier: id)
-            }
-        case .serviceRecovery:
-            Button(title) { recovering = true }
-                .disabled(collection.syncPresentation.serviceChanging)
-                .accessibilityIdentifier(id)
-                .alert(SyncText.value("sync.service.recovery.title"), isPresented: $recovering) {
-                    Button(SyncText.value("sync.service.recovery.confirm"), role: .destructive) {
-                        collection.syncPresentation.serviceChanging = true
-                        Task {
-                            collection.syncPresentation.serviceChangeFailed = !(await sync.recoverProviderHandoffToLocalOnly())
-                            collection.syncPresentation.serviceChanging = false
-                        }
-                    }
-                    Button(SyncText.value("sync.service.cancel"), role: .cancel) {}
-                } message: { Text(SyncText.value("sync.service.recovery.message")) }
-        case .meguriConnectionRetry:
-            Button(title) { sync.loadMeguriConnection() }
-                .disabled(sync.meguriBusy).accessibilityIdentifier(id)
-        case .meguriCancel:
-            if sync.meguriBusy {
-                Button(title, role: .cancel) { sync.cancelMeguriPreparation() }.accessibilityIdentifier(id)
-            }
-        case .meguriTryAgain:
-            // An unknown acceptance runs MP6.9's settling step; any other
-            // failure runs setup again from preparation (T19.5). The sheet that
-            // setup may open belongs to the Sync section, so outside Settings
-            // that section opens too.
-            if sync.meguriCanSettle {
-                Button(title) { sync.settleMeguriSetup() }.accessibilityIdentifier(id)
-            } else if sync.meguriRoutine == .acceptanceUnknown {
-                Button(title) { sync.settleMeguriRound() }
-                    .disabled(sync.meguriBusy).accessibilityIdentifier(id)
-            } else if sync.meguriCanChoose {
-                Button(title) { sync.startMeguriSetup(); showInSettings?(false) }.accessibilityIdentifier(id)
-            }
-        case .meguriFinishSetup:
-            if sync.meguriCanFinish {
-                Button(title) { sync.finishMeguriSetup() }.accessibilityIdentifier(id)
-            }
-        case .meguriSignIn, .meguriRetryMedia, .abandon, .checkDatabase:
-            // The sign-in fields are in the section; the others have no entry here.
-            EmptyView()
-        }
-    }
-    private func askKeepCollection() {
-        if let showInSettings { showInSettings(true) }
-        else { collection.syncPresentation.keepCollectionRequested = true }
-    }
-    private func open(_ entry: CloudSyncEntry) {
-        if let openEntry { openEntry(entry, host) } else { collection.presentCloudSync(entry, host: host) }
     }
 }
 

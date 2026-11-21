@@ -119,11 +119,13 @@ import Testing
     }
     @Test func meguriToolbarSymbolsFollowTheReportedPresentationAndBusyStages() {
         // T19.5: the symbol is the main status's; busy comes from the inputs, never a title.
-        let attention = "exclamationmark.arrow.triangle.2.circlepath"
-        let busy = "arrow.triangle.2.circlepath"
+        // N23.2 (round 10): one cloud family for both services.
+        let attention = SyncSymbol.waiting
+        let busy = SyncSymbol.moving
         let needsYou = SyncKinds.needsYouSymbol
         let stages: [(MeguriSetupStage, String, Bool)] = [
-            (.required, busy, false), (.preview, busy, false),
+            // N23.2: nothing moves before preparation or while the sheet asks.
+            (.required, attention, false), (.preview, attention, false),
             (.preparing, busy, true), (.collection, busy, true), (.media, busy, true),
             (.mediaBlocked, attention, false), (.acceptanceUnknown, attention, false),
             (.acceptedLocalIncomplete, attention, false), (.failed, needsYou, false)
@@ -134,10 +136,10 @@ import Testing
             #expect(presentation.isBusy == isBusy, "\(stage)")
         }
         let rounds: [(MeguriRoutineState, String, Bool)] = [
-            (.exchanging, busy, true), (.idle, "checkmark.circle", false), (.pending, "arrow.up.circle", false),
-            (.waiting, "arrow.up.circle", false), (.mediaBlocked, attention, false), (.authentication, needsYou, false),
+            (.exchanging, busy, true), (.idle, SyncSymbol.upToDate, false), (.pending, SyncSymbol.waiting, false),
+            (.waiting, SyncSymbol.waiting, false), (.mediaBlocked, attention, false), (.authentication, needsYou, false),
             (.acceptanceUnknown, attention, false), (.fullSyncRequired, needsYou, false),
-            (.network, attention, false), (.server, attention, false), (.cancelled, "arrow.up.circle", false)
+            (.network, attention, false), (.server, attention, false), (.cancelled, SyncSymbol.waiting, false)
         ]
         for (round, symbol, isBusy) in rounds {
             let presentation = MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: nil, routine: round)
@@ -154,7 +156,7 @@ import Testing
         }
         // P25.2, MP6.2: with Sync Automatically off an idle round reads as auto off, never "Paused".
         let manual = SyncKinds.meguri(.init(routine: .idle, automatic: false))
-        #expect(manual.symbol == "pause.circle" && manual.titleKey == "sync.status.automaticOff.title")
+        #expect(manual.symbol == SyncSymbol.waiting && manual.titleKey == "sync.status.automaticOff.title")
         let stopped = MeguriSyncStatusPresentation(stopped: true, connection: .authenticating, stage: .preparing, routine: .exchanging)
         #expect(!stopped.isBusy)
         let blocked = MeguriSyncStatusPresentation(stopped: false, connection: .blocked, stage: .media, routine: .exchanging)
