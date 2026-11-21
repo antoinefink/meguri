@@ -97,6 +97,7 @@ fn controlled_deck_delete_cancels_during_backup_and_when_queued() {
         decks::delete_controlled(
             &h.collection,
             vec![meguri_model::ids::DeckId(1)],
+            decks::ConfirmedLosses::Any,
             Arc::new(CancelBackup(cancel.clone())),
             cancel,
             ProgressSink::new()
@@ -115,7 +116,7 @@ fn controlled_deck_delete_cancels_during_backup_and_when_queued() {
         .engine
         .threads()
         .spawn("test-controlled-deck-delete", meguri_engine::Qos::Default, move |_| {
-            decks::delete_controlled(&c, vec![empty], Arc::new(NoBackup), token, ProgressSink::new())
+            decks::delete_controlled(&c, vec![empty], decks::ConfirmedLosses::Any, Arc::new(NoBackup), token, ProgressSink::new())
         })
         .unwrap();
     queued(&h.collection, "delete_decks");

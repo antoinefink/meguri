@@ -114,6 +114,12 @@ pub enum DeckRefusal {
     UnderDescendant,
     FilteredDeck,
     DefaultPreset,
+    /// `decks/decks` D8 step 6: the deletion's live counts grew past the
+    /// confirmed ones; the question shows again with these.
+    LossesChanged {
+        decks: u64,
+        cards: u64,
+    },
 }
 impl From<meguri_engine::decks::Refusal> for DeckRefusal {
     fn from(v: meguri_engine::decks::Refusal) -> Self {
@@ -123,6 +129,7 @@ impl From<meguri_engine::decks::Refusal> for DeckRefusal {
             meguri_engine::decks::Refusal::UnderDescendant => Self::UnderDescendant,
             meguri_engine::decks::Refusal::FilteredDeck => Self::FilteredDeck,
             meguri_engine::decks::Refusal::DefaultPreset => Self::DefaultPreset,
+            meguri_engine::decks::Refusal::LossesChanged { decks, cards } => Self::LossesChanged { decks, cards },
         }
     }
 }
@@ -134,6 +141,7 @@ impl From<DeckRefusal> for meguri_engine::decks::Refusal {
             DeckRefusal::UnderDescendant => Self::UnderDescendant,
             DeckRefusal::FilteredDeck => Self::FilteredDeck,
             DeckRefusal::DefaultPreset => Self::DefaultPreset,
+            DeckRefusal::LossesChanged { decks, cards } => Self::LossesChanged { decks, cards },
         }
     }
 }
