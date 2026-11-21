@@ -16,6 +16,8 @@
 //! adapters, and Set Due Date and Reset, which remember their input inside
 //! their own op, K6.6) and an op form that runs it as one op.
 
+pub mod column_sets;
+
 use meguri_model::changes::OpSource;
 use meguri_search::SearchMode;
 use meguri_search::config::{
