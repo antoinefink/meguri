@@ -84,7 +84,7 @@ let package = Package(
         .testTarget(name: "HomeTests", dependencies: ["Home"], swiftSettings: settings),
         .testTarget(name: "DeckOptionsTests", dependencies: ["DeckOptions", "AppModel"], swiftSettings: settings),
         .testTarget(name: "HeatmapKitTests", dependencies: ["HeatmapKit"], swiftSettings: settings),
-        .testTarget(name: "ReviewTests", dependencies: ["Review", "AppModel", "Settings"], swiftSettings: settings),
+        .testTarget(name: "ReviewTests", dependencies: ["Review", "AppModel", "DesignSystem", "Settings"], swiftSettings: settings),
         .testTarget(
             name: "CardRenderingTests",
             dependencies: [

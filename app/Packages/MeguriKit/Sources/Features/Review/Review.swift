@@ -117,6 +117,7 @@ struct ReviewStatusLayout<Content: View>: View {
             ScrollView(.vertical) {
                 content()
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: Self.columnWidth ?? .infinity)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: max(0, viewport.size.height))
             }
@@ -126,6 +127,16 @@ struct ReviewStatusLayout<Content: View>: View {
             .accessibilityValue(Text(verbatim: diagnosticValue ?? ""))
             #endif
         }
+    }
+    /// iPad and Mac keep a state's text in a centred column, the touch
+    /// answer row's width; iPhone keeps the full width (N16.4, N16.6).
+    private static var columnWidth: CGFloat? {
+        #if os(macOS)
+        ContentWidth.readable
+        #else
+        // By idiom, as the shell chooses its layout (N13.1).
+        UIDevice.current.userInterfaceIdiom == .pad ? ContentWidth.readable : nil
+        #endif
     }
 }
 
@@ -158,7 +169,7 @@ struct ReviewLayout<Card: View>: View {
     /// The window's own toolbar holds the corners (N3); the card sits between it and the answers.
     private var macBody: some View {
         VStack(spacing: 0) {
-            readingColumn
+            cardRegion
             ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
             // The window has no bottom inset: the bar is its last row (N16.1).
             if showsProgress { ReviewProgressBar(progress: progress) }
@@ -192,7 +203,7 @@ struct ReviewLayout<Card: View>: View {
     private var touchBody: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                readingColumn
+                cardRegion
                 ReviewAnswerBar(phase: phase, states: states, enabled: enabled, reveal: reveal, rate: rate)
             }
             .background(.token(.cardPage))
@@ -241,6 +252,8 @@ struct ReviewLayout<Card: View>: View {
     }
     #endif
     /// The card under any notice; a long notice scrolls within its limit, so the answers stay in reach.
+    /// Both take the window's full width on every device: card styling is written
+    /// for a card that fills the window (N16.4, changed 2026-11-20).
     private var cardRegion: some View {
         GeometryReader { middle in
             VStack(spacing: 0) {
@@ -269,32 +282,14 @@ struct ReviewLayout<Card: View>: View {
         }
     }
     private var showsProgress: Bool { phase == .question || phase == .answer || phase == .transition }
-    /// iPad and Mac keep the card, its notice and the states in one centred
-    /// column, the answer row's width; iPhone keeps the full width (N16.4).
-    private var readingColumn: some View {
-        cardRegion
-            .frame(maxWidth: Self.columnWidth)
-            .frame(maxWidth: .infinity)
-    }
-    private static var columnWidth: CGFloat? {
-        #if os(macOS)
-        ContentWidth.readable
-        #else
-        // By idiom, as the shell chooses its layout (N13.1): an unfolded
-        // iPhone is wide too, and its answer row splits at the fold instead.
-        UIDevice.current.userInterfaceIdiom == .pad ? ContentWidth.readable : nil
-        #endif
-    }
 }
 
-/// The session's progress as a thin grey system bar: no text, no accent
-/// colour, and not a control (N16.1).
+/// The session's progress as a thin grey bar: no text, no accent colour,
+/// and not a control (N16.1).
 struct ReviewProgressBar: View {
     let progress: ReviewSessionProgress
     var body: some View {
-        ProgressView(value: progress.fraction)
-            .progressViewStyle(.linear)
-            .tint(.secondary)
+        bar
             // Read as text: it takes no input, and as a progress control the
             // audit asks a full hit region of this thin bar.
             .accessibilityElement(children: .ignore)
@@ -303,6 +298,34 @@ struct ReviewProgressBar: View {
             .accessibilityValue(Text("\(progress.answered) of \(progress.total)", bundle: .module))
             .accessibilityIdentifier("review.session.progress")
     }
+    #if os(macOS)
+    /// Drawn on the Mac (exception, N16.1): the system's linear indicator
+    /// draws its rounded track inset in its frame, so it could not lie on
+    /// the window's bottom edge or reach its sides. This bar fills its frame:
+    /// a track in a quaternary fill, the value in the secondary one.
+    private var bar: some View {
+        Rectangle()
+            .fill(.quaternary)
+            .overlay(alignment: .leading) {
+                GeometryReader { track in
+                    Rectangle()
+                        .fill(.secondary)
+                        .frame(width: track.size.width * min(1, max(0, progress.fraction)))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: Self.thickness)
+    }
+    /// About the system indicator's track.
+    private static let thickness: CGFloat = 4
+    #else
+    /// The system's linear indicator lies on the screen's bottom edge as it is.
+    private var bar: some View {
+        ProgressView(value: progress.fraction)
+            .progressViewStyle(.linear)
+            .tint(.secondary)
+    }
+    #endif
 }
 
 /// A review state said in plain text: a title, an optional message and its
