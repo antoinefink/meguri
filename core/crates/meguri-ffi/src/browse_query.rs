@@ -762,14 +762,16 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 #[derive(Debug, Default)]
 pub struct Newest {
     issued: std::sync::atomic::AtomicU64,
-    running: Mutex<Option<(u64, Arc<meguri_engine::CancelToken>)>>,
+    /// The newest call that reached `start` (whether its job started or
+    /// not), and the token of the job it started.
+    running: Mutex<(u64, Option<Arc<meguri_engine::CancelToken>>)>,
 }
 
 impl Newest {
     const fn new() -> Newest {
         Newest {
             issued: std::sync::atomic::AtomicU64::new(0),
-            running: Mutex::new(None),
+            running: Mutex::new((0, None)),
         }
     }
 
@@ -779,22 +781,23 @@ impl Newest {
     }
 
     /// Starts `start` for `ticket` after cancelling an older job; a call
-    /// whose ticket a newer job already holds is refused `Cancelled`, so it
-    /// never cancels that job.
+    /// older than one that already reached here is refused `Cancelled`, so
+    /// it never cancels a newer job, even when that one failed to start.
     fn start(
         &self,
         ticket: u64,
         start: impl FnOnce() -> Result<meguri_engine::JobHandle, CoreError>,
     ) -> Result<meguri_engine::JobHandle, CoreError> {
         let mut running = lock(&self.running);
-        if running.as_ref().is_some_and(|(newer, _)| *newer > ticket) {
+        if running.0 > ticket {
             return Err(CoreError::Cancelled);
         }
-        if let Some((_, older)) = running.take() {
+        running.0 = ticket;
+        if let Some(older) = running.1.take() {
             older.cancel();
         }
         let handle = start()?;
-        *running = Some((ticket, Arc::clone(&handle.cancel)));
+        running.1 = Some(Arc::clone(&handle.cancel));
         Ok(handle)
     }
 }
@@ -1085,6 +1088,23 @@ pub fn start_browse_selection_counts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_older_call_never_starts_after_a_newer_one_reached_the_slot() {
+        let newest = Newest::default();
+        let (first, second) = (newest.ticket(), newest.ticket());
+        let refused = || Err(CoreError::Unavailable { reason: "suspended".into() });
+        // The newer call reaches the slot first and fails to start.
+        assert!(matches!(newest.start(second, refused), Err(CoreError::Unavailable { .. })));
+        // The older one is refused without starting, though no job runs.
+        let mut started = false;
+        let result = newest.start(first, || {
+            started = true;
+            refused()
+        });
+        assert_eq!(result.map(|_| ()), Err(CoreError::Cancelled));
+        assert!(!started);
+    }
 
     #[test]
     fn offsets_cross_in_utf16_units() {
