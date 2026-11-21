@@ -15,6 +15,10 @@
 //! - `engine.find_replace_scan_all_notes`: the all-notes target with a
 //!   find text no note holds: the compute phase alone (nothing written).
 //!
+//! Each sample is timed alone after a WAL checkpoint, as the app
+//! checkpoints when idle (U109); back to back, the log grows and every
+//! later sample is slower.
+//!
 //! Sizes come from `$MEGURI_BENCH_SIZES` (comma-separated, default
 //! `10k,150k`); sizes count cards. The result goes to
 //! `$MEGURI_BENCH_RESULTS/bulk.json`. On Apple hosts (`tools/mg bench-mac`)
@@ -81,6 +85,29 @@ fn regex(find: &str, replace: &str) -> FindReplace {
     }
 }
 
+/// The WAL checkpointed, as the app does between operations when it is idle
+/// (U109), so each sample starts from a short write-ahead log instead of
+/// the growing one of back-to-back bulk rewrites.
+fn checkpoint(collection: &Collection) {
+    collection
+        .submit_maintenance(
+            meguri_engine::executor::catalog::WAL_CHECKPOINT,
+            Duration::from_secs(1),
+            |writer| Ok(writer.checkpoint().map(drop)?),
+        )
+        .wait()
+        .expect("the checkpoint runs");
+}
+
+/// `op` timed alone, after a checkpoint.
+#[allow(clippy::disallowed_methods)] // A bench may read the wall clock.
+fn timed(collection: &Collection, op: impl FnOnce()) -> Duration {
+    checkpoint(collection);
+    let started = std::time::Instant::now();
+    op();
+    started.elapsed()
+}
+
 /// Marks every field of the target's notes, or removes the mark again.
 fn toggle(collection: &Collection, target: &NoteTarget, marked: bool) -> u64 {
     let request = if marked {
@@ -132,9 +159,12 @@ fn main() -> ExitCode {
         let mut marked = false;
         group.bench_function(format!("find_replace_10k/{size}"), |b| {
             b.iter_custom(|iters| {
-                bulk.run(iters, |_| {
-                    assert_eq!(toggle(&collection, &listed, marked), notes.len() as u64);
+                bulk.run_timed(iters, |_| {
+                    let took = timed(&collection, || {
+                        assert_eq!(toggle(&collection, &listed, marked), notes.len() as u64);
+                    });
                     marked = !marked;
+                    took
                 })
             })
         });
@@ -147,9 +177,12 @@ fn main() -> ExitCode {
         let mut marked = false;
         group.bench_function(format!("find_replace_all_notes/{size}"), |b| {
             b.iter_custom(|iters| {
-                every.run(iters, |_| {
-                    assert_eq!(toggle(&collection, &NoteTarget::AllNotes, marked), all.len() as u64);
+                every.run_timed(iters, |_| {
+                    let took = timed(&collection, || {
+                        assert_eq!(toggle(&collection, &NoteTarget::AllNotes, marked), all.len() as u64);
+                    });
                     marked = !marked;
+                    took
                 })
             })
         });
@@ -163,9 +196,12 @@ fn main() -> ExitCode {
         let mut marked = false;
         group.bench_function(format!("find_replace_listed_all/{size}"), |b| {
             b.iter_custom(|iters| {
-                listed_all.run(iters, |_| {
-                    assert_eq!(toggle(&collection, &every_id, marked), all.len() as u64);
+                listed_all.run_timed(iters, |_| {
+                    let took = timed(&collection, || {
+                        assert_eq!(toggle(&collection, &every_id, marked), all.len() as u64);
+                    });
                     marked = !marked;
+                    took
                 })
             })
         });
