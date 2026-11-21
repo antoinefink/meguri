@@ -11,7 +11,7 @@ pub mod update;
 pub use add::{AddFieldIdentity, AddNote, AddScreenNote, Added, add, add_for_screen, add_in, bulk_add, bulk_add_in};
 pub use check::{FieldCheck, FieldState, check};
 pub use delete::{delete, delete_controlled, delete_in};
-pub use update::{UpdateNote, Updated, update, update_in};
+pub use update::{NotePatch, UpdateNote, Updated, patch, patch_for, patch_in, update, update_in};
 
 use crate::executor::catalog;
 use crate::undo::entry::StepKind;

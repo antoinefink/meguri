@@ -47,7 +47,10 @@ import Testing
         ("sync.trouble.replacedMedia.footer", "Media files that sync replaced are kept here until you delete them."),
         ("sync.now.unavailable.off", "Sync is off. Choose a service in Sync settings to sync this collection."),
         ("sync.meguri.now.unavailable.signIn.sync", "Sign in to Meguri Sync in Sync settings to sync."),
-        ("sync.meguri.now.unavailable.stopped.sync", "Meguri Sync is stopped. Open Sync settings to see what to do.")
+        ("sync.meguri.now.unavailable.stopped.sync", "Meguri Sync is stopped. Open Sync settings to see what to do."),
+        // T20.2 (round 10): the status panel's sign-in action.
+        ("sync.status.signIn", "Sign In…"), ("sync.status.openSettings", "Sync Settings"),
+        ("sync.status.cancelSetup", "Cancel Setup"), ("sync.button.label.off", "Sync")
     ]
     /// Every needs you text of T19.4 and T19.5.
     private static let needsYou: [(String, String)] = [

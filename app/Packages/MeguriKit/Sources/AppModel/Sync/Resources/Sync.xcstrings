@@ -4814,6 +4814,39 @@
           }
         }
       }
+    },
+    "sync.status.signIn": {
+      "comment": "sync/status-strings T20.2: the status panel's action for Meguri Sync's sign-in rows; opens the Sync section at the sign-in fields.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign In…"
+          }
+        }
+      }
+    },
+    "sync.status.cancelSetup": {
+      "comment": "sync/status-strings T20.2: the status panel's Cancel while setup prepares; never the default button.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel Setup"
+          }
+        }
+      }
+    },
+    "sync.button.label.off": {
+      "comment": "sync/status-strings T20.2: the sync button's accessibility label while no service is selected.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

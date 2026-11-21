@@ -276,6 +276,8 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
     public static let addNote = BridgeCall("add_note")
     public static let addNoteForScreen = BridgeCall("add_note_for_screen")
     public static let updateNote = BridgeCall("update_note")
+    public static let patchNote = BridgeCall("patch_note")
+    public static let cardDeck = BridgeCall("card_deck")
     public static let readNote = BridgeCall("read_note")
     public static let checkNoteFields = BridgeCall("check_note_fields")
     public static let addDefaults = BridgeCall("add_defaults")
@@ -655,7 +657,7 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         coreVersion, coreBuildInfo, setEventListener, cancelTokenNew, cancelTokenCancel, cancelTokenIsCancelled, renderCard, compareTypedAnswer, cardExcerpts,
         deckDeletionJobResult, addDeck, startRenameDeck, startMoveDecks, startCollapseDecks,
         selectDeck, deckDeletionSummary, startDeleteDecks, noteDeletionJobResult, addNote,
-        addNoteForScreen, updateNote, readNote, checkNoteFields, addDefaults, addNotetypeSelection, notetypeLastDeck, tagComplete, editorFieldHTML, startDeleteNotes, notetypeNames,
+        addNoteForScreen, updateNote, patchNote, cardDeck, readNote, checkNoteFields, addDefaults, addNotetypeSelection, notetypeLastDeck, tagComplete, editorFieldHTML, startDeleteNotes, notetypeNames,
         readNotetype, addNotetype, addStockNotetype, cloneNotetype, ensureImageOcclusionNotetype,
         renameNotetype, setNotetypeCss, setNotetypeFieldOptions, setNotetypeTemplateOptions, tagMutationJobResult,
         tagTree, flagNames, setTagsCollapsed, renameFlag, restoreFlagName,

@@ -4,7 +4,7 @@ Spec: search/filter-tokens
 Requirements: R1078, R1080, R1084, R1092, R1102, R1104, R1105, R1106, R1107, R1110, R1111, R1114, R1115, R1158, R1165; supersedes in part R1076, R1077, R1086 to R1091, R1093 to R1101, R1103, R1108, R1109, R1112, R1159, R1168 to R1170 (the Browse and Note Types plan §5 lists the notes)
 Anki: none (Meguri design, decided by Antoine 2026-11-20, round 8 option 2A; it reads and writes Anki search text by the 26.09.3 grammar)
 Scenarios: none; tests in `core/crates/meguri-search/tests/` (T16)
-Status: Approved 2026-11-20 (R1232). Approved by Antoine in chat (round 8, decided 2026-11-20, `docs/design/decisions.md` row `browser`), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`).
+Status: Approved 2026-11-20 (R1232). Approved by Antoine in chat (round 8, decided 2026-11-20, `docs/design/decisions.md` row `browser`), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). The lines that carry the marker "changed 2026-11-21" with "U88a review", in any letter case or punctuation, are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/builder-spec-gaps-20261121.md`). Every other section is in force and unchanged.
 
 What Browse's search field holds and means (`docs/design/native-interface-contract.md` N21.2): plain words plus filter tokens, how they combine, how they become one Anki search that the existing search stack runs, how Anki search text typed, pasted or stored is read back into tokens, how the filter sidebar and the tokens stay in step, the suggestions, and the built-in saved searches. The grammar, the term meanings, the canonical writer and the builder stay `search/grammar`, `search/query-model`, `search/canonical-form` and `search/join-and-replace`; this file only says which built items a query makes. No syntax mode, no syntax reference and no canonical text are ever shown.
 
@@ -61,7 +61,7 @@ J4 writes them like the other field items: `Back:*apple*`, `"Notes Field:*x*"`, 
 1. Each value token gives one item: its value's built item when it has one value, otherwise the group OR of its values' items in their order. **is not** gives the negation of that item (J5).
 2. Each advanced token gives the parsed-text item of its text (J3, `field_text` unset).
 3. The text gives T5's items.
-4. The query's item is the group AND of 1 to 3 in order: tokens in their order, then the text's items. The run text is `build` of that item (J4). The empty query gives the empty text, which runs the whole collection (`search/query-model` Q2).
+4. The query's item is the group AND of 1 to 3 in order: tokens in their order, then the text's items. The run text is `build` of that item (J4). The empty query gives the empty text, which runs the whole collection (`search/query-model` Q2). Changed 2026-11-21 (U88a review): so does any query for which 1 to 3 give no item (no token, and a text that T5 turns into no items, such as White_Space only); `build` is not called then, since a group of no items is refused (J3).
 
 Examples:
 
@@ -198,7 +198,7 @@ The list under the field while it has focus (Mac, iPad: under the field; iPhone 
 ### T12.4 Filter counts (core)
 
 - `filter_counts(mode, values)` returns, for each listed value, the number of rows of `mode` its built item finds (`search/query-model` Q4), or none when it could not be counted. It runs off the main thread, at lower priority than a search, and is cancelled by a newer call.
-- Decks, tags, note types, states and flags are counted with one grouped read per kind over one snapshot (a deck's count includes its subdecks; a tag's its descendants). Day values and saved searches run their run text as a count-only search.
+- Decks, tags, note types, states and flags are counted with one grouped read per kind over one snapshot (a deck's count includes its subdecks; a tag's its descendants). Day values and saved searches run their run text as a count-only search (changed 2026-11-21, U88a review: a saved search's run text is T4's run text of T7's reading of its stored text, so a saved `deck:*` counts what clicking it shows).
 - Results are cached by (value, mode, change seq); a change set that touches cards, notes, decks or tags drops the affected entries (`engine/change-stream`). Budget: every count of the sidebar and the first suggestion screen within 200 ms at 150,000 cards (`browser/workspace` V17).
 
 ## T13. Saved searches
@@ -242,6 +242,7 @@ The list under the field while it has focus (Mac, iPad: under the field; iPhone 
 |---|---|
 | T4's table | the run texts exactly |
 | T7's table; a text with a top-level OR; `deck:*`; empty | the queries exactly |
+| The empty query, a query whose text is White_Space only, and the text `deck:*` read by T7, in Notes on a collection holding a note without cards (changed 2026-11-21, U88a review) | each runs the empty text (T4 step 4, T7 step 1), and the result holds that note (`search/join-and-replace` J8) |
 | Property: random queries of T3 values (every kind, is and is not, one to four values, Unicode names, names J3.5 refuses) and plain text | T7.1: same query back, except the listed exceptions; and the run text returns the same ids as the query read by `search/query-model` on the fixture collection |
 | Texts `10:45`, `a-b`, `-xyz`, `a_b`, a quoted pair of words, and `deck:` with nothing after it | T5: one literal item; a plain item; a negated plain item; a plain item with a wildcard; one quoted item; the last results kept |
 | Sidebar: click, ⌘-click twice, ⌥-click, saved search click | T9's results; selected rows follow the tokens |

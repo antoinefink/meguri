@@ -298,7 +298,16 @@ def native_sheet_grabbers(document, root):
             return any(c.type == "collectionView" and geometry(c)
                        and c.raw.get("identifier") == "" and c.raw.get("label") == ""
                        for c in e.children)
+        # Round 10's status panel at compact width (N23.1): an unmarked scroll
+        # view whose unmarked content holds exactly the named panel boundary.
+        if (e.type == "scrollView" and geometry(e)
+                and all(k in e.raw and e.raw[k] in (None, "") for k in ("identifier", "label", "value"))):
+            return any(is_unmarked_container(c) and any(panel_boundary(g) for g in c.children) for c in e.children)
         return is_unmarked_container(e) and any(contains_sheet_content(c) for c in e.children)
+
+    def panel_boundary(e):
+        return (e.type == "other" and e.identifier == "sync.status.popover" and geometry(e)
+                and all(k in e.raw and e.raw[k] in (None, "") for k in ("label", "value")))
 
     recognized = set()
     for e in root.walk():

@@ -1220,7 +1220,24 @@ screens:
       `sync.meguri.setup.continue`, `sync.meguri.now.chooseCollection` or
       `sync.meguri.media.showAffected`, each opening Settings › Account & Sync; (3) the Account &
       Sync link. File › Sync Now and Y follow the same table: disabled with its reason, opening
-      Account & Sync, or running the normal round only in its last row (MP5). No media indicator. Identifiers as above.
+      Account & Sync, or running the normal round only in its last row (MP5). No media indicator. Identifiers as above. New version 2026-11-21 (round
+      10; native-interface-contract N23, sync/status-strings T20); it replaces the popover description
+      and both services' symbol lists above. For both services the popover (the sheet at compact
+      width) is the status panel: one status line (N23.2's shape and the title), the one sentence, a
+      progress bar while the work runs with the files left under it, a count line with issues, and
+      Sync Settings then the state's one action, trailing (N23.3). Symbols: N23.2's five shapes, the
+      icloud symbols for iCloud only and the drawn cloud shapes for Meguri Sync and Off (N23.4).
+      States: empty, Sync Off (Sync Settings alone); typical, Up to Date; loading, Syncing… or a
+      setup transfer with its bar; error, a needs you sentence with its action; overflow, the
+      largest text sizes (the sheet scrolls, the buttons stack). Identifiers: sync.status.button,
+      sync.status.mediaIndicator, sync.status.popover, sync.status.panel.status,
+      sync.status.panel.progress, sync.status.panel.filesLeft, sync.status.settings,
+      sync.status.syncNow, sync.status.action. Routes: settings/sync/panel/<state> (the panel drawn
+      in the window: off, meguri-up-to-date, meguri-syncing, meguri-setup-media, meguri-preparing,
+      meguri-round-failed, meguri-sign-in-refused, meguri-choose-collection, meguri-blocked,
+      meguri-media-blocked, meguri-acceptance-unknown, icloud-up-to-date, icloud-syncing,
+      icloud-needs-you, icloud-no-account, icloud-setup-needed, icloud-issues, icloud-not-set-up) and settings/sync/status/<state> (the popover from the toolbar: off,
+      meguri-up-to-date, meguri-setup-media).
   - id: sync.connect
     title: Connect to iCloud
     units: [U166, U161]

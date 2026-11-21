@@ -16,6 +16,8 @@ private struct ReviewDestination: View {
     var body: some View {
         let showsStatus = collection.sync.needsUser || collection.syncPresentation.statusOwnsInput
         ReviewView(model: model, walk: walk, status: showsStatus ? AnyView(CloudSyncStatusButton(collection: collection)) : nil,
+            editNote: ReviewEditNote(flow: collection.editNoteFlow, open: { Task { await collection.openEditNote() } },
+                form: AnyView(EditNoteView(collection: collection))),
             visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } }
     }
 }
