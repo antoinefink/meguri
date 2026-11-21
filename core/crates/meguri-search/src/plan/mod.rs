@@ -4,7 +4,7 @@
 //! and the run errors that need no database (`errors.md` E3).
 
 mod history;
-mod names;
+pub(crate) mod names;
 mod props;
 pub mod sort;
 pub mod sql;

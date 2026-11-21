@@ -21,13 +21,19 @@ enum Piece {
 impl Query {
     /// F2-F6.
     pub fn canonical_text(&self) -> String {
-        let mut out = String::new();
         // F2.2: a search that is one group loses one level of brackets.
         let start = match self.node(self.root()).kind {
             NodeKind::Group(inside) => inside,
             _ => self.root(),
         };
-        let mut stack = vec![Piece::Node(start)];
+        self.canonical_text_of(start)
+    }
+
+    /// F3-F6 for the item at `id` as it stands inside a longer search: a
+    /// group keeps its brackets.
+    pub fn canonical_text_of(&self, id: crate::ast::NodeId) -> String {
+        let mut out = String::new();
+        let mut stack = vec![Piece::Node(id)];
         while let Some(piece) = stack.pop() {
             let id = match piece {
                 Piece::Text(text) => {
