@@ -62,6 +62,13 @@ MEGURI_MAC_AGENT_PROFILE_STYLE = $(MEGURI_CODE_SIGN_STYLE_$(MEGURI_SIGNING))
 MEGURI_MAC_AGENT_PROFILE_SPECIFIER =
 CODE_SIGN_STYLE[sdk=macosx*] = $(MEGURI_MAC_AGENT_PROFILE_STYLE)
 PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*] = $(MEGURI_MAC_AGENT_PROFILE_SPECIFIER)
+// The owner-requested real copy on a phone (run --real-copy) pins installed
+// profiles by UUID, as the Mac route does with the settings above. Defaults
+// keep every other build unchanged.
+MEGURI_DEVICE_PROFILE_STYLE = $(MEGURI_CODE_SIGN_STYLE_$(MEGURI_SIGNING))
+MEGURI_DEVICE_PROFILE_SPECIFIER =
+CODE_SIGN_STYLE[sdk=iphoneos*] = $(MEGURI_DEVICE_PROFILE_STYLE)
+PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*] = $(MEGURI_DEVICE_PROFILE_SPECIFIER)
 
 // Entitlements (R2041, KTD22). Mac: Meguri-macOS[-Dev][-AdHoc].entitlements,
 // -Dev for hook builds, -AdHoc without a signing team (Signing.xcconfig).
