@@ -135,7 +135,17 @@ public nonisolated struct NoteTypeDraft: Sendable, Hashable {
     /// Marks a row deleted (− or ⌫); refused while `deleteBlock` names a reason.
     @discardableResult public mutating func delete(_ id: Int) -> Bool {
         guard deleteBlock(id) == nil, let at = index(id), !state.rows[at].deleted else { return false }
-        record(.deleteField) { $0.rows[at].deleted = true }
+        let base = Int(base.sortField)
+        record(.deleteField) { state in
+            state.rows[at].deleted = true
+            // The Sort radio leaves a crossed-out row for the field the save would
+            // sort by (S3 step 4: the base's index, lowered to the last field), so
+            // the sort field never changes unseen.
+            if state.sortRow == id {
+                let kept = state.rows.filter { !$0.deleted }
+                if let row = kept[safe: min(base, kept.count - 1)] { state.sortRow = row.id }
+            }
+        }
         return true
     }
 

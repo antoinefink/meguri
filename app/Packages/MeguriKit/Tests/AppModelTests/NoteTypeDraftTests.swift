@@ -90,17 +90,22 @@ import Testing
 
     @Test func theSortRadioAndACrossedOutSortField() {
         var draft = NoteTypeDraft(Self.record())
-        let changed9 = draft.setSortField(2)
-        #expect(changed9)
-        #expect(draft.structureDraft().sortField == 2 && draft.changesStructure)
-        let changed10 = draft.setSortField(2)
-        #expect(!changed10)
-        let changed11 = draft.delete(2)
-        #expect(changed11)
-        // A crossed-out sort field leaves the choice to the save (S3 step 4).
-        #expect(draft.structureDraft().sortField == nil)
-        let changed12 = draft.setSortField(2)
-        #expect(!changed12, "a crossed-out row takes no radio")
+        let set = draft.setSortField(2)
+        #expect(set && draft.structureDraft().sortField == 2 && draft.changesStructure)
+        let again = draft.setSortField(2)
+        #expect(!again)
+        // Crossing out the sort field moves the radio, in the same step, to the
+        // field the save would sort by (S3 step 4: the base's index 0 here).
+        let deleted = draft.delete(2)
+        #expect(deleted && draft.sortRow == 0 && draft.structureDraft().sortField == 0)
+        let crossed = draft.setSortField(2)
+        #expect(!crossed, "a crossed-out row takes no radio")
+        let undone = draft.undo()
+        #expect(undone == .deleteField && draft.sortRow == 2)
+        // A base sort field past the end of the kept fields falls to the last one.
+        var last = NoteTypeDraft(Self.record(sort: 2))
+        _ = last.delete(2)
+        #expect(last.sortRow == 1 && last.structureDraft().sortField == 1)
     }
 
     @Test func renamesAndOptionsAreNotStructural() {

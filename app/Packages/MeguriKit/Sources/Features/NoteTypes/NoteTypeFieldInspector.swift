@@ -27,7 +27,7 @@ struct NoteTypeFieldInspector: View {
                     TextField(text: $name) { Text("noteTypes.inspector.name", bundle: .module) }
                         .focused($focus, equals: .name)
                         .autocorrectionDisabled()
-                        .onSubmit { commitName(row) }
+                        .onSubmit { Task { await commitName(name, row: row.id) } }
                         .accessibilityIdentifier("noteTypes.fields.inspector.name")
                     if let refusal = model.renameRefusal, refusal.row == row.id, model.renaming != row.id {
                         Text(NoteTypesStrings.refusal(refusal.refusal, locale: locale))
@@ -44,12 +44,12 @@ struct NoteTypeFieldInspector: View {
                         Text("noteTypes.inspector.rtl", bundle: .module)
                     }
                     .accessibilityIdentifier("noteTypes.fields.inspector.rtl")
-                    TextField(text: $placeholder) {
+                    TextField(text: $placeholder, prompt: Text("noteTypes.inspector.placeholderPrompt", bundle: .module)) {
                         Text("noteTypes.inspector.placeholder", bundle: .module)
                         Text("noteTypes.inspector.placeholderHelp", bundle: .module)
                     }
                     .focused($focus, equals: .placeholder)
-                    .onSubmit { commitPlaceholder(row) }
+                    .onSubmit { commitPlaceholder(placeholder, row: row.id) }
                     .accessibilityIdentifier("noteTypes.fields.inspector.placeholder")
                 } header: {
                     Text("noteTypes.inspector.title", bundle: .module)
@@ -59,35 +59,58 @@ struct NoteTypeFieldInspector: View {
         }
         .formStyle(.grouped)
         .task(id: row) { load() }
-        .onChange(of: focus) { previous, _ in
-            guard let row else { return }
-            if previous == .name { commitName(row) }
-            if previous == .placeholder { commitPlaceholder(row) }
+        .onChange(of: focus) { previous, now in
+            // Typed text belongs to the row it was typed for, even when the
+            // selection moves in the same update.
+            if let previous, let editing = editingRow { commit(previous, row: editing) }
+            editingRow = now == nil ? nil : row?.id
+            if now != nil { refreshPending() } else { model.pendingEdits[Self.pendingKey] = nil }
+        }
+        .onChange(of: name) { _, _ in refreshPending() }
+        .onChange(of: placeholder) { _, _ in refreshPending() }
+        .onDisappear {
+            if let focus, let editing = editingRow { commit(focus, row: editing) }
+            model.pendingEdits[Self.pendingKey] = nil
         }
         .accessibilityIdentifier("noteTypes.fields.inspector")
     }
 
+    private static let pendingKey = "inspector"
+    /// The row the focused field was typed for.
+    @State private var editingRow: Int?
+
     private func load() {
         guard let row else { return }
-        if focus != .name { name = row.name }
-        if focus != .placeholder { placeholder = row.field.description }
+        if focus != .name || editingRow != row.id { name = row.name }
+        if focus != .placeholder || editingRow != row.id { placeholder = row.field.description }
+    }
+
+    private func refreshPending() {
+        guard focus != nil, let editing = editingRow else { return }
+        let typedName = name, typedPlaceholder = placeholder, which = focus
+        model.pendingEdits[Self.pendingKey] = {
+            if which == .name { await commitName(typedName, row: editing) } else { commitPlaceholder(typedPlaceholder, row: editing) }
+        }
+    }
+
+    private func commit(_ field: Field, row: Int) {
+        let typedName = name, typedPlaceholder = placeholder
+        switch field {
+        case .name: Task { await commitName(typedName, row: row) }
+        case .placeholder: commitPlaceholder(typedPlaceholder, row: row)
+        }
     }
 
     private func option(_ row: NoteTypeFieldRow, _ key: WritableKeyPath<StructureDraftField, Bool>) -> Binding<Bool> {
         Binding(get: { row.field[keyPath: key] }, set: { value in model.setOption(id, row: row.id) { $0[keyPath: key] = value } })
     }
 
-    private func commitName(_ row: NoteTypeFieldRow) {
-        let typed = name
-        guard typed != row.name else { return }
-        Task {
-            await model.commitRename(id, row: row.id, typed: typed)
-            if model.renameRefusal == nil { name = model.draft(id)?.row(row.id)?.name ?? typed }
-        }
+    private func commitName(_ typed: String, row: Int) async {
+        guard let current = model.draft(id)?.row(row), typed != current.name else { return }
+        await model.commitRename(id, row: row, typed: typed)
     }
 
-    private func commitPlaceholder(_ row: NoteTypeFieldRow) {
-        let typed = placeholder
-        model.setOption(id, row: row.id) { $0.description = typed }
+    private func commitPlaceholder(_ typed: String, row: Int) {
+        model.setOption(id, row: row) { $0.description = typed }
     }
 }

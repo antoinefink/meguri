@@ -22,9 +22,7 @@ public struct NoteTypesView: View {
     public var body: some View {
         split
             .navigationTitle(title)
-            #if os(macOS)
             .navigationSubtitle(subtitle)
-            #endif
             .toolbar { toolbar }
             .confirmationDialog(Text("noteTypes.discard.title", bundle: .module), isPresented: $model.confirmingRevert,
                                 titleVisibility: .visible) {
@@ -62,8 +60,8 @@ public struct NoteTypesView: View {
     }
 
     /// The list column fits the longest stock name with its count (N22.1).
-    private static let listMinimum: CGFloat = 180
-    private static let listIdeal: CGFloat = 220
+    private static let listMinimum: CGFloat = 200
+    private static let listIdeal: CGFloat = 260
     private static let listMaximum: CGFloat = 320
 
     @ViewBuilder private var detail: some View {
@@ -113,7 +111,9 @@ public struct NoteTypesView: View {
         ToolbarItem(placement: .principal) {
             Picker(selection: $model.tab) {
                 Text("noteTypes.tab.fields", bundle: .module).tag(NoteTypesModel.Tab.fields)
+                    .accessibilityIdentifier("noteTypes.list.tabFields")
                 Text("noteTypes.tab.cards", bundle: .module).tag(NoteTypesModel.Tab.cards)
+                    .accessibilityIdentifier("noteTypes.list.tabCards")
             } label: {
                 Text("noteTypes.tabs", bundle: .module)
             }
@@ -142,8 +142,8 @@ public struct NoteTypesView: View {
                     Text("noteTypes.save", bundle: .module)
                 }
             }
+            // ⌘S is File › Save's (N4).
             .buttonStyle(.borderedProminent)
-            .keyboardShortcut("s", modifiers: .command)
             .disabled(model.selection.map { !model.canSave($0) } ?? true)
             .accessibilityIdentifier("noteTypes.list.save")
         }
@@ -285,10 +285,10 @@ private struct NoteTypeListRow: View {
         HStack(spacing: Spacing.xSmall) {
             Text(verbatim: item.name)
                 .lineLimit(1)
-                .truncationMode(.middle)
             if edited {
                 Text("noteTypes.list.edited", bundle: .module)
                     .foregroundStyle(.secondary)
+                    .fixedSize()
                     .accessibilityIdentifier("noteTypes.list.edited.\(item.id)")
             }
             Spacer(minLength: Spacing.xSmall)
@@ -296,6 +296,8 @@ private struct NoteTypeListRow: View {
                 Text(notes, format: .number)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
+                    // The count is never cut; the name truncates first.
+                    .fixedSize()
             }
         }
         .accessibilityElement(children: .combine)

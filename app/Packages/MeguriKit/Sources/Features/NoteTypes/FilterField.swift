@@ -28,7 +28,13 @@ private struct FilterFieldRepresentable: NSViewRepresentable {
         field.placeholderString = prompt
         field.sendsSearchStringImmediately = true
         field.delegate = context.coordinator
+        // The clear button sends the action, not a text change.
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.searched(_:))
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // The field's own magnifier and clear buttons, named for the hierarchy checks.
+        (field.cell as? NSSearchFieldCell)?.searchButtonCell?.setAccessibilityIdentifier("noteTypes.list.filterSearch")
+        (field.cell as? NSSearchFieldCell)?.cancelButtonCell?.setAccessibilityIdentifier("noteTypes.list.filterClear")
         return field
     }
 
@@ -43,6 +49,7 @@ private struct FilterFieldRepresentable: NSViewRepresentable {
     final class Coordinator: NSObject, NSSearchFieldDelegate {
         var text: Binding<String>
         init(text: Binding<String>) { self.text = text }
+        @objc func searched(_ field: NSSearchField) { text.wrappedValue = field.stringValue }
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSSearchField else { return }
             text.wrappedValue = field.stringValue

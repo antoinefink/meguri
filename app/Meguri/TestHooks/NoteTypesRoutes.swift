@@ -51,7 +51,7 @@ extension TestHooks {
                 route == .noteTypeSave ? AnyView(NoteTypeSaveSheet(model: model)) : sheets(route, navigation)
             }
             return ShellLaunch(features: features, probe: false) { navigation in
-                model.presentQuestion = { navigation.present(.noteTypeSave) }
+                model.presentQuestion = { navigation.present(.noteTypeSave); return true }
                 model.dismissQuestion = { if navigation.sheet == .noteTypeSave { navigation.dismissSheet() } }
                 navigation.select(.section(.noteTypes))
                 Task { @MainActor in

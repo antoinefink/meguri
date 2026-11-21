@@ -423,6 +423,16 @@
         }
       }
     },
+    "noteTypes.inspector.hide": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hide Inspector"
+          }
+        }
+      }
+    },
     "noteTypes.inspector.name": {
       "localizations": {
         "en": {
@@ -453,12 +463,32 @@
         }
       }
     },
+    "noteTypes.inspector.placeholderPrompt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optional"
+          }
+        }
+      }
+    },
     "noteTypes.inspector.rtl": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Right-to-Left"
+          }
+        }
+      }
+    },
+    "noteTypes.inspector.show": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Inspector"
           }
         }
       }

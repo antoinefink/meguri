@@ -30,6 +30,7 @@ struct NoteTypeFieldsTab: View {
     let id: Int64
     @State private var sortOrder = [KeyPathComparator(\FieldLine.position)]
     @State private var showsInspector = true
+    @State private var columns = TableColumnCustomization<FieldLine>()
     @Environment(\.locale) private var locale
 
     private var draft: NoteTypeDraft? { model.draft(id) }
@@ -62,6 +63,18 @@ struct NoteTypeFieldsTab: View {
             Divider()
             bottomBar
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showsInspector.toggle()
+                } label: {
+                    Label { Text(LocalizedStringKey(showsInspector ? "noteTypes.inspector.hide" : "noteTypes.inspector.show"), bundle: .module) }
+                        icon: { Image(systemName: "sidebar.trailing") }
+                }
+                .help(Text(LocalizedStringKey(showsInspector ? "noteTypes.inspector.hide" : "noteTypes.inspector.show"), bundle: .module))
+                .accessibilityIdentifier("noteTypes.fields.inspectorToggle")
+            }
+        }
         .inspector(isPresented: $showsInspector) {
             NoteTypeFieldInspector(model: model, id: id)
                 .inspectorColumnWidth(min: Self.inspectorMinimum, ideal: Self.inspectorIdeal, max: Self.inspectorMaximum)
@@ -73,24 +86,28 @@ struct NoteTypeFieldsTab: View {
     private static let inspectorMaximum: CGFloat = 360
 
     private var table: some View {
-        Table(of: FieldLine.self, selection: selection, sortOrder: $sortOrder) {
+        Table(of: FieldLine.self, selection: selection, sortOrder: $sortOrder, columnCustomization: $columns) {
             TableColumn(Text("noteTypes.fields.name", bundle: .module), value: \.position) { line in
                 FieldNameCell(model: model, id: id, line: line)
             }
+            .customizationID("noteTypes.fields.columnName")
             TableColumn(Text("noteTypes.fields.sort", bundle: .module)) { line in
                 sortRadio(line)
             }
             .width(min: ControlMetrics.minimumTarget, ideal: ControlMetrics.minimumTarget * 1.5)
+            .customizationID("noteTypes.fields.columnSort")
             TableColumn(Text("noteTypes.fields.usedOn", bundle: .module), value: \.usedOnSortKey) { line in
                 usedOn(line)
             }
+            .customizationID("noteTypes.fields.columnUsedOn")
             TableColumn(Text("noteTypes.fields.notes", bundle: .module), value: \.notesSortKey) { line in
                 notes(line)
             }
+            .customizationID("noteTypes.fields.columnNotes")
         } rows: {
             ForEach(sortedLines) { line in
                 TableRow(line)
-                    .draggable(String(line.id))
+                    .draggable(Self.dragPayload(id, line.id))
             }
             .dropDestination(for: String.self) { index, payload in
                 move(payload, to: index)
@@ -135,11 +152,13 @@ struct NoteTypeFieldsTab: View {
         if let names = line.usedOn {
             if names.isEmpty {
                 Text("noteTypes.fields.notUsed", bundle: .module).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("noteTypes.fields.usedOn.\(line.id)")
             } else {
                 Text(verbatim: names.joined(separator: ", "))
                     .foregroundStyle(line.deleted ? .secondary : .primary)
                     .strikethrough(line.deleted)
                     .lineLimit(1)
+                    .accessibilityIdentifier("noteTypes.fields.usedOn.\(line.id)")
             }
         }
     }
@@ -158,6 +177,8 @@ struct NoteTypeFieldsTab: View {
                     .foregroundStyle(line.deleted ? .secondary : .primary)
                     .strikethrough(line.deleted)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("noteTypes.fields.notes.\(line.id)")
         }
     }
 
@@ -218,7 +239,7 @@ struct NoteTypeFieldsTab: View {
     /// can be dragged: a view sorted by a header keeps the order as it is.
     private func move(_ payload: [String], to index: Int) {
         guard inFieldOrder else { return }
-        let ids = Set(payload.compactMap(Int.init))
+        let ids = Set(payload.compactMap { Self.draggedRow(id, $0) })
         let offsets = IndexSet(lines.filter { ids.contains($0.id) }.map(\.position))
         guard !offsets.isEmpty else { return }
         model.moveFields(id, fromOffsets: offsets, toOffset: index)
@@ -259,7 +280,10 @@ private struct FieldNameCell: View {
             .onAppear {
                 text = line.name
                 focused = true
+                pending()
             }
+            .onChange(of: text) { _, _ in pending() }
+            .onDisappear { model.pendingEdits["rename"] = nil }
         } else {
             Text(verbatim: line.name)
                 .strikethrough(line.deleted)
@@ -273,6 +297,23 @@ private struct FieldNameCell: View {
     private func commit() {
         let typed = text
         Task { await model.commitRename(id, row: line.id, typed: typed) }
+    }
+
+    /// Save commits what the field holds first.
+    private func pending() {
+        let typed = text, row = line.id, id = id, model = model
+        model.pendingEdits["rename"] = { await model.commitRename(id, row: row, typed: typed) }
+    }
+}
+
+extension NoteTypeFieldsTab {
+    /// A row's drag text: only this note type's own table reads it back, so
+    /// text dropped from elsewhere moves nothing.
+    static func dragPayload(_ notetype: Int64, _ row: Int) -> String { "meguri-field:\(notetype):\(row)" }
+    static func draggedRow(_ notetype: Int64, _ payload: String) -> Int? {
+        let parts = payload.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0] == "meguri-field", parts[1] == Substring(String(notetype)) else { return nil }
+        return Int(parts[2])
     }
 }
 

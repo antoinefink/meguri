@@ -114,6 +114,24 @@ struct NativeCommandContext {
         collection.navigation.select(.section(.noteTypes))
     }
 
+    /// D3: File › Save (⌘S) saves the shown note type's draft, as the toolbar's Save does.
+    var noteTypeSaveShown: Bool {
+        host == .main && collection.navigation.section == .noteTypes && collection.navigation.sheet == nil
+            && collection.review == nil && collection.navigation.review == nil
+    }
+    var canSaveNoteType: Bool {
+        guard noteTypeSaveShown, let id = collection.noteTypes.selection else { return false }
+        return collection.noteTypes.canSave(id)
+    }
+    var noteTypeSaveAsks: Bool {
+        guard noteTypeSaveShown, let id = collection.noteTypes.selection else { return false }
+        return collection.noteTypes.saveAsks(id)
+    }
+    func saveNoteType() {
+        guard canSaveNoteType else { return }
+        collection.noteTypes.save()
+    }
+
     // MARK: Card
 
     var review: ReviewCoordinator? {
@@ -208,6 +226,11 @@ struct AppCommands: Commands {
             Button("New Deck…") { context?.newDeck() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(context?.canNewDeck != true)
+        }
+        CommandGroup(replacing: .saveItem) {
+            Button(LocalizedStringKey(context?.noteTypeSaveAsks == true ? "Save…" : "Save")) { context?.saveNoteType() }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(context?.canSaveNoteType != true)
         }
         CommandGroup(replacing: .importExport) {
             Button("Import Collection…") { context?.present(.collectionEntry) }

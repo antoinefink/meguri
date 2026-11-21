@@ -319,16 +319,24 @@ public final class ReviewCollection: ChangeFanoutSink {
         let value = NoteTypesModel(backend: CoreNoteTypesBackend())
         value.service = { [weak self] in self?.noteTypeSaveService ?? .other }
         value.writable = { [weak self] in self?.noteTypeWriteAllowed ?? false }
-        value.presentQuestion = { [weak self] in self?.navigation.present(.noteTypeSave) }
+        value.presentQuestion = { [weak self] in
+            guard let self, self.navigation.sheet == nil || self.navigation.sheet == .noteTypeSave else { return false }
+            self.navigation.present(.noteTypeSave)
+            return true
+        }
         value.dismissQuestion = { [weak self] in
             if self?.navigation.sheet == .noteTypeSave { self?.navigation.dismissSheet() }
         }
         noteTypesOwner = value
         return value
     }
-    /// `notetypes/draft-save` D3: Meguri Sync counts only with a ready binding.
+    /// `notetypes/draft-save` D3 counts Meguri Sync only with a ready binding.
+    /// Whether the binding is ready is read in the background and can be
+    /// unknown for a moment, so any Meguri Sync selection counts here: a
+    /// structural save then waits for U269's job and never runs on this
+    /// device alone while the server may hold the collection.
     var noteTypeSaveService: NoteTypeSaveService {
-        sync.providerState?.selection == .meguri && sync.meguriAutomaticSettingVisible ? .meguriSync : .other
+        sync.providerState?.selection == .meguri ? .meguriSync : .other
     }
     /// A note type save may start: the collection is open and ready, with no
     /// review, entry, export or provider handoff holding it.
@@ -1950,7 +1958,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             await previous?.value
             if !active {
                 await meguriSignInPreparationTask?.value
-                await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
+                await deckNamesOwner?.cancelAndDrain(); await deckOptionsOwner?.cancelAndDrain(); await noteTypesOwner?.cancelAndDrain(); await deckDeletionOwner?.cancelAndDrain(); await manualOwner?.cancelAndDrain(); await entryOwner?.cancelAndDrain(); await exportOwner?.cancelAndDrain()
             }
             await openTask?.value
             guard !closed, state != .unopened else { resuming = false; return }
@@ -2073,6 +2081,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         invalidateDeckActions()
         await deckNamesOwner?.cancelAndDrain()
         await deckOptionsOwner?.cancelAndDrain()
+        await noteTypesOwner?.cancelAndDrain()
         await deckDeletionOwner?.cancelAndDrain()
         _ = await selectionTask?.value
         await collapseTask?.value

@@ -95,14 +95,23 @@ public final class NoteTypesModel {
     @ObservationIgnored public var service: @MainActor () -> NoteTypeSaveService = { .other }
     /// Whether the collection takes a write now (no review, ready, not closing).
     @ObservationIgnored public var writable: @MainActor () -> Bool = { true }
-    /// Shows and closes the Save sheet (`SheetRoute.noteTypeSave`).
-    @ObservationIgnored public var presentQuestion: @MainActor () -> Void = {}
+    /// Shows the Save sheet (`SheetRoute.noteTypeSave`); false when another
+    /// sheet holds the window, and then nothing is asked or saved.
+    @ObservationIgnored public var presentQuestion: @MainActor () -> Bool = { true }
     @ObservationIgnored public var dismissQuestion: @MainActor () -> Void = {}
     /// D6's Save and Upload: Meguri Sync's structure save job (U269, U285).
     /// Not built yet: with no job, the sheet's Save and Upload is disabled
     /// and nothing is saved on this device alone (D3: never D5's local save
     /// for a schema-classified save with a ready binding).
-    @ObservationIgnored public var meguriSyncSave: (@MainActor (NotetypeStructureDraft, NotetypeDraftSummary) async -> Void)?
+    /// The job runs with the note type locked like a local save; it returns
+    /// when the save committed and throws the save's refusal otherwise
+    /// (`LossesChanged`, `Stale`), which is handled as D5 step 6 says.
+    @ObservationIgnored public var meguriSyncSave: (@MainActor (NotetypeStructureDraft, NotetypeDraftSummary) async throws -> Void)?
+    /// Text a view holds but has not committed (a rename field, the
+    /// inspector's Name or Placeholder), committed before Save reads the draft.
+    @ObservationIgnored public var pendingEdits: [String: @MainActor () async -> Void] = [:]
+    /// Raised when the collection goes: work started before must not land.
+    private var epoch: UInt64 = 0
     /// How long a summary read waits after the last change (W7's pause).
     @ObservationIgnored var summaryDelay: Duration = .milliseconds(300)
 
@@ -271,7 +280,8 @@ public final class NoteTypesModel {
     /// text. A refusal keeps the old name and is shown under the row.
     public func commitRename(_ id: Int64, row: Int, typed: String) async {
         guard let draft = draft(id), let at = draft.rows.firstIndex(where: { $0.id == row }) else { return }
-        let names = draft.rows.map(\.name)
+        // A crossed-out field's name is free (S4.2): it is left out of V5's comparison.
+        let names = draft.rows.map { $0.deleted ? "" : $0.name }
         let check: NotetypeFieldNameCheck
         do { check = try await backend.checkFieldName(typed, fields: names, renaming: UInt32(at)) } catch { return }
         switch check {
@@ -373,11 +383,15 @@ public final class NoteTypesModel {
     /// Save (⌘S): D2's summary of the draft as it is, then D3; the sheet
     /// when it asks, else the save at once with nothing confirmed.
     public func save() {
-        guard let id = selection, canSave(id), let draft = drafts[id] else { return }
-        renaming = nil; renameRefusal = nil
-        preparing = id
-        let revision = revisions[id]
+        guard let id = selection, canSave(id) else { return }
+        let epoch = epoch
         saveTask = Task {
+            // Typed text that is not committed yet goes into the draft first.
+            for commit in pendingEdits.values { await commit() }
+            guard self.epoch == epoch, canSave(id), let draft = drafts[id] else { return }
+            renaming = nil; renameRefusal = nil
+            preparing = id
+            let revision = revisions[id]
             defer { if preparing == id { preparing = nil } }
             let summary: NotetypeDraftSummary
             do { summary = try await backend.summary(draft.structureDraft()) } catch { refused(id, error); return }
@@ -414,7 +428,7 @@ public final class NoteTypesModel {
             }
             let service = service()
             if NoteTypeSaveDecision.asksAgain(confirmed: confirmed, shown: shown.decision, latest: latest, service: service) {
-                question = Question(notetypeId: id, name: draft.name, summary: latest, decision: .decide(latest, service: service))
+                ask(Question(notetypeId: id, name: draft.name, summary: latest, decision: .decide(latest, service: service)))
                 return
             }
             let route = NoteTypeSaveDecision.decide(latest, service: service).route
@@ -439,7 +453,10 @@ public final class NoteTypesModel {
     private func ask(_ question: Question) {
         preparing = nil
         self.question = question
-        presentQuestion()
+        if !presentQuestion() {
+            self.question = nil
+            failure = .notSaved
+        }
     }
 
     private func closeQuestion() {
@@ -449,23 +466,28 @@ public final class NoteTypesModel {
 
     private func submit(_ id: Int64, draft: NoteTypeDraft, confirmed: NotetypeConfirmedLosses, route: NoteTypeSaveDecision.Route,
                         summary: NotetypeDraftSummary) async {
-        guard route == .local else {
-            // D6: Meguri Sync's job (U269) owns the round, the save and the upload.
-            if let meguriSyncSave { await meguriSyncSave(draft.structureDraft(confirmed: confirmed), summary) }
-            return
-        }
+        let meguriSyncSave = meguriSyncSave
+        // D6: Meguri Sync's job (U269) owns the round, the save and the upload.
+        guard route == .local || meguriSyncSave != nil else { return }
         guard writable() else { failure = .notSaved; return }
         // D5 step 3's deck creations: the Fields tab sets no deck override.
+        let epoch = epoch
         progress = Progress(notetypeId: id)
         do {
-            try await backend.save(draft.structureDraft(confirmed: confirmed)) { [weak self] completed, total in
-                guard self?.progress?.notetypeId == id else { return }
-                self?.progress?.completed = completed
-                self?.progress?.total = total
+            if route == .local {
+                try await backend.save(draft.structureDraft(confirmed: confirmed)) { [weak self] completed, total in
+                    guard self?.progress?.notetypeId == id else { return }
+                    self?.progress?.completed = completed
+                    self?.progress?.total = total
+                }
+            } else if let meguriSyncSave {
+                try await meguriSyncSave(draft.structureDraft(confirmed: confirmed), summary)
             }
+            guard self.epoch == epoch else { return }
             progress = nil
             saved(id)
         } catch {
+            guard self.epoch == epoch else { return }
             progress = nil
             if case BridgeError.commitCompleted = error { saved(id); return }
             refused(id, error)
@@ -530,6 +552,7 @@ public final class NoteTypesModel {
             guard let record = try? await backend.read(id) else { readCounts(id); return }
             readCounts(id)
             guard record.base != records[id]?.base else { return }
+            if let draft = drafts[id], !draft.isEdited { drafts[id] = nil; draftChanged(id) }
             if let draft = drafts[id], draft.base.base != record.base, progress?.notetypeId != id {
                 // The draft keeps its base: Save meets `Stale` and offers Reload (D1).
                 changedElsewhere.insert(id)
@@ -543,6 +566,7 @@ public final class NoteTypesModel {
     /// The collection closed or was replaced: every draft and read goes.
     public func invalidate() {
         listToken &+= 1
+        epoch &+= 1
         saveTask?.cancel()
         countsTask?.cancel()
         for task in summaryTasks.values { task.cancel() }
@@ -552,6 +576,12 @@ public final class NoteTypesModel {
         phase = .idle; items = []; selection = nil; records = [:]; recordFailed = []; typeCounts = [:]; fieldCounts = [:]
         drafts = [:]; revisions = [:]; summaries = [:]; references = [:]; changedElsewhere = []; selectedField = [:]
         renaming = nil; renameRefusal = nil; preparing = nil; progress = nil; failure = nil; confirming = false
+    }
+
+    /// Waits for a save that runs (the app goes to the background or closes
+    /// the collection): a save is never cancelled halfway by the app.
+    public func cancelAndDrain() async {
+        await saveTask?.value
     }
 
     // MARK: Tests and test hooks

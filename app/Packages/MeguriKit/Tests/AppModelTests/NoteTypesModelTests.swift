@@ -157,7 +157,7 @@ import Testing
         backend.summaries = [Self.losing]
         let (model, _) = await open(backend)
         var presented = 0
-        model.presentQuestion = { presented += 1 }
+        model.presentQuestion = { presented += 1; return true }
         model.deleteField(7, row: 1)
         await model.settle()
         #expect(model.saveAsks(7), "Save… while the sheet will show")
@@ -302,6 +302,69 @@ import Testing
         await model.settle()
         #expect(model.changedElsewhere == [7])
         #expect(model.draft(7)?.base.base == [1, 2, 3], "the draft keeps its base, so Save meets Stale")
+    }
+}
+
+extension NoteTypesModelTests {
+    @Test func editsWaitWhileASaveRunsAndAForeignSheetAsksNothing() async {
+        let backend = FakeNoteTypesBackend()
+        backend.summaries = [Self.losing]
+        let (model, _) = await open(backend)
+        model.deleteField(7, row: 1)
+        model.presentQuestion = { false }
+        model.save()
+        await model.settle()
+        #expect(model.question == nil && model.failure == .notSaved && backend.saved.isEmpty && model.editable(7))
+    }
+
+    @Test func textNotCommittedYetGoesIntoTheDraftBeforeSave() async {
+        let (model, backend) = await open()
+        model.addField(7)
+        let row = model.renaming ?? 0
+        model.pendingEdits["rename"] = { await model.commitRename(7, row: row, typed: "Typed") }
+        model.save()
+        await model.settle()
+        #expect(backend.saved.last?.fields.last?.name == "Typed")
+    }
+
+    @Test func aCrossedOutNameIsFreeForAnotherField() async {
+        let (model, _) = await open()
+        model.deleteField(7, row: 2)
+        model.addField(7)
+        let row = model.renaming ?? 0
+        await model.commitRename(7, row: row, typed: "Extra")
+        #expect(model.renameRefusal == nil && model.draft(7)?.row(row)?.name == "Extra")
+    }
+
+    @Test func meguriSyncsJobLocksTheNoteTypeAndItsRefusalsAreHandled() async {
+        let backend = FakeNoteTypesBackend()
+        backend.summaries = [NotetypeDraftSummary(reasons: [.fieldsChanged], changes: [.fieldAdded(name: "Field 1")], losesContent: false)]
+        let (model, _) = await open(backend)
+        model.service = { .meguriSync }
+        var locked = false
+        model.meguriSyncSave = { _, _ in
+            locked = !model.editable(7)
+            throw BridgeError.stale(table: .notetypes, key: "7")
+        }
+        model.addField(7)
+        model.cancelRename()
+        model.save()
+        await model.settle()
+        model.confirm()
+        await model.settle()
+        #expect(locked && model.changedElsewhere == [7] && model.isEdited(7) && model.editable(7))
+    }
+
+    @Test func anUneditedDraftTakesTheNewerRecord() async {
+        let backend = FakeNoteTypesBackend()
+        let (model, _) = await open(backend)
+        model.renameField()
+        model.undo()
+        backend.records[7] = NotetypeRecord(id: 7, name: "Sample", kind: 0, sortField: 0, css: ".card {}", base: [9, 9],
+                                            fields: NoteTypeDraftTests.record().fields, templates: NoteTypeDraftTests.record().templates)
+        model.changesCommitted(.notetypes([7]))
+        await model.settle()
+        #expect(model.changedElsewhere.isEmpty && model.draft(7)?.base.base == [9, 9])
     }
 }
 

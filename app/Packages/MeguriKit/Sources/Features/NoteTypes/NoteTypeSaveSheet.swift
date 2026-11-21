@@ -23,6 +23,11 @@ public struct NoteTypeSaveSheet: View {
                 content(question)
             }
         }
+        // A save question ends only by Cancel or the confirm button.
+        .interactiveDismissDisabled(true)
+        #if os(iOS)
+        .presentationSizing(.form)
+        #endif
         .onDisappear { model.questionClosed() }
     }
 
@@ -38,6 +43,7 @@ public struct NoteTypeSaveSheet: View {
         }
         .padding(Spacing.large)
         .frame(width: ContentWidth.readable * 0.7)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("noteTypes.list.saveSheet")
         #else
         NavigationStack {
@@ -47,9 +53,10 @@ public struct NoteTypeSaveSheet: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { cancel }
-                ToolbarItem(placement: .confirmationAction) { confirm(question) }
+                ToolbarItem(placement: question.decision.destructive ? .destructiveAction : .confirmationAction) { confirm(question) }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("noteTypes.list.saveSheet")
         #endif
     }
@@ -61,12 +68,12 @@ public struct NoteTypeSaveSheet: View {
                 .font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("noteTypes.list.saveSheet.title")
+                .accessibilityIdentifier("noteTypes.list.saveSheetTitle")
             GroupBox {
                 VStack(alignment: .leading, spacing: Spacing.small) {
                     ForEach(Array(question.rows.enumerated()), id: \.offset) { index, row in
                         SaveRowView(row: row)
-                            .accessibilityIdentifier("noteTypes.list.saveSheet.row.\(index)")
+                            .accessibilityIdentifier("noteTypes.list.saveSheetRow.\(index)")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -78,19 +85,19 @@ public struct NoteTypeSaveSheet: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("noteTypes.list.saveSheet.sync")
+                .accessibilityIdentifier("noteTypes.list.saveSheetSync")
             }
             Text(verbatim: NoteTypesStrings.backup(device: device, locale: locale))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("noteTypes.list.saveSheet.backup")
+                .accessibilityIdentifier("noteTypes.list.saveSheetBackup")
         }
     }
 
     private var cancel: some View {
         Button(role: .cancel) { model.cancelQuestion() } label: { Text("noteTypes.save.cancel", bundle: .module) }
             .keyboardShortcut(.cancelAction)
-            .accessibilityIdentifier("noteTypes.list.saveSheet.cancel")
+            .accessibilityIdentifier("noteTypes.list.saveSheetCancel")
     }
 
     @ViewBuilder private func confirm(_ question: NoteTypesModel.Question) -> some View {
@@ -99,12 +106,12 @@ public struct NoteTypeSaveSheet: View {
         if question.decision.destructive {
             Button(role: .destructive) { model.confirm() } label: { label }
                 .disabled(!model.canConfirm)
-                .accessibilityIdentifier("noteTypes.list.saveSheet.confirm")
+                .accessibilityIdentifier("noteTypes.list.saveSheetConfirm")
         } else {
             Button { model.confirm() } label: { label }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!model.canConfirm)
-                .accessibilityIdentifier("noteTypes.list.saveSheet.confirm")
+                .accessibilityIdentifier("noteTypes.list.saveSheetConfirm")
         }
     }
 }
