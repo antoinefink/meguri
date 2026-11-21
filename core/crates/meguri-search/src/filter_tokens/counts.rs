@@ -241,7 +241,7 @@ impl CountPlan {
             }
         }
         // One statement per row set, at most COLUMNS columns each.
-        let mut by_rows: Vec<((Rows, bool), Vec<(usize, Query)>)> = Vec::new();
+        let mut by_rows: Vec<(Shape, Vec<(usize, Query)>)> = Vec::new();
         for (index, query) in shared {
             let scope = crate::plan::query_scope(&query);
             // Notes mode with card terms only: the cards are read alone and
@@ -277,6 +277,10 @@ impl CountPlan {
         CountPlan { mode, jobs, uncounted }
     }
 }
+
+/// The rows a shared statement reads, and whether they are cards read
+/// alone for Notes mode (matched to the notes read for the other items).
+type Shape = (Rows, bool);
 
 /// The count-only search of one text (T12.4).
 fn search_job(

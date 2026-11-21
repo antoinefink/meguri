@@ -970,7 +970,9 @@ fn scan(text: &str, cursor: usize, names: Option<&NameIndex>) -> Scanned {
             },
         };
         let mut range = lexer.input_range(start..end);
-        let holds = range.start < cursor && cursor <= range.end;
+        // An unclosed quote runs to the end of the text, the spaces G1 trims
+        // after it included.
+        let holds = range.start < cursor && (cursor <= range.end || unclosed);
         // D6.2: a term with an unclosed quote ends at the cursor.
         if holds && form.is_none() && unclosed {
             range.end = cursor;
@@ -1043,7 +1045,11 @@ fn typed_part(lexer: &Lexer, start: usize, end: usize, cursor: usize, form: Opti
     {
         to -= 1;
     }
-    let typed = lexer.string(from..to).replace("\\\"", "\"");
+    // Past the trimmed text (spaces inside an unclosed quote), spaces.
+    let inside = to.min(lexer.len());
+    let mut typed = lexer.string(from.min(inside)..inside);
+    typed.extend(std::iter::repeat_n(' ', to - inside));
+    let typed = typed.replace("\\\"", "\"");
     // G3 form 2: a `"` right after the key's colon.
     let chars = lexer.chars(start..lexer.len());
     let mut k = 0;
