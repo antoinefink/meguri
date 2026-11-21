@@ -316,7 +316,8 @@ struct SyncStatusActionButton: View {
                 Button(title) { sync.settleMeguriRound() }
                     .disabled(sync.meguriBusy).accessibilityIdentifier(id)
             } else {
-                Button(title) { sync.startMeguriSetup(); showInSettings?(false) }.accessibilityIdentifier(id)
+                // A sheet opened from a status action keeps the service on Cancel (V27.4).
+                Button(title) { sync.startMeguriSetup(keepingService: true); showInSettings?(false) }.accessibilityIdentifier(id)
             }
         case .meguriFinishSetup:
             Button(title) { sync.finishMeguriSetup() }.accessibilityIdentifier(id)
