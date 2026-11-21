@@ -64,15 +64,42 @@ public final class ReviewCollection: ChangeFanoutSink {
               proof.request == deckPageRefreshRequest else { return nil }
         return proof.request.deckID
     }
-    public private(set) var review: ReviewCoordinator?
+    public private(set) var review: ReviewCoordinator? {
+        // A review that ends, however it ends, ends Study's walk with it (N24.3).
+        didSet { if review == nil, let walk { closeWalk(walk) } }
+    }
     public private(set) var previousRecord: ReviewRecord?
+    /// Today's Study while it walks the decks (N24.3); its current session is `review`.
+    public private(set) var walk: StudyWalk?
+    /// The last walk in this launch, for Today's Previous Session (N24.2). A walk is not
+    /// stored as one record: after a relaunch Today shows the last deck's session.
+    public private(set) var previousWalk: StudyWalk.Summary?
+    @ObservationIgnored private var walkTask: Task<Void, Never>?
+    @ObservationIgnored private var deckPageOpening: Task<Bool, Never>?
+    /// `stats/studied-today` T12: the Today page's numbers, read with the counts. A read
+    /// that fails keeps the last value.
+    public private(set) var studiedToday: StudiedToday?
+    /// N24.2: while nothing waits, when the next learning card of a top-level normal deck
+    /// becomes ready (`sched/counts` C7's earliest `next_learning_ready_at`).
+    public private(set) var nextLearningReadyAt: Date?
+    @ObservationIgnored var studiedTodayService: any StudiedTodayService = CoreStudiedTodayService()
+    @ObservationIgnored var loadDeckStudyState: @MainActor (Int64) async throws -> ReviewDeckStudyState = {
+        try await CoreDeckService().studyState(deckID: $0)
+    }
+    @ObservationIgnored private var todayTask: Task<Void, Never>?
+    @ObservationIgnored private var todayRevision: UInt64 = 0
     /// Turns FSRS on by itself for an open collection (`sched/fsrs-policy` A1).
     public let studyPreparation = StudyPreparation()
     public var policy: FsrsPolicyStatus? { studyPreparation.status }
     public var enabling: Bool { studyPreparation.running }
     /// A study entry point was refused because the collection could not be
     /// prepared (`sched/app-coordination` F5.3). Try Again runs the step again.
-    public struct StudyRefusal: Equatable, Sendable { public let deckID: Int64 }
+    public struct StudyRefusal: Equatable, Sendable {
+        public let deckID: Int64
+        /// Refused at a turn of Today's Study: Try Again starts Study again (N24.3).
+        public let studyAll: Bool
+        public init(deckID: Int64, studyAll: Bool = false) { self.deckID = deckID; self.studyAll = studyAll }
+    }
     public private(set) var studyRefusal: StudyRefusal?
     public private(set) var progress: CoreProgress?
     public private(set) var error: String?
@@ -941,7 +968,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         do {
             if candidateActive {
                 navigation.collectionReplaced()
-                previousRecord = nil; recoveryDrops.removeAll()
+                previousRecord = nil; recoveryDrops.removeAll(); dropWalk()
                 try await records.remove()
                 try await completeOpenedHost(loadRecord: false)
             } else {
@@ -1048,7 +1075,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             generation = next; day?.pause()
             invalidateMedia()
             review?.generationEnded(); review = nil; navigation.endReview()
-            previousRecord = nil; studyRefusal = nil
+            previousRecord = nil; studyRefusal = nil; dropWalk()
             studyPreparation.collectionEnded()
             decks = []; countTimer?.invalidate(); countsTask?.cancel()
             navigation.collectionReplaced(keepingEntrySheet: opening)
@@ -1147,7 +1174,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         let intent = navigation.beginDeckSelection()
         let selection = selectDeck(deckID: deckID, intent: intent, admission: admission)
         let expected = generation, revision = selectionRevision
-        return Task {
+        let task = Task {
             guard await selection.value, expected == generation, revision == selectionRevision,
                   canSaveDeckState, admission(), navigation.intentRevision == intent else { return false }
             if navigation.sidebarSelection != .deck(DeckID(deckID)) {
@@ -1157,6 +1184,18 @@ public final class ReviewCollection: ChangeFanoutSink {
                 ? detail.map { (page: $0, generation: expected, intent: navigation.intentRevision) } : nil
             didOpen()
             return true
+        }
+        deckPageOpening = task
+        return task
+    }
+
+    /// Waits until no deck page is opening. A page that opens after a review started ends
+    /// it, so a double-click's second click and Return or S just after a selection wait
+    /// for the open their first click or the selection asked for (H12).
+    public func deckPageOpened() async {
+        while let task = deckPageOpening {
+            _ = await task.value
+            if deckPageOpening == task { deckPageOpening = nil; return }
         }
     }
 
@@ -1270,6 +1309,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             let tree = try await loadDeckTree()
             guard expected == generation, tree.generation == generation, revision == deckTreeRevision, !closed else { return }
             decks = tree.nodes
+            refreshTodayNumbers()
             countTimer?.invalidate(); countTimer = nil
             if foreground && !configuration.clock.isFixed && Double(tree.nextChangeAt) < Date.distantFuture.timeIntervalSince1970 {
                 let date = max(Date(timeIntervalSince1970: Double(tree.nextChangeAt)),
@@ -1379,7 +1419,8 @@ public final class ReviewCollection: ChangeFanoutSink {
     public func retryRefusedStudy() async {
         guard let refusal = studyRefusal else { return }
         studyRefusal = nil
-        _ = await startStudy(deckID: refusal.deckID, entry: .tryAgain)
+        if refusal.studyAll { await startStudyAll(entry: .tryAgain) }
+        else { _ = await startStudy(deckID: refusal.deckID, entry: .tryAgain) }
     }
     private func configureStudyPreparation() {
         studyPreparation.environment = .init(
@@ -1412,7 +1453,9 @@ public final class ReviewCollection: ChangeFanoutSink {
         studySyncFacts = facts
         Task { await studyPreparation.syncChanged() }
     }
-    public var canStudy: Bool { !sync.meguriCollectionWorkHeld && !deckNamesReserved && !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting && review == nil }
+    public var canStudy: Bool { studyAdmissible && review == nil && walk == nil }
+    /// What every start needs, a walk's later turns included (they start while its review shows).
+    private var studyAdmissible: Bool { !sync.meguriCollectionWorkHeld && !deckNamesReserved && !opening && entryOwner?.busy != true && navigation.sheet != .collectionEntry && state == .ready && reviewIsActive && !resuming && !starting }
     public func startStudy(deckID: Int64) async {
         _ = await startStudy(deckID: deckID, entry: .study)
     }
@@ -1423,10 +1466,10 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// study is prepared first; the entry point shows the loading state of a
     /// starting session meanwhile and never waits for sync (F4, F5.1). When
     /// that fails, study is refused with Try Again and nothing else changes (F5.3).
-    private func startStudy(deckID: Int64, entry: StudyPreparation.Entry) async -> Bool {
+    private func startStudy(deckID: Int64, entry: StudyPreparation.Entry, walk: StudyWalk? = nil) async -> Bool {
         var entry = entry
         while true {
-            switch await attemptStudy(deckID: deckID, entry: entry) {
+            switch await attemptStudy(deckID: deckID, entry: entry, walk: walk) {
             case .started: return true
             case .stopped: return false
             case .refusedByCore where entry != .refusedByCore:
@@ -1434,14 +1477,17 @@ public final class ReviewCollection: ChangeFanoutSink {
                 // again, run the step and go on (F1 item 5).
                 entry = .refusedByCore
             case .notReady, .refusedByCore:
-                studyRefusal = .init(deckID: deckID)
+                studyRefusal = .init(deckID: deckID, studyAll: walk != nil)
                 return false
             }
         }
     }
 
-    private func attemptStudy(deckID: Int64, entry: StudyPreparation.Entry) async -> StudyAttempt {
-        guard canStudy, foreground,
+    private func attemptStudy(deckID: Int64, entry: StudyPreparation.Entry, walk: StudyWalk? = nil) async -> StudyAttempt {
+        // A walk's turn starts while its own review shows, never after it stopped.
+        let walkCurrent: @MainActor @Sendable () -> Bool = { walk.map { self.walk === $0 && !$0.stopped } ?? true }
+        let admitted = walk.map { _ in studyAdmissible && walkCurrent() && (review == nil || review === self.walk?.current) } ?? canStudy
+        guard admitted, foreground,
               sceneActive, applicationActive, windowVisible, reviewWindowActive else { return .stopped }
         // Refused before anything is written: with no open collection to
         // prepare, and after a failed step, where Try Again runs it (F5.3).
@@ -1452,7 +1498,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         let current: @MainActor @Sendable () -> Bool = {
             expected == self.generation && intent == self.navigation.intentRevision &&
                 self.canSaveDeckState && self.foreground && self.sceneActive && self.applicationActive &&
-                self.windowVisible && self.reviewWindowActive && self.reviewIsActive
+                self.windowVisible && self.reviewWindowActive && self.reviewIsActive && walkCurrent()
         }
         do {
             try configuration.nativeReviewInput?.admitStudy(deck: deckID, name: fullDeckName(deckID))
@@ -1471,7 +1517,15 @@ public final class ReviewCollection: ChangeFanoutSink {
             }
             var refusedByCore = false
             model.onPolicyRefusal = { refusedByCore = true }
-            presentReview(model)
+            if let walk {
+                // Undo reaches the open deck's answers only, from the walk's second deck on.
+                model.sessionScopedUndo = walk.turns > 0
+                model.onTerminal = { [weak self, weak walk, weak model] in
+                    guard let self, let walk, let model, walk.current === model else { return }
+                    self.requestAdvance(walk)
+                }
+            }
+            presentReview(model, walk: walk)
             // The session's own loading state shows while the collection is
             // prepared. No session is open yet, so the step may run.
             let prepared = await studyPreparation.prepare(for: entry)
@@ -1506,6 +1560,8 @@ public final class ReviewCollection: ChangeFanoutSink {
             guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return .stopped }
             if let activityFailure { throw activityFailure }
             if model.sessionID == nil {
+                // A walk keeps its review up while the step runs again for this turn.
+                if refusedByCore, walk != nil { return .refusedByCore }
                 navigation.endReview(); review = nil
                 if refusedByCore { return .refusedByCore }
                 error = model.notice
@@ -1524,7 +1580,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         logger.debug("\(stage, privacy: .public) currentOwner=\(currentOwner, privacy: .public) reviewIsActive=\(self.reviewIsActive, privacy: .public) paused=\(model.paused, privacy: .public) foreground=\(self.foreground, privacy: .public) sceneActive=\(self.sceneActive, privacy: .public) applicationActive=\(self.applicationActive, privacy: .public) windowVisible=\(self.windowVisible, privacy: .public) reviewWindowActive=\(self.reviewWindowActive, privacy: .public) reviewVisible=\(self.reviewVisible, privacy: .public) hostCountZero=\(self.visibleReviewHosts == 0, privacy: .public) presentationAllowsInput=\(self.reviewPresentationAllowsInput, privacy: .public)")
     }
     #endif
-    func presentReview(_ model: ReviewCoordinator) {
+    func presentReview(_ model: ReviewCoordinator, walk: StudyWalk? = nil) {
         reviewVisible = true
         review = model
         let expected = generation
@@ -1537,15 +1593,154 @@ public final class ReviewCollection: ChangeFanoutSink {
             self.sync.visibleMedia(names, generation: expected)
         }
         sync.visibleMedia(model.visibleMediaNames, generation: expected)
-        navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: model.record.deckID), session: model))
+        if let walk {
+            // The walk is the presentation: its next deck keeps the same review on screen.
+            walk.present(model)
+            if navigation.review?.session !== walk {
+                navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: model.record.deckID), session: walk))
+            }
+        } else {
+            navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: model.record.deckID), session: model))
+        }
     }
     public func finishReview() async {
         guard let review else { return }
+        // Back to Decks, Esc and Done stop the walk: no other deck starts (N24.3).
+        walk?.stop()
         guard await review.end() else { return }
-        previousRecord = review.record
+        // A deck page shows a previous session only for a single-deck session (N24.2).
+        previousRecord = walk == nil ? review.record : nil
         self.review = nil; navigation.endReview()
         await studyPreparation.sessionEnded()
         refreshCounts()
+    }
+
+    // MARK: Study All Decks (N24.3)
+
+    /// The decks Today's Study walks, from the deck list's counts (N24.2's first line).
+    public var studyAllDecks: [StudyWalk.Deck] { StudyWalk.decks(from: decks) }
+
+    /// Today's Study: walks the top-level normal decks with cards waiting, each as one
+    /// ordinary session, in one review presentation.
+    public func startStudyAll() async { await startStudyAll(entry: .study) }
+
+    private func startStudyAll(entry: StudyPreparation.Entry) async {
+        let list = studyAllDecks
+        guard canStudy, !list.isEmpty else { return }
+        let walk = StudyWalk(decks: list)
+        self.walk = walk
+        previousWalk = nil
+        let task = Task { await advance(walk, entry: entry) }
+        walkTask = task
+        await task.value
+    }
+
+    /// The open deck came to its end: move on once whatever runs now has finished.
+    private func requestAdvance(_ walk: StudyWalk) {
+        guard self.walk === walk, !walk.stopped else { return }
+        // Synchronously, with the terminal state: no frame shows that deck's end screen.
+        walk.markAdvancing()
+        let previous = walkTask
+        walkTask = Task { await previous?.value; await advance(walk) }
+    }
+
+    /// One step of the walk: end the open deck's session if another deck has a card ready
+    /// now and start that one, or show the walk's finished screen on the open deck.
+    private func advance(_ walk: StudyWalk, entry: StudyPreparation.Entry = .study) async {
+        guard self.walk === walk, !walk.stopped else { return }
+        let open = walk.current
+        // Keep Going may have taken the open deck back to its cards meanwhile.
+        if let open, open.phase != .waiting, open.phase != .finished { walk.settle(); return }
+        walk.beginAdvance()
+        while let deck = walk.nextDeck() {
+            // The open deck's own Keep Going covers it.
+            if open?.record.deckID == deck.id { continue }
+            let readiness = await readiness(of: deck.id)
+            guard self.walk === walk, !walk.stopped else { return }
+            guard readiness.ready else { walk.skip(deck, learningLater: readiness.learningLater); continue }
+            if let open {
+                walk.close(open, leftForEnd: open.phase == .waiting)
+                guard await open.end() else { endWalkAtToday(walk); return }
+                await studyPreparation.sessionEnded()
+                guard self.walk === walk, !walk.stopped else { return }
+            }
+            let started = await startStudy(deckID: deck.id, entry: entry, walk: walk)
+            guard self.walk === walk, !walk.stopped else { return }
+            guard started else { endWalkAtToday(walk); return }
+            // A start that found no card has asked for the next step already.
+            if let model = walk.current, model.phase != .waiting, model.phase != .finished { walk.settle() }
+            return
+        }
+        guard walk.current != nil else {
+            // No deck had a card ready after all: nothing was presented.
+            self.walk = nil
+            refreshCounts()
+            return
+        }
+        walk.finish()
+    }
+
+    /// Whether a deck has a card to show now (`sched/counts` C7: not finished, not empty).
+    /// A deck deleted before its turn has none.
+    private func readiness(of deckID: Int64) async -> (ready: Bool, learningLater: Bool) {
+        guard deck(deckID) != nil, let state = try? await reviewSessionClient.studyState(deckID: deckID),
+              state.deck == deckID else { return (false, false) }
+        return (!state.finished && !state.empty, state.learningLaterToday > 0)
+    }
+
+    /// The next deck could not start: the window returns to Today, with what was answered.
+    private func endWalkAtToday(_ walk: StudyWalk) {
+        if review != nil { review = nil } else { closeWalk(walk) }
+        navigation.endReview()
+        refreshCounts()
+    }
+
+    private func closeWalk(_ walk: StudyWalk) {
+        walk.stop()
+        if self.walk === walk {
+            previousWalk = walk.previousSession(at: configuration.clock.now())
+            self.walk = nil
+        }
+    }
+
+    /// Another collection: no walk and no record of one applies.
+    private func dropWalk() {
+        walk?.stop(); walk = nil; previousWalk = nil
+    }
+
+    // MARK: Today's numbers (T12, N24.2)
+
+    /// Reads T12's numbers again, and while nothing waits the next learning card's time;
+    /// coalesced, and never on the page's path (the counts show first).
+    func refreshTodayNumbers() {
+        todayRevision &+= 1
+        guard todayTask == nil else { return }
+        todayTask = Task {
+            var observed: UInt64
+            repeat {
+                observed = todayRevision
+                await loadTodayNumbers()
+            } while observed != todayRevision && !closed && !Task.isCancelled
+            todayTask = nil
+        }
+    }
+
+    func loadTodayNumbers() async {
+        let expected = generation
+        if let numbers = try? await studiedTodayService.numbers(),
+           expected == generation, numbers.generation == expected, !closed {
+            studiedToday = numbers
+        }
+        guard expected == generation, !closed else { return }
+        guard studyAllDecks.isEmpty else { nextLearningReadyAt = nil; return }
+        // Only while nothing waits: one C7 read per top-level normal deck.
+        var earliest: Int64?
+        for node in decks where !node.filtered {
+            guard let state = try? await loadDeckStudyState(node.id), let ready = state.nextLearningReadyAt else { continue }
+            earliest = min(earliest ?? ready, ready)
+        }
+        guard expected == generation, !closed, studyAllDecks.isEmpty else { return }
+        nextLearningReadyAt = earliest.map { Date(timeIntervalSince1970: Double($0)) }
     }
     public func navigationChanged() {
         if navigation.review == nil, review != nil { Task { await finishReview() } }
@@ -1651,6 +1846,14 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
     }
     public func waitForLifecycle() async { await lifecycleTask?.value }
+    func waitForTodayNumbers() async { await todayTask?.value }
+    /// Waits for the walk's queued steps, the ones they queue included.
+    func waitForWalk() async {
+        while let task = walkTask {
+            await task.value
+            if walkTask == task { return }
+        }
+    }
     func waitForCloudActivation() async { await cloudActivationCompletion?.value }
     /// The UIKit assertion owner supplies the OS's remaining time, never a
     /// guessed duration. Tokens keep a late expiry out of a later foreground.

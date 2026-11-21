@@ -1167,6 +1167,140 @@
           }
         }
       }
+    },
+    "Study All Decks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Study All Decks"
+          }
+        }
+      }
+    },
+    "%lld cards": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld card"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld cards"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%lld decks": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld deck"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld decks"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "%@ in %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ in %2$@"
+          }
+        }
+      }
+    },
+    "about %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "about %@"
+          }
+        }
+      }
+    },
+    "%@ first, then %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ first, then %2$@"
+          }
+        }
+      }
+    },
+    "Studied Today": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Studied Today"
+          }
+        }
+      }
+    },
+    "None yet": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "None yet"
+          }
+        }
+      }
+    },
+    "Next learning card at %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next learning card at %@"
+          }
+        }
+      }
+    },
+    "home.today.studied.spoken": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "home.today.previous.deck": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ in %2$@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

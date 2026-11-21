@@ -8,13 +8,17 @@ public struct ReviewView: View {
     public let close: () -> Void
     public let status: AnyView?
     public let visibilityChanged: (Bool) -> Void
+    /// Today's Study (N24.3): the walk whose open deck `model` is. One review for the
+    /// whole walk: its progress, its finished screen, and nothing between its decks.
+    public let walk: StudyWalk?
     @Environment(\.colorScheme) private var colorScheme
-    public init(model: ReviewCoordinator, status: AnyView? = nil, visibilityChanged: @escaping (Bool) -> Void = { _ in }, close: @escaping () -> Void) {
-        self.status = status
+    public init(model: ReviewCoordinator, walk: StudyWalk? = nil, status: AnyView? = nil,
+                visibilityChanged: @escaping (Bool) -> Void = { _ in }, close: @escaping () -> Void) {
+        self.status = status; self.walk = walk
         self.model = model; self.visibilityChanged = visibilityChanged; self.close = close
     }
     public var body: some View {
-        ReviewLayout(progress: model.sessionProgress, notice: model.notice,
+        ReviewLayout(progress: walk?.progress ?? model.sessionProgress, notice: model.notice,
             undoDescription: undoDescription, canUndo: model.canUndo, canRedo: model.canRedo,
             phase: model.phase, states: model.item?.nextStates, enabled: !model.paused,
             close: close, undo: { model.restore() }, redo: { model.restore(redo: true) },
@@ -22,15 +26,19 @@ public struct ReviewView: View {
             status: status) {
             ZStack {
                 if let pair = model.pair {
+                    // A walk's next deck brings its own pages: a new host for them, while
+                    // the review around it stays (N24.3).
                     #if os(macOS)
                     ReviewCardHost(model: model, pair: pair, close: close)
                         .opacity(model.phase == .question || model.phase == .answer || model.phase == .transition ? 1 : 0)
+                        .id(ObjectIdentifier(model))
                     #else
                     ReviewCardHost(model: model, pair: pair, close: close)
                         .accessibilityIdentifier("review.session.card")
                         .accessibilityAction(named: Text("Show Answer", bundle: .module)) { model.reveal() }
                         .accessibilityAction(.magicTap) { model.reveal() }
                         .opacity(model.phase == .question || model.phase == .answer || model.phase == .transition ? 1 : 0)
+                        .id(ObjectIdentifier(model))
                     #endif
                 }
                 stateContent
@@ -38,10 +46,27 @@ public struct ReviewView: View {
         }
         .onAppear { visibilityChanged(true) }
         .onDisappear { visibilityChanged(false) }
-        .task { await appearance() }
+        .task(id: ObjectIdentifier(model)) { await appearance() }
         .onChange(of: colorScheme) { _, _ in Task { await appearance() } }
     }
+    /// Between a walk's decks: one session has come to its end and the next is starting.
+    private var betweenDecks: Bool {
+        guard let walk else { return false }
+        switch model.phase {
+        case .waiting, .finished, .ended: return walk.advancing
+        case .loading: return walk.turns > 1
+        case .question, .answer, .transition, .error: return false
+        }
+    }
     @ViewBuilder private var stateContent: some View {
+        if betweenDecks {
+            // No screen, title or pause between a walk's decks (N24.3).
+            ProgressView()
+        } else {
+            phaseContent
+        }
+    }
+    @ViewBuilder private var phaseContent: some View {
         switch model.phase {
         case .loading:
             ReviewStatusLayout { LoadingStateView(Text("Preparing review…", bundle: .module)) }
@@ -50,10 +75,19 @@ public struct ReviewView: View {
                 #endif
         case .waiting, .finished:
             ReviewStatusLayout {
-                ReviewTerminalContent(waiting: model.phase == .waiting, summary: model.sessionSummary,
-                    continueAvailable: model.continueAvailable, canContinue: model.canContinue,
-                    canRefresh: model.canRefresh, canFinish: model.canFinish,
-                    refresh: model.retry, continueReview: model.continueReview, close: close)
+                if let walk {
+                    // The walk's one finished screen: its cards and time with the open deck's
+                    // Keep Going, never Waiting for Learning (N24.3).
+                    ReviewTerminalContent(waiting: false, summary: walk.summary,
+                        continueAvailable: model.continueAvailable, canContinue: model.canContinue,
+                        canRefresh: model.canRefresh, canFinish: model.canFinish,
+                        refresh: model.retry, continueReview: model.continueReview, close: close)
+                } else {
+                    ReviewTerminalContent(waiting: model.phase == .waiting, summary: model.sessionSummary,
+                        continueAvailable: model.continueAvailable, canContinue: model.canContinue,
+                        canRefresh: model.canRefresh, canFinish: model.canFinish,
+                        refresh: model.retry, continueReview: model.continueReview, close: close)
+                }
             }
             #if DEBUG
             .debugStatusAccessibilityValue(model.debugSessionStatus)

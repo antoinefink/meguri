@@ -35,6 +35,10 @@ extension TestHooks {
             registry.register("home/deck-list/beside-today") { _ in .screen { HomeDeckListPreview.besideDetail(deck: nil) } }
             registry.register("home/deck-list/empty") { _ in .screen { HomeDeckListPreview.preview(.empty) } }
             registry.register("home/deck-list/typical") { _ in .screen { HomeDeckListPreview.preview(.typical) } }
+            // N24.2: Today's summary beside the deck list (Mac, iPad, the Duo held wide), over sample values.
+            registry.register("home/today/summary") { _ in .screen { HomeTodayPreview.preview(.summary) } }
+            registry.register("home/today/nothing-waiting") { _ in .screen { HomeTodayPreview.preview(.nothingWaiting) } }
+            registry.register("home/today/after-walk") { _ in .screen { HomeTodayPreview.preview(.afterWalk) } }
         }
     }
 

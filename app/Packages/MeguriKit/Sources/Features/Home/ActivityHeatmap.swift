@@ -3,6 +3,9 @@ import CoreBridge
 import DesignSystem
 import HeatmapKit
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// The heatmap rows' content widths, kept above the views (`AppNavigation.featureState`):
 /// a page drawn again (a pushed deck page, a layout switch, a row the list made again)
@@ -87,6 +90,17 @@ struct ActivityHeatmapSection: View {
         if visible {
             Section {
                 VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                    // AH9: the months' row. A caption line's height, kept from the first frame
+                    // whether or not a label is drawn yet, so the squares never move down.
+                    Text(verbatim: "Nov")
+                        .font(.caption)
+                        .hidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .overlay {
+                            if let grid, let days, geometry.weeks > 0 {
+                                MonthLabelsView(grid: grid, geometry: geometry, today: days.today)
+                            }
+                        }
                     // Only this clear view sizes the row, and it reports the width offered.
                     // The squares sit in its overlay, so an old width (taken before a fold
                     // or in another column) can never feed itself.
@@ -140,6 +154,7 @@ private struct ActivityGridView: View {
     let grid: ActivityGrid
     let geometry: ActivityGrid.Geometry
     let today: ActivityDays.Day
+    @Environment(\.colorSchemeContrast) private var contrast
     #if os(macOS)
     @Environment(\.locale) private var locale
     #endif
@@ -170,26 +185,65 @@ private struct ActivityGridView: View {
 
     private func square(_ daysAgo: Int) -> some View {
         let shape = RoundedRectangle(cornerRadius: geometry.side * ActivityGrid.gapRatio)
+        let level = grid.level(daysAgo: daysAgo)
+        let increased = contrast == .increased
         return shape
-            .fill(Self.style(level: grid.level(daysAgo: daysAgo)))
+            .fill(Self.style(level: level, increasedContrast: increased, graphite: Self.graphite))
+            // N24.6: with Increase Contrast the steps lie over the empty day's own fill.
+            .background { if increased && level > 0 { shape.fill(.fill.secondary) } }
             .overlay {
                 if daysAgo == 0 { shape.strokeBorder(.primary, lineWidth: 1) }
             }
             .frame(width: geometry.side, height: geometry.side)
     }
 
-    /// System colours only: the secondary fill for no reviews, the accent's four
-    /// hierarchical steps for the levels (N14.11).
-    static func style(level: Int) -> AnyShapeStyle {
-        switch level {
-        case 4: AnyShapeStyle(.tint)
-        case 3: AnyShapeStyle(.tint.secondary)
-        case 2: AnyShapeStyle(.tint.tertiary)
-        case 1: AnyShapeStyle(.tint.quaternary)
-        default: AnyShapeStyle(.fill.secondary)
+    /// The secondary fill for no reviews; the accent at N24.6's fixed opacities for the
+    /// levels (`ActivityGrid.opacity`). The Mac's Graphite accent would make grey steps
+    /// that do not tell a light day from an empty one, so they use the system blue.
+    static func style(level: Int, increasedContrast: Bool, graphite: Bool) -> AnyShapeStyle {
+        guard let opacity = ActivityGrid.opacity(level: level, increasedContrast: increasedContrast) else {
+            return AnyShapeStyle(.fill.secondary)
         }
+        return graphite ? AnyShapeStyle(Color.blue.opacity(opacity)) : AnyShapeStyle(TintShapeStyle().opacity(opacity))
     }
 
+    private static var graphite: Bool {
+        #if os(macOS)
+        NSColor.currentControlTint == .graphiteControlTint
+        #else
+        false
+        #endif
+    }
+}
+
+/// AH9: the months above the grid, in caption secondary text. Drawn, not laid out: which
+/// labels fit depends on their measured widths, and the row's height is kept by its
+/// host from the first frame whether or not any label is drawn.
+private struct MonthLabelsView: View {
+    let grid: ActivityGrid
+    let geometry: ActivityGrid.Geometry
+    let today: ActivityDays.Day
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        Canvas { context, size in
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.locale = locale
+            let names = calendar.shortStandaloneMonthSymbols
+            guard names.count == 12 else { return }
+            #if os(macOS)
+            let resolved = names.map { context.resolve(Text(verbatim: $0).font(.caption).foregroundStyle(.secondary)) }
+            #else
+            let resolved = names.map { context.resolve(Text(verbatim: $0).font(.caption).foregroundStyle(.token(.textSecondary))) }
+            #endif
+            let labels = grid.monthLabels(year: today.year, month: today.month, day: today.day,
+                                          pitch: geometry.pitch, width: size.width) { resolved[$0 - 1].measure(in: size).width }
+            for label in labels {
+                context.draw(resolved[label.month - 1], at: CGPoint(x: CGFloat(label.column) * geometry.pitch, y: 0),
+                             anchor: .topLeading)
+            }
+        }
+    }
 }
 
 #if os(macOS)

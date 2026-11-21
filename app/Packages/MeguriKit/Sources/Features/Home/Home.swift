@@ -112,6 +112,15 @@ public struct HomeView: View {
             DeckSearchFocus.request(collection, layout: searchLayout)
             return .handled
         }
+        // H12: Return and S on Today's page start Study, the walk of N24.3.
+        .onKeyPress(keys: [.return, KeyEquivalent("s")], phases: .down) { press in
+            guard press.modifiers.isEmpty, deckID == nil, showsRootDeckList, showsToday else { return .ignored }
+            #if os(macOS)
+            guard homeKeyboardActive else { return .ignored }
+            #endif
+            DeckListStudy.startAll(collection: collection)
+            return .handled
+        }
         // H9.2: O on a normal deck's page opens its Deck Options (N20.9).
         .onKeyPress(keys: [KeyEquivalent("o")], phases: .down) { press in
             guard press.modifiers.isEmpty, !press.phase.contains(.repeat), let deckID,
@@ -985,7 +994,12 @@ private struct HomeSidebarBranch: View {
     let collection: ReviewCollection
     let node: CountedDeckNode
     let ancestors: [String]
+    @Environment(\.locale) private var locale
     private var name: String { node.name.components(separatedBy: "::").last ?? node.name }
+    /// N24.4: the full path, then the three counts, zeros included.
+    private var helpTag: Text { Text(verbatim: path + "\n" + node.counts.summary(locale: locale)) }
+    /// N24.4: the same three counts, "to review" in place of "due".
+    private var countsValue: Text { Text(verbatim: node.counts.summary(locale: locale)) }
     /// N20.3: shown and spoken paths join their components with " › ".
     private var path: String { (ancestors + [name]).joined(separator: " › ") }
     private var quiet: Bool {
@@ -1036,9 +1050,13 @@ private struct HomeSidebarBranch: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(Text(verbatim: path))
+            // H12: the first click opens the page, as a click does; the second starts the review.
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                DeckListStudy.start(deckID: node.id, collection: collection)
+            })
+            .help(helpTag)
             .accessibilityLabel(Text(verbatim: path))
-            .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
+            .accessibilityValue(countsValue)
             .accessibilityIdentifier("home.sidebar.deck.\(node.id)")
             .tag(SidebarItem.deck(DeckID(node.id)))
             #else
@@ -1058,7 +1076,9 @@ private struct HomeSidebarBranch: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text(verbatim: path))
-            .accessibilityValue(Text("\(Text(node.counts.new, format: .number)) new · \(Text(node.counts.learning, format: .number)) learning · \(Text(node.counts.review, format: .number)) due", bundle: .module))
+            .accessibilityValue(countsValue)
+            // N24.4: the help tag with a pointer.
+            .help(helpTag)
             #endif
         }
         #if !os(macOS)
@@ -1067,9 +1087,37 @@ private struct HomeSidebarBranch: View {
         .deckMenu(collection: collection, deck: node, place: "sidebar")
         .tag(SidebarItem.deck(DeckID(node.id)))
         #if os(macOS)
-        // An integer badge, which the system hides at zero (N11.5).
-        .badge(Int(node.counts.review))
+        // N24.4: every card waiting, as an integer badge the system hides at zero.
+        .badge(node.counts.waiting)
         #endif
+    }
+}
+
+/// Starting a deck from the deck list (H3, H12): a double-click, or Return or S on its
+/// selected row. A filtered deck shows R53's explanation and a deck with nothing to study
+/// its page's state, on its page; any other goes through the deck page's Study path.
+public enum DeckListStudy {
+    /// After the press's own actions: the double-click's second click and the selection's
+    /// open run first, and the page they open never ends the review this starts.
+    public static func start(deckID: Int64, collection: ReviewCollection) {
+        Task {
+            await Task.yield()
+            await collection.deckPageOpened()
+            guard let node = collection.deck(deckID) else { return }
+            guard !node.filtered, collection.offersStudy(deckID: deckID) else {
+                if collection.navigation.homeDeckPage?.rawValue != deckID { collection.openDeckPage(deckID: deckID) }
+                return
+            }
+            guard collection.canStudy, collection.navigation.sheet == nil, !collection.addNotePresentation.opening else { return }
+            await collection.startStudy(deckID: deckID)
+        }
+    }
+
+    /// Today's Study (N24.3) from its keys: nothing while nothing waits or Study is unavailable.
+    public static func startAll(collection: ReviewCollection) {
+        guard !collection.studyAllDecks.isEmpty, collection.canStudy, collection.navigation.sheet == nil,
+              !collection.addNotePresentation.opening else { return }
+        Task { await collection.startStudyAll() }
     }
 }
 

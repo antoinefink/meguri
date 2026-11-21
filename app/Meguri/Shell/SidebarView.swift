@@ -66,6 +66,12 @@ struct SidebarView: View {
                 }
             }
         }
+        // H12: with the list focused, Return or S starts the selected deck's review, or
+        // Today's Study on the Today row; once per press, never on a key's repeat.
+        .onKeyPress(keys: [.return, KeyEquivalent("s")], phases: .down) { press in
+            guard press.modifiers.isEmpty, features.sidebarStudy(navigation.sidebarSelection) else { return .ignored }
+            return .handled
+        }
     }
 
     /// N14.1: with a collection, the first row is Today on every sidebar layout.

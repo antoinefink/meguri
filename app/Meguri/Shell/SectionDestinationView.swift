@@ -11,11 +11,25 @@ import SwiftUI
 /// person, or while its popover is still open (N16.2).
 private struct ReviewDestination: View {
     let model: ReviewCoordinator
+    var walk: StudyWalk? = nil
     let collection: ReviewCollection
     var body: some View {
         let showsStatus = collection.sync.needsUser || collection.syncPresentation.statusOwnsInput
-        ReviewView(model: model, status: showsStatus ? AnyView(CloudSyncStatusButton(collection: collection)) : nil,
+        ReviewView(model: model, walk: walk, status: showsStatus ? AnyView(CloudSyncStatusButton(collection: collection)) : nil,
             visibilityChanged: collection.setReviewVisible) { Task { await collection.finishReview() } }
+    }
+}
+
+/// Today's Study (N24.3): one presentation for the whole walk, showing its open deck.
+private struct WalkReviewDestination: View {
+    let walk: StudyWalk
+    let collection: ReviewCollection
+    var body: some View {
+        if let model = walk.current {
+            ReviewDestination(model: model, walk: walk, collection: collection)
+        } else {
+            ProgressView()
+        }
     }
 }
 
@@ -49,6 +63,9 @@ struct ShellFeatures {
     var sidebarDecks: (AppNavigation) -> AnyView
     /// The sidebar with its deck search around it (N20.1); fixtures keep the bare list.
     var sidebarSearch: (AnyView) -> AnyView = { $0 }
+    /// H12: Return or S while the sidebar has focus starts the selected row's review: a
+    /// deck's, or Today's Study. True when the row takes the key, even to do nothing.
+    var sidebarStudy: (SidebarItem) -> Bool = { _ in false }
     /// N20.3: the naming form in the detail beside the deck list (iPhone at
     /// regular width), and what choosing another row does to it: Cancel.
     var deckNameBesideList: () -> AnyView = { AnyView(EmptyView()) }
@@ -84,11 +101,20 @@ struct ShellFeatures {
         }
         features.sidebarDecks = { _ in AnyView(HomeSidebarDecks(collection: collection)) }
         features.sidebarSearch = { list in AnyView(HomeSidebarDeckSearch(collection: collection) { list }) }
+        features.sidebarStudy = { item in
+            switch item {
+            case .section(.home): DeckListStudy.startAll(collection: collection); return true
+            case .deck(let deck): DeckListStudy.start(deckID: deck.rawValue, collection: collection); return true
+            case .section: return false
+            }
+        }
         features.deckNameBesideList = { AnyView(DeckNameForm(model: collection.deckActions, embedded: true)) }
         features.cancelDeckName = { if !collection.deckActions.busy { collection.deckActions.cancel() } }
         features.review = { presentation, _ in
             if let model = presentation.session as? ReviewCoordinator {
                 AnyView(ReviewDestination(model: model, collection: collection))
+            } else if let walk = presentation.session as? StudyWalk {
+                AnyView(WalkReviewDestination(walk: walk, collection: collection))
             } else { AnyView(EmptyView()) }
         }
         features.sheet = { route, navigation in
