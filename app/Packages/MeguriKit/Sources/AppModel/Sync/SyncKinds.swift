@@ -28,7 +28,8 @@ public enum SyncStatusAction: String, Sendable, Equatable, CaseIterable {
         case .meguriCancel: "sync.meguri.cancel"
         case .meguriTryAgain: "sync.recovery.tryAgain"
         case .meguriFinishSetup: "sync.meguri.setup.finish"
-        case .meguriRetryMedia: "sync.meguri.media.retry"
+        // Resume fix: the status row's Try Again (T19.5); Troubleshooting's Retry has its own key.
+        case .meguriRetryMedia: "sync.recovery.tryAgain"
         }
     }
 }
@@ -92,14 +93,20 @@ public struct MeguriKindFacts: Sendable, Equatable {
     /// The core permits Finish Setup.
     public var finishOffered: Bool
     public var automatic: Bool
+    /// The setup media step's files left to download, as last recorded; nil
+    /// when none is recorded. Files left are downloads, so a count names the direction.
+    public var mediaFilesLeft: UInt64?
     public init(handoffRecovery: Bool = false, providerBlocked: Bool = false,
                 connection: MeguriProviderConnectionPhase = .setupRequired, stage: MeguriSetupStage? = nil,
                 routine: MeguriRoutineState? = nil, failureKey: String? = nil, finishOffered: Bool = false,
-                automatic: Bool = true) {
+                automatic: Bool = true, mediaFilesLeft: UInt64? = nil) {
         self.handoffRecovery = handoffRecovery; self.providerBlocked = providerBlocked; self.connection = connection
         self.stage = stage; self.routine = routine; self.failureKey = failureKey
         self.finishOffered = finishOffered; self.automatic = automatic
+        self.mediaFilesLeft = mediaFilesLeft.flatMap { $0 > 0 ? $0 : nil }
     }
+    /// The media step downloads: files are left to come from the server.
+    var mediaDownloads: Bool { mediaFilesLeft != nil }
 }
 
 /// The main status of T19.4's four rules, for either service.
@@ -301,6 +308,13 @@ public enum SyncKinds {
             case .media: return .init(nil, "sync.meguri.setup.collectionDone")
             case .acceptanceUnknown: return .init(.waiting, "sync.meguri.setup.acceptanceUnknown", .meguriTryAgain)
             case .mediaBlocked: return .init(.issues, "sync.meguri.media.blocked", .meguriRetryMedia)
+            // Resume fix: it continues by itself; Try Again runs it now.
+            case .mediaPaused:
+                return facts.mediaFilesLeft.map { .init(.waiting, "sync.meguri.media.left", .meguriRetryMedia, count: $0) }
+                    ?? .init(.waiting, "sync.meguri.media.left.unknown", .meguriRetryMedia)
+            case .mediaStopped:
+                return .init(.needsYou, facts.mediaDownloads ? "sync.needsYou.meguri.mediaStopped.download"
+                    : "sync.needsYou.meguri.mediaStopped", .meguriRetryMedia)
             case .acceptedLocalIncomplete:
                 return facts.finishOffered
                     ? .init(.needsYou, "sync.needsYou.meguri.finishSetup", .meguriFinishSetup)
@@ -363,6 +377,8 @@ public enum SyncKinds {
             case .collection: (busy, "sync.meguri.status.transferringCollection.title")
             case .media: (busy, "sync.meguri.status.transferringMedia.title")
             case .mediaBlocked: (stopped, "sync.meguri.status.mediaBlocked.title")
+            case .mediaPaused, .mediaStopped:
+                (stopped, facts.mediaDownloads ? "sync.meguri.status.downloadPaused.title" : "sync.meguri.status.transferPaused.title")
             case .acceptanceUnknown: (stopped, "sync.meguri.status.acceptanceUnknown.title")
             case .acceptedLocalIncomplete: (stopped, "sync.meguri.status.acceptedLocalIncomplete.title")
             case .failed: (stopped, "sync.meguri.status.setupFailed.title")
@@ -385,11 +401,11 @@ public enum SyncKinds {
         let row = meguriRow(facts)
         if row.kind == .needsYou {
             return .init(symbol: needsYouSymbol, titleKey: "sync.status.needsAttention.title", detailKey: row.textKey,
-                         detailCount: nil, action: row.action, kind: .needsYou, issues: [], issuesRowKey: nil)
+                         detailCount: row.count, action: row.action, kind: .needsYou, issues: [], issuesRowKey: nil)
         }
         let title = meguriTitle(facts)
         let issues = row.kind == .issues ? [row] : []
-        return .init(symbol: title.symbol, titleKey: title.key, detailKey: row.textKey, detailCount: nil,
+        return .init(symbol: title.symbol, titleKey: title.key, detailKey: row.textKey, detailCount: row.count,
                      action: row.kind == .issues ? nil : row.action, kind: row.kind, issues: issues,
                      issuesRowKey: row.kind == .issues ? "sync.meguri.media.notTransferred" : nil)
     }

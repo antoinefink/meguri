@@ -475,7 +475,7 @@ The H-A minimal form of `decisions.md` (2026-11-19). Antoine's build direction (
 
 ## N15. Round 2 Settings and sync decisions (2026-11-19)
 
-Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`: `settings.root`, `settings.accountSync`, `sync.connect`, `sync.status`, `sync.serviceSwitch`). Where earlier text differs, this section wins. The behaviour is `sync/policy` P25, `sync/cloudkit-recovery` V27 and `sync/meguri-provider` MP6; all text is `sync/status-strings` T19. Those spec sections were approved on 2026-11-19 (`docs/process/review-log/redesign-specs-20261119.md`). The points raised for the owner are in P25.6, V27.9 and MP6.8; two of them (no device backup of a replaced iCloud collection, and Cancel removing the Meguri Sync sign-in) were decided on 2026-11-19 and are marked there.
+Decided by Antoine in chat and page comments on 2026-11-19 (`decisions.md`: `settings.root`, `settings.accountSync`, `sync.connect`, `sync.status`, `sync.serviceSwitch`). Where earlier text differs, this section wins. The behaviour is `sync/policy` P25, `sync/cloudkit-recovery` V27 and `sync/meguri-provider` MP6; all text is `sync/status-strings` T19. Those spec sections were approved on 2026-11-19 (`docs/process/review-log/redesign-specs-20261119.md`). The points raised for the owner are in P25.6, V27.9 and MP6.8; two of them (no device backup of a replaced iCloud collection, and Cancel removing the Meguri Sync sign-in) were decided on 2026-11-19 and are marked there. The lines marked "Changed 2026-11-21 (resume fix)" are in force: decided by Claude (coordinator) under Antoine's delegation of 2026-11-21 and his permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/sync-media-resume-20261121.md`).
 
 ### N15.1 Settings page
 
@@ -493,7 +493,7 @@ Its rows, in this order, each only under its condition:
 
 1. **Service**: a standard `Picker` labelled Service with Off, Meguri Sync and iCloud, in that order. iCloud has the secondary label Beta after its name, in the picker and wherever the service is a heading or a row label; the label is text, not colour alone, and VoiceOver reads "iCloud, Beta". The picker shows the service the core reports, never the value just tapped (MP6.1).
 2. **Account**, for Meguri Sync only: the username as its value; it pushes the page with Server Address and Username, and the sign-in fields while not signed in (MP2's labelled fields and one prominent Sign In, N6's credential rules). iCloud has no account row: the status says when the Apple account needs the user, and Meguri never asks for an Apple password (R117).
-3. **Status**: the status symbol, title and detail of T19.4 or T19.5. A needs you status has its one action as a button in this row. An issues row under it pushes the issues list. A waiting status has no button.
+3. **Status**: the status symbol, title and detail of T19.4 or T19.5. A needs you status has its one action as a button in this row. An issues row under it pushes the issues list. A waiting status has no button. Changed 2026-11-21 (resume fix): a waiting status whose T19.5 row has its own action (Try Again on the acceptance-unknown rows and on the paused setup media step, T19.1) has that button in this row, and the status panel shows the same action (N23.3).
 4. **Sync Automatically**: a `Toggle` with its footer, shown while a service is selected. Until the service is connected (selected, with its setup completed: a ready binding, `sync/policy` P25.3) it is disabled and shows its stored value (decided 2026-11-19 (review F8)).
 5. **Sync Now**: a button, through `syncNowAvailability()` (N11.8); disabled with its reason as N11.8 says.
 6. **Troubleshooting**: a `NavigationLink`, shown while a service is selected.
@@ -1052,7 +1052,7 @@ N11.10's sheets for the template and field editors and its "No schema-change con
 
 ## N23. Round 10: the sync status panel (2026-11-21)
 
-Decided by Antoine in chat on 2026-11-20 (`decisions.md`, row `sync.statusPopover`; round 10 answer 6A). Changed 2026-11-21 (round 10). In force: approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/round10-sync-panel-20261121.md`). The text is `sync/status-strings` T20; the status itself is T19.4 and T19.5, unchanged. Where the earlier text that N23.5 lists differs, this section wins. The sidebar and its frame are not part of this section.
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, row `sync.statusPopover`; round 10 answer 6A). Changed 2026-11-21 (round 10). In force: approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/round10-sync-panel-20261121.md`). The text is `sync/status-strings` T20; the status itself is T19.4 and T19.5, unchanged. Where the earlier text that N23.5 lists differs, this section wins. The sidebar and its frame are not part of this section. The lines marked "Changed 2026-11-21 (resume fix)" are in force: decided by Claude (coordinator) under Antoine's delegation of 2026-11-21 and his permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/sync-media-resume-20261121.md`).
 
 ### N23.1 The panel
 
@@ -1097,7 +1097,7 @@ The first row that applies decides, in this order.
 | Sync is off (no service, and the provider does not need the person) | Sync Settings, as the default button |
 | Needs you, with a built action (T19.4, T19.5 Action column) | Sync Settings, then the action, as the default button unless the "No default button" bullet below says otherwise |
 | Needs you, with no built action (iCloud's `noAccount` and `restricted` states, Update Meguri (T19.4 row 4), Abandon Change… (row 25, not built)) | Sync Settings, with no default button: Return does nothing |
-| Not needs you, with the row's own action (Cancel Setup while setup prepares; Try Again for an acceptance that is not known, T19.1) | Sync Settings, then that action; Cancel Setup is never the default |
+| Not needs you, with the row's own action (Cancel Setup while setup prepares; Try Again for an acceptance that is not known, T19.1; Try Again for a paused setup media step, changed 2026-11-21 (resume fix)) | Sync Settings, then that action; Cancel Setup is never the default |
 | Meguri Sync with no round reported yet, or with round media blocked | Sync Settings, then Sync Now, disabled, as the default button, with no help tag; File › Sync Now and Y still open the Sync section (T18.7) |
 | Any other status with a service | Sync Settings, then Sync Now as the default button |
 

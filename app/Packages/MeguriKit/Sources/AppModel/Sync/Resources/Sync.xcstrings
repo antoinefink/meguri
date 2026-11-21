@@ -4847,6 +4847,84 @@
           }
         }
       }
+    },
+    "sync.meguri.status.downloadPaused.title": {
+      "comment": "Approved sync/status-strings T19.5 (changed 2026-11-21, resume fix); shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Media Download Paused"
+          }
+        }
+      }
+    },
+    "sync.meguri.status.transferPaused.title": {
+      "comment": "Approved sync/status-strings T19.5 (changed 2026-11-21, resume fix); shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Media Transfer Paused"
+          }
+        }
+      }
+    },
+    "sync.meguri.media.left": {
+      "comment": "Approved sync/status-strings T19.5 (changed 2026-11-21, resume fix); shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media file is left. Syncing starts when it finishes."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld media files are left. Syncing starts when they finish."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sync.meguri.media.left.unknown": {
+      "comment": "Approved sync/status-strings T19.5 (changed 2026-11-21, resume fix); shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Syncing starts when the media finishes."
+          }
+        }
+      }
+    },
+    "sync.needsYou.meguri.mediaStopped.download": {
+      "comment": "Approved sync/status-strings T19.5 (changed 2026-11-21, resume fix); shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloading the media didn’t finish, so syncing hasn’t started."
+          }
+        }
+      }
+    },
+    "sync.needsYou.meguri.mediaStopped": {
+      "comment": "Approved sync/status-strings T19.5 (changed 2026-11-21, resume fix); shown only for the corresponding local or typed Core fact.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transferring the media didn’t finish, so syncing hasn’t started."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

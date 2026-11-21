@@ -354,6 +354,11 @@ extension AppNavigation {
 // Display values carry no command or binding authority.
 public enum MeguriSetupStage: Sendable, Equatable {
     case required, preparing, preview, collection, media, mediaBlocked
+    /// The media step stopped before it finished (a quit, a lost connection, a
+    /// server error) and continues by itself (MP6.5, resume fix).
+    case mediaPaused
+    /// The media step failed again after its automatic attempts: the person retries it.
+    case mediaStopped
     case acceptanceUnknown, acceptedLocalIncomplete, failed
 }
 public enum MeguriRoutineState: Sendable, Equatable {
@@ -409,8 +414,8 @@ public struct MeguriSyncStatusPresentation {
         else if connection == .signedOut || connection == .cancelled { needsUser = true }
         else if let stage {
             needsUser = switch stage {
-            case .required, .preview, .mediaBlocked, .acceptanceUnknown, .acceptedLocalIncomplete, .failed: true
-            case .preparing, .collection, .media: false
+            case .required, .preview, .mediaBlocked, .mediaStopped, .acceptanceUnknown, .acceptedLocalIncomplete, .failed: true
+            case .preparing, .collection, .media, .mediaPaused: false
             }
         } else if let routine {
             needsUser = switch routine {
