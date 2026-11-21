@@ -356,6 +356,18 @@ class TestDataTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(summary["counts"]["oracle_output"], 0)
 
+    def test_clock_values_must_have_the_d5_forms(self):
+        for start, tz in (("", "UTC"), ("2030-01-15T10:00:00", "")):
+            with self.subTest(start=start, tz=tz):
+                scenario = "clock: {tz: " + json.dumps(tz) + ", start: " + json.dumps(start) + "}\ndescription: x\n"
+                golden = json.loads(self.recorded(scenario))
+                golden["clock"]["start"], golden["tz"] = start, tz
+                files = {SCENARIOS + "/one.yaml": scenario, "conformance/oracle.json": json.dumps(self.PIN),
+                         GOLDENS + "/one.json": json.dumps(golden)}
+                code, summary, _views, _error = self.check(files)
+                self.assertEqual(code, 1)
+                self.assertEqual(summary["counts"]["oracle_output"], 0)
+
     def test_scenario_inputs_are_never_exempt(self):
         files = self.oracle_pair(scenario=STORY)
         code, summary, views, _error = self.check(files)

@@ -53,6 +53,8 @@ CodeRabbit, all answered on the pull request:
 - Deleting `conformance/oracle.json` was not selected: fixed, with a bats case.
 - A scenario with `clock: {}` let a golden with null `tz` and `start` pass:
   fixed by type checks before the comparison, with a selftest.
+- `clock.start` and `tz` took any string: they must now have the D5 forms
+  (date-time, zone name), with a selftest.
 
 Round 2 on `1c0c6d728`: M1, M2 and L2 to L4 closed; the D3 hash found
 faithful to the YAML 1.2 core schema and RFC 8785 for the forms scenarios
@@ -70,7 +72,7 @@ use. New findings, all fixed in the next commit:
 
 ## Evidence
 
-- `similarity-selftest`: 106 passed, calibration included.
+- `similarity-selftest`: 107 passed, calibration included.
 - `selftest` (`hosted_similarity.bats`, `provenance.bats`): 63 passed.
 - All 1,264 goldens in the tree meet the full binding (shape, pin, scenario
   hash, zone and clock).
