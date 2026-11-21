@@ -27,17 +27,12 @@ pub(super) fn merged(ranges: &[Range<u64>]) -> Vec<Range<u64>> {
     out
 }
 
-/// Every card of each note in `notes`, ascending card id, from one read
-/// transaction on the query reader.
-pub(super) fn cards_of_notes(
-    collection: &crate::Collection,
-    notes: &[i64],
-) -> Result<HashMap<i64, Vec<i64>>, BrowseError> {
-    let reader = collection.reader(ReaderRole::Query)?;
-    let snapshot = reader.snapshot()?;
+/// Every card of each note in `notes`, ascending card id, in a read
+/// transaction the caller holds.
+fn cards_of_notes_in(rows: &impl ReadRows, notes: &[i64]) -> Result<HashMap<i64, Vec<i64>>, BrowseError> {
     let mut cards: HashMap<i64, Vec<i64>> = HashMap::new();
     let params = worker::cells(&[id_list(notes)]);
-    snapshot.visit_id_rows(ids::CARDS_OF_NOTES, &params, &|| false, &mut |row| {
+    rows.visit_id_rows(ids::CARDS_OF_NOTES, &params, &|| false, &mut |row| {
         cards.entry(row[1]).or_default().push(row[0]);
         true
     })?;
@@ -52,10 +47,14 @@ pub(super) fn resolve(
     target: SearchMode,
 ) -> Result<Vec<i64>, BrowseError> {
     let collection = shared.engine()?.collection()?;
+    // H6: the generation is compared while the query reader is held, and
+    // the notes' cards are read in the same transaction.
+    let reader = collection.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
     let (mode, selected, notes) = {
         let handle = shared.handle(handle)?;
         let handle = lock(&handle);
-        // H6: the handle's generation, against the collection's.
+        // The handle's generation, against the collection's.
         if handle.generation != collection.generation() {
             return Err(BrowseError::UnknownHandle);
         }
@@ -83,7 +82,7 @@ pub(super) fn resolve(
         // Every card of each selected note, ascending card id; a note
         // without cards adds none.
         (SearchMode::Notes, SearchMode::Cards) => {
-            let mut cards = cards_of_notes(&collection, &selected)?;
+            let mut cards = cards_of_notes_in(&*snapshot, &selected)?;
             selected
                 .iter()
                 .flat_map(|note| cards.remove(note).unwrap_or_default())

@@ -701,27 +701,46 @@ fn sessions_on_two_engines_refuse_each_others_handles_h15() {
 }
 
 /// H3: a request made while searches are stopping (a replacement, a suspend
-/// or a close in progress) fails with the engine's refusal, even when its
-/// worker starts after the halt ends; the one-shot search is refused too.
+/// or a close in progress) fails with the engine's refusal, whether its
+/// worker takes it during the stop or after it, and a later request does
+/// not turn that refusal into a cancellation; the one-shot search is
+/// refused too.
 #[test]
 fn a_request_made_during_a_halt_fails_with_the_engines_refusal_h3() {
     let fx = fixture(2);
-    let held = hold_search_readers(&fx.h);
-    let seq = SearchSession::while_searches_stopped_for_testing(&fx.h.engine, || {
+    let refused = |events: &[SearchEvent]| {
+        matches!(
+            events,
+            [SearchEvent::Failed {
+                error: BrowseError::Engine(EngineError::CollectionUnavailable { .. }),
+                ..
+            }]
+        )
+    };
+    // Taken by the worker during the stop.
+    SearchSession::while_searches_stopped_for_testing(&fx.h.engine, || {
         assert!(matches!(
             search_ids(&fx.h.engine, "", SearchMode::Cards),
             Err(BrowseError::Engine(EngineError::CollectionUnavailable { .. }))
         ));
+        let seq = fx.session.start_search("", SearchMode::Cards, asc("cardDue"), None);
+        assert!(refused(&fx.until(seq)));
+    });
+    // Taken after the stop: the worker is held in an earlier request's
+    // first page until the stop has ended.
+    let (go, wait) = mpsc::channel::<()>();
+    fx.session.after_first_page_for_testing(move || {
+        let _ = wait.recv_timeout(WAIT);
+    });
+    let busy = fx.session.start_search("", SearchMode::Cards, asc("cardDue"), None);
+    assert!(matches!(fx.events.recv_timeout(WAIT).unwrap(), SearchEvent::FirstPage { seq, .. } if seq == busy));
+    let seq = SearchSession::while_searches_stopped_for_testing(&fx.h.engine, || {
         fx.session.start_search("", SearchMode::Cards, asc("cardDue"), None)
     });
-    drop(held);
-    assert!(matches!(
-        fx.until(seq).as_slice(),
-        [SearchEvent::Failed {
-            error: BrowseError::Engine(EngineError::CollectionUnavailable { .. }),
-            ..
-        }]
-    ));
+    go.send(()).unwrap();
+    let events = fx.until(seq);
+    assert!(matches!(events[0], SearchEvent::Cancelled { seq } if seq == busy), "{events:?}");
+    assert!(refused(&events[1..]), "{events:?}");
     // Afterwards searches run again.
     assert_eq!(fx.search("", SearchMode::Cards, asc("cardDue")).1, 4);
 }
