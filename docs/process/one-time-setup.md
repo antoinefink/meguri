@@ -150,13 +150,9 @@ Only for the real copy, "Meguri" with the daily-driver ids, which Antoine studie
 3. On `com.antoinefink.meguri`, enable iCloud (CloudKit) with the container `iCloud.com.antoinefink.meguri`, and Push Notifications. The container needs no schema: iCloud Sync stays off in the real copy while `MEGURI_CLOUD_SCHEMA_CONFIGURED_production` is `NO` (`app/Config/Cloud.xcconfig`).
 4. Create a macOS App Development profile for each App ID that includes this Mac as a registered device, and an iOS one for the iPhone later. Use the portal, then download them with Xcode › Settings › Accounts › Download Manual Profiles. Don't build Release in Xcode to get them: Xcode would leave a registered daily-driver app in its DerivedData. `tools/mg build-app --real-copy` uses installed profiles only and never requests provisioning updates.
 
-Push needs a decision before the route can pass. Release signs `com.apple.developer.aps-environment` = `production` (KTD22), but Mac development profiles grant push `development` only. So a development-signed real copy is refused at signing even after the steps above. The two ways out:
-- a Developer ID certificate and profile (production push), with a signing variant;
-- development push for this personal Release.
+The real copy signs push `development`, so these ordinary development profiles authorize it. CloudKit stays production. This is an exception to KTD22, for this route only (standing decision 2026-11-21).
 
-Either changes the signing policy and needs Antoine's choice. Until then the route stops at its profile check, which names `push-production`.
-
-Doctor's informational `daily-driver` line (it never changes doctor's status) reads the installed profiles (`tools/scripts/daily-driver-profiles.py`). It reports whether one authorizes the real copy on the Mac (identity, App Group, Keychain group, the production container and environment, production push, expiry, this Mac), and the iOS state. It lists this step while the Mac profile is missing or incomplete. When only production push is missing, the step names the push decision instead. It cannot see the developer portal itself.
+Doctor's informational `daily-driver` line (it never changes doctor's status) reads the installed profiles (`tools/scripts/daily-driver-profiles.py`). It reports whether one authorizes the real copy on the Mac (identity, App Group, Keychain group, the production container and environment, development push, expiry, this Mac), and the iOS state. It lists this step while the Mac profile is missing or incomplete. It cannot see the developer portal itself.
 
 Building and installing the real copy, at Antoine's request only:
 1. Run `MEGURI_APP_SIGNING=team tools/mg build-app --platform mac --real-copy --owner-requested`. It packs `build/app/real-copy/Meguri.zip`, unregisters and deletes the built app, and prints the read-only clean-up checks (`details.real_copy_cleanup_checks`). Don't use Meguri while it runs: until the route forgets it, the built copy is a registered app with the real bundle id, container and Keychain group.
@@ -164,8 +160,7 @@ Building and installing the real copy, at Antoine's request only:
 
 **iPhone: a documented option, not built.** `run --physical-device --personal-preview` installs only the dev identity. A real copy on the phone would need:
 - the iOS profiles from step 4;
-- a `run --platform iphone --physical-device <id> --real-copy --owner-requested` route, mirroring the personal preview: Release with the daily ids, team signing from installed profiles only, a `devicectl` install and its sealed install witness;
-- the same push decision.
+- a `run --platform iphone --physical-device <id> --real-copy --owner-requested` route, mirroring the personal preview: Release with the daily ids and development push, team signing from installed profiles only, a `devicectl` install and its sealed install witness.
 
 ### `nightly-scheduler`
 

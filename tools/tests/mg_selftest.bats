@@ -717,7 +717,7 @@ with open(sys.argv[1], "wb") as stream:
 PY
 }
 
-@test "doctor's real-copy profile line is informational: missing, push-blocked and authorized never change its status" {
+@test "doctor's real-copy profile line is informational: missing, incomplete and authorized never change its status" {
   make_stubs
   mg doctor
   [ "$(field .status)" = pass ]
@@ -725,12 +725,14 @@ PY
   [ "$(field .details.daily_driver_profiles.mac.state)" = missing ]
   [[ "$stderr" == *"info  daily-driver"*"no installed Mac profile authorizes the real copy"* ]]
   [ "$(field '[.details.checks[] | select(.id | startswith("daily"))] | length')" = 0 ]
-  daily_profile development
+  # The real copy signs development push: a profile granting production only is incomplete.
+  daily_profile production
   mg doctor
   [ "$(field .status)" = pass ]
-  jq -e '.user_steps[] | select(.id == "daily-driver-account" and .required == false and (.title | contains("push")))' "$result"
-  [[ "$stderr" == *"waiting on the push decision"* ]]
-  daily_profile production
+  [ "$(field .details.daily_driver_profiles.mac.state)" = incomplete ]
+  [[ "$stderr" == *"missing: push-development"* ]]
+  jq -e '.user_steps[] | select(.id == "daily-driver-account" and .required == false)' "$result"
+  daily_profile development
   mg doctor
   [ "$(field .status)" = pass ]
   [ "$(field '[.user_steps[] | select(.id == "daily-driver-account")] | length')" = 0 ]

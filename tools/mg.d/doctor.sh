@@ -374,15 +374,10 @@ mg_doctor() {
   fi
   if [ -n "$daily" ] && jq -e '.mac.state == "authorized"' >/dev/null 2>&1 <<<"$daily"; then
     printf '  %-4s  %-16s %s\n' info daily-driver "an installed Mac profile authorizes the real copy (com.antoinefink.meguri)$([ -n "$daily_udid" ] || echo ", but this Mac's UDID could not be read, so its coverage is unchecked"); iOS: $daily_ios"
-  elif [ "$daily_missing" = push-production ]; then
-    # Done on the account side; development profiles never grant production push.
-    printf '  %-4s  %-16s %s\n' info daily-driver "the real copy's profile is installed but grants push development only: waiting on the push decision (one-time-setup.md); iOS: $daily_ios"
-    mg_user_step daily-driver-account missing false "Decide how the real copy signs push (daily driver)" \
-      "Its Mac profile is installed; a development profile grants push development only, while Release signs production. Choose Developer ID signing or development push for the personal Release (one-time-setup.md)."
   else
     printf '  %-4s  %-16s %s\n' info daily-driver "optional: no installed Mac profile authorizes the real copy (com.antoinefink.meguri); missing: $daily_missing; iOS: $daily_ios"
     mg_user_step daily-driver-account missing false "Set up the real copy's identifiers and profiles (daily driver)" \
-      "In Certificates, Identifiers & Profiles: register com.antoinefink.meguri and com.antoinefink.meguri.widget, the App Group group.com.antoinefink.meguri on both, iCloud (iCloud.com.antoinefink.meguri) and Push on the app, and a macOS development profile for each that includes this Mac. See the push note in the doc."
+      "In Certificates, Identifiers & Profiles: register com.antoinefink.meguri and com.antoinefink.meguri.widget, the App Group group.com.antoinefink.meguri on both, iCloud (iCloud.com.antoinefink.meguri) and Push Notifications on the app, and a macOS App Development profile for each that includes this Mac (docs/process/one-time-setup.md#daily-driver-account)."
   fi
   [ -z "$daily" ] || mg_detail daily_driver_profiles "$daily"
 
