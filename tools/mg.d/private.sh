@@ -5,6 +5,9 @@
 #   tools/mg private suite [--record <name>] [--keep]
 #                                           the private suite on a fresh copy; summary of pass counts
 #   tools/mg private scan-outputs [path...] files (default: the staged lines) holding a private token
+#   tools/mg private pins                   reviewed public files (PUBLIC_ARTIFACTS) edited since their review
+#   tools/mg private refresh-public --head <full-oid> [--shared-main]
+#                                           drops the tokens that commit already publishes
 #
 # A host job. The only source is local-data/anki/ of this checkout (the main
 # checkout: no worktree has local-data/), and of it only collection.anki2,
@@ -24,6 +27,14 @@
 # it and name files and lines, never a token. Every job that copies the
 # collection installs those hooks first (tools/mg hooks install) and copies
 # nothing when it cannot.
+#
+# One answer in every checkout (docs/process/provenance.md): every worktree
+# reads the main checkout's token set, so a rebuild or refresh there reaches
+# all of them at their next commit. A copy sets meguri.privateTokenSet=required
+# in the repository's config; from then on the hooks refuse a commit when the
+# set is missing, empty or unreadable instead of passing unscanned.
+# baseline.json beside the set names the commit whose text the set last
+# dropped (counts, hashes and that id only); tools/mg doctor reports it.
 #
 # suite runs the checks meguri-cli registers (U249 adds the R1942 checks),
 # scans the summary and only then, with --record, writes it to
@@ -45,7 +56,7 @@ mg_job anonymize host mg_anonymize \
   "Anonymized clone (specs/fixtures/anonymizer.md): [--source <dir>] [--out <dir>] [--salt-file <file>] [--now <instant>] [--tz <zone>]; default source a fresh vault copy, clone in build/private/<run>/clone, salt build/private/anonymize.salt; V1, V2, V4, V5 by meguri-cli, V3 by tools/mg oracle check --schedule on the source and the clone"
 
 mg_job private host mg_private \
-  "Private collection vault (local-data/anki/, read-only, never off this Mac): status | copy | suite [--record <name>] [--keep] | refresh-public --head <full-oid> [--shared-main] | scan-outputs [paths...] (default: the staged lines); copies and the token set stay in build/private/"
+  "Private collection vault (local-data/anki/, read-only, never off this Mac): status | copy | suite [--record <name>] [--keep] | refresh-public --head <full-oid> [--shared-main] | scan-outputs [paths...] (default: the staged lines) | pins (reviewed public files edited since their review; reads no token set); copies and the token set stay in build/private/"
 
 mg_job private-selftest host mg_private_selftest \
   "The vault's copy through the real read-only mount, on a made-up profile folder (no private data; any checkout): meguri-cli private copy in the private service gives the collection, its log and media unchanged, the source keeps every hash, size and mtime, writes through /vault are refused, a read-write source is refused"
@@ -60,6 +71,10 @@ MG_PRIVATE_CI_MARKERS="CI CONTINUOUS_INTEGRATION BUILDKITE BITBUCKET_BUILD_NUMBE
 MG_PRIVATE_SOURCE=local-data/anki
 MG_PRIVATE_DIR=build/private
 MG_PRIVATE_TOKENS=build/private/tokens/tokens.txt
+# What the set last dropped as public: {head, tokens, sha256, at, by}.
+MG_PRIVATE_BASELINE=build/private/tokens/baseline.json
+# The repository config key that makes a missing token set block commits.
+MG_PRIVATE_REQUIRED_KEY=meguri.privateTokenSet
 MG_PRIVATE_REPORTS=conformance/reports/private
 MG_PRIVATE_SCAN=tools/scripts/private-scan/private_scan.py
 # meguri-cli as the dev service builds it (profile `fixtures`), seen from the
@@ -71,7 +86,7 @@ MG_PRIVATE_CLI=/cargo-target/fixtures/meguri-cli
 MG_PRIVATE_COPY_SCRIPT='"$1" private copy --source "$2" --out "$3/copy" --access-log "$3/vault-access.log" >"$3/copy.json"'
 
 mg__private_usage() {
-  mg_failure usage "$1; usage: tools/mg private status | copy | suite [--record <name>] [--keep] | refresh-public --head <full-oid> [--shared-main] | scan-outputs [paths...]"
+  mg_failure usage "$1; usage: tools/mg private status | copy | suite [--record <name>] [--keep] | refresh-public --head <full-oid> [--shared-main] | scan-outputs [paths...] | pins"
   mg_message "private: usage error"
   mg_status error
 }
@@ -221,6 +236,86 @@ mg__private_copy() {
     return 1
   fi
   MG__PRIVATE_TOKENSET="$(jq -c . "$MG_ROOT/$run/token-set.json")"
+  # From here on a commit this set cannot check is refused, in every
+  # worktree (the key is in the repository's shared config).
+  if ! git -C "$MG_ROOT" config "$MG_PRIVATE_REQUIRED_KEY" required ||
+     ! mg__private_baseline_write "$MG_ROOT" "$(git -C "$MG_ROOT" rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null || true)" build; then
+    mg_failure token-set-marker "the token set was built, but $MG_PRIVATE_REQUIRED_KEY or $MG_PRIVATE_BASELINE could not be written, so a later missing set would not block commits"
+    mg_status error
+    return 1
+  fi
+}
+
+# mg__private_main: the main checkout (the one whose token set every
+# worktree reads); this checkout when git cannot say.
+mg__private_main() {
+  local common
+  if common="$(git -C "$MG_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && [ -n "$common" ]; then
+    dirname "$common"
+  else
+    printf '%s\n' "$MG_ROOT"
+  fi
+}
+
+# mg__private_sha256 <file>: its SHA-256 (macOS has shasum, the containers
+# sha256sum).
+mg__private_sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | cut -c1-64
+  else
+    sha256sum "$1" | cut -c1-64
+  fi
+}
+
+# mg__private_baseline_write <checkout> <head> <by>: records beside that
+# checkout's token set which commit's text it last dropped. Counts, a hash
+# and the commit id only. Returns 1 when it cannot be written.
+mg__private_baseline_write() {
+  local dir="$1/$(dirname "$MG_PRIVATE_TOKENS")" set="$1/$MG_PRIVATE_TOKENS" tmp
+  [ -f "$set" ] || return 1
+  tmp="$(mktemp "$dir/baseline.tmp.XXXXXX")" || return 1
+  if jq -n --arg head "$2" --arg by "$3" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg sha "$(mg__private_sha256 "$set")" --argjson tokens "$(grep -c . "$set")" \
+    '{head: $head, by: $by, at: $at, sha256: $sha, tokens: $tokens}' >"$tmp" && mv -f "$tmp" "$1/$MG_PRIVATE_BASELINE"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
+# mg__private_set_facts <checkout>: one JSON object about that checkout's
+# token set, from stat, a count of its non-empty lines (what the scanner
+# reads as tokens) and a hash (never its text): path,
+# present, readable, tokens, sha256, modified, baseline (baseline.json, or
+# null) and baseline_current (whether it describes these bytes).
+mg__private_set_facts() {
+  local set="$1/$MG_PRIVATE_TOKENS" base="$1/$MG_PRIVATE_BASELINE" present=false readable=false tokens=0 sha="" modified="" baseline=null
+  if [ -e "$set" ] || [ -L "$set" ]; then
+    present=true
+    if [ -f "$set" ] && [ ! -L "$set" ] && [ -r "$set" ]; then
+      readable=true
+      tokens="$(grep -c . "$set")"
+      sha="$(mg__private_sha256 "$set")"
+      modified="$(date -u -r "$set" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+    fi
+  fi
+  # Anything but one object with a commit id and a hash is no baseline.
+  [ ! -f "$base" ] || baseline="$(jq -cs 'if length == 1 and (.[0] | type == "object" and (.head | type == "string" and length > 0) and (.sha256 | type == "string")) then .[0] | {head, by, at, sha256, tokens} else null end' "$base" 2>/dev/null)"
+  [ -n "$baseline" ] || baseline=null
+  jq -nc --arg path "$set" --argjson present "$present" --argjson readable "$readable" --argjson tokens "${tokens:-0}" \
+    --arg sha "$sha" --arg modified "$modified" --argjson baseline "$baseline" \
+    '{path: $path, present: $present, readable: $readable, tokens: $tokens, sha256: $sha, modified: $modified,
+      baseline: $baseline, baseline_current: ($baseline != null and $sha != "" and $baseline.sha256 == $sha)}'
+}
+
+# mg__private_required: whether this repository is expected to have a token
+# set (the hooks' rule: tools/hooks/pre-commit). -e stats the folder only.
+mg__private_required() {
+  local main
+  main="$(mg__private_main)"
+  [ "$(git -C "$MG_ROOT" config --get "$MG_PRIVATE_REQUIRED_KEY" 2>/dev/null)" = required ] ||
+    [ -e "$main/$MG_PRIVATE_SOURCE" ] || [ -L "$main/$MG_PRIVATE_SOURCE" ] ||
+    [ -e "$MG_ROOT/$MG_PRIVATE_SOURCE" ] || [ -L "$MG_ROOT/$MG_PRIVATE_SOURCE" ]
 }
 
 mg__private_status() {
@@ -244,6 +339,8 @@ mg__private_status() {
     tokens="$(jq -c --arg p "$MG_PRIVATE_TOKENS" '{path: $p} + .' "$MG_ROOT/$(dirname "$MG_PRIVATE_TOKENS")/meta.json" 2>/dev/null ||
       jq -nc --arg p "$MG_PRIVATE_TOKENS" '{path: $p}')"
   fi
+  # The set the hooks read here: the main checkout's, in a worktree too.
+  mg_detail token_set_now "$(mg__private_set_facts "$(mg__private_main)" | jq -c --argjson required "$(mg__private_required && echo true || echo false)" '. + {required: $required}')"
   mg_detail source "$(jq -nc --arg p "$MG_PRIVATE_SOURCE" --argjson present "$present" --argjson bytes "${bytes:-0}" \
     --argjson wal "$wal" --argjson media "$media" \
     '{path: $p, present: $present, collection_bytes: $bytes, wal: $wal, media_folder: $media}')"
@@ -282,14 +379,18 @@ mg__private_copy_job() {
 
 # mg__private_scan <json out> <scan args...>: runs the scanner with every
 # token set this checkout sees (the main checkout's and its own). Returns
-# its exit code, 3 when there is no token set.
+# its exit code, 3 when there is no token set, 4 when one is there but is
+# not a readable, non-empty regular file.
 mg__private_scan() {
   local out="$1" common main sets=() f
   shift
   common="$(git -C "$MG_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
   main="${common:+$(dirname "$common")}"
   for f in "${main:+$main/$MG_PRIVATE_TOKENS}" "$MG_ROOT/$MG_PRIVATE_TOKENS"; do
-    [ -n "$f" ] && [ -f "$f" ] || continue
+    [ -n "$f" ] || continue
+    { [ -e "$f" ] || [ -L "$f" ]; } || continue
+    # A set that is there but cannot be read is an error, never "no set".
+    { [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] && [ -s "$f" ]; } || return 4
     [ "${#sets[@]}" -gt 0 ] && [ "${sets[1]}" = "$f" ] && continue
     sets[${#sets[@]}]=--tokens
     sets[${#sets[@]}]="$f"
@@ -335,6 +436,11 @@ mg__private_scan_outputs() {
       mg__private_report_scan "$out"
       mg_message "private: $(jq '.files | length' "$out") files hold a private token (R1940)"
       mg_status fail
+      ;;
+    4)
+      mg_failure token-set-unreadable "a private token set ($MG_PRIVATE_TOKENS of the main checkout or this one) is not a readable, non-empty regular file, so nothing was scanned" "tools/mg doctor"
+      mg_message "private: the token set cannot be read"
+      mg_status error
       ;;
     3)
       mg_failure no-token-set "no private token set ($MG_PRIVATE_TOKENS of the main checkout or this one); tools/mg private copy builds it" "tools/mg private copy"
@@ -444,16 +550,59 @@ mg__private_refresh_public() {
     mg_status error
     return 0
   fi
+  local target="$MG_ROOT"
+  [ "$#" -ne 3 ] || target="$(mg__private_main)"
+  # A set built before the key existed: from now on its absence is refused.
+  if ! git -C "$MG_ROOT" config "$MG_PRIVATE_REQUIRED_KEY" required ||
+     ! mg__private_baseline_write "$target" "$2" refresh-public; then
+    mg_failure baseline "the token set was refreshed, but $MG_PRIVATE_BASELINE could not be written; tools/mg doctor will report the baseline as unknown"
+    mg_status error
+    return 0
+  fi
   mg_artifact report "$out" "public-baseline refresh (counts and hashes only)"
   mg_detail refresh_public "$(jq -c . "$out")"
   mg_message "private: removed $(jq .removed "$out") public entries; $(jq .after "$out") tokens remain"
   mg_status pass
 }
 
+# tools/mg private pins: reads no token set and no private data, so it runs
+# anywhere (CI too). A stale pin is not a leak: the file's later lines were
+# scanned when they were committed. It says where a whole-file scan, or a
+# merge from a base older than the file's reviewed lines, will flag them.
+mg__private_pins() {
+  local out="$MG_RUN_DIR/pins.json" rc
+  if [ "$#" -ne 0 ]; then
+    mg__private_usage "pins takes no argument"
+    return 0
+  fi
+  python3 -I -B "$MG_ROOT/$MG_PRIVATE_SCAN" pins --repo "$MG_ROOT" >"$out"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    mg_failure pins "listing the pinned public files failed (exit $rc); see log.txt"
+    mg_status error
+    return 0
+  fi
+  mg_artifact report "$out" "pinned public files whose bytes changed since their review (paths only)"
+  mg_detail pins "$(jq -c '{commit, pinned, stale: (.stale | length), absent: ((.absent | length) + .absent_vendor)}' "$out")"
+  mg_count total "$(jq .pinned "$out")"
+  mg_count warned "$(jq '(.stale | length) + (.absent | length) + .absent_vendor' "$out")"
+  if [ "$(jq '(.stale | length) + (.absent | length) + .absent_vendor' "$out")" -eq 0 ]; then
+    mg_message "private: all $(jq .pinned "$out") reviewed public files still have their reviewed bytes"
+    mg_status pass
+  else
+    mg_message "private: $(jq '.stale | length' "$out") of $(jq .pinned "$out") reviewed public files changed since their review, $(jq '(.absent | length) + .absent_vendor' "$out") are gone; their reviewed lines are scanned like new ones (docs/process/provenance.md#one-answer-in-every-checkout)"
+    mg_status warn
+  fi
+}
+
 mg_private() {
   local command="${1:-}"
   [ "$#" -eq 0 ] || shift
   case "$command" in
+    pins)
+      mg__private_pins "$@"
+      return 0
+      ;;
     refresh-public)
       mg__private_refresh_public "$@"
       return 0

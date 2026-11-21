@@ -84,6 +84,23 @@ private-data access, similarity exceptions or clean-room rules.
 This delegation covers only the exact hash entries above. Use normal tool
 approval; it cannot override a denial or an owner-only action.
 
+## One answer in every checkout
+
+The private-token scan (`tools/hooks/pre-commit`, `pre-merge-commit`, `tools/mg private scan-outputs`) reads one token set: the main checkout's `build/private/tokens/tokens.txt`. Every worktree resolves it through the repository's git directory, so nothing is copied into a worktree and a rebuild or refresh reaches all of them at their next commit. The three hook shims live once in the shared hooks directory. `tools/mg doctor` checks both (`private-hooks`, `private-scan`) and reports the set's token count, hash prefix, change time and public baseline, never its text.
+
+- The scan fails closed. `tools/mg private copy` sets `meguri.privateTokenSet=required` in the repository config; the main checkout's `local-data/anki` means the same. `tools/mg hooks install` (so every `worktree new`) and `refresh-public` set the key too when they see a set. Where a set is expected, a missing, empty or unreadable one refuses the commit, as does a session that cannot see it. A set that a rebuild or refresh leaves empty refuses every commit until `tools/mg private copy` rebuilds it. Each worktree runs its own branch's hook: one whose branch predates this rule still passes silently until it merges `master`. A clone on a machine without the collection (CI, a contributor) has none, and its hooks have nothing to check.
+- The public baseline is the commit whose text the set last dropped: a word already in a file committed there is not private. `baseline.json` beside the set names it. `tools/mg private copy` sets it to that checkout's `HEAD`.
+- A hook scans the lines its commit adds against the first parent. A file admitted whole under [Routine privacy admissions](#routine-privacy-admissions) is exempt only while its bytes equal the pinned digest. After any later edit, its reviewed lines count again wherever they are seen as added: a whole-file `scan-outputs <path>`, or a merge in a worktree whose base predates them. Newer worktrees already hold those lines and see nothing. The finding is marked `stale_public_artifact`, and the hook says `[reviewed public file whose bytes changed since its review]`. `tools/mg private pins` lists every such file without reading a token set.
+- Rebase, cherry-pick, `git am` and GitHub's merges run no hook. A digest admitted on a branch whose file then changes in a rebase no longer covers it.
+
+When reviewed text on `master` is flagged this way, do not add an exemption, refresh a pin for bytes nobody reviewed, or look for the word. Check that each flagged line was in the reviewed bytes (the pinned digest occurs in the file's history, and the line is unchanged since). Then the owner, or the orchestrator on his decision, moves the baseline in the main checkout, with no other writer of the token set or of that checkout's `HEAD` running:
+
+```sh
+tools/mg private refresh-public --head "$(git rev-parse HEAD)"
+```
+
+It reads `tokens.txt` and the text of every regular file committed at that exact commit (`conformance/reports/private/` excepted). It does not read `local-data/`, needs no Docker, and prints counts and hashes only. It writes the new set, keeps the old one beside it as `tokens.before-<nonce>`, and records `baseline.json`. From a worktree, `--shared-main` refreshes the main checkout's set against the worktree's `HEAD`. Every published word at that commit stops being a token, so run it only on a commit whose content is accepted as public. Old worktrees pick the result up unchanged.
+
 ## Commit trailers
 
 | Trailer | Required on |
