@@ -4,7 +4,7 @@
 //! refusals of S1.2 in their order. The same scans run again on the live
 //! rows in the write phase ([`super::commit`]).
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use meguri_model::card::Card;
 use meguri_model::ids::NotetypeId;
@@ -14,7 +14,10 @@ use meguri_model::proto::notetype::CardRequirement;
 use meguri_storage::ReadRows;
 use meguri_storage::journal::{LayoutReport, LayoutShape, StructureReason, StructureReport};
 
-use super::{DraftTemplate, StructureDraft, StructureRefusal, invalid, position, stale, write_spec};
+use super::summary::{self, RestoreSummary};
+use super::{
+    ConfirmedLosses, DraftTemplate, Losses, StructureDraft, StructureRefusal, invalid, position, stale, write_spec,
+};
 use crate::cardgen::regenerate::{self, RegenerationPlan};
 use crate::notetypes::rename::{self, FieldIdentity, FieldRename, FieldRenamePlan, RenameFields};
 use crate::notetypes::rewrite::{self, Map, Side, Target};
@@ -63,6 +66,9 @@ pub(crate) struct Layout {
     pub report_layout: bool,
     /// S5 runs.
     pub rewrite_notes: bool,
+    /// The field at the final sort position is not the base's sort field
+    /// (S2): reported in D2's summary whatever the schema reasons.
+    pub sort_changed: bool,
     pub cards: CardMap,
     /// S7 runs.
     pub fronts_changed: bool,
@@ -71,9 +77,26 @@ pub(crate) struct Layout {
     pub generation: Option<RegenerationPlan>,
     /// Whether the save writes anything (N3.1).
     pub changed: bool,
+    pub confirmed: ConfirmedLosses,
+    /// What D2 lists that the rows alone do not tell.
+    pub text_or_styling_changed: bool,
+    /// The report's template map when it is not the origins
+    /// (`restore-to-default` D4.1: a cloze note type's card ordinals).
+    pub report_template_map: Option<Vec<i32>>,
+    /// Which read `LossesChanged` carries.
+    pub purpose: Purpose,
     /// The note type name after N4 steps 1 and 2, before step 7's `+`:
     /// the write phase applies step 7 again on the live rows.
     pub requested_name: String,
+}
+
+/// The op a layout belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Purpose {
+    /// The draft save: D2's summary.
+    Draft,
+    /// Restore to Default: a `restore_summary` (D7.1).
+    Restore,
 }
 
 impl Layout {
@@ -102,7 +125,10 @@ impl Layout {
                     before: LayoutShape::of(&self.base)?,
                     after: LayoutShape::of(&self.saved)?,
                     field_map: map(&self.field_origins),
-                    template_map: map(&self.template_origins),
+                    template_map: self
+                        .report_template_map
+                        .clone()
+                        .unwrap_or_else(|| map(&self.template_origins)),
                 },
             );
         }
@@ -131,6 +157,12 @@ pub(crate) enum CardOutcome {
 }
 
 impl CardMap {
+    /// The loss category of a card this map removes (D8): its base
+    /// template, or `None` for D4.1's kind-change removals.
+    pub fn removed_template(&self, ord: u16) -> Option<u32> {
+        (self.templates_changed && matches!(self.moved.get(usize::from(ord)), Some(None))).then_some(u32::from(ord))
+    }
+
     pub fn is_identity(&self) -> bool {
         self.remove_from.is_none()
             && (!self.templates_changed
@@ -158,21 +190,58 @@ impl CardMap {
     }
 }
 
-/// S1.2 item 4 on `reader`'s rows: when the save rewrites notes, every note
-/// of the type must hold at most as many values as the base has fields.
-/// One pass over the type's notes, with progress.
-///
-/// The write phase runs it again on the live rows of its transaction
-/// before its first write; any further precondition on the live rows
-/// belongs beside it, after the base token check (`commit::check_live`).
-pub(crate) fn check_note_values(
+/// The losses and card effects counted on one set of rows.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Counts {
+    /// Per removed base field ordinal: notes whose value there is not empty
+    /// (E1).
+    pub fields: BTreeMap<u32, u64>,
+    /// Per removed base template ordinal: its cards.
+    pub templates: BTreeMap<u32, u64>,
+    /// D4.1's kind-change removals.
+    pub kind_change_cards: u64,
+    /// Notes with a card before and none after (shown, never compared).
+    pub notes_without_cards: u64,
+    pub cards_renumbered: u64,
+}
+
+impl Counts {
+    /// D8: whether any live count is larger than its own confirmed count
+    /// (an absent category was confirmed as 0). Never a total.
+    pub fn exceed(&self, confirmed: &ConfirmedLosses) -> bool {
+        let over = |live: &BTreeMap<u32, u64>, shown: &BTreeMap<u32, u64>| {
+            live.iter().any(|(ord, count)| *count > shown.get(ord).copied().unwrap_or(0))
+        };
+        over(&self.fields, &confirmed.fields)
+            || over(&self.templates, &confirmed.templates)
+            || self.kind_change_cards > confirmed.kind_change_cards
+    }
+}
+
+/// One pass over the type's notes on `reader`'s rows, with progress: S1.2
+/// item 4 when the save rewrites notes (at most as many values as the base
+/// has fields), the notes with content in each removed field, the cards
+/// removed per category, the notes left with no card and the cards
+/// renumbered. The write phase runs it again on the live rows of its
+/// transaction before its first write.
+pub(crate) fn count(
     reader: &impl ReadRows,
     layout: &Layout,
     cancel: &CancelToken,
     progress: &ProgressSink,
-) -> Result<(), EngineError> {
-    if !layout.rewrite_notes {
-        return Ok(());
+) -> Result<Counts, EngineError> {
+    let mut counts = Counts::default();
+    for &field in &layout.removed_fields {
+        counts.fields.insert(field, 0);
+    }
+    for (at, moved) in layout.cards.moved.iter().enumerate() {
+        if layout.cards.templates_changed && moved.is_none() {
+            counts.templates.insert(position(at), 0);
+        }
+    }
+    let scan_cards = !layout.cards.is_identity();
+    if !layout.rewrite_notes && layout.removed_fields.is_empty() && !scan_cards {
+        return Ok(counts);
     }
     let base_fields = layout.base.fields.len();
     let total = reader.notetype_note_count(layout.base.id)?;
@@ -185,14 +254,66 @@ pub(crate) fn check_note_values(
         let Some(last) = page.last() else { break };
         after = Some(last.id);
         for note in page {
-            if note.field_values().count() > base_fields {
+            let values: Vec<&str> = note.field_values().collect();
+            if layout.rewrite_notes && values.len() > base_fields {
                 return Err(StructureRefusal::NoteFieldCountMismatch { note: note.id }.into());
+            }
+            for &field in &layout.removed_fields {
+                let filled = values
+                    .get(field as usize)
+                    .is_some_and(|value| !meguri_text::field_empty::counts_as_empty(value));
+                if filled {
+                    *counts.fields.entry(field).or_default() += 1;
+                }
+            }
+            if scan_cards {
+                let cards = reader.cards_of_note(note.id)?;
+                let mut removed = 0;
+                for card in &cards {
+                    match layout.cards.outcome_of(card.ord) {
+                        CardOutcome::Remove => {
+                            removed += 1;
+                            match layout.cards.removed_template(card.ord) {
+                                Some(template) => *counts.templates.entry(template).or_default() += 1,
+                                None => counts.kind_change_cards += 1,
+                            }
+                        }
+                        CardOutcome::Move(_) => counts.cards_renumbered += 1,
+                        CardOutcome::Keep => {}
+                    }
+                }
+                if !cards.is_empty() && removed == cards.len() {
+                    counts.notes_without_cards += 1;
+                }
             }
             done += 1;
             progress.report(done, Some(total));
         }
     }
-    Ok(())
+    Ok(counts)
+}
+
+/// The op's own read of a set of rows (D8): D2's summary, or for a restore
+/// a `restore_summary` (D7.1).
+pub(crate) fn losses_read(layout: &Layout, counts: &Counts, generation: Option<&RegenerationPlan>) -> Losses {
+    let summary = summary::of(layout, counts, generation);
+    match layout.purpose {
+        Purpose::Draft => Losses::Draft(summary),
+        Purpose::Restore => Losses::Restore(RestoreSummary {
+            summary,
+            kind_change_cards_removed: counts.kind_change_cards,
+            digest: layout.digest,
+        }),
+    }
+}
+
+/// `LossesChanged` with [`losses_read`].
+pub(crate) fn losses_changed(
+    layout: &Layout,
+    counts: &Counts,
+    generation: Option<&RegenerationPlan>,
+) -> EngineError {
+    StructureRefusal::LossesChanged(Box::new(losses_read(layout, counts, generation))).into()
 }
 
 /// S5: a note's values as the save stores them: for each saved field, the
@@ -364,6 +485,9 @@ pub(crate) struct Shape {
     pub template_origins: Vec<Option<u32>>,
     pub fresh_fields: Vec<bool>,
     pub fresh_templates: Vec<bool>,
+    pub confirmed: ConfirmedLosses,
+    pub text_or_styling_changed: bool,
+    pub purpose: Purpose,
     pub requested_name: String,
 }
 
@@ -444,6 +568,7 @@ pub(crate) fn classify(base: Notetype, saved: Notetype, shape: Shape) -> Layout 
     Layout {
         report_layout: fields_changed || templates_changed || sort_changed || fields_renamed || templates_renamed,
         rewrite_notes: fields_changed || sort_changed,
+        sort_changed,
         cards: CardMap {
             templates_changed,
             moved,
@@ -462,6 +587,10 @@ pub(crate) fn classify(base: Notetype, saved: Notetype, shape: Shape) -> Layout 
         field_origins: shape.field_origins,
         template_origins: shape.template_origins,
         changed,
+        confirmed: shape.confirmed,
+        text_or_styling_changed: shape.text_or_styling_changed,
+        report_template_map: None,
+        purpose: shape.purpose,
         requested_name: shape.requested_name,
     }
 }
@@ -497,9 +626,9 @@ pub(crate) fn plan_draft(
     check_unique(draft.fields.iter().map(|f| f.origin), "a field")?;
     check_unique(draft.templates.iter().map(|t| t.origin), "a template")?;
     let id = draft.notetype;
-    let base = reader
-        .notetype(id)?
-        .ok_or_else(|| invalid(format!("no note type {id}")))?;
+    // A note type that no longer exists is `Stale` (S1.2, changed
+    // 2026-11-20, round 9 review).
+    let base = reader.notetype(id)?.ok_or_else(|| stale(id))?;
     // S1.1: origins outside the base are refused before every refusal,
     // `Stale` included (against the note type as stored).
     check_range(draft.fields.iter().map(|f| f.origin), base.fields.len(), "a field")?;
@@ -535,9 +664,11 @@ pub(crate) fn plan_draft(
     Ok(Planned::Layout(Box::new(layout)))
 }
 
-/// S1.2 items 4 and 5 and the generation plan, on the planning snapshot.
-/// Shared with Restore to Default, whose restore is a checked save with no
-/// template refusal (`restore-to-default` D3).
+/// S1.2 items 4 and 5, the generation plan and the confirmed losses, on
+/// the planning snapshot: a confirmation already out of date there is
+/// refused before the safety backup (D8). Shared with Restore to Default,
+/// whose restore is a checked save with no template refusal
+/// (`restore-to-default` D3).
 pub(crate) fn finish(
     reader: &impl ReadRows,
     layout: &mut Layout,
@@ -552,14 +683,17 @@ pub(crate) fn finish(
         }
         return Ok(());
     }
-    // Item 4.
-    check_note_values(reader, layout, cancel, progress)?;
+    // Item 4, with the loss counts in the same pass.
+    let counts = count(reader, layout, cancel, progress)?;
     // Item 5.
     if checked && let Some(failure) = validate::first_failure(&layout.saved) {
         return Err(failure.into());
     }
     layout.generation = plan_generation(reader, layout, cancel, progress)?;
     cancel.check()?;
+    if counts.exceed(&layout.confirmed) {
+        return Err(losses_changed(layout, &counts, layout.generation.as_ref()));
+    }
     Ok(())
 }
 
@@ -655,7 +789,20 @@ fn layout_of_draft(reader: &impl ReadRows, base: Notetype, draft: &StructureDraf
     {
         saved.config.reqs = requirements(&base, &saved, &template_origins);
     }
+    let text_or_styling_changed = draft.css != base.config.css
+        || draft.templates.iter().any(|d| {
+            d.origin.is_some_and(|o| {
+                let c = &base.templates[o as usize].config;
+                d.front != c.q_format
+                    || d.back != c.a_format
+                    || d.browser_front != c.q_format_browser
+                    || d.browser_back != c.a_format_browser
+            })
+        });
     let shape = Shape {
+        confirmed: draft.confirmed.clone(),
+        text_or_styling_changed,
+        purpose: Purpose::Draft,
         requested_name,
         fresh_fields: field_origins.iter().map(Option::is_none).collect(),
         fresh_templates: template_origins.iter().map(Option::is_none).collect(),

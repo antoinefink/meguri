@@ -76,6 +76,8 @@ pub mod note_patch;
 pub mod notetype_field_rename;
 #[path = "notetype_records.rs"]
 pub mod notetype_records;
+#[path = "notetype_removal.rs"]
+pub mod notetype_removal;
 #[path = "notetype_structure.rs"]
 pub mod notetype_structure;
 #[path = "observers.rs"]

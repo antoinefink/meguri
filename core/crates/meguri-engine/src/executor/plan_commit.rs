@@ -87,6 +87,29 @@ pub fn plan_and_commit_with<P, T, PF, SF, CF>(
     collection: &Collection,
     role: ReaderRole,
     spec: OpSpec,
+    plan: PF,
+    choose: SF,
+    commit: CF,
+) -> Result<OpResult<T>, EngineError>
+where
+    P: Send + 'static,
+    T: Send + 'static,
+    PF: FnMut(&PlanContext<'_>) -> Result<Plan<P>, EngineError>,
+    SF: Fn(&OpSpec, &P) -> OpSpec,
+    CF: Fn(&mut OpContext<'_, '_>, P) -> Result<T, EngineError> + Send + Sync + 'static,
+{
+    plan_and_commit_with_replans(collection, role, spec, REPLANS, plan, choose, commit)
+}
+
+/// [`plan_and_commit_with`] that plans again at most `replans` times after
+/// `Stale`, and returns the last `Stale` itself, before opening another
+/// snapshot: a draft whose base is the caller's never replans (0); Restore
+/// to Default replans once (`notetypes/restore-to-default` D6).
+pub fn plan_and_commit_with_replans<P, T, PF, SF, CF>(
+    collection: &Collection,
+    role: ReaderRole,
+    spec: OpSpec,
+    replans: u32,
     mut plan: PF,
     choose: SF,
     commit: CF,
@@ -136,7 +159,7 @@ where
         let commit = Arc::clone(&commit);
         let value = planned.value;
         match collection.run(attempt_spec, move |context| commit(context, value)) {
-            Err(EngineError::Stale { .. }) if attempt < REPLANS => attempt += 1,
+            Err(EngineError::Stale { .. }) if attempt < replans => attempt += 1,
             other => return other,
         }
     }
