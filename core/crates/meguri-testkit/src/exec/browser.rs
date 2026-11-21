@@ -217,12 +217,11 @@ fn browser_rows(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
                 .ok_or_else(|| ExecError::new("unknown_ref", reference.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let collection = session.engine_collection()?;
-    let today = super::sched::day_query_now(session)?.day.today;
     let time = RowTime {
         now: session.clock.now_secs(),
-        today,
+        today: today(session)?,
     };
+    let collection = session.engine_collection()?;
     let rows = browse::rows(
         &collection,
         &RowRequest {
@@ -252,6 +251,31 @@ fn browser_rows(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
         })
         .collect::<Result<Vec<_>, _>>()
         .map(Value::Array)
+}
+
+/// B3: today from the scenario clock, computed as the day query computes it
+/// but with no write: Browse rows run no unbury and store no timing key
+/// (`sched/day-clock` D14.2; the oracle's rows read the day the same way).
+fn today(session: &Session<'_>) -> Result<u32, ExecError> {
+    use meguri_model::clock::Clock;
+    use meguri_sched::timing::{self, DayInputs};
+    use meguri_storage::ReadRows;
+    let reader = collection(session)?.reader()?;
+    let stored = |key: &str| -> Result<Option<i128>, ExecError> {
+        Ok(match reader.config_value(key).map_err(core)? {
+            Some(ConfigValue::Integer(value)) => Some(value),
+            _ => None,
+        })
+    };
+    let now = session.clock.now_secs();
+    let day = timing::sched_day(&DayInputs {
+        crt: reader.col().map_err(core)?.created.0,
+        creation_offset: timing::creation_offset(stored("creationOffset")?),
+        offset: session.clock.utc_offset_at(now * 1000),
+        rollover_hour: timing::rollover_hour(stored("rollover")?).unwrap_or(timing::DEFAULT_ROLLOVER_HOUR),
+        now,
+    });
+    Ok(day.today)
 }
 
 /// B3's tint names.

@@ -3193,7 +3193,13 @@ fn held_observation_shapes_and_pure_formatting_are_recognized() {
         };
         let kind = observe[0].kind;
         assert_eq!(K::from_name(kind.name()), Some(kind));
-        assert!(!capabilities.observations.contains(kind.name()));
+        // U84 runs `browser_rows`; the other held kinds are language only.
+        assert_eq!(
+            capabilities.observations.contains(kind.name()),
+            kind == K::BrowserRows,
+            "{}",
+            kind.name()
+        );
         assert_eq!(
             parsed.needs().setup.contains(NEW_COLLECTION),
             kind != K::StudiedTodayFormat
