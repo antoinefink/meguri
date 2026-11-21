@@ -25,6 +25,16 @@ PR #58 (Meguri Dev name, `.dev` ids, blue icon) broke six `tools/mg selftest` te
 - **Authorship:** unchanged. The file is Meguri's own text about icon images the owner supplied (see `app-icon-20261118.md`).
 - **Bytes:** the same as `origin/master` at `f3e92f66f`. This branch does not change the file.
 
+## Session record (`docs/process/provenance.md#routine-privacy-admissions`)
+
+| Record | Reviewed SHA-256 | Decision |
+|---|---|---|
+| `docs/process/provenance/sessions/s-20261121T162958Z-4014b7dd.json` | `030246c7516e6bbe91063ebd2a23aa2cb54058204966ecd724d221e6ac482038` | **CLEAR** |
+
+- **Reviewer:** a second independent non-author Claude subagent (Opus). It read only public files.
+- **What it reviewed:** every field, including the absolute worktree path, the sparse patterns, the excluded paths and the deny profile digest. It compared their form with earlier fixer records.
+- **Finding:** public operational metadata only. The worktree path has the same standard form as other records; the record has no free text.
+
 ## Independent code review
 
 The same subagent reviewed the diff and found no blocking issue.
