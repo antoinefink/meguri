@@ -18,6 +18,8 @@
 			</dict>
 		</dict>
 	</array>
+	<key>LSHasLocalizedDisplayName</key>
+	<true/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
