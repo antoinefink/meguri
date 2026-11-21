@@ -141,8 +141,10 @@ pub fn removal_counts(
 
 /// W7.1: the position in `fields` of the name suggested for the unknown
 /// field name `unknown`: the first field whose name equals it under simple
-/// case folding, else the first at the smallest Levenshtein distance (in
-/// characters) of at most 2; none otherwise.
+/// case folding, else the first at the smallest Levenshtein distance of at
+/// most 2, counted in characters after both are simply case folded (so
+/// `fornt` suggests `Front`); none otherwise. The caller shows the field's
+/// stored spelling.
 pub fn near_field_name(unknown: &str, fields: &[&str]) -> Option<usize> {
     let mapper = icu_casemap::CaseMapper::new();
     let fold = |text: &str| -> Vec<char> { text.chars().map(|ch| mapper.simple_fold(ch)).collect() };
@@ -150,11 +152,9 @@ pub fn near_field_name(unknown: &str, fields: &[&str]) -> Option<usize> {
     if let Some(at) = fields.iter().position(|name| fold(name) == folded) {
         return Some(at);
     }
-    let typed: Vec<char> = unknown.chars().collect();
     let mut best: Option<(usize, usize)> = None;
     for (at, name) in fields.iter().enumerate() {
-        let name: Vec<char> = name.chars().collect();
-        let distance = levenshtein(&typed, &name, 2);
+        let distance = levenshtein(&folded, &fold(name), 2);
         if distance <= 2 && best.is_none_or(|(_, shortest)| distance < shortest) {
             best = Some((at, distance));
         }
@@ -325,8 +325,14 @@ mod tests {
         assert_eq!(near_field_name("Ab", &["Ac", "Ad"]), Some(0));
         // Equal under folding comes before any distance.
         assert_eq!(near_field_name("ab", &["ac", "AB"]), Some(1));
-        // Simple folding is per character: ß is not ss.
-        assert_eq!(near_field_name("STRASSE", &["Straße"]), None);
+        // The distance is taken on folded text.
+        assert_eq!(near_field_name("fornt", &fields), Some(0));
+        assert_eq!(near_field_name("BAK", &fields), Some(1));
+        assert_eq!(near_field_name("EXTRAS", &fields), Some(2));
+        // Simple folding is per character: ß is not ss, so the names are
+        // two edits apart, not equal.
+        assert_eq!(near_field_name("STRASSE", &["Straße"]), Some(0));
+        assert_eq!(near_field_name("STRASSEN", &["Straße"]), None);
         assert_eq!(near_field_name("\u{212A}ELVIN", &["kelvin"]), Some(0));
         assert_eq!(near_field_name("x", &[]), None);
     }
