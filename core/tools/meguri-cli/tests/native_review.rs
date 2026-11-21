@@ -1,7 +1,7 @@
 use std::process::Command;
 #[test]
 fn native_review_internal_cli_requires_all_explicit_seeds_and_rejects_overflow() {
-    let cli = env!("CARGO_BIN_EXE_meguri-cli");
+    let cli = &crate::bin_exe();
     assert_eq!(
         Command::new(cli).arg("internal-native-review").status().unwrap().code(),
         Some(2)
