@@ -508,7 +508,7 @@ impl Request<'_> {
             prefix: 0,
         };
         let rows = &**snapshot;
-        let (id, handle, match_data) = if plan.is_slow() {
+        let (id, handle, match_data) = if streams(rows, &plan, self.shared.registry.upgrade().as_deref())? {
             self.streamed(rows, text, query, &sort, &context, notetypes, &plan, template)?
         } else {
             let (id, handle) = self
@@ -947,6 +947,32 @@ pub(super) const DEFAULT_CHUNK: usize = 500;
 pub(super) const MAX_CHUNK: usize = 32_768;
 /// `engine/jobs` J5: at most one `Progress` per 100 ms.
 const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Collections up to this many rows of the mode run a slow plan as one
+/// statement, its first page from its `LIMIT` form. On the 150k fixture
+/// that is faster than streaming, which sorts every candidate before its
+/// first test. Larger collections stream.
+pub(super) const STREAM_ROWS: u64 = 300_000;
+
+/// Q10 "may": whether a plan with slow terms takes the two stages. Always
+/// when a test set a chunk size (H16).
+pub(super) fn streams(
+    rows: &impl ReadRows,
+    plan: &Plan,
+    registry: Option<&super::SearchRegistry>,
+) -> Result<bool, Stop> {
+    if !plan.is_slow() {
+        return Ok(false);
+    }
+    if registry.and_then(super::SearchRegistry::stream_chunk).is_some() {
+        return Ok(true);
+    }
+    let table = match plan.mode() {
+        SearchMode::Cards => meguri_storage::Table::Cards,
+        SearchMode::Notes => meguri_storage::Table::Notes,
+    };
+    Ok(rows.row_count(table)? > STREAM_ROWS)
+}
 
 /// Q8: whether two contexts hold the same `value`.
 fn same_value(value: ContextValue, a: &SearchContext, b: &SearchContext) -> bool {

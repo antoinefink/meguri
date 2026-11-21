@@ -52,7 +52,11 @@ pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i
             .map_err(failed)?;
         Ok(ids)
     };
-    if !plan.is_slow() {
+    let streamed = worker::streams(&*snapshot, &plan, Some(&*engine.inner.searches)).map_err(|stop| match stop {
+        worker::Stop::Failed(error) => error,
+        worker::Stop::Cancelled => BrowseError::Engine(crate::error::EngineError::Cancelled),
+    })?;
+    if !streamed {
         let mut ids = read(plan.sql(), plan.params())?;
         ids.sort_unstable();
         return Ok(ids);
