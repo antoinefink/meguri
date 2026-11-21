@@ -34,7 +34,11 @@ public struct NoteTypeSaveSheet: View {
     @ViewBuilder private func content(_ question: NoteTypesModel.Question) -> some View {
         #if os(macOS)
         VStack(alignment: .leading, spacing: Spacing.medium) {
-            details(question)
+            // A long list of changes scrolls; the buttons stay in view.
+            ViewThatFits(in: .vertical) {
+                details(question)
+                ScrollView { details(question) }
+            }
             HStack(spacing: Spacing.small) {
                 Spacer()
                 cancel

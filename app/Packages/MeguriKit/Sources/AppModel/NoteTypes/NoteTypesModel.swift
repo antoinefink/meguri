@@ -188,10 +188,11 @@ public final class NoteTypesModel {
         guard force || records[id] == nil || recordFailed.contains(id) else { return }
         detailTasks[id]?.cancel()
         recordFailed.remove(id)
+        let epoch = epoch
         detailTasks[id] = Task {
             do {
                 let record = try await backend.read(id)
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, self.epoch == epoch else { return }
                 records[id] = record
                 if drafts[id] == nil, selectedField[id] == nil { selectedField[id] = record.fields.first.map { Int($0.ord) } }
                 readCounts(id)
@@ -205,11 +206,12 @@ public final class NoteTypesModel {
 
     /// The subtitle's counts and W3.1's Notes column, read in the background.
     private func readCounts(_ id: Int64) {
+        let epoch = epoch
         Task {
-            if let counts = try? await backend.typeCounts(id) { typeCounts[id] = counts }
+            if let counts = try? await backend.typeCounts(id), self.epoch == epoch { typeCounts[id] = counts }
         }
         Task {
-            if let counts = try? await backend.fieldContentCounts(id) { fieldCounts[id] = counts }
+            if let counts = try? await backend.fieldContentCounts(id), self.epoch == epoch { fieldCounts[id] = counts }
         }
     }
 
@@ -279,11 +281,20 @@ public final class NoteTypesModel {
     /// Return in a rename field, or the inspector's Name: V5 on the typed
     /// text. A refusal keeps the old name and is shown under the row.
     public func commitRename(_ id: Int64, row: Int, typed: String) async {
-        guard let draft = draft(id), let at = draft.rows.firstIndex(where: { $0.id == row }) else { return }
         // A crossed-out field's name is free (S4.2): it is left out of V5's comparison.
-        let names = draft.rows.map { $0.deleted ? "" : $0.name }
-        let check: NotetypeFieldNameCheck
-        do { check = try await backend.checkFieldName(typed, fields: names, renaming: UInt32(at)) } catch { return }
+        func names() -> (names: [String], at: Int)? {
+            guard let draft = draft(id), let at = draft.rows.firstIndex(where: { $0.id == row }) else { return nil }
+            return (draft.rows.map { $0.deleted ? "" : $0.name }, at)
+        }
+        var check: NotetypeFieldNameCheck?
+        // The answer counts only for the names it checked: another rename that
+        // landed meanwhile is checked against again.
+        for _ in 0..<3 {
+            guard let before = names() else { return }
+            guard let answer = try? await backend.checkFieldName(typed, fields: before.names, renaming: UInt32(before.at)) else { return }
+            if let after = names(), after.names == before.names, after.at == before.at { check = answer; break }
+        }
+        guard let check else { return }
         switch check {
         case .ignored:
             renameRefusal = nil
@@ -335,6 +346,8 @@ public final class NoteTypesModel {
     public func reload(_ id: Int64) {
         guard editable(id) else { return }
         drafts[id] = nil
+        // No edit lands on the old base while the newer one is read.
+        records[id] = nil
         changedElsewhere.remove(id)
         draftChanged(id)
         loadDetail(id, force: true)
@@ -529,7 +542,8 @@ public final class NoteTypesModel {
         guard phase != .idle else { return }
         let notesMoved = changes.notes.contains { $0.change != .updated }
         guard changes.wholeCollection || !changes.notetypes.isEmpty || notesMoved else { return }
-        if changes.wholeCollection || changes.notetypes.contains(where: { $0.change != .updated }) {
+        // A rename elsewhere arrives as an update: the list reads its names again.
+        if changes.wholeCollection || !changes.notetypes.isEmpty {
             reloadList()
         } else {
             refreshCounts()
@@ -548,8 +562,11 @@ public final class NoteTypesModel {
     }
 
     private func recheck(_ id: Int64) {
+        let epoch = epoch
         Task {
-            guard let record = try? await backend.read(id) else { readCounts(id); return }
+            let read = try? await backend.read(id)
+            guard self.epoch == epoch else { return }
+            guard let record = read else { readCounts(id); return }
             readCounts(id)
             guard record.base != records[id]?.base else { return }
             if let draft = drafts[id], !draft.isEdited { drafts[id] = nil; draftChanged(id) }
