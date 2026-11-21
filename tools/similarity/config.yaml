@@ -102,6 +102,12 @@ scan:
     - "conformance/fixtures/**"
     - "conformance/recordings/**"
     - "conformance/corpora/**"
+  # Test data (provenance.md, "Test data"): a golden whose header names the
+  # oracle pin in `pin` and its own scenario is recorded Anki output. Its
+  # matches are reported as oracle-output and do not fail the scan. Scenarios,
+  # and goldens without that header, are scanned as before.
+  oracle_goldens:
+    pin: conformance/oracle.json
   # Swift has no Anki counterpart, so only the cross-language channels apply.
   # Server Rust and JS/JSX/TS/TSX use their existing language channels;
   # similarity results do not establish translation independence.

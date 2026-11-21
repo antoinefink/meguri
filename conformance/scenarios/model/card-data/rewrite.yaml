@@ -28,7 +28,7 @@ setup:
     - {notetype: Pair, fields: [card15, back]}
     - {notetype: Pair, fields: [card16, back]}
 steps:
-  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)", params: ['{"s":123.45678,"d":1.234567,"dr":0.987654,"decay":0.123456}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)", params: ['{"s":87.65438,"d":4.567891,"dr":0.912345,"decay":0.345678}']}
   - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)", params: ['{"s":2.5,"d":0.0015,"dr":0.125,"decay":0.0005}']}
   - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)", params: ['{"s":0.00015,"d":0.0025,"dr":0.005,"decay":1.0005}']}
   - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)", params: ['{"s":0.00005,"d":0.0005}']}

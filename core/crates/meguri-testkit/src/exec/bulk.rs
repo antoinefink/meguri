@@ -61,14 +61,21 @@ fn run_find_replace(session: &mut Session<'_>, step: &Step) -> Result<OpResult, 
         Some(FindReplaceIn::Tags) => FindIn::Tags,
         Some(FindReplaceIn::Field(name)) => FindIn::Field(name.clone()),
     };
-    let request = FindReplace {
+    let mut request = FindReplace {
         find: args.find.clone(),
         replace: args.replace.clone(),
         regex: args.regex.unwrap_or(false),
         ignore_case: args.ignore_case.unwrap_or(true),
+        whole_words: false,
         within,
+        confirmed: 0,
     };
     let collection = session.engine_collection()?;
+    // The confirmed count (the pattern of `notetypes/draft-save` D8): a
+    // caller with no question passes the count it reads at the step. A
+    // refused preview leaves the run to give the same refusal.
+    request.confirmed = find_replace::preview(&collection, &target, &request, &CancelToken::new(), &ProgressSink::new())
+        .map_or(u64::MAX, |preview| preview.changed);
     match find_replace::run(&collection, &target, &request, CancelToken::new(), ProgressSink::new()) {
         Ok(done) => Ok(OpResult::Output(json!({ "count": done.value.affected }))),
         Err(EngineError::FindReplace(refusal)) => match refusal {
@@ -77,7 +84,9 @@ fn run_find_replace(session: &mut Session<'_>, step: &Step) -> Result<OpResult, 
             Refusal::FieldCountMismatch { .. } => Ok(OpResult::Rejected("field_count")),
             // X1: no scenario lists a note of a missing note type; it would
             // need its own rejection kind first.
-            Refusal::NotetypeMissing { .. } => Err(core(EngineError::FindReplace(refusal))),
+            Refusal::NotetypeMissing { .. } | Refusal::CountChanged { .. } => {
+                Err(core(EngineError::FindReplace(refusal)))
+            }
         },
         Err(error) => Err(core(error)),
     }
