@@ -51,11 +51,11 @@ public enum SyncPanel {
         }
     }
 
-    /// N23.1: Meguri Sync's setup work uses the Account row's value (MP6.5);
+    /// N23.1: Meguri Sync's setup work uses the status row's value (MP6.5);
     /// a round's exchange and iCloud's collection or media transfer are
     /// indeterminate. A status that needs the person has no bar.
     /// `meguriMoving`: Meguri Sync signs in or a round exchanges, which the
-    /// Account row shows no value for.
+    /// status row shows no setup value for.
     public static func progress(_ status: SyncMainStatus, meguri: Bool, setupValue: MeguriProgressValue?,
                                 meguriMoving: Bool, cloudState: CloudPolicyStatusState?) -> Progress? {
         guard !status.needsYou else { return nil }

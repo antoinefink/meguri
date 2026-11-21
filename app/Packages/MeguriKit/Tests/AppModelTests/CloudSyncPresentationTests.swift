@@ -251,10 +251,10 @@ import Testing
         #expect(stopped.needsUser)
         let unconfigured = MeguriSyncStatusPresentation(stopped: false, connection: .unconfigured, stage: nil, routine: nil)
         #expect(!unconfigured.needsUser)
-        for stage in [MeguriSetupStage.required, .preview, .mediaBlocked, .acceptanceUnknown, .acceptedLocalIncomplete, .failed] {
+        for stage in [MeguriSetupStage.required, .preview, .mediaBlocked, .mediaStopped, .acceptanceUnknown, .acceptedLocalIncomplete, .failed] {
             #expect(MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: stage, routine: nil).needsUser, "\(stage)")
         }
-        for stage in [MeguriSetupStage.preparing, .collection, .media] {
+        for stage in [MeguriSetupStage.preparing, .collection, .media, .mediaPaused] {
             #expect(!MeguriSyncStatusPresentation(stopped: false, connection: .setupRequired, stage: stage, routine: nil).needsUser, "\(stage)")
         }
     }
@@ -276,7 +276,7 @@ import Testing
             #expect(SyncKinds.meguri(.init(routine: routine)).titleKey != "sync.status.upToDate.title", "\(String(describing: routine))")
         }
         let stages: [MeguriSetupStage] = [.required, .preparing, .preview, .collection, .media,
-            .mediaBlocked, .acceptanceUnknown, .acceptedLocalIncomplete, .failed]
+            .mediaBlocked, .mediaPaused, .mediaStopped, .acceptanceUnknown, .acceptedLocalIncomplete, .failed]
         for stage in stages {
             #expect(SyncKinds.meguri(.init(stage: stage, routine: .idle)).titleKey != "sync.status.upToDate.title", "\(stage)")
         }
@@ -513,7 +513,6 @@ import Testing
     @Test func meguriT18CopyKeepsCollectionMediaAndUnknownEffectsDistinct() {
         #expect(SyncText.value("sync.service.none.footer") == "Choose a service to sync this collection.")
         #expect(SyncText.value("sync.meguri.signIn.footer.setup.manual") == "After you sign in, Meguri sets up syncing with this server. It asks before it replaces a collection with your cards.")
-        #expect(SyncText.value("sync.meguri.setup.collectionDone") == "The collection transferred. Syncing starts when the media finishes.")
         #expect(SyncText.value("sync.meguri.setup.finish") == "Finish Setup")
         #expect(SyncText.value("sync.keep.device") == "Keep This Device’s Collection")
         #expect(SyncText.value("sync.keep.service.meguri") == "Keep the Meguri Sync Collection")

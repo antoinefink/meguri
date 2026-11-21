@@ -25,9 +25,9 @@ struct SyncSettingsSections: View {
             if selection != nil || sync.providerNeedsAttention {
                 SyncMainStatusRows(collection: collection, host: host)
             }
-            // N23.1: the media facts the status panel leaves out stay in the Sync section.
+            // N23.1: the one media fact the status panel leaves out stays in the Sync section.
             if selection == .meguri, MeguriMediaFactRows.isVisible(sync) {
-                VStack(alignment: .leading) { MeguriMediaFactRows(collection: collection, showsNotTransferred: false) }
+                MeguriMediaFactRows(collection: collection)
                     .font(.footnote).foregroundStyle(.secondary)
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("settings.sync.meguri.mediaFacts")
@@ -156,7 +156,7 @@ struct SyncServiceRows: View {
             Text(SyncText.value("sync.service.opFirst")).foregroundStyle(.secondary)
                 .accessibilityIdentifier("settings.sync.serviceRefused")
         } else if !changing, !sync.serviceChangeAvailable, selected != "localOnly" {
-            Text(SyncText.value("sync.switch.busy")).foregroundStyle(.secondary)
+            Text(SyncText.value(sync.serviceChangeBusyKey)).foregroundStyle(.secondary)
                 .accessibilityIdentifier("settings.sync.serviceBusy")
         }
         if sync.providerState?.phase == .blocked {
@@ -296,13 +296,10 @@ struct MeguriAccountRows: View {
                         .accessibilityIdentifier("settings.sync.meguri.continueSetup")
                 }
             }
+            // The work's bar is in the status row (MP6.5, resume fix); preparing a sign-in is this row's own.
             if collection.meguriSignInPreparing {
                 ProgressView(SyncText.value("sync.meguri.signIn.preparing"))
                     .accessibilityIdentifier("settings.sync.meguri.signInProgress")
-            } else if let progress = sync.meguriProgressValue {
-                // One indicator: a value that becomes unknown leaves it in place, indeterminate.
-                ProgressView(value: progress.fraction, total: 1)
-                    .progressViewStyle(.linear)
             }
         }
         .onAppear { if address.isEmpty { address = sync.meguriEndpoint }; startSetupIfAsked() }
@@ -558,6 +555,14 @@ struct SyncMainStatusRows: View {
             VStack(alignment: .leading) {
                 Text(SyncText.value(status.titleKey))
                 if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
+                if let progress = sync.panelProgress {
+                    // N15.2 row 3 (resume fix): the status's own bar, under its text, with the
+                    // panel's value. One indicator: a value that becomes unknown stays in place.
+                    // Inside the combined status element: the title is already read; the bar adds its value.
+                    ProgressView(value: progress.fraction, total: 1)
+                        .progressViewStyle(.linear)
+                        .accessibilityIdentifier("settings.sync.status.progress")
+                }
                 if !meguri, let cloud = sync.status {
                     ForEach(Array(SyncStatusCopy.lines(cloud, now: clock.now()).enumerated()), id: \.offset) { _, line in
                         Text(line).font(.footnote).foregroundStyle(.secondary)
@@ -574,10 +579,6 @@ struct SyncMainStatusRows: View {
                         }
                     }
                     .font(.footnote).foregroundStyle(.secondary)
-                }
-                if meguri, let left = sync.meguriMediaFilesLeft {
-                    Text(SyncText.format("sync.meguri.media.filesLeft", Int64(clamping: left)))
-                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
         } icon: {
@@ -597,7 +598,9 @@ struct SyncMainStatusRows: View {
             SyncStatusActionButton(collection: collection, action: action, host: host,
                 openEntry: openEntry, showInSettings: showInSettings, identifier: "settings.sync.statusAction")
         }
-        if status.hasIssues {
+        // An issues row only for an issue beside the state itself (resume fix):
+        // Meguri Sync's media-blocked row needs the files it lists.
+        if SyncStatusCopy.showsIssues(sync) {
             NavigationLink {
                 if meguri { MeguriAffectedFilesPage(collection: collection) }
                 else { SyncIssuesPage(collection: collection) }
@@ -675,15 +678,6 @@ struct SyncTroubleshootingPage: View {
                         // full replacement over one (MP4): the entries wait for a setup.
                         if sync.serviceConnected { Text(SyncText.value("sync.trouble.replace.connected.meguri")) }
                         else if !sync.meguriCanChoose { Text(SyncText.value("sync.switch.busy")) }
-                    }
-                }
-                if sync.meguriCanRetryMedia || sync.meguriRoutine == .mediaBlocked {
-                    Section {
-                        Button(SyncText.value("sync.meguri.media.retry")) {
-                            if sync.meguriRoutine == .mediaBlocked { sync.retryMeguriRoundMedia() } else { sync.retryMeguriMedia() }
-                        }
-                        .disabled(sync.meguriBusy)
-                        .accessibilityIdentifier("sync.trouble.retryMedia")
                     }
                 }
             } else if sync.status?.accountStatus == .available {

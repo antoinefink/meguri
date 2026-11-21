@@ -4,7 +4,7 @@ Spec: browser/sidebar
 Requirements: R1157, R1158, R1159, R1160, R1161, R1162, R1163, R1164, R1165, R1166, R1167, R1168, R1169, R1170, R1171, R1172, R1174, R1175, R1176, R1177, R1178, R1179, R1180, R1268 (sidebar part), AE43 (sidebar part); supports R274, R899, R1173, R66, R67
 Anki: 26.09.3 for S2 to S12 (the desktop browser's sidebar); none for the Meguri rules S15 lists
 Scenarios: conformance/scenarios/browser/sidebar/ (recorded, not active; S16)
-Status: Approved 2026-11-20 (R1232) for the lines of S2, S7, S9 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R1232) for the lines of S2, S7, S9 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). The line of S9.3 that begins "Changed 2026-11-21 (confirmed losses)" is in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/delete-deck-losses-20261121.md`). Every other section is in force and unchanged.
 
 What Browse's filter sidebar (U216, U217) holds and does: its sections and items, the search each item stands for, their order, which items keep their expansion and where, the filter box, how activating items changes the search, and which management action each item offers with the operation it calls. The operations themselves are other files' (named in each section); this file says which one runs, with which input. Layout, icons, colours, labels and gestures are Meguri's (`docs/design/screen-inventory.yaml` `browse.browser`, `browser/browse-strings` W6). Anki's sidebar is a desktop widget the oracle does not run (`conformance/AGENTS.md`), so apart from the searches the items build (S16) Meguri's tests check this file from its tables.
 
@@ -224,6 +224,8 @@ Offered, and done by ⌫ (Anki: the Delete key) with the sidebar focused, when t
 | deck | `decks/decks` D8 with the selected decks' ids | D8.5's summary over the selection: a confirmation stating both counts when it removes at least one card (R67; Anki asks nothing), then the toast "Deleted <deck> (N cards)" with Undo (R66, `decks/decks`), <deck> the acted-on item's label |
 | tag | `tags/tags` T9 with the selected tags' full names | none; undoable (R1178); result message with the count |
 | saved search | `browser/config-keys` K7.2's Delete Saved Searches with the selected names | none; undoable "Delete Saved Search" |
+
+Changed 2026-11-21 (confirmed losses; decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review, `docs/process/review-log/delete-deck-losses-20261121.md`): the deck Delete passes as D8's confirmed losses the counts of the last summary read before it (`decks/decks` D8 step 6): equal to the confirmation's when that recheck has `cards` 1 or more; when it has `cards` 0, that read's own counts, also after a confirmation. On `LossesChanged` it shows the confirmation again with the new counts, or deletes at once when the new `cards` is 0 (when the refusal's `cards` is 0, an added empty deck is then deleted without a question, as N20.7 says); that refusal shows no failure message.
 
 A mixed selection offers no Delete, and ⌫ does nothing.
 
