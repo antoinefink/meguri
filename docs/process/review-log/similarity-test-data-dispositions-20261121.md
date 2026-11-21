@@ -60,8 +60,15 @@ search and the other areas have no flag.
 
 ## (c) findings, rewritten
 
-All four are small, incidental reuse of Anki unit-test values or a test query,
-not copied test code. Each scenario still tests the same behaviour.
+All four reuse Anki unit-test values or a test query; no test code was
+copied. Each scenario still tests the same behaviour. For
+`template-swap-replace` the reuse is more than the query: the independent
+review found that its steps follow the order of the Anki test that holds the
+query (two templates, move one, remove one and check the render, add and
+remove in one save, then count orphans). Names, values and observations are
+our own and spec S2, S6 and S7 call for each step. Whether a test's step
+order counts as class (c) is left to the coordinator; reordering or splitting
+the scenario is the remedy if it does.
 
 1. `model/card-data/rewrite`: the first card's input was the four values of an
    Anki unit test of card-data rounding, and `specs/model/card-data-json.md`
@@ -71,8 +78,8 @@ not copied test code. Each scenario still tests the same behaviour.
    Open: `core/crates/meguri-model/tests/card_data_json.rs` (`spec_examples`)
    still has the old pair, copied from C5. A fixer must replace it with C5's
    new row; a spec writer cannot edit `core/`.
-2. `stats/studied-today/format-table`: two of its 36 inputs, `[3, 13000]` and
-   `[300, 5400000]`, were the two cases of an Anki unit test. Now
+2. `stats/studied-today/format-table`: two of its 36 inputs were the two
+   (cards, time) cases of an Anki unit test. Now
    `[3, 7000]` (2.33 s per card: rounding down to two decimals) and
    `[240, 5040000]` (84 minutes: the minutes form). They are not rows of
    `specs/stats/studied-today.md` T2.4, whose count (34 rows plus 2) holds.
@@ -92,15 +99,19 @@ Seen and not flagged: `render/cloze/hints.yaml` uses the cloze word `shared`
 for a two-number cloze, as an Anki cloze test does. One natural word; left
 as is.
 
-## (a) and (b): proposed dispositions
+## (a) and (b): dispositions
 
 `provenance.md` allows a similarity exception only as an allowlist entry
-written from Antoine's chat approval and recorded as an escalation. None is
-added here. Escalation `E-20261121T155116Z-246e` (kind `approval`, unit
-`similarity-test-data-allowlist`) asks Antoine to decide both:
+written from Antoine's chat approval and recorded as an escalation. No entry
+was added. Escalation `E-20261121T155116Z-246e` (kind `approval`, unit
+`similarity-test-data-allowlist`) asked for a decision on both classes; it
+proposed:
 
-1. (b), 112 files. Recommended: rewrite, no exception. 91 scenarios match only
-   because their review-log insert names all nine columns in schema order;
+1. (b), 112 files. Recommended: rewrite, no exception. 91 scenarios match
+   because their review-log insert names all nine columns in schema order
+   (85 on that alone; 6 also match a `#c1, #c2, ...` list:
+   `sched/memory/{crafted-rows,no-history,recompute,reset,sm2-history}` and
+   `storage/revlog/last-review-pick`);
    dropping that list (a positional insert in the same order) changes no
    observation, only `scenario_sha256`, as the search area did on
    2026-11-20. The other 21 (Image Occlusion coordinates, numbered `#c1`
@@ -111,7 +122,7 @@ added here. Escalation `E-20261121T155116Z-246e` (kind `approval`, unit
    entry; those 3 could take digest entries (below).
 2. (a), 67 files (66 plus the residual zero line). These cannot be
    rewritten: Meguri must emit the same bytes. Line-range entries would need
-   498 entries, and every re-record (each pin bump re-records every golden)
+   499 entries, and every re-record (each pin bump re-records every golden)
    moves the lines and fails the check again. Whole-file path entries would
    hide later findings. Proposed mechanism, not built: an allowlist entry
    that holds the reviewed file's whole SHA-256 and applies only while the
@@ -119,6 +130,20 @@ added here. Escalation `E-20261121T155116Z-246e` (kind `approval`, unit
    re-record or edit voids it and the file is judged again. A blanket rule
    for goldens is not proposed: scanning goldens caught both value lifts
    above (the scenario inputs did not flag; Anki's asserted outputs did).
+
+Decision (coordinator, 2026-11-21, under Antoine's delegation of that day;
+`docs/process/standing-decisions.md`): class (a) is permitted. Text in a
+golden that `tools/mg oracle record` wrote is Anki's output and not a finding,
+for goldens only and only while the golden is tied to its recording. Built in
+pull request #79 as a scanner rule rather than allowlist entries: a flagged
+golden that carries the current pin's recording header for its own scenario
+is reported as `oracle-output` and does not fail. With it, the whole tree
+reports 67 goldens as oracle output and no flagged golden. Class (b) takes
+the recommended rewrites in a follow-up spec-writer change (no exception).
+Still open: 3 scenarios under `stats/browse-queries/`. What matches is
+Anki output that a spec lists word for word, so it is class (a) in kind, but
+the decision covers goldens only. They need an allowlist entry or a
+separate decision.
 
 ## Hosted check
 
@@ -129,8 +154,33 @@ passes the check without any exception. The studied-today golden still flags
 after its rewrite, on the zero line (Anki's own output, class a, the same as
 nine unmodified stats goldens). Any re-record of that golden fails the check
 until the class (a) decision lands, so that rewrite is a separate branch and
-pull request, which waits for that decision or for the coordinator to accept
-the one red flag.
+pull request (#76). With #79 on master the zero line is oracle output and
+#76 passes.
+
+## Independent review
+
+Reviewer: a separate Opus agent that did not classify. It read Anki only at
+the pinned tag and wrote its own verdict for each sample file before reading
+the classifier's. Because it had already read this log's table, it notes its
+verdicts were not fully blind. Sample: 40 files, covering every (c), the 10
+largest (a) (the type-answer comparison corpus) and 26 others across all
+classes and most areas.
+
+- Classes: 40 of 40 agree.
+- Rewrites: all four sound. The new values occur nowhere in Anki at the tag,
+  and each scenario still covers its behaviour. The `LEFT JOIN` form is
+  equivalent because note ids are a non-null key.
+- Other (c): none found by text. It compared distinctive strings and numbers
+  in all 1,274 scenarios against Anki's test files and Rust test modules. Two
+  single-word overlaps, `zero` in `render/cloze/markers` and `shared` in
+  `render/cloze/hints`, are acceptable. Structural concern: the step order of
+  `template-swap-replace` follows an Anki test (recorded above, open for the
+  coordinator).
+- Document fixes, all applied: six column-list files also match a numbered
+  list; the `all-notes.yaml` row missed its second region; the lifted
+  studied-today inputs were still written in this log (now described without
+  the numbers; commit `ddce0da82`'s message keeps them and cannot change);
+  498 should have been 499. In the provenance note: two wording fixes.
 
 ## Per-file classification
 
@@ -145,7 +195,7 @@ the one red flag.
 | `scenarios/editor/image-occlusion/add-check.yaml` | b | text | 6 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
 | `scenarios/editor/image-occlusion/audio-fields.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
 | `goldens/maintenance/check-db-notes/all-notes.json` | b | text | 1 | echo of the scenario's own Image Occlusion field (format keywords and coordinates .1/.1/.2) | open |
-| `scenarios/maintenance/check-db-notes/all-notes.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
+| `scenarios/maintenance/check-db-notes/all-notes.yaml` | b | text | 2 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits), and a generic note-type subquery | open |
 | `scenarios/maintenance/check-db-notes/io-field-tags.yaml` | b | text | 1 | Image Occlusion field syntax with coordinates .1/.1/.2 (format keywords plus three digits) | open |
 | `scenarios/maintenance/check-db/all-records.yaml` | c | text | 1 | orphan-card count query was an Anki test query (count() spelled count(*)) | rewritten; clear |
 | `goldens/media/add/lowercase.json` | b | lex | 5 | lex: long runs of a repeated letter (case-folding names) against one repetitive Anki literal | open |
@@ -221,17 +271,17 @@ the one red flag.
 | `scenarios/sched/compat/re-enable.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
 | `scenarios/sched/loadbalancer/crafted-days.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
 | `scenarios/sched/loadbalancer/siblings.yaml` | b | text | 1 | generic subquery nid in (select id from notes where mid ...) | open |
-| `scenarios/sched/memory/crafted-rows.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/sched/memory/crafted-rows.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
 | `scenarios/sched/memory/ignore-before-boundary.yaml` | b | text | 3 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
 | `scenarios/sched/memory/ignore-before-count.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
 | `scenarios/sched/memory/ignore-before.yaml` | b | text | 5 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
 | `scenarios/sched/memory/lrt-repair.yaml` | b | text | 10 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/memory/no-history.yaml` | b | text | 3 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/sched/memory/no-history.yaml` | b | text | 3 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
 | `scenarios/sched/memory/on-the-fly.yaml` | b | text | 4 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/memory/recompute.yaml` | b | text | 11 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/memory/reset.yaml` | b | text | 7 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/sched/memory/recompute.yaml` | b | text | 11 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
+| `scenarios/sched/memory/reset.yaml` | b | text | 7 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
 | `scenarios/sched/memory/skipped-rows.yaml` | b | text | 6 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `scenarios/sched/memory/sm2-history.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/sched/memory/sm2-history.yaml` | b | text | 8 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
 | `scenarios/sched/options/missing-preset.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
 | `scenarios/sched/options/remap-steps.yaml` | b | text | 5 | numbered sequence (c1, c2, ... or #c1, #c2, ...) against a numbered table literal | open |
 | `scenarios/sched/options/undo-save.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
@@ -311,9 +361,9 @@ the one red flag.
 | `scenarios/stats/widget/day-start-spring-forward-r2.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
 | `scenarios/stats/widget/day-start-spring-forward-r4.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
 | `scenarios/stats/widget/day-start-summer.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
-| `goldens/stats/studied-today/format-table.json` | c | text | 1 | inputs [3, 13000] and [300, 5400000] were the two cases of an Anki unit test; the golden shows its asserted lines | rewritten; residual (a): the zero line |
+| `goldens/stats/studied-today/format-table.json` | c | text | 1 | two inputs were the two cases of an Anki unit test; the golden showed its asserted lines | rewritten; residual (a): the zero line |
 | `goldens/storage/revlog/studied-today-window.json` | a | text | 1 | oracle output: Studied-today line | open |
-| `scenarios/storage/revlog/last-review-pick.yaml` | b | text | 11 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
+| `scenarios/storage/revlog/last-review-pick.yaml` | b | text | 11 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type), and a `#c1, #c2, ...` list | open |
 | `scenarios/storage/revlog/studied-today-window.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
 | `scenarios/sync/normal/many-objects.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |
 | `scenarios/sync/wire/records-up.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open |

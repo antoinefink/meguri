@@ -32,7 +32,7 @@ copied here.
 |---|---|
 | review-log insert or select naming the nine columns in schema order | `rslib/src/dbcheck.rs` test |
 | Image Occlusion field with coordinates .1/.1/.2 | `ts/tests/e2e/io-mask-save-race.spec.ts` (one seed note) |
-| `c1, c2, ...` and `#c1, #c2, ...` sequences | `rslib/ascii_percent_encoding/src/lib.rs` (only at 2.1.56, so not read under the pinned-tag rule; the match is the numbered words alone) |
+| `c1, c2, ...` and `#c1, #c2, ...` sequences | `rslib/ascii_percent_encoding/src/lib.rs` (the index reports it under 2.1.56; the file is absent at 26.09.3, so it was not read; the match is the numbered words alone) |
 | repeated `i` in media names (lex) | `rslib/src/deckconfig/schema11.rs` (24.04; product code that reads many fields of a variable named `i`) |
-| `nid in (select id from notes where mid ...)`, `mid in (select id from notetypes where name ...)` | `rslib/src/storage/notetype/mod.rs`, `rslib/src/search/sqlwriter.rs` (product SQL) |
+| `nid in (select id from notes where mid ...)`, `mid in (select id from notetypes where name ...)` | `rslib/src/storage/notetype/mod.rs` (product SQL), `rslib/src/search/sqlwriter.rs` (product SQL and its test module) |
 | an update of orphan cards (`package/apkg-import/guid-other-id`) | `pylib/tests/test_models.py` (shares only the subquery) |
