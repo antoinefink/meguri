@@ -950,6 +950,8 @@ fn a_slow_search_streams_and_equals_the_whole_statement_q10_h3_h10_h13() {
     let (pairs, count) = fx.search("re:n00[0-4] card:1", SearchMode::Notes, asc("noteFld"));
     assert_eq!(count, 50);
     assert_eq!(fx.ids(pairs), fx.notes[..50].iter().map(|note| note.0).collect::<Vec<_>>());
+}
+
 /// H15: handle ids are unique across engines too; each session refuses
 /// the other's handle although both hold results.
 #[test]
