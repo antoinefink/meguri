@@ -77,8 +77,8 @@ impl NameIndexProvider {
         })();
         match built {
             Ok(index) => {
-                self.stale.store(false, Ordering::Release);
                 self.install(index);
+                self.stale.store(false, Ordering::Release);
                 Ok(())
             }
             Err(error) => {
@@ -123,8 +123,8 @@ impl NameIndexProvider {
             }
             index = whole;
         }
-        self.stale.store(false, Ordering::Release);
         self.install(index);
+        self.stale.store(false, Ordering::Release);
         Ok(())
     }
 }
