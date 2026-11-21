@@ -872,6 +872,54 @@ pub mod a;'
   [ "$status" -eq 0 ]
 }
 
+@test "the golden-copies check fails a fixture that no longer equals the golden string it copies" {
+  local fx=app/Tests/Fixtures/demo
+  commit_in "$SB" conformance/goldens/demo/sides.json '{"steps": [{"q": "<b>one</b>"}, {"q": "two", "a/b": "three"}]}'
+  commit_in "$SB" "$fx/golden-copies.json" '{"golden": "conformance/goldens/demo/sides.json", "copies": [
+    {"file": "one.html", "pointer": "/steps/0/q"}, {"file": "three.html", "pointer": "/steps/1/a~1b"}]}'
+  commit_in "$SB" "$fx/one.html" '<b>one</b>'
+  commit_in "$SB" "$fx/three.html" 'three'
+  mg static-checks --check golden-copies
+  [ "$status" -eq 0 ]
+
+  # A golden re-recorded under the copies: each stale copy is one finding,
+  # in the working tree and in the committed tree (the merge's --rev run).
+  commit_in "$SB" conformance/goldens/demo/sides.json '{"steps": [{"q": "<b>uno</b>"}, {"q": "two", "a/b": "three"}]}'
+  mg static-checks --check golden-copies
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "golden-copies:$fx/one.html:0" ]
+  [[ "$(field '.failures[0].message')" == *"differs from conformance/goldens/demo/sides.json at /steps/0/q"* ]]
+  mg static-checks --check golden-copies --rev HEAD
+  [ "$status" -eq 1 ]
+  validate "$result"
+
+  # --write rewrites the copies from the golden, and the check passes again.
+  run python3 -I -B "$SB/tools/gate/static-checks/golden-copies.py" --write "$SB"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SB/$fx/one.html")" = "<b>uno</b>" ]
+  mg static-checks --check golden-copies
+  [ "$status" -eq 0 ]
+
+  # A missing copy, a pointer the golden lacks, or a pointer at a non-string.
+  rm "$SB/$fx/three.html"
+  mg static-checks --check golden-copies
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "golden-copies:$fx/three.html:0" ]
+  git -C "$SB" checkout -q -- "$fx/three.html"
+  printf '{"golden": "conformance/goldens/demo/sides.json", "copies": [{"file": "one.html", "pointer": "/steps/2/q"}, {"file": "three.html", "pointer": "/steps/1"}]}\n' >"$SB/$fx/golden-copies.json"
+  mg static-checks --check golden-copies
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "golden-copies:$fx/one.html:0 golden-copies:$fx/three.html:0" ]
+  [[ "$(field '.failures[0].message')" == *"pointer /steps/2/q, which is not in"* ]]
+  [[ "$(field '.failures[1].message')" == *"pointer /steps/1, which is not a string"* ]]
+
+  # A manifest naming a golden that does not exist.
+  printf '{"golden": "conformance/goldens/demo/gone.json", "copies": [{"file": "one.html", "pointer": "/steps/0/q"}]}\n' >"$SB/$fx/golden-copies.json"
+  mg static-checks --check golden-copies
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "golden-copies:$fx/golden-copies.json:0" ]
+}
+
 # --- merge, escalations (R1951, R1957, R1991) ------------------------------
 
 @test "merge fast-forwards the integration branch only on a passing receipt for the branch tip" {
