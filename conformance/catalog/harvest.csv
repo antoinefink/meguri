@@ -369,7 +369,7 @@ hc2d41d1889af,python,tag,notes,not-applicable,The Python note object raising on 
 hc8ae2d43aae9,python,tag,notes,not-applicable,The Python note constructor's argument rules,,done
 hcf98d05f053c,python,tag,notes,in-scope,"Cards from an added template (U34), Empty Cards (U35) and an edit that adds a card; the template and Empty Cards parts wait for those units",cardgen/empty/after-template-change cardgen/normal/edits-only-add notetypes/structure/add-template notetypes/structure/edit-front,done
 hf90ff3b47fc0,python,tag,notes,not-applicable,The Python note object's in-memory tag string helpers; the stored tags follow tags/tags T4,,done
-h0bc924c8e05f,rust,tag,notes,in-scope,Change Deck recomputes memory states with the target preset (U87 with U49's hook),,deferred
+h0bc924c8e05f,rust,tag,notes,in-scope,Change Deck recomputes memory states with the target preset (U87 with U49's hook),notes/change-deck/memory-states,done
 h0e7337c9f130,rust,tag,notes,in-scope,Updating notes stores their new fields and adds required cards,notes/save/untouched-fields cardgen/normal/edits-only-add,done
 h1145d1f031f2,rust,tag,notes,in-scope,Change Deck recomputes memory states (U87 with U49's hook),notes/change-deck/memory-states,done
 h1ec2b2ea9c20,rust,tag,notes,in-scope,Deleting notes removes their cards,storage/graves/delete-note,done

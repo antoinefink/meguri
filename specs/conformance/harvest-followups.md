@@ -125,19 +125,19 @@ Session s-20261117T152613Z-96466c16 found that these rows test a count that no M
 
 ## H7. Further rows held by session s-20261117T152613Z-96466c16
 
-Session s-20261117T152613Z-96466c16 reviewed these rows and they stay `deferred`. The kinds, the owner rule and the meaning of a sketch are those of H4. `blocked` means a recorded scenario exists but cannot land yet; it is named in the row, it is not linked in the catalog, its scenario and golden are kept on the branch `held/harvest-batch-2` (re-record them when they land), and the row becomes `covered-new` only in the change that unblocks it. Changed 2026-11-21 (implementation review): the `change_deck` scenarios landed after U87 (PR #77) and are active; their twelve rows below are linked and `done`, h66f7a2aeee4f to `sched/options/remap-steps` as well, since its test edits a preset's steps rather than moving a card. Changed 2026-11-21 (implementation review): the scenarios that use `find_replace` or `find_replace_fields` landed with U86 and are active (`browser/find-replace` F12); the `blocked` rows that name only such scenarios are unblocked, and they become `covered-new` when their catalog rows are linked to those scenarios. Changed 2026-11-21 (implementation review): ten of them are linked and `done` in the catalog, after a check of each against its test at the pin: hf7c80804a0ae, h6b3ffb448b14, h8b9aff97d516, h3bc595fa00b0, h6d2b664432d7, h22d21da07c9d, h8838c90310d2, h0b434e5e6376, h102f0046f2fd and hcd7b5a34f3ac, to the scenarios their rows name. h28ba189d8c7e stays `deferred` (its row below). A row that closes on native tests also needs the page or editor golden it names, where it names one (H1). This session's rows in H4 (deck presets, deck choosers, collection packages), H5 (optimizer) and H6 (reclassification) are not repeated here. Rows already listed in H2 or H3 keep the obligations there; the entries below add the route to close them.
+Session s-20261117T152613Z-96466c16 reviewed these rows and they stay `deferred`. The kinds, the owner rule and the meaning of a sketch are those of H4. `blocked` means a recorded scenario exists but cannot land yet; it is named in the row, it is not linked in the catalog, its scenario and golden are kept on the branch `held/harvest-batch-2` (re-record them when they land), and the row becomes `covered-new` only in the change that unblocks it. Changed 2026-11-21 (implementation review): the `change_deck` scenarios landed after U87 (PR #77) and are active; their thirteen rows below (he244355f799a and the twelve of H7.9) are linked and `done`, h66f7a2aeee4f to `sched/options/remap-steps` as well, since its test edits a preset's steps rather than moving a card. Changed 2026-11-21 (implementation review): the scenarios that use `find_replace` or `find_replace_fields` landed with U86 and are active (`browser/find-replace` F12); the `blocked` rows that name only such scenarios are unblocked, and they become `covered-new` when their catalog rows are linked to those scenarios. Changed 2026-11-21 (implementation review): ten of them are linked and `done` in the catalog, after a check of each against its test at the pin: hf7c80804a0ae, h6b3ffb448b14, h8b9aff97d516, h3bc595fa00b0, h6d2b664432d7, h22d21da07c9d, h8838c90310d2, h0b434e5e6376, h102f0046f2fd and hcd7b5a34f3ac, to the scenarios their rows name. h28ba189d8c7e stays `deferred` (its row below). A row that closes on native tests also needs the page or editor golden it names, where it names one (H1). This session's rows in H4 (deck presets, deck choosers, collection packages), H5 (optimizer) and H6 (reclassification) are not repeated here. Rows already listed in H2 or H3 keep the obligations there; the entries below add the route to close them.
 
 ### H7.1 Browser and search
 
 | Harvest id | Owner | Kind | Minimal addition and observation |
 |---|---|---|---|
-| hf7c80804a0ae | U86, U246 | blocked | Prepared scenario `browser/find-replace/mixed-notetypes` (recorded golden). A regex `find_replace` with an inline case flag over five notes of three own note types writes only the three matching notes and returns count 3; `find_replace_fields` gives the sorted union of field names, a shared name once, and the Vocab-only list; a literal run limited to field `Text` skips notes without that field and returns count 2. Held until U86 adds `find_replace` and `find_replace_fields` to the testkit scenario model (`conformance/bulk-ops#X5`); `goldens-check` reports it invalid until then. |
-| h6b3ffb448b14 | U86, U246 | blocked | Prepared scenario `browser/find-replace/literal-dollar-replacement` (recorded golden): in literal mode `$3` and `${1}$$x$name` are stored exactly as typed, while regex mode expands the capture. Held for the same testkit work as hf7c80804a0ae. |
-| h8b9aff97d516 | U86, U246 | blocked | Prepared scenario `browser/find-replace/whole-collection-count` (recorded golden): an all-notes run gives count 3, a run limited to field `Back` gives 1, and a run with no match gives 0 and writes nothing, `col.mod` included (`browser/find-replace` F6, F8, F9). Held for the same testkit work as hf7c80804a0ae. |
+| hf7c80804a0ae | U86, U246 | covered-new | Prepared scenario `browser/find-replace/mixed-notetypes` (recorded golden). A regex `find_replace` with an inline case flag over five notes of three own note types writes only the three matching notes and returns count 3; `find_replace_fields` gives the sorted union of field names, a shared name once, and the Vocab-only list; a literal run limited to field `Text` skips notes without that field and returns count 2. Held until U86 adds `find_replace` and `find_replace_fields` to the testkit scenario model (`conformance/bulk-ops#X5`); `goldens-check` reports it invalid until then. |
+| h6b3ffb448b14 | U86, U246 | covered-new | Prepared scenario `browser/find-replace/literal-dollar-replacement` (recorded golden): in literal mode `$3` and `${1}$$x$name` are stored exactly as typed, while regex mode expands the capture. Held for the same testkit work as hf7c80804a0ae. |
+| h8b9aff97d516 | U86, U246 | covered-new | Prepared scenario `browser/find-replace/whole-collection-count` (recorded golden): an all-notes run gives count 3, a run limited to field `Back` gives 1, and a run with no match gives 0 and writes nothing, `col.mod` included (`browser/find-replace` F6, F8, F9). Held for the same testkit work as hf7c80804a0ae. |
 | h0d07ce6ed51b | U84, U246 | needs-op | No observation reads the column catalog; row reads take their keys from the scenario. Add an observation `browser_columns` (no argument): `[{key, sort_cards, sort_notes, alignment, uses_cell_font}]` sorted by key (sort values `none`, `ascending`, `descending`; no labels). Oracle: Anki's catalog read, sorted by key because its own order depends on the locale. Meguri: the `browser/columns` C2 catalog with `browser/config-keys` K3's sortability. A scenario observes exactly the 19 keys on a fresh collection. |
 | h04f566130b07 | U88, U246 | needs-op | Both sides refuse a search group with no items (`search/join-and-replace` J3), but `conformance/search-ops` S5 and the schema forbid such groups and S6 treats `invalid_item` as a run error. Let `search_build` accept `{group: {joiner, items: []}}` at the top level, as a member and under `negated`, with output `{error: invalid_item}`; change S5, the schema's non-empty rule and S6 in the same change. Oracle: Anki's invalid-input refusal mapped to `invalid_item`, never a reason read from its message. |
 | h2e49ab2ea87a | U88, U246 | needs-op | The same `search_build` change as h04f566130b07; the scenario also shows the refusal is never `deck:*` or empty text. Until then U88's builder tests cover J3. |
-| he244355f799a | U82, U91 | blocked | Prepared scenario `search/state/memory-state-moves` (recorded golden), held until the testkit scenario model parses `change_deck`; land it with that variant or with the held `notes/change-deck` scenarios. It shows the selection is "stability absent", which `sched/memory-state` M1 does not yet state (spec gap proposed). Changed 2026-11-21 (implementation review): landed and active; `sched/memory-state` M7.2 now states the selection. It does not prove the "new cards left out" half, which has no visible effect through Meguri's only consumer. |
+| he244355f799a | U82, U91 | covered-new | Prepared scenario `search/state/memory-state-moves` (recorded golden), held until the testkit scenario model parses `change_deck`; land it with that variant or with the held `notes/change-deck` scenarios. It shows the selection is "stability absent", which `sched/memory-state` M1 does not yet state (spec gap proposed). Changed 2026-11-21 (implementation review): landed and active; `sched/memory-state` M7.2 now states the selection. It does not prove the "new cards left out" half, which has no visible effect through Meguri's only consumer. |
 
 ### H7.2 Deck options
 
@@ -272,30 +272,30 @@ The six display rows are also in H2 and H3; these are the assertions H3 asks for
 
 ### H7.9 Rows proven only by held scenarios
 
-These rows have recorded scenarios that prove them, but the scenarios cannot land yet, so they are kept on the branch `held/harvest-batch-2`. Either they use `find_replace`, `find_replace_fields` or `change_deck`, which the testkit does not parse yet, or they sit in a directory whose core test lists every scenario it runs and requires each to pass (the sched `ops`, `answer`, `leech`, `counts`, `queue`, `session` and `steps` next-states families, `render/type-answer`) or under an `active` pattern of `area.yaml` while still pending (`render/filters/kana-stored-edits`). A spec table marks such a scenario `(held)`. The implementer who adds the op, or extends the core test's list, lands the scenario with it, re-recorded. Each row becomes done in the change that lands its scenarios (re-recorded) together with the testkit support.
+These rows have recorded scenarios that prove them, but the scenarios cannot land yet, so they are kept on the branch `held/harvest-batch-2`. Changed 2026-11-21 (implementation review): the `find_replace` and `change_deck` scenarios have landed (U86, U87); their rows are linked in the catalog and their kind is `covered-new`, except h28ba189d8c7e (`needs-op`). Either they use `find_replace`, `find_replace_fields` or `change_deck`, which the testkit does not parse yet, or they sit in a directory whose core test lists every scenario it runs and requires each to pass (the sched `ops`, `answer`, `leech`, `counts`, `queue`, `session` and `steps` next-states families, `render/type-answer`) or under an `active` pattern of `area.yaml` while still pending (`render/filters/kana-stored-edits`). A spec table marks such a scenario `(held)`. The implementer who adds the op, or extends the core test's list, lands the scenario with it, re-recorded. Each row becomes done in the change that lands its scenarios (re-recorded) together with the testkit support.
 
 | Harvest id | Owner | Kind | Held scenarios |
 |---|---|---|---|
-| h0bc924c8e05f | U49, U87 | blocked | `notes/change-deck/memory-states` |
-| h1145d1f031f2 | U49, U87 | blocked | `notes/change-deck/memory-states` |
-| h2ed53ea93d68 | U87 | blocked | `notes/change-deck/memory-states` |
-| h346f0091fba0 | U87 | blocked | `notes/change-deck/memory-states` |
-| h55e8477eea21 | U49, U87 | blocked | `notes/change-deck/memory-states` |
-| h5a6b3bd92841 | U49, U87 | blocked | `notes/change-deck/remaining-steps` |
-| h66f7a2aeee4f | U49, U87 | blocked | `notes/change-deck/remaining-steps` |
-| h87ed9c949919 | U87 | blocked | `notes/change-deck/fsrs-off` |
-| hcc385fabbd1f | U87 | blocked | `notes/change-deck/target-state-kept` |
-| h8fb237008b4c | U49, U87 | blocked | `notes/change-deck/memory-states`, `notes/change-deck/target-state-kept` |
-| he1455a2bccbd | U49, U87 | blocked | `notes/change-deck/remaining-steps` |
-| h29a2723c264d | U87 | blocked | `notes/change-deck/memory-states`, `notes/change-deck/remaining-steps`, `notes/change-deck/target-state-kept` |
+| h0bc924c8e05f | U49, U87 | covered-new | `notes/change-deck/memory-states` |
+| h1145d1f031f2 | U49, U87 | covered-new | `notes/change-deck/memory-states` |
+| h2ed53ea93d68 | U87 | covered-new | `notes/change-deck/memory-states` |
+| h346f0091fba0 | U87 | covered-new | `notes/change-deck/memory-states` |
+| h55e8477eea21 | U49, U87 | covered-new | `notes/change-deck/memory-states` |
+| h5a6b3bd92841 | U49, U87 | covered-new | `notes/change-deck/remaining-steps` |
+| h66f7a2aeee4f | U49, U87 | covered-new | `notes/change-deck/remaining-steps` |
+| h87ed9c949919 | U87 | covered-new | `notes/change-deck/fsrs-off` |
+| hcc385fabbd1f | U87 | covered-new | `notes/change-deck/target-state-kept` |
+| h8fb237008b4c | U49, U87 | covered-new | `notes/change-deck/memory-states`, `notes/change-deck/target-state-kept` |
+| he1455a2bccbd | U49, U87 | covered-new | `notes/change-deck/remaining-steps` |
+| h29a2723c264d | U87 | covered-new | `notes/change-deck/memory-states`, `notes/change-deck/remaining-steps`, `notes/change-deck/target-state-kept` |
 | h28ba189d8c7e | U86 | needs-op | `notes/transform/replace-saves` covers the Find and Replace path only (card generation on, stored tag case kept, the stamp). Changed 2026-11-21 (implementation review): the test also asks for a transform with card generation off (no card added although a template now renders) and with registered tag spelling; only h83c15fb8bf40's `refresh_notes` op reaches those, so the row is linked to `replace-saves` together with that op's scenario when it lands |
-| h3bc595fa00b0 | U86 | blocked | `browser/find-replace/field-names` |
-| h6d2b664432d7 | U246, U86 | blocked | `browser/find-replace/mode-counts` |
-| h22d21da07c9d | U86 | blocked | `tags/find-replace/listed-notes`, `tags/find-replace/pattern-modes` |
-| h8838c90310d2 | U86 | blocked | `tags/find-replace/pattern-modes` |
-| h0b434e5e6376 | U86 | blocked | `tags/find-replace/invalid-regex` |
-| h102f0046f2fd | U86 | blocked | `tags/find-replace/all-notes` |
-| hcd7b5a34f3ac | U86 | blocked | `tags/find-replace/listed-notes` |
+| h3bc595fa00b0 | U86 | covered-new | `browser/find-replace/field-names` |
+| h6d2b664432d7 | U246, U86 | covered-new | `browser/find-replace/mode-counts` |
+| h22d21da07c9d | U86 | covered-new | `tags/find-replace/listed-notes`, `tags/find-replace/pattern-modes` |
+| h8838c90310d2 | U86 | covered-new | `tags/find-replace/pattern-modes` |
+| h0b434e5e6376 | U86 | covered-new | `tags/find-replace/invalid-regex` |
+| h102f0046f2fd | U86 | covered-new | `tags/find-replace/all-notes` |
+| hcd7b5a34f3ac | U86 | covered-new | `tags/find-replace/listed-notes` |
 | h1df457b7a669 | U246 | blocked | `sched/ops/set-due/missing-default-preset` |
 | h6a74f5728f8c | U246 | blocked | `sched/ops/set-due/missing-preset` |
 | h25a2a4a1f100 | U246 | blocked | `sched/counts/new-studied-today` |
