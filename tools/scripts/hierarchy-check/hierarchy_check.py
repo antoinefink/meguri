@@ -236,6 +236,30 @@ def native_toggle_switch_parts(document, root):
     return recognized
 
 
+def native_stepper_arrows(document, root):
+    """Recognize the two arrows AppKit puts inside a Mac stepper.
+
+    The app names the stepper; its arrows are AppKit's and take no
+    identifier. Only an app-identified stepper whose children are exactly one
+    unidentified, childless increment arrow and one decrement arrow inside its
+    frame qualifies. Used only for missing identifiers.
+    """
+    if type(document.get("schema")) is not int or document["schema"] != 1 or document.get("platform") != "mac":
+        return set()
+    recognized = set()
+    for owner in root.walk():
+        if (owner.type != "stepper" or not isinstance(owner.identifier, str)
+                or not IDENTIFIER.fullmatch(owner.identifier) or is_system_identifier(owner)
+                or sorted(c.type for c in owner.children) != ["decrementArrow", "incrementArrow"]):
+            continue
+        if all(not c.children and c.raw.get("identifier") in (None, "")
+               and c.x >= owner.x and c.y >= owner.y
+               and c.x + c.w <= owner.x + owner.w and c.y + c.h <= owner.y + owner.h
+               for c in owner.children):
+            recognized.update(owner.children)
+    return recognized
+
+
 def native_sheet_grabbers(document, root):
     """Recognize only the captured English iOS half-screen chrome shape.
 
@@ -386,7 +410,7 @@ def ordinary_issues(document, root, native_ids, native_link_comparison_page=None
     """Ordinary diagnostics for one observation, without merging identities."""
     elements = [e for e in root.walk() if not e.under(SYSTEM_UI) and not e.under(TRANSIENT)]
     sheet_grabbers = native_sheet_grabbers(document, root)
-    toggle_parts = native_toggle_switch_parts(document, root)
+    toggle_parts = native_toggle_switch_parts(document, root) | native_stepper_arrows(document, root)
     issues = []
 
     for e in elements:

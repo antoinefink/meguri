@@ -301,6 +301,7 @@ extension TestHooks {
                 navigation.path(section).map { destination in
                     switch destination {
                     case let .deckPage(deck): "deck:\(deck.rawValue)"
+                    case let .deckOptions(deck): "deckOptions:\(deck.rawValue)"
                     case .noteTypes: "noteTypes"
                     case .settingsPage(let page): "settings.\(page.rawValue)"
                     }

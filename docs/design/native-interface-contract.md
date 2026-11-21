@@ -554,9 +554,10 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 
 ### N16.1 Session progress
 
-- One thin grey bar along the very bottom edge, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint. No text, no counts, no accent colour.
+- One thin grey bar along the very bottom edge, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint (on the Mac a drawn bar, the exception below). No text, no counts, no accent colour.
 - Touch: the bar spans the screen's width on its bottom edge, inside the bottom safe area, so the home indicator lies over its middle. iPhone Duo: the same edge folded, held wide and held tall; held wide it runs under both halves and across the fold. It is not a control, so it may cross (R9 covers controls).
-- Mac: the bar is the window's last row, under the answer buttons. The Mac had no bar before.
+- Mac: the bar is the window's last row, under the answer buttons, on the window's bottom edge and across its full width. The Mac had no bar before.
+- Mac exception (2026-11-20; need: the bottom-edge, full-width bar above, which the system indicator did not meet; Antoine reported the gap below the bar and at its leading end on 2026-11-20 and asked for the bar to sit on the edge, PR #24): the bar is drawn, not the system's linear indicator, which draws its rounded track inset in its frame. The drawn bar is a 4 pt track in the quaternary fill with the value in the secondary fill; the window's rounded bottom corners clip its ends, as they clip any content on that edge. Its accessibility below is unchanged. Verification: `ReviewLayoutTests.progressBarIsTheBottomEdge` (light and dark), and the Mac review drives in the test VM on 2026-11-20 (light and dark, 800, 1000 and 1600 pt windows), in PR #24. Touch keeps the system indicator, which lies on the screen's bottom edge.
 - The bar shows on the question and answer sides and between cards. Loading, waiting, paused and finished states have none.
 - Its value is the answers given over those answers plus the cards left (new, learning and to review). Accessibility: label "Session Progress", value "12 of 40", identifier `review.session.progress`. It takes no input and is read as text, so the hit-region audit does not ask a touch target of it.
 - Replaces: N11.1's bar across the top and its device setting (R341–R345), N13.3's counts line and top bar.
@@ -575,14 +576,15 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 
 - Show Answer is centred in the answer row on touch, as wide as two answer buttons. At the accessibility text sizes it keeps the full row.
 - With a fold through the row (iPhone Duo held wide) it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9).
-- The answer buttons' group is centred: on touch it is the reading column's width (N16.4), on Mac the four standard buttons are centred in it, as is Show Answer.
+- The answer buttons' group is centred: on touch it is at most `ContentWidth.readable` wide and spans the full width when a fold crosses it; on Mac the four standard buttons are centred in the window, as is Show Answer.
 - Replaces: N13.3's trailing-half Show Answer where no fold crosses the row.
 
 ### N16.4 Reading column
 
-- iPad and Mac: the card, any notice above it and the review's states sit in one centred column, `ContentWidth.readable` wide, the width the touch answer row already had. A narrower window uses its full width.
-- iPhone and iPhone Duo are unchanged: the card takes the full width in every position. The choice is by idiom, as N13.1's layout choice is.
-- The window beside the column shows the card page colour. A template's own background does not reach it yet (N13.4, R335).
+- Changed 2026-11-20 (Antoine asked "do we really want a max width at all?"; decided by the coordinator under his standing delegation; `decisions.md`): the card and any notice above it take the review's full width on every device, as on iPhone. Card styling is the user's and is written for a card that fills the window, so a narrower column would change how it looks. A card whose own content is wider than the window, such as a wide table or image, scrolls sideways inside the card page; any other card shows no horizontal scroll bar at any window width, also with scroll bars always shown.
+- iPad and Mac keep the review's states (N16.6) in one centred column, `ContentWidth.readable` wide. A narrower window uses its full width. iPhone and iPhone Duo are unchanged: the card, its notice and the states take the full width in every position. The choice is by idiom, as N13.1's layout choice is. The touch answer row keeps its own width (N16.3).
+- Around the answer row and the states the window shows the card page colour. A template's own background does not reach it yet (N13.4, R335).
+- Replaced (2026-11-19 text): "iPad and Mac: the card, any notice above it and the review's states sit in one centred column, `ContentWidth.readable` wide".
 
 ### N16.5 End of a session
 
@@ -599,7 +601,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 - Waiting for a learning card that is not ready: "Waiting for Learning", "Your next learning card is not ready yet." and Check Now.
 - Paused by an error: "Review Paused", the message and Try Again. Ended: "Session Ended".
 - Loading keeps the system progress indicator with its label.
-- A notice above the card keeps its warning symbol and text, centred in the column; a long one still scrolls within its limit.
+- A notice above the card keeps its warning symbol and text, centred across the review's width (N16.4); a long one still scrolls within its limit.
 
 ### N16.7 No session timer
 
@@ -733,6 +735,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 | 1 | Add Note | `square.and.pencil` | | absent |
 | 2 | Rename… | `pencil` | ⇧⌘R | shown |
 | 2 | New Subdeck… | `folder.badge.plus` | | absent |
+| 2 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | absent |
 | 3 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | shown |
 
 - A filtered deck's menu holds Rename… and Delete Deck (R53).
@@ -782,7 +785,7 @@ The menu bar, in order: Meguri, File, Edit, View, Deck, Card, Window, Help. The 
 | Deck | Rename… | ⇧⌘R | a deck is shown, filtered included |
 | Deck | New Subdeck… | | a normal deck is shown |
 | Deck | Delete Deck | ⌘⌫ | a deck is shown, filtered included, outside review, and no text field, sheet or panel owns the keys (N4, H9.2); N20.7 |
-| Deck | Deck Options… | ⌥⌘O | arrives with the Deck Options unit; a normal deck |
+| Deck | Deck Options… | ⌥⌘O | a normal deck is shown, outside review; N20.9 |
 | Card | Show Answer | Space | review shows a question side |
 | Card | Again, Hard, Good, Easy | 1, 2, 3, 4 | review shows an answer side |
 | Card | Edit Note | ⌘E | a card is presented, on either side, and nothing else owns the keys; N20.8 |
@@ -831,7 +834,7 @@ The English text of the screens above. "New" marks text not used before this rou
 | Import Collection…, Export Collection…, Sync Now, Close | File menu | |
 | Undo, Redo, Undo <step name>, Redo <step name> | Edit menu; <step name> is the core's undo step name until S5's keys exist (R173) | |
 | Find… | Edit menu | new |
-| Deck Options… | the Deck menu | with its unit |
+| Deck Options… | the Deck menu, the deck menu | N20.9 |
 | Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
 | Edit Note | the Card menu, the card's context menu (Mac), the touch review's More menu, the form's title | N20.8 |
 
@@ -886,6 +889,24 @@ Decided 2026-11-20 (`decisions.md`, `review.editNote`, option 7A; then `review.q
 - **No unsuspend inside Meguri** (option 2A). There is no Suspended Cards list, no deck-menu item and no other way to remove a suspension in this version. Until the notes and cards browser arrives, a suspended card comes back only by Undo right away or by another client after a sync.
 - Strings: "More" (new), "Edit Note", "Bury Card", "Suspend Card" (exist, `review/reviewer-strings#S18`), "Card Buried" and "Card Suspended" (new, VoiceOver announcements), the step display names "Answer", "Bury Card", "Suspend Card", "Edit Note" (new, S5), "<deck> · <note type>" (new), "Done", "Cancel", "Discard changes?", "Discard", "Keep Editing" (exist).
 - Replaces: round 6's touch Edit Note button (7A's `pencil` beside Undo); `review/card-actions` A4 and A5's toasts and `review/reviewer-strings` S4's `review.toast.cardsBuried` and `review.toast.cardSuspended` for Bury Card and Suspend Card (no toast); S5's raw step names in the Undo titles ("Undo Answer Card", "Undo Bury"); R394's iPad "trailing inspector" and its panel as U190's editor in edit mode; R397's Close button (now Cancel and Done); R824 and R863's Esc that saves, for this form; `screen-inventory.yaml`'s `review.menu` toasts.
+
+### N20.9 Deck Options, first version
+
+Decided 2026-11-20 (`decisions.md`, `deck.options`, option 6B). The scope, the save input and the strings are `sched/deck-options` O17 and `decks/deck-options-strings` K10. The Advanced page comes later and does not change this page.
+
+- Entries: the deck menu's Deck Options… (`gearshape`, group 2 after New Subdeck…, normal decks only; N20.2), Deck › Deck Options… (⌥⌘O, N20.4), the O key on the deck list and the deck page (`decks/deck-list` H9.2) and the finished state's Deck Options link (H5.2). Not offered during a review in this version: the Deck menu is disabled then (N20.4), and the review menu's item comes with the review menu.
+- One grouped form, three sections:
+  1. no header: **Preset**, a menu picker of the collection's presets, each listed as `decks/deck-options-strings` K6 gives it ("Default (used by 6 decks)"); the row shows the chosen preset's name. Footer: "Used by N decks. Changes apply to all of them.", or "Used by this deck only." when N is 1, with N the count the picker shows (`sched/deck-options` O6.1).
+  2. **Daily Limits**: New Cards per Day, Maximum Reviews per Day, each a number field trailing in its row.
+  3. **Memory**: Desired Retention, a percentage field with a stepper of 1 %. Footer: "How likely you are to remember a card when it comes back."
+- When the deck holds its own value for a row (a This deck or active Today only limit, or its own desired retention; O2 item 3), the section's footer adds "This deck has its own limits, which stay in force." (Daily Limits) or "This deck has its own desired retention, which stays in force." (Memory). The page cannot change or remove them in this version.
+- No limit tabs, no Advanced row, no FSRS switch (N18.1), no preset Add, Clone, Rename or Remove, no Save to All Subdecks, no restore-default or help controls.
+- Issues: O4's errors and warnings of the three rows show under their row as N11.9 says; an error disables Save.
+- Placement, pushed like a page: compact (iPhone, the Duo folded or held tall, iPad at compact width) full screen with a back button; the Duo held wide, iPad and Mac in the detail area in place of the deck page. Touch: the navigation title "Deck Options" and Save as the confirmation action. Mac: the toolbar title "Deck Options" with the deck's path joined with " › " as its subtitle, the back button, and Save as the toolbar's confirmation (⌘S; ⌘↩ too, O15.3).
+- Save runs O17's save; on success the page returns to the deck page. A refused save keeps the page with its issues.
+- Leaving: while the draft differs (O6.6), Cancel replaces the back button and swipe back is off on every platform (N11.9's iPhone rule); Cancel, Esc (Mac) and choosing another sidebar row ask "Discard changes?" with Discard (destructive) and Keep Editing. With no change, back leaves at once.
+- Strings (new unless marked): "Deck Options" (title; the undo step's name exists), "Deck Options…" (exists in R283), "Preset" (K4's tab text, here a row label), "Daily Limits" (K2), "New Cards per Day", "Maximum Reviews per Day", "Memory", "Desired Retention", "Used by %@ decks. Changes apply to all of them.", "Used by this deck only.", "How likely you are to remember a card when it comes back.", "This deck has its own limits, which stay in force.", "This deck has its own desired retention, which stays in force.", "Save", and the existing "Discard changes?", "Discard", "Keep Editing", "Cancel". Keys: K10.
+- Replaces, for this version: N11.9's Preset Actions menu, Save to All Subdecks, restore-default and help buttons, the reload row, two columns and the review-time sheet (each comes back with the unit that brings its part); R736's Anki labels for these three options (6B: Apple title case, K10); R740's and R742's tabs; the screen contract `deckOptions.options`' layout until the Advanced page lands.
 
 ## N21. Round 8: Browse (2026-11-20)
 

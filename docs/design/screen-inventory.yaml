@@ -760,6 +760,14 @@ screens:
     variants: full
     references: [grouped-form, sheet-form, confirmation-dialog]
     purpose: >-
+      First version (native-interface-contract N20.9, sched/deck-options O17; decided 2026-11-20):
+      one grouped page pushed in place of the deck page, titled "Deck Options": Preset (a menu,
+      footer "Used by N decks. Changes apply to all of them." or "Used by this deck only."), Daily
+      Limits (New Cards per Day, Maximum Reviews per Day; the preset's values, no tabs) and Memory
+      (Desired Retention, footer "How likely you are to remember a card when it comes back."); Save
+      is the confirmation action (⌘S); leaving with a change asks "Discard changes?". No Advanced
+      row, preset actions, tabs, restore-default or help controls yet; the rest of this purpose
+      applies as those parts land.
       A normal deck's options: its preset, the Essentials, the Advanced sections and the one undoable
       save (U232: shell, presets and save; U233: Essentials and Daily Limits; U234: the other
       Advanced sections; sched/deck-options O2 to O9; R730–R753; native-interface-contract N11.9).

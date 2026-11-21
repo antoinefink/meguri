@@ -3,7 +3,7 @@ import CoreBridge
 import SwiftUI
 
 /// The deck's long-press and right-click menu (N20.2): Study and Add Note,
-/// then Rename… and New Subdeck…, then Delete Deck. A filtered deck takes
+/// then Rename…, New Subdeck… and Deck Options…, then Delete Deck. A filtered deck takes
 /// neither notes nor subdecks and is not studied yet, so it offers Rename…
 /// and Delete Deck.
 struct DeckMenu: View {
@@ -55,6 +55,15 @@ struct DeckMenu: View {
                 }
                 .disabled(!collection.deckActions.canPresent(.subdeck(deck.id)))
                 .accessibilityIdentifier("home.deckMenu.subdeck.\(deck.id)")
+                // N20.9: the deck's options, normal decks only.
+                Button { collection.openDeckOptions(deckID: deck.id) } label: {
+                    Label { Text("Deck Options…", bundle: .module) } icon: { Image(systemName: "gearshape") }
+                }
+                #if os(macOS)
+                .keyboardShortcut("o", modifiers: [.command, .option])
+                #endif
+                .disabled(!collection.deckOptions.canOpen(deckID: deck.id))
+                .accessibilityIdentifier("home.deckMenu.options.\(deck.id)")
             }
         }
         Divider()
