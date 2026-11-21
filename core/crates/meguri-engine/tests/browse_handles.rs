@@ -1004,10 +1004,15 @@ fn a_request_made_during_a_halt_fails_with_the_engines_refusal_h3() {
     let seq = SearchSession::while_searches_stopped_for_testing(&fx.h.engine, || {
         fx.session.start_search("", SearchMode::Cards, asc("cardDue"), None)
     });
+    // A later request supersedes the refused one while it is queued: the
+    // refusal stands.
+    let later = fx.session.start_search("", SearchMode::Notes, asc("noteFld"), None);
     go.send(()).unwrap();
-    let events = fx.until(seq);
+    let events = fx.until(later);
     assert!(matches!(events[0], SearchEvent::Cancelled { seq } if seq == busy), "{events:?}");
-    assert!(refused(&events[1..]), "{events:?}");
+    assert!(refused(&events[1..2]), "{events:?}");
+    assert_eq!(events[1].seq(), seq);
+    assert!(matches!(events.last(), Some(SearchEvent::Complete { count: 2, .. })), "{events:?}");
     // Afterwards searches run again.
     assert_eq!(fx.search("", SearchMode::Cards, asc("cardDue")).1, 4);
 }

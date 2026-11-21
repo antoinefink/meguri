@@ -1094,3 +1094,54 @@ pub(super) fn context(collection: &Collection, rows: &impl ReadRows) -> Result<S
         fold: meguri_search::FoldMode::Unicode,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn job(job: Job, cancelled: bool) -> QueuedJob {
+        let token = CancelToken::new();
+        if cancelled {
+            token.cancel();
+        }
+        QueuedJob {
+            seq: 7,
+            token,
+            epoch: 0,
+            job,
+        }
+    }
+
+    // H3, H4: a request no thread could run keeps its refusal over its
+    // cancellation; others end Cancelled or Failed.
+    #[test]
+    fn an_unstarted_request_keeps_its_refusal_over_its_cancellation() {
+        let refused = |event: &SearchEvent| {
+            matches!(
+                event,
+                SearchEvent::Failed {
+                    error: BrowseError::Engine(EngineError::CollectionUnavailable { .. }),
+                    ..
+                }
+            )
+        };
+        assert!(refused(&unstarted(&job(Job::Refused, true), "no thread")));
+        assert!(refused(&unstarted(&job(Job::Refused, false), "no thread")));
+        assert!(matches!(
+            unstarted(&job(Job::Superseded, true), "no thread"),
+            SearchEvent::Cancelled { seq: RequestSeq(7) }
+        ));
+        let search = || Job::Search {
+            text: String::new(),
+            mode: SearchMode::Cards,
+            sort: SortSpec::new("cardDue", meguri_search::config::SortDirection::Ascending),
+        };
+        assert!(matches!(
+            unstarted(&job(search(), false), "no thread"),
+            SearchEvent::Failed {
+                error: BrowseError::Engine(EngineError::Internal { .. }),
+                ..
+            }
+        ));
+    }
+}
