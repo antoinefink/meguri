@@ -48,6 +48,8 @@ pub mod controlled_services;
 pub mod day_conformance;
 #[path = "deck_config.rs"]
 pub mod deck_config;
+#[path = "deck_delete_losses.rs"]
+pub mod deck_delete_losses;
 #[path = "deck_options.rs"]
 pub mod deck_options;
 #[path = "decks.rs"]

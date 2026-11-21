@@ -1,0 +1,33 @@
+# Change Deck with FSRS off computes no memory state (specs/browser/
+# bulk-actions.md B7.2 steps 3.3 and 4; specs/sched/memory-state.md M7.2;
+# R1188). The move still removes the memory keys a card holds.
+# c1 Home, review with one review-log row and no state: moved to Side.
+# c2 Home, review with one review-log row and a stored state: moved to Side.
+# c3 Side, review with one review-log row and no state: already in the
+#    target, stays as it is.
+id: notes/change-deck/fsrs-off
+clock: {tz: UTC, start: "2030-03-04T09:00:00"}
+setup:
+  config: {fsrs: false, loadBalancerEnabled: false}
+  decks: [Home, Side]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Home, fields: [one, a]}
+    - {notetype: Pair, deck: Home, fields: [two, a]}
+    - {notetype: Pair, deck: Side, fields: [three, a]}
+steps:
+  - observe: [timing]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 3, ivl = 6, factor = 2500, reps = 1, data = '{}'"
+  - db_exec:
+      sql: "UPDATE cards SET data = '{\"s\":5.5,\"d\":4.25,\"dr\":0.9,\"decay\":0.154,\"pos\":2}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+  - db_exec:
+      sql: "INSERT INTO revlog SELECT 1898326800000 + n, id, 0, 3, 6, 0, 2500, 4000, 0 FROM (SELECT id, row_number() OVER (ORDER BY id) AS n FROM cards)"
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1h
+  - change_deck: {cards: ["#c1", "#c2"], deck: Side}
+  - observe: ["card(#c1, #c2, #c3)"]

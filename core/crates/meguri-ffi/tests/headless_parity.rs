@@ -108,7 +108,7 @@ fn testkit_and_ffi_host_harness_call_the_backup_before_the_same_deletion_changes
         OpSource::UserUndoable,
     )
     .unwrap();
-    meguri_engine::decks::delete(&collection, vec![deck], host.backup()).unwrap();
+    meguri_engine::decks::delete(&collection, vec![deck], meguri_engine::decks::ConfirmedLosses::Any, host.backup()).unwrap();
     let mut events = Vec::new();
     while let Some(event) = subscription.try_recv() {
         events.push(event);

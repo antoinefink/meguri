@@ -1,5 +1,5 @@
 harvest_id,language,source,area,classification,reason,scenarios,status
-hf7c80804a0ae,rust,tag,browser,in-scope,"U86/U246: regex replacement across multiple note types must count changed notes, list applicable field names and skip notes lacking a selected field.",,deferred
+hf7c80804a0ae,rust,tag,browser,in-scope,"U86/U246: regex replacement across multiple note types must count changed notes, list applicable field names and skip notes lacking a selected field.",browser/find-replace/mixed-notetypes,done
 h05c549f3f6aa,rust,supplementary,deckconfig,in-scope,updating a preset,decks/presets/add-clone-rename,done
 h06c17c5eb2f4,rust,supplementary,deckconfig,not-applicable,an API error for an unknown preset id,,done
 h07c1d1d6c593,rust,supplementary,deckconfig,in-scope,the default preset cannot be removed,decks/presets/remove,done
@@ -369,29 +369,29 @@ hc2d41d1889af,python,tag,notes,not-applicable,The Python note object raising on 
 hc8ae2d43aae9,python,tag,notes,not-applicable,The Python note constructor's argument rules,,done
 hcf98d05f053c,python,tag,notes,in-scope,"Cards from an added template (U34), Empty Cards (U35) and an edit that adds a card; the template and Empty Cards parts wait for those units",cardgen/empty/after-template-change cardgen/normal/edits-only-add notetypes/structure/add-template notetypes/structure/edit-front,done
 hf90ff3b47fc0,python,tag,notes,not-applicable,The Python note object's in-memory tag string helpers; the stored tags follow tags/tags T4,,done
-h0bc924c8e05f,rust,tag,notes,in-scope,Change Deck recomputes memory states with the target preset (U87 with U49's hook),,deferred
+h0bc924c8e05f,rust,tag,notes,in-scope,Change Deck recomputes memory states with the target preset (U87 with U49's hook),notes/change-deck/memory-states,done
 h0e7337c9f130,rust,tag,notes,in-scope,Updating notes stores their new fields and adds required cards,notes/save/untouched-fields cardgen/normal/edits-only-add,done
-h1145d1f031f2,rust,tag,notes,in-scope,Change Deck recomputes memory states (U87 with U49's hook),,deferred
+h1145d1f031f2,rust,tag,notes,in-scope,Change Deck recomputes memory states (U87 with U49's hook),notes/change-deck/memory-states,done
 h1ec2b2ea9c20,rust,tag,notes,in-scope,Deleting notes removes their cards,storage/graves/delete-note,done
 h28ba189d8c7e,rust,tag,notes,in-scope,"Transforming many notes with or without card generation and stamps (the bulk-operation framework, U86)",,deferred
-h29a2723c264d,rust,tag,notes,in-scope,Change Deck moves the cards to the target deck (U87),,deferred
-h2ed53ea93d68,rust,tag,notes,in-scope,Change Deck leaves scheduling alone (U87),,deferred
-h346f0091fba0,rust,tag,notes,in-scope,Change Deck to the same deck recomputes nothing (U87),,deferred
-h3bc595fa00b0,rust,tag,notes,in-scope,The field names of the selected notes for Find and Replace (U86),,deferred
+h29a2723c264d,rust,tag,notes,in-scope,Change Deck moves the cards to the target deck (U87),notes/change-deck/memory-states notes/change-deck/remaining-steps notes/change-deck/target-state-kept,done
+h2ed53ea93d68,rust,tag,notes,in-scope,Change Deck leaves scheduling alone (U87),notes/change-deck/memory-states,done
+h346f0091fba0,rust,tag,notes,in-scope,Change Deck to the same deck recomputes nothing (U87),notes/change-deck/memory-states,done
+h3bc595fa00b0,rust,tag,notes,in-scope,The field names of the selected notes for Find and Replace (U86),browser/find-replace/field-names,done
 h4907663a10e2,rust,tag,notes,in-scope,"Undo and redo of adding and deleting notes: an add's undo removes its rows, tags and config writes with no grave (notes/note-records A5)",notes/records/undo-add undo/delete-notes,done
 h4ee2959fd8e8,rust,tag,notes,in-scope,Saving an unchanged note keeps its stamps; a change stamps it,storage/noop/identical-note-rewrite notes/save/untouched-fields,done
-h55e8477eea21,rust,tag,notes,in-scope,Change Deck gives new cards no memory state (U87 with U49's hook),,deferred
+h55e8477eea21,rust,tag,notes,in-scope,Change Deck gives new cards no memory state (U87 with U49's hook),notes/change-deck/memory-states,done
 h57651ff721da,rust,tag,notes,in-scope,A note type's default deck for the Add screen (U191),notes/add-defaults/after-add notes/add-defaults/last-deck,done
-h5a6b3bd92841,rust,tag,notes,in-scope,Change Deck remaps remaining learning steps to the new preset (U87 with U49's hook),,deferred
+h5a6b3bd92841,rust,tag,notes,in-scope,Change Deck remaps remaining learning steps to the new preset (U87 with U49's hook),notes/change-deck/remaining-steps,done
 h5eb1c8260e8c,rust,tag,notes,not-applicable,Reading a note through the protobuf interface; Meguri reads rows by model/row-records,,done
-h66f7a2aeee4f,rust,tag,notes,in-scope,Change Deck keeps remaining steps when the old preset had none (U87 with U49's hook),,deferred
+h66f7a2aeee4f,rust,tag,notes,in-scope,"A preset step edit keeps remaining steps when the old list is empty, and floors them at 1 when the new list is empty (U49); Change Deck follows the same rule",sched/options/remap-steps notes/change-deck/remaining-steps,done
 h6ce76081385b,rust,tag,notes,in-scope,Adding a note gives it an id; a request without a note is the protobuf interface's,notes/records/add,done
 h7acd0470902a,rust,tag,notes,not-applicable,Listing a note's card ids through the protobuf interface; no stored behavior,,done
 h7ba73914c295,rust,tag,notes,in-scope,"Add-screen defaults for deck and note type, current deck rules (U191)",editor/config-keys/add-defaults-by-notetype editor/config-keys/add-defaults-current-deck editor/config-keys/first-notetype-fallback notes/add-defaults/review-card,done
 h7f3ad7c57016,rust,tag,notes,in-scope,"GUID text encoding (text/guid G2, G4); checked by U20's Rust tests against G4's table, since GUIDs Anki creates are random",,deferred
 h83c15fb8bf40,rust,tag,notes,in-scope,"Regenerating cards and stamps after outside changes to notes (the bulk-operation framework, U86)",,deferred
-h87ed9c949919,rust,tag,notes,in-scope,Change Deck with FSRS off computes no memory state (U87),,deferred
-h8fb237008b4c,rust,tag,notes,in-scope,Change Deck recomputes memory states only for the moved cards (U87 with U49's hook),,deferred
+h87ed9c949919,rust,tag,notes,in-scope,Change Deck with FSRS off computes no memory state (U87),notes/change-deck/fsrs-off,done
+h8fb237008b4c,rust,tag,notes,in-scope,Change Deck recomputes memory states only for the moved cards (U87 with U49's hook),notes/change-deck/memory-states notes/change-deck/target-state-kept,done
 h97fb2906cd6a,rust,tag,notes,in-scope,Adding a note: a note requiring no card gets one; the refusals of a wrong field count or note type are Meguri tests,cardgen/normal/conditionals notes/records/add,done
 h9c660fb50a5e,rust,tag,notes,in-scope,Bulk add (notes/note-records A5); its scenarios come with the importers (U120),,deferred
 ha4fba0e6523a,rust,tag,notes,in-scope,"Updating several notes without an undo step, as the local servers do (U137)",,deferred
@@ -399,8 +399,8 @@ hab1f710886fe,rust,tag,notes,in-scope,Add-screen defaults for deck and note type
 hab3e195632ce,rust,tag,notes,in-scope,Deleting notes removes them with their cards and graves,storage/graves/delete-note,done
 haeb2e195c8b5,rust,tag,notes,in-scope,The field check through the protobuf interface,notes/fields-check/states,done
 hc981fbc25c3f,rust,tag,notes,in-scope,A note that requires no card gets ordinal 0; edits add the cards that become required; cloze numbers above 500 map to ordinal 499,cardgen/normal/conditionals cardgen/normal/edits-only-add cardgen/cloze/numbers cardgen/cloze/above-500,done
-hcc385fabbd1f,rust,tag,notes,in-scope,Change Deck skips cards already in the target deck (U87),,deferred
-he1455a2bccbd,rust,tag,notes,in-scope,Change Deck remaps remaining relearning steps to the new preset (U87 with U49's hook),,deferred
+hcc385fabbd1f,rust,tag,notes,in-scope,Change Deck skips cards already in the target deck (U87),notes/change-deck/target-state-kept,done
+he1455a2bccbd,rust,tag,notes,in-scope,Change Deck remaps remaining relearning steps to the new preset (U87 with U49's hook),notes/change-deck/remaining-steps,done
 he257a95c303c,rust,tag,notes,in-scope,"The field check states: empty, cloze in a standard note type, missing cloze, cloze outside a cloze field, duplicate",notes/fields-check/states notes/fields-check/duplicates,done
 he3c37320b8ea,rust,tag,notes,in-scope,"The cloze numbers of a note, seen through the ordinals of its cards",cardgen/cloze/numbers,done
 hf306bec628a4,rust,tag,notes,in-scope,First-field checksum,text/fields/checksum,done
@@ -883,7 +883,7 @@ hf87bc805c0cf,rust,tag,sched,in-scope,Good on a relearning step lowers the remai
 hfa3da761639b,rust,tag,sched,in-scope,Hard keeps the remaining count of two relearning steps,sched/steps/relearning,done
 hfb93da3c2901,rust,tag,sched,in-scope,Short-term Hard keeps a card in relearning,sched/fsrs/short-term,done
 hfea722b04230,rust,tag,sched,in-scope,U41/U246: concatenated queue sources must preserve each source's internal card order and place the second stream after the first.,sched/queue/mix/interday-review sched/queue/mix/new-review,done
-h6d2b664432d7,python,tag,search,in-scope,"U86/U246: replacement must support no-match, all-field, field-scoped and regex modes with correct changed-note counts.",,deferred
+h6d2b664432d7,python,tag,search,in-scope,"U86/U246: replacement must support no-match, all-field, field-scoped and regex modes with correct changed-note counts.",browser/find-replace/mode-counts,done
 hce3457dc5c85,python,tag,search,out-of-scope,A collection-wide duplicate-group report with optional search restriction is the explicitly excluded Find Duplicates feature; per-note warnings and dupe: search remain required.,,done
 hefdc4581f106,python,tag,search,in-scope,"U81/U82/U84/U91: cover the combined search matrix for wildcards, tags, states, ids, fields, names, properties, rated/added dates and sorting; parser cases alone are insufficient.",search/matrix/combined,done
 h0218dc5d4063,rust,tag,search,in-scope,"built state items for new, learning, review, due, suspended and buried give their search terms (U88)",browser/sidebar/item-searches,done
@@ -910,7 +910,7 @@ h5cdce206bbe1,rust,tag,search,in-scope,U88/U246: a generated due-within-days sea
 h63a23874d7e3,rust,tag,search,in-scope,"canonical search text: redundant quotes and escapes dropped, needed ones added, OR in capitals, numbers normalized",search/canonical/quoting search/canonical/leaves search/canonical/numbers search/canonical/round-trips search/structure/operators,done
 h66aebcbc4027,rust,tag,search,in-scope,a deck search returns that deck's cards and not those of other decks (U82),browser/sidebar/item-searches,done
 h66d9a93ef6e9,rust,tag,search,in-scope,U84/U85/U246: selecting Browser columns must update the active row-projection state.,browser/columns/switched-columns,done
-h6b3ffb448b14,rust,tag,search,in-scope,"U86/U246: literal replacement text containing a dollar and digits must be stored verbatim, without capture expansion.",,deferred
+h6b3ffb448b14,rust,tag,search,in-scope,"U86/U246: literal replacement text containing a dollar and digits must be stored verbatim, without capture expansion.",browser/find-replace/literal-dollar-replacement,done
 h6becb38c0590,rust,tag,search,in-scope,a built tag item gives a tag term with its name (U88),browser/sidebar/item-searches,done
 h7594406238d4,rust,tag,search,in-scope,U88/U246: literal query generation must quote wildcard metacharacters and the escape character.,search/builder/items,done
 h75a546f3b68f,rust,tag,search,in-scope,U88/U246: replacing a filter kind must update matching nodes inside nested searches while preserving unrelated kinds and negation.,search/join-replace/replace,done
@@ -921,7 +921,7 @@ h79e4ec8d2c86,rust,tag,search,in-scope,a committed search of several items keeps
 h7c1c920002b6,rust,tag,search,in-scope,U88/U246: all seven flag-color choices must generate their corresponding stored flag numbers.,search/builder/items,done
 h855ecd06d4e6,rust,tag,search,in-scope,replacing an item's kind inside a group leaves terms of other kinds (U88),browser/sidebar/combine,done
 h88ad03350510,rust,tag,search,in-scope,U88/U246: an absent generated filter must represent an unrestricted collection search.,search/builder/items,done
-h8b9aff97d516,rust,tag,search,in-scope,U86/U246: Find and Replace must report the number of changed notes when the request selects the full collection.,,deferred
+h8b9aff97d516,rust,tag,search,in-scope,U86/U246: Find and Replace must report the number of changed notes when the request selects the full collection.,browser/find-replace/whole-collection-count,done
 h8f79a3f11361,rust,tag,search,in-scope,U88/U246: constructing a duplicate predicate must preserve both note-type identity and first-field text.,search/builder/items,done
 h944eb618c913,rust,tag,search,in-scope,U88/U246: a generated field-text filter must retain both the field name and its search text.,search/builder/items,done
 h993a80697567,rust,tag,search,in-scope,U88/U246: a generated multi-note filter must preserve the complete identifier list in valid search syntax.,search/builder/items search/ids/lists,done
@@ -942,7 +942,7 @@ hcd65bea8e67f,rust,tag,search,in-scope,a built due-on-day item gives an equality
 hcf4fefe3e9ef,rust,tag,search,in-scope,U88/U246: replacing a standalone filter with another of the same kind must discard the old value.,search/join-replace/replace,done
 hd007ebca9ed4,rust,tag,search,not-applicable,Combining adjacent integer ranges is an internal SQL-planning optimization; exact helper output is not a persisted or native-app interface (R1879).,,done
 hdff0242575ab,rust,tag,search,in-scope,the empty search returns every card,search/structure/whole-collection,done
-he244355f799a,rust,tag,search,in-scope,U82/U91: a memory-state predicate must find cards with stored FSRS stability and exclude new cards lacking it; SQL spelling is implementation-specific.,,deferred
+he244355f799a,rust,tag,search,in-scope,U82/U91: a memory-state predicate must find cards with stored FSRS stability and exclude new cards lacking it; SQL spelling is implementation-specific.,search/state/memory-state-moves,done
 he2a0ba83d1b8,rust,tag,search,in-scope,"U84/U85/U246: Browser row projection must return the requested card's sort field, deck and note type in the requested column order.",browser/columns/requested-order,done
 he56ed2a516b3,rust,tag,search,in-scope,U88/U246: a generated rated-history filter must retain both its time window and chosen answer button.,search/builder/items,done
 he8cfded7f1d7,rust,tag,search,not-applicable,Unknown flag-enum fallback in a foreign generated search RPC is not Meguri's typed filter contract (R1879).,,done
@@ -1050,7 +1050,7 @@ hfa9987445e9e,rust,tag,sync,out-of-scope,"Frozen by Antoine 2026-10-26; previous
 h12a8b8c90d0b,python,tag,tags,in-scope,unused registry rows removed,tags/clear-unused/parents,done
 h15bbd0ab00e1,python,tag,tags,not-applicable,legacy Python wrappers that forward to the bulk add and remove operations,,done
 h16d1d167d5e7,python,tag,tags,in-scope,every tag a note uses is registered and listed,tags/canon/spelling,done
-h22d21da07c9d,python,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h22d21da07c9d,python,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),tags/find-replace/listed-notes tags/find-replace/pattern-modes,done
 h24a44aea4cbd,python,tag,tags,in-scope,moving a tag under another tag,tags/reparent/rules,done
 h35c21a97404e,python,tag,tags,not-applicable,a Python string helper with wildcard patterns; Meguri has no such interface,,done
 h407bcbbdc1cb,python,tag,tags,not-applicable,legacy Python wrapper that forwards to Clear Unused Tags,,done
@@ -1064,9 +1064,9 @@ hd16c24f88495,python,tag,tags,in-scope,"adding tags to selected notes, sorted an
 hda41aef53f19,python,tag,tags,in-scope,removing tags from selected notes,tags/bulk/remove,done
 hf6d2b53b1903,python,tag,tags,in-scope,tag tree built from the registry with implicit parents,tags/tree/structure,done
 h04e3f5f5228e,rust,tag,tags,in-scope,missing tags added case-insensitively and the result sorted,tags/bulk/add,done
-h0b434e5e6376,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h0b434e5e6376,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),tags/find-replace/invalid-regex,done
 h0e99ed421e1d,rust,tag,tags,in-scope,collapsed state reflected in the tag tree,tags/collapse/set tags/tree/structure,done
-h102f0046f2fd,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h102f0046f2fd,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),tags/find-replace/all-notes,done
 h4068299df64b,rust,tag,tags,in-scope,"matching a tag and its descendants case-insensitively, literal names",tags/rename/basic tags/rename/refused tags/bulk/remove,done
 h423183febc3e,rust,tag,tags,in-scope,"tag names normalized, existing spelling adopted, duplicates dropped and items split on save",tags/canon/normalize tags/canon/spelling,done
 h4bf8df530930,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),tags/complete/components tags/complete/filter-sequence,done
@@ -1074,7 +1074,7 @@ h657d1b2b3255,rust,tag,tags,in-scope,deleting a tag from every note and the regi
 h6d9e5bc856c0,rust,tag,tags,in-scope,added tags take the registered spelling and are stored,tags/bulk/add,done
 h719a952d33d5,rust,tag,tags,in-scope,registered names listed,tags/canon/spelling,done
 h762285c157a4,rust,tag,tags,in-scope,clearing unused tags keeps their collapsed state; deleting a tag removes its descendants,tags/clear-unused/parents tags/delete/children,done
-h8838c90310d2,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h8838c90310d2,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),tags/find-replace/pattern-modes,done
 h8a531508a003,rust,tag,tags,in-scope,renaming a tag and its descendants,tags/rename/basic,done
 h9f3686b61815,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),tags/complete/components tags/complete/registry,done
 h9f452a4faaf3,rust,tag,tags,in-scope,"tag tree with implicit parents, case and order",tags/tree/structure tags/canon/spelling,done
@@ -1082,7 +1082,7 @@ hab1bc9fa2604,rust,tag,tags,in-scope,"reparenting rules, merges and moves to the
 hac48d18d7071,rust,tag,tags,in-scope,a blank new name is refused and nothing changes,tags/rename/refused,done
 hafc1cda6babf,rust,tag,tags,in-scope,moving a tag to the top level,tags/reparent/rules,done
 hca878bd8d66c,rust,tag,tags,in-scope,tags still used by notes are kept,tags/clear-unused/parents,done
-hcd7b5a34f3ac,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+hcd7b5a34f3ac,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),tags/find-replace/listed-notes,done
 hd8d86a3d37b3,rust,tag,tags,in-scope,removal from listed notes leaves other notes alone,tags/bulk/remove,done
 he58668dea421,rust,tag,tags,in-scope,moving a tag under another tag,tags/reparent/rules,done
 h26e80efa4ec6,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done

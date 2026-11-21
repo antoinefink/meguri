@@ -1,10 +1,38 @@
 internal import MeguriCoreBindings
 import Instrumentation
 
+/// The Question cell (`browser/columns` C10), of an excerpt or of a Browse
+/// row.
 public enum ExcerptQuestion: Sendable, Hashable {
     case text(String)
     case missingCloze(kind: CardBlankKind, text: String)
     case templateError(CardTemplateError, side: CardRenderSide)
+
+    init(_ question: MeguriCoreBindings.ExcerptQuestion) {
+        self = switch question {
+        case .text(let text): .text(text)
+        case .missingCloze(let kind, let text): .missingCloze(kind: CardBlankKind(kind), text: text)
+        case .templateError(let kind, let side): .templateError(RenderedCard.error(kind), side: CardRenderSide(side))
+        }
+    }
+}
+
+extension CardBlankKind {
+    init(_ kind: MeguriCoreBindings.RenderBlank) {
+        switch kind {
+        case .missingCloze: self = .missingCloze
+        case .emptyFront: self = .emptyFront
+        }
+    }
+}
+
+extension CardRenderSide {
+    init(_ side: MeguriCoreBindings.RenderSide) {
+        switch side {
+        case .question: self = .question
+        case .answer: self = .answer
+        }
+    }
 }
 public enum CardExcerpt: Sendable, Hashable {
     case found(cardID: Int64, question: ExcerptQuestion, deck: String)
@@ -16,14 +44,7 @@ public enum CardExcerpt: Sendable, Hashable {
         case .missing(let id): self = .missing(cardID: id)
         case .damaged(let id): self = .damaged(cardID: id)
         case .found(let id, let question, let deck):
-            let cell: ExcerptQuestion = switch question {
-            case .text(let text): .text(text)
-            case .missingCloze(let kind, let text):
-                .missingCloze(kind: kind == .missingCloze ? .missingCloze : .emptyFront, text: text)
-            case .templateError(let kind, let side):
-                .templateError(RenderedCard.error(kind), side: side == .question ? .question : .answer)
-            }
-            self = .found(cardID: id, question: cell, deck: deck)
+            self = .found(cardID: id, question: ExcerptQuestion(question), deck: deck)
         }
     }
 }

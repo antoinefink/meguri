@@ -156,6 +156,8 @@ By spec-writer sessions `s-20261121T180133Z-9326df1d` (stats), `s-20261121T18062
 - #86 stats (63), #87 sched (20), #88 the other areas (23), #89 `render/image-occlusion/review/fixtures` (needs an implementer to copy six app fixture sides from its golden), #90 the two sync actor scenarios (golden and recording re-recorded).
 - With all five merged locally on `f17019af5`: `similarity/20261121T184754Z-1299`, 2,528 files, 1 flagged, 65 oracle output, 3 allowlisted. `goldens-check` passes.
 - Left: `preservation/recipe/kitchen-sink`. A rewrite touches the preservation fixture; the options and a proposed exact-file entry are in #88 for the coordinator.
+- `preservation/recipe/kitchen-sink`, decided by the coordinator: option 2 of #88 (no exception, no allowlist entry). Pull request #97 (oracle-maintainer session `s-20261121T202427Z-c7524e47`) drops the column list from the insert. The values are already in table order, and the recipe golden's observations are unchanged. It remakes the fixture with `make.sh` (every N9.2 check passed) and re-records the seven goldens that open it (guids only; `fixture/open` only its driver hash). `oracle compare preservation` passed three times, and `goldens-check` passes.
+- Whole tree after #97: on its branch alone, `similarity/20261121T202925Z-80259` gives 2,528 files and 1 flagged (`render/image-occlusion/review/fixtures`, which #89 clears). With #89 merged on top, `similarity/20261121T204106Z-19903` gives 2,528 files, **0 flagged**, 65 oracle output and 3 allowlisted (status `warn` only for the 346 files below the fingerprint limits).
 
 ## Hosted check
 
@@ -217,7 +219,7 @@ classes and most areas.
 | `scenarios/package/apkg-export/selection/invalid-ids.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#88); clear |
 | `scenarios/package/apkg-import/guid-other-id.yaml` | b | text | 1 | generic orphan-card subquery (nid not in (select id from notes)) in a different statement | rewritten (#88); clear |
 | `goldens/preservation/render/every-card.json` | a | text | 6 | oracle output: hint-filter HTML | open |
-| `scenarios/preservation/recipe/kitchen-sink.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | open: coordinator decides (options in #88) |
+| `scenarios/preservation/recipe/kitchen-sink.yaml` | b | text | 1 | revlog column list in schema-18 order (id, cid, usn, ease, ivl, lastIvl, factor, time, type) | rewritten (#97, fixture remade); clear |
 | `goldens/render/cloze/blank-check.json` | a | text | 1 | oracle output: cloze span HTML | open |
 | `goldens/render/cloze/encoding.json` | a | text | 1 | oracle output: cloze span HTML | open |
 | `goldens/render/cloze/markers.json` | a | text | 1 | oracle output: cloze span HTML | open |

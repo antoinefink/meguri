@@ -7777,7 +7777,7 @@ Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). Th
   - Literal mode escapes the pattern and treats `$` in the replacement literally. Regex mode uses `${1}`/`$name` groups. Ignore case prepends `(?i)`. The find text is NFC-normalized when `normalize_note_text` is on (R1202/R1203).
   - Targets: all fields, a named field matched by name for each notetype (notes without it are skipped), or Tags (replace inside each tag, then re-normalize and deduplicate through U30) (R1204/R1205).
   - Only changed notes are saved, through U27 (R1207).
-  - `find_replace_preview` returns a live matching-note count and an invalid-regex error with its range. It runs like a U85 search, on a search worker with a seq-filtered callback, and is cancelled and superseded by the next request, so the query lane stays free (R1206).
+  - `find_replace_preview` returns a live matching-note count and an invalid-regex error with its range (changed 2026-11-21: the message only, no range, `browser/find-replace` F10; the preview reads its own snapshot, `browser/workspace` V17). It runs like a U85 search, on a search worker with a seq-filtered callback, and is cancelled and superseded by the next request, so the query lane stays free (R1206).
 - **Edit Field** supports Replace, Append, Prepend and Clear with a separator. The separator is omitted when the field is empty (R1210). Only changed notes are saved; notes lacking the field are counted as skipped (R1208–R1211).
 
 **Execution note:** For Find and Replace: spec writer first; scenarios use oracle goldens of the resulting db_dump. Batch edit has no oracle (Meguri-only) and is implemented test-first from the Product Contract.

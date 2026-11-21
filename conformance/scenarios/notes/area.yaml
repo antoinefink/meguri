@@ -3,6 +3,11 @@
 # and bootstrap; records/add also legacy_update (U36), fields/count-repair
 # Check Database (U128), and records/undo-add the U38 undo adapter.
 area: notes
-# transform/replace-saves runs U86's find_replace (bulk-ops X1).
+# transform/replace-saves runs U86's find_replace (bulk-ops X1); change-deck/
+# runs U87's change_deck (bulk-ops X2).
 active:
+  - "change-deck/fsrs-off"
+  - "change-deck/memory-states"
+  - "change-deck/remaining-steps"
+  - "change-deck/target-state-kept"
   - "transform/replace-saves"
