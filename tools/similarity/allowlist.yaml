@@ -22,3 +22,18 @@ entries:
     reason: Exact schema-18 table/index declarations from specs/storage/schema-18.md S2/S3; reviewed SHA256 b0e4f8380947dc09b0b72eb209dad1f3759e22376d8b75fa94432720b0616e58. Owner approval E-20261115T200432Z-c0f9. No implementation, other file or other channel is exempted.
     approved_by: antoine
     approved_on: 2026-11-15
+  - path: conformance/scenarios/stats/browse-queries/ae60-young.yaml
+    channels: [text]
+    reason: Interop search queries (specs/stats/browse-queries.md Q3, Q8) that a compatible app must parse; the spec states them exactly. Reviewed SHA256 8fdc08a1fb1f75106358cd4f4db4f957a0ab1a34de73fcc5d6d85608b2abbe06. Decided by Claude (coordinator) under Antoine's delegation of 2026-11-21 (escalation E-20261121T155116Z-246e). Only the text channel of this one file is exempt.
+    approved_by: antoine
+    approved_on: 2026-11-21
+  - path: conformance/scenarios/stats/browse-queries/card-counts-labels.yaml
+    channels: [text]
+    reason: Interop search queries (specs/stats/browse-queries.md Q3, Q8) that a compatible app must parse; the spec states them exactly. Reviewed SHA256 7cca0f176714aa5dc2fe059149519dad6fd8bb6fcf937baea16c8d599e0bc696. Decided by Claude (coordinator) under Antoine's delegation of 2026-11-21 (escalation E-20261121T155116Z-246e). Only the text channel of this one file is exempt.
+    approved_by: antoine
+    approved_on: 2026-11-21
+  - path: conformance/scenarios/stats/browse-queries/parse-all.yaml
+    channels: [text]
+    reason: Interop search queries (specs/stats/browse-queries.md Q3, Q8) that a compatible app must parse; the spec states them exactly. Reviewed SHA256 37f0378b536ae12aea4a04daf1988d990c90725453186d32c6b6c9a1efedb881. Decided by Claude (coordinator) under Antoine's delegation of 2026-11-21 (escalation E-20261121T155116Z-246e). Only the text channel of this one file is exempt.
+    approved_by: antoine
+    approved_on: 2026-11-21

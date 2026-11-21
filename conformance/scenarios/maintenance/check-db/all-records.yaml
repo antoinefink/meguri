@@ -78,7 +78,7 @@ steps:
   - check_db: {}
   - db_exec: {sql: "SELECT n.sfld, c.ord, c.type, c.queue, typeof(c.due), c.due, typeof(c.ivl), c.ivl, c.odid, c.odue, typeof(c.mod), c.mod, c.usn, (SELECT replace(name, char(31), '::') FROM decks WHERE id = c.did) FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.sfld"}
   - db_exec: {sql: "SELECT id FROM cards WHERE nid IN (SELECT id FROM notes WHERE sfld IN ('orda', 'textd')) ORDER BY id"}
-  - db_exec: {sql: "SELECT count(*) FROM cards WHERE nid NOT IN (SELECT id FROM notes)"}
+  - db_exec: {sql: "SELECT count(*) FROM cards c LEFT JOIN notes n ON n.id = c.nid WHERE n.id IS NULL"}
   - db_exec: {sql: "SELECT id, replace(name, char(31), '::'), mtime_secs, usn FROM decks ORDER BY name"}
   - db_exec: {sql: "SELECT id, cid, usn, ivl, lastIvl, time, type FROM revlog ORDER BY id"}
   - db_exec: {sql: "SELECT CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY = 'nextPos'"}

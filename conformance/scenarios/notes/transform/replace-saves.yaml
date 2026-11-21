@@ -1,0 +1,52 @@
+# How Find and Replace saves the notes it rewrites
+# (specs/browser/find-replace.md F6 steps 4 and 5; specs/conformance/bulk-ops.md
+# X1, X4): each rewritten note is stamped (mod, usn -1), its stored tags keep
+# their order and case and are not registered, only their spacing becomes
+# canonical, and the cards the note now needs are added, while a card whose
+# field became empty is kept.
+# Tri: Card B exists only when Extra is not empty.
+# n1 registers the tag a and is never matched.
+# n2 has Extra empty and the raw tags "  Zed   A  " (A differs in case from
+#    the registered a; Zed is not registered): Extra gets filled.
+# n3 has Extra filled and two cards: Extra is emptied.
+# n4 has Extra empty and is never listed.
+id: notes/transform/replace-saves
+clock: {tz: UTC, start: "2030-02-11T09:00:00"}
+setup:
+  notetypes:
+    - name: Tri
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Card A, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card B, front: "{{#Extra}}{{Front}}{{/Extra}}", back: "{{Extra}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Tri, fields: [alpha, one, ""], tags: [a]}
+    - {notetype: Tri, fields: [beta, two, ""]}
+    - {notetype: Tri, fields: [gamma, three, keep]}
+    - {notetype: Tri, fields: [delta, four, ""]}
+steps:
+  - db_exec:
+      sql: "UPDATE notes SET tags = '  Zed   A  ' WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - observe: [{db_dump: {tables: [notes, cards, tags]}}]
+  # n2: the empty Extra matches; Card B is added.
+  - find_replace:
+      notes: ["#n2"]
+      find: "^$"
+      replace: filled
+      regex: true
+      in: {field: Extra}
+  - observe: [{db_dump: {tables: [notes, cards, tags]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  # n3: Extra becomes empty; its Card B stays.
+  - find_replace:
+      notes: ["#n3"]
+      find: keep
+      replace: ""
+      in: {field: Extra}
+  - observe: [{db_dump: {tables: [notes, cards, tags]}}]

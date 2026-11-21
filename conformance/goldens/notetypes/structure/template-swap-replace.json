@@ -347,6 +347,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "notetypes/structure/template-swap-replace",
-  "scenario_sha256": "8fd6a5dced77d3b8d330cc9b86151de0110466c8a65a9b7bef3af07a5a72807b",
+  "scenario_sha256": "13e4df77b0708820ec6586d5fcabf6e2056a68594a21eaa0abebdf0b4cd92846",
   "tz": "UTC"
 }

@@ -1356,8 +1356,10 @@ PUBLIC_ARTIFACTS = {
 # 071ee5ebf2138e3ad180e0aacf6940c2cab5e6d8333741d9925c7bee2b153f39.
 # Keys pin exact repository-path UTF-8 bytes; values pin complete file bytes.
 PUBLIC_VENDOR_ARTIFACTS = {
+    # Complete-content PUBLIC review: independent non-author reviewer, 2026-11-21
+    # (docs/process/review-log/selftest-six-20261121.md).
     "757fd5fb3da8ccfca681ebdc23701b14eb3a62c18056c970122d156377c7099e":
-        "c3ddf502516cc2db653a00d92672ae50e947a5beca4d216c29b561ddfef825ad",
+        "0ff0200e298c6b2c06eca789fe37c8d967c2f3ce6a1e6fef42e89e19b4341a49",
     '7f3eddd9b055b1b5220d7e096440db86572a8f0074cc61166de2a6609b308e78':
         '3e2b6410255d6c7d07c209a11d02c793e6b0a1e1156ac8fc0509f2f375051e0d',
     '6a9d04ca41587836af459446bdc65bf4d7255154cbe98aabcce66a19b4c66043':

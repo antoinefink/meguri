@@ -301,10 +301,11 @@ mg__similarity_record() {
   mg_artifact similarity-reviewer "$dir/reviewer.md" "reviewer view (names Anki paths; human review only)"
   mg_artifact similarity-reviewer-json "$dir/reviewer.json"
   mg_count total "$(jq '.counts.scanned' "$summary")"
-  mg_count passed "$(jq '.counts.clean + .counts.allowlisted' "$summary")"
+  mg_count passed "$(jq '.counts.clean + .counts.allowlisted + (.counts.oracle_output // 0)' "$summary")"
   mg_count failed "$(jq '.counts.flagged + .counts.errors' "$summary")"
   mg_count skipped "$(jq '.counts.skipped' "$summary")"
   mg_count allowlisted "$(jq '.counts.allowlisted' "$summary")"
+  mg_count oracle_output "$(jq '.counts.oracle_output // 0' "$summary")"
   mg_detail corpus "$(jq -c '.corpus' "$summary")"
   mg_detail timing "$(jq -c '.timing' "$summary")"
   mg_detail counts "$(jq -c '.counts' "$summary")"
@@ -322,7 +323,7 @@ mg__similarity_record() {
       repro: ("tools/mg similarity -- " + (. | @sh))}' "$summary" >>"$MG_STATE/failures.jsonl"
   local status
   status="$(jq -r '.status' "$summary")"
-  mg_message "$(jq -r '"similarity: \(.counts.scanned) files scanned, \(.counts.flagged) flagged, \(.counts.allowlisted) allowlisted" + (if .counts.missing > 0 then ", \(.counts.missing) listed but missing" else "" end) + "; corpus \(.corpus.tags) tags \(.corpus.first_tag)..\(.corpus.last_tag)" + (if .test_data then "; test data: \(.test_data.pairs) pairs, \(.test_data.limited | length) files below fingerprint limits; provenance unproven" else "" end)' "$summary")"
+  mg_message "$(jq -r '"similarity: \(.counts.scanned) files scanned, \(.counts.flagged) flagged, \(.counts.allowlisted) allowlisted" + (if (.counts.oracle_output // 0) > 0 then ", \(.counts.oracle_output) recorded oracle output" else "" end) + (if .counts.missing > 0 then ", \(.counts.missing) listed but missing" else "" end) + "; corpus \(.corpus.tags) tags \(.corpus.first_tag)..\(.corpus.last_tag)" + (if .test_data then "; test data: \(.test_data.pairs) pairs, \(.test_data.limited | length) files below fingerprint limits; provenance unproven" else "" end)' "$summary")"
   case "$status" in
     pass | warn | fail | error) mg_status "$status" ;;
     *) mg_status error ;;

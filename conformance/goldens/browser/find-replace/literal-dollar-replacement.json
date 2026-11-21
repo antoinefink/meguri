@@ -1,0 +1,438 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "find_replace": {
+          "count": 1
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701660000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 3620878059,
+              "data": "",
+              "flags": 0,
+              "flds": "$3 here\u001fa $3",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701660,
+              "sfld": "$3 here",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 1569289109,
+              "data": "",
+              "flags": 0,
+              "flds": "fee there\u001fplain",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "fee there",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600002": {
+              "csum": 3499368040,
+              "data": "",
+              "flags": 0,
+              "flds": "other\u001fwords",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "other",
+              "tags": "",
+              "usn": 0
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "find_replace": {
+          "count": 1
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701720000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 1266514003,
+              "data": "",
+              "flags": 0,
+              "flds": "${1}$$x$name here\u001fa ${1}$$x$name",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701720,
+              "sfld": "${1}$$x$name here",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600001": {
+              "csum": 1569289109,
+              "data": "",
+              "flags": 0,
+              "flds": "fee there\u001fplain",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "fee there",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600002": {
+              "csum": 3499368040,
+              "data": "",
+              "flags": 0,
+              "flds": "other\u001fwords",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "other",
+              "tags": "",
+              "usn": 0
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "find_replace": {
+          "count": 1
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600001": {
+              "data": "{}",
+              "did": 1,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            },
+            "1894701600002": {
+              "data": "{}",
+              "did": 1,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600002,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 0
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701780000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "notes": {
+            "1894701600000": {
+              "csum": 1266514003,
+              "data": "",
+              "flags": 0,
+              "flds": "${1}$$x$name here\u001fa ${1}$$x$name",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701720,
+              "sfld": "${1}$$x$name here",
+              "tags": "",
+              "usn": 0
+            },
+            "1894701600001": {
+              "csum": 3782224475,
+              "data": "",
+              "flags": 0,
+              "flds": "f$x there\u001fplain",
+              "guid": "#random",
+              "id": 1894701600001,
+              "mid": 1894701600006,
+              "mod": 1894701780,
+              "sfld": "f$x there",
+              "tags": "",
+              "usn": -1
+            },
+            "1894701600002": {
+              "csum": 3499368040,
+              "data": "",
+              "flags": 0,
+              "flds": "other\u001fwords",
+              "guid": "#random",
+              "id": 1894701600002,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "other",
+              "tags": "",
+              "usn": 0
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/find-replace/literal-dollar-replacement",
+  "scenario_sha256": "d53d7cad3bec3c47fe639592e36e38db30af7c22690584dedc9481aa5fe8e213",
+  "tz": "UTC"
+}

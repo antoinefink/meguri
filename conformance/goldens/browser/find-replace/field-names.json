@@ -1,0 +1,40 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "find_replace_fields": ["alpha", "Mid", "Zeta"]
+      },
+      {
+        "find_replace_fields": ["alpha", "Mid", "Zeta"]
+      },
+      {
+        "find_replace_fields": ["alpha", "beta", "Mid", "Zeta", "Échelle"]
+      },
+      {
+        "find_replace_fields": ["alpha", "beta", "Mid", "Zeta", "Échelle"]
+      },
+      {
+        "find_replace_fields": ["beta", "Mid", "Échelle"]
+      },
+      {},
+      {
+        "find_replace_fields": []
+      },
+      {
+        "find_replace_fields": ["beta", "Mid", "Échelle"]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/find-replace/field-names",
+  "scenario_sha256": "1b9063d0695f743bfbc9376f2c7f9da4d8132d436a1a14ed312c995e12d141f2",
+  "tz": "UTC"
+}
