@@ -80,6 +80,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/widget/day-start-spring-forward-r2-early-row",
-  "scenario_sha256": "e4c014d63d3796173a149cc6f36b2f2b0c58be9b30577d768f041597060498ac",
+  "scenario_sha256": "a47604f43177640a2ffe4dd39dc8f5bc95082d399c78f916f13507b48c45ff88",
   "tz": "Europe/Paris"
 }

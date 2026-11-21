@@ -25,6 +25,7 @@ mod parties_edge;
 mod render;
 pub mod sched;
 mod search;
+mod stats;
 mod storage;
 mod sync;
 pub mod sync_guard;

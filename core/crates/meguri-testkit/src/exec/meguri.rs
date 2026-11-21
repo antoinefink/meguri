@@ -311,7 +311,7 @@ impl MeguriExecutor {
     }
 
     /// The areas that have adapters, by name.
-    pub const AREAS: [&'static str; 18] = [
+    pub const AREAS: [&'static str; 19] = [
         "package",
         "maintenance",
         "sync",
@@ -327,6 +327,7 @@ impl MeguriExecutor {
         "render",
         "sched",
         "search",
+        "stats",
         "storage",
         "tags",
         "text",
@@ -362,6 +363,7 @@ impl MeguriExecutor {
                 "render" => super::render::register(&mut registry),
                 "sched" => super::sched::register(&mut registry),
                 "search" => super::search::register(&mut registry),
+                "stats" => super::stats::register(&mut registry),
                 "storage" => super::storage::register(&mut registry),
                 "tags" => super::tags::register(&mut registry),
                 "text" => super::text::register(&mut registry),

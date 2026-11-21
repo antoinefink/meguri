@@ -39,19 +39,19 @@ steps:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
       params: [2, 2, -27, 15, 2500, 4, 0, 0, "{}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767225600000, 3, -600, -60, 0, 0), (1767226200001, 3, 1, -600, 2500, 0), (1767348000001, 3, 4, 1, 2500, 1), (1768903200001, 3, 15, 4, 2500, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767225600000, 3, -600, -60, 0, 0), (1767226200001, 3, 1, -600, 2500, 0), (1767348000001, 3, 4, 1, 2500, 1), (1768903200001, 3, 15, 4, 2500, 1)) AS v"
   # c2: Second: a review row at exactly 2026-01-02T00:00:00.000Z, then two
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
       params: [2, 2, 48, 60, 2500, 3, 0, 0, "{}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767312000000, 3, 10, 4, 2500, 1), (1768903200002, 3, 30, 10, 2500, 1), (1771581600002, 3, 60, 30, 2500, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767312000000, 3, 10, 4, 2500, 1), (1768903200002, 3, 30, 10, 2500, 1), (1771581600002, 3, 60, 30, 2500, 1)) AS v"
   # c3: Second: c2 without its first row
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"
       params: [2, 2, 48, 60, 2500, 3, 0, 0, "{}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768903200003, 3, 30, 10, 2500, 1), (1771581600003, 3, 60, 30, 2500, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768903200003, 3, 30, 10, 2500, 1), (1771581600003, 3, 60, 30, 2500, 1)) AS v"
   - observe: ["next_states(#c1, #c2, #c3)"]
   - legacy_update: {preset: JanFirst, patch: {ignoreRevlogsBeforeDate: "2026-01-01"}}
   - legacy_update: {preset: JanSecond, patch: {ignoreRevlogsBeforeDate: "2026-01-02"}}

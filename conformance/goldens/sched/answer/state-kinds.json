@@ -1005,10 +1005,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "4e0df1bf9c5ea41100d1ce14ab30872923da68c62659c78f340d963b5844ea4c",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "sched/answer/state-kinds",
-  "scenario_sha256": "1deba517064ca7d3e8ff85cde387ebcccbf9ab2c091796d93dc33f1d63fe2129",
+  "scenario_sha256": "6534a60fabc0daf4a64a115c2286f5d4847a9db467ee0f1ffa87675553004dac",
   "tz": "UTC"
 }

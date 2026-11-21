@@ -147,10 +147,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "7aa5be68cd3f6ec92b60d18d7848e5789ec977b61294deb57de649edda2c6243",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "sched/compat/enable-fsrs",
-  "scenario_sha256": "8b2b9def9ab59f6bf39c7da3e300e88cf21fb5059bec9fe1634cce3183f0d4ba",
+  "scenario_sha256": "17c415b30679f6ca7d064114e22ac4dac1261235de9d359f78262eb52e47d8aa",
   "tz": "UTC"
 }
