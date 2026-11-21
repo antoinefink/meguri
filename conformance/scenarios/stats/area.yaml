@@ -1,0 +1,24 @@
+# specs/conformance/dsl.md D9.1. Active scenarios pass T0 on Meguri's executor.
+# card-info/ runs the card_stats observation (stats-ops H9) through U92's
+# executor (stats/card-info C13.2); damaged/ is a run error, not a golden.
+# The other stats scenarios wait for their own executor support.
+area: stats
+active:
+  - "card-info/ae46-no-state"
+  - "card-info/back-to-back-answers"
+  - "card-info/cloze-type"
+  - "card-info/custom-data"
+  - "card-info/due-estimate-night"
+  - "card-info/edge-values"
+  - "card-info/filtered-card"
+  - "card-info/intraday-learning"
+  - "card-info/memory-and-retention"
+  - "card-info/mixed-history"
+  - "card-info/new-card"
+  - "card-info/no-item"
+  - "card-info/no-lrt-elapsed"
+  - "card-info/params"
+  - "card-info/reset-position"
+  - "card-info/review-card"
+  - "card-info/times"
+  - "card-info/zone-dst"

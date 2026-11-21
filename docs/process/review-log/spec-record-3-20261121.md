@@ -40,3 +40,10 @@ No approved text is missing or changed in meaning; the code of PRs #77, #78 and 
 2. The thirteen Change Deck rows of H7 (he244355f799a and the twelve of H7.9) are linked and `done`, after a check of each against its test at the pin (subagent; no Anki text here). h66f7a2aeee4f's test edits a preset's steps rather than moving a card, so it links `sched/options/remap-steps` as well, and its reason now says so.
 3. V8.3 and B16: the coordinator's note on PR #77 is written. The screen derives the title from the action it ran. A title read from the stored undo history alone needs a later core unit, which adds the command to the step through `StepInfo`, `UndoMeta` and the FFI.
 4. Independent review of this commit (Opus subagent): one P1, five P2 and three P3, all fixed. P1: h0bc924c8e05f had been left `deferred`; it is now linked to `notes/change-deck/memory-states`. P2: H7.9's rows read `covered-new` with a dated note; `sched/memory-state` and `sched/step-remap` mark their rows active; B17's closing paragraph and the `basic` row lose the old held wording; V8.3 no longer names a relaunch (`engine/undo` M6). P3: wording in B17, X5 and the B1 brief.
+
+## Card Info activation (after PR #82 merged)
+
+1. `conformance/scenarios/stats/area.yaml` lists the 18 `card-info/*` ids. On `master` with it: `tools/mg conformance --lane docker stats/` gives 20 pass, 95 pending, 0 T0 failures; `goldens-check` pass.
+2. C8 also records what PR #82's last review commit built: a numeric `rollover` is written as its number; a too-deep member of the deck and preset objects stays one string, and an unreadable stored text is `null`.
+3. C13.2, C14.1, `conformance/stats-ops` H9 and its intro, and plan section 9 say the scenarios are active and U92 (#82) is merged. This part is small and follows the reviewed rulings; it was checked by the run above, with no separate review.
+
