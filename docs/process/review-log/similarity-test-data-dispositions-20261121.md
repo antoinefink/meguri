@@ -66,9 +66,10 @@ copied. Each scenario still tests the same behaviour. For
 review found that its steps follow the order of the Anki test that holds the
 query (two templates, move one, remove one and check the render, add and
 remove in one save, then count orphans). Names, values and observations are
-our own and spec S2, S6 and S7 call for each step. Whether a test's step
-order counts as class (c) is left to the coordinator; reordering or splitting
-the scenario is the remedy if it does.
+our own and spec S2, S6 and S7 call for each step. Decided by the
+coordinator (2026-11-21, under Antoine's delegation): not class (c). Our spec
+calls for each step, and an order of generic operations is not text. The scenario
+stays as it is.
 
 1. `model/card-data/rewrite`: the first card's input was the four values of an
    Anki unit test of card-data rounding, and `specs/model/card-data-json.md`
@@ -139,11 +140,14 @@ pull request #79 as a scanner rule rather than allowlist entries: a flagged
 golden that carries the current pin's recording header for its own scenario
 is reported as `oracle-output` and does not fail. With it, the whole tree
 reports 67 goldens as oracle output and no flagged golden. Class (b) takes
-the recommended rewrites in a follow-up spec-writer change (no exception).
-Still open: 3 scenarios under `stats/browse-queries/`. What matches is
-Anki output that a spec lists word for word, so it is class (a) in kind, but
-the decision covers goldens only. They need an allowlist entry or a
-separate decision.
+the recommended rewrites in a follow-up by a fresh spec-writer session (no
+exception): drop the redundant column lists and re-record (coordinator
+decision, same delegation). The 3 scenarios under `stats/browse-queries/` hold
+Anki output that a spec lists word for word; the rule covers goldens only.
+Decided (same delegation): accepted, as functional query strings that a
+compatible app must accept. Pull request #79 adds three exact whole-file
+allowlist entries for them (text channel only, no pattern, each with the
+file's reviewed SHA-256).
 
 ## Hosted check
 
