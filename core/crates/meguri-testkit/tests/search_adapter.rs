@@ -116,14 +116,22 @@ fn canonical_search_writes_canonical_texts() {
     assert_eq!(out["steps"][0]["canonical_search"], expected);
 }
 
-// A term whose matching unit has not landed is a run error, never a guess.
+// Q5, Q6 with U81's plain text: in cards mode a note term skips the card
+// whose note is gone; in notes mode it returns a note without cards.
 #[test]
-fn terms_of_later_units_are_run_errors() {
-    let dir = tempfile::tempdir().unwrap();
-    let body = format!("{ROWS}  - observe:\n      - search: [{{query: 'dog'}}]\n");
-    let loaded = load(dir.path(), "search/stub", &body);
-    let error = MeguriExecutor::new().run(&loaded).unwrap_err();
-    assert_eq!((error.kind.as_str(), error.step), ("unsupported_observation", Some(5)));
+fn text_terms_read_the_note_rows() {
+    let out = run(concat!(
+        "  - observe:\n",
+        "      - search:\n",
+        "          - {query: dog}\n",
+        "          - {query: dog, kind: notes}\n",
+        "          - {query: cat, kind: notes}\n",
+        "          - {query: cat}\n",
+    ));
+    assert_eq!(
+        out["steps"][5]["search"],
+        json!([{"ids": [201]}, {"ids": [101]}, {"ids": [102]}, {"ids": []}])
+    );
 }
 
 // S1: `search` needs the scenario's collection. The run starts from the

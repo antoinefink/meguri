@@ -55,11 +55,14 @@ pub fn preset_selection(
     let query = meguri_search::parse(text).map_err(|error| EngineError::InvalidArgument {
         message: error.to_string(),
     })?;
-    let compiled = meguri_search::Plan::build(&query, meguri_search::SearchMode::Cards, search).map_err(|error| {
-        EngineError::Unsupported {
-            feature: format!("preset search: {error:?}"),
-        }
-    })?;
+    // T15: the note types of the snapshot the search runs on.
+    let notetypes = meguri_search::SearchNotetypes::read(rows)?;
+    let compiled =
+        meguri_search::Plan::build(&query, meguri_search::SearchMode::Cards, search, &notetypes).map_err(|error| {
+            EngineError::Unsupported {
+                feature: format!("preset search: {error:?}"),
+            }
+        })?;
     let params = compiled
         .params()
         .iter()

@@ -7,13 +7,18 @@ import SwiftUI
 /// its guard. All other window delegate behavior remains with SwiftUI.
 struct AddNoteWindowGuard: NSViewRepresentable {
     let navigation: AppNavigation
-    func makeCoordinator() -> Coordinator { Coordinator(navigation: navigation) }
+    /// Edit Note's panel during a review: ⌘W and the close button act as its Cancel (E7).
+    let editNote: EditNoteFlow?
+    func makeCoordinator() -> Coordinator { Coordinator(navigation: navigation, editNote: editNote) }
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
         view.changedWindow = { [weak coordinator = context.coordinator] in coordinator?.install(on: $0) }
         return view
     }
-    func updateNSView(_ view: ObserverView, context: Context) { context.coordinator.install(on: view.window) }
+    func updateNSView(_ view: ObserverView, context: Context) {
+        context.coordinator.editNote = editNote
+        context.coordinator.install(on: view.window)
+    }
     static func dismantleNSView(_ view: ObserverView, coordinator: Coordinator) { coordinator.restore() }
 
     final class ObserverView: NSView {
@@ -22,11 +27,12 @@ struct AddNoteWindowGuard: NSViewRepresentable {
     }
     final class Coordinator: NSObject, NSWindowDelegate {
         let navigation: AppNavigation
+        weak var editNote: EditNoteFlow?
         private weak var window: NSWindow?
         // NSObject's nonisolated selector introspection only reads this weak
         // reference. Installation and all window callbacks stay on MainActor.
         nonisolated(unsafe) private weak var previous: (any NSWindowDelegate)?
-        init(navigation: AppNavigation) { self.navigation = navigation }
+        init(navigation: AppNavigation, editNote: EditNoteFlow?) { self.navigation = navigation; self.editNote = editNote }
         func install(on window: NSWindow?) {
             guard let window, window.delegate !== self else { return }
             restore()
@@ -37,6 +43,10 @@ struct AddNoteWindowGuard: NSViewRepresentable {
             window = nil; previous = nil
         }
         func windowShouldClose(_ sender: NSWindow) -> Bool {
+            if let editNote, editNote.isPresented {
+                Task { await editNote.requestCancel() }
+                return false
+            }
             if case .add = navigation.sheet {
                 navigation.dismissSheet()
                 return false

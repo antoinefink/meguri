@@ -4,8 +4,9 @@
 use crate::ast::Term;
 use crate::context::{ContextReads, SearchContext};
 use crate::error::{ErrorKind, SearchFailure};
+use crate::notetypes::SearchNotetypes;
 
-use super::{Rows, SearchMode, history, names, props, state};
+use super::{Rows, SearchMode, history, names, props, state, text};
 
 /// A bound parameter. All user text goes in parameters; numbers and ids may
 /// be written into the statement (Q9).
@@ -33,11 +34,15 @@ impl Params {
 }
 
 /// What a term compiles against: the rows the statement tests (aliases `c`
-/// for `cards` and `n` for `notes`) and the outside values.
+/// for `cards` and `n` for `notes`), the outside values and the note types.
 #[derive(Clone, Copy, Debug)]
 pub struct TermEnv<'a> {
     pub rows: Rows,
     pub ctx: &'a SearchContext,
+    pub notetypes: &'a SearchNotetypes,
+    /// A `-` stands directly before the term, which the plan leaves to the
+    /// term: only `sc:` takes it (`text-matching.md` T9.4, [`takes_negation`]).
+    pub negated: bool,
 }
 
 /// One term's predicate.
@@ -52,47 +57,48 @@ pub struct TermSql {
     pub reads: ContextReads,
 }
 
-/// What compiling a term gives.
-#[derive(Clone, Debug, PartialEq)]
-pub enum TermOutcome {
-    Sql(TermSql),
-    /// The unit that owns the term's matching (U81, U82) has not landed.
-    NotYetSupported,
-}
-
-/// Q9: the term's SQL. U80 compiles the whole collection; the text terms are
-/// U81's and the name, id, state, property and history terms U82's, which
-/// replace their stubs here. An `Err` is a plan error of E4 step 3: pattern
-/// errors ([`is_pattern_error`]) wait for the statement checks of every term.
-pub fn compile_term(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermOutcome, ErrorKind> {
+/// Q9: the term's SQL. U80 compiles the whole collection, U81 the text terms
+/// and U82 the name, id, state, property and history terms. An `Err` is a
+/// plan error of E4 step 3: pattern errors ([`is_pattern_error`]) wait for
+/// the statement checks of every term.
+pub fn compile_term(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermSql, ErrorKind> {
     Ok(match term {
-        Term::Tag { mode, text } => TermOutcome::Sql(names::tag(*mode, text, params)?),
-        Term::Deck(value) => TermOutcome::Sql(names::deck(value, env, params)?),
-        Term::Preset(value) => TermOutcome::Sql(names::preset(value, params)),
-        Term::Notetype(value) => TermOutcome::Sql(names::notetype(value, params)?),
-        Term::Template(template) => TermOutcome::Sql(names::template(template, params)?),
-        Term::Ids { kind, list } => TermOutcome::Sql(names::ids(*kind, list, env)),
-        Term::NotetypeId(id) => TermOutcome::Sql(names::notetype_id(*id)),
-        Term::Duplicates { notetype, text } => TermOutcome::Sql(names::duplicates(*notetype, text, env, params)),
+        Term::Tag { mode, text } => names::tag(*mode, text, params)?,
+        Term::Deck(value) => names::deck(value, env, params)?,
+        Term::Preset(value) => names::preset(value, params),
+        Term::Notetype(value) => names::notetype(value, params)?,
+        Term::Template(template) => names::template(template, params)?,
+        Term::Ids { kind, list } => names::ids(*kind, list, env),
+        Term::NotetypeId(id) => names::notetype_id(*id),
+        Term::Duplicates { notetype, text } => names::duplicates(*notetype, text, env, params),
         // Q2: true for every row.
-        Term::WholeCollection => TermOutcome::Sql(TermSql {
+        Term::WholeCollection => TermSql {
             sql: "1".to_owned(),
             slow: false,
             reads: ContextReads::NONE,
-        }),
-        Term::State(state) => TermOutcome::Sql(state::state(*state, env, params)),
-        Term::Flag(flag) => TermOutcome::Sql(state::flag(*flag)),
-        Term::Property { property, comparison } => {
-            TermOutcome::Sql(props::property(property, *comparison, env, params)?)
-        }
-        Term::HasCustomData(key) => TermOutcome::Sql(props::has_custom_data(key, params)),
-        Term::Added(days) => TermOutcome::Sql(history::added(*days, env.ctx)),
-        Term::Edited(days) => TermOutcome::Sql(history::edited(*days, env.ctx)),
-        Term::Introduced(days) => TermOutcome::Sql(history::introduced(*days, env.ctx)),
-        Term::Rated { days, button } => TermOutcome::Sql(history::rated(*days, *button, env.ctx)),
-        Term::Rescheduled(days) => TermOutcome::Sql(history::rescheduled(*days, env.ctx)),
-        _ => TermOutcome::NotYetSupported,
+        },
+        Term::State(state) => state::state(*state, env, params),
+        Term::Flag(flag) => state::flag(*flag),
+        Term::Property { property, comparison } => props::property(property, *comparison, env, params)?,
+        Term::HasCustomData(key) => props::has_custom_data(key, params),
+        Term::Added(days) => history::added(*days, env.ctx),
+        Term::Edited(days) => history::edited(*days, env.ctx),
+        Term::Introduced(days) => history::introduced(*days, env.ctx),
+        Term::Rated { days, button } => history::rated(*days, *button, env.ctx),
+        Term::Rescheduled(days) => history::rescheduled(*days, env.ctx),
+        Term::Text(value) => text::plain(value, env, params)?,
+        Term::NoCombining(value) => text::no_combining(value, env, params)?,
+        Term::StripCloze(value) => text::strip_cloze(value, env.negated, env, params)?,
+        Term::Word(value) => text::word(value, env, params)?,
+        Term::Regex(value) => text::regex(value, env, params)?,
+        Term::Field { name, mode, text } => text::field(name, *mode, text, env, params)?,
     })
+}
+
+/// The terms that take a `-` standing directly before them themselves
+/// (T9.4): the plan compiles them with [`TermEnv::negated`] and no `NOT`.
+pub fn takes_negation(term: &Term) -> bool {
+    matches!(term, Term::StripCloze(_))
 }
 
 /// E4 step 3.2: the errors of the pattern checks (pattern size, then the

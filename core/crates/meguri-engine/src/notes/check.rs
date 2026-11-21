@@ -72,7 +72,9 @@ pub fn check(
     };
     let mut duplicates = Vec::new();
     if state == FieldState::Normal {
-        let checksum = meguri_text::checksum::note_checksum(&text);
+        // K4: the comparison text is already stripped; a second H5 pass
+        // would remove markup its entities decoded to.
+        let checksum = meguri_text::checksum::checksum_of_sort_text(&text);
         for note in reader.notes_with_checksum(nt.id, checksum)? {
             if Some(note.id) != own
                 && meguri_text::html::strip_markup_keep_media(note.field_values().next().unwrap_or_default()) == text

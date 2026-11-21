@@ -65,7 +65,7 @@ extension FieldEditorTests {
         let page = try FieldEditorHost(draft: draft, isCurrent: { true })
         page.webView.frame = CGRect(x: 0, y: 0, width: 500, height: 700)
         let host = page
-        defer { host.dispose() }
+        defer { host.shutDown() }
         #expect(page.modeField == nil && page.modeControlIdentifier == "editor.add.htmlToggle")
         try await page.start()
         // The page has each name as a header and no mode button of its own.
@@ -108,9 +108,9 @@ extension FieldEditorTests {
         #expect(next.values == ["", ""])
         // The first owner is over: it cannot start again or end the page it gave away.
         await #expect(throws: (any Error).self) { try await first.start() }
-        first.dispose()
+        first.shutDown()
         try await second.flush(hold: false)
-        second.dispose()
+        second.shutDown()
     }
 
     @Test func inputThatArrivesDuringAHoldIsCommittedAfterRelease() async throws {
@@ -134,6 +134,6 @@ extension FieldEditorTests {
         try await page.release()
         try await page.flush(hold: false)
         #expect(draft.values[0] == "ime" && draft.firstFieldHasContent)
-        page.dispose()
+        page.shutDown()
     }
 }

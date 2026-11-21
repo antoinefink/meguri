@@ -157,6 +157,71 @@ pub fn update_note(request: UpdateNoteRequest) -> Result<NoteMutation, CoreError
         r.value.written,
     ))
 }
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct NoteFieldValue {
+    pub ord: u32,
+    pub html: String,
+}
+/// `editor/field-html` S2: the note type and layout as the editor loaded
+/// them, the fields it changed, and the whole tag list only when it changed.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct NotePatchRequest {
+    /// The generation the editor loaded the note in; the patch is refused
+    /// with `StaleGeneration` on any other, so a draft never lands in a
+    /// replacement collection. None for hosts that do not track it.
+    pub expected_generation: Option<u64>,
+    pub id: i64,
+    pub notetype_id: i64,
+    pub field_layout: Vec<AddFieldIdentity>,
+    pub fields: Vec<NoteFieldValue>,
+    pub tags: Option<Vec<String>>,
+}
+#[uniffi::export]
+/// `session_id`: the open review session when the review's Edit Note saves
+/// (`review/edit-current` E2); the step then belongs to that session.
+pub fn patch_note(request: NotePatchRequest, session_id: Option<u64>) -> Result<NoteMutation, CoreError> {
+    callback::enter("patch_note");
+    let id = NoteId(request.id);
+    let input = notes::NotePatch {
+        id,
+        notetype_id: NotetypeId(request.notetype_id),
+        field_layout: request.field_layout.into_iter().map(|field| notes::AddFieldIdentity {
+            ord: field.ord,
+            id: field.id,
+            name: field.name,
+        }).collect(),
+        fields: request.fields.into_iter().map(|field| (field.ord, field.html)).collect(),
+        tags: request.tags,
+    };
+    let host = runtime::host()?;
+    // Resolve the collection once and check it against the editor's
+    // generation; the op then runs on that collection only.
+    let collection = host.collection()?;
+    let expected = request.expected_generation.map(meguri_engine::Generation);
+    if let Some(expected) = expected {
+        if collection.generation() != expected {
+            return Err(meguri_engine::EngineError::StaleGeneration { planned: expected, current: collection.generation() }.into());
+        }
+    }
+    let r = match session_id {
+        // The review resolves its own bound collection and checks the generation there.
+        Some(session) => host.review().patch_note(input, meguri_engine::SessionId(session), expected)?,
+        None => notes::patch(&collection, input, OpSource::UserUndoable)?,
+    };
+    Ok(NoteMutation::with_cards(MutationSummary::of(&r), id, r.value.cards, r.value.written))
+}
+/// The deck a card is in now (`review/edit-current` E1's subtitle).
+#[uniffi::export]
+pub fn card_deck(card_id: i64) -> Result<i64, CoreError> {
+    callback::enter("card_deck");
+    let c = runtime::host()?.collection()?;
+    let r = c.reader(ReaderRole::Query)?;
+    let card = r.card(meguri_model::ids::CardId(card_id))?.ok_or_else(|| meguri_engine::EngineError::NotFound {
+        table: meguri_storage::Table::Cards,
+        key: card_id.to_string(),
+    })?;
+    Ok(card.deck_id.0)
+}
 #[uniffi::export]
 pub fn read_note(id: i64) -> Result<NoteRecord, CoreError> {
     callback::enter("read_note");
