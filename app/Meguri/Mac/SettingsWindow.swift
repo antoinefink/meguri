@@ -46,3 +46,4 @@ private struct SettingsToolbarStyle: NSViewRepresentable {
         }
     }
 }
+#endif
