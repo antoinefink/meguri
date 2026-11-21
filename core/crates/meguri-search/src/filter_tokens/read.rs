@@ -37,6 +37,8 @@ pub fn classify_text(text: &str, names: &NameIndex) -> TextReading {
         Err(_) => return TextReading::Items(literal_words(&text)),
     };
     let reader = Reader::new(names);
+    // The source's characters once: spans are character offsets.
+    let chars: Vec<char> = text.chars().collect();
     let mut items = Vec::new();
     for id in run_items(&query) {
         match reader.text_item(&query, id) {
@@ -44,7 +46,11 @@ pub fn classify_text(text: &str, names: &NameIndex) -> TextReading {
                 text: query.canonical_text_of(id),
                 field_text: false,
             }),
-            Some(TextItem::Literal(written)) => items.push(BuiltItem::Literal(written)),
+            Some(TextItem::Literal) => {
+                let span = query.node(id).span.clone();
+                let written: String = chars.get(span).unwrap_or_default().iter().collect();
+                items.push(BuiltItem::Literal(unquoted(&written)));
+            }
             Some(TextItem::Nothing) => {}
             None => return TextReading::Syntax,
         }
@@ -85,7 +91,7 @@ enum TextItem {
     /// A plain-text term, or the negation of one, as read.
     Plain,
     /// A field term naming no field: the literal item of its written text.
-    Literal(String),
+    Literal,
     /// The whole-collection term of an empty text.
     Nothing,
 }
@@ -272,7 +278,7 @@ impl<'n> Reader<'n> {
             _ => {}
         }
         match self.text_item(query, id) {
-            Some(TextItem::Plain | TextItem::Literal(_)) => Class::Text,
+            Some(TextItem::Plain | TextItem::Literal) => Class::Text,
             _ => Class::Advanced,
         }
     }
@@ -350,8 +356,10 @@ impl<'n> Reader<'n> {
                 // A card type some note type has, in its stored spelling
                 // (N4.2 compares by unicase equality); one no note type has
                 // stays advanced (T7.1: renamed or deleted).
-                self.template_named(&typed)
-                    .map(|stored| Single::Value(Value::CardType(stored)))
+                // The stored spelling must build too (a stored name not in
+                // NFC is not offered).
+                let stored = Value::CardType(self.template_named(&typed)?);
+                stored.is_offered().then_some(Single::Value(stored))
             }
             NodeKind::Term(Term::Field {
                 name,
@@ -492,8 +500,7 @@ impl<'n> Reader<'n> {
                 if self.field_named(name).is_some() {
                     return None;
                 }
-                let written = query.source_text(&query.node(id).span)?;
-                Some(TextItem::Literal(unquoted(&written)))
+                Some(TextItem::Literal)
             }
             _ => None,
         }
@@ -553,25 +560,28 @@ fn pair(query: &Query, a: NodeId, b: NodeId) -> Option<DueValue> {
 /// An advanced token's text: its item's canonical text as a whole search
 /// (F2.2: a group loses its brackets), or the item as written when that
 /// canonical text would not read back as the same item (`canonical-form`
-/// F7's shapes: a negated operator word, `preset:`, `prop:cds:`).
+/// F7's shapes: a negated operator word, `has\-cd:` as a field name, R-read
+/// values).
 fn whole_text(query: &Query, id: NodeId) -> String {
-    let canonical = match query.node(id).kind {
-        NodeKind::Group(inside) => query.canonical_text_of(inside),
-        _ => query.canonical_text_of(id),
+    let start = match query.node(id).kind {
+        NodeKind::Group(inside) => inside,
+        _ => id,
     };
-    advanced_text(query, &[id], canonical)
+    advanced_text(query, &[start], query.canonical_text_of(start))
 }
 
-/// `canonical`, the text of the items `ids`, when it reads back as itself
-/// and the items hold no negated operator word; else their written text.
+/// `canonical`, the text of the items `ids`, when it reads back as the
+/// same items; else their written text.
 fn advanced_text(query: &Query, ids: &[NodeId], canonical: String) -> String {
-    let operator = ids.iter().any(|id| {
-        subtree(query, *id)
-            .into_iter()
-            .any(|node| matches!(query.node(node).kind, NodeKind::NegatedOperator(_)))
+    let same = parse(&canonical).is_ok_and(|again| {
+        let read: Vec<NodeId> = match (&again.node(again.root()).kind, ids.len()) {
+            (NodeKind::And(items), n) if n > 1 => items.clone(),
+            _ => vec![again.root()],
+        };
+        let shape = shapes(query, ids);
+        !shape.iter().any(|piece| piece == NEGATED_OPERATOR) && shape == shapes(&again, &read)
     });
-    let stable = parse(&canonical).is_ok_and(|again| again.canonical_text() == canonical);
-    if stable && !operator {
+    if same {
         return canonical;
     }
     let (Some(first), Some(last)) = (ids.first(), ids.last()) else {
@@ -581,14 +591,58 @@ fn advanced_text(query: &Query, ids: &[NodeId], canonical: String) -> String {
     query.source_text(&span).unwrap_or(canonical)
 }
 
-/// The nodes below and at `id`, with an explicit stack (E6).
+const NEGATED_OPERATOR: &str = "negated operator";
+
+/// The items `ids` as a sequence in pre-order: each term with its data,
+/// each operator with its number of children (spans left out).
+fn shapes(query: &Query, ids: &[NodeId]) -> Vec<String> {
+    let mut out = Vec::new();
+    for id in ids {
+        for node in subtree(query, *id) {
+            out.push(match &query.node(node).kind {
+                NodeKind::And(items) => format!("and {}", items.len()),
+                NodeKind::Or(runs) => format!("or {}", runs.len()),
+                NodeKind::Not(_) => "not".to_owned(),
+                NodeKind::Group(_) => "group".to_owned(),
+                NodeKind::Term(term) => format!("{term:?}"),
+                NodeKind::NegatedOperator(_) => NEGATED_OPERATOR.to_owned(),
+            });
+        }
+    }
+    out
+}
+
+/// Whether the builder writes the parsed text `text` as the same query:
+/// its canonical text reads back as the same items, and it holds no
+/// negated operator word (`canonical-form` F7's shapes fail this).
+pub(crate) fn writes_unchanged(text: &str) -> Result<bool, ()> {
+    let query = parse(text).map_err(|_| ())?;
+    let root = match query.node(query.root()).kind {
+        NodeKind::Group(inside) => inside,
+        _ => query.root(),
+    };
+    let canonical = query.canonical_text();
+    Ok(advanced_text(&query, &[root], canonical.clone()) == canonical)
+}
+
+pub(crate) fn holds_negated_operator(text: &str) -> bool {
+    parse(text).is_ok_and(|query| {
+        query
+            .nodes()
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::NegatedOperator(_)))
+    })
+}
+
+/// The nodes below and at `id` in pre-order, children left to right, with
+/// an explicit stack (E6).
 fn subtree(query: &Query, id: NodeId) -> Vec<NodeId> {
     let mut out = Vec::new();
     let mut stack = vec![id];
     while let Some(id) = stack.pop() {
         out.push(id);
         match &query.node(id).kind {
-            NodeKind::And(children) | NodeKind::Or(children) => stack.extend(children.iter().copied()),
+            NodeKind::And(children) | NodeKind::Or(children) => stack.extend(children.iter().rev().copied()),
             NodeKind::Not(child) | NodeKind::Group(child) => stack.push(*child),
             NodeKind::Term(_) | NodeKind::NegatedOperator(_) => {}
         }

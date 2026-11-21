@@ -392,6 +392,9 @@ pub enum RunTextError {
     /// An advanced token holding a negated operator word (`-and`, `-or`),
     /// which `errors.md` E3 never runs.
     NegatedOperator { token: usize },
+    /// An advanced token whose text the canonical writer would change into
+    /// another search (`canonical-form` F7's shapes).
+    Unwritable { token: usize },
     /// An advanced token whose text does not parse (its path's first step
     /// is the token's index).
     Build(BuilderError),
@@ -474,14 +477,13 @@ fn token_item(k: usize, token: &Token) -> Result<BuiltItem, RunTextError> {
         Token::Advanced(text) => {
             // E3: a negated operator word never runs, and the canonical
             // writer could not keep it (F7), so the query has no run text.
-            let operator = parse(text).is_ok_and(|query| {
-                query
-                    .nodes()
-                    .iter()
-                    .any(|node| matches!(node.kind, crate::ast::NodeKind::NegatedOperator(_)))
-            });
-            if operator {
+            if read::holds_negated_operator(text) {
                 return Err(RunTextError::NegatedOperator { token: k });
+            }
+            // Other F7 shapes (`has\-cd:x`, R-read values) would run as
+            // another search once the builder writes them.
+            if read::writes_unchanged(text) == Ok(false) {
+                return Err(RunTextError::Unwritable { token: k });
             }
             Ok(BuiltItem::Parsed {
                 text: text.clone(),

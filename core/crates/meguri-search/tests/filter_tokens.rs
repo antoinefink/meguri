@@ -616,6 +616,29 @@ fn pairs_repeats_and_unstable_items() {
         read("preset:a\\\"b").tokens,
         vec![Token::Advanced(s("preset:a\\\"b"))]
     );
+    // A field named like a key, its `-` escaped, keeps its escape; the
+    // builder would write it as `has-cd:x`, another search, so the query
+    // has no run text.
+    let mut keyed = names.clone();
+    let mut types = keyed.notetypes().to_vec();
+    types[0].fields.push(s("has-cd"));
+    keyed.set_notetypes(types);
+    let query = read_text("has\\-cd:x", &keyed);
+    assert_eq!(query.tokens, vec![Token::Advanced(s("has\\-cd:x"))]);
+    assert_eq!(query.run_text(&keyed), Err(RunTextError::Unwritable { token: 0 }));
+    assert_eq!(
+        read("preset:a\\\"b").run_text(&names),
+        Err(RunTextError::Unwritable { token: 0 })
+    );
+    // A stored card type spelling must build: the Kelvin sign folds like
+    // `k` but is not in NFC, so `card:kx` stays advanced.
+    let mut kelvin = names.clone();
+    let mut types = kelvin.notetypes().to_vec();
+    types[0].templates = vec![s("\u{212a}x")];
+    kelvin.set_notetypes(types);
+    assert_eq!(read_text("card:kx", &kelvin).tokens, vec![Token::Advanced(s("card:kx"))]);
+    // Stable advanced items keep their canonical text and run.
+    assert_eq!(read("prop:ivl>30 (a OR b)").run_text(&names).unwrap(), "prop:ivl>30 (a OR b)");
 }
 
 // T16: T5's items of single texts; `deck:` with nothing after it is
