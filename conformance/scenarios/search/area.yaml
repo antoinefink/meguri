@@ -6,6 +6,8 @@
 # tagged needs-*, the terms of U81 and U82; they become active as those land.
 area: search
 active:
+  - "builder/items"
+  - "builder/names"
   - "canonical/*"
   # U82: decks, dupe, errors/ae42, history/added-edited, ids,
   # notetypes/names, props, regex/glob-size and state, after the R1881
@@ -16,7 +18,9 @@ active:
   # with db_exec so that tags T3 spelling does not apply.
   # U81: fields, folding, notetypes/glob-escapes, reference/examples, regex,
   # the needs-text structure scenarios and text. matrix/combined and
-  # unsorted wait for sorted search (U84).
+  # unsorted wait for sorted search (U84). builder/items and builder/names
+  # pass T0 once U88a's search_build adapter and U81's text terms are both
+  # in; the R1881 search-data check passes on every search scenario.
   - "decks/*"
   - "dupe/*"
   - "extractors/*"
