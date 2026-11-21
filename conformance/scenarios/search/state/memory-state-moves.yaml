@@ -1,0 +1,50 @@
+# Which cards count as holding a memory state, read through the only
+# operation that selects cards by it: Change Deck with FSRS on recomputes
+# the target deck's cards that hold none (specs/sched/memory-state.md M1,
+# M7.2; specs/browser/bulk-actions.md B7.2 step 4; R645). No search term
+# names this predicate, so the observation is which target cards the move
+# writes again (new mod, usn -1, state keys back) and which it leaves as
+# they were.
+# Target uses the preset Keep (desired retention 0.85), Source the default.
+# c1 Source, answered: moved to Target, the move that triggers the pass.
+# c2 Target, answered, then only s kept (d, dr, decay removed).
+# c3 Target, answered, then only d kept (s, dr, decay removed).
+# c4 Target, answered: full state, never moved.
+# c5 Target, answered, then s, d, dr and decay all removed.
+# c6 Target, new: no review-log row, nothing to compute from.
+# Every card gets usn 7 before the move, as after a sync, so a written row
+# shows usn -1 and a later mod.
+id: search/state/memory-state-moves
+clock: {tz: UTC, start: "2030-06-03T07:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Keep, desired_retention: 0.85}
+  decks: [Source, {name: Target, preset: Keep}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Side A, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Source, fields: [alpha, x]}
+    - {notetype: Pair, deck: Target, fields: [beta, x]}
+    - {notetype: Pair, deck: Target, fields: [gamma, x]}
+    - {notetype: Pair, deck: Target, fields: [delta, x]}
+    - {notetype: Pair, deck: Target, fields: [epsilon, x]}
+    - {notetype: Pair, deck: Target, fields: [zeta, x]}
+steps:
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good}
+  - answer: {card: "#c2", rating: good}
+  - answer: {card: "#c3", rating: good}
+  - answer: {card: "#c4", rating: good}
+  - answer: {card: "#c5", rating: good}
+  - db_exec: {sql: "UPDATE cards SET data = json_remove(data, '$.d', '$.dr', '$.decay') WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET data = json_remove(data, '$.s', '$.dr', '$.decay') WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET data = json_remove(data, '$.s', '$.d', '$.dr', '$.decay') WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET usn = 7"}
+  - advance: 1h
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6)"]
+  - change_deck: {cards: ["#c1"], deck: Target}
+  - observe: ["card(#c1, #c2, #c3, #c4, #c5, #c6)"]

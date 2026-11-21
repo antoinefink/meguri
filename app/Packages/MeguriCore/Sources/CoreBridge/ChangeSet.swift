@@ -124,3 +124,47 @@ extension ChangeSet {
         collectionRow = changes.collectionRow
     }
 }
+
+// Back to the bindings, for the calls that take the change sets Swift
+// received (Browse's `invalidatedRows`, `browser/result-sets` H10).
+extension ChangeSet.Change {
+    var raw: MeguriCoreBindings.ChangeKind {
+        switch self {
+        case .added: .added
+        case .updated: .updated
+        case .removed: .removed
+        }
+    }
+}
+
+extension OpSource {
+    var raw: MeguriCoreBindings.OpSource {
+        switch self {
+        case .userUndoable: .userUndoable
+        case .userNonUndoable: .userNonUndoable
+        case .syncIncoming: .syncIncoming
+        case .localApi: .localApi
+        case .optimizer: .optimizer
+        case .rollover: .rollover
+        case .maintenance: .maintenance
+        case .cloudIncoming: .cloudIncoming
+        case .cloudRekey: .cloudRekey
+        }
+    }
+}
+
+extension ChangeSet {
+    var raw: MeguriCoreBindings.ChangeSet {
+        let rows = { (list: [Row]) in list.map { IdChange(id: $0.id, kind: $0.change.raw) } }
+        let named = { (list: [Named]) in list.map { NameChange(name: $0.name, kind: $0.change.raw) } }
+        return MeguriCoreBindings.ChangeSet(
+            wholeCollection: wholeCollection, source: source.raw,
+            cards: cards.map { CardChange(id: $0.id, noteId: $0.noteID, kind: $0.change.raw, memoryStateOnly: $0.memoryStateOnly) },
+            notes: rows(notes),
+            notetypes: notetypes.map { NotetypeChange(id: $0.id, kind: $0.change.raw, schemaChanged: $0.schemaChanged) },
+            decks: rows(decks), deckConfigs: rows(deckConfigs), configKeys: named(configKeys), tags: named(tags),
+            revlogAdded: revlogAdded, revlogRemoved: revlogRemoved, mediaAdded: mediaAdded, mediaRemoved: mediaRemoved,
+            skippedIncomingCards: skippedIncomingCards, skippedIncomingNotes: skippedIncomingNotes,
+            skippedIncomingDecks: skippedIncomingDecks, collectionRow: collectionRow)
+    }
+}

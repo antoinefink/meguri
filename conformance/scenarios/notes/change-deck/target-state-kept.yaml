@@ -1,0 +1,69 @@
+# Change Deck with FSRS on computes memory states only for the cards of the
+# target deck itself (by did or odid, not its subdecks) that hold none, are
+# not new and have a review-log row; every other card keeps its row, stamps
+# and usn included (specs/browser/bulk-actions.md B7.2 step 4;
+# specs/sched/memory-state.md M4.1, M7.2; R645, R1188).
+# Upper starts on Default (desired retention 0.9) and switches to Second
+# (0.85) after c1 is answered, so c1 holds a state that a recompute with
+# the target preset would change. Upper::Sub and Lower stay on Default.
+# c1 Upper, answered: has a state with dr 0.9, never moved.
+# c2 Lower, answered: has a state, moved to Upper.
+# c3 Upper, new, no review-log row.
+# c4 Upper::Sub, review card, no state, one review row (a subdeck).
+# c5 review card, no state, one review row, in the filtered deck Cram with
+#    Upper as its home deck (odid).
+# c6 Upper, review card, no state, only a set-due-date row (gives no item).
+# c7 Upper, new card, no state, one review row (as after a reset).
+# c8 Lower, review card, no state, one review row (another deck).
+# Every card gets a server usn and an old mod before the move, so that a
+# written row shows usn -1 and a new mod.
+id: notes/change-deck/target-state-kept
+clock: {tz: UTC, start: "2030-05-06T08:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Second, desired_retention: 0.85}
+  decks: [Upper, "Upper::Sub", Lower]
+  notetypes:
+    - name: Duo
+      fields: [Front, Back]
+      templates: [{name: Card A, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Duo, deck: Upper, fields: [red, x]}
+    - {notetype: Duo, deck: Lower, fields: [green, x]}
+    - {notetype: Duo, deck: Upper, fields: [blue, x]}
+    - {notetype: Duo, deck: "Upper::Sub", fields: [one, x]}
+    - {notetype: Duo, deck: Upper, fields: [two, x]}
+    - {notetype: Duo, deck: Upper, fields: [three, x]}
+    - {notetype: Duo, deck: Upper, fields: [four, x]}
+    - {notetype: Duo, deck: Lower, fields: [five, x]}
+steps:
+  - observe: [timing]
+  # c1 and c2 are answered while every deck uses Default.
+  - answer: {card: "#c1", rating: good}
+  - answer: {card: "#c2", rating: good}
+  # Upper alone moves to Second; this starts no recompute.
+  - set_deck_preset: {deck: Upper, preset: Second}
+  # c4, c5, c6 and c8: review cards, 6 days, due on day 3, no state.
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 3, ivl = 6, factor = 2500, reps = 1, data = '{}' WHERE id IN (SELECT id FROM (SELECT id, row_number() OVER (ORDER BY id) AS n FROM cards) WHERE n IN (4, 5, 6, 8))"
+  # One Good row six days ago for c4, c5, c7 and c8.
+  - db_exec:
+      sql: "INSERT INTO revlog SELECT 1903766400000 + n, id, 0, 3, 6, 0, 2500, 4000, 0 FROM (SELECT id, row_number() OVER (ORDER BY id) AS n FROM cards) WHERE n IN (4, 5, 7, 8)"
+  # c6: a set-due-date row only.
+  - db_exec:
+      sql: "INSERT INTO revlog SELECT 1903766400000 + n, id, 0, 0, 6, 0, 2500, 0, 4 FROM (SELECT id, row_number() OVER (ORDER BY id) AS n FROM cards) WHERE n = 6"
+  # Cram, a filtered deck; c5 sits in it with Upper in odid.
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = due WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"
+  - db_exec: {sql: "UPDATE cards SET usn = 7, mod = 1700000000"}
+  - advance: 1h
+  - observe: ["card(#c1, #c2, #c3, #c4)", "card(#c5, #c6, #c7, #c8)"]
+  # c2 moves in and gets a state with Second's retention; c5 (home Upper)
+  # gets one and c6 gets only dr and decay; c1, c3, c4, c7 and c8 are not
+  # written.
+  - change_deck: {cards: ["#c2"], deck: Upper}
+  - observe: ["card(#c1, #c2, #c3, #c4)", "card(#c5, #c6, #c7, #c8)"]

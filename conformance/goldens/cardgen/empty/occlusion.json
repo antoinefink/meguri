@@ -143,10 +143,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "cardgen/empty/occlusion",
-  "scenario_sha256": "55eb1a072447db3f11bcae49b7b184bc00401dc86cabb0b0ab082c8b09afc046",
+  "scenario_sha256": "822e6b2f61268f9b2d9548487ef3adc9925654c7300bb6ca234e97e4da4a51e0",
   "tz": "UTC"
 }

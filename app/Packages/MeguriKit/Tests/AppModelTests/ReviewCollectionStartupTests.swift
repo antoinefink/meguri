@@ -1346,6 +1346,7 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
             case .internal: "bridge.internal"
             case .mediaCommitPending: "bridge.mediaCommitPending"
             case .commitCompleted: "bridge.commitCompleted"
+            case .browse: "bridge.browse"
             }
         }
         return "unknown"

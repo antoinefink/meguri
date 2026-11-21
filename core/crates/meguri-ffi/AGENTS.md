@@ -18,3 +18,6 @@
 - A preparation task keeps the policy admission identity assigned to that host job after its typed result is consumed. Read it from the task’s stored value without I/O; never derive ownership from history entries.
 
 - In smoke observations, open the media service before retaining a Query reader: opening that service borrows Query again.
+
+- `CoreError` sits in many `Result`s, and clippy's `result_large_err` fails the lint once a variant makes it larger: keep new variants to a few words. Browse search errors (several strings) come only in a request's `Failed` event, as `BrowseRequestError::Search`, never in `CoreError`.
+- A Browse session's events go to its own listener (`browse_search`), not the core event channel. Their search error ranges convert to UTF-16 against the text the engine's `Failed` carries; no seq-to-text map is kept here.
