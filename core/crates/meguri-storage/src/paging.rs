@@ -473,6 +473,27 @@ pub trait ReadRows: sealed::Connected {
         rows::get(self.connection(), &RowKey::Id(id.0))
     }
 
+    /// One card's review-log rows as stored, every column by storage class,
+    /// in ascending `id` order (`stats/card-info` C1: one indexed read). The
+    /// caller decodes them, so a damaged row is still listed.
+    fn card_revlog_images(&self, card: CardId) -> Result<Vec<RowImage>, StorageError> {
+        let columns = Table::Revlog
+            .columns()
+            .iter()
+            .map(|c| format!("\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("SELECT {columns} FROM revlog WHERE cid = ?1 ORDER BY id");
+        let width = Table::Revlog.columns().len();
+        let mut statement = self.connection().prepare_cached(&sql)?;
+        let images = statement.query_map([card.0], |row| {
+            (0..width)
+                .map(|i| row.get_ref(i).map(Cell::from_ref))
+                .collect::<rusqlite::Result<Vec<Cell>>>()
+        })?;
+        Ok(images.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     fn deck(&self, id: DeckId) -> Result<Option<Deck>, StorageError> {
         rows::get(self.connection(), &RowKey::Id(id.0))
     }

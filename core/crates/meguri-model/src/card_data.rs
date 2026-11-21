@@ -31,6 +31,8 @@ pub struct CardData {
     /// `lrt`: last review time, epoch seconds.
     pub last_review_secs: Option<i64>,
     custom_data: Option<String>,
+    /// `cd` as stored, before C3 rule 5 drops `""` and `{}`.
+    stored_custom_data: Option<String>,
     unknown: Vec<(String, String)>,
 }
 
@@ -119,8 +121,33 @@ impl CardData {
             custom_data: cd
                 .and_then(json::string)
                 .filter(|text| !text.is_empty() && text != "{}"),
+            stored_custom_data: cd.and_then(json::string),
             unknown: Vec::new(),
         }
+    }
+
+    /// `stats/card-info` C1: C3 with one more rule, a `cd` member (or the
+    /// seventh array element) whose value is not a JSON string makes the
+    /// whole text read as no keys. The second value is C3.1's custom data:
+    /// the stored `cd` string, `{}` included, or `""`.
+    pub fn parse_for_card_info(text: &str) -> (CardData, String) {
+        let no_keys = || (CardData::default(), String::new());
+        let Some(raw) = json::parse_skipping_range(text) else {
+            return no_keys();
+        };
+        let not_string = |value: &RawValue| json::kind(value) != Kind::String;
+        let refused = match json::kind(raw) {
+            Kind::Object => json::parse_members(raw.get())
+                .is_some_and(|members| members.iter().any(|(key, value)| key == "cd" && not_string(value))),
+            Kind::Array => json::array(raw).is_some_and(|items| items.get(6).is_some_and(|value| not_string(value))),
+            _ => false,
+        };
+        if refused {
+            return no_keys();
+        }
+        let data = CardData::parse(text);
+        let custom = data.stored_custom_data.clone().unwrap_or_default();
+        (data, custom)
     }
 
     /// `cd`: custom scheduling data, a string holding JSON text. Meguri only
