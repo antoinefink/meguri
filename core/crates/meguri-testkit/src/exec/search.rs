@@ -368,10 +368,6 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
             let sorted = match &sort {
                 None => None,
                 Some(sort) => Some(SortedQuery::for_plan(&plan, sort, context).map_err(|error| match error {
-                    SortError::FieldColumnNotYetSupported { name } => ExecError::new(
-                        "unsupported_observation",
-                        format!("the sort key of field column {name:?} is U261's"),
-                    ),
                     SortError::ModeMismatch => ExecError::new("core_error", "sorted plan of another mode"),
                 })?),
             };

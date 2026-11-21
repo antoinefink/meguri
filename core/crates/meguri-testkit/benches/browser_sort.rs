@@ -5,6 +5,9 @@
 //! id of the whole collection in order on a query reader with the
 //! product's SQL functions, from the search's predicate (`for_plan`) and
 //! from an id list, as a resort does (`for_ids`, `browser/result-sets` H8).
+//! U261 adds a field column (`browser/workspace` V4.2), `browser.sort.*.fld`:
+//! the second field of the note type with the most notes, ascending (its
+//! first direction).
 //!
 //! Sizes come from `$MEGURI_BENCH_SIZES` (default `10k,150k`), made first by
 //! `tools/mg bench`. The result goes to `$MEGURI_BENCH_RESULTS`.
@@ -94,6 +97,23 @@ fn ids(rows: &RawRows) -> Vec<i64> {
         .collect()
 }
 
+/// `fld:` and the second field (the first when it has one) of the note type
+/// with the most notes.
+fn field_column(reader: &meguri_storage::Reader) -> String {
+    let rows = reader
+        .execute_raw(
+            "SELECT f.name FROM fields f \
+             JOIN (SELECT mid, COUNT(*) AS n FROM notes GROUP BY mid ORDER BY n DESC LIMIT 1) m ON f.ntid = m.mid \
+             ORDER BY f.ord = 1 DESC, f.ord LIMIT 1",
+            &[],
+        )
+        .expect("the fields read");
+    match rows.rows.first().map(|row| &row[0]) {
+        Some(SqlValue::Text(name)) => format!("fld:{name}"),
+        other => panic!("no field: {other:?}"),
+    }
+}
+
 fn main() -> ExitCode {
     let mut criterion = Criterion::default()
         .sample_size(20)
@@ -118,6 +138,7 @@ fn main() -> ExitCode {
             .expect("the collection opens");
         let reader = db.open_reader(ReaderRole::Query).expect("a query reader");
         let notetypes = SearchNotetypes::read(&reader).expect("the note types read");
+        let field = field_column(&reader);
         // The baseline: every id unsorted, read the same way.
         for (mode, mode_name) in [(SearchMode::Cards, "cards"), (SearchMode::Notes, "notes")] {
             let plan = Plan::build(&query, mode, &ctx, &notetypes).expect("the plan builds");
@@ -132,10 +153,17 @@ fn main() -> ExitCode {
                 suite.push(measurement.finish());
             }
         }
-        for (mode, key) in SORTS {
+        let fields = [SearchMode::Cards, SearchMode::Notes].map(|mode| (mode, field.as_str(), "fld"));
+        let sorts = SORTS.iter().map(|&(mode, key)| (mode, key, key)).chain(fields);
+        for (mode, key, label) in sorts {
             let plan = Plan::build(&query, mode, &ctx, &notetypes).expect("the plan builds");
             let all = ids(&reader.execute_raw(plan.sql(), &[]).expect("the search runs"));
-            let sort = Sort::new(mode, key, SortDirection::Descending).expect("a sortable key");
+            let direction = if label == "fld" {
+                SortDirection::Ascending
+            } else {
+                SortDirection::Descending
+            };
+            let sort = Sort::new(mode, key, direction).expect("a sortable key");
             let mode_name = match mode {
                 SearchMode::Cards => "cards",
                 SearchMode::Notes => "notes",
@@ -158,11 +186,11 @@ fn main() -> ExitCode {
             };
             let runs: [(&str, &dyn Fn() -> usize); 2] = [("search", &from_plan), ("resort", &from_ids)];
             for (source, run) in runs {
-                let name = format!("browser.sort.{source}.{mode_name}.{key}");
+                let name = format!("browser.sort.{source}.{mode_name}.{label}");
                 // Warm the pages and the statement cache outside the samples.
                 eprintln!("browser-sort {size} {name}: {} rows", black_box(run()));
                 let mut measurement = Measurement::start(&name, Some(&size));
-                criterion.bench_function(&format!("{source}.{mode_name}.{key}/{size}"), |b| {
+                criterion.bench_function(&format!("{source}.{mode_name}.{label}/{size}"), |b| {
                     b.iter_custom(|n| measurement.run(n, |_| black_box(run())))
                 });
                 // A criterion filter skips the other sorts: no row for them.

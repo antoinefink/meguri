@@ -8,11 +8,14 @@
 //! unreadable (C3) or of another shape reads as its K1 default, and the
 //! default is never stored.
 
+pub mod column_sets;
+
 use std::fmt;
 
 use meguri_storage::{ConfigValue, ReadRows, StorageError};
 
 use crate::plan::SearchMode;
+use crate::plan::sort::FIELD_COLUMN_PREFIX;
 
 /// The keys of K1, in K1's order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -343,6 +346,56 @@ impl Column {
     /// C2, C6, R1150: the column's cells use the row's font.
     pub fn uses_row_font(self) -> bool {
         matches!(self, Column::SortField | Column::Question | Column::Answer)
+    }
+}
+
+/// A column of a Browse list (`browser/workspace` V2.3): one of the 19
+/// columns of K3, or a field column `fld:<field name>` (V3).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum ColumnKey {
+    Column(Column),
+    /// The exact stored field name.
+    Field(String),
+}
+
+impl ColumnKey {
+    /// The column `key` names; `None` for a key that names none.
+    pub fn parse(key: &str) -> Option<ColumnKey> {
+        if let Some(name) = key.strip_prefix(FIELD_COLUMN_PREFIX) {
+            return Some(ColumnKey::Field(name.to_owned()));
+        }
+        Column::from_key(key).map(ColumnKey::Column)
+    }
+
+    /// The column key as stored.
+    pub fn key(&self) -> String {
+        match self {
+            ColumnKey::Column(column) => column.key().to_owned(),
+            ColumnKey::Field(name) => format!("{FIELD_COLUMN_PREFIX}{name}"),
+        }
+    }
+
+    /// `browser/sorting` S1: a field column sorts in both modes.
+    pub fn sortable(&self, mode: SearchMode) -> bool {
+        match self {
+            ColumnKey::Column(column) => column.sortable(mode),
+            ColumnKey::Field(_) => true,
+        }
+    }
+
+    /// The direction a first click on the header sorts in (S1, V4.1); `None`
+    /// for a column that never sorts.
+    pub fn first_direction(&self) -> Option<SortDirection> {
+        match self {
+            ColumnKey::Column(column) => column.first_direction(),
+            ColumnKey::Field(_) => Some(SortDirection::Ascending),
+        }
+    }
+}
+
+impl From<Column> for ColumnKey {
+    fn from(column: Column) -> ColumnKey {
+        ColumnKey::Column(column)
     }
 }
 

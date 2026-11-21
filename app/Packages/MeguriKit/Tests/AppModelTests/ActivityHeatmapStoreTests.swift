@@ -81,10 +81,10 @@ import Testing
         let days = try #require(store.days(.collection))
         // Rotation, window resizes and folds: other week counts from the same counts.
         let weeks = [CGFloat(322), 400, 700, 1_100].map {
-            let geometry = ActivityGrid.Geometry(width: $0, minimumPitch: 20)
+            let geometry = ActivityGrid.Geometry(width: $0, square: .touch)
             return ActivityGrid(counts: days.counts, weeks: geometry.weeks, todayWeekday: days.today.weekday, firstWeekday: 1).weeks
         }
-        #expect(weeks == [16, 20, 35, 53])
+        #expect(weeks == [17, 21, 37, 53])
         #expect(store.request(.collection) == request, "the load key has no width in it")
         await store.load(store.request(.collection))
         #expect(service.calls.count == 1)

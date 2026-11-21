@@ -183,11 +183,27 @@ fn errors_come_as_failed_alone_in_b1_order_h3_h14() {
     assert_eq!(failed("\"re:(\"", asc("question")), BrowseError::UnsortableColumn);
     assert_eq!(failed("", asc("nope")), BrowseError::UnsortableColumn);
     assert!(matches!(failed("\"re:(\"", asc("noteFld")), BrowseError::Search(e) if e.code() == "invalid_regex"));
-    // The field column's sort key is U261's.
-    assert!(matches!(
-        failed("", asc("fld:Front")),
-        BrowseError::Engine(EngineError::Unsupported { .. })
-    ));
+}
+
+/// H7, H8 with U261's field columns: a search sorts by `fld:<name>`, a
+/// resort to it keeps the ids, and a page shows the field's cell.
+#[test]
+fn field_columns_sort_and_page_h7_h8() {
+    let fx = fixture(3);
+    let (handle, count) = fx.search("", SearchMode::Cards, desc("fld:Front"));
+    assert_eq!(count, 6);
+    let mut expected = card_ids(&fx.cards);
+    expected.reverse();
+    assert_eq!(fx.ids(handle), expected);
+    let seq = fx.session.resort(handle, asc("fld:Back"), None).unwrap();
+    let (by_back, count) = complete(&fx.until(seq));
+    assert_eq!(count, 6);
+    let rows = fx.session.rows(by_back, 0, 0..1, &["fld:Front", "noteFld"]).unwrap();
+    let row = rows[0].as_ref().unwrap();
+    let Cell::Text(front) = &row.cells[0] else {
+        panic!("{:?}", row.cells)
+    };
+    assert_eq!(row.cells[1], Cell::Text(front.clone()), "the sort field is Front");
 }
 
 /// Holds every search reader, so a request waits for one.
@@ -383,8 +399,8 @@ fn pages_check_revisions_limits_and_columns_and_defer_question_and_answer_h7() {
         Some(BrowseError::InvalidArgument { .. })
     ));
     assert!(matches!(
-        fx.session.rows(handle, 0, 0..1, &["fld:Front"]).err(),
-        Some(BrowseError::Engine(EngineError::Unsupported { .. }))
+        fx.session.rows(handle, 0, 0..1, &["fld:"]).map(|rows| rows.len()),
+        Ok(1)
     ));
     assert_eq!(
         fx.session.rows(handle, 0, 1199..1201, &["noteFld"]).err(),

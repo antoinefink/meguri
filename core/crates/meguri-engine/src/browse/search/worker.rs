@@ -652,9 +652,6 @@ pub(super) fn refusal(text: &str) -> SearchError {
 
 fn sort_error(error: SortError) -> Stop {
     match error {
-        SortError::FieldColumnNotYetSupported { name } => Stop::Failed(BrowseError::Engine(EngineError::Unsupported {
-            feature: format!("the sort key of field column {name:?} (U261)"),
-        })),
         SortError::ModeMismatch => Stop::Failed(BrowseError::Engine(EngineError::internal(
             "a sorted statement of the other mode",
         ))),

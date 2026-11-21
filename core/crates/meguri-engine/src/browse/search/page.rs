@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use meguri_search::browser::cells::{Cell, RowTime};
 use meguri_search::browser::qa::{Answer, Question};
-use meguri_search::config::Column;
-use meguri_search::{FIELD_COLUMN_PREFIX, SearchMode};
+use meguri_search::SearchMode;
+use meguri_search::config::{Column, ColumnKey};
 use meguri_storage::ReaderRole;
 
 use crate::browse::{RowFailure, RowRequest, RowResult, rows_in};
@@ -33,16 +33,11 @@ pub struct QaCells {
     pub answer: Option<Answer>,
 }
 
-/// H7: the column keys of a page; a field column key is U261's.
-fn columns(keys: &[&str]) -> Result<Vec<Column>, BrowseError> {
+/// H7: the column keys of a page: the 19 columns and field columns
+/// `fld:<name>` (`browser/workspace` V3).
+fn columns(keys: &[&str]) -> Result<Vec<ColumnKey>, BrowseError> {
     keys.iter()
-        .map(|key| match Column::from_key(key) {
-            Some(column) => Ok(column),
-            None if key.starts_with(FIELD_COLUMN_PREFIX) => Err(BrowseError::Engine(EngineError::Unsupported {
-                feature: format!("the cells of field column {key:?} (U261)"),
-            })),
-            None => Err(BrowseError::invalid(format!("{key:?} is not a column key"))),
-        })
+        .map(|key| ColumnKey::parse(key).ok_or_else(|| BrowseError::invalid(format!("{key:?} is not a column key"))))
         .collect()
 }
 
@@ -78,7 +73,7 @@ fn read(
     collection: &crate::Collection,
     mode: SearchMode,
     ids: &[i64],
-    columns: &[Column],
+    columns: &[ColumnKey],
     between: &mut dyn FnMut() -> Result<(), EngineError>,
 ) -> Result<Vec<RowResult>, BrowseError> {
     let reader = collection.reader(ReaderRole::Query)?;
@@ -105,8 +100,8 @@ pub(super) fn rows(
 ) -> Result<Vec<RowResult>, BrowseError> {
     let requested = columns(keys)?;
     let (mode, ids, collection) = ids_at(shared, handle, revision, &range)?;
-    let deferred = |column: &Column| matches!(column, Column::Question | Column::Answer);
-    let computed: Vec<Column> = requested.iter().copied().filter(|column| !deferred(column)).collect();
+    let deferred = |column: &ColumnKey| matches!(column, ColumnKey::Column(Column::Question | Column::Answer));
+    let computed: Vec<ColumnKey> = requested.iter().filter(|column| !deferred(column)).cloned().collect();
     let rows = read(&collection, mode, &ids, &computed, &mut || Ok(()))?;
     Ok(rows
         .into_iter()
@@ -138,12 +133,12 @@ pub(super) fn qa_cells(
     cancel: Option<&CancelToken>,
 ) -> Result<Vec<Result<QaCells, RowFailure>>, BrowseError> {
     let (mode, ids, collection) = ids_at(shared, handle, revision, &range)?;
-    let columns: &[Column] = match which {
-        QaWhich::Question => &[Column::Question],
-        QaWhich::Answer => &[Column::Answer],
-        QaWhich::Both => &[Column::Question, Column::Answer],
+    let columns: Vec<ColumnKey> = match which {
+        QaWhich::Question => vec![ColumnKey::Column(Column::Question)],
+        QaWhich::Answer => vec![ColumnKey::Column(Column::Answer)],
+        QaWhich::Both => vec![ColumnKey::Column(Column::Question), ColumnKey::Column(Column::Answer)],
     };
-    let rows = read(&collection, mode, &ids, columns, &mut || match cancel {
+    let rows = read(&collection, mode, &ids, &columns, &mut || match cancel {
         Some(token) => token.check(),
         None => Ok(()),
     })?;

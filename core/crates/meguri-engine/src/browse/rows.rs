@@ -13,8 +13,8 @@ use meguri_model::note::Note;
 use meguri_model::notetype::{Notetype, NotetypeTemplate};
 use meguri_search::SearchMode;
 use meguri_search::browser::cells::{self, Cell, Font, RowState, RowTime, Tint};
-use meguri_search::browser::{deck_cell, qa};
-use meguri_search::config::Column;
+use meguri_search::browser::{deck_cell, fields, qa};
+use meguri_search::config::{Column, ColumnKey};
 use meguri_storage::rows::{Cell as Stored, Record, RowError, RowKey, Table};
 use meguri_storage::{ReadRows, ReaderRole, StorageError};
 use meguri_template::card::CardRender;
@@ -22,13 +22,14 @@ use meguri_template::card::CardRender;
 use crate::{Collection, EngineError, rendering};
 
 /// One row request (C3): the mode, the ids (card ids in cards mode, note ids
-/// in notes mode), the columns in the order their cells are wanted, and the
-/// now and today every row uses (C1).
+/// in notes mode), the columns in the order their cells are wanted (the 19
+/// and field columns, `browser/workspace` V3), and the now and today every
+/// row uses (C1).
 #[derive(Clone, Copy, Debug)]
 pub struct RowRequest<'a> {
     pub mode: SearchMode,
     pub ids: &'a [i64],
-    pub columns: &'a [Column],
+    pub columns: &'a [ColumnKey],
     pub time: RowTime,
 }
 
@@ -215,7 +216,7 @@ impl<R: ReadRows + ?Sized> Reading<'_, R> {
         let mut cards = self.rows.cards_of_note(id)?;
         cards.sort_by_key(|card| card.id);
         let first = damaged(cards.first())?.clone();
-        let data = if self.request.columns.iter().any(|column| reads_card_data(*column)) {
+        let data = if self.request.columns.iter().any(reads_card_data) {
             self.card(first.id)?.map(|(_, data)| data).unwrap_or_default()
         } else {
             Fields::default()
@@ -232,7 +233,7 @@ impl<R: ReadRows + ?Sized> Reading<'_, R> {
             .request
             .columns
             .iter()
-            .any(|column| matches!(column, Column::Question | Column::Answer))
+            .any(|column| matches!(column, ColumnKey::Column(Column::Question | Column::Answer)))
         {
             Some(self.render(records, template)?)
         } else {
@@ -242,7 +243,11 @@ impl<R: ReadRows + ?Sized> Reading<'_, R> {
             .request
             .columns
             .iter()
-            .map(|column| self.cell(*column, records, rendered.as_ref()))
+            .map(|column| match column {
+                ColumnKey::Column(column) => self.cell(*column, records, rendered.as_ref()),
+                // V3: the note's value; in cards mode each card repeats it.
+                ColumnKey::Field(name) => fields::cell(fields::value(&records.note, &records.kind, name)),
+            })
             .collect();
         Ok(Row {
             id,
@@ -329,9 +334,9 @@ fn template<'k>(kind: &'k Notetype, card: &Card) -> Option<&'k NotetypeTemplate>
     }
 }
 
-fn reads_card_data(column: Column) -> bool {
+fn reads_card_data(column: &ColumnKey) -> bool {
     matches!(
         column,
-        Column::Position | Column::Stability | Column::Difficulty | Column::Retrievability
+        ColumnKey::Column(Column::Position | Column::Stability | Column::Difficulty | Column::Retrievability)
     )
 }
