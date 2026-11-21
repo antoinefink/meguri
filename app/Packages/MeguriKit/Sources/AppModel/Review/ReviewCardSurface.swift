@@ -80,6 +80,9 @@ public final class ReviewPages: ReviewCardSurface {
     private var composing = false
     private var committedMediaUpdate: CardUpdate?
     var onMediaReady: (() -> Void)?
+    /// The Study click's way to the first card (R1813): this surface marks the
+    /// first card ready and its presentation's commit.
+    var startTrace: StudyStartTrace?
     public convenience init(resolver: MediaPathResolver) {
         self.init(pair: CardPagePair(resolver: resolver))
     }
@@ -87,6 +90,7 @@ public final class ReviewPages: ReviewCardSurface {
         self.pair = pair
         pair.onCommitted = { [weak self] update, _ in
             guard let self, let pair = self.pair, pair.current.update == update else { return }
+            if let trace = self.startTrace { self.startTrace = nil; trace.mark(.committed) }
             self.observeHost(pair.current, update: update, purpose: .preload)
             self.hasPresented = true
             self.committedMediaUpdate = update
@@ -179,6 +183,7 @@ public final class ReviewPages: ReviewCardSurface {
         }
         try Task.checkCancellation()
         guard !closed else { throw CancellationError() }
+        startTrace?.mark(.card)
         prepared = nil; editing = false; domEditable = false; composing = false
         pair.ownsKeyboardFocus = inputActive && ReviewInputOwnership.cardFocused(in: pair.current.webView)
         CATransaction.begin()

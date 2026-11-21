@@ -38,6 +38,8 @@ public final class ReviewCoordinator {
     /// Collection-owned routing; pages retain only render metadata, never sync ownership.
     public var onVisibleMediaChanged: (([String]) -> Void)?
     public private(set) var visibleMediaNames: [String] = []
+    /// The Study click's way to the first card (R1813); the collection sets it.
+    var startTrace: StudyStartTrace?
     private let client: any ReviewSessionClient
     private let store: ReviewRecordStore
     private let clock: AppClock
@@ -217,6 +219,7 @@ public final class ReviewCoordinator {
         #endif
         do {
             let result = try await coreStart.value
+            startTrace?.mark(.core)
             failureStage = .presentation
             #if DEBUG
             logger.notice("core.returned")
@@ -239,7 +242,7 @@ public final class ReviewCoordinator {
                 logger.notice("surface.begin")
                 #endif
                 let loaded = try await preparePages { try await self.surface.load() }
-                if loaded { startupNeedsPreparation = false }
+                if loaded { startupNeedsPreparation = false; startTrace?.mark(.loaded) }
                 #if DEBUG
                 logger.notice("surface.end")
                 logger.notice("apply.begin")
@@ -637,6 +640,8 @@ public final class ReviewCoordinator {
                 }
             }
         case .waitingUntil, .finished:
+            // No first card to show: the start's intervals end without one.
+            startTrace?.cancel()
             clearVisibleMedia()
             preload?.cancel(); await preload?.value; preload = nil
             timer.pause(at: uptime()); activeTime.pause(at: uptime()); surface.pair?.pauseAudio()
@@ -722,6 +727,7 @@ public final class ReviewCoordinator {
         #endif
         try await surface.render(sessionID: sessionID, items: head.items)
         try Task.checkCancellation()
+        startTrace?.mark(.rendered)
         #if DEBUG
         logger.notice("render.end")
         #endif
@@ -737,6 +743,7 @@ public final class ReviewCoordinator {
             #endif
             try await surface.present(item: item, inputTime: inputTime ?? uptime())
             try Task.checkCancellation()
+            startTrace?.mark(.presented)
             #if DEBUG
             logger.notice("present.end")
             #endif
@@ -933,6 +940,7 @@ public final class ReviewCoordinator {
         if let endTask { return await endTask.value }
         closingAdmission = true
         restorationID = nil
+        startTrace?.cancel()
         beginPause()
         let task = Task { () -> Bool in
             do {
@@ -958,6 +966,7 @@ public final class ReviewCoordinator {
     public func generationEnded() {
         closingAdmission = true
         restorationID = nil
+        startTrace?.cancel()
         summaryTask?.cancel()
         paused = true; deadlineTimer?.invalidate(); preload?.cancel()
         sessionID = nil; phase = .ended; surface.close()
@@ -996,6 +1005,7 @@ public final class ReviewCoordinator {
     }
     private func fail(_ error: any Error) {
         guard phase != .ended else { return }
+        startTrace?.cancel()
         notice = String(describing: error); phase = .error
     }
     public static func name(_ rating: ReviewRating) -> String {

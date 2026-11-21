@@ -107,6 +107,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         public init(deckID: Int64, studyAll: Bool = false) { self.deckID = deckID; self.studyAll = studyAll }
     }
     public private(set) var studyRefusal: StudyRefusal?
+    /// The parts of the last Study's way to its first card (R1813), for the test hooks' probe.
+    public private(set) var lastStudyStart: StudyStartTrace.Timings?
     public private(set) var progress: CoreProgress?
     public private(set) var error: String?
     public private(set) var deferredSuspend: UInt64?
@@ -1524,6 +1526,8 @@ public final class ReviewCollection: ChangeFanoutSink {
         if !studyPreparation.available || (entry == .study && studyPreparation.phase == .failed) { return .notReady }
         starting = true
         defer { starting = false }
+        let trace = StudyStartTrace(deckID: deckID)
+        trace.finished = { [weak self] timings in self?.lastStudyStart = timings }
         let expected = generation, intent = navigation.intentRevision
         let current: @MainActor @Sendable () -> Bool = {
             expected == self.generation && intent == self.navigation.intentRevision &&
@@ -1532,15 +1536,23 @@ public final class ReviewCollection: ChangeFanoutSink {
         }
         do {
             try configuration.nativeReviewInput?.admitStudy(deck: deckID, name: fullDeckName(deckID))
-            guard await selectDeck(deckID: deckID, intent: intent, admission: current).value,
-                  current(), let resolver = await mediaResolverForReview(), current() else { return .stopped }
+            guard await selectDeck(deckID: deckID, intent: intent, admission: current).value, current() else {
+                trace.cancel(); return .stopped
+            }
+            trace.mark(.selected)
+            guard let resolver = await mediaResolverForReview(), current() else { trace.cancel(); return .stopped }
+            trace.mark(.media)
             // A deck's own session replaces the previous one, a walk's included (N24.2). A
             // walk's turn leaves it until the walk has an answer (`closeWalk`).
             if walk == nil { previousRecord = nil; previousWalk = nil }
-            let model = ReviewCoordinator(deckID: deckID, surface: makeReviewSurface(resolver),
+            let surface = makeReviewSurface(resolver)
+            trace.mark(.pages)
+            (surface as? ReviewPages)?.startTrace = trace
+            let model = ReviewCoordinator(deckID: deckID, surface: surface,
                 store: records, clock: configuration.clock, client: reviewSessionClient,
                 nativeInput: configuration.nativeReviewInput, nativeGeneration: expected,
                 recordDiagnostic: configuration.recordDiagnostic)
+            model.startTrace = trace
             model.nativeInputEligibility = { [weak self, weak model] in
                 guard let self, let model else { return false }
                 return self.generation == expected && self.reviewIsActive && self.foreground &&
@@ -1563,8 +1575,10 @@ public final class ReviewCollection: ChangeFanoutSink {
             // The session's own loading state shows while the collection is
             // prepared. No session is open yet, so the step may run.
             let prepared = await studyPreparation.prepare(for: entry)
+            trace.mark(.prepared)
             guard !closed, !closing, expected == generation, review === model, model.phase != .ended else { return .stopped }
             guard prepared else {
+                trace.cancel()
                 navigation.endReview(); review = nil
                 return .notReady
             }
@@ -1603,6 +1617,7 @@ public final class ReviewCollection: ChangeFanoutSink {
             }
             return .started
         } catch {
+            trace.cancel()
             self.error = String(describing: error)
             return .stopped
         }
@@ -1636,6 +1651,7 @@ public final class ReviewCollection: ChangeFanoutSink {
         } else {
             navigation.startReview(ReviewPresentation(deck: DeckID(rawValue: model.record.deckID), session: model))
         }
+        model.startTrace?.mark(.revealed)
     }
     public func finishReview() async {
         guard let review else { return }
