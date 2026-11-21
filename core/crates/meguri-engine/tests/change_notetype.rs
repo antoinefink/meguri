@@ -1146,7 +1146,7 @@ fn ords(h: &Harness, note: NoteId) -> Vec<u16> {
 }
 
 /// Undo then redo, twice: each undo gives back `before` exactly and each
-/// redo `after`, and each reports what `reports` says (undo, redo).
+/// redo `after`; `check` judges each report (`true` for an undo's).
 fn undo_redo_twice(
     h: &Harness,
     capture: &Capture,
@@ -1165,12 +1165,15 @@ fn undo_redo_twice(
 }
 
 /// R945 between two note types (U35a; M1, M9 step 3, M10, K19.2 "Repeated
-/// field origins"): Src (Word, Gloss; `{{Word}}`) to Twin (Word, Hint, Gloss;
-/// `{{Word}}`, `{{Hint}}?`) with the field map 0, 0, 1. Both new fields
-/// get the old Word as M9 step 3 writes it (controls removed, no NFC);
+/// field origins"): Src (Word, Gloss; `{{Word}}`, `{{Gloss}}`) to Twin (Word,
+/// Hint, Gloss; `{{Word}}`, `{{Hint}}?`) with the field map 0, 0, 1 and the
+/// template map 0, -1: Src's second template's cards go, with their graves.
+/// Both new fields get the old Word as M9 step 3 writes it (controls
+/// removed, no NFC);
 /// Twin's second template gives a card exactly where Hint is not empty by
 /// E1. Undo restores every row exactly; redo writes the change again; the
-/// reports hold the repeated map and its lowest-copy inverse.
+/// reports hold the repeated map and its lowest-copy inverse (0, 2; the
+/// reversed template map is 0, -1).
 #[test]
 fn a_repeated_field_map_between_two_note_types_commits_and_undo_restores_every_value() {
     let (h, backups, capture) = harness_observed();
@@ -1193,7 +1196,10 @@ fn a_repeated_field_map_between_two_note_types_commits_and_undo_restores_every_v
     // their graves, which the whole-row comparison then restores.
     assert_eq!(read.templates, Some(vec![Some(0), Some(1)]));
     let dropped = ids.iter().filter(|id| ords(&h, **id).contains(&1)).count();
-    assert!(dropped > 0);
+    // n1, n3, n4, n5 and n6 kept their `{{Gloss}}` card from `add` (the
+    // raw writes generate no card); n2's Gloss is empty.
+    assert_eq!(dropped, 5);
+    let removed = cards_of(&h, n1)[1].1;
     let before = whole(&h);
     let fields = vec![Some(0), Some(0), Some(1)];
     run(&h, mapped(&read, &ids, fields, Some(vec![Some(0), None]))).unwrap();
@@ -1211,6 +1217,7 @@ fn a_repeated_field_map_between_two_note_types_commits_and_undo_restores_every_v
         assert_eq!((n.notetype_id, n.fields.as_str()), (twin, *fields), "{id:?}");
         assert_eq!(&ords(&h, *id), cards, "{id:?}");
     }
+    assert_ne!(cards_of(&h, n1)[1].1, removed, "a new card never takes a removed card's id");
     let after = whole(&h);
     assert_eq!(after.graves.len() - before.graves.len(), dropped);
     let check = |report: &meguri_storage::journal::StructureReport, undo: bool| {
