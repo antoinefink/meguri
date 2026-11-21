@@ -113,7 +113,7 @@ Changed 2026-11-21 (U88a review): new section. Every refusal of J3 and `search/f
 | `empty_name` | deck, tag and note type by name; field present, field text, field contains, field empty | the name, or the field name, is empty |
 | `unrepresentable_name` | deck and note type by name | J3.5 lists the name |
 | `reserved_field_name` | field present, field text, field contains, field empty | the field name is a reserved key (J3.3) |
-| `empty_text` | literal text; field contains | the text is empty |
+| `empty_text` | literal text; field contains; written text (`search/filter-tokens` T3.2; changed 2026-11-21, implementation review) | the text is empty |
 | `unrepresentable_text` | duplicates | the text holds White_Space other than U+0020, or U+001C–U+001F (J3.4) |
 | `ordinal_out_of_range` | template by ordinal | k is above 65534 |
 | `flag_out_of_range` | flag n | n is outside 1–7 |
