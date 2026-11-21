@@ -55,6 +55,15 @@ struct BuildUnderTest {
         hasHooks ? "com.antoinefink.meguri.dev" : "com.antoinefink.meguri"
     }
 
+    /// The name the system shows for the development identity
+    /// (CFBundleDisplayName; also the app's Files folder on iOS), set by the
+    /// bundle id in app/Config/Base.xcconfig.
+    static let developmentDisplayName = "Meguri Dev"
+
+    var expectedDisplayName: String {
+        hasHooks ? Self.developmentDisplayName : "Meguri"
+    }
+
     var expectedAppGroup: String {
         #if os(macOS)
         "DNQ34W43XX." + expectedBundleIdentifier

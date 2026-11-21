@@ -11,6 +11,27 @@
 // daily-driver identifiers.
 MEGURI_TEAM_ID = DNQ34W43XX
 MEGURI_BUNDLE_ID = com.antoinefink.meguri$(MEGURI_BUNDLE_ID_SUFFIX)
+// The name and icon the system shows for the app (Dock, app switcher, app
+// menu, About, Home Screen, Spotlight), chosen by the bundle id itself: every
+// build with the development id (Debug, Profile, the personal preview, which
+// passes only the suffix) is "Meguri Dev" with the blue icon, so the test
+// copy never looks like the daily driver. An unknown id resolves to nothing
+// and fails tools/mg xcode-check. PRODUCT_NAME stays Meguri (tools rely on
+// Meguri.app). AppIcon-Dev.icon is generated: tools/mg dev-icon.
+MEGURI_APP_NAME_com_antoinefink_meguri = Meguri
+MEGURI_APP_NAME_com_antoinefink_meguri_dev = Meguri Dev
+MEGURI_APP_NAME = $(MEGURI_APP_NAME_$(MEGURI_BUNDLE_ID:c99extidentifier))
+MEGURI_APP_ICON_com_antoinefink_meguri = AppIcon
+MEGURI_APP_ICON_com_antoinefink_meguri_dev = AppIcon-Dev
+MEGURI_APP_ICON = $(MEGURI_APP_ICON_$(MEGURI_BUNDLE_ID:c99extidentifier))
+// The generated Info.plist always sets CFBundleName to PRODUCT_NAME, while the
+// Mac's app menu and About panel read the localized CFBundleName: each
+// identity's names are in Meguri/Identity/<identity>/en.lproj/InfoPlist.strings
+// (en is the only localization). The other identity's names and icon document
+// stay out of the bundle; only an exact path, quoted for checkouts with spaces, excludes a file in a subfolder.
+MEGURI_UNUSED_IDENTITY_FILES_com_antoinefink_meguri = AppIcon-Dev.icon "$(SRCROOT)/Meguri/Identity/Development/en.lproj/InfoPlist.strings"
+MEGURI_UNUSED_IDENTITY_FILES_com_antoinefink_meguri_dev = AppIcon.icon "$(SRCROOT)/Meguri/Identity/DailyDriver/en.lproj/InfoPlist.strings"
+MEGURI_UNUSED_IDENTITY_FILES = $(MEGURI_UNUSED_IDENTITY_FILES_$(MEGURI_BUNDLE_ID:c99extidentifier))
 // Per-platform App Group ids (swiftui-arch §0.7): `group.` on iOS, the team
 // prefix on macOS. The app reads its own from Info.plist (MeguriAppGroupIdentifier).
 MEGURI_APP_GROUP[sdk=iphone*] = group.$(MEGURI_BUNDLE_ID)

@@ -1,0 +1,5 @@
+/* This identity's names (app/Config/Base.xcconfig, MEGURI_APP_NAME): the
+   Mac's app menu and About panel read CFBundleName, which Info.plist keeps
+   as PRODUCT_NAME. */
+"CFBundleName" = "Meguri";
+"CFBundleDisplayName" = "Meguri";
