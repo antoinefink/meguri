@@ -1692,9 +1692,15 @@ def main(argv):
             parser.error("give --staged with --repo, or paths")
         # An empty set would pass everything: a truncated or unreadable
         # file must not look like a clean scan, even beside a full one.
-        if not all(load_tokens([path]).count for path in args.tokens):
-            raise ValueError("a token set is empty")
-        matcher = load_tokens(args.tokens)
+        # Each file is read once: what was checked is what is scanned with.
+        tokens = set()
+        for path in args.tokens:
+            with open(path, encoding="utf-8") as f:
+                one = set(tokens_from_lines(f))
+            if not one:
+                raise ValueError("a token set is empty")
+            tokens.update(one)
+        matcher = Matcher(tokens)
         if args.staged:
             found, scanned = scan_staged(matcher, args.repo)
         else:

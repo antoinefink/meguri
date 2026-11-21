@@ -44,3 +44,5 @@ Reviewer: an independent Claude subagent, non-author, reading commit `2ccb50391`
 - **An empty `core.hooksPath` was read as unset.** Fixed: `mg_hooks_check` uses the exit status of `git config --get`.
 - **A set of blank lines was counted as tokens.** Fixed: the count is of non-empty lines, as the scanner reads them, so doctor fails on such a set.
 - **`private status` in a linked worktree.** Already fixed in `927ac7ab1`.
+
+- **The token files were read twice, once to check and once to scan.** Fixed: each is read once and the matcher is built from what was checked.
