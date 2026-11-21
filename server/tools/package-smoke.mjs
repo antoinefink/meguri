@@ -241,8 +241,13 @@ try {
         const response = page.waitForResponse(r => new URL(r.url()).pathname === path);
         response.catch(() => {}); // Awaited below; a failed act() must not leave it unhandled.
         await act();
-        const status = (await response).status();
-        if (status < 200 || status > 299) { browserStep = `${step}: ${path} answered ${status}`; throw new Error(browserStep); }
+        const answer = await response, status = answer.status();
+        if (status < 200 || status > 299) {
+          // Only the server's fixed error code (for example storage_unavailable), never other body text.
+          const code = await answer.json().then(body => body?.error?.code, () => undefined);
+          browserStep = `${step}: ${path} answered ${status} ${/^[a-z_]{1,40}$/.test(code ?? '') ? code : 'without an error code'}`;
+          throw new Error(browserStep);
+        }
       };
       if (phase === 'seed') {
         browserStep = 'setup form';

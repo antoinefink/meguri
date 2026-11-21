@@ -217,6 +217,11 @@ pub trait ReadRows: sealed::Connected {
     ) -> Result<Vec<u32>, StorageError> {
         crate::queries::activity::day_counts(self.connection(), scope, next_day_at)
     }
+    /// `stats/studied-today` T12.1: the number of N6's rows after review-log
+    /// id `after` (`stats/day-buckets` B2) and the sum of their `time`.
+    fn studied_since(&self, after: i64) -> Result<crate::queries::studied::Studied, StorageError> {
+        crate::queries::studied::studied_since(self.connection(), after)
+    }
 
     /// Execute the read-only one-column card-id statement compiled by the
     /// search crate. SQL remains inside storage; callers bind typed cells.

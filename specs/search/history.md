@@ -33,7 +33,7 @@ A day is therefore always 86400 s long here, even when the local day is not. On 
 - Europe/Paris, rollover 4, the 23-hour day of 2030-03-30/31 (clocks jump at 02:00 +01:00): one second before the boundary 2030-03-31 04:00 +02:00 (02:00 UTC), cutoff(1) is 2030-03-30 02:00 UTC, which is 03:00 +01:00, an hour before that day's local rollover. An answer at 03:30 +01:00 on 03-30, a card added then and an edit at 03:00:01 +01:00 count for `rated:1`, `added:1` and `edited:1`; an answer at 02:59:59 +01:00 does not, and `prop:rated=-1` finds it.
 - America/New_York, rollover 4, the 25-hour day of 2030-11-02/03 (clocks fall back at 02:00 −04:00): one second before the boundary 2030-11-03 04:00 −05:00 (09:00 UTC), cutoff(1) is 2030-11-02 09:00 UTC, which is 05:00 −04:00, an hour after that day's local rollover. An answer at 04:30 −04:00 on 11-02 does not count for `rated:1` (`prop:rated=-1` finds it); one at 05:00:00 −04:00 does.
 
-Scenarios: `search/history/dst-paris`, `search/history/dst-new-york`. Both start the collection after the offset change and only observe after it; Meguri's day clock and Anki's cached day agree there (`sched/day-clock` D6).
+Scenarios: `search/history/dst-paris`, `search/history/dst-new-york`. Both start the collection after the offset change and only observe after it; Meguri's day calculation and Anki's cached day agree there (`sched/day-clock` D6, D8.1; changed 2026-11-21, implementation review).
 
 ## H3. `added:N` (R1072)
 

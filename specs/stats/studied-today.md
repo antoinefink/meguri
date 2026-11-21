@@ -393,3 +393,33 @@ These differences are deliberate. They change no golden: an observation either d
 | Direction marks (T6.3) | U+2068 and U+2069 around numbers and some parts of text; none in the Again line | none (H5 and H6 remove every one from the oracle's text) | the same test |
 | Deck scope whose deck id names no deck (T3.2) | the scope is `deck:current`, which reads the deck named `Default` and shows its values | `unknown_deck` | U97's Today query unit tests (`core/crates/meguri-stats/src/today.rs`) |
 | Line breaks in the Studied sentence (T6.3) | a line break after the count and after `today` | single spaces (H5 and H6 replace them) | the same test |
+
+## T12. Today's numbers for the Today page (round 10, Meguri)
+
+Changed 2026-11-21 (round 10; `docs/design/native-interface-contract.md` N24.2; Antoine's answers 1A and 3A). In force: approved by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/round10-today-20261121.md`). A Meguri read with no Anki counterpart; it adds nothing to T2 to T11, and the Home line stays unbuilt.
+
+### T12.1 What the core returns
+
+One read for the whole collection, `studied_today_numbers`, returns five integers:
+
+| Field | Rows | Value |
+|---|---|---|
+| `answers` | `stats/counting-rules` N6's rows: those in the studied-today window (`stats/day-buckets` B2: `id` greater than `S`), `type` neither 4 nor 5 | their number (N6's `cards`) |
+| `cards` | the same rows | the number of different `cid` among them |
+| `time_ms` | the same rows | the sum of their `time` (N6's `time_ms`) |
+| `recent_answers` | N6's row rule over the seven scheduler days that end with today: `id` greater than `S − 6 × 86,400,000` | their number |
+| `recent_time_ms` | the same rows | the sum of their `time` |
+
+- It reads the review log of the collection's current state in one snapshot, as the heatmap's query does (`stats/activity-heatmap` AH5), and never the resident values of N7: it has no `building` result. A sum that overflows a signed 64-bit integer is an error, never a wrapped value.
+- Deleted cards' rows count (N6). Heatmap settings never apply.
+- Freshness: the Today page reads it again when it reads its counts (after a session, an undo, a sync, a rollover), as T7 asks of the UI.
+
+### T12.2 What the Today page shows
+
+- Studied Today: `cards` as "N cards" (different cards, as Previous Session and the finished screen count) and `time_ms` as the finished screen writes a time (N16.5: whole seconds under a minute, else minutes rounded to the nearest), in the system's short unit form; a negative sum shows as 0. "None yet" while `cards` is 0. The bar's value is `cards / (cards + W)`, where `W` is the cards waiting in the walk's decks (N24.3: the top-level normal decks' list counts, `sched/counts` C5); with both 0 the bar is empty.
+- The estimate after Study's first line: `W × recent_time_ms / recent_answers` milliseconds, computed in 64-bit floating point, rounded up to whole minutes, at least 1, written as "about" followed by the duration in the system's short unit form; shown only while `recent_answers` is at least 1 and `W` is above 0. It is an estimate: learning cards take several answers, and nothing promises the time.
+- The texts are Meguri's own and in the Home String Catalog, in the app's language, with the system's number and duration formatting: these numbers are not T2's Home line, which keeps T5.1's rules when it is built.
+
+### T12.3 Tests
+
+`core/crates/meguri-engine/tests/studied_today_numbers.rs`: B2's boundary (a row at `S` is out, at `S + 1` in) and rollover; types 4 and 5 left out, any `ease` counted; a deleted card's row counted; a card answered twice counted once in `cards`; the recent window's boundary at `S − 6` days (exclusive); an empty log gives zeros; overflow is an error.

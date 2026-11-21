@@ -4,7 +4,7 @@ Spec: browser/result-sets
 Requirements: R1080, R1083, R1084, R1116, R1117, R1142, R1154, R1155, R1156, R1241, R1242, R1244, R1851; exposes R1776–R1778; supports R1106, R1109–R1111, R1113, R1152, R1153, R1215, R1826
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/modes/
-Status: Approved 2026-11-20 (R1232) for the lines of H7 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). Every other section is in force and unchanged.
+Status: Approved 2026-11-20 (R1232) for the lines of H7 that begin "Changed 2026-11-20 (round 8)". Approved by Antoine in chat (round 8, decided 2026-11-20), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`). The lines that carry the marker "changed 2026-11-21" with "implementation review", in any letter case or punctuation, are in force: decided by Claude (coordinator) under Antoine's permission of 2026-11-20 to update specs, after independent review (`docs/process/review-log/spec-followups-20261121.md`). Every other section is in force and unchanged.
 
 How the core runs searches for Browse and the local servers, and what it hands back: a search session, its requests and events, the result handle with its ordered ids, row pages, reverse order and resorting, invalidation by change sets, the Cards/Notes toggle, selection by id and index, and the one-shot id search. Which rows a query returns is `search/query-model`; their order is `browser/sorting`; the cells of a row are `browser/columns`. Most of this file is Meguri's own contract (U85); the toggle and selection rules of H11 and H12 reproduce what Anki's browser does.
 
@@ -110,7 +110,7 @@ Changed 2026-11-20 (round 8): `rows` also accepts field column keys `fld:<field 
 
 ## H9. Search context
 
-The engine builds each request's context (`search/query-model` Q8) when the request starts: now from the clock, today and next-day-at from the day clock (`sched/day-clock`, U40), and the config values Q8 lists, read in the request's snapshot (`deck:current` reads `curDeck`, `search/names-and-ids` N3.4). Swift never builds a context. The context is fixed for the request and kept by its handle.
+The engine builds each request's context (`search/query-model` Q8) when the request starts: now from the clock, today and next-day-at from the day calculation (`sched/day-clock` D8.1, U40; changed 2026-11-21, implementation review), and the config values Q8 lists, read in the request's snapshot (`deck:current` reads `curDeck`, `search/names-and-ids` N3.4). Swift never builds a context. The context is fixed for the request and kept by its handle. Changed 2026-11-21 (implementation review): that calculation is never a day query: no search, sorted or not, and no resort unburies a card or writes a timing key (`search/query-model` Q8).
 
 ## H10. Change sets and invalidation
 

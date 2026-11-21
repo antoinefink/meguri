@@ -56,3 +56,43 @@ public struct CoreActivityService: ActivityService {
         }
     }
 }
+
+/// Today's answers for the Today page (`stats/studied-today` T12): N6's
+/// answers and time for today, and for the seven scheduler days ending today.
+public struct StudiedToday: Sendable, Hashable {
+    public let answers: UInt64
+    /// The different cards today's answers are for.
+    public let cards: UInt64
+    public let timeMilliseconds: Int64
+    public let recentAnswers: UInt64
+    public let recentTimeMilliseconds: Int64
+    public let generation: UInt64
+
+    public init(answers: UInt64, cards: UInt64, timeMilliseconds: Int64, recentAnswers: UInt64,
+                recentTimeMilliseconds: Int64, generation: UInt64 = 0) {
+        self.answers = answers; self.cards = cards; self.timeMilliseconds = timeMilliseconds
+        self.recentAnswers = recentAnswers; self.recentTimeMilliseconds = recentTimeMilliseconds
+        self.generation = generation
+    }
+
+    init(_ raw: MeguriCoreBindings.StudiedTodayNumbers) {
+        self.init(answers: raw.answers, cards: raw.cards, timeMilliseconds: raw.timeMs, recentAnswers: raw.recentAnswers,
+                  recentTimeMilliseconds: raw.recentTimeMs, generation: raw.generation)
+    }
+}
+
+public protocol StudiedTodayService: Sendable {
+    func numbers() async throws(BridgeError) -> StudiedToday
+}
+
+/// Reads on the query lane and the core's query reader, as the heatmap does.
+public struct CoreStudiedTodayService: StudiedTodayService {
+    public init() {}
+    public func numbers() async throws(BridgeError) -> StudiedToday {
+        if Task.isCancelled { throw .cancelled }
+        return try await QueryLane.shared.call(.studiedTodayNumbers) {
+            if Task.isCancelled { throw BridgeError.cancelled }
+            return StudiedToday(try studiedTodayNumbers())
+        }
+    }
+}
