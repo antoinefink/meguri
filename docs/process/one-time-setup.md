@@ -145,22 +145,31 @@ Xcode 27.1 or later adds the iPhone Duo simulator (R1962). It runs on its own de
 
 Only for the real copy, "Meguri" with the daily-driver ids, which Antoine studies with beside the test copy "Meguri Dev" (root `AGENTS.md`). Only Antoine sets this up; agents never register identifiers or request profiles.
 
-1. In Certificates, Identifiers & Profiles, register the App IDs `com.antoinefink.meguri` and `com.antoinefink.meguri.widget`.
-2. Register the App Group `group.com.antoinefink.meguri` and assign it to both App IDs. On the Mac the group is the team-prefixed `DNQ34W43XX.com.antoinefink.meguri`.
-3. On `com.antoinefink.meguri`, enable iCloud (CloudKit) with the container `iCloud.com.antoinefink.meguri`, and Push Notifications. The container needs no schema: iCloud Sync stays off in the real copy while `MEGURI_CLOUD_SCHEMA_CONFIGURED_production` is `NO` (`app/Config/Cloud.xcconfig`).
-4. Create a macOS App Development profile for each App ID that includes this Mac as a registered device, and an iOS one for the iPhone later. Use the portal, then download them with Xcode › Settings › Accounts › Download Manual Profiles. Don't build Release in Xcode to get them: Xcode would leave a registered daily-driver app in its DerivedData. `tools/mg build-app --real-copy` uses installed profiles only and never requests provisioning updates.
+1. In Certificates, Identifiers & Profiles › Identifiers, register the App IDs `com.antoinefink.meguri` and `com.antoinefink.meguri.widget`.
+2. Turn on App Groups for both, with the group `group.com.antoinefink.meguri` (register it if it is missing). On the Mac the routes sign the team-prefixed `DNQ34W43XX.com.antoinefink.meguri`, which needs no registration.
+3. On `com.antoinefink.meguri` only, turn on iCloud (CloudKit) with the container `iCloud.com.antoinefink.meguri`, and Push Notifications. Push needs no key or certificate. The container needs no schema: iCloud Sync stays off in the real copy while `MEGURI_CLOUD_SCHEMA_CONFIGURED_production` is `NO` (`app/Config/Cloud.xcconfig`).
+4. In Profiles, create development profiles. For each one, select the Apple Development certificate installed on this Mac, and the device it is for:
+   - for the Mac: one **macOS App Development** profile for `com.antoinefink.meguri`, with this Mac;
+   - for the iPhone: one **iOS App Development** profile for `com.antoinefink.meguri` and one for `com.antoinefink.meguri.widget`, with the iPhone.
 
-The real copy signs push `development`, so these ordinary development profiles authorize it. CloudKit stays production. This is an exception to KTD22, for this route only (standing decision 2026-11-21).
+   Both devices are already registered from earlier development builds; add one under Devices with its UDID if not. Then download the profiles: Xcode › Settings › Accounts › your team › Download Manual Profiles.
 
-Doctor's informational `daily-driver` line (it never changes doctor's status) reads the installed profiles (`tools/scripts/daily-driver-profiles.py`). It reports whether one authorizes the real copy on the Mac (identity, App Group, Keychain group, the production container and environment, development push, expiry, this Mac), and the iOS state. It lists this step while the Mac profile is missing or incomplete. It cannot see the developer portal itself.
+   Don't build Release in Xcode to get them: Xcode would leave a registered daily-driver app in its DerivedData. The routes sign manually with the profile they select (no Xcode-managed profile is needed) and never request provisioning updates.
 
-Building and installing the real copy, at Antoine's request only:
-1. Run `MEGURI_APP_SIGNING=team tools/mg build-app --platform mac --real-copy --owner-requested`. It packs `build/app/real-copy/Meguri.zip`, unregisters and deletes the built app, and prints the read-only clean-up checks (`details.real_copy_cleanup_checks`). Don't use Meguri while it runs: until the route forgets it, the built copy is a registered app with the real bundle id, container and Keychain group.
-2. Antoine installs it. First quit Meguri and move any existing `/Applications/Meguri.app` aside: rename an earlier dev install to `Meguri Dev.app`, and move an earlier real copy to the Trash. This matters because `ditto` merges into an existing bundle and breaks its signature. Then, from the checkout, run `ditto -x -k build/app/real-copy/Meguri.zip /Applications/`.
+The real copy signs push `development`, so these ordinary development profiles authorize it. CloudKit stays production. This is an exception to KTD22 for these routes only (standing decision 2026-11-21).
 
-**iPhone: a documented option, not built.** `run --physical-device --personal-preview` installs only the dev identity. A real copy on the phone would need:
-- the iOS profiles from step 4;
-- a `run --platform iphone --physical-device <id> --real-copy --owner-requested` route, mirroring the personal preview: Release with the daily ids and development push, team signing from installed profiles only, a `devicectl` install and its sealed install witness.
+Doctor's informational `daily-driver` line (it never changes doctor's status) reads the installed profiles (`tools/scripts/daily-driver-profiles.py`). It reports whether one authorizes the real copy on this Mac: identity, App Group, Keychain group, the production container and environment, development push, expiry, this Mac. It also reports the iOS app and widget states. It lists this step while the Mac profile is missing or incomplete. It cannot see the developer portal, nor whether the profile's certificate is on this Mac; the build checks that.
+
+Building and installing the real copy, at Antoine's request only. The coordinator installs (standing decision 2026-11-21); nothing launches it:
+- **Mac:** `MEGURI_APP_SIGNING=team tools/mg build-app --platform mac --real-copy --owner-requested --install`.
+  - Quit Meguri first. Rename an earlier dev install at `/Applications/Meguri.app` to `Meguri Dev.app` first, or the install refuses.
+  - It packs `build/app/real-copy/Meguri.zip`, unregisters and deletes the built app, moves an earlier real copy to the Trash (its data stays), and unpacks the new one into `/Applications`. Without `--install` it stops at the zip.
+  - The read-only clean-up checks are in `details.real_copy_cleanup_checks`.
+  - Don't use Meguri while it builds: until the route forgets it, the built copy is a registered app with the real bundle id, container and Keychain group.
+- **iPhone:** `tools/mg run --platform iphone --physical-device <id> --real-copy --owner-requested`.
+  - Quit Meguri on the phone first.
+  - It checks the app and widget profiles for that phone, builds the Release with development push, verifies it, and installs it with `devicectl` (a private install witness). It never launches it.
+  - Installing over an earlier real copy keeps its data.
 
 ### `nightly-scheduler`
 
