@@ -67,6 +67,7 @@ pub enum BuiltItem {
     /// A note type by name (J3.5).
     Notetype(String),
     AnyNotetype,
+    /// `mid:`; refused when negative.
     NotetypeId(NotetypeId),
     /// A template by 0-based ordinal, 0 to 65534.
     Template(u32),
@@ -99,9 +100,12 @@ pub enum BuiltItem {
     DueOn(i64),
     /// Due within `i` days (`prop:due<=i`).
     DueWithin(i64),
-    /// Note, card or deck ids, in the given order.
+    /// Note, card or deck ids, in the given order; refused whole when any
+    /// id is negative (a deck's J3.5 fallback list included: the caller
+    /// never drops an id from it).
     Ids { kind: IdKind, ids: Vec<i64> },
-    /// Notes of note type `notetype` whose first field is exactly `text`.
+    /// Notes of note type `notetype` whose first field is exactly `text`;
+    /// refused when `notetype` is negative.
     Duplicates { notetype: NotetypeId, text: String },
     /// The items `grammar.md` reads from `text`. `field_text` is set when the
     /// text comes from a search field (J2 then applies first).
@@ -131,9 +135,8 @@ fn take_children(item: &mut BuiltItem, into: &mut Vec<BuiltItem>) {
     }
 }
 
-/// Why J3 refuses an item (`invalid_item{reason}`). J3 names `empty_group`,
-/// `reserved_field_name` and `unrepresentable_name`; the other reasons are
-/// Meguri's names for J3's other refusals.
+/// Why J3 refuses an item (`invalid_item{reason, path}`): the reasons of
+/// `search/join-and-replace` J3.6, whose names are an interface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidItem {
     /// A group with no items.
@@ -155,10 +158,11 @@ pub enum InvalidItem {
     /// An answer button outside 1 to 4.
     ButtonOutOfRange,
     /// A due day outside signed 32-bit.
-    DayOutOfRange,
+    DueDayOutOfRange,
     /// An empty id list.
     EmptyIdList,
-    /// A negative id in an id list.
+    /// An id below 0: in an id list, the note type id of `mid:`, or the
+    /// note type id of duplicates.
     NegativeId,
     /// J3.4: duplicates text holding White_Space other than U+0020, or
     /// U+001C to U+001F.
@@ -166,7 +170,7 @@ pub enum InvalidItem {
 }
 
 impl InvalidItem {
-    /// The reason's name in errors and across the FFI.
+    /// The reason's name in errors and across the FFI (J3.6).
     pub fn reason(self) -> &'static str {
         match self {
             InvalidItem::EmptyGroup => "empty_group",
@@ -178,7 +182,7 @@ impl InvalidItem {
             InvalidItem::FlagOutOfRange => "flag_out_of_range",
             InvalidItem::DaysOutOfRange => "days_out_of_range",
             InvalidItem::ButtonOutOfRange => "button_out_of_range",
-            InvalidItem::DayOutOfRange => "day_out_of_range",
+            InvalidItem::DueDayOutOfRange => "due_day_out_of_range",
             InvalidItem::EmptyIdList => "empty_id_list",
             InvalidItem::NegativeId => "negative_id",
             InvalidItem::UnrepresentableText => "unrepresentable_text",
@@ -201,14 +205,9 @@ pub enum ErrorSource {
 pub enum BuilderError {
     /// A parse error; its range lies in the text `source` names.
     Parse { source: ErrorSource, error: SearchError },
-    /// `invalid_item{reason}`.
-    InvalidItem(InvalidItem),
-}
-
-impl From<InvalidItem> for BuilderError {
-    fn from(reason: InvalidItem) -> BuilderError {
-        BuilderError::InvalidItem(reason)
-    }
+    /// `invalid_item{reason, path}`: the refused item's path from the top
+    /// item, in the form of [`ErrorSource::Item`] (J1).
+    InvalidItem { reason: InvalidItem, path: Vec<usize> },
 }
 
 /// J2: text from a search field has every character U+001C to U+001F
@@ -228,7 +227,7 @@ fn is_separator(c: char) -> bool {
 
 /// White_Space other than U+0020, or U+001C to U+001F: what a term cannot
 /// hold as written (G1, J2).
-fn splits_a_term(c: char) -> bool {
+pub(crate) fn splits_a_term(c: char) -> bool {
     (is_white_space(c) && c != ' ') || is_separator(c)
 }
 
@@ -259,6 +258,13 @@ pub fn build_query(item: &BuiltItem) -> Result<Query, BuilderError> {
     let mut writer = Writer::default();
     let root = writer.item(item)?;
     Ok(writer.builder.finish(root, None))
+}
+
+fn refused(reason: InvalidItem, path: &[usize]) -> BuilderError {
+    BuilderError::InvalidItem {
+        reason,
+        path: path.to_vec(),
+    }
 }
 
 /// One item being visited: its children's nodes as they are made.
@@ -338,7 +344,7 @@ impl Writer {
         let Frame { item, children, .. } = frame;
         Ok(match item {
             BuiltItem::Group { joiner, .. } => match children.len() {
-                0 => return Err(InvalidItem::EmptyGroup.into()),
+                0 => return Err(refused(InvalidItem::EmptyGroup, path)),
                 1 => children[0],
                 _ => {
                     let joined = self.push(match joiner {
@@ -359,7 +365,7 @@ impl Writer {
                 self.push(NodeKind::Not(none))
             }
             leaf => {
-                let term = leaf_term(leaf)?;
+                let term = leaf_term(leaf).map_err(|reason| refused(reason, path))?;
                 self.term(term)
             }
         })
@@ -418,7 +424,7 @@ fn leaf_term(item: &BuiltItem) -> Result<Term, InvalidItem> {
         BuiltItem::AnyTag => any_tag(),
         BuiltItem::Notetype(name) => Term::Notetype(notetype_text(name)?),
         BuiltItem::AnyNotetype => Term::Notetype(ANY.to_owned()),
-        BuiltItem::NotetypeId(id) => Term::NotetypeId(*id),
+        BuiltItem::NotetypeId(id) => Term::NotetypeId(non_negative(*id)?),
         BuiltItem::Template(ordinal) => {
             let ordinal = u16::try_from(*ordinal)
                 .ok()
@@ -476,12 +482,14 @@ fn leaf_term(item: &BuiltItem) -> Result<Term, InvalidItem> {
                 list: list.join(","),
             }
         }
+        // J3.6: the note type id before the text.
         BuiltItem::Duplicates { notetype, text } => {
+            let notetype = non_negative(*notetype)?;
             if text.chars().any(splits_a_term) {
                 return Err(InvalidItem::UnrepresentableText);
             }
             Term::Duplicates {
-                notetype: *notetype,
+                notetype,
                 text: text.clone(),
             }
         }
@@ -493,12 +501,17 @@ fn leaf_term(item: &BuiltItem) -> Result<Term, InvalidItem> {
     })
 }
 
+/// J3: no note type id an item writes is negative.
+fn non_negative(id: NotetypeId) -> Result<NotetypeId, InvalidItem> {
+    if id.0 < 0 { Err(InvalidItem::NegativeId) } else { Ok(id) }
+}
+
 fn days(d: u64) -> Result<u32, InvalidItem> {
     u32::try_from(d).map_err(|_| InvalidItem::DaysOutOfRange)
 }
 
 fn due(day: i64, comparison: Comparison) -> Result<Term, InvalidItem> {
-    let day = i32::try_from(day).map_err(|_| InvalidItem::DayOutOfRange)?;
+    let day = i32::try_from(day).map_err(|_| InvalidItem::DueDayOutOfRange)?;
     Ok(Term::Property {
         property: Property::Due(day),
         comparison,
@@ -578,7 +591,7 @@ fn tag_term(name: &str) -> Result<Term, InvalidItem> {
 /// J3.2: `^`, the tag with its regex metacharacters escaped and every
 /// White_Space character and U+001C to U+001F written as `\x{hex}`, then
 /// `(::|$)`, so it matches the tag and its descendants.
-fn tag_expression(name: &str) -> String {
+pub(crate) fn tag_expression(name: &str) -> String {
     let mut out = String::from("^");
     for c in name.chars() {
         if is_white_space(c) || is_separator(c) {

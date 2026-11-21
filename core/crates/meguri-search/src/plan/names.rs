@@ -87,8 +87,18 @@ pub(super) fn deck(value: &str, env: &TermEnv<'_>, params: &mut Params) -> Resul
         "current" => return Ok(current_deck(env, params)),
         _ => {}
     }
-    // N3.3 steps 1-2: the converted expression, cut into levels.
-    let converted = pattern::glob_to_regex(&value, Wildcards::TEXT);
+    let expression = format!("(?i)^{}($|{LEVEL})", deck_levels(&value));
+    pattern::compile(&expression, &value)?;
+    let pattern = params.bind(Param::Text(expression));
+    Ok(fast(in_decks(&format!(
+        "SELECT id FROM decks WHERE meguri_regex({pattern}, name)"
+    ))))
+}
+
+/// N3.3 steps 1-2: the converted expression of a (NFC) deck value, cut
+/// into levels and joined with U+001F.
+pub(crate) fn deck_levels(value: &str) -> String {
+    let converted = pattern::glob_to_regex(value, Wildcards::TEXT);
     let levels: Vec<String> = converted
         .split("::")
         .map(|piece| {
@@ -98,12 +108,7 @@ pub(super) fn deck(value: &str, env: &TermEnv<'_>, params: &mut Params) -> Resul
             if piece.is_empty() { "blank".to_owned() } else { piece.to_owned() }
         })
         .collect();
-    let expression = format!("(?i)^{}($|{LEVEL})", levels.join(&LEVEL.to_string()));
-    pattern::compile(&expression, &value)?;
-    let pattern = params.bind(Param::Text(expression));
-    Ok(fast(in_decks(&format!(
-        "SELECT id FROM decks WHERE meguri_regex({pattern}, name)"
-    ))))
+    levels.join(&LEVEL.to_string())
 }
 
 /// N3.4: the current deck's tree, by the stored name of the current deck or

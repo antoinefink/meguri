@@ -41,11 +41,15 @@ pub(super) enum Job {
         source: Source,
         sort: SortSpec,
     },
+    /// Superseded while queued: it ends `Cancelled` without running.
+    Superseded,
 }
 
 pub(super) struct QueuedJob {
     pub(super) seq: u64,
     pub(super) token: Arc<CancelToken>,
+    /// The registry's halt epoch when it was queued.
+    pub(super) epoch: u64,
     pub(super) job: Job,
 }
 
@@ -165,11 +169,15 @@ fn serve(shared: &Arc<SessionShared>, threads: &crate::threads::ThreadRegistry, 
                 let _ = delivery.join();
             }
             Err(error) => {
-                shared.listener.event(SearchEvent::Failed {
-                    seq,
-                    error: BrowseError::Engine(EngineError::internal(format!(
-                        "cannot start the search event thread: {error}"
-                    ))),
+                shared.listener.event(if job.token.is_cancelled() {
+                    SearchEvent::Cancelled { seq }
+                } else {
+                    SearchEvent::Failed {
+                        seq,
+                        error: BrowseError::Engine(EngineError::internal(format!(
+                            "cannot start the search event thread: {error}"
+                        ))),
+                    }
                 });
             }
         }
@@ -207,6 +215,10 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
         outbox,
         published: std::cell::Cell::new(None),
     };
+    // Listed for halts from the start, so a halt that begins while the
+    // request parses, or began after it was queued, cancels it (H3).
+    let registry = shared.registry.upgrade();
+    let _running = registry.as_ref().map(|registry| registry.run(&job.token, job.epoch));
     let result = if job.token.is_cancelled() {
         Err(Stop::Cancelled)
     } else {
@@ -214,6 +226,7 @@ fn run(shared: &Arc<SessionShared>, job: QueuedJob, outbox: &mpsc::Sender<Search
             Job::Search { text, mode, sort } => request.search(&text, mode, &sort),
             Job::Resort { source, sort } => request.resort(source, &sort),
             Job::Toggle { source, sort } => request.toggle(source, &sort),
+            Job::Superseded => Err(Stop::Cancelled),
         }
     };
     let Err(stop) = result else { return };
@@ -303,6 +316,8 @@ impl Request<'_> {
     /// superseded meanwhile.
     fn first_page(&self, handle: Handle) -> Result<(HandleId, Arc<Mutex<Handle>>), Stop> {
         let ids = handle.ids[..handle.ids.len().min(PAGE)].to_vec();
+        let mut handle = handle;
+        handle.prefix = ids.len();
         let handle = Arc::new(Mutex::new(handle));
         let mut state = self.shared.lock();
         let live = state
@@ -348,6 +363,16 @@ impl Request<'_> {
     /// Completes the handle and sends `Complete`, unless the request was
     /// superseded. Set-aside cards H10 recorded as removed go too.
     fn complete(&self, id: HandleId, handle: &Mutex<Handle>) -> Result<(), Stop> {
+        // One transition under the session's lock, then the handle's: no
+        // call sees the handle complete while its request is still current.
+        let mut state = self.shared.lock();
+        let live = state
+            .current
+            .as_ref()
+            .is_some_and(|current| current.seq == self.seq && !current.token.is_cancelled());
+        if !live || state.closed {
+            return Err(Stop::Cancelled);
+        }
         let (count, revision) = {
             let mut handle = lock(handle);
             let removed = std::mem::take(&mut handle.removed_while_running);
@@ -357,14 +382,6 @@ impl Request<'_> {
             handle.complete = true;
             (handle.count(), handle.revision)
         };
-        let mut state = self.shared.lock();
-        let live = state
-            .current
-            .as_ref()
-            .is_some_and(|current| current.seq == self.seq && !current.token.is_cancelled());
-        if !live || state.closed {
-            return Err(Stop::Cancelled);
-        }
         state.current = None;
         state.complete.push_back(id);
         while state.complete.len() > 2 {
@@ -410,7 +427,6 @@ impl Request<'_> {
     ) -> Result<T, Stop> {
         let (_engine, collection) = self.collection()?;
         let registry = self.shared.registry.upgrade().ok_or(Stop::Cancelled)?;
-        let _running = registry.run(self.token);
         let slot = registry.reader(self.token).ok_or(Stop::Cancelled)?;
         let lease = collection.search_reader(slot.index)?;
         let snapshot = lease.snapshot()?;
@@ -473,6 +489,7 @@ impl Request<'_> {
             match_data: None,
             complete: false,
             removed_while_running: Default::default(),
+            prefix: 0,
         };
         let rows = &**snapshot;
         let (id, handle, match_data) = if plan.is_slow() {
@@ -547,7 +564,24 @@ impl Request<'_> {
         let mut published: Option<(HandleId, Arc<Mutex<Handle>>)> = None;
         let mut scanned = 0u64;
         let mut last_progress = crate::monotonic::now();
-        for (index, window) in candidates.ids.chunks(chunk).enumerate() {
+        // Chunks start at `chunk` and double up to MAX_CHUNK, so a sparse
+        // result does not pay one statement per few hundred candidates,
+        // while a dense one fills its first page from the first chunks. A
+        // chunk size a test sets stays fixed (H16).
+        let grows = chunk == DEFAULT_CHUNK;
+        let mut windows = Vec::new();
+        let mut start = 0usize;
+        let mut size = chunk;
+        while start < candidates.ids.len() {
+            let end = (start + size).min(candidates.ids.len());
+            windows.push(start..end);
+            start = end;
+            if grows {
+                size = (size * 2).min(MAX_CHUNK);
+            }
+        }
+        for range in windows {
+            let window = &candidates.ids[range.clone()];
             *params.last_mut().expect("the list parameter") = id_list(window);
             let keep: std::collections::HashSet<i64> = match &pairs_sql {
                 Some(sql) => {
@@ -564,7 +598,7 @@ impl Request<'_> {
                     .into_iter()
                     .collect(),
             };
-            let base = index * chunk;
+            let base = range.start;
             for (offset, id) in window.iter().enumerate() {
                 if keep.contains(id) {
                     pending.ids.push(*id);
@@ -590,8 +624,10 @@ impl Request<'_> {
                 && crate::monotonic::now().saturating_sub(last_progress) >= PROGRESS_EVERY
             {
                 last_progress = crate::monotonic::now();
+                // The rows confirmed so far become the announced prefix.
                 let (matched, revision) = {
-                    let handle = lock(handle);
+                    let mut handle = lock(handle);
+                    handle.prefix = handle.ids.len();
                     (handle.count(), handle.revision)
                 };
                 self.send(SearchEvent::Progress {
@@ -700,6 +736,7 @@ impl Request<'_> {
                 match_data: source.match_data,
                 complete: false,
                 removed_while_running: Default::default(),
+                prefix: 0,
             };
             self.sort_ids(snapshot, &all, &sort, &clock, template)
         })
@@ -784,6 +821,7 @@ impl Request<'_> {
                 match_data: derived.match_data,
                 complete: false,
                 removed_while_running: Default::default(),
+                prefix: 0,
             };
             self.sort_ids(snapshot, &derived.ids, &sort, &context, template)
         })
@@ -882,6 +920,8 @@ struct Derived {
 
 /// Q10 step 4's chunk of candidates, unless a test sets another (H16).
 pub(super) const DEFAULT_CHUNK: usize = 500;
+/// The largest chunk the doubling reaches.
+pub(super) const MAX_CHUNK: usize = 32_768;
 /// `engine/jobs` J5: at most one `Progress` per 100 ms.
 const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
 

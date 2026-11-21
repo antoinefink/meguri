@@ -24,10 +24,11 @@ pub(crate) struct SearchRegistry {
     next_server_reader: AtomicUsize,
     /// Q10's chunk size when a test sets one (H16); 0 otherwise.
     stream_chunk: AtomicUsize,
-    /// Handle ids are unique across the engine's sessions, so one session
-    /// never takes another's handle for its own (H15).
-    next_handle: AtomicU64,
 }
+
+/// Handle ids are unique across every session of every engine in the
+/// process, so a session never takes another's handle for its own (H15).
+static NEXT_HANDLE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Default)]
 struct State {
@@ -38,6 +39,9 @@ struct State {
     next_run: u64,
     /// Halts in force: while any is, every request is cancelled.
     halts: usize,
+    /// One more at every halt: a request queued before a halt and started
+    /// after it is cancelled too (H3: every in-flight request).
+    epoch: u64,
     sessions: Vec<Weak<SessionShared>>,
     next_session: u64,
 }
@@ -61,13 +65,19 @@ impl SearchRegistry {
         state.next_session
     }
 
+    /// The halt epoch a request queued now records.
+    pub(super) fn epoch(&self) -> u64 {
+        self.lock().epoch
+    }
+
     /// A request takes its worker: its token is listed for [`Self::halt`],
-    /// and set at once while a halt is in force.
-    pub(super) fn run(&self, token: &Arc<CancelToken>) -> Running<'_> {
+    /// and set at once while a halt is in force or when one began after the
+    /// request was queued at `epoch`.
+    pub(super) fn run(&self, token: &Arc<CancelToken>, epoch: u64) -> Running<'_> {
         let mut state = self.lock();
         state.next_run += 1;
         let key = state.next_run;
-        if state.halts > 0 {
+        if state.halts > 0 || state.epoch != epoch {
             token.interrupt();
         }
         state.running.push((key, Arc::clone(token)));
@@ -103,9 +113,9 @@ impl SearchRegistry {
         self.stream_chunk.store(chunk, Ordering::Relaxed);
     }
 
-    /// A handle id no session of this engine has used.
+    /// A handle id no session in the process has used.
     pub(super) fn next_handle(&self) -> super::HandleId {
-        super::HandleId(self.next_handle.fetch_add(1, Ordering::Relaxed) + 1)
+        super::HandleId(NEXT_HANDLE.fetch_add(1, Ordering::Relaxed) + 1)
     }
 
     /// The server reader the next one-shot search uses (H13).
@@ -118,6 +128,7 @@ impl SearchRegistry {
     pub(crate) fn halt(&self) -> Halt<'_> {
         let mut state = self.lock();
         state.halts += 1;
+        state.epoch += 1;
         for (_, token) in &state.running {
             token.interrupt();
         }
@@ -174,14 +185,19 @@ impl Drop for Halt<'_> {
 /// Carries a caller's cancel token over to a request's own token
 /// (`engine/jobs` J4): the caller's token wakes it, which sets the request's
 /// token and wakes a request waiting for a reader.
+/// The caller's token keeps the waker until it is cancelled or dropped (the
+/// token has no way to remove one), so the bridge refers to the request's
+/// token through a `Weak` and keeps nothing of a request that is over.
 pub(super) struct Bridge {
-    pub(super) request: Arc<CancelToken>,
+    pub(super) request: Weak<CancelToken>,
     pub(super) registry: Weak<SearchRegistry>,
 }
 
 impl Wake for Bridge {
     fn wake(self: Arc<Self>) {
-        self.request.cancel();
+        if let Some(request) = self.request.upgrade() {
+            request.cancel();
+        }
         if let Some(registry) = self.registry.upgrade() {
             registry.wake();
         }
@@ -192,7 +208,7 @@ impl Wake for Bridge {
 pub(super) fn bridge(caller: &CancelToken, request: &Arc<CancelToken>, registry: &Arc<SearchRegistry>) {
     use std::future::Future;
     let waker = std::task::Waker::from(Arc::new(Bridge {
-        request: Arc::clone(request),
+        request: Arc::downgrade(request),
         registry: Arc::downgrade(registry),
     }));
     let mut context = std::task::Context::from_waker(&waker);

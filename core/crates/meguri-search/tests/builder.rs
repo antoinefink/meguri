@@ -23,8 +23,13 @@ fn text(item: &BuiltItem) -> String {
 }
 
 fn refused(item: &BuiltItem) -> InvalidItem {
+    refused_at(item).0
+}
+
+/// J1: the refusal's reason and the refused item's path.
+fn refused_at(item: &BuiltItem) -> (InvalidItem, Vec<usize>) {
     match build(item) {
-        Err(BuilderError::InvalidItem(reason)) => reason,
+        Err(BuilderError::InvalidItem { reason, path }) => (reason, path),
         other => panic!("{item:?}: {other:?}"),
     }
 }
@@ -113,7 +118,7 @@ fn the_spec_examples_build_their_text() {
 fn items_without_an_oracle_scenario_build_their_text() {
     let cases = [
         (NotetypeId(Ntid(1_600_000_000_000)), "mid:1600000000000"),
-        (NotetypeId(Ntid(-5)), "mid:-5"),
+        (NotetypeId(Ntid(0)), "mid:0"),
         (
             Ids {
                 kind: IdKind::Cards,
@@ -273,8 +278,8 @@ fn refused_items_give_their_reason() {
             },
             InvalidItem::ButtonOutOfRange,
         ),
-        (DueOn(2_147_483_648), InvalidItem::DayOutOfRange),
-        (DueWithin(-2_147_483_649), InvalidItem::DayOutOfRange),
+        (DueOn(2_147_483_648), InvalidItem::DueDayOutOfRange),
+        (DueWithin(-2_147_483_649), InvalidItem::DueDayOutOfRange),
         (
             Ids {
                 kind: IdKind::Notes,
@@ -286,6 +291,23 @@ fn refused_items_give_their_reason() {
             Ids {
                 kind: IdKind::Decks,
                 ids: vec![1, -1],
+            },
+            InvalidItem::NegativeId,
+        ),
+        (NotetypeId(Ntid(-5)), InvalidItem::NegativeId),
+        (NotetypeId(Ntid(i64::MIN)), InvalidItem::NegativeId),
+        (
+            Duplicates {
+                notetype: Ntid(-5),
+                text: s("x"),
+            },
+            InvalidItem::NegativeId,
+        ),
+        // J3.6: the duplicates' note type id before its text.
+        (
+            Duplicates {
+                notetype: Ntid(-1),
+                text: s("a\u{a0}b"),
             },
             InvalidItem::NegativeId,
         ),
@@ -309,9 +331,76 @@ fn refused_items_give_their_reason() {
     }
     // A deck whose levels J3.5 accepts: inner spaces, `:` inside, non-ASCII.
     assert_eq!(text(&Deck(s("a b::c:d::日本"))), "\"deck:a b::c:d::日本\"");
-    assert_eq!(InvalidItem::EmptyGroup.reason(), "empty_group");
-    assert_eq!(InvalidItem::ReservedFieldName.reason(), "reserved_field_name");
-    assert_eq!(InvalidItem::UnrepresentableName.reason(), "unrepresentable_name");
+    // Duplicates with note type 0 builds (J3: id 0 is allowed).
+    assert_eq!(
+        text(&Duplicates {
+            notetype: Ntid(0),
+            text: s("x"),
+        }),
+        "dupe:0,x"
+    );
+    // J3.5: a deck's fallback list with one negative descendant id is not
+    // built at all; no id is dropped from it.
+    assert_eq!(
+        refused(&Ids {
+            kind: IdKind::Decks,
+            ids: vec![1_600_000_000_000, 1_600_000_000_001, -7],
+        }),
+        InvalidItem::NegativeId
+    );
+}
+
+// J3.6: every reason's name, exactly as written.
+#[test]
+fn the_reason_names_are_the_specs() {
+    let names = [
+        (InvalidItem::EmptyGroup, "empty_group"),
+        (InvalidItem::EmptyName, "empty_name"),
+        (InvalidItem::UnrepresentableName, "unrepresentable_name"),
+        (InvalidItem::ReservedFieldName, "reserved_field_name"),
+        (InvalidItem::EmptyText, "empty_text"),
+        (InvalidItem::UnrepresentableText, "unrepresentable_text"),
+        (InvalidItem::OrdinalOutOfRange, "ordinal_out_of_range"),
+        (InvalidItem::FlagOutOfRange, "flag_out_of_range"),
+        (InvalidItem::DaysOutOfRange, "days_out_of_range"),
+        (InvalidItem::ButtonOutOfRange, "button_out_of_range"),
+        (InvalidItem::DueDayOutOfRange, "due_day_out_of_range"),
+        (InvalidItem::EmptyIdList, "empty_id_list"),
+        (InvalidItem::NegativeId, "negative_id"),
+    ];
+    for (reason, name) in names {
+        assert_eq!(reason.reason(), name);
+    }
+}
+
+// J1: a refusal names the refused item by its path, as a parse error's
+// source does: the top item's path is empty; in a group, the item's index;
+// under a negation, 0.
+#[test]
+fn refusals_carry_the_refused_items_path() {
+    assert_eq!(refused_at(&Flag(9)), (InvalidItem::FlagOutOfRange, vec![]));
+    assert_eq!(
+        refused_at(&group(Joiner::And, vec![])),
+        (InvalidItem::EmptyGroup, vec![])
+    );
+    // J1's example: an empty group under a negation that is the second item
+    // of a group.
+    let item = group(Joiner::Or, vec![Flag(1), not(group(Joiner::And, vec![]))]);
+    assert_eq!(refused_at(&item), (InvalidItem::EmptyGroup, vec![1, 0]));
+    let item = group(
+        Joiner::And,
+        vec![
+            Deck(s("X")),
+            not(group(Joiner::Or, vec![Tag(s("a")), NotetypeId(Ntid(-5))])),
+        ],
+    );
+    assert_eq!(refused_at(&item), (InvalidItem::NegativeId, vec![1, 0, 1]));
+    // The first refusal in item order, with its own path.
+    let item = group(Joiner::And, vec![group(Joiner::Or, vec![Literal(s(""))]), Flag(0)]);
+    assert_eq!(refused_at(&item), (InvalidItem::EmptyText, vec![0, 0]));
+    // The empty group itself, not a parent, is named.
+    let item = group(Joiner::And, vec![Deck(s("X")), group(Joiner::Or, vec![Flag(2), group(Joiner::And, vec![])])]);
+    assert_eq!(refused_at(&item), (InvalidItem::EmptyGroup, vec![1, 1]));
 }
 
 // J1: the first parse error in item order, with its source path; J2 for
@@ -468,12 +557,9 @@ fn item(seq: &mut Seq, depth: u32) -> BuiltItem {
         6 => FieldEmpty(name(seq)),
         7 => Literal(name(seq)),
         8 => Flag(1 + seq.below(7) as u8),
-        // Not the whole collection: its `deck:*` reads back as a deck term
-        // the stand-in compilers do not equate with it (Q2's meaning is
-        // checked by the example tests).
-        9 => [NoFlag, AnyFlag, AnyTag, Untagged, AnyDeck, CurrentDeck, AnyNotetype]
+        9 => [NoFlag, AnyFlag, AnyTag, Untagged, AnyDeck, CurrentDeck, AnyNotetype, WholeCollection]
             .into_iter()
-            .nth(seq.below(7))
+            .nth(seq.below(8))
             .unwrap_or(NoFlag),
         10 => State(states[seq.below(states.len())]),
         11 => Added(seq.below(400) as u64),
@@ -537,11 +623,25 @@ fn holds_an_exception(item: &BuiltItem) -> bool {
 // fixture collection, finds the same ids (through the stand-in term
 // compilers of `canonical_roundtrip.rs`, as F7's tests do). F7's first three
 // shapes in parsed text are excluded; the fourth is checked for meaning only.
+// An item holding the whole collection is checked as J8 says it keeps its
+// meaning: o is canonical text and returns the same cards in cards mode,
+// where `deck:*` (a deck term, Q2) is compiled by the product's compiler.
 #[test]
 fn built_searches_round_trip() {
     let conn = collection();
+    let mut whole_cards = |term: &meguri_search::Term,
+                           env: &meguri_search::plan::TermEnv<'_>,
+                           params: &mut meguri_search::plan::Params| {
+        match term {
+            meguri_search::Term::Deck(text) if text == "*" => {
+                meguri_search::plan::sql::compile_term(term, env, params)
+            }
+            _ => stand_in(term, env, params),
+        }
+    };
     let mut seq = Seq(0x00B0_1D3E);
     let (mut checked, mut refusals, mut fourth_shape, mut parsed_checked) = (0, 0, 0, 0);
+    let mut whole_checked = 0;
     let mut attempts = 0;
     while checked < 5_000 {
         attempts += 1;
@@ -549,20 +649,34 @@ fn built_searches_round_trip() {
         let item = item(&mut seq, 3);
         let query = match build_query(&item) {
             Ok(query) => query,
-            Err(BuilderError::InvalidItem(_)) => {
+            Err(BuilderError::InvalidItem { .. }) => {
                 refusals += 1;
                 continue;
             }
             Err(BuilderError::Parse { .. }) => continue,
         };
-        // F7's first three shapes; and the whole collection, whose `deck:*`
-        // reads back as a deck term (Q2) that the stand-in compilers do not
-        // equate with it: the example tests check that text.
+        // F7's first three shapes.
+        if holds_an_exception(&item) || is_exception(&query) {
+            continue;
+        }
         let whole = query
             .nodes()
             .iter()
             .any(|node| node.kind == NodeKind::Term(meguri_search::Term::WholeCollection));
-        if holds_an_exception(&item) || is_exception(&query) || whole {
+        if whole {
+            let o = query.canonical_text();
+            assert_eq!(build(&item).as_deref(), Ok(o.as_str()));
+            let again = parse(&o).unwrap_or_else(|e| panic!("{item:?} -> {o:?}: {e:?}"));
+            if !is_group_of_group(&query) {
+                assert_eq!(again.canonical_text(), o, "{item:?}");
+            }
+            let first = Plan::build_with(&query, SearchMode::Cards, &context(), &mut whole_cards);
+            let second = Plan::build_with(&again, SearchMode::Cards, &context(), &mut whole_cards);
+            match (first, second) {
+                (Ok(first), Ok(second)) => assert_eq!(ids(&conn, &first), ids(&conn, &second), "{o:?} in cards"),
+                (a, b) => panic!("{o:?} in cards: {a:?} / {b:?}"),
+            }
+            whole_checked += 1;
             continue;
         }
         // A parsed-text item means what its text means, independently of
@@ -607,6 +721,7 @@ fn built_searches_round_trip() {
     assert!(refusals > 10, "the generator should also meet refusals ({refusals})");
     assert!(parsed_checked > 500, "parsed-text items checked: {parsed_checked}");
     assert!(fourth_shape > 0, "the generator should meet F7's fourth shape");
+    assert!(whole_checked > 10, "whole-collection items checked: {whole_checked}");
 }
 
 // J3.3's reserved keys are exactly the keys the parser does not read as a

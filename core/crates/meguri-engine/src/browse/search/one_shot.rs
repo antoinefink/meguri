@@ -18,7 +18,7 @@ pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i
     // Listed for halts (replace, suspend, close), so its reader comes back
     // at once.
     let token = crate::cancel::CancelToken::new();
-    let _running = engine.inner.searches.run(&token);
+    let _running = engine.inner.searches.run(&token, engine.inner.searches.epoch());
     let index = engine.inner.searches.server_reader();
     let lease = collection.server_reader(index)?;
     let snapshot = lease.snapshot()?;
@@ -59,7 +59,15 @@ pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i
     let mut params = plan.params().to_vec();
     params.push(meguri_search::Param::Integer(0));
     let mut ids = Vec::new();
-    for window in candidates.chunks(chunk) {
+    let mut start = 0usize;
+    let mut size = chunk;
+    while start < candidates.len() {
+        let end = (start + size).min(candidates.len());
+        let window = &candidates[start..end];
+        start = end;
+        if chunk == worker::DEFAULT_CHUNK {
+            size = (size * 2).min(worker::MAX_CHUNK);
+        }
         *params.last_mut().expect("the list parameter") = meguri_search::plan::sql::id_list(window);
         let keep: std::collections::HashSet<i64> = read(&sql, &params)?.into_iter().collect();
         ids.extend(window.iter().copied().filter(|id| keep.contains(id)));

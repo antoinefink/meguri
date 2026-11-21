@@ -156,9 +156,9 @@ fn search_build(_session: &mut Session<'_>, request: &ObservationRequest) -> Res
         .map(|item| match build(&built_item(item)) {
             Ok(text) => Ok(json!({ "text": text })),
             Err(BuilderError::Parse { error, .. }) => Ok(error_value(&error)),
-            Err(BuilderError::InvalidItem(reason)) => Err(ExecError::new(
+            Err(BuilderError::InvalidItem { reason, path }) => Err(ExecError::new(
                 "invalid_item",
-                format!("the builder refused an item: {}", reason.reason()),
+                format!("the builder refused the item at {path:?}: {}", reason.reason()),
             )),
         })
         .collect::<Result<Vec<_>, _>>()

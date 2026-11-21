@@ -20,6 +20,8 @@ pub mod card_extractors;
 pub mod config_keys;
 #[path = "edit_services.rs"]
 pub mod edit_services;
+#[path = "filter_tokens.rs"]
+pub mod filter_tokens;
 #[path = "name_index.rs"]
 pub mod name_index;
 #[path = "names_and_ids.rs"]

@@ -26,6 +26,10 @@
 //! U84 (`specs/browser/columns.md`, `specs/browser/sorting.md`): [`browser`]
 //! computes Browse cell values, [`config::Column`] holds the column catalog,
 //! and [`SortedQuery`] writes the sorted statement of a search or an id list.
+//!
+//! U260 (`specs/search/filter-tokens.md` T1-T7): [`filter_tokens`] holds
+//! Browse's query of tokens and text, writes its run text and reads Anki
+//! search text back into it.
 
 pub mod ast;
 pub mod browser;
@@ -35,6 +39,7 @@ pub mod config;
 pub mod context;
 pub mod custom_data;
 pub mod error;
+pub mod filter_tokens;
 mod lexer;
 pub mod name_index;
 pub mod notetypes;
