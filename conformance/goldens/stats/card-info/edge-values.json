@@ -236,6 +236,6 @@
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/card-info/edge-values",
-  "scenario_sha256": "74a8ec250a6e96d724f78eb98db18eb8ef95509f2c9df44dbad85bbe2a42a4a7",
+  "scenario_sha256": "790df529011b37527ae28e2a5784159c26a551323fd3720d2d1c7795a14d302f",
   "tz": "Europe/Paris"
 }

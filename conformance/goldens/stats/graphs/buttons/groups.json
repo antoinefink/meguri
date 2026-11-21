@@ -61,10 +61,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "3b432b0dc6b9c55f70628701c34445cc86010c44c075e5d7bb3b5137ab361e12",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/graphs/buttons/groups",
-  "scenario_sha256": "18f92df9e292b49878076c097027e92c8f9ee989dbe1db245135064e11a122b3",
+  "scenario_sha256": "146a82b1736a0e86600f81bf8f8f730075d1913f9f3e717aea9c143e5c9417e0",
   "tz": "Europe/Paris"
 }

@@ -36,10 +36,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/today/odd-values",
-  "scenario_sha256": "7828e8f3b4e7645f42259b4bb0100cb0fc96df1dfe7cb709e4a6916d8446e0b8",
+  "scenario_sha256": "2b44d8925debf182ab0350f80d3bfcc9c18c30072f1d858a230197d2cac5d1a3",
   "tz": "Europe/Paris"
 }

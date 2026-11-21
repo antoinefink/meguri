@@ -36,10 +36,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "90567cc61f2b9b40ded60df6c78b8ed634f5d0a4307f7525dd375818d011b6c3",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/today/day-start-los-angeles-dst",
-  "scenario_sha256": "91ecd40cbd182831ebb8d224cf4e4c3bb22e8fc006dac01b6097344d3f552bec",
+  "scenario_sha256": "fc6e0fae8907cd85070d2ed97707547f777c317487ab8528c87a0777de84bc30",
   "tz": "America/Los_Angeles"
 }

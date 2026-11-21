@@ -105,10 +105,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "9837e2a324d17b1b16e377e6dc25ef7bee0d3f896c50cfbef93f685234e439d0",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "stats/card-info/no-lrt-elapsed",
-  "scenario_sha256": "0ad7d4bea1e789728144687d975853689b56ec43b51b0df87f87aad894e316cf",
+  "scenario_sha256": "d4cfa5f7cd1eedddecc1a04130284a3d2220469574761ab53714c9df7a409049",
   "tz": "Europe/Paris"
 }
