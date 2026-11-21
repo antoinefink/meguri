@@ -1,5 +1,7 @@
 //! A setup media step killed mid-transfer (resume fix). Its own binary: it
 //! re-runs itself with `--exact <test>`, which needs an unprefixed name.
+// The script serves several test binaries; this one uses part of it.
+#[allow(dead_code)]
 #[path = "support/meguri_bootstrap_script.rs"]
 mod support;
 use support::*;
