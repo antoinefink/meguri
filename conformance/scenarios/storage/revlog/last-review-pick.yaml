@@ -57,65 +57,65 @@ steps:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600001, 3, -600, -60, 0, 0), (1769853600001, 3, 10, 1, 2500, 1), (1771149600001, 2, 15, 10, 2350, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600001, 3, -600, -60, 0, 0), (1769853600001, 3, 10, 1, 2500, 1), (1771149600001, 2, 15, 10, 2350, 1)) AS v"
   # c2
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0,\"lrt\":1771149600}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600002, 3, -600, -60, 0, 0), (1769853600002, 3, 10, 1, 2500, 1), (1771149600002, 2, 15, 10, 2350, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600002, 3, -600, -60, 0, 0), (1769853600002, 3, 10, 1, 2500, 1), (1771149600002, 2, 15, 10, 2350, 1)) AS v"
   # c3
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600003, 3, -600, -60, 0, 0), (1770285600003, 3, 10, 1, 2500, 1), (1771581600003, 0, 10, 10, 2500, 4), (1771927200003, 0, 12, 10, 2500, 5), (1772013600003, 0, 0, 12, 0, 4), (1772186400003, 0, 12, 12, 2500, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600003, 3, -600, -60, 0, 0), (1770285600003, 3, 10, 1, 2500, 1), (1771581600003, 0, 10, 10, 2500, 4), (1771927200003, 0, 12, 10, 2500, 5), (1772013600003, 0, 0, 12, 0, 4), (1772186400003, 0, 12, 12, 2500, 1)) AS v"
   # c4
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0,\"lrt\":1770285600}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600004, 3, -600, -60, 0, 0), (1770285600004, 3, 10, 1, 2500, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600004, 3, -600, -60, 0, 0), (1770285600004, 3, 10, 1, 2500, 1)) AS v"
   # c5
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600005, 3, -600, -60, 0, 0), (1770285600005, 3, 10, 1, 2500, 1), (1772013600005, 3, 0, 0, 0, 3)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600005, 3, -600, -60, 0, 0), (1770285600005, 3, 10, 1, 2500, 1), (1772013600005, 3, 0, 0, 0, 3)) AS v"
   # c6
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600006, 3, -600, -60, 0, 0), (1770285600006, 3, 10, 1, 2500, 1), (1771754400006, 3, 12, 10, 2500, 3)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600006, 3, -600, -60, 0, 0), (1770285600006, 3, 10, 1, 2500, 1), (1771754400006, 3, 12, 10, 2500, 3)) AS v"
   # c7
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0,\"lrt\":1771754400}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600007, 3, -600, -60, 0, 0), (1770285600007, 3, 10, 1, 2500, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600007, 3, -600, -60, 0, 0), (1770285600007, 3, 10, 1, 2500, 1)) AS v"
   # c8
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600008, 3, -600, -60, 0, 0), (1770285600008, 3, 10, 1, 2500, 1), (1771408800008, 1, 10, 10, 2500, 4)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600008, 3, -600, -60, 0, 0), (1770285600008, 3, 10, 1, 2500, 1), (1771408800008, 1, 10, 10, 2500, 4)) AS v"
   # c9
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0,\"lrt\":1771408800}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600009, 3, -600, -60, 0, 0), (1770285600009, 3, 10, 1, 2500, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768989600009, 3, -600, -60, 0, 0), (1770285600009, 3, 10, 1, 2500, 1)) AS v"
   # c10
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 9)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0}"]
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 9), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1770717600010, 0, 10, 0, 2500, 4), (1771581600010, 0, 10, 10, 2500, 1)) AS v"
+      sql: "INSERT INTO revlog SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 9), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1770717600010, 0, 10, 0, 2500, 4), (1771581600010, 0, 10, 10, 2500, 1)) AS v"
   # c11
   - db_exec:
       sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 10)"
       params: [2, 2, -5, 15, 2350, 3, 0, 0, "{\"s\":10.0,\"d\":5.0}"]
-  - observe: ["next_states(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9, #c10, #c11)"]
+  - observe: ["next_states(#c1, #c3, #c5, #c7, #c9, #c11, #c2, #c4, #c6, #c8, #c10)"]
   # Nothing was written: no card gained an lrt.
   - db_exec: {sql: "SELECT data FROM cards ORDER BY id"}

@@ -35,10 +35,10 @@
                   "shapes": [
                     {
                       "props": [
-                        ["left", "1."],
-                        ["top", "1"],
-                        ["width", "1.0000"],
-                        ["height", "1E0"]
+                        ["left", "1E0"],
+                        ["top", "1."],
+                        ["width", "1"],
+                        ["height", "1.0000"]
                       ],
                       "shape": "rect"
                     }
@@ -245,10 +245,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "6ec0471caa7ac410187b9a65e4f507f035131593c035c72ebe301727f32db313",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "render/image-occlusion/format/parse-numbers",
-  "scenario_sha256": "d6508741614a70f4f6b5578c32c9900f2c2ae630d2799f28ec3301c4a9ff14fd",
+  "scenario_sha256": "9657cece226970fe59c3011f35ca28443e071251c06f7b221b3f316dc6a2c238",
   "tz": "UTC"
 }

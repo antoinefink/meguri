@@ -34,10 +34,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "63d7ee8c9340e3db90caf514e2a5cf52640d1eb70a16e0a8f09d231f6ffcc50f",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "editor/cloze/output/read-back",
-  "scenario_sha256": "ea6a001f2e46525cf937bd47a352f55532464f9476e7cfb6c8155ba779a7a3ba",
+  "scenario_sha256": "8cb99d8600f4c376156ba76a51189c1d5f725bc973f95ed52b2636bbb43aeae7",
   "tz": "UTC"
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Self-tests for the private collection vault's jobs and hook (U15, R1938–
-# R1943): `tools/mg private status|copy|suite|scan-outputs` and
+# R1943): `tools/mg private status|copy|suite|scan-outputs|pins` and
 # tools/hooks/pre-commit. Docker is faked: the fake runs the private
 # service's command here, with /vault, /work and meguri-cli mapped, and a
 # fake meguri-cli whose "collection" is a candidates file (meguri-cli itself
@@ -211,6 +211,12 @@ no_private_text() { # <file>...: none holds a string of the made-up collection
   [ "$(field .details.token_set.tokens)" -eq 2 ]
   [ "$(field .details.token_set.in_repository)" -eq 1 ]
   [ ! -e "$SB/build/private/$run/candidates.jsonl" ]
+  # From now on a missing set blocks commits, and the set names its baseline.
+  [ "$(git -C "$SB" config --get meguri.privateTokenSet)" = required ]
+  [ "$(jq -r .head "$SB/build/private/tokens/baseline.json")" = "$(git -C "$SB" rev-parse HEAD)" ]
+  [ "$(jq -r .by "$SB/build/private/tokens/baseline.json")" = build ]
+  [ "$(jq -r .sha256 "$SB/build/private/tokens/baseline.json")" = "$(sha256sum "$tokens" | cut -c1-64)" ]
+  no_private_text "$SB/build/private/tokens/baseline.json"
   # The hooks that check commits and merges against the token set.
   grep -q 'tools/hooks/pre-commit' "$SB/.git/hooks/pre-commit"
   grep -q 'tools/hooks/pre-merge-commit' "$SB/.git/hooks/pre-merge-commit"
@@ -378,6 +384,151 @@ no_private_text() { # <file>...: none holds a string of the made-up collection
   git -C "$BATS_TEST_TMPDIR/wt" add x.txt
   run --separate-stderr git -C "$BATS_TEST_TMPDIR/wt" commit -qm "in a worktree"
   [ "$status" -eq 0 ]
+}
+
+@test "pre-commit hook: where a token set is expected, a missing, empty or unreadable one blocks the commit, in every worktree" {
+  mg hooks install
+  git -C "$SB" worktree add -q "$BATS_TEST_TMPDIR/wt" -b other
+  local set="$SB/build/private/tokens/tokens.txt" n=0 where
+  try_commit() { # <checkout>: stages one harmless new file and commits it
+    n=$((n + 1))
+    printf 'harmless %s\n' "$n" >"$1/harmless-$n.txt"
+    git -C "$1" add "harmless-$n.txt"
+    run --separate-stderr git -C "$1" commit -qm "harmless $n"
+  }
+  [ -z "$(git -C "$SB" config --get meguri.privateTokenSet)" ]
+  # A machine without the collection: nothing to check against.
+  for where in "$SB" "$BATS_TEST_TMPDIR/wt"; do
+    try_commit "$where"
+    [ "$status" -eq 0 ]
+  done
+  # What `private copy` records: from then on a missing set is a refusal.
+  git -C "$SB" config meguri.privateTokenSet required
+  for where in "$SB" "$BATS_TEST_TMPDIR/wt"; do
+    try_commit "$where"
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"expected to have a private token set"* ]]
+    [[ "$stderr" == *"$set"* ]]
+    git -C "$where" reset -q
+  done
+  # The collection's folder in the main checkout means the same, unrecorded.
+  git -C "$SB" config --unset meguri.privateTokenSet
+  mkdir -p "$SB/local-data/anki"
+  try_commit "$BATS_TEST_TMPDIR/wt"
+  [ "$status" -ne 0 ]
+  git -C "$BATS_TEST_TMPDIR/wt" reset -q
+  rmdir "$SB/local-data/anki" "$SB/local-data"
+  # A set that is there but empty, unreadable or no regular file: refused
+  # even where none is expected.
+  mkdir -p "$(dirname "$set")"
+  : >"$set"
+  try_commit "$BATS_TEST_TMPDIR/wt"
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"not a readable, non-empty regular file"* ]]
+  git -C "$BATS_TEST_TMPDIR/wt" reset -q
+  printf 'quokkasprung\n' >"$set"
+  if [ "$(id -u)" -ne 0 ]; then # root reads through any mode
+    chmod 000 "$set"
+    try_commit "$SB"
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"not a readable, non-empty regular file"* ]]
+    git -C "$SB" reset -q
+    mg private scan-outputs tools/mg
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = token-set-unreadable ]
+    chmod 600 "$set"
+  fi
+  mv "$set" "$set.real"
+  ln -s "$set.real" "$set"
+  try_commit "$SB"
+  [ "$status" -ne 0 ]
+  git -C "$SB" reset -q
+  rm "$set"
+  mv "$set.real" "$set"
+  # Installing the hooks where a set exists records that one is expected,
+  # and a worktree's status reports the main checkout's set.
+  mg hooks install
+  [ "$(git -C "$SB" config --get meguri.privateTokenSet)" = required ]
+  run --separate-stderr "$BATS_TEST_TMPDIR/wt/tools/mg" private status
+  [ "$(jq -c '.details.token_set_now | [.path, .present, .readable, .tokens, .required]' "${lines[${#lines[@]} - 1]}")" = "[\"$set\",true,true,1,true]" ]
+  # Readable again: both checkouts commit, and both are scanned.
+  for where in "$SB" "$BATS_TEST_TMPDIR/wt"; do
+    try_commit "$where"
+    [ "$status" -eq 0 ]
+    printf 'Quokkasprung\n' >"$where/leak.txt"
+    git -C "$where" add leak.txt
+    run --separate-stderr git -C "$where" commit -qm leak
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"leak.txt (line 1)"* ]]
+    ! grep -qi quokka <<<"$stderr"
+    git -C "$where" reset -q
+  done
+}
+
+@test "a reviewed public file edited since its review: the same answer in a new and an old worktree, marked as stale, and listed by private pins" {
+  mg hooks install
+  # A made-up reviewed file and its pin, committed like a real admission.
+  mkdir -p "$SB/docs" "$SB/build/private/tokens"
+  printf 'Quokkasprung was reviewed as public\nsecond line\n' >"$SB/docs/reviewed.md"
+  local pin
+  pin="$(sha256sum "$SB/docs/reviewed.md" | cut -c1-64)"
+  python3 - "$SB/tools/scripts/private-scan/private_scan.py" "$pin" <<'PY'
+import sys
+path, pin = sys.argv[1:]
+source = open(path, encoding="utf-8").read()
+marker = "PUBLIC_ARTIFACTS = {\n"
+assert source.count(marker) == 1
+open(path, "w", encoding="utf-8").write(source.replace(marker, marker + "    'docs/reviewed.md': '%s',\n" % pin))
+PY
+  git -C "$SB" branch old-base
+  printf 'quokkasprung\n' >"$SB/build/private/tokens/tokens.txt"
+  git -C "$SB" add -A
+  git -C "$SB" commit -qm "admit the reviewed file"
+  # (The sandbox's own tools/ files have pins too; only this one is asked.)
+  stale() { jq -c '.stale | index("docs/reviewed.md") != null' "$SB/build/mg/private/$(field .run_id)/pins.json"; }
+  mg private pins
+  [ "$(stale)" = false ]
+  [ "$(field .details.pins.commit)" = "$(git -C "$SB" rev-parse HEAD)" ]
+  mg private scan-outputs docs/reviewed.md
+  [ "$(field .status)" = pass ]
+  # An ordinary edit to another line passes the hook and leaves the pin stale.
+  printf 'third line\n' >>"$SB/docs/reviewed.md"
+  git -C "$SB" add docs/reviewed.md
+  git -C "$SB" commit -qm "edit another line"
+  mg private pins
+  [ "$(field .status)" = warn ]
+  [ "$(stale)" = true ]
+  # Whole-file scan, a worktree at the new head and one at the old base all
+  # flag the reviewed line and say why; none passes silently.
+  mg private scan-outputs docs/reviewed.md
+  [ "$(field .status)" = fail ]
+  [ "$(jq -c '.files[0].stale_public_artifact' "$SB/build/mg/private/$(field .run_id)/scan.json")" = true ]
+  git -C "$SB" worktree add -q "$BATS_TEST_TMPDIR/new" -b new-base
+  git -C "$SB" worktree add -q "$BATS_TEST_TMPDIR/old" old-base
+  run --separate-stderr git -C "$BATS_TEST_TMPDIR/old" merge -q --no-edit --no-ff new-base
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"docs/reviewed.md (line 1) [reviewed public file whose bytes changed since its review]"* ]]
+  [[ "$stderr" == *"one-answer-in-every-checkout"* ]]
+  ! grep -qi quokka <<<"$stderr"
+  run --separate-stderr "$BATS_TEST_TMPDIR/new/tools/mg" private scan-outputs docs/reviewed.md
+  [ "$(jq -r .status "${lines[${#lines[@]} - 1]}")" = fail ]
+  # The documented repair: the owner drops what the head already publishes
+  # from the one shared set; the old worktree's merge then passes unchanged.
+  git -C "$BATS_TEST_TMPDIR/old" merge --abort 2>/dev/null || git -C "$BATS_TEST_TMPDIR/old" reset -q --hard
+  chmod 700 "$SB/build/private"
+  chmod 600 "$SB/build/private/tokens/tokens.txt"
+  # A random word no file of the sandbox holds, so the set is not emptied.
+  printf 'madeup%s\n' "$(LC_ALL=C tr -dc 'a-z' </dev/urandom | head -c 10)" >>"$SB/build/private/tokens/tokens.txt"
+  mg private refresh-public --head "$(git -C "$SB" rev-parse HEAD)"
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.refresh_public.removed)" -eq 1 ]
+  [ "$(jq -r .head "$SB/build/private/tokens/baseline.json")" = "$(git -C "$SB" rev-parse HEAD)" ]
+  [ "$(jq -r .by "$SB/build/private/tokens/baseline.json")" = refresh-public ]
+  [ "$(jq -r .sha256 "$SB/build/private/tokens/baseline.json")" = "$(sha256sum "$SB/build/private/tokens/tokens.txt" | cut -c1-64)" ]
+  run --separate-stderr git -C "$BATS_TEST_TMPDIR/old" merge -q --no-edit --no-ff new-base
+  [ "$status" -eq 0 ]
+  mg private scan-outputs docs/reviewed.md
+  [ "$(field .status)" = pass ]
 }
 
 @test "pre-commit hook: a merge's conflict resolution and an automatic merge are scanned too" {

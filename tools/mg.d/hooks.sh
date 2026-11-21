@@ -82,6 +82,47 @@ mg_hooks_install() {
   for name in $MG_HOOK_NAMES; do
     mg__hook_install_one "$MG_HOOKS_DIR" "$name" || return 1
   done
+  # A token set seen here (stat only) is expected from now on: the hooks
+  # then refuse a commit from a session that cannot see it, instead of
+  # passing unscanned (tools/hooks/pre-commit). `worktree new` runs this, so
+  # a set built before the key existed gets it.
+  if [ -f "$(dirname "$common")/build/private/tokens/tokens.txt" ] &&
+     ! git -C "$MG_ROOT" config meguri.privateTokenSet required; then
+    MG_HOOKS_FAILURE=token-set-key
+    MG_HOOKS_MESSAGE="a private token set exists but meguri.privateTokenSet could not be set in the repository config"
+    return 1
+  fi
+}
+
+# mg_hooks_check: whether every shim is installed as mg_hooks_install would
+# write it and this checkout has the hook each one runs. Read-only. Returns
+# 1 with MG_HOOKS_MESSAGE set to what is wrong; MG_HOOKS_DIR is the hooks
+# directory.
+mg_hooks_check() {
+  MG_HOOKS_MESSAGE="" MG_HOOKS_DIR=""
+  local hooks_path common name wrong=""
+  # Set to an empty value still overrides the hooks directory.
+  if hooks_path="$(git -C "$MG_ROOT" config --get core.hooksPath)"; then
+    MG_HOOKS_MESSAGE="core.hooksPath is set ($hooks_path), so git does not run the installed shims"
+    return 1
+  fi
+  if ! common="$(git -C "$MG_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+    MG_HOOKS_MESSAGE="$MG_ROOT is not a git checkout"
+    return 1
+  fi
+  MG_HOOKS_DIR="$common/hooks"
+  for name in $MG_HOOK_NAMES; do
+    if [ ! -f "$MG_HOOKS_DIR/$name" ] || [ ! -x "$MG_HOOKS_DIR/$name" ] ||
+       [ "$(cat "$MG_HOOKS_DIR/$name" 2>/dev/null)" != "$(mg__hook_shim "$name")" ]; then
+      wrong="$wrong $name (shim)"
+    elif [ ! -f "$MG_ROOT/tools/hooks/$name" ] || [ ! -x "$MG_ROOT/tools/hooks/$name" ]; then
+      wrong="$wrong $name (tools/hooks/$name of this checkout)"
+    fi
+  done
+  if [ -n "$wrong" ]; then
+    MG_HOOKS_MESSAGE="missing, not executable or not the current Meguri shim:$wrong"
+    return 1
+  fi
 }
 
 mg_hooks() {

@@ -14,7 +14,7 @@ steps:
   - ensure_io_notetype: {}
   - add_note:
       notetype: Image Occlusion
-      fields: ["{{c1::image-occlusion:rect:left=.1:top=.1:width=.2:height=.2:oi=1}}", "<img src=\"pic.png\">", "", "", ""]
+      fields: ["{{c1::image-occlusion:rect:left=.15:top=.12:width=.2:height=.2:oi=1}}", "<img src=\"pic.png\">", "", "", ""]
   - update_notetype:
       notetype: Image Occlusion
       edits:

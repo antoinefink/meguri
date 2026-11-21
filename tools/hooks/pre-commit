@@ -5,8 +5,13 @@
 # for the merges `git merge` commits itself.
 #
 # The token set is built from the user's collection by `tools/mg private
-# copy` and lives in the main checkout's build/private/tokens/ (a checkout's
-# own build/private/tokens/ counts too). Without one the hook does nothing.
+# copy` and lives in the main checkout's build/private/tokens/, the one set
+# every worktree reads (a checkout's own build/private/tokens/ counts too).
+# A clone of a machine without the collection has none and the hook does
+# nothing there. Where one is expected (`tools/mg private copy` set
+# meguri.privateTokenSet=required in the repository's config, or the main
+# checkout or this one holds local-data/anki) a missing, empty or unreadable
+# set blocks the commit: an unscanned commit is not a clean one.
 # With one, the lines this commit adds (binary files whole) must hold none of
 # its tokens; tools/scripts/private-scan/private_scan.py scans them. The hook
 # names files and line numbers, never a token. A merge commit is scanned
@@ -26,11 +31,26 @@ top="$(git rev-parse --show-toplevel)" || exit 1
 common="$(git rev-parse --path-format=absolute --git-common-dir)" || exit 1
 main="$(dirname "$common")"
 
+# Whether this machine is expected to hold a token set. -e only stats the
+# folder; nothing under local-data/ is opened.
+required=false
+[ "$(git config --get meguri.privateTokenSet 2>/dev/null)" = required ] && required=true
+for dir in "$main" "$top"; do
+  { [ -e "$dir/local-data/anki" ] || [ -L "$dir/local-data/anki" ]; } && required=true
+done
+
 args=()
 for dir in "$main" "$top"; do
   f="$dir/build/private/tokens/tokens.txt"
-  [ -f "$f" ] || continue
   [ "${#args[@]}" -gt 0 ] && [ "${args[1]}" = "$f" ] && continue
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    { [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] && [ -s "$f" ]; } ||
+      reject "the private token set $f is not a readable, non-empty regular file, so the staged lines cannot be scanned (R1940); tools/mg doctor (private-scan) says what is wrong"
+  elif [ "$dir" != "$main" ] || [ "$required" != true ]; then
+    continue
+  else
+    reject "this repository is expected to have a private token set, but $f is missing or cannot be seen from this session, so the staged lines cannot be scanned (R1940); build it with tools/mg private copy in the main checkout, or commit from a session that can read it (tools/mg doctor, private-scan)"
+  fi
   args[${#args[@]}]=--tokens
   args[${#args[@]}]="$f"
 done
@@ -48,8 +68,12 @@ case "$rc" in
   1)
     {
       echo "pre-commit: staged lines hold a word, deck name, tag or media name from the user's private collection (R1940):"
-      jq -r '.files[] | "  " + .path + (if .binary then " (binary file)" else " (line " + (.lines | map(tostring) | join(", ")) + ")" end)' <<<"$out"
+      jq -r '.files[] | "  " + .path + (if .binary then " (binary file)" else " (line " + (.lines | map(tostring) | join(", ")) + ")" end) + (if .stale_public_artifact then " [reviewed public file whose bytes changed since its review]" else "" end)' <<<"$out"
       echo "Remove that text: committed results from the private collection hold only aggregates and logical ids."
+      if jq -e 'any(.files[]; .stale_public_artifact)' <<<"$out" >/dev/null; then
+        echo "A file marked [reviewed public file ...] was admitted whole by a public review (PUBLIC_ARTIFACTS) and edited since, so its"
+        echo "old lines count again when a commit or merge adds them here: docs/process/provenance.md#one-answer-in-every-checkout."
+      fi
       echo "The hook never names the token. Check again with: tools/mg private scan-outputs"
     } >&2
     exit 1
