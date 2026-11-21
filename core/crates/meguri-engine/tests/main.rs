@@ -82,6 +82,8 @@ pub mod name_index;
 pub mod note_patch;
 #[path = "notetype_field_rename.rs"]
 pub mod notetype_field_rename;
+#[path = "notetype_reads.rs"]
+pub mod notetype_reads;
 #[path = "notetype_records.rs"]
 pub mod notetype_records;
 #[path = "notetype_removal.rs"]

@@ -366,6 +366,19 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
 
     public static let validateSchedulingPreferences = BridgeCall("validate_scheduling_preferences")
 
+    public static let notetypeList = BridgeCall("notetype_list")
+    public static let startNotetypeNoteCounts = BridgeCall("start_notetype_note_counts")
+    public static let notetypeNoteCountsJobResult = BridgeCall("NotetypeNoteCountsJob.result")
+    public static let startNotetypeFieldContentCounts = BridgeCall("start_notetype_field_content_counts")
+    public static let notetypeFieldContentCountsJobResult = BridgeCall("NotetypeFieldContentCountsJob.result")
+    public static let startNotetypeDraftSummary = BridgeCall("start_notetype_draft_summary")
+    public static let notetypeDraftSummaryJobResult = BridgeCall("NotetypeDraftSummaryJob.result")
+    public static let startNotetypeNotesWithoutCard = BridgeCall("start_notetype_notes_without_card")
+    public static let notetypeNotesWithoutCardJobResult = BridgeCall("NotetypeNotesWithoutCardJob.result")
+    public static let startNotetypeRemovalCounts = BridgeCall("start_notetype_removal_counts")
+    public static let notetypeRemovalCountsJobResult = BridgeCall("NotetypeRemovalCountsJob.result")
+    public static let notetypeNearFieldName = BridgeCall("notetype_near_field_name")
+
     public static let startCreateBackup = BridgeCall("start_create_backup")
     public static let createBackupResultOutcome = BridgeCall("CreateBackupResult.outcome")
     public static let startRestoreBackup = BridgeCall("start_restore_backup")
@@ -669,5 +682,6 @@ public struct BridgeCall: Sendable, Hashable, CustomStringConvertible {
         tryPendingReviewRestore, deckRenameJobResult, deckMoveJobResult, deckCollapseJobResult, startUndo, startRedo, startAddNotes, noteAdditionJobResult,
         parseDueDays, startSchedOp, schedOpJobResult, startBuriedKinds, buriedKindsJobResult,
         deckOptionsEditorSnapshot, deckOptionsEditorEdit, deckOptionsEditorValidate, parseOptionSteps, formatOptionSteps, startDeckOptions, startSaveDeckOptions, startOptionIgnoreCount, startSchedulingPreferences, startSaveSchedulingPreferences, deckOptionsReadJobResult, deckOptionsSaveJobResult, optionIgnoreCountJobResult, schedulingPreferencesJobResult, schedulingPreferencesSaveJobResult, validateSchedulingPreferences,
+        notetypeList, startNotetypeNoteCounts, notetypeNoteCountsJobResult, startNotetypeFieldContentCounts, notetypeFieldContentCountsJobResult, startNotetypeDraftSummary, notetypeDraftSummaryJobResult, startNotetypeNotesWithoutCard, notetypeNotesWithoutCardJobResult, startNotetypeRemovalCounts, notetypeRemovalCountsJobResult, notetypeNearFieldName,
     ]
 }

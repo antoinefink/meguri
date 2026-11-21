@@ -318,6 +318,35 @@ pub trait ReadRows: sealed::Connected {
             })? as u64)
     }
 
+    /// The number of notes of each `mid` that has notes, by `mid`
+    /// (`notetypes/editor-actions` A2's note counts). A `mid` may name no
+    /// note type; the caller keeps only those that do.
+    fn note_counts_by_notetype(&self) -> Result<Vec<(NotetypeId, u64)>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT mid, count(*) FROM notes GROUP BY mid ORDER BY mid")?;
+        let rows = statement.query_map([], |row| Ok((NotetypeId(row.get(0)?), row.get::<_, i64>(1)?)))?;
+        rows.map(|row| {
+            let (id, count) = row?;
+            let count = u64::try_from(count).map_err(|_| StorageError::Io {
+                detail: "invalid note count".into(),
+            })?;
+            Ok((id, count))
+        })
+        .collect()
+    }
+
+    /// Every note type's id and stored name, by name under the `unicase`
+    /// collation of the `notetypes.name` column, ties by ascending id
+    /// (`notetypes/editor-actions` A2's ordered list).
+    fn notetype_names_by_name(&self) -> Result<Vec<(NotetypeId, String)>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT id, name FROM notetypes ORDER BY name COLLATE unicase, id")?;
+        let rows = statement.query_map([], |row| Ok((NotetypeId(row.get(0)?), row.get::<_, String>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Notes of one type, in id order, for cancellable regeneration.
     fn notetype_notes_after(
         &self,
@@ -325,14 +354,29 @@ pub trait ReadRows: sealed::Connected {
         after: Option<NoteId>,
         limit: usize,
     ) -> Result<Vec<Note>, StorageError> {
-        let mut statement = self.connection().prepare_cached(
-            "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes WHERE mid = ?1 AND id > ?2 ORDER BY id LIMIT ?3")?;
-        let found = statement.query_map(
-            (notetype.0, after.map_or(i64::MIN, |id| id.0), limit_value(limit)),
-            |row| rows::row_image(row, Table::Notes),
-        )?;
-        found
-            .map(|cells| Note::from_cells(&cells?).map_err(StorageError::from))
+        // The first page has no id bound, so a note whose id is i64::MIN is
+        // read like any other.
+        let images: Vec<RowImage> = match after {
+            None => self
+                .connection()
+                .prepare_cached(
+                    "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes \
+                     WHERE mid = ?1 ORDER BY id LIMIT ?2",
+                )?
+                .query_map((notetype.0, limit_value(limit)), |row| rows::row_image(row, Table::Notes))?
+                .collect::<rusqlite::Result<_>>()?,
+            Some(after) => self
+                .connection()
+                .prepare_cached(
+                    "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes \
+                     WHERE mid = ?1 AND id > ?2 ORDER BY id LIMIT ?3",
+                )?
+                .query_map((notetype.0, after.0, limit_value(limit)), |row| rows::row_image(row, Table::Notes))?
+                .collect::<rusqlite::Result<_>>()?,
+        };
+        images
+            .iter()
+            .map(|cells| Note::from_cells(cells).map_err(StorageError::from))
             .collect()
     }
 
@@ -527,14 +571,31 @@ pub trait ReadRows: sealed::Connected {
         notetype: NotetypeId,
         after: Option<CardId>,
     ) -> Result<Vec<(CardId, u16)>, StorageError> {
-        let mut statement = self.connection().prepare_cached(
-            "SELECT cards.id, cards.ord FROM notes JOIN cards ON cards.nid=notes.id \
-             WHERE notes.mid=?1 AND (?2 IS NULL OR cards.id>?2) ORDER BY cards.id LIMIT 1000",
-        )?;
-        let rows = statement.query_map((notetype.0, after.map(|id| id.0)), |row| {
-            Ok((CardId(row.get(0)?), row.get::<_, u16>(1)?))
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        // Cards in id order, each joined to its note: a page reads from the
+        // cursor on (an `id > ?` range), so a whole pass reads each card
+        // once rather than from the start on every page. A pass reads the
+        // whole cards table once even for a small type (about 30 ms at
+        // 150k), never more.
+        let read = |row: &rusqlite::Row<'_>| Ok((CardId(row.get(0)?), row.get::<_, u16>(1)?));
+        let rows = match after {
+            None => self
+                .connection()
+                .prepare_cached(
+                    "SELECT cards.id, cards.ord FROM cards CROSS JOIN notes ON cards.nid=notes.id \
+                     WHERE notes.mid=?1 ORDER BY cards.id LIMIT 1000",
+                )?
+                .query_map((notetype.0,), read)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            Some(after) => self
+                .connection()
+                .prepare_cached(
+                    "SELECT cards.id, cards.ord FROM cards CROSS JOIN notes ON cards.nid=notes.id \
+                     WHERE notes.mid=?1 AND cards.id>?2 ORDER BY cards.id LIMIT 1000",
+                )?
+                .query_map((notetype.0, after.0), read)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+        };
+        Ok(rows)
     }
 
     /// A config row as stored.

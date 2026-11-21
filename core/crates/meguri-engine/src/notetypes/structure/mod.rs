@@ -341,6 +341,21 @@ pub(crate) fn write_spec(spec: &OpSpec, reasons: &[SchemaReason], touches_notes:
     }
 }
 
+/// `notetypes/draft-save` D2's `draft_summary(draft)`: on one snapshot,
+/// writing nothing, cancellable and with the planner's progress (S10).
+/// Its counts are the save's own pass on the same draft (S1.2), so the
+/// sheet confirms exactly what the save counts again.
+pub fn draft_summary(
+    collection: &Collection,
+    draft: &StructureDraft,
+    cancel: &CancelToken,
+    progress: &ProgressSink,
+) -> Result<DraftSummary, EngineError> {
+    let lease = collection.reader(ReaderRole::Query)?;
+    let snapshot = lease.snapshot()?;
+    plan::summarize_draft(&*snapshot, draft, cancel, progress)
+}
+
 /// The draft apply op: plans on a maintenance snapshot (cancellable, with
 /// progress), takes the safety backup of a schema-classified save, then
 /// writes in one transaction and one "Update Note Type" step. A `Stale`

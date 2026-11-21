@@ -22,6 +22,7 @@
 
 pub mod change;
 pub mod clone;
+pub mod counts;
 pub mod names;
 pub mod read;
 pub mod remove;

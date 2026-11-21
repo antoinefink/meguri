@@ -40,6 +40,7 @@ pub mod media;
 pub mod mutations;
 pub mod notes;
 pub mod notetype_change;
+pub mod notetype_reads;
 pub mod notetype_structure;
 pub mod notetypes;
 #[cfg(feature = "test-hooks")]
