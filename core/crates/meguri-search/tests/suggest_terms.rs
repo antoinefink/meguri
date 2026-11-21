@@ -356,8 +356,9 @@ mod accepted {
     // Decks: look-alikes of `a_b*` and of `a` U+00A0 `b` (written by id).
     const DECKS: [(i64, &str); 5] = [(10, "a_b*"), (11, "axb"), (12, "a\u{a0}b"), (13, "a\u{a0}b::kid"), (14, "axbx")];
     const TYPES: [(i64, &str); 3] = [(100, "N_t*"), (101, "Nxtx"), (102, "N\u{a0}t")];
-    // Tags written exactly, with look-alikes: `t_g` beside `txg`.
-    const TAGS: [&str; 3] = ["t_g", "txg", "t_g::kid"];
+    // Tags written exactly, with look-alikes: `t_g` beside `txg`; and one
+    // J3.2 writes as `tag:re:` (U+00A0), on note 2 with `txg`.
+    const TAGS: [&str; 4] = ["t_g", "txg", "t_g::kid", "t\u{a0}s"];
 
     struct Fx {
         _dir: tempfile::TempDir,
@@ -400,7 +401,7 @@ mod accepted {
         }
         // One note per note type and tag, one card per deck.
         for (k, (mid, _)) in TYPES.iter().enumerate() {
-            let tags = format!(" {} ", TAGS[k]);
+            let tags = if k == 1 { format!(" {} {} ", TAGS[1], TAGS[3]) } else { format!(" {} ", TAGS[k]) };
             exec(
                 &db,
                 "INSERT INTO notes (id,guid,mid,mod,usn,tags,flds,sfld,csum,flags,data) VALUES (?1,?1,?2,0,0,?3,'f','f',0,0,'')",
@@ -539,5 +540,10 @@ mod accepted {
             let text = accepted(&names, "tag:t", tag);
             assert_eq!(fx.ids(&text, SearchMode::Notes), notes.iter().copied().collect(), "{text}");
         }
+        // The other names (J10): the rows N2 gives for the inserted
+        // `tag:re:` text, which holds the tag (note 2) and nothing else.
+        let text = accepted(&names, "tag:t", "t\u{a0}s");
+        assert!(text.starts_with("\"tag:re:"), "{text}");
+        assert_eq!(fx.ids(&text, SearchMode::Notes), BTreeSet::from([2]), "{text}");
     }
 }
