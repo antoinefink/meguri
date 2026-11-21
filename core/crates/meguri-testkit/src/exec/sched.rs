@@ -194,6 +194,34 @@ fn fuzz_table(session: &mut Session<'_>, request: &ObservationRequest) -> Result
     Ok(json!({"intervals":intervals,"rows":fuzz_table_rows(&pairs,&intervals,maximum)}))
 }
 
+/// Today and the next day boundary from the scenario clock, computed as the
+/// day query computes them but with no write: no unbury and no timing key
+/// stored (`sched/day-clock` D14.2). Browse rows and sort keys read the day
+/// this way, as the oracle's Browse does (browser-ops B1, B3).
+pub(super) fn day_without_writes(session: &Session<'_>) -> Result<meguri_sched::timing::SchedDay, ExecError> {
+    use meguri_sched::timing::{self, DayInputs};
+    let core = |e: StorageError| ExecError::new("core_error", e.to_string());
+    let collection = session
+        .storage
+        .collection()
+        .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
+    let reader = collection.reader()?;
+    let stored = |key: &str| -> Result<Option<i128>, ExecError> {
+        Ok(match reader.config_value(key).map_err(core)? {
+            Some(meguri_storage::ConfigValue::Integer(value)) => Some(value),
+            _ => None,
+        })
+    };
+    let now = session.clock.now_secs();
+    Ok(timing::sched_day(&DayInputs {
+        crt: reader.col().map_err(core)?.created.0,
+        creation_offset: timing::creation_offset(stored("creationOffset")?),
+        offset: session.clock.utc_offset_at(now * 1000),
+        rollover_hour: timing::rollover_hour(stored("rollover")?).unwrap_or(timing::DEFAULT_ROLLOVER_HOUR),
+        now,
+    }))
+}
+
 /// One day query now (`sched/day-clock` D5 to D7) on the session's
 /// collection: the engine's `checkRollover()` without its events, which no
 /// observation reads.

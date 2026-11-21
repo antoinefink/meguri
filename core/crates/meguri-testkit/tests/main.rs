@@ -99,6 +99,8 @@ pub mod scenario_format;
 pub mod sched_ops_conformance;
 #[path = "search_adapter.rs"]
 pub mod search_adapter;
+#[path = "search_no_writes.rs"]
+pub mod search_no_writes;
 #[path = "session_conformance.rs"]
 pub mod session_conformance;
 #[path = "stock_render_handoff.rs"]

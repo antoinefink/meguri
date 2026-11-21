@@ -1,10 +1,13 @@
 //! The search area's observation kinds (`specs/conformance/search-ops.md`):
 //! `search` parses each query, builds its plan for the mode and runs the
-//! plan's statement on the session's collection; `canonical_search` writes
+//! plan's statement on the session's collection, sorted when the request
+//! has an `order` (`browser-ops.md` B1, B2); `canonical_search` writes
 //! canonical texts and never touches the collection.
 
+use meguri_search::config::SortDirection;
 use meguri_search::{
-    BuildError, ContextValue, FoldMode, Param, Plan, SearchContext, SearchError, SearchMode, SearchNotetypes, parse,
+    BuildError, ContextReads, ContextValue, FoldMode, Param, Plan, SearchContext, SearchError, SearchMode,
+    SearchNotetypes, Sort, SortError, SortedQuery, parse,
 };
 use meguri_storage::raw::SqlValue;
 use meguri_storage::{ConfigValue, ReadRows};
@@ -314,12 +317,10 @@ fn notetypes(session: &Session<'_>) -> Result<SearchNotetypes, ExecError> {
     SearchNotetypes::read(&*collection.reader()?).map_err(|e| ExecError::new("core_error", e.to_string()))
 }
 
-/// S1: one output per request.
+/// S1: one output per request; a request with `order` is a sorted search
+/// (browser-ops.md B1, B2).
 fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
     let requests = SearchRequest::from_list(list(request)?).map_err(|e| invalid(e.to_string()))?;
-    if requests.iter().any(|request| request.order.is_some()) {
-        return Err(ExecError::new("unsupported_observation", "sorted search is pending"));
-    }
     let mut context = context(session)?;
     let notetypes = notetypes(session)?;
     let mut day_supplied = false;
@@ -336,27 +337,92 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
                 continue;
             }
         };
-        let mut plan = match Plan::build(&query, mode, &context, &notetypes) {
-            Ok(plan) => plan,
-            Err(BuildError::Search(error)) => {
-                outputs.push(error_value(&error));
+        // B1: a parse error first, then `unsortable`, then the run errors.
+        let sort = match &request.order {
+            None => None,
+            Some(order) => {
+                let direction = if order.reverse == Some(true) {
+                    SortDirection::Descending
+                } else {
+                    SortDirection::Ascending
+                };
+                match Sort::new(mode, &order.column, direction) {
+                    Ok(sort) => Some(sort),
+                    Err(_) => {
+                        outputs.push(json!({"error": "unsortable"}));
+                        continue;
+                    }
+                }
+            }
+        };
+        let build = |context: &SearchContext| -> Result<Result<Built, Value>, ExecError> {
+            let plan = match Plan::build(&query, mode, context, &notetypes) {
+                Ok(plan) => plan,
+                Err(BuildError::Search(error)) => return Ok(Err(error_value(&error))),
+            };
+            let sorted = match &sort {
+                None => None,
+                Some(sort) => Some(SortedQuery::for_plan(&plan, sort, context).map_err(|error| match error {
+                    SortError::FieldColumnNotYetSupported { name } => ExecError::new(
+                        "unsupported_observation",
+                        format!("the sort key of field column {name:?} is U261's"),
+                    ),
+                    SortError::ModeMismatch => ExecError::new("core_error", "sorted plan of another mode"),
+                })?),
+            };
+            Ok(Ok(Built { plan, sorted }))
+        };
+        let mut built = match build(&context)? {
+            Ok(built) => built,
+            Err(value) => {
+                outputs.push(value);
                 continue;
             }
         };
-        if !day_supplied
-            && (plan.reads().contains(ContextValue::Today) || plan.reads().contains(ContextValue::NextDayAt))
-        {
-            let day = super::sched::day_query_now(session)?.day;
+        if !day_supplied && built.reads_day() {
+            // A search never writes, sorted or not: the day is read without
+            // the day query's unbury and timing-key writes (browser-ops B1).
+            let day = super::sched::day_without_writes(session)?;
             context.today = day.today;
             context.next_day_at = day.next_day_at;
             day_supplied = true;
             // Only context changed; the same parsed query must still compile.
-            plan = Plan::build(&query, mode, &context, &notetypes)
-                .map_err(|e| ExecError::new("core_error", format!("search context replan: {e:?}")))?;
+            built = build(&context)?
+                .map_err(|e| ExecError::new("core_error", format!("search context replan: {e}")))?;
         }
-        outputs.push(run(session, &plan, mode)?);
+        outputs.push(match &built.sorted {
+            None => run(session, &built.plan, mode)?,
+            Some(sorted) => run_sorted(session, sorted)?,
+        });
     }
     Ok(Value::Array(outputs))
+}
+
+/// A request's plan and, for a sorted search, its sorted statement.
+struct Built {
+    plan: Plan,
+    sorted: Option<SortedQuery>,
+}
+
+impl Built {
+    fn reads_day(&self) -> bool {
+        reads_day(self.plan.reads()) || self.sorted.as_ref().is_some_and(|sorted| reads_day(sorted.reads()))
+    }
+}
+
+fn reads_day(reads: ContextReads) -> bool {
+    reads.contains(ContextValue::Today) || reads.contains(ContextValue::NextDayAt)
+}
+
+fn sql_params(params: &[Param]) -> Vec<SqlValue> {
+    params
+        .iter()
+        .map(|param| match param {
+            Param::Integer(v) => SqlValue::Integer(*v),
+            Param::Real(v) => SqlValue::Real(*v),
+            Param::Text(v) => SqlValue::Text(v.clone()),
+        })
+        .collect()
 }
 
 /// Runs a plan: `{ids}` with logical references first, sorted by number,
@@ -367,16 +433,7 @@ fn run(session: &Session<'_>, plan: &Plan, mode: SearchMode) -> Result<Value, Ex
         .storage
         .collection()
         .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
-    let params: Vec<SqlValue> = plan
-        .params()
-        .iter()
-        .map(|param| match param {
-            Param::Integer(v) => SqlValue::Integer(*v),
-            Param::Real(v) => SqlValue::Real(*v),
-            Param::Text(v) => SqlValue::Text(v.clone()),
-        })
-        .collect();
-    let rows = match collection.reader()?.execute_raw(plan.sql(), &params) {
+    let rows = match collection.reader()?.execute_raw(plan.sql(), &sql_params(plan.params())) {
         Ok(rows) => rows,
         Err(_) => return Ok(json!({"error": "search_failed"})),
     };
@@ -394,6 +451,54 @@ fn run(session: &Session<'_>, plan: &Plan, mode: SearchMode) -> Result<Value, Ex
         SearchMode::Cards => ids_value(&found, &session.cards, "#c"),
         SearchMode::Notes => ids_value(&found, &session.notes, "#n"),
     })
+}
+
+/// B1, B2: the sorted ids, each equal-key run listed as S1 orders an
+/// unsorted result, everything else at its sorted place. A database error is
+/// `search_failed`.
+fn run_sorted(session: &Session<'_>, sorted: &SortedQuery) -> Result<Value, ExecError> {
+    let collection = session
+        .storage
+        .collection()
+        .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
+    let rows = match collection.reader()?.execute_raw(sorted.runs_sql(), &sql_params(sorted.params())) {
+        Ok(rows) => rows,
+        Err(_) => return Ok(json!({"error": "search_failed"})),
+    };
+    let named = match sorted.mode() {
+        SearchMode::Cards => (&session.cards, "#c"),
+        SearchMode::Notes => (&session.notes, "#n"),
+    };
+    let mut ids = Vec::with_capacity(rows.rows.len());
+    let mut run: Vec<i64> = Vec::new();
+    let mut run_key = None;
+    for row in &rows.rows {
+        let (Some(SqlValue::Integer(id)), Some(SqlValue::Integer(key))) = (row.first(), row.get(1)) else {
+            return Err(ExecError::new(
+                "core_error",
+                format!("sorted search returned {row:?}, not an id and a run"),
+            ));
+        };
+        if run_key != Some(*key) {
+            ids.extend(run_value(&run, named.0, named.1));
+            run.clear();
+            run_key = Some(*key);
+        }
+        run.push(*id);
+    }
+    ids.extend(run_value(&run, named.0, named.1));
+    Ok(json!({ "ids": ids }))
+}
+
+/// One equal-key run in S1's order.
+fn run_value(run: &[i64], named: &[i64], prefix: &str) -> Vec<Value> {
+    match ids_value(run, named, prefix) {
+        Value::Object(mut map) => match map.remove("ids") {
+            Some(Value::Array(ids)) => ids,
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
 }
 
 /// S1's `{ids}`: the found ids that a logical reference names (`named[k]` is
