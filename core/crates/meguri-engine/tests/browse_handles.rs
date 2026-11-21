@@ -940,8 +940,14 @@ fn a_slow_search_streams_and_equals_the_whole_statement_q10_h3_h10_h13() {
     let events = fx.until(seq);
     assert!(matches!(events.last(), Some(SearchEvent::Complete { count: 298, .. })), "{events:?}");
     assert_eq!(fx.ids(handle), card_ids(&fx.cards[..298]));
+    // The one-shot search streams to every matching id, ascending.
     let streamed = search_ids(&fx.h.engine, "re:n00[0-4]", SearchMode::Notes).unwrap();
-    fx.h.engine.set_search_stream_chunk_for_testing(0);
-    assert_eq!(streamed, search_ids(&fx.h.engine, "re:n00[0-4]", SearchMode::Notes).unwrap());
-    assert_eq!(streamed.len(), 50);
+    let mut expected: Vec<i64> = fx.notes[..50].iter().map(|note| note.0).collect();
+    expected.sort_unstable();
+    assert_eq!(streamed, expected);
+    // In notes mode with card scope a note is kept through one of its
+    // card-and-note pairs.
+    let (pairs, count) = fx.search("re:n00[0-4] card:1", SearchMode::Notes, asc("noteFld"));
+    assert_eq!(count, 50);
+    assert_eq!(fx.ids(pairs), fx.notes[..50].iter().map(|note| note.0).collect::<Vec<_>>());
 }

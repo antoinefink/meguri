@@ -13,6 +13,15 @@ use meguri_storage::{ReadRows, ReaderRole};
 
 use super::{BrowseError, HandleId, SessionShared, check_revision, lock, worker};
 
+/// H6: a call through a handle reads the generation the handle was made in.
+fn check_generation(handle: &super::handle::Handle, collection: &crate::Collection) -> Result<(), BrowseError> {
+    if handle.generation == collection.generation() {
+        Ok(())
+    } else {
+        Err(BrowseError::UnknownHandle)
+    }
+}
+
 /// Ranges ascending and merged; an empty range adds nothing.
 pub(super) fn merged(ranges: &[Range<u64>]) -> Vec<Range<u64>> {
     let mut sorted: Vec<Range<u64>> = ranges.iter().filter(|range| range.start < range.end).cloned().collect();
@@ -55,6 +64,7 @@ pub(super) fn resolve(
     let (mode, selected, notes) = {
         let handle = shared.handle(handle)?;
         let handle = lock(&handle);
+        check_generation(&handle, &collection)?;
         check_revision(&handle, revision)?;
         let ranges = merged(ranges);
         if ranges.last().is_some_and(|range| range.end > handle.count()) {
@@ -113,22 +123,25 @@ pub(super) fn index_of(
 ) -> Result<Option<u64>, BrowseError> {
     let collection = shared.engine()?.collection()?;
     let handle = shared.handle(handle)?;
-    let (mode, ids, nids) = {
-        let handle = lock(&handle);
-        check_revision(&handle, revision)?;
-        (handle.mode, handle.ids.clone(), handle.nids.clone())
-    };
-    let position = |target: i64, list: &[i64]| list.iter().position(|id| *id == target).map(|index| index as u64);
-    Ok(match (mode, kind) {
-        (SearchMode::Cards, SearchMode::Cards) | (SearchMode::Notes, SearchMode::Notes) => position(id, &ids),
-        // The lowest index among the note's cards.
-        (SearchMode::Cards, SearchMode::Notes) => position(id, &nids),
-        // The card's note, read now; none when the card no longer exists.
+    let mode = lock(&handle).mode;
+    // A card id on a notes handle: its note, read now (none when the card
+    // no longer exists); then the lookup, under the handle's lock, over the
+    // announced prefix only.
+    let (target, by_note) = match (mode, kind) {
         (SearchMode::Notes, SearchMode::Cards) => match notes_of_cards(&collection, &[id])?.get(&id) {
-            Some(note) => position(*note, &ids),
-            None => None,
+            Some(note) => (*note, false),
+            None => return Ok(None),
         },
-    })
+        // The lowest index among the note's cards.
+        (SearchMode::Cards, SearchMode::Notes) => (id, true),
+        _ => (id, false),
+    };
+    let handle = lock(&handle);
+    check_generation(&handle, &collection)?;
+    check_revision(&handle, revision)?;
+    let count = handle.count() as usize;
+    let list = if by_note { &handle.nids[..count] } else { &handle.ids[..count] };
+    Ok(list.iter().position(|id| *id == target).map(|index| index as u64))
 }
 
 /// Where `map_selection` maps from (H12).
@@ -188,7 +201,9 @@ pub(super) fn map(
         (MapFrom::Handle { handle, revision }, selection) => {
             let handle = shared.handle(*handle)?;
             let handle = lock(&handle);
+            check_generation(&handle, &collection)?;
             check_revision(&handle, *revision)?;
+            let count = handle.count() as usize;
             let indexes: Vec<usize> = match selection {
                 Selection::Ranges(ranges) => {
                     let ranges = merged(&ranges);
@@ -199,7 +214,7 @@ pub(super) fn map(
                 }
                 Selection::Ids(ids) => {
                     let wanted: HashSet<i64> = ids.into_iter().collect();
-                    (0..handle.ids.len()).filter(|index| wanted.contains(&handle.ids[*index])).collect()
+                    (0..count).filter(|index| wanted.contains(&handle.ids[*index])).collect()
                 }
             };
             let selected: Vec<i64> = indexes.iter().map(|index| handle.ids[*index]).collect();
@@ -207,7 +222,7 @@ pub(super) fn map(
                 let mut nids: HashMap<i64, i64> =
                     indexes.iter().map(|index| (handle.ids[*index], handle.nids[*index])).collect();
                 if let Some(card) = current
-                    && let Some(index) = handle.ids.iter().position(|id| *id == card)
+                    && let Some(index) = handle.ids[..count].iter().position(|id| *id == card)
                 {
                     nids.insert(card, handle.nids[index]);
                 }
@@ -223,8 +238,15 @@ pub(super) fn map(
     let target = shared.handle(to)?;
     let (to_mode, to_ids, to_nids) = {
         let target = lock(&target);
+        check_generation(&target, &collection)?;
         check_revision(&target, to_revision)?;
-        (target.mode, target.ids.clone(), target.nids.clone())
+        // H12: over the final prefix of `to_revision` only.
+        let count = target.count() as usize;
+        (
+            target.mode,
+            target.ids[..count].to_vec(),
+            target.nids.get(..count).map(<[i64]>::to_vec).unwrap_or_default(),
+        )
     };
     // Cards from a released handle: their notes, read now.
     let from_nids = match (from_mode, from_nids) {

@@ -856,7 +856,9 @@ impl Request<'_> {
                 let mut seen = std::collections::HashSet::new();
                 let mut notes: Vec<i64> = matched.iter().map(|(_, note)| *note).filter(|note| seen.insert(*note)).collect();
                 let mut pairs = matched;
-                if scope == Scope::Card {
+                // A sound collection has no card without a note row: every
+                // matched card's note exists.
+                if scope == Scope::Card && any(ids::ANY_LONE_CARD)? {
                     let existing: std::collections::HashSet<i64> =
                         self.list(rows, ids::EXISTING_NOTES, &[id_list(&notes)])?.ids.into_iter().collect();
                     notes.retain(|note| existing.contains(note));
@@ -865,7 +867,11 @@ impl Request<'_> {
                 if scope == Scope::Note && any(ids::ANY_LONE_NOTE)? {
                     if let Some(sql) = plan.lone_rows_sql() {
                         self.count_extra_test();
-                        notes.extend(self.list(rows, &sql, plan.params())?.ids);
+                        notes.extend(
+                            self.list(rows, &sql, plan.params())
+                                .map_err(|stop| refused(stop, &source.text))?
+                                .ids,
+                        );
                     }
                 }
                 let match_data = (scope != Scope::Note).then(|| pairs.iter().map(|(card, _)| *card).collect());
@@ -887,7 +893,11 @@ impl Request<'_> {
                 if scope == Scope::Card && any(ids::ANY_LONE_CARD)? {
                     if let Some(sql) = plan.lone_rows_sql() {
                         self.count_extra_test();
-                        cards.extend(self.list(rows, &sql, plan.params())?.ids);
+                        cards.extend(
+                            self.list(rows, &sql, plan.params())
+                                .map_err(|stop| refused(stop, &source.text))?
+                                .ids,
+                        );
                     }
                 }
                 Some(Derived {
