@@ -3,17 +3,21 @@
 # The Rust caches of the hosted checks (docs/process/tiers.md, "Hosted
 # checks"). Run from the checkout root, in GitHub Actions only.
 #
-#   rust-cache.sh prune   before a save: keep only the cargo registry and the
+#   rust-cache.sh prune <name> <cap MB>
+#                         before a save: keep only the cargo registry and the
 #                         third-party crates under $RUNNER_TEMP. Local packages
 #                         (workspace and patched path crates) are rebuilt from
 #                         source, so their artifacts never enter a cache.
-#                         Writes save=yes, or save=no over 4 GB, to
-#                         $GITHUB_OUTPUT.
+#                         Writes save=yes, or save=no over the cap, to
+#                         $GITHUB_OUTPUT. The caps keep two versions of every
+#                         cache (old and new key, after a Cargo.lock or image
+#                         change) under GitHub's 10 GB, so one cache cannot
+#                         evict another's current entry.
 
 set -euo pipefail
 
 prune() {
-  local target="$RUNNER_TEMP/cargo-target" dir p u size=0
+  local name="$1" cap="$2" target="$RUNNER_TEMP/cargo-target" dir p u size=0
   local -a pkgs paths=()
   echo "Cargo target before pruning: $(sudo du -sm "$target" | cut -f1) MB"
   mapfile -t pkgs < <(find core -name Cargo.toml -not -path '*/target/*' -print0 |
@@ -38,9 +42,9 @@ prune() {
     [[ ! -e "$p" ]] || paths+=("$p")
   done
   ((${#paths[@]} == 0)) || size="$(du -smc -- "${paths[@]}" | tail -n 1 | cut -f1)"
-  echo "Rust dependency cache: $size MB"
-  if ((size > 4096)); then
-    echo "::warning::Rust dependency cache is $size MB, over 4 GB; not saving it."
+  echo "$name: $size MB"
+  if ((size > cap)); then
+    echo "::warning::$name is $size MB, over its $cap MB cap; not saving it."
     echo "save=no" >>"$GITHUB_OUTPUT"
   else
     echo "save=yes" >>"$GITHUB_OUTPUT"
@@ -48,6 +52,9 @@ prune() {
 }
 
 case "${1:-}" in
-  prune) prune ;;
-  *) echo "usage: .github/rust-cache.sh prune" >&2; exit 2 ;;
+  prune)
+    [[ $# -eq 3 && "$3" =~ ^[1-9][0-9]*$ ]] || { echo "usage: .github/rust-cache.sh prune <name> <cap MB>" >&2; exit 2; }
+    prune "$2" "$3"
+    ;;
+  *) echo "usage: .github/rust-cache.sh prune <name> <cap MB>" >&2; exit 2 ;;
 esac

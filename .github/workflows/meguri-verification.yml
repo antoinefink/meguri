@@ -67,7 +67,8 @@ jobs:
       # of `tools/mg core-test` or `core-lint` changed: the Rust workspace, the
       # conformance data and specs its tests read (servers/ specs excepted),
       # their tools/mg jobs (with the AnkiWeb scanner), the dev image (with
-      # .github/dev-image.sh), the cache script and the timing-sensitive list. A change to docs/ or to Markdown outside those directories runs
+      # .github/dev-image.sh), the cache script and the timing-sensitive list.
+      # A change to docs/ or to Markdown outside those directories runs
       # neither. Manual runs, new branches and anything that cannot be compared
       # run every suite.
       - name: Select the suites this change affects
@@ -293,7 +294,7 @@ jobs:
           matrix.shard == 1 && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
           && steps.pull.outputs.used == 'yes' && steps.rust-cache.outputs.cache-hit != 'true'
         shell: bash
-        run: .github/rust-cache.sh prune
+        run: .github/rust-cache.sh prune "Rust dependency cache" 4096
 
       - name: Save the Rust dependency cache
         if: steps.prune.outputs.save == 'yes'
@@ -430,7 +431,7 @@ jobs:
       contents: read
       packages: read
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 45
+    timeout-minutes: 60
     concurrency:
       group: meguri-verification-${{ github.ref }}-core-lint-${{ needs.suites.outputs.core == 'yes' && ((github.event_name == 'schedule' || inputs.cold) && 'cold' || 'run') || github.run_id }}
       cancel-in-progress: true
@@ -485,7 +486,7 @@ jobs:
           ((rc == 0))
           jq -e --arg sha "$GITHUB_SHA" '
             .status == "pass" and .commit.sha == $sha and .commit.dirty == false
-            and .job == "core-lint" and .args == [] and .summary.failed == 0' "$artifact"
+            and .job == "core-lint" and .args == [] and .summary.failed == 0 and .summary.passed > 0' "$artifact"
 
       - name: Keep only third-party crates in the Rust lint cache
         id: prune
@@ -493,7 +494,7 @@ jobs:
           (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
           && steps.pull.outputs.used == 'yes' && steps.rust-cache.outputs.cache-hit != 'true'
         shell: bash
-        run: .github/rust-cache.sh prune
+        run: .github/rust-cache.sh prune "Rust lint cache" 1024
 
       - name: Save the Rust lint cache
         if: steps.prune.outputs.save == 'yes'
@@ -559,21 +560,26 @@ jobs:
             exit 0
           fi
           [[ "$CORE" == yes ]] || fail "Select suites gave no Core selection ('$CORE')."
-          [[ "$LINT_JOB" == success ]] || fail "Linux · core · lint ended $LINT_JOB (failed, cancelled or not started)."
+          # Lint first, failing only after the shards: a lint failure must
+          # not hide the shard results.
           lint="$RUNNER_TEMP/lint/meguri-result.json"
-          [[ -f "$lint" ]] || fail "Linux · core · lint left no receipt."
-          jq -e --arg sha "$GITHUB_SHA" '
-            .status == "pass" and .commit.sha == $sha and .commit.dirty == false
-            and .job == "core-lint" and .args == [] and .summary.failed == 0 and .summary.passed > 0' "$lint" >/dev/null ||
-            fail "The lint receipt is not a passing core-lint run on $GITHUB_SHA."
+          lint_error=
+          if [[ "$LINT_JOB" != success ]]; then
+            lint_error="Linux · core · lint ended $LINT_JOB (failed, cancelled or not started)."
+          elif [[ ! -f "$lint" ]]; then
+            lint_error="Linux · core · lint left no receipt."
+          elif ! jq -e --arg sha "$GITHUB_SHA" '
+              .status == "pass" and .commit.sha == $sha and .commit.dirty == false
+              and .job == "core-lint" and .args == [] and .summary.failed == 0 and .summary.passed > 0' "$lint" >/dev/null; then
+            lint_error="The lint receipt is not a passing core-lint run on $GITHUB_SHA."
+          fi
+          printf 'Lint: %s\n\n' "${lint_error:-$(jq -r '.message' "$lint")}" >>"$GITHUB_STEP_SUMMARY"
           [[ "$SHARD_JOBS" == success ]] || fail "The Core shards ended $SHARD_JOBS (failed, cancelled or not started)."
           count="$(jq length <<<"$SHARDS")"
           ((count > 0)) || fail "The shard list is empty."
           jq -e '. == [range(1; length + 1)]' <<<"$SHARDS" >/dev/null || fail "The shard list $SHARDS is not 1..N."
           {
-            echo "### Linux · core: $count shards and lint"
-            echo
-            echo "Lint: $(jq -r '.message' "$lint")"
+            echo "### Linux · core: $count shards"
             echo
             echo "| Shard | Passed | Failed | Skipped |"
             echo "| --- | --- | --- | --- |"
@@ -598,6 +604,7 @@ jobs:
             echo "Not covered here: the tests of .github/core-timing-sensitive.txt, which run in the advisory job **Linux · core (timing-sensitive)**:"
             jq -r '.details.hosted_selection.listed[]? | "- `\(.)`"' "$receipt"
           } >>"$GITHUB_STEP_SUMMARY"
+          [[ -z "$lint_error" ]] || fail "$lint_error"
 
   # !cancelled(), not success(): when "Select suites" fails, each suite must
   # still report, and fail, rather than skip (a skipped check counts as passing).
