@@ -196,6 +196,8 @@ impl<'n> Reader<'n> {
             return out;
         }
         let mut words = Vec::new();
+        // The source's characters once: spans are character offsets.
+        let chars: Vec<char> = field_text.chars().collect();
         let items = run_items(&query);
         let mut k = 0;
         while k < items.len() {
@@ -215,9 +217,8 @@ impl<'n> Reader<'n> {
                     .tokens
                     .push(self.placed(Some(token), &mut kinds, || whole_text(&query, id))),
                 Class::Text => {
-                    if let Some(written) = query.source_text(&query.node(id).span) {
-                        words.push(written);
-                    }
+                    let span = query.node(id).span.clone();
+                    words.push(chars.get(span).map(|c| c.iter().collect::<String>()).unwrap_or_default());
                 }
                 Class::Advanced => out.tokens.push(Token::Advanced(whole_text(&query, id))),
             }
@@ -278,7 +279,7 @@ impl<'n> Reader<'n> {
 
     /// Rows 3, 5 and 6: a group OR whose runs are all value items of one
     /// kind, `tag:leech` a tag among tags and a state among states. Each
-    /// value once.
+    /// value once, in the order of its first item.
     fn group_or(&self, query: &Query, runs: &[NodeId]) -> Option<Vec<Value>> {
         let mut singles = Vec::with_capacity(runs.len());
         for run in runs {
@@ -303,10 +304,13 @@ impl<'n> Reader<'n> {
                 (Single::Leech(_), Kind::CardState) => Value::State(StateValue::Leech),
                 (Single::Leech(_), _) => return None,
             };
-            if !value.kind().same(&kind) || values.contains(&value) {
+            if !value.kind().same(&kind) {
                 return None;
             }
-            values.push(value);
+            // A value written twice is one value (OR keeps the meaning).
+            if !values.contains(&value) {
+                values.push(value);
+            }
         }
         Some(values)
     }
@@ -366,7 +370,10 @@ impl<'n> Reader<'n> {
                 if item_key(&typed_value.item()?)? != key {
                     return None;
                 }
-                Some(Single::Value(Value::Field { field, test }))
+                // The stored spelling must build too (`ſc` resolves to a
+                // field `sc`, a reserved key J3.3 refuses).
+                let stored = Value::Field { field, test };
+                stored.is_offered().then_some(Single::Value(stored))
             }
             _ => None,
         }
@@ -477,7 +484,7 @@ impl<'n> Reader<'n> {
             NodeKind::Not(child) => {
                 matches!(query.node(*child).kind, NodeKind::Term(Term::Text(_))).then_some(TextItem::Plain)
             }
-            NodeKind::Term(Term::Field { name, mode, text }) => {
+            NodeKind::Term(Term::Field { name, .. }) => {
                 let nfc_name = nfc(name);
                 if matches!(nfc_name.as_ref(), "*" | "_*" | "*_") || pattern::has_wildcards(&nfc_name) {
                     return None;
@@ -485,15 +492,21 @@ impl<'n> Reader<'n> {
                 if self.field_named(name).is_some() {
                     return None;
                 }
-                let value = match mode {
-                    TextMode::Normal => pattern::exact_text(text).into_owned(),
-                    TextMode::Regex => format!("re:{text}"),
-                    TextMode::NoCombining => format!("nc:{text}"),
-                };
-                Some(TextItem::Literal(format!("{}:{value}", pattern::exact_text(name))))
+                let written = query.source_text(&query.node(id).span)?;
+                Some(TextItem::Literal(unquoted(&written)))
             }
             _ => None,
         }
+    }
+}
+
+/// A term's written text without the quotes around it, if it has them
+/// (`"10:4 5"` is the characters `10:4 5`); every other character as
+/// written, backslashes included.
+fn unquoted(written: &str) -> String {
+    match written.strip_prefix('"').and_then(|inner| inner.strip_suffix('"')) {
+        Some(inner) if !inner.is_empty() => inner.replace("\\\"", "\""),
+        _ => written.to_owned(),
     }
 }
 

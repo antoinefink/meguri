@@ -389,6 +389,9 @@ pub enum RunTextError {
     InvalidToken { token: usize },
     /// A value T3 does not offer (it has no built item).
     NotOffered { token: usize, value: usize },
+    /// An advanced token holding a negated operator word (`-and`, `-or`),
+    /// which `errors.md` E3 never runs.
+    NegatedOperator { token: usize },
     /// An advanced token whose text does not parse (its path's first step
     /// is the token's index).
     Build(BuilderError),
@@ -468,10 +471,23 @@ impl FilterQuery {
 /// advanced token's parsed text.
 fn token_item(k: usize, token: &Token) -> Result<BuiltItem, RunTextError> {
     match token {
-        Token::Advanced(text) => Ok(BuiltItem::Parsed {
-            text: text.clone(),
-            field_text: false,
-        }),
+        Token::Advanced(text) => {
+            // E3: a negated operator word never runs, and the canonical
+            // writer could not keep it (F7), so the query has no run text.
+            let operator = parse(text).is_ok_and(|query| {
+                query
+                    .nodes()
+                    .iter()
+                    .any(|node| matches!(node.kind, crate::ast::NodeKind::NegatedOperator(_)))
+            });
+            if operator {
+                return Err(RunTextError::NegatedOperator { token: k });
+            }
+            Ok(BuiltItem::Parsed {
+                text: text.clone(),
+                field_text: false,
+            })
+        }
         Token::Value(value_token) => {
             if value_token.kind().is_none() {
                 return Err(RunTextError::InvalidToken { token: k });

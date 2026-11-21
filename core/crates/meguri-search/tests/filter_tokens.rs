@@ -586,14 +586,32 @@ fn pairs_repeats_and_unstable_items() {
         read("prop:due=0 OR is:due -prop:due=0").tokens,
         vec![value(vec![Value::Due(DueValue::Today), Value::Due(DueValue::Overdue)])]
     );
-    // A value twice in one group is no token T10 makes.
+    // A value written twice in one group is one value.
     assert_eq!(
-        read("(tag:alpha OR tag:alpha) word"),
-        FilterQuery::new(vec![Token::Advanced(s("tag:alpha OR tag:alpha"))], "word")
+        read("(tag:alpha OR tag:ALPHA OR tag:beta) word"),
+        FilterQuery::new(vec![value(vec![tag("alpha"), tag("beta")])], "word")
     );
     // A negated operator word and an R-read value keep their written text.
     assert_eq!(read("a -or b"), FilterQuery::new(vec![Token::Advanced(s("-or"))], "a b"));
     assert_eq!(read("a -and b"), FilterQuery::new(vec![Token::Advanced(s("-and"))], "a b"));
+    // E3: they never run, so the query has no run text.
+    for text in ["a -or b", "a -and b"] {
+        assert_eq!(
+            read(text).run_text(&names),
+            Err(RunTextError::NegatedOperator { token: 0 }),
+            "{text:?}"
+        );
+        assert_eq!(
+            FilterQuery::new(vec![], text).run_text(&names),
+            Err(RunTextError::NegatedOperator { token: 0 })
+        );
+    }
+    // A field term naming no field is the literal of its written text:
+    // backslashes kept, outer quotes dropped.
+    assert_eq!(
+        classify_text("missing:a\\*b \"10:4 5\"", &names),
+        TextReading::Items(vec![BuiltItem::Literal(s("missing:a\\*b")), BuiltItem::Literal(s("10:4 5"))])
+    );
     assert_eq!(
         read("preset:a\\\"b").tokens,
         vec![Token::Advanced(s("preset:a\\\"b"))]
