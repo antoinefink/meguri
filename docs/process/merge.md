@@ -61,7 +61,7 @@ When integration is authorized, the orchestrator can run `tools/mg merge <branch
 1. Refuses when the unit has an open escalation in the main checkout's ledger joined with the branch tip's (an escalation added or resolved in the unit's worktree counts; a ledger that does not parse is refused), when the branch does not contain the integration head (merge the integration branch into the unit branch first), or when the branch's worktree is not clean at the branch tip.
 2. Runs `tools/mg gate --base <integration head>` in the branch's worktree, with the branch's own tiers and tools: the worktree-safe T0 and T1 runs (docs/process/tiers.md).
 3. Runs what the worktree left, in the plan's order and under the gate's rules (nothing after a failed canary; T1 only when T0 has nothing blocking):
-   - the `where: main` runs from the main checkout against the branch's tree: `static-checks --rev <tip>` (which also reads `oracle/`) and `similarity --rev <tip>` (which needs `refs/`);
+   - the `where: main` runs from the main checkout against the branch's tree: `static-checks --rev <tip>` (which also reads `oracle/`) and `similarity --rev <tip>` (which needs `refs/`; for a pull request, the hosted Linux · similarity check is the similarity gate, and nobody runs it by hand before the merge);
    - the `deferred-tip` and `needs-oracle-tree` runs in a full checkout of the tip at `build/mg/merge-tip`: the branch's own tools and `oracle/`, and the main checkout's similarity corpus (`MG_SIMILARITY_REFS`). That checkout is removed when the merge ends; their results are copied to `build/mg/merge/<run>/tip/`. One merge at a time: an existing `build/mg/merge-tip` is refused (`git worktree remove --force` it once no merge runs).
 4. Checks that the worktree is still clean at the tip and that no run changed the main checkout or the tip checkout.
 5. Evaluates one receipt for the tip with the branch's gate (`build/mg/merge/<run>/receipt.json`), keeping the worktree receipt's own blockers (`tree-changed`).
@@ -94,7 +94,8 @@ From a sparse role worktree, an oracle-image run uses the main checkout's `oracl
 
 ## What reaches the implementer, and escalations
 
-- A similarity flag: the merge copies the implementer view (`implementer.md`, `implementer.json`) to `<worktree>/build/mg/merge-feedback/<run>/` and records an approval escalation. The reviewer view stays in the main checkout. The implementer rewrites the region from the spec, or Antoine approves an allowlist entry (R1957).
+- A similarity flag on a pull request: Linux · similarity fails and its summary names the file, channel and score. A human or the coordinator decides; the reviewer view comes from a local `tools/mg similarity --base <base> --rev <tip>` in the main checkout.
+- A similarity flag in `tools/mg merge`: the merge copies the implementer view (`implementer.md`, `implementer.json`) to `<worktree>/build/mg/merge-feedback/<run>/` and records an approval escalation. The reviewer view stays in the main checkout. The implementer rewrites the region from the spec, or Antoine approves an allowlist entry (R1957).
 - A changed approved signature baseline (`needs-human-review` from `tools/mg snapshots`): the merge records an approval escalation; Antoine reviews it in the gallery (R1991).
 
 `docs/process/provenance/escalations.jsonl` is the list of what waits for Antoine. Each entry has a `kind`:

@@ -17,6 +17,8 @@ name: Verify Meguri
 # - Linux · core (timing-sensitive): advisory. Runs the listed tests alone,
 #   one at a time; its failures show in its summary and do not fail Core.
 # - Linux · server, conformance, package-smoke: unchanged suites.
+# - Linux · similarity: the similarity scan against the pinned Anki releases
+#   (.github/similarity.sh), for the files this change adds or modifies.
 
 on:
   pull_request:
@@ -704,6 +706,83 @@ jobs:
           path: ${{ runner.temp }}/meguri-result.json
           if-no-files-found: ignore
           retention-days: 7
+
+  # The clean-room similarity scan (docs/process/provenance.md, "Similarity
+  # scan"). It fetches the pinned Anki release tags itself, into a directory
+  # outside the checkout that no cache or artifact reads, and mounts them
+  # read-only into the scanner. Its own index cache holds hashes plus Anki
+  # paths and line numbers, never text, under a key and a path no other job
+  # uses. It uploads nothing, and prints only what the filter in
+  # .github/similarity.sh builds: file names, scores, counts and the verdict.
+  # It needs no secret: only the read-only token of the checkout.
+  similarity:
+    name: Linux · similarity
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: meguri-verification-${{ github.ref }}-similarity
+      # A master push scans only what it pushed: never cancel one.
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      # A change the scanner never reads (docs/, specs/, conformance data
+      # outside scenarios and goldens, file types it has no lexer for)
+      # passes in seconds with "not selected": a skipped job would count as
+      # passing too, but would not say so.
+      - name: Select what to scan
+        id: select
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: .github/similarity.sh select
+
+      - name: Fetch the pinned Anki releases
+        if: steps.select.outputs.run == 'yes'
+        shell: bash
+        run: .github/similarity.sh corpus "$RUNNER_TEMP/similarity-refs"
+
+      # Keyed by the pin and the scanner (its code, config and the interop
+      # vocabulary, which together decide the index), and only ever saved by
+      # master pushes and manual runs, once per key. Cold runs build it.
+      - name: Restore the similarity index
+        id: index
+        if: steps.select.outputs.run == 'yes' && github.event_name != 'schedule' && inputs.cold != true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/similarity-index
+          key: similarity-index-v1-${{ hashFiles('tools/similarity/config.yaml', 'tools/similarity/meguri_similarity/**', 'specs/*/interop-vocab.txt') }}
+
+      - name: Build the scanner image
+        if: steps.select.outputs.run == 'yes'
+        shell: bash
+        run: docker build --progress plain -f docker/similarity.Dockerfile --target similarity .
+
+      - name: Scan
+        if: steps.select.outputs.run == 'yes'
+        shell: bash
+        env:
+          REFS: ${{ runner.temp }}/similarity-refs
+          BASE: ${{ steps.select.outputs.base }}
+          CODE: ${{ steps.select.outputs.code }}
+          AREAS: ${{ steps.select.outputs.areas }}
+        run: .github/similarity.sh scan
+
+      - name: Save the similarity index
+        if: >-
+          steps.select.outputs.run == 'yes' && steps.index.outputs.cache-hit != 'true'
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && hashFiles('build/similarity-index/*/meta.json') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/similarity-index
+          key: similarity-index-v1-${{ hashFiles('tools/similarity/config.yaml', 'tools/similarity/meguri_similarity/**', 'specs/*/interop-vocab.txt') }}
 
   apple:
     name: Unsigned Apple Core build pilot
