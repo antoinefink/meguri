@@ -326,6 +326,22 @@ import Testing
         }
     }
 
+    /// A refusal that comes back after backgrounding cancelled the delete asks
+    /// nothing: no question is left pending, and nothing failed.
+    @Test func aLossesRefusalAfterBackgroundingAsksNothing() async {
+        let owner = await makeOwner(), model = owner.deckDeletion, gate = DeletionGate()
+        model.readSummary = { _ in DeckDeletionSummary(decks: 1, cards: 0) }
+        model.deleteDecks = { _, _ in
+            await gate.hold()
+            // An admitted write still answers after the cancel.
+            while !Task.isCancelled { await Task.yield() }
+            throw BridgeError.deckRefused(.lossesChanged(decks: 1, cards: 2))
+        }
+        model.delete(deckID: 2); await gate.entered()
+        gate.release(); await model.cancelAndDrain()
+        #expect(model.confirmation == nil && model.failure == nil && !model.busy)
+    }
+
     /// A question confirmed at 2 cards whose recheck finds none passes that
     /// zero-card read as its confirmation (`decks/decks` D8 step 6).
     @Test func aRecheckWithNoCardsIsWhatTheDeleteConfirms() async {

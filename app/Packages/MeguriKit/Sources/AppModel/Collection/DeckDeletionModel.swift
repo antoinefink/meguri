@@ -160,7 +160,9 @@ public final class DeckDeletionModel {
                         // Something arrived after that read; nothing was written. The
                         // fresh counts are a new read: ask with them, or delete at once
                         // when no card would be lost (N20.7). Each repeat needs another write.
-                        guard isCurrent() else { return }
+                        // Backgrounding cancelled the task: drop the question, as nothing
+                        // was written and nobody would answer it.
+                        guard isCurrent(), !Task.isCancelled else { return }
                         summary = DeckDeletionSummary(decks: decks, cards: cards)
                         shown = nil
                         continue
