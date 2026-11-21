@@ -21,7 +21,8 @@ name: Verify Meguri
 # - Linux · server, conformance, package-smoke: unchanged suites.
 # - Linux · checks: every run. static-checks against the base, lint-ui,
 #   design-docs and core-deny, one after another on one runner.
-# - Linux · selftest: `tools/mg selftest`, for changes to tools/ or .github/.
+# - Linux · selftest: `tools/mg selftest` and `image-tools-selftest`, for
+#   changes to tools/ or .github/.
 
 on:
   pull_request:
@@ -808,8 +809,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The tools/mg self-tests (bats, in the dev image), for changes to tools/ or
-  # .github/ only: about 12 minutes on one runner.
+  # The tools/mg self-tests (bats, in the dev image) and the image-tools
+  # script tests, for changes to tools/ or .github/ only, on one runner.
   selftest:
     name: Linux · selftest
     needs: [suites, image]
@@ -845,6 +846,13 @@ jobs:
       - name: selftest
         shell: bash
         run: .github/mg-step.sh selftest selftest
+
+      # The Python tests of the scripts that run in the image-tools container
+      # (dev-icon, contact-sheet, hierarchy-check and the others it lists).
+      - name: image-tools-selftest
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: .github/mg-step.sh image-tools-selftest image-tools-selftest
 
       - name: Give the checkout back to the runner user
         if: always()
