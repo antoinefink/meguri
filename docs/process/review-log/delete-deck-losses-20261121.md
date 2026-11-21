@@ -26,9 +26,11 @@ Reviewer: an independent Claude subagent (Opus). It received the diff and the ba
   - This log was missing.
 - P3, all taken: K5 now follows `conformance/notetype-ops` T9 (numbers taken at the step); `any` is named as a deliberate difference; comparing `decks` at zero cards is stated as accepted; D14 and D16 wording; the filtered-deck sentence names home decks outside the subtree; N20.7's failure alert excludes `LossesChanged`; the second commit's `Spec:` trailer names S9.3.
 
+Second pass on commit 1e258d08f: no P1 or P2 left; each fix matches its finding. Its three P3 notes were taken: the backup check counts any attempt's backup, it runs before the second count's comparison (its `Stale` wins), and the code list names the bridge error.
+
 Confirmed by the reviewer: every interleaving that raises a count is refused (cards or decks added to the deck or a subdeck, a deck renamed into the subtree); filtered-deck moves leave the counts unchanged; a removed listed deck is a no-op without backup; `Stale` precedence and the kept backup match `package/backup-triggers` T6.2; the refusal matches `engine/undo`; the app loop needs a write per repeat; no sentence describing the window as open is left in `specs/` or `docs/`.
 
 ## Code changes required
 
-- Core: `decks::delete` takes the confirmed losses (counts or `any`), the two counts, `LossesChanged`, the backup-at-commit check; the FFI's `start_delete_decks` takes the counts; the testkit's K5 executor passes the counts it reads.
+- Core: `decks::delete` takes the confirmed losses (counts or `any`), the two counts, `LossesChanged`, the backup-at-commit check; the FFI's `start_delete_decks` takes the counts and reports `LossesChanged { decks, cards }` as its own bridge error, apart from the `Couldn’t Delete` failures; the testkit's K5 executor passes the counts it reads.
 - App: `DeckDeletionModel` passes its last read and handles `LossesChanged` as N20.7 says.
