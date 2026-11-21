@@ -6,12 +6,14 @@ import SwiftUI
 public struct AccountSyncView: View {
     let collection: ReviewCollection
     var host: AppNavigation.SheetHost
+    /// False in the Mac Settings pane, whose title bar already says Sync.
+    var showsHeading: Bool
     @State private var draft = MeguriSignInDraft()
-    public init(collection: ReviewCollection, host: AppNavigation.SheetHost = .main) {
-        self.collection = collection; self.host = host
+    public init(collection: ReviewCollection, host: AppNavigation.SheetHost = .main, showsHeading: Bool = true) {
+        self.collection = collection; self.host = host; self.showsHeading = showsHeading
     }
     public var body: some View {
-        Form { SyncSettingsSections(collection: collection, host: host, draft: draft) }
+        Form { SyncSettingsSections(collection: collection, host: host, draft: draft, showsHeading: showsHeading) }
             .formStyle(.grouped)
             .onDisappear { draft.password = "" }
             .navigationTitle(SyncText.value("sync.settings.sync.section"))

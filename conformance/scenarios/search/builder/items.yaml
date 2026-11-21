@@ -103,7 +103,7 @@ steps:
           - {group: {joiner: and, items: [{deck: X}]}}
           - {group: {joiner: or, items: [{group: {joiner: and, items: [{state: new}, {flag: 1}]}}]}}
           - {group: {joiner: and, items: [{notetype: Memo}, {template: 0}]}}
-          - {group: {joiner: or, items: [{state: new}, {state: learn}, {state: review}]}}
+          - {group: {joiner: or, items: [{state: review}, {state: suspended}, {state: learn}]}}
           - {group: {joiner: and, items: [{state: due}, {negated: {due_on: 0}}]}}
           - {group: {joiner: and, items: [{group: {joiner: or, items: [{flag: 1}, {flag: 2}]}}, {state: due}]}}
           - {group: {joiner: or, items: [{group: {joiner: and, items: [{flag: 1}, {flag: 2}]}}, {state: due}]}}

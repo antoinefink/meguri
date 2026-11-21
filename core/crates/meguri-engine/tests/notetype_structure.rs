@@ -220,6 +220,9 @@ struct State {
     cards: Vec<(i64, i64, u16, i64, i64)>,
     graves: u64,
     scm: i64,
+    /// Every stored column of the notes and cards, tags and scheduling
+    /// included, for whole-state comparisons.
+    rows: Vec<meguri_storage::RowImage>,
 }
 
 fn state(h: &Harness, id: NotetypeId) -> State {
@@ -243,7 +246,15 @@ fn state(h: &Harness, id: NotetypeId) -> State {
         }
     }
     cards.sort_unstable();
+    let mut rows = Vec::new();
+    for note in &notes {
+        rows.push(reader.row_image(meguri_storage::Table::Notes, &meguri_storage::RowKey::Id(note.id.0)).unwrap().unwrap());
+    }
+    for card in &cards {
+        rows.push(reader.row_image(meguri_storage::Table::Cards, &meguri_storage::RowKey::Id(card.0)).unwrap().unwrap());
+    }
     State {
+        rows,
         notetype,
         notes: notes
             .iter()

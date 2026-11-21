@@ -4,7 +4,7 @@ Spec: notetypes/workspace
 Requirements: R915 to R917, R919 to R921, R923 to R927, R929 to R938, R940; supersedes in part R915, R919, R920, R925, R929, R931, R932, R938, R940 (the Browse and Note Types plan §5 lists the notes)
 Anki: none for the layout (Meguri design, decided by Antoine 2026-11-20, round 9: 1B 2B 3C 4B 5A 6B 7B 8B); the stored data and every save keep `notetypes/records`, `notetypes/structure-changes`, `notetypes/validation` and `render/*`
 Scenarios: none; tests named in W16
-Status: Under review (R915; round 9, decided 2026-11-20, `docs/design/decisions.md` the two `noteTypes` rows). Do not implement until approved.
+Status: Approved 2026-11-20 (R915). Approved by Antoine in chat (round 9, decided 2026-11-20, `docs/design/decisions.md` the two `noteTypes` rows), after an independent review and five reviewer rounds (`docs/process/review-log/browse-note-types-specs-20261120.md`).
 
 What the Note Types section shows and does: the list, the Fields tab, the Cards tab with the template editor and its live preview, the Card Text row over the styling, live issues, creating and duplicating, and the read-only touch layouts. Saving is `notetypes/draft-save`. Layout is `docs/design/native-interface-contract.md` N22. Where `notetypes/editor-actions` differs, this file wins for Meguri's screen; its sections that state Anki-matching results (A2's order, A6's copied texts, A10's sort-field tracking, A11, A14, A15) still hold.
 

@@ -26,13 +26,13 @@ setup:
     - {notetype: Memo, fields: [c7, "no entries"]}
 steps:
   - observe: [ids]
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852801000, 1894701600000, 0, 5, 1, 0, 2500, 1000, 1)"}
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852802000, 1894701600001, 0, -1, 1, 0, 2500, 1000, 1)"}
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894701601000, 1894701600002, 0, -1, 1, 0, 2500, 1000, 1)"}
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852803000, 1894701600002, 0, 3, 1, 0, 2500, 1000, 1)"}
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852804000, 1894701600003, 0, 0, 1, 0, 2500, 1000, 4)"}
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894701605000, 1894701600004, 0, 7, 1, 0, 2500, 1000, 1)"}
-  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894852806000, 1894701600005, 0, 3, 1, 0, 2500, 1000, 9)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1894701600000, 1894852801000, 5, 1, 1000, 2500, 1, 0, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1894701600001, 1894852802000, -1, 1, 1000, 2500, 1, 0, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1894701600002, 1894701601000, -1, 1, 1000, 2500, 1, 0, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1894701600002, 1894852803000, 3, 1, 1000, 2500, 1, 0, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1894701600003, 1894852804000, 0, 4, 1000, 2500, 1, 0, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1894701600004, 1894701605000, 7, 1, 1000, 2500, 1, 0, 0)"}
+  - db_exec: {sql: "INSERT INTO revlog (cid, id, ease, type, time, factor, ivl, lastIvl, usn) VALUES (1894701600005, 1894852806000, 3, 9, 1000, 2500, 1, 0, 0)"}
   - set_clock: "2030-01-17T10:00:00"
   - observe:
       - timing

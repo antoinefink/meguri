@@ -360,6 +360,11 @@ public enum MeguriRoutineState: Sendable, Equatable {
     case unreported, exchanging, idle, pending, waiting, mediaBlocked, authentication
     case acceptanceUnknown, fullSyncRequired, network, server, cancelled, failed
 }
+/// One progress indicator's value: the view keeps one identity for both cases.
+public enum MeguriProgressValue: Equatable, Sendable {
+    case indeterminate, fraction(Double)
+    public var fraction: Double? { if case .fraction(let value) = self { value } else { nil } }
+}
 public enum MeguriSyncNowRoute: Equatable, Sendable {
     case disabled(String?), account(String), round
 }
@@ -413,6 +418,31 @@ public struct MeguriSyncStatusPresentation {
             case .unreported, .exchanging, .idle, .pending, .waiting, .network, .server, .cancelled: false
             }
         } else { needsUser = true } // Signed in, setup not continued.
+    }
+    /// The Account section's progress while Meguri work runs: none while idle
+    /// or stopped. The media step's value is the whole step's files done over
+    /// files done and left, never one request's bytes, so batches cannot switch
+    /// it between a bar and a spinner. Other steps use their job's own total.
+    public static func progress(busy: Bool, stopped: Bool, stage: MeguriSetupStage?,
+                                completed: UInt64?, total: UInt64?,
+                                mediaDone: UInt64?, mediaAwaiting: UInt64?) -> MeguriProgressValue? {
+        guard busy, !stopped else { return nil }
+        if stage == .media {
+            guard let done = mediaDone, let awaiting = mediaAwaiting else { return .indeterminate }
+            let all = Double(done) + Double(awaiting)
+            return all > 0 ? .fraction(Double(done) / all) : .indeterminate
+        }
+        guard let completed, let total, total > 0 else { return .indeterminate }
+        return .fraction(min(1, Double(completed) / Double(total)))
+    }
+    /// MP6.5: a provider phase that turns blocked stops the Meguri network work
+    /// already running: the setup's media step or a round. A collection step is
+    /// left to Core, whose replacement keeps its own exclusive phase.
+    public static func stopsWorkOnBlock(was: SyncProviderPhase?, now: SyncProviderPhase?,
+                                        stage: MeguriSetupStage?, roundRunning: Bool) -> Bool {
+        guard now == .blocked, was != .blocked else { return false }
+        if let stage { return stage == .media }
+        return roundRunning
     }
     public static func canDiscard(_ receipt: MeguriBootstrapReceipt) -> Bool {
         receipt.acceptance == .notSent && receipt.phase != .needsDecision
