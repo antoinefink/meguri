@@ -511,10 +511,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "d242c316ccc15adbecf1514c8b7cc469057e11fb38054dc00fb496b302f2b634",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "sched/memory/skipped-rows",
-  "scenario_sha256": "5a5f322aa9ebb00c8965302a9293226e0f34c995afe6621aecd218a03261943f",
+  "scenario_sha256": "bce5cf9c5ab94a71f5446142659dfe283e28dae1630108bbb516bc294ca598da",
   "tz": "UTC"
 }

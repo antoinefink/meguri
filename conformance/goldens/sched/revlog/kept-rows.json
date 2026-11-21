@@ -308,10 +308,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "9b5b72a872e653e261f80ba56ab4c80cb0ed388624fe2d866307a497a123e9af",
+    "driver_sha256": "70951a89ad9f1f5e8f20af3d6978d6965b4b10baec80696d8ccaad11d46c2792",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "sched/revlog/kept-rows",
-  "scenario_sha256": "81cba0ed4ca8c3c087e3b154ac2ec8659402cea2bad7b51516f7f4b0e328b051",
+  "scenario_sha256": "7b0a5dc7eb05ea5ded26b390eeef808d949eae90e9d08c80791de6929e02e042",
   "tz": "UTC"
 }

@@ -43,7 +43,7 @@ steps:
         WHERE cards.id = c.cid
   # c2 and c4: a learning run on 2030-01-01, then two reviews.
   - db_exec:
-      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1 + c.n, c.cid, -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c JOIN (VALUES (1893492000000, 3, -600, -60, 0, 0), (1893492600000, 3, 1, -600, 2500, 0), (1893578400000, 3, 4, 1, 2500, 1), (1893924000000, 3, 20, 4, 2500, 1)) AS v WHERE c.n IN (2, 4)"
+      sql: "INSERT INTO revlog SELECT v.column1 + c.n, c.cid, -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c JOIN (VALUES (1893492000000, 3, -600, -60, 0, 0), (1893492600000, 3, 1, -600, 2500, 0), (1893578400000, 3, 4, 1, 2500, 1), (1893924000000, 3, 20, 4, 2500, 1)) AS v WHERE c.n IN (2, 4)"
   - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
   - advance: 1h
   - observe: [{legacy_json: {decks: [Words, Orphan]}}]
