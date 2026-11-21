@@ -77,7 +77,11 @@ struct MeguriMediaResume: Equatable, Sendable {
     }
     /// What a media step's refusal means for the next attempt.
     static func outcome(refused failure: MeguriBootstrapFailure, accounting: MeguriBootstrapMediaAccounting?) -> Outcome {
-        if accounting != nil { return .blocked }
+        // Only files the media path cannot transfer block the step (MP5). Files
+        // still pending, here or on the server, are an unfinished step.
+        if let accounting {
+            return accounting.files.contains { $0.state == .excluded } ? .blocked : .unfinished
+        }
         switch failure {
         case .busy, .cancelled, .unavailable, .mediaIncomplete: return .unfinished
         // Identity: setup's sign-in row (T19.5).
