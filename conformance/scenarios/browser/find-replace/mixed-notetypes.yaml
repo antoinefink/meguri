@@ -1,0 +1,53 @@
+# Find and Replace over notes of three note types (R1200, R1202, R1204,
+# R1207; specs/browser/find-replace.md F3, F4 step 2, F6 steps 2, 3 and 8).
+# First a regular expression with its own inline case flag, ignore_case off,
+# in All Fields: it rewrites every field holding a match in n1 (Vocab), n2
+# (Gloss) and n4 (Plain), whatever the note type, and leaves n3 and n5,
+# which hold no match, unwritten: count 3. The In list for all five notes is
+# the union of the three note types' field names, Text once, in unicase
+# order; for the two Vocab notes it is Vocab's names only. Then a literal
+# replacement limited to the field Text: the Vocab notes have no such field
+# and are skipped although their fields hold the find text, Gloss and Plain
+# notes change in Text only (their other fields keep the find text), and the
+# Gloss note without a match stays: count 2. Rows read with db_exec after
+# usn is reset and the clock advanced, so written rows show usn -1 and a
+# new mod (bulk-ops.md X4).
+id: browser/find-replace/mixed-notetypes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Vocab
+      fields: [Word, Meaning]
+      templates: [{name: Recall, front: "{{Word}}", back: "{{Meaning}}"}]
+    - name: Gloss
+      fields: [Text, Aside, Source]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Aside}}{{Source}}"}]
+    - name: Plain
+      fields: [Text, Extra]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Extra}}"}]
+  notes:
+    - {notetype: Vocab, fields: ["alpha qqq", "beta QQQ"]}
+    - {notetype: Gloss, fields: ["gamma qQq", "", "qqq delta"]}
+    - {notetype: Vocab, fields: [epsilon, zeta]}
+    - {notetype: Plain, fields: [qqq, "Qqq and qqq"]}
+    - {notetype: Gloss, fields: [eta, theta, iota]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - advance: 1m
+  - find_replace:
+      notes: ["#n1", "#n2", "#n3", "#n4", "#n5"]
+      find: "(?i)q{3}"
+      replace: zz
+      regex: true
+      ignore_case: false
+  - db_exec: {sql: "SELECT flds, mod, usn FROM notes ORDER BY id"}
+  - observe: [{find_replace_fields: {notes: ["#n1", "#n2", "#n3", "#n4", "#n5"]}}]
+  - observe: [{find_replace_fields: {notes: ["#n1", "#n3"]}}]
+  - db_exec: {sql: "UPDATE notes SET usn = 0"}
+  - advance: 1m
+  - find_replace:
+      notes: ["#n1", "#n2", "#n3", "#n4", "#n5"]
+      find: zz
+      replace: yy
+      in: {field: Text}
+  - db_exec: {sql: "SELECT flds, mod, usn FROM notes ORDER BY id"}

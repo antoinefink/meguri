@@ -4,7 +4,8 @@
 # U84: the browser_rows observation and sorted searches (browser-ops B1 to
 # B4). browser/modes/ is U85's (result-sets H16): every search of a browser
 # scenario runs through the core's result sets, slow plans streamed with one
-# candidate per chunk.
+# candidate per chunk. U86: find-replace/ runs bulk-ops X1 and X3 through
+# the engine's Find and Replace and selection_summary.
 area: browser
 active:
   - "config/absent-defaults"
@@ -58,3 +59,8 @@ active:
   - "modes/toggle-context"
   - "modes/toggle-damaged"
   - "modes/toggle-sets"
+  - "find-replace/field-names"
+  - "find-replace/literal-dollar-replacement"
+  - "find-replace/mixed-notetypes"
+  - "find-replace/mode-counts"
+  - "find-replace/whole-collection-count"

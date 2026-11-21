@@ -1,4 +1,4 @@
-"""Synthetic coverage of the explicit search-data lane; no real corpus reads."""
+"""Synthetic coverage of the explicit test-data lane; no real corpus reads."""
 
 import json
 import os
@@ -6,7 +6,7 @@ import shutil
 import unittest
 
 from meguri_similarity.lexer import Lexer
-from meguri_similarity.search_data import lex
+from meguri_similarity.test_data import lex
 from support import make_corpus, scan, synthetic_config, tmpdir, write_tree
 
 SCENARIOS = "conformance/scenarios/search"
@@ -16,7 +16,7 @@ COMMENT = "Lex tokens identifier words split from camel and snake case plus the 
 OWN = "Every token carries the line"
 
 
-class SearchDataTests(unittest.TestCase):
+class TestDataTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.shared = tmpdir()
@@ -37,11 +37,11 @@ class SearchDataTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.root)
 
-    def check(self, files, paths=None, enabled=True):
+    def check(self, files, paths=None, enabled=True, flag="--test-data"):
         write_tree(self.root, files)
         return scan(self.refs, os.path.join(self.shared, "cache"), self.root,
                     [SCENARIOS, GOLDENS] if paths is None else paths, self.out,
-                    config=self.config, extra=["--search-data"] if enabled else [])
+                    config=self.config, extra=[flag] if enabled else [])
 
     def pair(self, value, golden=OWN):
         return {SCENARIOS + "/one.yaml": "description: " + json.dumps(value) + "\n",
@@ -52,7 +52,7 @@ class SearchDataTests(unittest.TestCase):
             paths=[SCENARIOS + "/one.yaml", GOLDENS + "/one.json"], enabled=False)
         self.assertEqual(code, 0, error)
         self.assertEqual((summary["counts"]["scanned"], summary["counts"]["skipped"]), (0, 2))
-        self.assertNotIn("search_data", summary)
+        self.assertNotIn("test_data", summary)
 
     def test_recursive_pairs_have_hash_manifest_and_real_fingerprint_counts(self):
         files = self.pair(OWN)
@@ -60,7 +60,7 @@ class SearchDataTests(unittest.TestCase):
                       GOLDENS + "/nested/two.json": json.dumps({"result": "three"})})
         code, summary, views, error = self.check(files)
         self.assertEqual(code, 0, error)
-        data = summary["search_data"]
+        data = summary["test_data"]
         self.assertEqual(data["pairs"], 2)
         self.assertEqual([item["path"] for item in data["manifest"]], sorted(files))
         self.assertTrue(all(len(item["sha256"]) == 64 for item in data["manifest"]))
@@ -69,17 +69,17 @@ class SearchDataTests(unittest.TestCase):
         self.assertEqual(summary["status"], "warn")
         self.assertTrue(data["limited"])
         self.assertTrue(all(set(item["fingerprints"]) == {"lex", "com", "text"} for item in data["coverage"]))
-        self.assertIn("search_data", views["implementer"])
+        self.assertIn("test_data", views["implementer"])
 
-    def test_whole_search_roots_exclude_area_manifests_from_pairing(self):
+    def test_whole_area_roots_exclude_area_manifests_from_pairing(self):
         files = self.pair(OWN)
         files[SCENARIOS + "/area.yaml"] = "area: search\nstatus: active\n"
         files[SCENARIOS + "/area.yml"] = "area: search\nstatus: pending\n"
         code, summary, _views, error = self.check(files)
         self.assertEqual(code, 0, error)
         self.assertEqual(summary["counts"]["scanned"], 2)
-        self.assertEqual(summary["search_data"]["pairs"], 1)
-        self.assertEqual([item["path"] for item in summary["search_data"]["manifest"]],
+        self.assertEqual(summary["test_data"]["pairs"], 1)
+        self.assertEqual([item["path"] for item in summary["test_data"]["manifest"]],
                          sorted(self.pair(OWN)))
 
     def test_copied_scalar_and_yaml_comment_are_detected_across_languages(self):
@@ -123,13 +123,56 @@ class SearchDataTests(unittest.TestCase):
         self.assertEqual(code, 0, error)
         self.assertEqual(summary["counts"]["flagged"], 0)
         self.assertEqual(summary["status"], "pass")
-        self.assertFalse(summary["search_data"]["limited"])
+        self.assertFalse(summary["test_data"]["limited"])
+
+    def test_every_area_pairs_within_itself(self):
+        files = self.pair(OWN)
+        files.update({"conformance/scenarios/sched/area.yaml": "area: sched\n",
+                      "conformance/scenarios/sched/one.yaml": "description: " + json.dumps(STORY) + "\n",
+                      "conformance/goldens/sched/one.json": json.dumps({"description": OWN}),
+                      "conformance/scenarios/fp-probe/nested/two.json": json.dumps({"values": ["a"]}),
+                      "conformance/goldens/fp-probe/nested/two.json": json.dumps({"result": "b"})})
+        code, summary, _views, error = self.check(files, paths=["conformance/scenarios", "conformance/goldens"])
+        self.assertEqual(code, 1, error)
+        self.assertEqual(summary["test_data"]["pairs"], 3)
+        self.assertEqual(summary["counts"]["scanned"], 6)
+        self.assertEqual({item["path"] for item in summary["flags"]}, {"conformance/scenarios/sched/one.yaml"})
+        code, summary, _views, error = self.check({}, paths=["conformance/scenarios/fp-probe", "conformance/goldens/fp-probe"])
+        self.assertEqual((code, summary["test_data"]["pairs"]), (0, 1), error)
+
+    def test_json_with_characters_yaml_refuses_is_still_scanned(self):
+        golden = '{"description": "' + STORY.replace(" ", " \u007f", 1) + '", "raw": "a\u0085b\u0080c"}'
+        self.assertIn("\x7f", golden)
+        files = self.pair(OWN)
+        files[GOLDENS + "/one.json"] = golden
+        code, summary, _views, error = self.check(files)
+        self.assertEqual(code, 1, error)
+        self.assertEqual(summary["counts"]["errors"], 0)
+        self.assertEqual({item["path"] for item in summary["flags"]}, {GOLDENS + "/one.json"})
+        words = [word for item in lex(golden, GOLDENS + "/one.json", Lexer()).texts for word in item[0]]
+        self.assertIn("implementer", words)
+        self.assertEqual(lex(golden, GOLDENS + "/one.json", Lexer()).texts[0][1][0], 1)
+
+    def test_the_old_flag_still_selects_the_lane(self):
+        code, summary, _views, error = self.check(self.pair(STORY), flag="--search-data")
+        self.assertEqual(code, 1, error)
+        self.assertIn("test_data", summary)
+
+    def test_names_pair_only_within_one_area(self):
+        files = {SCENARIOS + "/one.yaml": "description: value\n",
+                 "conformance/goldens/sched/one.json": "{}"}
+        code, summary, _views, _error = self.check(files, paths=["conformance/scenarios", "conformance/goldens"])
+        self.assertEqual((code, summary["status"]), (2, "error"))
+        self.assertIn("same area", summary["error"])
 
     def test_outside_missing_unsupported_unpaired_and_empty_inputs_refuse(self):
         cases = [
             ({}, []),
             ({}, [SCENARIOS + "/missing.yaml", GOLDENS]),
             ({"core/one.json": "{}"}, ["core/one.json"]),
+            ({"conformance/goldens-apple/search/one.json": "{}"}, ["conformance/goldens-apple/search/one.json"]),
+            ({"conformance/scenarios/one.yaml": "x: y", "conformance/goldens/one.json": "{}"},
+             ["conformance/scenarios", "conformance/goldens"]),
             ({}, [SCENARIOS + "/../../../../outside.json"]),
             ({SCENARIOS + "/one.txt": "text"}, [SCENARIOS]),
             ({SCENARIOS + "/one.yaml": "description: value\n"}, [SCENARIOS]),
@@ -138,7 +181,7 @@ class SearchDataTests(unittest.TestCase):
         ]
         for files, paths in cases:
             with self.subTest(paths=paths):
-                for directory in (SCENARIOS, GOLDENS):
+                for directory in ("conformance",):
                     shutil.rmtree(os.path.join(self.root, directory), ignore_errors=True)
                 code, summary, _views, _error = self.check(files, paths=paths)
                 self.assertEqual(code, 2)

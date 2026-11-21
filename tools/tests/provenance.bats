@@ -1226,26 +1226,29 @@ STUB
   [ "$(field '.failures[0].id')" = usage ]
 }
 
-@test "similarity search data requires explicit paths and rejects revision modes" {
-  mg similarity --search-data
-  [ "$status" -eq 2 ]
-  [ "$(field '.failures[0].id')" = usage ]
-  mg similarity --search-data --rev HEAD -- conformance/scenarios/search conformance/goldens/search
-  [ "$status" -eq 2 ]
-  [ "$(field '.failures[0].id')" = usage ]
-  mg similarity --search-data --base HEAD -- conformance/scenarios/search conformance/goldens/search
-  [ "$status" -eq 2 ]
-  [ "$(field '.failures[0].id')" = usage ]
+@test "similarity test data requires explicit paths and rejects revision modes" {
+  local flag
+  for flag in --test-data --search-data; do
+    mg similarity "$flag"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+    mg similarity "$flag" --rev HEAD -- conformance/scenarios/search conformance/goldens/search
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+    mg similarity "$flag" --base HEAD -- conformance/scenarios/search conformance/goldens/search
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+  done
 }
 
-@test "similarity search data keeps the implementer guard" {
-  mg worktree new --role implementer search-data
-  MG_AT="$BATS_TEST_TMPDIR/repo-wt/search-data" mg similarity --search-data -- conformance/scenarios/search conformance/goldens/search
+@test "similarity test data keeps the implementer guard" {
+  mg worktree new --role implementer test-data
+  MG_AT="$BATS_TEST_TMPDIR/repo-wt/test-data" mg similarity --test-data -- conformance/scenarios/search conformance/goldens/search
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = implementer-worktree ]
 }
 
-@test "similarity search data forwards the mode and retains coverage in the receipt" {
+@test "similarity test data forwards the mode and retains coverage in the receipt" {
   mkdir -p "$SB/refs/anki"
   export FX_SEARCH_ARGS="$BATS_TEST_TMPDIR/search-args"
   cat >"$SB/tools/mg.d/zz-search-data-fake.sh" <<'EOF'
@@ -1258,16 +1261,16 @@ mg__similarity_run() {
     echo '{}' >"$out/$file"
   done
   cat >"$out/summary.json" <<'JSON'
-{"status":"warn","counts":{"scanned":2,"flagged":0,"allowlisted":0,"clean":2,"errors":0,"skipped":0,"missing":0},"corpus":{"tags":2,"first_tag":"a","last_tag":"b"},"timing":{},"flags":[],"errors":[],"missing":[],"search_data":{"pairs":1,"manifest":[{"path":"conformance/scenarios/search/a.yaml","sha256":"synthetic"}],"coverage":[{"path":"conformance/scenarios/search/a.yaml","fingerprints":{"lex":0,"com":0,"text":0},"meaningful":false}],"limited":["conformance/scenarios/search/a.yaml"]}}
+{"status":"warn","counts":{"scanned":2,"flagged":0,"allowlisted":0,"clean":2,"errors":0,"skipped":0,"missing":0},"corpus":{"tags":2,"first_tag":"a","last_tag":"b"},"timing":{},"flags":[],"errors":[],"missing":[],"test_data":{"pairs":1,"manifest":[{"path":"conformance/scenarios/sched/a.yaml","sha256":"synthetic"}],"coverage":[{"path":"conformance/scenarios/sched/a.yaml","fingerprints":{"lex":0,"com":0,"text":0},"meaningful":false}],"limited":["conformance/scenarios/sched/a.yaml"]}}
 JSON
 }
 EOF
-  mg similarity --search-data -- conformance/scenarios/search conformance/goldens/search
+  mg similarity --search-data -- conformance/scenarios/sched conformance/goldens/sched
   [ "$status" -eq 0 ]
   [ "$(field .status)" = warn ]
-  grep -Fx -- '--search-data' "$FX_SEARCH_ARGS"
-  [ "$(field '.details.search_data.pairs')" -eq 1 ]
-  [ "$(field '.details.search_data.limited | length')" -eq 1 ]
+  grep -Fx -- '--test-data' "$FX_SEARCH_ARGS"
+  [ "$(field '.details.test_data.pairs')" -eq 1 ]
+  [ "$(field '.details.test_data.limited | length')" -eq 1 ]
   validate "$result"
 }
 
@@ -1489,13 +1492,14 @@ case "$1 $*" in
   compose*" run "*) ;;
   *) exit 97 ;;
 esac
-args=("$@") root="" files="" out="" null="" compose="" mode=scan i=0
+args=("$@") root="" files="" out="" null="" compose="" allowlist="" mode=scan i=0
 while [ "$i" -lt "${#args[@]}" ]; do
   case "${args[$i]}" in
     -f) compose="${args[$((i + 1))]}" ;;
     --root) root="${args[$((i + 1))]}" ;;
     --files-from) files="${args[$((i + 1))]}" ;;
     --out) out="${args[$((i + 1))]}" ;;
+    --allowlist) allowlist="${args[$((i + 1))]}" ;;
     --null) null=yes ;;
     jplag) mode=jplag ;;
   esac
@@ -1512,6 +1516,7 @@ if [ "$mode" = jplag ]; then
 fi
 cp "$files" "$STUB_OUT/files.lst"
 echo "$null" >"$STUB_OUT/null"
+[ -z "$allowlist" ] || cp "$host${allowlist#/work}" "$STUB_OUT/allowlist.yaml"
 (cd "$root" && find . -type f -print0 | sed -z 's|^\./||') >"$STUB_OUT/tree.lst"
 if [ -n "${STUB_ERROR:-}" ]; then
   jq -n --arg e "$STUB_ERROR" '{status: "error", error: $e}' >"$out/summary.json"
@@ -1621,6 +1626,30 @@ commit_awkward_names() {
     [ ! -e "$STUB_OUT" ]
     validate "$result"
   done
+}
+
+@test "similarity --allowlist-rev scans with that commit's allowlist, not the checkout's" {
+  make_docker_stub
+  mkdir -p "$SB/refs/anki"
+  mkdir -p "$SB/tools/similarity"
+  echo 'entries: [] # base' >"$SB/tools/similarity/allowlist.yaml"
+  git -C "$SB" add -A && git -C "$SB" commit -qm base
+  echo 'entries: [] # branch' >"$SB/tools/similarity/allowlist.yaml"
+  git -C "$SB" commit -qam branch
+  mg similarity --base HEAD~1 --rev HEAD --allowlist-rev HEAD~1
+  [ "$status" -eq 0 ]
+  grep -qx 'entries: \[\] # base' "$STUB_OUT/allowlist.yaml"
+  mg similarity --base HEAD~1 --rev HEAD
+  [ "$status" -eq 0 ]
+  [ ! -e "$STUB_OUT/allowlist.yaml" ]
+  # A commit without an allowlist exempts nothing.
+  git -C "$SB" rm -q tools/similarity/allowlist.yaml && git -C "$SB" commit -qm none
+  mg similarity --allowlist-rev HEAD --rev HEAD -- core/rust-toolchain.toml
+  [ "$status" -eq 0 ]
+  grep -qx 'entries: \[\]' "$STUB_OUT/allowlist.yaml"
+  mg similarity --allowlist-rev no-such-ref -- core/rust-toolchain.toml
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = bad-rev ]
 }
 
 @test "similarity warns about listed files the scanner did not find" {

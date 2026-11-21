@@ -104,6 +104,7 @@
 
 - `tools/mg core-format` optionally rewrites Rust formatting in the dev container on demand. `core-lint` does not enforce source formatting.
 - Hosted checks run `core-test --quick` (shards) and `core-lint` (Linux · core · lint, which Linux · core requires) whenever Core is selected; they run no `static-checks`, `lint-ui`, `core-deny` or Swift job. A `core-lint` input outside `core/` (`mg.d/core.sh`, `scripts/ankiweb-scan.py`) must stay in "Select suites"' Core paths.
+- Linux · similarity (`.github/similarity.sh`) runs `tools/mg similarity` with `MG_SIMILARITY_REFS` set to Anki tags it fetched outside the checkout at the commits pinned in `tools/similarity/config.yaml` (`corpus.commits`), and `--allowlist-rev <base>`. Its log and step summary carry only what `similarity.sh summary` builds from typed report fields; never print `tools/mg` output, a report or a scanner message there (`tests/hosted_similarity.bats`). Its index cache (`similarity-index-v1-`, path `build/similarity-index`) is its own. `similarity.sh select` reads the scanner's exclusions and extensions from `config.yaml` and `lexer.py`: keep both parseable by its awk.
 
 - `u38-wiring --milestone <id>` runs the on-demand host provider-owner test against the normalized milestone manifest. Ordinary core tests skip that one check while providers are expected to be pending; M1R and M1 run it through their distinct T3 run IDs.
 
