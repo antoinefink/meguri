@@ -1,7 +1,7 @@
 # Rust core jobs. Sourced by tools/mg; they run inside the `dev` container.
 
 mg_job core-test docker:dev mg_core_test \
-  "Rust tests: cargo nextest on core/ (no retries), canary_* first; --canaries only; a bare run and --quick leave out the three stress cases (hosted shards: [--partition hash:M/N] [--exclude-list <file> | --only-list <file>]), --stress requires those three (--stress --case session|suspend|merge: one of them), building only their test binaries; args after -- go to nextest"
+  "Rust tests: cargo nextest on core/ (no retries), canary_* first; --canaries only; a bare run and --quick leave out the three stress cases (hosted shards: [--partition hash:M/N] [--exclude-list <file> | --only-list <file>] [--archive <file>]; --build-archive <file> builds quick's tests once for them), --stress requires those three (--stress --case session|suspend|merge: one of them), building only their test binaries; args after -- go to nextest"
 mg_job core-lint docker:dev mg_core_lint \
   "Rust lint: clippy -D warnings on all targets and features, layering-check (edges.toml), and no AnkiWeb name in meguri-sync built without its features; source formatting is optional"
 mg_job core-deny docker:dev mg_core_deny \
@@ -136,10 +136,46 @@ mg__core_list() {
 mg__core_settle() {
   [ "$list_mode" = only ] || return 0
   # The listing also names each selected test's binary (mg_core_test).
-  (cd core && cargo nextest list --workspace ${features[0]+"${features[@]}"} --message-format json -E "$1") \
+  (cd core && cargo nextest list ${scope[0]+"${scope[@]}"} --message-format json -E "$1") \
     >"$MG_RUN_DIR/nextest-list.json" || echo '{}' >"$MG_RUN_DIR/nextest-list.json"
   mg_artifact nextest-list-json "$MG_RUN_DIR/nextest-list.json"
   sync
+}
+
+# mg__core_archive_path <file>: a .tar.zst path inside the checkout, relative.
+mg__core_archive_path() {
+  case "$1" in
+    '' | /* | ../* | */../* | *..) return 1 ;;
+    *.tar.zst) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# mg__core_build_archive <file>: quick's test binaries (every workspace test,
+# with quick's features), built once into a nextest archive that hosted
+# shards run with --archive. Builds only: no test runs here.
+mg__core_build_archive() {
+  local out="$MG_RUN_DIR/nextest-archive.log" rc
+  if [ ! -f core/Cargo.toml ]; then
+    mg_failure no-workspace "core/ has no Cargo workspace, so there is nothing to archive"
+    mg_status fail
+    return 0
+  fi
+  mkdir -p "$(dirname "$1")"
+  rm -f "$1"
+  (cd core && cargo nextest archive --workspace --features meguri-ffi/test-hooks --archive-file "$MG_ROOT/$1") 2>&1 | tee "$out" >&2
+  rc=${PIPESTATUS[0]}
+  mg_artifact log "$out" "cargo nextest archive"
+  if [ "$rc" -ne 0 ] || [ ! -s "$1" ]; then
+    mg_failure "nextest-archive-exit-$rc" "cargo nextest archive exited with code $rc; see log.txt"
+    mg_message "core-test: building the test archive failed (exit $rc)"
+    mg_status fail
+    return 0
+  fi
+  mg_detail archive "$(jq -nc --arg file "$1" --arg sha "$(sha256sum "$1" | cut -c1-64)" --argjson bytes "$(wc -c <"$1" | tr -d ' ')" \
+    '{file: $file, sha256: $sha, bytes: $bytes, features: ["meguri-ffi/test-hooks"]}')"
+  mg_message "core-test: test archive $1 built ($(( $(wc -c <"$1") / 1048576 )) MB)"
+  mg_status pass
 }
 
 # tools/mg core-test [--canaries | --quick [hosted options] | --stress [--case <case>] | -- nextest args]
@@ -156,8 +192,18 @@ mg__core_settle() {
 # build has been flushed to disk, and fails when a listed test did not run.
 mg_core_test() {
   local only_canaries=false mode=default arg stress_case=all
-  local partition="" list_mode="" list_file="" listed="" list_expr=""
+  local partition="" list_mode="" list_file="" listed="" list_expr="" archive=""
   case "${1:-}" in
+    --build-archive)
+      if [ "$#" -ne 2 ] || ! mg__core_archive_path "$2"; then
+        mg_failure usage "--build-archive takes one <file>.tar.zst inside the checkout, given relative to its root, and nothing else" "tools/mg core-test --build-archive build/core-tests.tar.zst"
+        mg_status error
+        return 0
+      fi
+      mg__core_environment
+      mg__core_build_archive "$2"
+      return 0
+      ;;
     --canaries|--stress)
       mode="${1#--}"
       shift
@@ -188,6 +234,15 @@ mg_core_test() {
             partition="$2"
             shift 2
             ;;
+          --archive)
+            if [ -n "$archive" ] || [ "$#" -lt 2 ] || ! mg__core_archive_path "$2" || [ ! -f "$2" ]; then
+              mg_failure usage "--archive takes one existing <file>.tar.zst inside the checkout, given relative to its root (tools/mg core-test --build-archive makes it)" "tools/mg core-test --quick --archive build/core-tests.tar.zst"
+              mg_status error
+              return 0
+            fi
+            archive="$2"
+            shift 2
+            ;;
           --exclude-list|--only-list)
             if [ -n "$list_mode" ] || [ "$#" -lt 2 ] || [ -z "$2" ]; then
               mg_failure usage "--quick takes at most one of --exclude-list or --only-list, with a file" "tools/mg core-test --quick --exclude-list .github/core-timing-sensitive.txt"
@@ -200,7 +255,7 @@ mg_core_test() {
             shift 2
             ;;
           *)
-            mg_failure usage "--quick takes only --partition hash:M/N and one of --exclude-list or --only-list <file>" "tools/mg core-test --quick"
+            mg_failure usage "--quick takes only --partition hash:M/N, --archive <file> and one of --exclude-list or --only-list <file>" "tools/mg core-test --quick"
             mg_status error
             return 0
             ;;
@@ -234,8 +289,10 @@ mg_core_test() {
         fi
       fi
       mg_detail hosted_selection "$(jq -nc --arg partition "$partition" --arg mode "$list_mode" --arg file "$list_file" \
-        --arg sha "$( [ -z "$list_file" ] || sha256sum "$list_file" | cut -c1-64)" --arg listed "$listed" '
+        --arg sha "$( [ -z "$list_file" ] || sha256sum "$list_file" | cut -c1-64)" --arg listed "$listed" \
+        --arg archive "$archive" --arg archive_sha "$( [ -z "$archive" ] || sha256sum "$archive" | cut -c1-64)" '
         {partition: (if $partition == "" then null else $partition end),
+         archive: (if $archive == "" then null else {file: $archive, sha256: $archive_sha} end),
          list_mode: (if $mode == "" then null else $mode end),
          list_file: (if $file == "" then null else $file end),
          list_sha256: (if $sha == "" then null else $sha end),
@@ -273,10 +330,20 @@ mg_core_test() {
   local main="$MG_RUN_DIR/nextest.jsonl" canary="$MG_RUN_DIR/nextest-canary.jsonl"
   local rc stopped=false pkg stress_complete=true
   local ordinary_filter="not ($MG_CORE_CANARIES)"
-  local files=() canaries=() features=() hosted=()
+  local files=() canaries=() features=() hosted=() scope=() extract=""
   case "$mode" in
     quick|stress) features=(--features meguri-ffi/test-hooks) ;;
   esac
+  # scope: what nextest builds and lists. From an archive, the binaries
+  # --build-archive built with quick's features, extracted beside the Cargo
+  # target (on disk, not the /tmp tmpfs); nothing is compiled.
+  if [ -n "$archive" ]; then
+    extract="${CARGO_TARGET_DIR:-$MG_RUN_DIR}/nextest-archive-$MG_RUN_ID"
+    rm -rf "$extract" && mkdir -p "$extract"
+    scope=(--archive-file "$MG_ROOT/$archive" --extract-to "$extract" --extract-overwrite)
+  else
+    scope=(--workspace ${features[0]+"${features[@]}"})
+  fi
   if [ "$mode" = quick ]; then
     local quick_filter="not ($MG_CORE_STRESS)"
     case "$list_mode" in
@@ -313,7 +380,11 @@ mg_core_test() {
     return 0
   fi
   if [ "${#canaries[@]}" -gt 0 ]; then
-    mg__nextest "$canary" "${canaries[@]}" --no-tests=pass -E "$MG_CORE_CANARIES"
+    if [ -n "$archive" ]; then
+      mg__nextest "$canary" "${scope[@]}" --no-tests=pass -E "$MG_CORE_CANARIES"
+    else
+      mg__nextest "$canary" "${canaries[@]}" --no-tests=pass -E "$MG_CORE_CANARIES"
+    fi
     rc=$?
     mg_artifact nextest-canary-jsonl "$canary"
     files=("$canary")
@@ -323,7 +394,7 @@ mg_core_test() {
       :
     else
       mg__core_settle "$ordinary_filter"
-      mg__nextest "$main" --workspace ${features[0]+"${features[@]}"} ${hosted[0]+"${hosted[@]}"} --no-tests=pass -E "$ordinary_filter"
+      mg__nextest "$main" "${scope[@]}" ${hosted[0]+"${hosted[@]}"} --no-tests=pass -E "$ordinary_filter"
       rc=$?
       mg_artifact nextest-jsonl "$main"
       files=("$canary" "$main")
@@ -332,7 +403,7 @@ mg_core_test() {
     [ "$#" -gt 0 ] || set -- --no-tests=pass
     [ "$bare" = false ] || set -- "$@" -E "not ($bare_out)"
     mg__core_settle "${quick_filter:-}"
-    mg__nextest "$main" --workspace ${features[0]+"${features[@]}"} ${hosted[0]+"${hosted[@]}"} "$@"
+    mg__nextest "$main" "${scope[@]}" ${hosted[0]+"${hosted[@]}"} "$@"
     rc=$?
     mg_artifact nextest-jsonl "$main"
     files=("$main")
@@ -381,7 +452,7 @@ mg_core_test() {
   fi
   # --only-list: every listed test must have run exactly once. A renamed or
   # removed test would otherwise leave the list silently checking nothing.
-  local listed_complete=true listed_results missing scope=""
+  local listed_complete=true listed_results missing scope_note=""
   if [ "$list_mode" = only ] && [ "$stopped" = false ]; then
     # The JSON names a test `<package>::<binary name>$<test>`: a library's
     # unit tests and an integration test named like the library share that
@@ -411,21 +482,23 @@ mg_core_test() {
         "tools/mg core-test --quick --only-list $list_file"
     fi
   fi
-  [ "$bare" = false ] || scope="; the three --stress cases left out"
-  [ -z "$partition" ] || scope="; partition $partition"
-  [ "$list_mode" != exclude ] || scope="$scope; $(printf '%s' "$listed" | grep -c . || true) listed tests left to the --only-list run"
-  [ "$list_mode" != only ] || scope="$scope; only the $(printf '%s' "$listed" | grep -c . || true) tests of $list_file, one at a time"
+  [ -z "$extract" ] || rm -rf "$extract"
+  [ "$bare" = false ] || scope_note="; the three --stress cases left out"
+  [ -z "$partition" ] || scope_note="; partition $partition"
+  [ -z "$archive" ] || scope_note="$scope_note; from $archive"
+  [ "$list_mode" != exclude ] || scope_note="$scope_note; $(printf '%s' "$listed" | grep -c . || true) listed tests left to the --only-list run"
+  [ "$list_mode" != only ] || scope_note="$scope_note; only the $(printf '%s' "$listed" | grep -c . || true) tests of $list_file, one at a time"
   if [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ] && [ "$only_canaries" = true ]; then
     mg_message "core-test: canaries only: $passed passed, $skipped skipped"
     mg_status pass
   elif [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ] && [ "$stress_complete" = true ] && [ "$listed_complete" = true ]; then
-    mg_message "core-test: $passed passed, $skipped skipped$scope"
+    mg_message "core-test: $passed passed, $skipped skipped$scope_note"
     mg_status pass
   elif [ "$stopped" = true ] && [ "$failed" -gt 0 ]; then
     mg_message "core-test: canary failed ($failed failed, $passed passed); the other tests did not run (nextest exit $rc)"
     mg_status fail
   else
-    mg_message "core-test: $failed failed, $passed passed, $skipped skipped (nextest exit $rc)$scope"
+    mg_message "core-test: $failed failed, $passed passed, $skipped skipped (nextest exit $rc)$scope_note"
     mg_status fail
   fi
 }
