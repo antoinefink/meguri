@@ -82,7 +82,7 @@ changed() {
   summary code "$(changed core/a.rs core/b.rs)"
   [ "$status" -eq 1 ]
   never_printed
-  [[ "$output" == *"3 files scanned, 1 passed (0 allowlisted), 2 flagged, 4 skipped"* ]]
+  [[ "$output" == *"3 files scanned, 1 passed (0 allowlisted, 0 recorded oracle output), 2 flagged, 4 skipped"* ]]
   [[ "$output" == *"Corpus: 54 Anki release tags 2.1.50..?, index 0123456789abcdef0123 (restored)."* ]]
   grep -qF '| `core/a.rs` | struct | 42% (22 of 52 fingerprints) | yes |' <<<"$output"
   grep -qF '| `core/b.rs` | text | 2 matching runs | yes |' <<<"$output"

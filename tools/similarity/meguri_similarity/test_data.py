@@ -236,3 +236,64 @@ def lex(text, path, lexer):
     except (ValueError, TypeError, yaml.YAMLError, RecursionError) as error:
         # Parser exceptions may embed fixture content; expose no raw payload.
         raise TestDataError("invalid or unsupported test-data document") from error
+
+
+# Oracle output (provenance.md, "Test data"): a golden's matches are Anki's
+# recorded program output, reported as `oracle-output` and not failing, only
+# while the golden carries the recording header of the current oracle pin for
+# its own scenario. Scenarios are never exempt. The header does not prove the
+# observations were not edited by hand: goldens-check (freshness) and the T1
+# oracle compare do, and only `tools/mg oracle record` writes goldens.
+ORACLE_OUTPUT = "oracle-output"
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def oracle_pin(root, rel):
+    """(anki_version, lock_sha256) of the oracle pin file `rel` under root, or
+    None when it is missing, linked or malformed (then no golden is exempt)."""
+    if not isinstance(rel, str) or not rel or rel.startswith("/") or ".." in rel.split("/"):
+        return None
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    current = os.dup(root_fd)
+    try:
+        parts = rel.split("/")
+        for part in parts[:-1]:
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+            os.close(current)
+            current = next_fd
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=current)
+        with os.fdopen(fd, "rb") as stream:
+            pin = json.loads(stream.read(65536).decode("utf-8"), object_pairs_hook=_strict_object,
+                             parse_constant=_nonfinite)
+    except (OSError, ValueError, UnicodeError):
+        return None
+    finally:
+        os.close(current)
+        os.close(root_fd)
+    if not isinstance(pin, dict):
+        return None
+    version, lock = pin.get("anki_version"), pin.get("lock_sha256")
+    if not isinstance(version, str) or not version or not isinstance(lock, str) or not _HEX64.fullmatch(lock):
+        return None
+    return version, lock
+
+
+def oracle_recorded(path, text, pin):
+    """True when the golden at `path` holds the header `tools/mg oracle record`
+    writes, for the pin `pin` and for the scenario of the same name."""
+    if pin is None or _scope(path) is None or _scope(path)[0] != 1 or not path.endswith(".json"):
+        return False
+    try:
+        doc = json.loads(text, object_pairs_hook=_strict_object, parse_constant=_nonfinite)
+    except ValueError:
+        return False
+    if not isinstance(doc, dict) or not isinstance(doc.get("observations"), dict):
+        return False
+    oracle = doc.get("oracle")
+    if not isinstance(oracle, dict) or (oracle.get("anki_version"), oracle.get("lock_sha256")) != pin:
+        return False
+    if not isinstance(oracle.get("driver_sha256"), str) or not _HEX64.fullmatch(oracle["driver_sha256"]):
+        return False
+    if not isinstance(doc.get("scenario_sha256"), str) or not _HEX64.fullmatch(doc["scenario_sha256"]):
+        return False
+    return doc.get("scenario_id") == path[len(ROOTS[1]) + 1:-len(".json")]

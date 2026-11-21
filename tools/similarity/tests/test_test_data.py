@@ -7,7 +7,7 @@ import unittest
 
 from meguri_similarity.lexer import Lexer
 from meguri_similarity.test_data import lex
-from support import make_corpus, scan, synthetic_config, tmpdir, write_tree
+from support import file_entry, make_corpus, scan, synthetic_config, tmpdir, write_tree
 
 SCENARIOS = "conformance/scenarios/search"
 GOLDENS = "conformance/goldens/search"
@@ -237,6 +237,70 @@ class TestDataTests(unittest.TestCase):
                       GOLDENS + "/one.json", Lexer())
         self.assertTrue(any(item[0][0] == "every" for item in decoded.texts))
         self.assertTrue(all(line == 1 for item in decoded.texts for line in item[1]))
+
+    # Oracle output (provenance.md "Test data"): only a golden with the
+    # recording header of the current pin for its own scenario is exempt.
+    PIN = {"anki_version": "26.9.3", "lock_sha256": "a" * 64}
+
+    def recorded(self, body=STORY, **header):
+        golden = {"clock": {"mode": "frozen"}, "observations": {"steps": [{"text": body}]},
+                  "oracle": {"anki_version": "26.9.3", "driver_sha256": "b" * 64, "lock_sha256": "a" * 64},
+                  "scenario_id": "search/one", "scenario_sha256": "c" * 64, "tz": "UTC"}
+        for key, value in header.items():
+            if key in ("anki_version", "driver_sha256", "lock_sha256"):
+                golden["oracle"][key] = value
+            elif value is None:
+                golden.pop(key)
+            else:
+                golden[key] = value
+        return json.dumps(golden)
+
+    def oracle_pair(self, golden, scenario=OWN, pin=PIN):
+        files = self.pair(scenario)
+        files[GOLDENS + "/one.json"] = golden
+        if pin is not None:
+            files["conformance/oracle.json"] = json.dumps(pin)
+        return files
+
+    def test_recorded_golden_with_corpus_text_is_reported_as_oracle_output(self):
+        code, summary, views, error = self.check(self.oracle_pair(self.recorded()))
+        self.assertEqual(code, 0, error)
+        self.assertEqual((summary["counts"]["flagged"], summary["counts"]["oracle_output"]), (0, 1))
+        self.assertEqual(summary["test_data"]["oracle_output"], [GOLDENS + "/one.json"])
+        for view in views.values():
+            entry = file_entry(view, GOLDENS + "/one.json")
+            self.assertEqual(entry["status"], "oracle-output")
+            self.assertEqual([flag["channel"] for flag in entry["flags"]], ["text"])
+
+    def test_hand_written_golden_with_corpus_text_still_flags(self):
+        cases = {
+            "no header": json.dumps({"observations": {"steps": [{"text": STORY}]}}),
+            "another pin": self.recorded(lock_sha256="d" * 64),
+            "another version": self.recorded(anki_version="26.9.2"),
+            "another scenario": self.recorded(scenario_id="search/two"),
+            "no scenario digest": self.recorded(scenario_sha256=None),
+            "malformed driver digest": self.recorded(driver_sha256="not-a-digest"),
+            "observations not an object": self.recorded(observations=[STORY]),
+        }
+        for name, golden in cases.items():
+            with self.subTest(name):
+                code, summary, _views, _error = self.check(self.oracle_pair(golden))
+                self.assertEqual(code, 1)
+                self.assertEqual((summary["counts"]["flagged"], summary["counts"]["oracle_output"]), (1, 0))
+
+    def test_without_a_readable_pin_no_golden_is_exempt(self):
+        for name, pin in {"missing": None, "malformed": {"anki_version": "26.9.3", "lock_sha256": "short"}}.items():
+            with self.subTest(name):
+                shutil.rmtree(os.path.join(self.root, "conformance"), ignore_errors=True)
+                code, summary, _views, _error = self.check(self.oracle_pair(self.recorded(), pin=pin))
+                self.assertEqual(code, 1)
+                self.assertEqual(summary["counts"]["oracle_output"], 0)
+
+    def test_scenario_inputs_are_never_exempt(self):
+        code, summary, views, _error = self.check(self.oracle_pair(self.recorded(), scenario=STORY))
+        self.assertEqual(code, 1)
+        self.assertEqual(file_entry(views["implementer"], SCENARIOS + "/one.yaml")["status"], "flagged")
+        self.assertEqual(summary["counts"]["oracle_output"], 1)
 
 
 if __name__ == "__main__":

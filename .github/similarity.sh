@@ -278,7 +278,7 @@ cmd_summary() {
     (if $kind == "data" then "Test data (conformance scenarios and goldens of the touched areas)" else "Code" end) as $title |
     "#### \($title): \(if $failed then "**failed**" else "passed" end)",
     "",
-    "\(count("scanned")) files scanned, \(count("clean") + count("allowlisted")) passed (\(count("allowlisted")) allowlisted), \(count("flagged")) flagged, \(count("skipped")) skipped (outside the scanner'"'"'s scope), \(count("errors")) errors, \(count("missing")) listed but missing.",
+    "\(count("scanned")) files scanned, \(count("clean") + count("allowlisted") + count("oracle_output")) passed (\(count("allowlisted")) allowlisted, \(count("oracle_output")) recorded oracle output), \(count("flagged")) flagged, \(count("skipped")) skipped (outside the scanner'"'"'s scope), \(count("errors")) errors, \(count("missing")) listed but missing.",
     (if $kind == "data" and ($s.test_data | type) == "object" then
       "\($s.test_data.pairs | num // 0) scenario and golden pairs; \(($s.test_data.limited // []) | length) files are below the fingerprint limits and were not meaningfully checked."
      else empty end),
