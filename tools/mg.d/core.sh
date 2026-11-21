@@ -342,13 +342,15 @@ mg_core_test() {
     local archives="${CARGO_TARGET_DIR:-$MG_RUN_DIR}/nextest-archive" old
     mkdir -p "$archives"
     # A cancelled run cannot remove its extraction: remove those of runs that
-    # have ended (they have a result.json; a live run has none yet), and any
-    # older than a day, which a killed run leaves without one.
+    # ended over 10 minutes ago (a result.json that old; a live run has none,
+    # and tools/mg writes it after stopping the run's container, which a
+    # failed cleanup would leave running at most until then), and any older
+    # than a day, which a killed run or a pruned result leaves unmarked.
     for old in "$archives"/*/; do
       [ -d "$old" ] || continue
       old="${old%/}"
       old="${old##*/}"
-      [ ! -f "$MG_ROOT/build/mg/core-test/$old/result.json" ] || rm -rf "${archives:?}/$old"
+      [ -z "$(find "$MG_ROOT/build/mg/core-test/$old/result.json" -mmin +10 2>/dev/null)" ] || rm -rf "${archives:?}/$old"
     done
     find "$archives" -mindepth 1 -maxdepth 1 -type d -mmin +1440 -exec rm -rf {} + 2>/dev/null
     extract="$archives/$MG_RUN_ID"

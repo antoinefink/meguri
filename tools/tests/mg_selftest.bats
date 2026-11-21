@@ -1578,10 +1578,17 @@ core_report_names() {
   [ -z "$(ls -A "$CARGO_TARGET_DIR/nextest-archive")" ]
   mkdir -p "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-1" "$SB/build/mg/core-test/20000101T000000Z-1"
   echo '{}' >"$SB/build/mg/core-test/20000101T000000Z-1/result.json"
+  touch -d '-11 minutes' "$SB/build/mg/core-test/20000101T000000Z-1/result.json"
+  # A run that ended just now keeps its extraction for now.
+  mkdir -p "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-3" "$SB/build/mg/core-test/20000101T000000Z-3"
+  echo '{}' >"$SB/build/mg/core-test/20000101T000000Z-3/result.json"
+  # Unmarked and two days old (a killed run, or a pruned result): removed.
+  mkdir -p "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-4"
+  touch -d '-2 days' "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-4"
   mkdir -p "$CARGO_TARGET_DIR/nextest-archive/20000101T000000Z-2"
   mg core-test --quick --archive build/archive/core-tests.tar.zst --partition hash:1/2 --exclude-list list.txt
   [ "$status" -eq 0 ]
-  [ "$(ls "$CARGO_TARGET_DIR/nextest-archive")" = 20000101T000000Z-2 ]
+  [ "$(ls "$CARGO_TARGET_DIR/nextest-archive" | tr '\n' ' ')" = "20000101T000000Z-2 20000101T000000Z-3 " ]
 
   # The timing-sensitive job's run: exactly the listed test, from the archive.
   mg core-test --quick --archive build/archive/core-tests.tar.zst --only-list list.txt
