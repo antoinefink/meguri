@@ -255,7 +255,10 @@ async function landOnCollection(page: Page, navigate: () => Promise<unknown>) {
     await expect.poll(() => answers.some(response => !response.ok()) ? []
       : paths.filter(path => !answers.some(response => new URL(response.url()).pathname === path))).toEqual([]);
     for (const response of answers) {
-      expect(response.ok(), `${response.request().method()} ${new URL(response.url()).pathname} answered ${response.status()}`).toBe(true);
+      // Name the server's fixed error code (for example storage_unavailable), never other body text.
+      const code = response.ok() ? "" : await response.json().then(body => body?.error?.code, () => undefined);
+      expect(response.ok(), `${response.request().method()} ${new URL(response.url()).pathname} answered ${response.status()} ${
+        /^[a-z_]{1,40}$/.test(code ?? "") ? code : "without an error code"}`).toBe(true);
     }
     await expect(page.getByRole("main").getByText("Loading storage…", { exact: true })).toHaveCount(0);
     expect(await page.getByRole("alert").allTextContents()).toEqual([]);

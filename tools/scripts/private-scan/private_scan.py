@@ -1084,7 +1084,7 @@ PUBLIC_ARTIFACTS = {
     'server/web/src/app.tsx':
         '7e93bc4d6f065091261d676de9d7c4936a5bc0ebf10aa6777bddada6ec4e5f63',
     'server/web/tests/browser/accounts.spec.ts':
-        'c54edd895ad46474b03411778575aeebe1a68c0383e6fca807307e2a05c288a4',
+        'ca12f0a952651e7bbbf110916fc31759c4e43679e59d0da776523afd5f6fa06d',
     'server/web/scripts/run.sh':
         '45ae2cae47f70726bae42af8aa3d26621353f4ade6dd457d39f19b7b36e64418',
     'server/web/package-lock.json':
@@ -1313,7 +1313,7 @@ PUBLIC_ARTIFACTS = {
     'core/crates/meguri-host/src/provider_bootstrap.rs': '038e6199bd9e9d63e307023e182caa3632ace08fee94c21563e61854357553bd',
     'core/crates/meguri-host/Cargo.toml': 'ef2e5f907851eb4d19984c899516e6affe5444516b59d245f4501dde2b744a73',
     'core/crates/meguri-host/examples/real_server_provider.rs': '30c41dac4cce43053fbabf3654565584fe6ebb3a8054c8660b1a8c4695d51ea5',
-    'server/tools/package-smoke.mjs': '6d81346b3b4e48b7d5ed96eee18998448f989ff26c02c97d084717c0a14bb2de',
+    'server/tools/package-smoke.mjs': '8a4ac4d7a54677a9fee3f64c4132de34e088d2f514c74c16083dbe9236ac456b',
     'tools/mg.d/meguri-provider-test.sh': 'bf637fbb25533a5cb354c079f4ee89d1518693e8e3b47c4c6d12b5c5467921f0',
     'tools/mg.d/meguri-native-provider.sh': '054b3eddd84f0d3f58a46075d4b0181a610a13ae728b87cfeda2ed09c779e94d',
     'tools/tests/gate.bats': 'f47075ea99a15e3757e9731394b67b46a89307318eda7e18b9bff2d9a5d0a68b',
