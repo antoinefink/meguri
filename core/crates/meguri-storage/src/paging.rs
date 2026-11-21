@@ -458,6 +458,22 @@ pub trait ReadRows: sealed::Connected {
         .collect()
     }
 
+    /// The ids of the deck's cards (`did` or `odid`, so its cards held in a
+    /// filtered deck too) whose stability reads as NULL the way
+    /// `search/card-extractors` X4 reads `s`, ascending: Change Deck's
+    /// memory-state set (`browser/bulk-actions` B7.2 step 4). It needs the
+    /// search crate's `meguri_card_f32`, which every engine connection
+    /// registers (C5).
+    fn deck_cards_without_stability(&self, id: DeckId) -> Result<Vec<CardId>, StorageError> {
+        Ok(self
+            .connection()
+            .prepare_cached(
+                "SELECT id FROM cards WHERE (did = ?1 OR odid = ?1) AND meguri_card_f32(data, 's') IS NULL ORDER BY id",
+            )?
+            .query_map([id.0], |row| row.get::<_, i64>(0).map(CardId))?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     fn deck_has_cards(&self, id: DeckId) -> Result<bool, StorageError> {
         Ok(self
             .connection()

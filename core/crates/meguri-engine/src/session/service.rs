@@ -976,6 +976,59 @@ impl ReviewService {
         })?;
         Ok(result)
     }
+    /// A Browse bulk action that writes scheduling (`browser/workspace`
+    /// V8.1: Suspend, Unsuspend, Bury, Unbury, Set Due Date, Forget),
+    /// admitted as [`Self::sched_op`] admits an operation with no session:
+    /// new answers wait, the answers already accepted are written first, and
+    /// once the action committed the session's observer has seen it and the
+    /// session's redo is gone. `run` is the action (`bulk::cards::run_admitted`)
+    /// on the bound collection; it is not a step of the session.
+    pub fn admit_card_action<T>(
+        &self,
+        cancel: &Arc<crate::CancelToken>,
+        run: impl FnOnce(&Collection) -> Result<crate::OpResult<T>, EngineError>,
+    ) -> Result<crate::OpResult<T>, EngineError> {
+        let _control = self.control.try_acquire()?;
+        cancel.check()?;
+        let (c, journal) = self.bound()?;
+        journal.check(c.generation())?;
+        {
+            let mut state = self.inner.state.lock().unwrap();
+            if state.paused || state.mutating {
+                return Err(EngineError::unavailable("review admission is closed"));
+            }
+            state.mutating = true;
+        }
+        struct MutationAdmission<'a>(&'a Mutex<State>);
+        impl Drop for MutationAdmission<'_> {
+            fn drop(&mut self) {
+                self.0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .mutating = false;
+            }
+        }
+        let _admission = MutationAdmission(&self.inner.state);
+        self.drain_until(crate::monotonic::now() + Duration::from_secs(5))?;
+        cancel.check()?;
+        let result = run(&c)?;
+        // As in `sched_op`: the barrier witnesses the observer's work for
+        // this commit before the admission closes.
+        let settled = (|| {
+            let (tx, rx) = mpsc::sync_channel(1);
+            self.inner.tx.send(Work::ApplicationBarrier(tx)).map_err(invalid)?;
+            rx.recv().map_err(invalid)?;
+            if let Some(s) = self.inner.state.lock().unwrap().session.as_mut() {
+                s.redo.clear();
+            }
+            Ok::<_, EngineError>(())
+        })();
+        settled.map_err(|error| EngineError::CommitCompleted {
+            seq: result.seq,
+            message: error.to_string(),
+        })?;
+        Ok(result)
+    }
     /// `review/edit-current` E2: Edit Note's save from the review, admitted
     /// as a card action is (the open session, not ending or restoring; answers
     /// in flight drained first) and recorded as a step of that session, so the
