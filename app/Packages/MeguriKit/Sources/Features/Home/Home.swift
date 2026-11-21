@@ -1034,13 +1034,9 @@ private struct HomeSidebarBranch: View {
                     }
                 } label: { row }
                 .tag(SidebarItem.deck(DeckID(node.id)))
-                #if !os(macOS)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(Text(verbatim: path))
-                .accessibilityValue(expanded.wrappedValue
-                    ? Text("Expanded", bundle: .module) : Text("Collapsed", bundle: .module))
-                .accessibilityIdentifier("home.sidebar.disclosure.\(node.id)")
-                #endif
+                // No accessibility of the group's own on iOS: the list flattens its rows, so
+                // an identifier here reached every row under it (the parent's and each
+                // subdeck's cell). The system's disclosure control reports its own state.
             }
         }
         .id(node.id)
@@ -1142,24 +1138,17 @@ public enum HomeSidebarPreview {
 public enum DeckListStudy {
     /// After the press's own actions: the double-click's second click and the selection's
     /// open run first, and the page they open never ends the review this starts.
+    /// A later selection (another row, Today) cancels the request: see
+    /// `ReviewCollection.startFromDeckList`.
     public static func start(deckID: Int64, collection: ReviewCollection) {
-        Task {
-            await Task.yield()
-            await collection.deckPageOpened()
-            guard let node = collection.deck(deckID) else { return }
-            guard !node.filtered, collection.offersStudy(deckID: deckID) else {
-                if collection.navigation.homeDeckPage?.rawValue != deckID { collection.openDeckPage(deckID: deckID) }
-                return
-            }
-            guard collection.canStudy, collection.navigation.sheet == nil, !collection.addNotePresentation.opening else { return }
-            await collection.startStudy(deckID: deckID)
-        }
+        let request = collection.deckListStudyRequest(deckID: deckID)
+        Task { await collection.startFromDeckList(request) }
     }
 
-    /// Today's Study (N24.3) from its keys: nothing while nothing waits or Study is unavailable.
+    /// Today's Study (N24.3) from its keys: nothing while nothing waits or Study is unavailable,
+    /// when the key arrives and again when the start runs.
     public static func startAll(collection: ReviewCollection) {
-        guard !collection.studyAllDecks.isEmpty, collection.canStudy, collection.navigation.sheet == nil,
-              !collection.addNotePresentation.opening else { return }
+        guard collection.studyAllAvailable else { return }
         Task { await collection.startStudyAll() }
     }
 }

@@ -156,6 +156,7 @@ private struct ActivityGridView: View {
     let geometry: ActivityGrid.Geometry
     let today: ActivityDays.Day
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
     /// The Mac's accent, read again when the system's colours change (System Settings).
     @State private var graphite = Self.currentGraphite
     #if os(macOS)
@@ -196,7 +197,7 @@ private struct ActivityGridView: View {
         let level = grid.level(daysAgo: daysAgo)
         let increased = contrast == .increased
         return shape
-            .fill(Self.style(level: level, increasedContrast: increased, graphite: graphite))
+            .fill(Self.style(level: level, increasedContrast: increased, dark: colorScheme == .dark, graphite: graphite))
             // N24.6: with Increase Contrast the steps lie over the empty day's own fill.
             .background { if increased && level > 0 { shape.fill(.fill.secondary) } }
             .overlay {
@@ -208,8 +209,8 @@ private struct ActivityGridView: View {
     /// The secondary fill for no reviews; the accent at N24.6's fixed opacities for the
     /// levels (`ActivityGrid.opacity`). The Mac's Graphite accent would make grey steps
     /// that do not tell a light day from an empty one, so they use the system blue.
-    static func style(level: Int, increasedContrast: Bool, graphite: Bool) -> AnyShapeStyle {
-        guard let opacity = ActivityGrid.opacity(level: level, increasedContrast: increasedContrast) else {
+    static func style(level: Int, increasedContrast: Bool, dark: Bool, graphite: Bool) -> AnyShapeStyle {
+        guard let opacity = ActivityGrid.opacity(level: level, increasedContrast: increasedContrast, dark: dark) else {
             return AnyShapeStyle(.fill.secondary)
         }
         return graphite ? AnyShapeStyle(Color.blue.opacity(opacity)) : AnyShapeStyle(TintShapeStyle().opacity(opacity))

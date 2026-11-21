@@ -121,11 +121,12 @@ public nonisolated struct TodaySummary: Equatable, Sendable {
                                                    timeZone: calendar.timeZone))
         }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) {
-            let formatter = DateFormatter()
-            formatter.locale = locale; formatter.calendar = calendar; formatter.timeZone = calendar.timeZone
-            formatter.dateStyle = .medium; formatter.timeStyle = .short
-            formatter.doesRelativeDateFormatting = true
-            return formatter.string(from: date)
+            // The day is decided by the supplied `now`; the formatter gives only the word.
+            let time = date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar,
+                                                       timeZone: calendar.timeZone))
+            return String(localized: "home.today.previous.yesterday", defaultValue: "\(yesterdayWord(locale: locale)) at \(time)",
+                          bundle: .module, locale: locale,
+                          comment: "Previous Session's end on the day before: the system's word for that day, then the time.")
         }
         let formatter = DateFormatter()
         formatter.locale = locale; formatter.calendar = calendar; formatter.timeZone = calendar.timeZone
@@ -134,6 +135,16 @@ public nonisolated struct TodaySummary: Equatable, Sendable {
     }
 
     // MARK: Pieces
+
+    /// The system's word for the day before ("Yesterday"), from a one-day offset alone, so
+    /// it never depends on the system's own date.
+    static func yesterdayWord(locale: Locale) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = locale
+        formatter.dateTimeStyle = .named
+        formatter.formattingContext = .beginningOfSentence
+        return formatter.localizedString(from: DateComponents(day: -1))
+    }
 
     /// "1 card", "128 cards" (the catalog's plural forms).
     static func cards(_ count: Int, locale: Locale) -> String {

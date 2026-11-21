@@ -103,7 +103,7 @@ public struct TodayView: View {
             summary: TodaySummary(nodes: collection.decks, studied: collection.studiedToday, previous: previous),
             nextLearningReadyAt: collection.nextLearningReadyAt, totals: totals,
             error: besideDeckList ? nil : collection.error,
-            canStudy: collection.canStudy && collection.navigation.sheet == nil && !collection.addNotePresentation.opening,
+            canStudy: collection.studyAllAvailable,
             study: { Task { await collection.startStudyAll() } },
             activity: collection.activity, widths: collection.navigation.activityRowWidths)
             .activityLoading(collection.activity, scope: .collection, active: collection.heatmapRefreshes,
@@ -265,21 +265,57 @@ struct TodaySummaryContent: View {
     // MARK: Rows
 
     /// Studied Today: the label, the system's linear bar in the accent colour, and the value.
+    /// The narrowest bar still worth drawing beside the label and value.
+    private static let usableBar = Spacing.xxLarge * 2
+
     private var studiedRow: some View {
-        rowLayout {
-            Text("Studied Today", bundle: .module)
-                .fixedSize(horizontal: false, vertical: true)
-            ProgressView(value: summary.studiedFraction)
-                .progressViewStyle(.linear)
-            Text(verbatim: summary.studiedValue(locale: locale))
-                .quietText()
-                .fixedSize(horizontal: !stacks, vertical: true)
+        let value = summary.studiedValue(locale: locale)
+        return Group {
+            if stacks {
+                rowLayout {
+                    Text("Studied Today", bundle: .module)
+                        .fixedSize(horizontal: false, vertical: true)
+                    studiedBar
+                    Text(verbatim: value).quietText()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                // One line while the label, a usable bar and the value fit; otherwise the
+                // bar goes on its own line under them. The label never wraps.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: Spacing.medium) {
+                        studiedLabel
+                        studiedBar.frame(minWidth: Self.usableBar, idealWidth: Self.usableBar, maxWidth: .infinity)
+                        studiedValue(value)
+                    }
+                    VStack(alignment: .leading, spacing: Spacing.xSmall) {
+                        HStack(alignment: .firstTextBaseline, spacing: Spacing.small) {
+                            studiedLabel
+                            Spacer(minLength: Spacing.small)
+                            studiedValue(value)
+                        }
+                        studiedBar
+                    }
+                }
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Studied Today", bundle: .module))
         .accessibilityValue(Text(verbatim: summary.studiedAccessibilityValue(locale: locale)))
         .accessibilityIdentifier("home.today.studied")
         .listRowSeparator(.hidden)
+    }
+
+    private var studiedLabel: some View {
+        Text("Studied Today", bundle: .module).lineLimit(1).fixedSize()
+    }
+
+    private var studiedBar: some View {
+        ProgressView(value: summary.studiedFraction).progressViewStyle(.linear)
+    }
+
+    private func studiedValue(_ value: String) -> some View {
+        Text(verbatim: value).quietText().lineLimit(1).fixedSize()
     }
 
     private func previousRow(decks: String?, value: String) -> some View {

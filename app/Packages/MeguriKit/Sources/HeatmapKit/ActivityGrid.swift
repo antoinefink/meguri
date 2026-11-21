@@ -61,12 +61,14 @@ public nonisolated struct ActivityGrid: Sendable, Equatable {
     }
 
     /// N24.6: a level's opacity of the accent colour; nil for level 0, which keeps the
-    /// system's secondary fill. With Increase Contrast the light steps sit further apart.
-    public static func opacity(level: Int, increasedContrast: Bool) -> Double? {
+    /// system's secondary fill. With Increase Contrast the light steps sit further apart. On
+    /// a dark background the accent's faint steps sink towards the empty day's fill, so the
+    /// dark table is stronger (with or without Increase Contrast).
+    public static func opacity(level: Int, increasedContrast: Bool, dark: Bool = false) -> Double? {
         switch level {
-        case 1: increasedContrast ? 0.4 : 0.35
-        case 2: increasedContrast ? 0.6 : 0.55
-        case 3: 0.8
+        case 1: dark ? 0.5 : increasedContrast ? 0.4 : 0.35
+        case 2: dark ? 0.68 : increasedContrast ? 0.6 : 0.55
+        case 3: dark ? 0.84 : 0.8
         case 4: 1
         default: nil
         }

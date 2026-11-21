@@ -69,14 +69,28 @@ struct SidebarView: View {
                 }
             }
         }
-        // H12: with the list focused, Return or S starts the selected deck's review, or
-        // Today's Study on the Today row; once per press, never on a key's repeat, and
-        // never while a text input (the deck search field) has focus (R197).
+        #if os(macOS)
+        // H12: the Mac's table takes Return itself and gives letters to type-select, so
+        // Return reaches the list as its primary action for the selection: the selected
+        // deck's review, or Today's Study on the Today row. The primary action also comes
+        // with a double-click, which the deck row's own gesture handles: here only a key
+        // acts, so a double-click starts one review. No menu of its own: each row keeps
+        // its deck menu. S is not bound on the Mac sidebar (type-select owns letters).
+        .contextMenu(forSelectionType: SidebarItem.self, menu: { _ in EmptyView() }, primaryAction: { items in
+            guard NSApp.currentEvent?.type == .keyDown, !textInputHasFocus, items.count == 1,
+                  let item = items.first else { return }
+            _ = features.sidebarStudy(item)
+        })
+        #else
+        // H12: with the list focused (a hardware keyboard), Return or S starts the selected
+        // deck's review, or Today's Study on the Today row; once per press, never on a key's
+        // repeat, and never while a text input (the deck search field) has focus (R197).
         .onKeyPress(keys: [.return, KeyEquivalent("s")], phases: .down) { press in
             guard press.modifiers.isEmpty, !textInputHasFocus,
                   features.sidebarStudy(navigation.sidebarSelection) else { return .ignored }
             return .handled
         }
+        #endif
     }
 
     private var textInputHasFocus: Bool {

@@ -118,7 +118,12 @@ import Testing
         let yesterday = try #require(summary(["Languages"], ended: lateYesterday).previousValue(now: now, calendar: calendar, locale: locale))
         let lateTime = lateYesterday.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale,
                                                                 calendar: calendar, timeZone: calendar.timeZone))
-        #expect(yesterday.hasPrefix("46 cards · Yesterday"))
+        #expect(yesterday == "46 cards · Yesterday at \(lateTime)")
+        // The day is the supplied clock's: a clock far from the system's date gives the same word.
+        let early = try #require(calendar.date(from: DateComponents(year: 2001, month: 1, day: 2, hour: 12)))
+        let dayBefore = try #require(calendar.date(from: DateComponents(year: 2001, month: 1, day: 1, hour: 20)))
+        #expect(summary(["Languages"], ended: dayBefore).previousValue(now: early, calendar: calendar, locale: locale)?
+            .hasPrefix("46 cards · Yesterday at ") == true)
         // The time of that day follows the word, and no date: never the day before it in another zone.
         #expect(yesterday.hasSuffix(lateTime))
         #expect(!yesterday.contains("2026") && !yesterday.contains("20"))
@@ -160,6 +165,7 @@ import Testing
         #expect(value("home.today.study.cardsInDecks") == "%1$@ in %2$@")
         #expect(value("home.today.study.cardsInDeck") == "%1$@ in %2$@")
         #expect(strings["%@ in %@"] == nil)
+        #expect(value("home.today.previous.yesterday") == "%1$@ at %2$@")
         #expect(plural("%lld cards", "one") == "%lld card" && plural("%lld cards", "other") == "%lld cards")
         #expect(plural("%lld decks", "one") == "%lld deck" && plural("%lld decks", "other") == "%lld decks")
     }

@@ -1313,6 +1313,17 @@
           }
         }
       }
+    },
+    "home.today.previous.yesterday": {
+      "comment": "Previous Session's end on the day before: the system's word for that day, then the time.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ at %2$@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

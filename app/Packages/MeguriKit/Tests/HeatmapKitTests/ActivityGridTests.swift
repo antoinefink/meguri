@@ -38,6 +38,10 @@ import Testing
     @Test func levelOpacitiesAreFixed() {
         #expect((0...4).map { ActivityGrid.opacity(level: $0, increasedContrast: false) } == [nil, 0.35, 0.55, 0.8, 1])
         #expect((0...4).map { ActivityGrid.opacity(level: $0, increasedContrast: true) } == [nil, 0.4, 0.6, 0.8, 1])
+        // Dark: stronger steps, so level 1 stands clear of the empty day's fill.
+        for increased in [false, true] {
+            #expect((0...4).map { ActivityGrid.opacity(level: $0, increasedContrast: increased, dark: true) } == [nil, 0.5, 0.68, 0.84, 1])
+        }
     }
 
     // MARK: Month labels (AH9)

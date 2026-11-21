@@ -76,6 +76,9 @@ public final class ReviewCollection: ChangeFanoutSink {
     public private(set) var previousWalk: StudyWalk.Summary?
     @ObservationIgnored private var walkTask: Task<Void, Never>?
     @ObservationIgnored private var deckPageOpening: Task<Bool, Never>?
+    /// Deck page opens so far, and the decks of the last few, for `DeckListStudyRequest`.
+    @ObservationIgnored private var deckPageOpens: UInt64 = 0
+    @ObservationIgnored private var recentDeckPageOpens: [Int64] = []
     /// `stats/studied-today` T12: the Today page's numbers, read with the counts. A read
     /// that fails keeps the last value.
     public private(set) var studiedToday: StudiedToday?
@@ -1203,6 +1206,9 @@ public final class ReviewCollection: ChangeFanoutSink {
             return true
         }
         deckPageOpening = task
+        deckPageOpens &+= 1
+        recentDeckPageOpens.append(deckID)
+        if recentDeckPageOpens.count > 16 { recentDeckPageOpens.removeFirst() }
         return task
     }
 
@@ -1656,9 +1662,55 @@ public final class ReviewCollection: ChangeFanoutSink {
     /// The decks Today's Study walks, from the deck list's counts (N24.2's first line).
     public var studyAllDecks: [StudyWalk.Deck] { StudyWalk.decks(from: decks) }
 
+    /// Today's Study button and its keys: available while a deck waits and Study is.
+    public var studyAllAvailable: Bool {
+        !studyAllDecks.isEmpty && canStudy && navigation.sheet == nil && !addNotePresentation.opening
+    }
+
     /// Today's Study: walks the top-level normal decks with cards waiting, each as one
-    /// ordinary session, in one review presentation.
-    public func startStudyAll() async { await startStudyAll(entry: .study) }
+    /// ordinary session, in one review presentation. Its availability is read again when
+    /// it runs, not only when the click or key arrived.
+    public func startStudyAll() async {
+        guard studyAllAvailable else { return }
+        await startStudyAll(entry: .study)
+    }
+
+    // MARK: Starting a deck from the deck list (H12)
+
+    /// A double-click, or Return or S on a selected deck row, as it was asked for.
+    public struct DeckListStudyRequest: Sendable {
+        public let deckID: Int64
+        fileprivate let opens: UInt64
+    }
+
+    /// Taken when the click or key arrives.
+    public func deckListStudyRequest(deckID: Int64) -> DeckListStudyRequest {
+        DeckListStudyRequest(deckID: deckID, opens: deckPageOpens)
+    }
+
+    /// Starts the request's deck once no deck page is opening (a page that opened later would
+    /// end the review), unless a later selection took the window elsewhere. The open of the
+    /// double-click's own second click is the same deck's and keeps the request. A filtered
+    /// deck shows R53's explanation and a deck with nothing to study its page's state, on its
+    /// page (H3); any other goes through the deck page's Study path.
+    public func startFromDeckList(_ request: DeckListStudyRequest) async {
+        await Task.yield()
+        await deckPageOpened()
+        guard deckListRequestIsCurrent(request), let node = deck(request.deckID) else { return }
+        guard !node.filtered, offersStudy(deckID: request.deckID) else {
+            if navigation.homeDeckPage?.rawValue != request.deckID { openDeckPage(deckID: request.deckID) }
+            return
+        }
+        guard canStudy, navigation.sheet == nil, !addNotePresentation.opening else { return }
+        await startStudy(deckID: request.deckID)
+    }
+
+    func deckListRequestIsCurrent(_ request: DeckListStudyRequest) -> Bool {
+        let since = deckPageOpens &- request.opens
+        guard since <= UInt64(recentDeckPageOpens.count),
+              recentDeckPageOpens.suffix(Int(since)).allSatisfy({ $0 == request.deckID }) else { return false }
+        return navigation.sidebarSelection == .deck(DeckID(request.deckID))
+    }
 
     private func startStudyAll(entry: StudyPreparation.Entry) async {
         let list = studyAllDecks
@@ -1700,13 +1752,17 @@ public final class ReviewCollection: ChangeFanoutSink {
             guard openStillEnded() else { walk.settle(); return }
             guard readiness.ready else { walk.skip(deck, learningLater: readiness.learningLater); continue }
             if let open {
-                walk.close(open, leftForEnd: open.phase == .waiting)
+                // Read before end(), which leaves the phase `.ended`. Counted after it: end()
+                // waits for pending work, and a commit that fails meanwhile takes a rejected
+                // answer out of the record.
+                let leftForEnd = open.phase == .waiting
                 guard await open.end() else {
                     // The session did not end: it stays on screen with its error, as after
                     // Back to Decks, which tries again; no other deck starts.
                     walk.stop()
                     return
                 }
+                walk.close(open, leftForEnd: leftForEnd)
                 await studyPreparation.sessionEnded()
                 guard self.walk === walk, !walk.stopped else { return }
             }
@@ -1727,10 +1783,13 @@ public final class ReviewCollection: ChangeFanoutSink {
     }
 
     /// Whether a deck has a card to show now (`sched/counts` C7: not finished, not empty).
-    /// A deck deleted before its turn has none.
+    /// A deck gone from the list before its turn has none. A read that fails says nothing
+    /// about the deck: its start decides, and a start that finds no card is skipped.
     private func readiness(of deckID: Int64) async -> (ready: Bool, learningLater: Bool) {
-        guard deck(deckID) != nil, let state = try? await reviewSessionClient.studyState(deckID: deckID),
-              state.deck == deckID else { return (false, false) }
+        guard deck(deckID) != nil else { return (false, false) }
+        guard let state = try? await reviewSessionClient.studyState(deckID: deckID), state.deck == deckID else {
+            return (true, false)
+        }
         return (!state.finished && !state.empty, state.learningLaterToday > 0)
     }
 

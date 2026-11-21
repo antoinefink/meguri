@@ -4,7 +4,10 @@ import Testing
 @testable import AppModel
 
 /// Today's Study (contract N24.3, `decks/deck-list` H12) and Today's numbers (N24.2, T12).
-/// The collection tests own the process's real collection: run this suite with a focused selector.
+/// The collection tests own the process's real collection: the suite sits inside
+/// `ReviewCollectionStartupTests`, whose serialised trait also covers its child suites, so it
+/// never runs beside the other real-collection suites. Run it with a focused selector.
+extension ReviewCollectionStartupTests {
 @MainActor
 @Suite(.serialized) struct StudyWalkTests {
     // MARK: The list and the order of turns
@@ -159,8 +162,9 @@ import Testing
 
     @Test func aDeckWithNoCardAtItsTurnIsSkipped() async throws {
         let tree = [Self.node(1, "Languages", (1, 0, 0)), Self.node(5, "Emptied", (1, 0, 0)),
-                    Self.node(6, "Deleted", (1, 0, 0)), Self.node(7, "Raced", (1, 0, 0)), Self.node(2, "Science", (1, 0, 0))]
-        // Emptied has nothing ready; Deleted is gone before its turn; Raced looked ready but its start finds no card.
+                    Self.node(6, "Unreadable", (1, 0, 0)), Self.node(7, "Raced", (1, 0, 0)), Self.node(2, "Science", (1, 0, 0))]
+        // Emptied has nothing ready; Unreadable's state cannot be read, so its start decides and
+        // finds no card; Raced looked ready but its start finds no card.
         let client = WalkClient([1: [[11]], 5: [[]], 7: [[]], 2: [[21]]])
         client.deleted = [6]
         client.claimsReady = [7]
@@ -168,10 +172,87 @@ import Testing
             await owner.startStudyAll()
             try await answer(owner)
             #expect(owner.review?.record.deckID == 2 && owner.review?.phase == .question)
-            #expect(client.starts == [1, 7, 2])
+            #expect(client.starts == [1, 6, 7, 2])
             try await answer(owner)
             let walk = try #require(owner.walk)
             #expect(walk.ended && walk.summary.cards == 2)
+        }
+    }
+
+    @Test func aFailedReadinessReadStillStudiesTheDeck() async throws {
+        let tree = [Self.node(1, "Languages", (1, 0, 0)), Self.node(2, "Science", (1, 0, 0))]
+        let client = WalkClient([1: [[11]], 2: [[21]]])
+        client.deleted = [2]
+        try await withWalkOwner(tree: tree, client: client) { owner in
+            await owner.startStudyAll()
+            try await answer(owner)
+            // A read error is not an empty deck: Science starts and is studied.
+            #expect(owner.review?.record.deckID == 2 && owner.review?.phase == .question)
+            try await answer(owner)
+            #expect(owner.walk?.summary.cards == 2)
+        }
+    }
+
+    @Test func aRejectedAnswerWhileTheSessionEndsIsNotCounted() async throws {
+        let tree = [Self.node(1, "Languages", (1, 0, 0)), Self.node(2, "Science", (1, 0, 0))]
+        let client = WalkClient([1: [[11]], 2: [[21]]])
+        try await withWalkOwner(tree: tree, client: client) { owner in
+            await owner.startStudyAll()
+            let walk = try #require(owner.walk)
+            // Languages' last answer fails to commit while its session ends.
+            client.onEnd = { [unowned owner] deck in
+                if deck == 1 { owner.review?.commitFailed(cardID: 11, error: .internal("Rejected while ending")) }
+            }
+            try await answer(owner)
+            #expect(owner.review?.record.deckID == 2)
+            #expect(walk.answers == 0 && walk.summary.cards == 0)
+            try await answer(owner)
+            #expect(walk.ended && walk.answers == 1 && walk.summary.cards == 1)
+            await owner.finishReview()
+            #expect(owner.previousWalk?.decks == [2] && owner.previousWalk?.cards == 1)
+        }
+    }
+
+    @Test func aDeckListStartGivesWayToALaterSelection() async throws {
+        let tree = [Self.node(1, "Languages", (1, 0, 0)), Self.node(2, "Science", (1, 0, 0))]
+        let client = WalkClient([1: [[11]], 2: [[21]]])
+        try await withWalkOwner(tree: tree, client: client) { owner in
+            owner.openDeckPage(deckID: 1)
+            await owner.deckPageOpened()
+            // A double-click on Languages, then a click on Science before its start runs.
+            let superseded = owner.deckListStudyRequest(deckID: 1)
+            owner.openDeckPage(deckID: 2)
+            await owner.startFromDeckList(superseded)
+            #expect(owner.review == nil && client.starts.isEmpty)
+            #expect(owner.navigation.homeDeckPage?.rawValue == 2)
+            // A double-click whose second click opens the same deck again still starts it.
+            let request = owner.deckListStudyRequest(deckID: 2)
+            owner.openDeckPage(deckID: 2)
+            await owner.startFromDeckList(request)
+            #expect(owner.review?.record.deckID == 2 && client.starts == [2])
+            await owner.finishReview()
+            // A later section (Today) cancels it too.
+            let left = owner.deckListStudyRequest(deckID: 2)
+            owner.navigation.select(.section(.home))
+            await owner.startFromDeckList(left)
+            #expect(owner.review == nil && client.starts == [2])
+        }
+    }
+
+    @Test func todaysStudyChecksItsAvailabilityWhenItRuns() async throws {
+        let tree = [Self.node(1, "Languages", (1, 0, 0))]
+        let client = WalkClient([1: [[11]]])
+        try await withWalkOwner(tree: tree, client: client) { owner in
+            #expect(owner.studyAllAvailable)
+            // A sheet presented after the press, before the start runs.
+            owner.navigation.present(.deckName(.create))
+            #expect(!owner.studyAllAvailable)
+            await owner.startStudyAll()
+            #expect(owner.walk == nil && owner.review == nil && client.starts.isEmpty)
+            owner.navigation.dismissSheet()
+            await owner.startStudyAll()
+            #expect(owner.review?.record.deckID == 1)
+            await owner.finishReview()
         }
     }
 
@@ -490,6 +571,8 @@ import Testing
         var failEndOnce: Set<Int64> = []
         var onStart: ((Int64) -> Void)?
         var onStudyState: ((Int64) -> Void)?
+        /// Called as a session's end reaches the core, before it is answered.
+        var onEnd: ((Int64) -> Void)?
         private(set) var stateRequests: [Int64: Int] = [:]
         private var sessions: [UInt64: Int64] = [:]
         private var nextSession: UInt64 = 100
@@ -544,6 +627,7 @@ import Testing
         }
         func end(sessionID: UInt64) async throws {
             let deck = sessions[sessionID] ?? 0
+            onEnd?(deck)
             if failEndOnce.remove(deck) != nil { throw BridgeError.internal("The session could not end") }
             endedDecks.append(deck)
             // The learning card it waited for is ready by its next turn.
@@ -571,4 +655,5 @@ import Testing
                 siblingBuried: 0, userBuried: 0, tomorrow: none, empty: false)
         }
     }
+}
 }

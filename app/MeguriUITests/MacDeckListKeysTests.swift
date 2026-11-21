@@ -3,8 +3,9 @@ import XCTest
 #if os(macOS)
 
 /// `decks/deck-list` H12 and contract N24.4 on the Mac, over the generated local-review-1
-/// recipe: a double-click on a sidebar deck row, Return and S on a selected deck row and on
-/// the Today row start a review, once; S typed into the deck search field types it.
+/// recipe: a double-click on a sidebar deck row, and Return on a selected deck row or on the
+/// Today row, start a review, once; S typed into the deck search field types it. S on the
+/// sidebar itself is not bound on the Mac: the table's type-select owns letters.
 @MainActor
 final class MacDeckListKeysTests: XCTestCase {
     func testDoubleClickOnADeckRowStartsItsReviewOnce() throws {
@@ -24,10 +25,6 @@ final class MacDeckListKeysTests: XCTestCase {
 
     func testReturnOnASelectedDeckRowStartsItsReview() throws {
         try assertKeyStartsDeckReview("\r")
-    }
-
-    func testSOnASelectedDeckRowStartsItsReview() throws {
-        try assertKeyStartsDeckReview("s")
     }
 
     func testReturnOnTheTodayRowStartsStudy() throws {
@@ -67,7 +64,7 @@ final class MacDeckListKeysTests: XCTestCase {
         XCTAssertFalse(reviewScreen(app).exists, "A click alone never starts a review")
         try app.bringToFront(bundleIdentifier: bundle)
         app.typeKey(key, modifierFlags: [])
-        XCTAssertTrue(reviewScreen(app).waitForExistence(timeout: 20), "\(key == "\r" ? "Return" : "S") starts the review")
+        XCTAssertTrue(reviewScreen(app).waitForExistence(timeout: 20), "Return starts the review")
         XCTAssertEqual(reviewWindows(app).count, 1)
         try closeReview(app, bundle: bundle)
     }
