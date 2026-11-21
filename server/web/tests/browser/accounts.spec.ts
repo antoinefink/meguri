@@ -238,16 +238,27 @@ async function accountShell(page: Page, username: string, admin: boolean) {
 }
 
 // Collection's identity check and storage read can each show a focused alert
-// in place of the focused <main>. Wait for both answers and name any failure.
+// in place of the focused <main>. Record the answers that arrive on Collection
+// (bootstrap's earlier /api/me does not count), wait for both after
+// navigating, and name any failed answer or alert.
 async function landOnCollection(page: Page, navigate: () => Promise<unknown>) {
-  const answers = ["/api/me", "/api/me/storage"].map(path =>
-    page.waitForResponse(response => new URL(response.url()).pathname === path, { timeout: 8_000 }));
-  await navigate();
-  for (const response of await Promise.all(answers)) {
-    expect(response.ok(), `${response.request().method()} ${new URL(response.url()).pathname} answered ${response.status()}`).toBe(true);
+  const paths = ["/api/me", "/api/me/storage"];
+  const answers: Response[] = [];
+  const record = (response: Response) => {
+    if (paths.includes(new URL(response.url()).pathname) && new URL(page.url()).pathname === "/collection") answers.push(response);
+  };
+  page.on("response", record);
+  try {
+    await navigate();
+    await expect.poll(() => paths.filter(path => answers.some(response => new URL(response.url()).pathname === path))).toEqual(paths);
+    for (const response of answers) {
+      expect(response.ok(), `${response.request().method()} ${new URL(response.url()).pathname} answered ${response.status()}`).toBe(true);
+    }
+    await expect(page.getByRole("main").getByText("Loading storage…", { exact: true })).toHaveCount(0);
+    expect(await page.getByRole("alert").allTextContents()).toEqual([]);
+  } finally {
+    page.off("response", record);
   }
-  await expect(page.getByRole("main").getByText("Loading storage…", { exact: true })).toHaveCount(0);
-  expect(await page.getByRole("alert").allTextContents()).toEqual([]);
 }
 
 async function connectionLayout(page: Page, username: string, admin: boolean) {

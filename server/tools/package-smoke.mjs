@@ -239,6 +239,7 @@ try {
       const answered = async (step, path, act) => {
         browserStep = step;
         const response = page.waitForResponse(r => new URL(r.url()).pathname === path);
+        response.catch(() => {}); // Awaited below; a failed act() must not leave it unhandled.
         await act();
         const status = (await response).status();
         if (status < 200 || status > 299) { browserStep = `${step}: ${path} answered ${status}`; throw new Error(browserStep); }
