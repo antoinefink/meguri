@@ -556,14 +556,29 @@ pub trait ReadRows: sealed::Connected {
         notetype: NotetypeId,
         after: Option<CardId>,
     ) -> Result<Vec<(CardId, u16)>, StorageError> {
-        let mut statement = self.connection().prepare_cached(
-            "SELECT cards.id, cards.ord FROM notes JOIN cards ON cards.nid=notes.id \
-             WHERE notes.mid=?1 AND (?2 IS NULL OR cards.id>?2) ORDER BY cards.id LIMIT 1000",
-        )?;
-        let rows = statement.query_map((notetype.0, after.map(|id| id.0)), |row| {
-            Ok((CardId(row.get(0)?), row.get::<_, u16>(1)?))
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        // Cards in id order, each joined to its note: a page reads from the
+        // cursor on (an `id > ?` range), so a whole pass reads each card
+        // once rather than from the start on every page.
+        let read = |row: &rusqlite::Row<'_>| Ok((CardId(row.get(0)?), row.get::<_, u16>(1)?));
+        let rows = match after {
+            None => self
+                .connection()
+                .prepare_cached(
+                    "SELECT cards.id, cards.ord FROM cards CROSS JOIN notes ON cards.nid=notes.id \
+                     WHERE notes.mid=?1 ORDER BY cards.id LIMIT 1000",
+                )?
+                .query_map((notetype.0,), read)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            Some(after) => self
+                .connection()
+                .prepare_cached(
+                    "SELECT cards.id, cards.ord FROM cards CROSS JOIN notes ON cards.nid=notes.id \
+                     WHERE notes.mid=?1 AND cards.id>?2 ORDER BY cards.id LIMIT 1000",
+                )?
+                .query_map((notetype.0, after.0), read)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+        };
+        Ok(rows)
     }
 
     /// A config row as stored.

@@ -4,12 +4,19 @@ use meguri_template::{Form, ParsedTemplate};
 use std::collections::BTreeSet;
 
 pub fn required(nt: &Notetype, note: &Note) -> BTreeSet<u16> {
-    let fronts: Vec<ParsedTemplate> = nt
-        .templates
+    required_by(nt, &fronts(nt), note)
+}
+
+/// The note type's fronts, parsed, in template order (none for a cloze
+/// note type, whose templates play no part in G4).
+pub fn fronts(nt: &Notetype) -> Vec<ParsedTemplate> {
+    if nt.config.kind == 1 {
+        return Vec::new();
+    }
+    nt.templates
         .iter()
         .map(|template| ParsedTemplate::parse(&template.config.q_format))
-        .collect();
-    required_by(nt, &fronts, note)
+        .collect()
 }
 
 /// [`required`] with the note type's fronts parsed once, in template order,

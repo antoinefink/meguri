@@ -244,11 +244,7 @@ pub fn notes_without_card_on(
         return Ok(Vec::new());
     }
     let normalize_text = crate::notes::fields::normalize_enabled(reader)?;
-    let fronts: Vec<ParsedTemplate> = saved
-        .templates
-        .iter()
-        .map(|template| ParsedTemplate::parse(&template.config.q_format))
-        .collect();
+    let fronts: Vec<ParsedTemplate> = crate::cardgen::normal::fronts(saved);
     let deciding: Vec<Option<u32>> = fronts.iter().map(|front| sole_field(front, saved)).collect();
     let mut blank: Vec<BlankFront> = vec![BlankFront::default(); fronts.len()];
     // Whether every counted note so far has the deciding field empty.
