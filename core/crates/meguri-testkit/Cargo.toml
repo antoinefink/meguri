@@ -31,6 +31,8 @@ meguri-model = { workspace = true, features = ["test-hooks"] }
 meguri-package.workspace = true
 # The scheduler area's adapters (exec/sched.rs): fsrs_next and the fuzz table.
 meguri-sched.workspace = true
+# The stats area's `card_stats` observation (exec/stats.rs).
+meguri-stats.workspace = true
 # The search area's `search` and `canonical_search` observations (exec/search.rs).
 # test-hooks: Plan::build_with for meguri-search's own tests, which get it
 # through this crate in a plain workspace run.
@@ -133,6 +135,11 @@ harness = false
 # save summary and the delete counts.
 [[bench]]
 name = "notetype_reads"
+harness = false
+
+# U92's Card Info read: the card with the most rows and 500 rows.
+[[bench]]
+name = "card_info"
 harness = false
 
 # Integration tests: one binary. A file gets its own target only when it

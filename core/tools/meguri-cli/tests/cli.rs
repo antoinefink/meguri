@@ -162,6 +162,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "card",
             "card_excerpts",
             "card_extractors",
+            "card_stats",
             "cloze",
             "congrats",
             "db_dump",
@@ -209,7 +210,6 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "search_join",
         "search_replace",
         "tag_complete",
-        "card_stats",
         "stats",
     ] {
         assert!(

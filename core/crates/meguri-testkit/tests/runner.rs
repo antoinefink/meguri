@@ -1479,8 +1479,8 @@ fn prepared_batches_remain_pending_without_executing_any_prefix_or_mutating_inpu
         ),
         (
             "observations",
-            json!({"observe":[{"search_build":["whole_collection"]},{"tag_complete":{"cases":[{"input":"","limit":1}]}},{"card_stats":["#c1"]}]}),
-            "card_stats",
+            json!({"observe":[{"search_build":["whole_collection"]},{"tag_complete":{"cases":[{"input":"","limit":1}]}}]}),
+            "tag_complete",
         ),
     ] {
         let id = format!("prepared/{name}");

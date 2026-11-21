@@ -49,4 +49,10 @@ pub mod json_text {
     pub fn push_string(out: &mut String, text: &str) {
         crate::json::push_string(out, text);
     }
+
+    /// N4: the shortest text that reads back as the same `f32`; `null` for
+    /// NaN and the infinities.
+    pub fn push_f32(out: &mut String, value: f32) {
+        crate::json::push_f32(out, value);
+    }
 }

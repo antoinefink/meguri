@@ -12,6 +12,7 @@ pub mod activity;
 mod callback;
 pub mod bulk_actions;
 pub mod cancel;
+pub mod card_info;
 pub mod changes;
 pub mod cloud_asset_reads;
 pub mod cloud_cleanup;
