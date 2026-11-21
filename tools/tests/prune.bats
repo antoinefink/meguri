@@ -347,12 +347,16 @@ EOF
 }
 
 @test "prune --cleanroom keeps whole a run that did not pass and a run with unexpected files" {
-  local ok failed odd
+  local ok failed odd stray
   ok="$(cleanroom_run 1 10)"
   failed="$(cleanroom_run 2 10 error)"
   odd="$(cleanroom_run 3 10)"
   echo '{}' >"$MG/cleanroom/$odd/smoke-evidence.json"
   age "$MG/cleanroom/$odd"
+  stray="$(cleanroom_run 4 10)" # passed, but no ref reaches its base commit
+  jq '.details.source_commit = "1111111111111111111111111111111111111111"' "$MG/cleanroom/$stray/result.json" >"$BATS_TEST_TMPDIR/r.json"
+  mv "$BATS_TEST_TMPDIR/r.json" "$MG/cleanroom/$stray/result.json"
+  age "$MG/cleanroom/$stray"
   prune --cleanroom --apply
   [ "$(jq -r .status "$result")" = pass ]
   [ ! -e "$MG/cleanroom/$ok/source" ]
@@ -361,6 +365,10 @@ EOF
   [ -z "$(members "$MG/cleanroom-archive/2025-10.tar.xz" | grep "^$failed/" || true)" ]
   [ -d "$MG/cleanroom/$odd/source" ]
   [ -d "$MG/cleanroom/$odd/codex-home" ]
+  [ -d "$MG/cleanroom/$stray/source" ]
+  [ -d "$MG/cleanroom/$stray/codex-home" ]
+  jq -e --arg id "$stray" '.[] | select(.run == $id and .action == "untouched"
+    and (.reasons | index("source kept: no branch, tag or HEAD reaches its base commit")))' "$(plan)"
   [ -z "$(members "$MG/cleanroom-archive/2025-10.tar.xz" | grep "^$odd/" || true)" ]
   jq -e --arg id "$odd" '.[] | select(.run == $id and .action == "untouched"
     and (.reasons | any(startswith("unexpected entries: smoke-evidence.json"))))' "$(plan)"

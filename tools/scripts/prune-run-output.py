@@ -572,16 +572,18 @@ def plan_runs(ctx, ck, tracked):
     return cands
 
 
-def source_removable(ctx, run):
+def source_kept_because(ctx, run):
+    """Why a cleanroom run's source copy must stay, or None when it may go."""
     res = run.result or {}
     if res.get("status") != "pass" or res.get("dry_run") is True:
-        return False
-    args = res.get("args") or []
-    if "--check" in args:
-        return True
-    commit = (res.get("details") or {}).get("source_commit")
-    return (stat.S_ISREG(run.entries.get("changes.patch", 0)) and isinstance(commit, str)
-            and commit in ctx.reachable)
+        return "did not pass"
+    if "--check" in (res.get("args") or []):
+        return None
+    if not stat.S_ISREG(run.entries.get("changes.patch", 0)):
+        return "exported no changes.patch"
+    if (res.get("details") or {}).get("source_commit") not in ctx.reachable:
+        return "no branch, tag or HEAD reaches its base commit"
+    return None
 
 
 def plan_cleanroom(ctx, ck, tracked):
@@ -600,10 +602,11 @@ def plan_cleanroom(ctx, ck, tracked):
             if bad:
                 r.reasons.append("not a plain file or folder: " + ", ".join(bad))
             continue
-        r.source_ok = "source" not in r.entries or source_removable(ctx, r)
-        if not r.source_ok:
+        why = source_kept_because(ctx, r) if "source" in r.entries else None
+        r.source_ok = why is None
+        if why:
             r.action = "untouched"
-            r.reasons.append("did not pass, export its changes from a commit a ref reaches: kept whole")
+            r.reasons.append("source kept: " + why)
             continue
         r.action = "strip" if r.reasons else "remove"
     return cands
@@ -643,13 +646,15 @@ def summarize_runs(cands):
 def summarize_cleanroom(cands):
     s = {"runs": len(cands), "remove": 0, "strip": 0, "untouched": 0,
          "bytes_freed": 0, "bytes_source": 0, "bytes_codex_home": 0, "bytes_records": 0,
-         "source_kept": 0, "bytes_source_kept": 0, "kept_because": {}, "months": {}, "untouched_runs": []}
+         "source_kept": 0, "bytes_source_kept": 0, "source_kept_because": {}, "kept_because": {}, "months": {}, "untouched_runs": []}
     for r in cands:
         s[r.action] += 1
         if r.action == "untouched":
             if getattr(r, "source_ok", True) is False:
                 s["source_kept"] += 1
                 s["bytes_source_kept"] += r.bytes
+                why = r.reasons[-1]
+                s["source_kept_because"][why] = s["source_kept_because"].get(why, 0) + 1
                 continue
             s["untouched_runs"].append({"run": r.id, "why": [x for x in r.reasons if x not in ("newest", "recent", "latest", "referenced")] or r.reasons,
                                         "bytes": r.bytes})
@@ -1216,8 +1221,9 @@ def print_cleanroom(ck, s):
     if s["kept_because"]:
         log("  folders kept because: " + ", ".join("%s %d" % kv for kv in sorted(s["kept_because"].items(), key=lambda kv: -kv[1])))
     if s["source_kept"]:
-        log("  %d runs kept whole (%s): they did not pass or export, so their source copy may hold unexported work"
-            % (s["source_kept"], human(s["bytes_source_kept"])))
+        log("  %d runs kept whole (%s), their source copy possibly the only copy of their work: %s"
+            % (s["source_kept"], human(s["bytes_source_kept"]),
+               ", ".join("%s %d" % kv for kv in sorted(s["source_kept_because"].items(), key=lambda kv: -kv[1]))))
     for u in s["untouched_runs"]:
         log("  untouched %s (%s): %s" % (u["run"], human(u["bytes"]), "; ".join(u["why"])))
 
