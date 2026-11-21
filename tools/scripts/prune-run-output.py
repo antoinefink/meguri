@@ -58,6 +58,7 @@ MEMBER = re.compile(r"^(\d{8}T\d{6}Z-\d+)/([^/]+)$")
 SCAN_LIMIT = 64 << 20  # larger files are not scanned for run ids (counted)
 STATE_DEPTH = 4
 DU_BATCH = 400
+SMALL = 100 << 20  # build/ entries below this are summed in the printed report
 USAGE = "usage: tools/mg prune [--cleanroom] [--apply] [--root <checkout>] [--all-worktrees] [--no-docker]"
 
 NOTES = {
@@ -641,9 +642,9 @@ def unmanaged(ck, targets, volumes):
     if target.startswith("volume:"):
         name = target[len("volume:"):]
         v = next((v for v in volumes.get("list", []) if v["name"] == name), None)
+        why = "" if v else (" (no such volume)" if volumes.get("measured") else " (" + volumes.get("why", "not measured") + ")")
         items.insert(0, {"path": "docker volume " + name, "bytes": v["bytes"] if v else None,
-                         "note": "this checkout's Docker Rust target; prune never removes volumes" +
-                                 ("" if v or volumes.get("measured") else " (" + volumes.get("why", "not measured") + ")")})
+                         "note": "this checkout's Docker Rust target; prune never removes volumes" + why})
     elif target.startswith("dir:"):
         items.insert(0, {"path": target[len("dir:"):], "bytes": None,
                          "note": "this checkout's Docker Rust target (MEGURI_DOCKER_CARGO_TARGET); prune never touches it"})
@@ -1051,16 +1052,28 @@ def print_cleanroom(ck, s):
 
 def print_unmanaged(items, volumes):
     log("")
-    log("not managed by prune:")
+    log("not managed by prune (details.unmanaged lists every entry):")
+    small = [i for i in items if i["bytes"] is not None and i["bytes"] < SMALL]
     for i in items:
-        log("  %-60s %11s  %s" % (i["path"], "?" if i["bytes"] is None else human(i["bytes"]), i["note"]))
-    orphans = [v for v in volumes.get("list", []) if v["checkout"] is None]
-    if orphans:
-        log("  Docker volumes of no current checkout (removed worktrees; tools/AGENTS.md: `docker volume rm <name>` once no container uses it):")
-        for v in orphans:
-            log("    %-70s %10s%s" % (v["name"], v["size"], "  in use" if v["in_use"] else ""))
-    elif not volumes.get("measured"):
+        if i not in small:
+            log("  %-60s %11s  %s" % (i["path"], "?" if i["bytes"] is None else human(i["bytes"]), i["note"]))
+    if small:
+        log("  %-60s %11s  not managed by prune" % ("%d smaller entries of build/" % len(small),
+                                                     human(sum(i["bytes"] for i in small))))
+    if not volumes.get("measured"):
         log("  Docker volumes: not measured (%s)" % volumes.get("why"))
+        return
+    vols = volumes.get("list", [])
+    cargo = [v for v in vols if v["name"].endswith("_cargo-target")]
+    log("  Docker: %d Meguri volumes, %s; %d Rust target volumes of checkouts, %s"
+        % (len(vols), human(sum(v["bytes"] or 0 for v in vols)),
+           len([v for v in cargo if v["checkout"]]), human(sum(v["bytes"] or 0 for v in cargo if v["checkout"]))))
+    orphans = [v for v in vols if v["checkout"] is None]
+    if orphans:
+        log("  Docker volumes of no current checkout, %s (removed worktrees; tools/AGENTS.md: `docker volume rm <name>` once no container uses it):"
+            % human(sum(v["bytes"] or 0 for v in orphans)))
+        for v in orphans:
+            log("    %-76s %10s%s" % (v["name"], v["size"], "  in use" if v["in_use"] else ""))
 
 
 # ---------------------------------------------------------------------------
@@ -1244,18 +1257,22 @@ def run(args, ctx, wts, root, targets, out_path, mode):
             cr = plan_cleanroom(ctx, ck, tracked)
             measure([r for r in cr if r.action != "untouched"], True)
             cs = summarize_cleanroom(cr)
+            target = targets.get(ck.path, {}).get("target") or ""
+            vol = next((v for v in volumes.get("list", []) if "volume:" + v["name"] == target), None)
             row = {"checkout": ck.path, "runs": total["runs"], "delete": total["delete"],
                    "bytes_freed": total["bytes_freed"], "cleanroom_runs": cs["runs"],
-                   "cleanroom_bytes_freed": cs["bytes_freed"], "cargo_target": targets.get(ck.path, {}).get("target")}
+                   "cleanroom_bytes_freed": cs["bytes_freed"], "cargo_target": target or None,
+                   "cargo_volume_bytes": vol["bytes"] if vol else None}
             rows.append(row)
             tot["runs_bytes_freed"] += total["bytes_freed"]
             tot["cleanroom_bytes_freed"] += cs["bytes_freed"]
             tot["runs_delete"] += total["delete"]
         rows.sort(key=lambda r: -(r["bytes_freed"] + r["cleanroom_bytes_freed"]))
         log("")
-        log("  %-72s %7s %11s %11s" % ("checkout", "delete", "frees", "cleanroom"))
+        log("  %-72s %7s %11s %11s %12s" % ("checkout", "delete", "frees", "cleanroom", "Rust volume"))
         for r in rows:
-            log("  %-72s %7d %11s %11s" % (r["checkout"], r["delete"], human(r["bytes_freed"]), human(r["cleanroom_bytes_freed"])))
+            log("  %-72s %7d %11s %11s %12s" % (r["checkout"], r["delete"], human(r["bytes_freed"]), human(r["cleanroom_bytes_freed"]),
+                                               "-" if r["cargo_volume_bytes"] is None else human(r["cargo_volume_bytes"])))
         log("  %-72s %7d %11s %11s" % ("total", tot["runs_delete"], human(tot["runs_bytes_freed"]), human(tot["cleanroom_bytes_freed"])))
         orphans = [v for v in volumes.get("list", []) if v["checkout"] is None]
         print_unmanaged([], volumes)
