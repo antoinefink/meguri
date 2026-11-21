@@ -37,15 +37,16 @@ No toast follows an accepted answer, except the leech toast. A refused or failed
 
 | Key | English (one / other) | Argument | Shown after |
 |---|---|---|---|
-| `review.toast.cardsBuried` | `%lld card buried.` / `%lld cards buried.` | cards the op wrote | Bury Card, Bury Note, and Auto Advance's Bury Card answer action |
-| `review.toast.cardSuspended` | Card suspended. | | Suspend Card |
+| `review.toast.cardsBuried` | `%lld card buried.` / `%lld cards buried.` | cards the op wrote | Bury Note and Auto Advance's Bury Card answer action (not Bury Card, below) |
+| `review.toast.cardSuspended` | Card suspended. | | none in this version (Suspend Card shows no toast, below) |
 | `review.toast.noteSuspended` | Note suspended. | | Suspend Note |
 | `review.toast.noteDeleted` | Note deleted. | | Delete Note, with the action below |
 | `review.toast.undo` | Undo | | the action button of `review.toast.noteDeleted`; it undoes that Delete Note only (rule below, U179) |
 | `review.toast.dueDateSet` | `Set due date of %lld card.` / `Set due date of %lld cards.` | cards given to the op | Set Due Date… (U183) |
 | `review.toast.cardsReset` | `Reset %lld card.` / `Reset %lld cards.` | cards given to the op | Forget… (U183) |
 
-- The bury count is the op's count of cards it wrote (`sched/manual-ops#M2`, M9): Bury Note on a note with 3 cards of which one is suspended says "2 cards buried."; Bury Card on the current card says "1 card buried.".
+- Decided 2026-11-20 (round 7, `docs/design/native-interface-contract.md` N20.8): Bury Card and Suspend Card show no toast. VoiceOver announces `review.announce.cardBuried` "Card Buried" or `review.announce.cardSuspended` "Card Suspended" instead. `review.toast.cardsBuried` and `review.toast.cardSuspended` stay listed for the later Bury Note and Auto Advance, whose units decide again.
+- The bury count is the op's count of cards it wrote (`sched/manual-ops#M2`, M9): Bury Note on a note with 3 cards of which one is suspended says "2 cards buried."; Auto Advance's Bury Card answer action says "1 card buried.".
 - The suspend toasts carry no count: "Note suspended." also for a note whose other cards were already suspended.
 - The delete toast carries no count, whatever the number of cards removed with the note (R387; Anki says "3 cards deleted." for a note with 3 cards). VoiceOver announces it with its Undo action.
 - Decided 2026-10-27: the toast's Undo is offered only while that Delete Note is the session's newest undo step. When the newest step changes while the toast is shown (any step is recorded, such as an answer, an Auto Advance action, a bury, Flag or Mark, or an undo or redo runs, including the back button's), the toast closes at once. A tap on Undo first reads `peek(Session)` (`engine/undo`): it runs one `undo(Session)` (U179) only when the top step is `delete_note` and no step was recorded or undone since the toast appeared; otherwise it does nothing and the toast closes. The toast never runs an undo of another step.
@@ -64,9 +65,10 @@ No toast follows an accepted answer, except the leech toast. A refused or failed
 | `review.announce.redone` | `%@ redone` | step name |
 | `undo.step.<id>` | the name of `specs/conformance/undo-ops.md` V4 for `<id>` | |
 
+- **Display names** (decided 2026-11-20, round 7, N20.8): where a review step has one, the named forms use it instead of the V4 name: `undo.display.answer_card` "Answer", `undo.display.bury` "Bury Card", `undo.display.suspend` "Suspend Card", `undo.display.update_note` "Edit Note". So the review's Undo reads "Undo Answer", "Undo Bury Card", "Undo Suspend Card" and "Undo Edit Note", and VoiceOver hears "Answer undone". Steps with no display name keep their V4 name ("Undo Rename Deck", "Undo Delete Deck"). The bury and suspend names hold while the review offers only the card forms; Bury Note and Suspend Note, when they come, decide their own.
 - The step name is `undo.step.<id>` for the step's V4 id (`undo.step.answer_card` = "Answer Card", `undo.step.bury` = "Bury", `undo.step.delete_note` = "Delete Note"). The named forms label the back button, its Mac tooltip and the Undo and Redo items; the plain forms are used when there is no step.
 - Decided 2026-11-10: these forms are the app's only undo and redo titles, outside review too. The Edit menu's Undo and Redo items (U159, R173) use `review.undo.named` and `review.redo.named` with the `undo.step.<id>` name of the step that `peek(Global)` or `peek_redo(Global)` reports (`engine/undo`; "Undo Delete Deck"), and `review.undo.plain` and `review.redo.plain`, disabled, when there is none. The action name that U159 gives the system undo manager (the iPhone and iPad undo gestures) is the `undo.step.<id>` text alone; the system adds its own Undo and Redo words to it. The Undo button of a U153 toast is `review.undo.plain`. The `review.` prefix is part of the key, not a location: the String Catalog that holds this section and the `undo.step.<id>` names must be one that U153 and U159 can read as well as review.
-- After an undo or redo in review, VoiceOver hears `review.announce.undone` or `review.announce.redone` with the step's name ("Answer Card undone"). Decided 2026-10-27: no visible toast; the card coming back is the visible feedback (Anki shows the same text as a tooltip). R581's toast list does not include undo.
+- After an undo or redo in review, VoiceOver hears `review.announce.undone` or `review.announce.redone` with the step's name, its display name where it has one ("Answer undone", "Edit Note undone"; above). Decided 2026-10-27: no visible toast; the card coming back is the visible feedback (Anki shows the same text as a tooltip). R581's toast list does not include undo.
 
 ## S6. Auto Advance (R432, R433)
 

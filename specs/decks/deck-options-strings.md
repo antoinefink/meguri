@@ -154,3 +154,25 @@ These are Meguri's own (R734, R1959, `sched/deck-options` O11) and take their wo
 ## K9. Tests
 
 No scenario: these texts are not core output. U232's String Catalog test compares the English value of every key in K2 to K6 with these tables, and U234's test of each picker compares its labels and their order with K5.
+
+## K10. The first version's page (Meguri, 2026-11-20)
+
+The page of `sched/deck-options` O17 (`docs/design/native-interface-contract.md` N20.9). Decided 2026-11-20 (option 6B): its row labels use Apple's title case over Anki's wording, so for these three options K3's English is not shown on this page; K3 stays for the Advanced page. These texts are Meguri's.
+
+| Key | English | Shown |
+|---|---|---|
+| `deckOptions.v1.title` | Deck Options | the page's title |
+| `deckOptions.v1.preset` | Preset | the preset row's label |
+| `deckOptions.v1.presetFooter` | `Used by %2$@ decks. Changes apply to all of them.` / one: `Used by this deck only.` | the preset row's footer; `%1$lld` the use count (O6.1), which chooses the form and is not shown; `%2$@` that count in the locale's integer format with grouping (K6's convention) |
+| `deckOptions.v1.section.dailyLimits` | Daily Limits | section header |
+| `deckOptions.v1.newPerDay` | New Cards per Day | row |
+| `deckOptions.v1.reviewsPerDay` | Maximum Reviews per Day | row |
+| `deckOptions.v1.section.memory` | Memory | section header |
+| `deckOptions.v1.desiredRetention` | Desired Retention | row |
+| `deckOptions.v1.desiredRetentionFooter` | How likely you are to remember a card when it comes back. | Memory's footer |
+| `deckOptions.v1.ownLimits` | This deck has its own limits, which stay in force. | Daily Limits' footer, when the deck holds its own limit (O17.1) |
+| `deckOptions.v1.ownRetention` | This deck has its own desired retention, which stays in force. | added to Memory's footer, when the deck holds its own desired retention |
+| `deckOptions.v1.save` | Save | the confirmation button |
+
+- The preset menu's items keep K6's `deckOptions.preset.usedBy`.
+- The Discard prompt uses the editor's "Discard changes?", Discard and Keep Editing (`editor/editing-strings`).

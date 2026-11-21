@@ -1,6 +1,15 @@
-//! Pure, connection-local card-data functions (search/card-extractors X1-X8).
-//! No SQL against collection tables or persistent schema objects lives here.
+//! Pure, connection-local SQL functions: the card-data functions
+//! (search/card-extractors X1-X8), the expression functions of
+//! `text-matching.md` T14 and the name and id helpers of `names-and-ids.md`
+//! N7. No SQL against collection tables or persistent schema objects lives
+//! here.
+use std::borrow::Cow;
+use std::sync::{Arc, Mutex};
+
 use meguri_model::card_data::extractors::Fields;
+use meguri_model::proto::BlobMessage;
+use meguri_model::proto::deck::{DeckKind, DeckKindMessage};
+use regex::Regex;
 use rusqlite::{
     Connection,
     functions::{Context, FunctionFlags},
@@ -42,7 +51,119 @@ pub fn register(conn: &Connection) -> rusqlite::Result<()> {
     conn.create_scalar_function("meguri_relative_retrievability", 5, flags, |ctx| {
         Ok(sql_real(relative(ctx)))
     })?;
+    // P15: never an error; data or a key that is not TEXT reads as no keys.
+    conn.create_scalar_function("meguri_custom_data", 2, flags, |ctx| {
+        let (ValueRef::Text(data), ValueRef::Text(key)) = (ctx.get_raw(0), ctx.get_raw(1)) else {
+            return Ok(None);
+        };
+        let (Ok(data), Ok(key)) = (std::str::from_utf8(data), std::str::from_utf8(key)) else {
+            return Ok(None);
+        };
+        Ok(crate::custom_data::custom_data(data, key))
+    })?;
+    register_text(conn, flags)
+}
+
+/// T14 and N7: the expression and name functions.
+fn register_text(conn: &Connection, flags: FunctionFlags) -> rusqlite::Result<()> {
+    let last = Mutex::new(None);
+    conn.create_scalar_function("meguri_regex", 2, flags, move |ctx| {
+        let (Some(regex), Some(text)) = (expression(ctx, &last)?, text(ctx, 1)) else {
+            return Ok(None);
+        };
+        Ok(Some(regex.is_match(&text)))
+    })?;
+    let last = Mutex::new(None);
+    conn.create_scalar_function("meguri_regex_tags", 2, flags, move |ctx| {
+        let (Some(regex), Some(tags)) = (expression(ctx, &last)?, text(ctx, 1)) else {
+            return Ok(None);
+        };
+        Ok(Some(tags.split(' ').any(|piece| regex.is_match(piece))))
+    })?;
+    conn.create_scalar_function("meguri_transform", 2, flags, |ctx| {
+        let ValueRef::Integer(flags) = ctx.get_raw(1) else {
+            return Err(function_error("meguri_transform flags must be an integer"));
+        };
+        // Bit 1, cloze markup removal (T9.2), lands with the `sc:` term (U81).
+        if flags & !TRANSFORM_COMBINING_FREE != 0 {
+            return Err(function_error("unsupported meguri_transform flags"));
+        }
+        let Some(text) = text(ctx, 0) else {
+            return Ok(None);
+        };
+        Ok(Some(if flags & TRANSFORM_COMBINING_FREE != 0 {
+            crate::pattern::combining_free(&text).into_owned()
+        } else {
+            text.into_owned()
+        }))
+    })?;
+    conn.create_scalar_function("meguri_regex_escape", 1, flags, |ctx| {
+        Ok(text(ctx, 0).map(|text| regex::escape(&text)))
+    })?;
+    conn.create_scalar_function("meguri_deck_preset", 1, flags, |ctx| {
+        let ValueRef::Blob(bytes) = ctx.get_raw(0) else {
+            return Ok(None);
+        };
+        Ok(match DeckKindMessage::decode(bytes) {
+            Ok(DeckKindMessage {
+                kind: DeckKind::Normal(normal),
+                ..
+            }) => Some(normal.config_id),
+            _ => None,
+        })
+    })?;
+    conn.create_scalar_function("meguri_first_field_stripped", 1, flags, |ctx| {
+        Ok(text(ctx, 0).map(|flds| {
+            let first = flds.split('\u{1f}').next().unwrap_or_default();
+            meguri_text::html::strip_markup_keep_media(first).into_owned()
+        }))
+    })?;
     Ok(())
+}
+
+/// `meguri_transform`'s bit 0: the combining-free transform (T8.1).
+pub const TRANSFORM_COMBINING_FREE: i64 = 1;
+
+fn function_error(message: &'static str) -> rusqlite::Error {
+    rusqlite::Error::UserFunctionError(message.into())
+}
+
+/// A text argument (T14): TEXT as stored, INTEGER as its decimal text; NULL,
+/// REAL and BLOB give none, so the function gives NULL. No column the U82
+/// terms read holds a REAL; U81 adds SQLite's REAL text for `sfld` (T2).
+fn text<'a>(ctx: &'a Context<'_>, index: usize) -> Option<Cow<'a, str>> {
+    match ctx.get_raw(index) {
+        ValueRef::Text(bytes) => Some(String::from_utf8_lossy(bytes)),
+        ValueRef::Integer(value) => Some(Cow::Owned(value.to_string())),
+        ValueRef::Null | ValueRef::Real(_) | ValueRef::Blob(_) => None,
+    }
+}
+
+/// The compiled expression of argument 0 (T14): SQLite's per-statement
+/// auxiliary data when the argument is constant, else the last expression
+/// this function compiled (a pattern computed per row, `deck:current`). The
+/// plan compiled every pattern already, so a failure here is a programming
+/// mistake.
+fn expression(ctx: &Context<'_>, last: &Mutex<Option<(String, Arc<Regex>)>>) -> rusqlite::Result<Option<Arc<Regex>>> {
+    if let Some(regex) = ctx.get_aux::<Arc<Regex>>(0)? {
+        return Ok(Some(Arc::clone(&regex)));
+    }
+    let pattern = match ctx.get_raw(0) {
+        ValueRef::Null => return Ok(None),
+        ValueRef::Text(bytes) => std::str::from_utf8(bytes).map_err(|_| function_error("pattern is not UTF-8"))?,
+        _ => return Err(function_error("pattern must be text")),
+    };
+    let mut last = last.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let regex = match last.as_ref() {
+        Some((text, regex)) if text == pattern => Arc::clone(regex),
+        _ => {
+            let regex = Arc::new(Regex::new(pattern).map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?);
+            *last = Some((pattern.to_owned(), Arc::clone(&regex)));
+            regex
+        }
+    };
+    ctx.set_aux(0, Arc::clone(&regex))?;
+    Ok(Some(regex))
 }
 
 fn data(ctx: &Context<'_>) -> Fields {

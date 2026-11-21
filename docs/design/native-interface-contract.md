@@ -185,7 +185,7 @@ Decided 2026-10-27:
 
 - Every platform uses N3's quiet corners. There is no top bar with its own background, no title and no remaining counts.
 - Upper left, the exit. Sidebar layout (Mac, iPad and unfolded iPhone at regular width): a labelled "Back to Decks" button with the `chevron.backward` symbol. Compact layout: a close button with the `xmark` symbol, accessibility label and Voice Control name "Back to Decks". Esc does the same when nothing above the card owns it (R243).
-- Upper right, leading to trailing: on iPhone and iPad the undo button (U179) and the ⋯ menu button (U182); then the sync status icon, only while sync needs the person (N16.2; N3; `sync.status`'s button, whose states that contract gives, N11.8). The Mac has no on-screen undo or ⋯: undo and redo are in the Edit menu, card actions in the Card menu and the card's context menu (R288).
+- Upper right, leading to trailing: on iPhone and iPad the undo button (U179) and the More button (U182; the `ellipsis` symbol labelled "More", whose menu N20.8 gives; no toasts); then the sync status icon, only while sync needs the person (N16.2; N3; `sync.status`'s button, whose states that contract gives, N11.8). The Mac has no on-screen undo or ⋯: undo and redo are in the Edit menu, card actions in the Card menu and the card's context menu (R288).
 - The progress bar (R341–R345, when its device setting is on) is a thin native linear progress indicator across the top of the review area, below the corner controls. Replaced by N16.1: the bar is on the bottom edge and always shown.
 - The review area's background is the card's computed `body` background (R335), so the user's card styling reaches the window edges. Corner controls and the answer region use system control styles, with a foreground chosen for contrast against that background. Need: preserving user-authored card styling. No other chrome tint.
 - The sidebar stays hidden for the whole session; Show Sidebar is disabled during review.
@@ -554,9 +554,10 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 
 ### N16.1 Session progress
 
-- One thin grey bar along the very bottom edge, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint. No text, no counts, no accent colour.
+- One thin grey bar along the very bottom edge, below the answer buttons, on every device: the system's linear progress indicator with the secondary colour as its tint (on the Mac a drawn bar, the exception below). No text, no counts, no accent colour.
 - Touch: the bar spans the screen's width on its bottom edge, inside the bottom safe area, so the home indicator lies over its middle. iPhone Duo: the same edge folded, held wide and held tall; held wide it runs under both halves and across the fold. It is not a control, so it may cross (R9 covers controls).
-- Mac: the bar is the window's last row, under the answer buttons. The Mac had no bar before.
+- Mac: the bar is the window's last row, under the answer buttons, on the window's bottom edge and across its full width. The Mac had no bar before.
+- Mac exception (2026-11-20; need: the bottom-edge, full-width bar above, which the system indicator did not meet; Antoine reported the gap below the bar and at its leading end on 2026-11-20 and asked for the bar to sit on the edge, PR #24): the bar is drawn, not the system's linear indicator, which draws its rounded track inset in its frame. The drawn bar is a 4 pt track in the quaternary fill with the value in the secondary fill; the window's rounded bottom corners clip its ends, as they clip any content on that edge. Its accessibility below is unchanged. Verification: `ReviewLayoutTests.progressBarIsTheBottomEdge` (light and dark), and the Mac review drives in the test VM on 2026-11-20 (light and dark, 800, 1000 and 1600 pt windows), in PR #24. Touch keeps the system indicator, which lies on the screen's bottom edge.
 - The bar shows on the question and answer sides and between cards. Loading, waiting, paused and finished states have none.
 - Its value is the answers given over those answers plus the cards left (new, learning and to review). Accessibility: label "Session Progress", value "12 of 40", identifier `review.session.progress`. It takes no input and is read as text, so the hit-region audit does not ask a touch target of it.
 - Replaces: N11.1's bar across the top and its device setting (R341–R345), N13.3's counts line and top bar.
@@ -575,14 +576,15 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 
 - Show Answer is centred in the answer row on touch, as wide as two answer buttons. At the accessibility text sizes it keeps the full row.
 - With a fold through the row (iPhone Duo held wide) it keeps the trailing side, over Good and Easy: a centred button would sit on the fold (R9).
-- The answer buttons' group is centred: on touch it is the reading column's width (N16.4), on Mac the four standard buttons are centred in it, as is Show Answer.
+- The answer buttons' group is centred: on touch it is at most `ContentWidth.readable` wide and spans the full width when a fold crosses it; on Mac the four standard buttons are centred in the window, as is Show Answer.
 - Replaces: N13.3's trailing-half Show Answer where no fold crosses the row.
 
 ### N16.4 Reading column
 
-- iPad and Mac: the card, any notice above it and the review's states sit in one centred column, `ContentWidth.readable` wide, the width the touch answer row already had. A narrower window uses its full width.
-- iPhone and iPhone Duo are unchanged: the card takes the full width in every position. The choice is by idiom, as N13.1's layout choice is.
-- The window beside the column shows the card page colour. A template's own background does not reach it yet (N13.4, R335).
+- Changed 2026-11-20 (Antoine asked "do we really want a max width at all?"; decided by the coordinator under his standing delegation; `decisions.md`): the card and any notice above it take the review's full width on every device, as on iPhone. Card styling is the user's and is written for a card that fills the window, so a narrower column would change how it looks. A card whose own content is wider than the window, such as a wide table or image, scrolls sideways inside the card page; any other card shows no horizontal scroll bar at any window width, also with scroll bars always shown.
+- iPad and Mac keep the review's states (N16.6) in one centred column, `ContentWidth.readable` wide. A narrower window uses its full width. iPhone and iPhone Duo are unchanged: the card, its notice and the states take the full width in every position. The choice is by idiom, as N13.1's layout choice is. The touch answer row keeps its own width (N16.3).
+- Around the answer row and the states the window shows the card page colour. A template's own background does not reach it yet (N13.4, R335).
+- Replaced (2026-11-19 text): "iPad and Mac: the card, any notice above it and the review's states sit in one centred column, `ContentWidth.readable` wide".
 
 ### N16.5 End of a session
 
@@ -599,7 +601,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the `review.` rows; ro
 - Waiting for a learning card that is not ready: "Waiting for Learning", "Your next learning card is not ready yet." and Check Now.
 - Paused by an error: "Review Paused", the message and Try Again. Ended: "Session Ended".
 - Loading keeps the system progress indicator with its label.
-- A notice above the card keeps its warning symbol and text, centred in the column; a long one still scrolls within its limit.
+- A notice above the card keeps its warning symbol and text, centred across the review's width (N16.4); a long one still scrolls within its limit.
 
 ### N16.7 No session timer
 
@@ -706,7 +708,7 @@ Decided by Antoine in chat on 2026-11-19 (`decisions.md`, the two `home.fsrsShee
 
 ## N20. Round 6 decisions (2026-11-20)
 
-Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, `home.deckActions`, `home.deckName`, `shell.commands`; round 6 options 1C, 2C, 3B, 5B). Where earlier text differs, this section wins. It covers the screens that exist. Delete Deck (4B), Deck Options (6B) and Edit Note (7A) arrive with their units, which add their own subsections; their places below are kept for them. The name rules of N20.3 are `decks/decks` D19, the create row's D18. Meguri authors these strings; implementers take them from N20.6.
+Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, `home.deckActions`, `home.deckName`, `shell.commands`; round 6 options 1C, 2C, 3B, 5B). Where earlier text differs, this section wins. It covers the screens that exist. Delete Deck (4B), Deck Options (6B) and the review actions (7A, then round 7's 1D and 2A) arrive with their units, which add their own subsections; their places below are kept for them. The name rules of N20.3 are `decks/decks` D19, the create row's D18. Meguri authors these strings; implementers take them from N20.6.
 
 ### N20.1 Deck search in the sidebar
 
@@ -733,6 +735,7 @@ Decided by Antoine in chat on 2026-11-20 (`decisions.md`, rows `home.goToDeck`, 
 | 1 | Add Note | `square.and.pencil` | | absent |
 | 2 | Rename… | `pencil` | ⇧⌘R | shown |
 | 2 | New Subdeck… | `folder.badge.plus` | | absent |
+| 2 | Deck Options… (N20.9) | `gearshape` | ⌥⌘O | absent |
 | 3 | Delete Deck (destructive role, N20.7) | `trash` | ⌘⌫ | shown |
 
 - A filtered deck's menu holds Rename… and Delete Deck (R53).
@@ -782,17 +785,19 @@ The menu bar, in order: Meguri, File, Edit, View, Deck, Card, Window, Help. The 
 | Deck | Rename… | ⇧⌘R | a deck is shown, filtered included |
 | Deck | New Subdeck… | | a normal deck is shown |
 | Deck | Delete Deck | ⌘⌫ | a deck is shown, filtered included, outside review, and no text field, sheet or panel owns the keys (N4, H9.2); N20.7 |
-| Deck | Deck Options… | ⌥⌘O | arrives with the Deck Options unit; a normal deck |
+| Deck | Deck Options… | ⌥⌘O | a normal deck is shown, outside review; N20.9 |
 | Card | Show Answer | Space | review shows a question side |
 | Card | Again, Hard, Good, Easy | 1, 2, 3, 4 | review shows an answer side |
+| Card | Edit Note | ⌘E | a card is presented, on either side, and nothing else owns the keys; N20.8 |
+| Card | Bury Card | ⌘J | as Edit Note; N20.8 |
+| Card | Suspend Card | ⇧⌘J | as Edit Note; N20.8 |
 | Card | Back to Decks | Esc | during review |
-| Card | Edit Note | ⌘E | arrives with the Edit Note unit; during review |
 
 - Edit keeps the system's text items intact: its Find submenu and every other item the system adds for text. Meguri's Find… is a separate item placed just before that group; while enabled it takes ⌘F, while disabled the system's Find ▸ Find… of a focused text view keeps it. ⇧⌘O is a hidden second key equivalent of Meguri's Find…, with no menu item; on iPad it is a key command with no discoverability title.
-- Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo, Paste and Meguri's Find…; Deck after Study, New Subdeck… and Delete Deck; Card after Show Answer, Easy and Back to Decks. A separator with nothing after it yet is left out.
+- Separators: File after New Deck…, Export Collection… and Sync Now; Edit after Redo, Paste and Meguri's Find…; Deck after Study, New Subdeck… and Delete Deck; Card after Show Answer, Easy, Suspend Card and Back to Decks. A separator with nothing after it yet is left out.
 - The Deck menu acts on the deck the workspace shows: the sidebar's selection (Mac, iPad), or the deck page shown (tab layout). With none (Today, the welcome, review) its items are disabled.
 - Each command follows N4: disabled outside its context, routed through the action and guard of its visible control, and subject to input ownership. The Card menu's unmodified keys follow N11.3: the card page keeps the first claim. ⌘⌫ and the other menu key equivalents never take a key from a text input (H9.2). The one exception is Find…: while enabled it takes ⌘F even when a text input has focus, as its row above says.
-- iPad with a keyboard: the same menus, items and keys in the iPad menu bar and in the list the system shows while ⌘ is held (SwiftUI `commands`), except the Card menu: its items carry no key equivalents on iPad, because the card host keeps the single key registration (N11.3's first claim), so the ⌘-held list does not list the review keys. iPhone and the iPhone Duo have no menu bar: with a keyboard the same keys act, and where the system shows its ⌘-held list it follows these menus.
+- iPad with a keyboard: the same menus, items and keys in the iPad menu bar and in the list the system shows while ⌘ is held (SwiftUI `commands`), except the Card menu's single keys (Show Answer, the four ratings, Back to Decks): they carry no key equivalents on iPad, because the card host keeps the single key registration (N11.3's first claim), so the ⌘-held list does not list the review keys. The Card menu's ⌘ items (Edit Note ⌘E, Bury Card ⌘J, Suspend Card ⇧⌘J, N20.8) are not single keys and keep their equivalents there. iPhone and the iPhone Duo have no menu bar: with a keyboard the same keys act, and where the system shows its ⌘-held list it follows these menus.
 - Replaces: N11.3's first bullet's Study menu, and the Undo Answer and Redo Answer items it named; R280's New Deck… ⌥⌘N, Export… ⌘E (⌘E becomes Edit Note's) and the labels "Import…" and "Export…"; R282's ⇧⌘N for Note Types (the key is New Deck…'s; Note Types' key is open); R283's Go to Deck… (⇧⌘O is Find…'s second key), its S and Return as Study's menu keys (S and Return stay deck-list keys, H9.2) and "Delete Deck…" (now "Delete Deck"); the current Deck menu's "Rename Deck…" (now "Rename…").
 
 ### N20.5 Consistency fixes
@@ -829,9 +834,9 @@ The English text of the screens above. "New" marks text not used before this rou
 | Import Collection…, Export Collection…, Sync Now, Close | File menu | |
 | Undo, Redo, Undo <step name>, Redo <step name> | Edit menu; <step name> is the core's undo step name until S5's keys exist (R173) | |
 | Find… | Edit menu | new |
-| Deck Options… | the Deck menu | with its unit |
+| Deck Options… | the Deck menu, the deck menu | N20.9 |
 | Show Answer, Again, Hard, Good, Easy, Back to Decks | Card menu; Back to Decks also the touch close button | |
-| Edit Note | the Card menu | with its unit |
+| Edit Note | the Card menu, the card's context menu (Mac), the touch review's More menu, the form's title | N20.8 |
 
 - No longer used: "Go to Deck…", "Create Deck", "Overview", "Deck Actions", "Deck name", "Rename Deck…", "Close Review", the Study menu's title and its "Undo Answer" and "Redo Answer" items (Edit's Undo still reads "Undo Answer Card" after an answer, from the core's step name), "Import…", "Export…".
 
@@ -869,6 +874,39 @@ Decided 2026-11-20 (`decisions.md`, `home.deckActions`, option 4B). The operatio
 - While the delete runs, the deck's menu items and the Deck menu are disabled.
 - Strings, all new: `Delete “%@”?`, the six messages above (a String Catalog entry with plural variations for S and C), "Delete Deck", "Delete" (Mac alert), "Cancel", `Couldn’t Delete “%@”`, "Meguri couldn’t make a backup first, so nothing was deleted.", "Nothing was deleted.", "OK", and Edit's "Undo Delete Deck" and "Redo Delete Deck" (R173's pattern).
 - Replaces: R66's toast "Deleted <deck> (N cards)" with Undo (no toast); `home.deckMenu`'s "deletes … end with an Undo toast"; R67 stays as D8.5 states it.
+
+### N20.8 Review actions: Edit Note, Bury Card, Suspend Card
+
+Decided 2026-11-20 (`decisions.md`, `review.editNote`, option 7A; then `review.question`, round 7 options 1D and 2A, which replace 7A's separate Edit Note button). The review side of Edit Note is `review/edit-current`; Bury Card and Suspend Card are `review/card-actions` A4 and A5 on the current card. The card browser is not part of these rounds.
+
+- **Touch toolbar.** Upper left Back to Decks (N11.1, N20.5). Upper right, leading to trailing: Undo, then one More button, the system `ellipsis` symbol with the accessibility label and Voice Control name "More", then the sync status button only while sync needs the person (N16.2). No other button: there is no separate Edit Note button.
+- **The More menu** is a pull-down menu in groups, each item with its system symbol: [Edit Note (`pencil`)] | [Bury Card (`moon`), Suspend Card (`pause.circle`)]. Later card actions slot into these groups or new ones after them (`review/card-actions#A13`'s order: Card Info beside Edit Note; Flag and Mark Note; Set Due Date… and Forget…; Delete Note last and red); none is added now. Items are enabled while a card is presented, on either side, and disabled in the waiting, paused, finished and loading states and while an answer, an undo or another action runs (`review/commands#K1`).
+- **iPhone Duo.** Back to Decks, Undo and More stack on the trailing edge, in that order from the top; the menu opens beside them. Opened flat, they and the menu stay on the trailing half, away from the hinge.
+- **Mac: no toolbar control.** The Mac review keeps Back to Decks alone (N11.1). The Card menu gains, after Easy and before Back to Decks, in its own group: Edit Note ⌘E, Bury Card ⌘J, Suspend Card ⇧⌘J. A secondary click on the card shows Edit Note | Bury Card, Suspend Card first, above the system's text items (Look Up, Copy, Translate) when text is selected. iPad with a keyboard: the same Card menu items with their ⌘ keys in the menu bar and the ⌘-held list (N20.4: only the Card menu's single keys are left out of it). The `E`, `-` and `@` keys of `review/commands` keep acting on every platform.
+- **Edit Note** opens round 5's Add Note form (N17.1) on the current card's note, titled "Edit Note", with Cancel and Done. Its Deck and Type group is replaced by the navigation bar's subtitle "<deck> · <note type>": the card's deck by its last name component, and the note type's name; neither can be changed here. The fields, the HTML control and the tags are N17.1's; the first field has focus. Placement, as Add Note's: iPhone, and the Duo folded or held tall, a sheet; the Duo held wide (any iPhone at regular width), the whole screen with the form in a centred column of the readable width; iPad, the system page sheet; Mac, a panel over the card that owns the keys (N11.1). A fold or unfold moves the same draft to the other presentation. Changes are a draft: Done saves them with one note update (`review/edit-current#E2`) and returns to the same card, rendered again, at the same place in the session (E3). Done with no change closes. Cancel, Esc, ⌘W and the swipe down close without saving; with a change they first ask "Discard changes?" with Discard (destructive) and Keep Editing. ⌘Return is Done on Mac.
+- **Bury Card** hides the current card until tomorrow; **Suspend Card** hides it until it is unsuspended. Both act on the card, never on its note (`sched/manual-ops` M2, M3, one op naming the review session). The next card appears as after an answer (`review/card-actions#A4`), or the congratulations content when nothing is left. No banner and no toast: VoiceOver announces "Card Buried" or "Card Suspended".
+- **Undo** covers the last change made on the review screen: an answer, Bury Card, Suspend Card or a saved Edit Note. Undoing a bury or a suspend puts that card back on screen on its question side. Redo keeps its rule (N11.1, iPhone Redo after Undo). The Undo control's label, Mac tooltip and Edit › Undo name the step in Apple's style (`review/reviewer-strings#S5`'s display names): "Undo Answer", "Undo Bury Card", "Undo Suspend Card", "Undo Edit Note"; VoiceOver hears "Answer undone", "Bury Card undone" and so on.
+- **No unsuspend inside Meguri** (option 2A). There is no Suspended Cards list, no deck-menu item and no other way to remove a suspension in this version. Until the notes and cards browser arrives, a suspended card comes back only by Undo right away or by another client after a sync.
+- Strings: "More" (new), "Edit Note", "Bury Card", "Suspend Card" (exist, `review/reviewer-strings#S18`), "Card Buried" and "Card Suspended" (new, VoiceOver announcements), the step display names "Answer", "Bury Card", "Suspend Card", "Edit Note" (new, S5), "<deck> · <note type>" (new), "Done", "Cancel", "Discard changes?", "Discard", "Keep Editing" (exist).
+- Replaces: round 6's touch Edit Note button (7A's `pencil` beside Undo); `review/card-actions` A4 and A5's toasts and `review/reviewer-strings` S4's `review.toast.cardsBuried` and `review.toast.cardSuspended` for Bury Card and Suspend Card (no toast); S5's raw step names in the Undo titles ("Undo Answer Card", "Undo Bury"); R394's iPad "trailing inspector" and its panel as U190's editor in edit mode; R397's Close button (now Cancel and Done); R824 and R863's Esc that saves, for this form; `screen-inventory.yaml`'s `review.menu` toasts.
+
+### N20.9 Deck Options, first version
+
+Decided 2026-11-20 (`decisions.md`, `deck.options`, option 6B). The scope, the save input and the strings are `sched/deck-options` O17 and `decks/deck-options-strings` K10. The Advanced page comes later and does not change this page.
+
+- Entries: the deck menu's Deck Options… (`gearshape`, group 2 after New Subdeck…, normal decks only; N20.2), Deck › Deck Options… (⌥⌘O, N20.4), the O key on the deck list and the deck page (`decks/deck-list` H9.2) and the finished state's Deck Options link (H5.2). Not offered during a review in this version: the Deck menu is disabled then (N20.4), and the review menu's item comes with the review menu.
+- One grouped form, three sections:
+  1. no header: **Preset**, a menu picker of the collection's presets, each listed as `decks/deck-options-strings` K6 gives it ("Default (used by 6 decks)"); the row shows the chosen preset's name. Footer: "Used by N decks. Changes apply to all of them.", or "Used by this deck only." when N is 1, with N the count the picker shows (`sched/deck-options` O6.1).
+  2. **Daily Limits**: New Cards per Day, Maximum Reviews per Day, each a number field trailing in its row.
+  3. **Memory**: Desired Retention, a percentage field with a stepper of 1 %. Footer: "How likely you are to remember a card when it comes back."
+- When the deck holds its own value for a row (a This deck or active Today only limit, or its own desired retention; O2 item 3), the section's footer adds "This deck has its own limits, which stay in force." (Daily Limits) or "This deck has its own desired retention, which stays in force." (Memory). The page cannot change or remove them in this version.
+- No limit tabs, no Advanced row, no FSRS switch (N18.1), no preset Add, Clone, Rename or Remove, no Save to All Subdecks, no restore-default or help controls.
+- Issues: O4's errors and warnings of the three rows show under their row as N11.9 says; an error disables Save.
+- Placement, pushed like a page: compact (iPhone, the Duo folded or held tall, iPad at compact width) full screen with a back button; the Duo held wide, iPad and Mac in the detail area in place of the deck page. Touch: the navigation title "Deck Options" and Save as the confirmation action. Mac: the toolbar title "Deck Options" with the deck's path joined with " › " as its subtitle, the back button, and Save as the toolbar's confirmation (⌘S; ⌘↩ too, O15.3).
+- Save runs O17's save; on success the page returns to the deck page. A refused save keeps the page with its issues.
+- Leaving: while the draft differs (O6.6), Cancel replaces the back button and swipe back is off on every platform (N11.9's iPhone rule); Cancel, Esc (Mac) and choosing another sidebar row ask "Discard changes?" with Discard (destructive) and Keep Editing. With no change, back leaves at once.
+- Strings (new unless marked): "Deck Options" (title; the undo step's name exists), "Deck Options…" (exists in R283), "Preset" (K4's tab text, here a row label), "Daily Limits" (K2), "New Cards per Day", "Maximum Reviews per Day", "Memory", "Desired Retention", "Used by %@ decks. Changes apply to all of them.", "Used by this deck only.", "How likely you are to remember a card when it comes back.", "This deck has its own limits, which stay in force.", "This deck has its own desired retention, which stays in force.", "Save", and the existing "Discard changes?", "Discard", "Keep Editing", "Cancel". Keys: K10.
+- Replaces, for this version: N11.9's Preset Actions menu, Save to All Subdecks, restore-default and help buttons, the reload row, two columns and the review-time sheet (each comes back with the unit that brings its part); R736's Anki labels for these three options (6B: Apple title case, K10); R740's and R742's tabs; the screen contract `deckOptions.options`' layout until the Advanced page lands.
 
 ## N21. Round 8: Browse (2026-11-20)
 

@@ -257,7 +257,7 @@ screens:
     references: [progress-header, floating-controls]
     purpose: >-
       The card's question side in quiet corners (native-interface-contract N3, N11.1, N11.2, N16): Back
-      to Decks at the upper left, touch undo and ⋯ at the upper right with the sync status icon only
+      to Decks at the upper left, touch Undo and More (N20.8) at the upper right with the sync status icon only
       while sync needs the person, the card scrolling between them, a reserved bottom action region
       holding the centred Show Answer button and the thin grey progress bar on the bottom edge.
   - id: review.answer
@@ -273,7 +273,7 @@ screens:
       bottom region the Again, Hard, Good and Easy buttons in one row, interval as the prominent label
       and grade name secondary, no key hints (N11.2). iPhone (compact width, any iPad window that
       narrow): full screen above the hidden tab bar with the status bar visible, the exit an xmark
-      close button named "Back to Decks", undo and ⋯ at the upper right, the bottom region above the
+      close button named "Back to Decks", Undo and More at the upper right, the bottom region above the
       home indicator and clear of the fold, buttons at least 44 pt tall with Dynamic Type capped to
       keep one row (R358), card taps and tap zones as U180. iPad at regular width: the review fills
       the window with the sidebar hidden for the whole session, the labelled Back to Decks button,
@@ -287,8 +287,14 @@ screens:
     platforms: [iphone, ipad, mac]
     states: [typical]
     variants: pairwise
-    references: [toolbar, toast]
-    purpose: In-place card actions (bury, suspend, flag, mark, edit) and their toasts.
+    references: [toolbar]
+    purpose: >-
+      The review's More menu (native-interface-contract N20.8; touch: the ellipsis button labelled
+      More beside Undo; Mac: the Card menu and the card's context menu, no toolbar control), in
+      groups with system symbols: Edit Note | Bury Card, Suspend Card. Later card actions slot into
+      groups. Bury Card and Suspend Card act on the card on screen, the next card appears, no banner
+      or toast; VoiceOver announces Card Buried or Card Suspended, and Undo names the step (Undo
+      Bury Card). No way to unsuspend a card yet.
   - id: review.setDueDate
     title: Set Due Date
     units: [U183]
@@ -315,7 +321,16 @@ screens:
     states: [typical, overflow, error]
     variants: pairwise
     references: [editor, sheet-form]
-    purpose: Edit the note of the card under review without leaving the session.
+    purpose: >-
+      Edit the note of the card under review without leaving the session (native-interface-contract
+      N20.8, review/edit-current; decided 2026-11-20): round 5's Add Note form titled "Edit Note",
+      with Cancel and Done and the subtitle "<deck> · <note type>", which cannot be changed here.
+      Opened from the touch review's More menu (N20.8), Card › Edit Note (⌘E) and the card's
+      context menu on Mac, and E. iPhone and the Duo folded or held tall: a sheet; the Duo held
+      wide: the whole screen with a centred column; iPad: a page sheet; Mac: a panel over the card.
+      Changes are a draft: Done saves them in one note update and returns to the same card,
+      re-rendered; Cancel asks "Discard changes?" when there is a change. Error: a failed save keeps
+      the form open with its text and the reason. Overflow: long fields scroll in the form.
   - id: review.congratulations
     title: Congratulations
     units: [U186]
@@ -745,6 +760,14 @@ screens:
     variants: full
     references: [grouped-form, sheet-form, confirmation-dialog]
     purpose: >-
+      First version (native-interface-contract N20.9, sched/deck-options O17; decided 2026-11-20):
+      one grouped page pushed in place of the deck page, titled "Deck Options": Preset (a menu,
+      footer "Used by N decks. Changes apply to all of them." or "Used by this deck only."), Daily
+      Limits (New Cards per Day, Maximum Reviews per Day; the preset's values, no tabs) and Memory
+      (Desired Retention, footer "How likely you are to remember a card when it comes back."); Save
+      is the confirmation action (⌘S); leaving with a change asks "Discard changes?". No Advanced
+      row, preset actions, tabs, restore-default or help controls yet; the rest of this purpose
+      applies as those parts land.
       A normal deck's options: its preset, the Essentials, the Advanced sections and the one undoable
       save (U232: shell, presets and save; U233: Essentials and Daily Limits; U234: the other
       Advanced sections; sched/deck-options O2 to O9; R730–R753; native-interface-contract N11.9).
