@@ -6,6 +6,8 @@
 //! than one day ahead of now (I3). Rows that arrive with an id keep it (I4):
 //! they never come here.
 
+use std::collections::BTreeSet;
+
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::StorageError;
@@ -53,6 +55,66 @@ pub fn allocate(conn: &Connection, table: Table, now_ms: i64) -> Result<i64, Sto
     };
     free.filter(|id| *id <= cap)
         .ok_or(StorageError::IdsExhausted { table: name })
+}
+
+/// [`allocate`] that never returns an id of `avoid` (the ids of rows the
+/// transaction removed, which keep their graves and history), with I3's
+/// one-day cap still counted from `now_ms`. Ids in `avoid` count as taken.
+///
+/// # Errors
+///
+/// [`StorageError::IdsExhausted`] when no id from `now_ms` to
+/// `now_ms + MAX_AHEAD_MS` is free.
+pub fn allocate_avoiding(
+    conn: &Connection,
+    table: Table,
+    now_ms: i64,
+    avoid: &BTreeSet<i64>,
+) -> Result<i64, StorageError> {
+    if avoid.is_empty() {
+        return allocate(conn, table, now_ms);
+    }
+    let name = table.name();
+    if !avoid.contains(&now_ms) && !taken(conn, name, now_ms)? {
+        return Ok(now_ms);
+    }
+    let cap = now_ms.saturating_add(MAX_AHEAD_MS);
+    // I2 with the retired ids as rows: above every id in use or retired
+    // within the cap.
+    let largest: Option<i64> = conn
+        .prepare_cached(&format!("SELECT max(id) FROM {name}"))?
+        .query_row([], |row| row.get(0))?;
+    let retired = avoid.range(..=cap).next_back().copied();
+    let highest = largest.into_iter().chain(retired).max().unwrap_or(now_ms);
+    if let Some(next) = highest.checked_add(1)
+        && next > now_ms
+        && next <= cap
+    {
+        return Ok(next);
+    }
+    // I3: the smallest id above now that no row uses and that is not
+    // retired.
+    let mut from = now_ms;
+    loop {
+        let Some(next) = from.checked_add(1) else {
+            return Err(StorageError::IdsExhausted { table: name });
+        };
+        let candidate = if taken(conn, name, next)? {
+            conn.prepare_cached(&format!(
+                "SELECT a.id + 1 FROM {name} AS a WHERE a.id > ?1 AND a.id < ?2 \
+                 AND NOT EXISTS (SELECT 1 FROM {name} AS b WHERE b.id = a.id + 1) ORDER BY a.id LIMIT 1"
+            ))?
+            .query_row((from, cap), |row| row.get::<_, i64>(0))
+            .optional()?
+        } else {
+            Some(next)
+        };
+        match candidate {
+            Some(id) if id <= cap && avoid.contains(&id) => from = id,
+            Some(id) if id <= cap => return Ok(id),
+            _ => return Err(StorageError::IdsExhausted { table: name }),
+        }
+    }
 }
 
 /// I5 physical half of allocation. Scan ordered integer headers only; return
@@ -169,5 +231,44 @@ mod tests {
     #[test]
     fn the_largest_possible_id_falls_back_to_the_cap_rule() {
         assert_eq!(allocate(&table(&[T, i64::MAX]), Table::Notes, T).unwrap(), T + 1);
+    }
+}
+
+#[cfg(test)]
+mod avoiding_tests {
+    use super::*;
+
+    fn cards(ids: &[i64]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE cards (id integer PRIMARY KEY)").unwrap();
+        for id in ids {
+            conn.execute("INSERT INTO cards (id) VALUES (?1)", [id]).unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn retired_ids_are_never_returned_and_the_cap_counts_from_now() {
+        let now = 1_000;
+        // Now and its successor in use, the removed largest id retired.
+        let conn = cards(&[now]);
+        let avoid = BTreeSet::from([now + 1]);
+        assert_eq!(allocate_avoiding(&conn, Table::Cards, now, &avoid).unwrap(), now + 2);
+        // Now itself retired (a card removed in the same millisecond).
+        let conn = cards(&[]);
+        assert_eq!(allocate_avoiding(&conn, Table::Cards, now, &BTreeSet::from([now])).unwrap(), now + 1);
+        // An retired id far ahead (an imported card) does not push the new
+        // id past I3's cap.
+        let conn = cards(&[now]);
+        let far = BTreeSet::from([now + 2 * MAX_AHEAD_MS]);
+        assert_eq!(allocate_avoiding(&conn, Table::Cards, now, &far).unwrap(), now + 1);
+        // The largest possible id retired leaves the ids above now free.
+        let conn = cards(&[now, i64::MAX - 1]);
+        let id = allocate_avoiding(&conn, Table::Cards, now, &BTreeSet::from([i64::MAX])).unwrap();
+        assert_eq!(id, now + 1);
+        // A gap that is retired is skipped to the next free id.
+        let conn = cards(&[now, now + 1, now + 3, now + MAX_AHEAD_MS]);
+        let id = allocate_avoiding(&conn, Table::Cards, now, &BTreeSet::from([now + 2])).unwrap();
+        assert_eq!(id, now + 4);
     }
 }

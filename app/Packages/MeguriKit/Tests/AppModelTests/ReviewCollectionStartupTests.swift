@@ -1329,6 +1329,7 @@ private final class OwnerFanoutProbe: ChangeFanoutSink {
             case .undoUnavailable: "bridge.undoUnavailable"
             case .notetypeRefused: "bridge.notetypeRefused"
             case .deckRefused: "bridge.deckRefused"
+            case .notetypeStructureRefused: "bridge.notetypeStructureRefused"
             case .noteNotFound: "bridge.noteNotFound"
             case .notFound: "bridge.notFound"
             case .insufficientSpace: "bridge.insufficientSpace"

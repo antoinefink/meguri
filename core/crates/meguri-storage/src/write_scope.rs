@@ -15,7 +15,7 @@
 #[path = "write_scope_structure.rs"]
 mod structure;
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -87,8 +87,11 @@ pub struct WriteScope<'c> {
     open: bool,
     pub(crate) normal_stage: bool,
     /// Open savepoints, innermost last: whether the scope had a change when
-    /// each was taken.
-    savepoints: Vec<bool>,
+    /// each was taken, and the retired card ids then.
+    savepoints: Vec<(bool, BTreeSet<i64>)>,
+    /// Ids of cards removed earlier in the transaction: never given to a
+    /// new card in it (`ids::allocate_avoiding`).
+    retired_card_ids: BTreeSet<i64>,
 }
 
 /// A savepoint inside a write scope (`engine/op-model` O3): one step of a
@@ -139,6 +142,7 @@ impl<'c> WriteScope<'c> {
             open: true,
             normal_stage: false,
             savepoints: Vec::new(),
+            retired_card_ids: BTreeSet::new(),
         })
     }
 
@@ -147,7 +151,7 @@ impl<'c> WriteScope<'c> {
     pub fn savepoint(&mut self) -> Result<Savepoint, StorageError> {
         let depth = self.savepoints.len();
         self.conn.execute_batch(&format!("SAVEPOINT meguri_step_{depth}"))?;
-        self.savepoints.push(self.changed);
+        self.savepoints.push((self.changed, self.retired_card_ids.clone()));
         if let Some(journal) = &mut self.journal {
             journal.push_mark();
         }
@@ -187,8 +191,9 @@ impl<'c> WriteScope<'c> {
         let name = format!("meguri_step_{}", savepoint.depth);
         self.conn
             .execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"))?;
-        if let Some(changed) = self.savepoints.pop() {
+        if let Some((changed, retired)) = self.savepoints.pop() {
             self.changed = changed;
+            self.retired_card_ids = retired;
         }
         if let Some(journal) = &mut self.journal {
             journal.rollback_mark();
@@ -329,6 +334,12 @@ impl<'c> WriteScope<'c> {
         self.put_cells(Table::Cards, card.to_cells(), true)
     }
 
+    /// Stamp even an unchanged note: a note type structure change rewrites
+    /// every note of the type (`notetypes/structure-changes` S5, R927).
+    pub fn put_note_forced(&mut self, note: &Note) -> Result<Written, StorageError> {
+        self.put_cells(Table::Notes, note.to_cells(), true)
+    }
+
     /// Replace data while preserving every other stored scheduling column,
     /// including imported values that a typed whole-card write would normalize.
     /// The ordinary scope stamps and journals only a changed row.
@@ -341,6 +352,17 @@ impl<'c> WriteScope<'c> {
             return Ok(Written::Unchanged);
         };
         image[17] = Cell::text(data.to_text());
+        self.put_cells(Table::Cards, image, false)
+    }
+
+    /// Renumber a card (`notetypes/structure-changes` S6 step 2): only `ord`
+    /// changes, with the scope's stamps; every other stored column keeps its
+    /// value as stored, imported oddities included.
+    pub fn put_card_ord(&mut self, id: CardId, ord: u16) -> Result<Written, StorageError> {
+        let Some(mut image) = rows::select_image(self.conn, Table::Cards, &RowKey::Id(id.0))? else {
+            return Ok(Written::Unchanged);
+        };
+        image[3] = Cell::Integer(i64::from(ord));
         self.put_cells(Table::Cards, image, false)
     }
 
@@ -381,7 +403,12 @@ impl<'c> WriteScope<'c> {
     }
 
     fn add<R: Record>(&mut self, record: &R) -> Result<i64, StorageError> {
-        let id = ids::allocate(self.conn, R::TABLE, self.now().0)?;
+        let now = self.now().0;
+        let id = if R::TABLE == Table::Cards {
+            ids::allocate_avoiding(self.conn, R::TABLE, now, &self.retired_card_ids)?
+        } else {
+            ids::allocate(self.conn, R::TABLE, now)?
+        };
         let mut cells = record.to_cells();
         cells[0] = Cell::Integer(id);
         self.put_cells(R::TABLE, cells, false)?;
@@ -391,6 +418,14 @@ impl<'c> WriteScope<'c> {
     /// Adds a note under a new id (I2, I3); the note's own id is ignored.
     pub fn add_note(&mut self, note: &Note) -> Result<NoteId, StorageError> {
         self.add(note).map(NoteId)
+    }
+
+    /// Keeps `id` from every card this scope adds later: a card removed with
+    /// its grave and review log must never see its id given to a new card in
+    /// the same transaction, whatever the allocator (I3) would pick once the
+    /// row is gone. A savepoint rolled back forgets the ids retired after it.
+    pub fn retire_card_id(&mut self, id: CardId) {
+        self.retired_card_ids.insert(id.0);
     }
 
     /// Adds a card under a new id (I2, I3).

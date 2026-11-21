@@ -77,6 +77,9 @@ pub enum EngineError {
     /// A note type save refused (`notetypes/validation` V2, V3): nothing was
     /// written.
     NotetypeRefused(NotetypeRefusal),
+    /// A note type structure op refused (`notetypes/structure-changes`
+    /// S1.2, S12, `notetypes/restore-to-default` D7): nothing was written.
+    NotetypeStructure(crate::notetypes::structure::StructureRefusal),
     /// The open gate refused or failed (`storage/open-and-connections` C8).
     Open(OpenError),
     Storage(StorageError),
@@ -186,6 +189,7 @@ impl fmt::Display for EngineError {
                 notetype_id.0
             ),
             EngineError::NotetypeRefused(refusal) => write!(f, "note type refused: {refusal}"),
+            EngineError::NotetypeStructure(refusal) => write!(f, "note type structure change refused: {refusal}"),
             EngineError::Open(error) => write!(f, "open: {error}"),
             EngineError::Storage(error) => write!(f, "storage: {error}"),
             EngineError::SafetyBackupFailed(failure) => write!(f, "safety backup failed: {failure:?}"),
