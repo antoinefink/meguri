@@ -32,6 +32,7 @@ use crate::lifecycle::{Engine, Generation, WeakEngine};
 pub use handle::{Invalidation, Refetch};
 pub use one_shot::search_ids;
 pub use page::{QaCells, QaWhich};
+pub use selection::{MapFrom, Mapped, Selection};
 pub(crate) use registry::SearchRegistry;
 pub(crate) use worker::OWNER;
 
@@ -203,6 +204,14 @@ struct Current {
 }
 
 impl Engine {
+    /// H16: Q10's chunk of candidates for every search of this engine, one
+    /// candidate per chunk in the conformance adapter; 0 restores the
+    /// default.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_search_stream_chunk_for_testing(&self, chunk: usize) {
+        self.inner.searches.set_stream_chunk(chunk);
+    }
+
     /// H2: a session whose events go to `listener`.
     pub fn open_search_session(&self, listener: Arc<dyn SearchListener>) -> SearchSession {
         let registry = &self.inner.searches;
@@ -371,6 +380,26 @@ impl SearchSession {
         Ok(self.shared.enqueue(Job::Resort { source, sort }, cancel))
     }
 
+    /// H11: the handle's text in the other mode, sorted by `sort` (that
+    /// mode's sort), derived from the handle without a predicate run when it
+    /// can be. `NotComplete` on a handle in progress, before anything starts.
+    pub fn toggle(
+        &self,
+        handle: HandleId,
+        sort: SortSpec,
+        cancel: Option<&CancelToken>,
+    ) -> Result<RequestSeq, BrowseError> {
+        let handle = self.shared.handle(handle)?;
+        let source = {
+            let handle = lock(&handle);
+            if !handle.complete {
+                return Err(BrowseError::NotComplete);
+            }
+            worker::Source::of(&handle)
+        };
+        Ok(self.shared.enqueue(Job::Toggle { source, sort }, cancel))
+    }
+
     /// H8: reverses a complete handle in memory and returns its new
     /// revision; index i becomes count − 1 − i.
     pub fn reverse(&self, handle: HandleId, revision: u64) -> Result<u64, BrowseError> {
@@ -431,6 +460,25 @@ impl SearchSession {
         target: SearchMode,
     ) -> Result<Vec<i64>, BrowseError> {
         selection::resolve(&self.shared, handle, revision, ranges, target)
+    }
+
+    /// H12: the index of `id` in the handle (`kind` says whether it is a
+    /// card id or a note id), or none.
+    pub fn index_of(&self, handle: HandleId, revision: u64, kind: SearchMode, id: i64) -> Result<Option<u64>, BrowseError> {
+        selection::index_of(&self.shared, handle, revision, kind, id)
+    }
+
+    /// H12: maps a selection and the current row from `from` to `to`, over
+    /// the final prefix of `to` at `to_revision`.
+    pub fn map_selection(
+        &self,
+        from: MapFrom,
+        selection: Selection,
+        current: Option<i64>,
+        to: HandleId,
+        to_revision: u64,
+    ) -> Result<Mapped, BrowseError> {
+        selection::map(&self.shared, from, selection, current, to, to_revision)
     }
 
     /// H6: the handle's state and count in its current revision.
@@ -494,6 +542,11 @@ impl SearchSession {
             .after_first_page
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(Box::new(hook));
+    }
+
+    /// H16: how many of H11's extra tests the session's toggles made.
+    pub fn extra_tests_for_testing(&self) -> u64 {
+        self.shared.testing.extra_tests.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// H16: how many predicate runs the session's requests made.

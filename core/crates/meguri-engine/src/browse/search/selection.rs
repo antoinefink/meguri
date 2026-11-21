@@ -87,3 +87,202 @@ pub(super) fn resolve(
         }
     })
 }
+
+/// The notes of `cards` that exist, from one read transaction on the query
+/// reader: card id to note id.
+fn notes_of_cards(collection: &crate::Collection, cards: &[i64]) -> Result<HashMap<i64, i64>, BrowseError> {
+    let reader = collection.reader(ReaderRole::Query)?;
+    let snapshot = reader.snapshot()?;
+    let mut notes = HashMap::new();
+    let params = worker::cells(&[id_list(cards)]);
+    snapshot.visit_id_rows(ids::NOTES_OF_CARDS, &params, &|| false, &mut |row| {
+        notes.insert(row[0], row[1]);
+        true
+    })?;
+    Ok(notes)
+}
+
+/// H12: the index of `id` (a card id when `kind` is cards, a note id when
+/// it is notes) in the handle's revision `revision`, or none.
+pub(super) fn index_of(
+    shared: &Arc<SessionShared>,
+    handle: HandleId,
+    revision: u64,
+    kind: SearchMode,
+    id: i64,
+) -> Result<Option<u64>, BrowseError> {
+    let collection = shared.engine()?.collection()?;
+    let handle = shared.handle(handle)?;
+    let (mode, ids, nids) = {
+        let handle = lock(&handle);
+        check_revision(&handle, revision)?;
+        (handle.mode, handle.ids.clone(), handle.nids.clone())
+    };
+    let position = |target: i64, list: &[i64]| list.iter().position(|id| *id == target).map(|index| index as u64);
+    Ok(match (mode, kind) {
+        (SearchMode::Cards, SearchMode::Cards) | (SearchMode::Notes, SearchMode::Notes) => position(id, &ids),
+        // The lowest index among the note's cards.
+        (SearchMode::Cards, SearchMode::Notes) => position(id, &nids),
+        // The card's note, read now; none when the card no longer exists.
+        (SearchMode::Notes, SearchMode::Cards) => match notes_of_cards(&collection, &[id])?.get(&id) {
+            Some(note) => position(*note, &ids),
+            None => None,
+        },
+    })
+}
+
+/// Where `map_selection` maps from (H12).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MapFrom {
+    /// A handle of the session, at a revision.
+    Handle { handle: HandleId, revision: u64 },
+    /// A released handle's mode: the selection and the current row are ids
+    /// the caller holds (rows it fetched).
+    Mode(SearchMode),
+}
+
+/// What is selected in `from` (H12).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Selection {
+    /// Index ranges of a [`MapFrom::Handle`].
+    Ranges(Vec<Range<u64>>),
+    /// Ids of `from`'s mode.
+    Ids(Vec<i64>),
+}
+
+/// The result of `map_selection`: ascending merged ranges of `to` and the
+/// current index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mapped {
+    pub selected: Vec<Range<u64>>,
+    pub current: Option<u64>,
+}
+
+fn ranges_of(mut indexes: Vec<u64>) -> Vec<Range<u64>> {
+    indexes.sort_unstable();
+    indexes.dedup();
+    let mut out: Vec<Range<u64>> = Vec::new();
+    for index in indexes {
+        match out.last_mut() {
+            Some(last) if last.end == index => last.end += 1,
+            _ => out.push(index..index + 1),
+        }
+    }
+    out
+}
+
+/// H12: maps a selection and a current row between two handles of the
+/// session (a re-search or a toggle), over the final prefix of `to` at
+/// `to_revision`.
+pub(super) fn map(
+    shared: &Arc<SessionShared>,
+    from: MapFrom,
+    selection: Selection,
+    current: Option<i64>,
+    to: HandleId,
+    to_revision: u64,
+) -> Result<Mapped, BrowseError> {
+    let collection = shared.engine()?.collection()?;
+    // The selected ids of `from`'s mode, with their notes in cards mode.
+    let (from_mode, selected, from_nids): (SearchMode, Vec<i64>, Option<HashMap<i64, i64>>) = match (&from, selection) {
+        (MapFrom::Handle { handle, revision }, selection) => {
+            let handle = shared.handle(*handle)?;
+            let handle = lock(&handle);
+            check_revision(&handle, *revision)?;
+            let indexes: Vec<usize> = match selection {
+                Selection::Ranges(ranges) => {
+                    let ranges = merged(&ranges);
+                    if ranges.last().is_some_and(|range| range.end > handle.count()) {
+                        return Err(BrowseError::OutOfRange);
+                    }
+                    ranges.iter().flat_map(|range| range.start as usize..range.end as usize).collect()
+                }
+                Selection::Ids(ids) => {
+                    let wanted: HashSet<i64> = ids.into_iter().collect();
+                    (0..handle.ids.len()).filter(|index| wanted.contains(&handle.ids[*index])).collect()
+                }
+            };
+            let selected: Vec<i64> = indexes.iter().map(|index| handle.ids[*index]).collect();
+            let nids = (handle.mode == SearchMode::Cards).then(|| {
+                let mut nids: HashMap<i64, i64> =
+                    indexes.iter().map(|index| (handle.ids[*index], handle.nids[*index])).collect();
+                if let Some(card) = current
+                    && let Some(index) = handle.ids.iter().position(|id| *id == card)
+                {
+                    nids.insert(card, handle.nids[index]);
+                }
+                nids
+            });
+            (handle.mode, selected, nids)
+        }
+        (MapFrom::Mode(mode), Selection::Ids(ids)) => (*mode, ids, None),
+        (MapFrom::Mode(_), Selection::Ranges(_)) => {
+            return Err(BrowseError::invalid("a released handle's selection is ids, not ranges"));
+        }
+    };
+    let target = shared.handle(to)?;
+    let (to_mode, to_ids, to_nids) = {
+        let target = lock(&target);
+        check_revision(&target, to_revision)?;
+        (target.mode, target.ids.clone(), target.nids.clone())
+    };
+    // Cards from a released handle: their notes, read now.
+    let from_nids = match (from_mode, from_nids) {
+        (SearchMode::Cards, None) if to_mode == SearchMode::Notes => {
+            let mut cards = selected.clone();
+            cards.extend(current);
+            Some(notes_of_cards(&collection, &cards)?)
+        }
+        (_, nids) => nids,
+    };
+    let mut index_of: HashMap<i64, u64> = HashMap::new();
+    for (index, id) in to_ids.iter().enumerate() {
+        index_of.entry(*id).or_insert(index as u64);
+    }
+    Ok(match (from_mode, to_mode) {
+        (SearchMode::Cards, SearchMode::Cards) | (SearchMode::Notes, SearchMode::Notes) => Mapped {
+            selected: ranges_of(selected.iter().filter_map(|id| index_of.get(id).copied()).collect()),
+            current: current.and_then(|id| index_of.get(&id).copied()),
+        },
+        (SearchMode::Cards, SearchMode::Notes) => {
+            let notes = from_nids.unwrap_or_default();
+            Mapped {
+                selected: ranges_of(
+                    selected
+                        .iter()
+                        .filter_map(|card| notes.get(card))
+                        .filter_map(|note| index_of.get(note).copied())
+                        .collect(),
+                ),
+                current: current
+                    .and_then(|card| notes.get(&card))
+                    .and_then(|note| index_of.get(note).copied()),
+            }
+        }
+        (SearchMode::Notes, SearchMode::Cards) => {
+            let wanted: HashSet<i64> = selected.iter().copied().collect();
+            let selected = (0..to_nids.len()).filter(|index| wanted.contains(&to_nids[*index])).map(|index| index as u64).collect();
+            // The current note's first card (lowest card id, columns C1)
+            // when it is in `to`; otherwise the note's lowest-id card in it.
+            let current = match current {
+                None => None,
+                Some(note) => {
+                    let first = cards_of_notes(&collection, &[note])?
+                        .get(&note)
+                        .and_then(|cards| cards.iter().min().copied());
+                    match first.and_then(|card| index_of.get(&card).copied()) {
+                        Some(index) => Some(index),
+                        None => (0..to_nids.len())
+                            .filter(|index| to_nids[*index] == note)
+                            .min_by_key(|index| to_ids[*index])
+                            .map(|index| index as u64),
+                    }
+                }
+            };
+            Mapped {
+                selected: ranges_of(selected),
+                current,
+            }
+        }
+    })
+}
