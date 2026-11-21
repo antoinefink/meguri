@@ -59,6 +59,14 @@ struct NoteTypeFieldsTab: View {
     private var editable: Bool { model.editable(id) }
 
     var body: some View {
+        #if os(iOS)
+        NoteTypeFieldsTouchList(model: model, id: id, lines: lines)
+        #else
+        macBody
+        #endif
+    }
+
+    private var macBody: some View {
         VStack(spacing: .zero) {
             table
             Divider()

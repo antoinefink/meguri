@@ -58,6 +58,12 @@ public final class NoteTypesModel {
         didSet { if selection != oldValue { selectionChanged() } }
     }
     public var tab: Tab = .fields
+    /// iPad: the note type pushed over the list (N22.7); setting it selects it.
+    public var opened: Int64? {
+        didSet { if let opened, opened != selection { selection = opened } }
+    }
+    /// iPad: the field whose options show in a popover.
+    public var optionsField: Int?
     public private(set) var records: [Int64: NotetypeRecord] = [:]
     public private(set) var recordFailed: Set<Int64> = []
     public private(set) var typeCounts: [Int64: NotetypeRemovalCounts] = [:]

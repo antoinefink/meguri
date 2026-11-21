@@ -10,6 +10,7 @@ extension TestHooks {
     /// collection is opened and Save writes nothing.
     ///
     /// - `notetypes/fields/typical`: Vocabulary's Fields tab with no draft.
+    /// - `notetypes/list/typical`: on iPad, the list of note types alone.
     /// - `notetypes/fields/edited`: a draft that deletes Tavrin Notes and adds
     ///   Origin: "Edited" in the list, "Save…" in the toolbar.
     /// - `notetypes/save/losses`: that draft's Save sheet with iCloud or no
@@ -20,12 +21,15 @@ extension TestHooks {
     enum NoteTypesRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.registerShell("notetypes/fields/typical") { _ in launch(.typical) }
+            registry.registerShell("notetypes/list/typical") { _ in launch(.list) }
             registry.registerShell("notetypes/fields/edited") { _ in launch(.edited) }
             registry.registerShell("notetypes/save/losses") { _ in launch(.question(.other)) }
             registry.registerShell("notetypes/save/meguri-sync") { _ in launch(.question(.meguriSync)) }
         }
 
         enum State {
+            /// The list alone: on iPad no note type is opened (on the Mac, as typical).
+            case list
             case typical, edited
             case question(NoteTypeSaveService)
         }
@@ -57,8 +61,11 @@ extension TestHooks {
                 Task { @MainActor in
                     await model.prepareForTestHooks(select: SampleNoteTypesBackend.vocabulary)
                     let id = SampleNoteTypesBackend.vocabulary
+                    #if os(iOS)
+                    if case .list = state {} else { model.opened = id }
+                    #endif
                     switch state {
-                    case .typical:
+                    case .list, .typical:
                         model.selectedField[id] = 1
                     case .edited, .question:
                         model.stage(id) { draft in

@@ -90,8 +90,8 @@ struct ShellFeatures {
         features.nativeMacWorkspace = true
         features.availableSections = [.home, .noteTypes]
         #else
-        // W14's iPad row waits for the iPad regular layout (follow-up "U281 iPad"); the view code stays.
-        features.availableSections = [.home, .settings]
+        // W14: Note Types has a sidebar row at regular width; the tab layout reaches it from Settings (U286).
+        features.availableSections = [.home, .noteTypes, .settings]
         #endif
         features.sectionRoot = { section, _ in
             switch section {

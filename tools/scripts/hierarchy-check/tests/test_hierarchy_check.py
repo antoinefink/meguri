@@ -878,6 +878,23 @@ class IdentifierFormat(unittest.TestCase):
             el("group", f=(421, 82, 579, 28), children=[el("button", f=(x, 82, w, 28)) for _, x, w in columns])]))
         self.assertEqual(hierarchy_check.check(tree), [])
 
+    def test_swiftui_segments_a_searchable_field_and_a_titleless_sidebar_bar(self):
+        # Seen on iPad (U281): a segmented Picker's segments, the field `searchable`
+        # puts in a navigation bar, and the sidebar's bar after its removed title.
+        tree = doc(el("navigationBar", "Meguri", f=(0, 32, 320, 54), children=[el("button", label="Hide Sidebar", f=(10, 40, 40, 40))]),
+                   el("navigationBar", f=(320, 32, 900, 54), children=[
+                       el("segmentedControl", "noteTypes.list.tabs", f=(700, 40, 120, 40), children=[
+                           el("button", label="Fields", f=(700, 40, 60, 40)), el("button", label="Cards", f=(760, 40, 60, 40))]),
+                       el("searchField", label="Filter", f=(1000, 40, 200, 40))]), window=(0, 0, 1366, 1024))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_lookalikes_of_those_parts_are_still_reported(self):
+        tree = doc(el("navigationBar", "Meguri", f=(0, 32, 320, 54), children=[el("button", label="Edit", f=(10, 40, 40, 40))]),
+                   el("segmentedControl", f=(0, 100, 120, 40), children=[el("button", label="Fields", f=(0, 100, 60, 40))]),
+                   el("searchField", label="Filter", f=(0, 200, 200, 40)))
+        self.assertEqual(kinds(hierarchy_check.check(tree)),
+                         ["bad-identifier", "missing-identifier", "missing-identifier", "missing-identifier", "missing-identifier"])
+
     def test_table_header_lookalikes_are_still_reported(self):
         column = "8F4D7F23-581A-4144-BABE-CA39D6A01371"
         # A button that matches no column, a labelled one, a body button at a column's x and width,
