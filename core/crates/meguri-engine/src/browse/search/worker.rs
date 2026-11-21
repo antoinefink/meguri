@@ -521,7 +521,12 @@ impl Request<'_> {
             prefix: 0,
         };
         let rows = &**snapshot;
-        let (id, handle, match_data) = if streams(rows, &plan, self.shared.registry.upgrade().as_deref())? {
+        let (id, handle, match_data) = if streams(
+            rows,
+            &plan,
+            self.shared.registry.upgrade().as_deref(),
+            &|| self.token.is_cancelled(),
+        )? {
             self.streamed(rows, text, query, &sort, &context, notetypes, &plan, template)?
         } else {
             let (id, handle) = self
@@ -973,6 +978,7 @@ pub(super) fn streams(
     rows: &impl ReadRows,
     plan: &Plan,
     registry: Option<&super::SearchRegistry>,
+    cancel: &dyn Fn() -> bool,
 ) -> Result<bool, Stop> {
     if !plan.is_slow() {
         return Ok(false);
@@ -984,7 +990,20 @@ pub(super) fn streams(
         SearchMode::Cards => meguri_storage::Table::Cards,
         SearchMode::Notes => meguri_storage::Table::Notes,
     };
-    Ok(rows.row_count(table)? > STREAM_ROWS)
+    // Counts at most one row past the threshold, under the request's
+    // cancel test.
+    let mut seen = 0u64;
+    rows.visit_id_rows(
+        &format!("SELECT 1 FROM {} LIMIT {}", table.name(), STREAM_ROWS + 1),
+        &[],
+        cancel,
+        &mut |_| {
+            seen += 1;
+            true
+        },
+    )
+    .map_err(|error| if cancel() { Stop::Cancelled } else { Stop::from(error) })?;
+    Ok(seen > STREAM_ROWS)
 }
 
 /// Q8: whether two contexts hold the same `value`.

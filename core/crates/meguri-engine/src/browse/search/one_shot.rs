@@ -52,7 +52,7 @@ pub fn search_ids(engine: &Engine, text: &str, mode: SearchMode) -> Result<Vec<i
             .map_err(failed)?;
         Ok(ids)
     };
-    let streamed = worker::streams(&*snapshot, &plan, Some(&*engine.inner.searches)).map_err(|stop| match stop {
+    let streamed = worker::streams(&*snapshot, &plan, Some(&*engine.inner.searches), &|| token.is_cancelled()).map_err(|stop| match stop {
         worker::Stop::Failed(error) => error,
         worker::Stop::Cancelled => BrowseError::Engine(crate::error::EngineError::Cancelled),
     })?;

@@ -123,7 +123,12 @@ pub(super) fn index_of(
     let reader = collection.reader(ReaderRole::Query)?;
     let snapshot = reader.snapshot()?;
     let handle = shared.handle(handle)?;
-    let mode = lock(&handle).mode;
+    let mode = {
+        let handle = lock(&handle);
+        check_generation(&handle, &collection)?;
+        check_revision(&handle, revision)?;
+        handle.mode
+    };
     // A card id on a notes handle: its note, read now (none when the card
     // no longer exists); then the lookup, under the handle's lock, over the
     // announced prefix only.
