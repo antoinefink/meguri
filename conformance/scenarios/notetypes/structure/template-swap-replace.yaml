@@ -53,5 +53,5 @@ steps:
       - {db_dump: {tables: [notes, cards, graves]}}
       - {notetype_structure: {notetypes: [Pairing]}}
   - db_exec: {sql: "SELECT scm > ls FROM col"}
-  - db_exec: {sql: "SELECT count(*) FROM cards WHERE nid NOT IN (SELECT id FROM notes)"}
+  - db_exec: {sql: "SELECT count(*) FROM cards c LEFT JOIN notes n ON n.id = c.nid WHERE n.id IS NULL"}
   - db_exec: {sql: "SELECT n.sfld, count(c.id) FROM notes n LEFT JOIN cards c ON c.nid = n.id GROUP BY n.id ORDER BY n.id"}
